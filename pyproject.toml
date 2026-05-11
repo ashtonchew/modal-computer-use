@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "modal-computer-use"
+version = "0.1.0"
+description = "Daemon-first Modal-native computer-use primitives for Linux desktops"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "modal-computer-use contributors" }]
+dependencies = [
+  "fastapi>=0.115",
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "uvicorn[standard]>=0.30",
+  "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+modal = ["modal>=1.1.0"]
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.40"]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-Pillow",
+]
+
+[project.scripts]
+computer-use-daemon = "modal_computer_use.daemon.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modal_computer_use"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "SIM", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*.py" = ["S106"]
+"tests/*.py" = ["S106", "S108"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["modal_computer_use"]
+strict = false
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unreachable = true
+warn_unused_ignores = false
+disable_error_code = [
+  "arg-type",
+  "assignment",
+  "attr-defined",
+  "no-any-return",
+  "union-attr",
+  "valid-type",
+  "var-annotated",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "modal: requires Modal credentials and network access",
+]
