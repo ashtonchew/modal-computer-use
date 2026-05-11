@@ -1,0 +1,12 @@
+[
+  {"action": "mouse_move", "coordinate": [100, 200]},
+  {"action": "left_click_drag", "coordinate": [300, 400]},
+  {"action": "key", "text": "ctrl+c"},
+  {"action": "type", "text": "hello"},
+  {"action": "left_click"},
+  {"action": "right_click"},
+  {"action": "double_click"},
+  {"action": "middle_click"},
+  {"action": "screenshot"},
+  {"action": "cursor_position"}
+]
