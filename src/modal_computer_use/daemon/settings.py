@@ -57,6 +57,16 @@ class DaemonSettings:
         if os.getenv("COMPUTER_USE_MAX_SCREENSHOTS")
         else None
     )
+    max_artifact_bytes: int | None = (
+        int(os.environ["COMPUTER_USE_MAX_ARTIFACT_BYTES"])
+        if os.getenv("COMPUTER_USE_MAX_ARTIFACT_BYTES")
+        else None
+    )
+    max_recording_seconds: int | None = (
+        int(os.environ["COMPUTER_USE_MAX_RECORDING_SECONDS"])
+        if os.getenv("COMPUTER_USE_MAX_RECORDING_SECONDS")
+        else None
+    )
     image_profile: str = os.getenv("COMPUTER_USE_IMAGE_PROFILE", "standard")
 
 

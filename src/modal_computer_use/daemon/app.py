@@ -61,7 +61,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     )
     app.state.input_lock = asyncio.Lock()
     app.state.artifacts = ArtifactStore(settings.artifacts_dir)
-    app.state.recordings = RecordingRegistry()
+    app.state.recordings = RecordingRegistry(settings)
     app.state.idempotency_cache = {}
     app.state.action_count = 0
     app.state.screenshot_count = 0
