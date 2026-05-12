@@ -41,7 +41,8 @@ results.
 
 The GitHub Actions workflow also has a protected manual `modal-smoke` job. Run it with
 `workflow_dispatch` and `run_modal_smoke=true` only from a protected environment with
-`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` configured as secrets.
+`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` configured as secrets. The job fails closed when the
+workflow is requested without those secrets so skipped Modal tests cannot produce a false green.
 
 Do not store personal Modal tokens in repository or CI configuration. If a future workspace needs
 fully automated Modal CI, use a Modal service user scoped to a restricted Modal Environment rather
