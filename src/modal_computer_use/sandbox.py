@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from ._version import __version__
@@ -171,6 +172,8 @@ class ComputerSandbox:
             app_name=app_name,
             name=name,
             run_id=config.run_id,
+            owner=sandbox_tags.get("computer-use.owner"),
+            created_at=_created_at_from_tags(sandbox_tags),
             config_hash=compute_config_hash(config),
             status="started",
             tags=sandbox_tags,
@@ -439,3 +442,16 @@ def _vnc_url(sandbox: object) -> str | None:
     if tunnel is None:
         return None
     return str(getattr(tunnel, "url", None) or getattr(tunnel, "tcp_socket", None) or "")
+
+
+def _created_at_from_tags(tags: dict[str, str]) -> datetime | None:
+    value = tags.get("computer-use.created_at")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)

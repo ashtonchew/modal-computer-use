@@ -54,6 +54,13 @@ Ephemeral sandbox artifacts live inside the sandbox and disappear when it exits.
 
 Increase the Modal idle timeout on the Sandbox config, or send periodic no-op actions from the agent loop. The daemon itself does not enforce idle timeouts; Modal does.
 
+### Stale sandboxes are hard to identify
+
+Use `ComputerSandboxManager.list()` to inspect safe Modal metadata, including run ID, owner,
+creation time, config hash, and artifact directory when those tags are present. Use
+`cleanup_expired(..., dry_run=True)` first to see candidates. Missing or invalid
+`computer-use.created_at` tags are skipped rather than terminated automatically.
+
 ## Security incidents
 
 ### A noVNC URL was shared accidentally

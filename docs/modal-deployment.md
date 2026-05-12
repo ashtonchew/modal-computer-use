@@ -21,6 +21,12 @@ Per current Modal docs, configure the Sandbox with:
 - **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
 - **Tags** are applied after creation with `Sandbox.set_tags()` and used for `Sandbox.list(tags=...)` attach and recovery flows.
 
+The SDK does not pass tags into `Sandbox.create()`. It applies tags after creation so it works
+with the current Modal Sandbox contract. Built-in tags are string-only and limited to safe
+operational metadata such as `computer-use.run_id`, `computer-use.owner`,
+`computer-use.created_at`, `computer-use.config_hash`, `computer-use.window_manager`, and
+`computer-use.artifacts_dir`.
+
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples; call `computer.artifacts.sync()` when the file needs to be visible from outside the sandbox immediately.
 
 ## Attach and recovery
@@ -45,7 +51,20 @@ so incompatible desktop/runtime settings are not silently reused. Use
 `on_config_mismatch="reuse"` only for an intentional attach to the existing configuration.
 
 Attached metadata is limited to safe operational fields such as sandbox ID, app name, sandbox
-name, run ID, config hash, tags, and artifact directory. Connect tokens are never stored there.
+name, run ID, owner, creation time, config hash, tags, and artifact directory. Connect tokens are
+never stored there.
+
+## Cleanup
+
+`ComputerSandboxManager.cleanup_expired(ttl_seconds=..., owner=None, dry_run=True)` inspects
+Modal sandboxes through tags and returns a structured cleanup plan. Dry-run is the default.
+Passing `dry_run=False` calls `terminate()` only on sandboxes that have a valid
+`computer-use.created_at` tag older than the TTL cutoff. Sandboxes with missing or invalid
+creation metadata are skipped with a reason, because the SDK cannot prove they are safe to clean
+up.
+
+Cleanup is orchestration, not daemon primitive execution. It never attaches a model loop, never
+calls provider APIs, and does not rely on local daemon state to prove cloud lifecycle behavior.
 
 ## Authentication
 

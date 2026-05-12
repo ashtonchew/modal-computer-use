@@ -262,11 +262,34 @@ class SandboxRef(StrictBaseModel):
     app_name: str
     name: str | None = None
     run_id: str | None = None
+    owner: str | None = None
+    created_at: datetime | None = None
     config_hash: str | None = None
     status: Literal["created", "scheduled", "started", "ready", "finished", "unknown"]
     tags: dict[str, str] = Field(default_factory=dict)
     vnc_url: str | None = None
     artifacts_dir: str = "/home/desktop/artifacts"
+
+
+class SandboxCleanupItem(StrictBaseModel):
+    sandbox_id: str
+    name: str | None = None
+    run_id: str | None = None
+    owner: str | None = None
+    created_at: datetime | None = None
+    status: Literal["candidate", "terminated", "skipped", "error"]
+    reason: str
+
+
+class SandboxCleanupResult(StrictBaseModel):
+    dry_run: bool
+    ttl_seconds: int
+    inspected_count: int
+    matched_count: int
+    terminated_count: int
+    candidates: list[SandboxCleanupItem] = Field(default_factory=list)
+    skipped: list[SandboxCleanupItem] = Field(default_factory=list)
+    errors: list[SandboxCleanupItem] = Field(default_factory=list)
 
 
 class DebugUrls(StrictBaseModel):

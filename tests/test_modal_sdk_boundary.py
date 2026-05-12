@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
-from modal_computer_use import ComputerConfig, ComputerSandbox
+from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager
 from modal_computer_use.config import BrowserConfig
 from modal_computer_use.errors import (
     ConfigConflictError,
@@ -45,12 +46,19 @@ class FakeConnectToken:
 
 
 class FakeSandboxObject:
-    def __init__(self, *, name: str | None = None, tags: dict[str, str] | None = None) -> None:
-        self.object_id = "sb-123"
+    def __init__(
+        self,
+        *,
+        sandbox_id: str = "sb-123",
+        name: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> None:
+        self.object_id = sandbox_id
         self.name = name
         self._tags = tags or {}
         self.set_tags_calls: list[dict[str, str]] = []
         self.wait_until_ready_calls: list[int] = []
+        self.terminated = False
 
     def set_tags(self, tags: dict[str, str]) -> None:
         self.set_tags_calls.append(tags)
@@ -69,6 +77,9 @@ class FakeSandboxObject:
     def exec(self, *args: str, timeout: int | None = None) -> object:
         return SimpleNamespace(args=args, timeout=timeout, returncode=0)
 
+    def terminate(self) -> None:
+        self.terminated = True
+
     def tunnels(self) -> dict[int, object]:
         return {6080: SimpleNamespace(url="https://novnc.example")}
 
@@ -82,6 +93,7 @@ class FakeSandbox:
     listed: ClassVar[list[FakeSandboxObject]] = []
     from_name_result: ClassVar[FakeSandboxObject | None] = None
     from_name_error: ClassVar[Exception | None] = None
+    from_id_result: ClassVar[FakeSandboxObject | None] = None
 
     @classmethod
     def create(cls, *args: str, **kwargs: object) -> FakeSandboxObject:
@@ -102,6 +114,8 @@ class FakeSandbox:
     @classmethod
     def from_id(cls, sandbox_id: str) -> FakeSandboxObject:
         cls.from_id_calls.append(sandbox_id)
+        if cls.from_id_result is not None:
+            return cls.from_id_result
         return FakeSandboxObject()
 
     @classmethod
@@ -121,6 +135,7 @@ def fake_modal() -> SimpleNamespace:
     FakeSandbox.listed = []
     FakeSandbox.from_name_result = None
     FakeSandbox.from_name_error = None
+    FakeSandbox.from_id_result = None
     return SimpleNamespace(App=FakeApp, Probe=FakeProbe, Sandbox=FakeSandbox)
 
 
@@ -159,7 +174,13 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert FakeSandbox.created.wait_until_ready_calls == [120]
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.run_id"] == "run-123"
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.owner"] == "alice"
+    assert FakeSandbox.created.set_tags_calls[0]["computer-use.artifacts_dir"] == (
+        "/home/desktop/artifacts"
+    )
+    assert "computer-use.created_at" in FakeSandbox.created.set_tags_calls[0]
     assert FakeSandbox.created.set_tags_calls[0]["custom"] == "tag"
+    assert computer.metadata().owner == "alice"
+    assert computer.metadata().created_at is not None
 
 
 def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
@@ -217,6 +238,9 @@ def test_attach_metadata_includes_safe_tags_run_id_and_config_hash(monkeypatch) 
                 "computer-use": "true",
                 "computer-use.run_id": "run-123",
                 "computer-use.config_hash": config_hash,
+                "computer-use.owner": "alice",
+                "computer-use.created_at": "2026-05-12T12:00:00Z",
+                "computer-use.artifacts_dir": "/home/desktop/artifacts",
             },
         )
     ]
@@ -229,8 +253,11 @@ def test_attach_metadata_includes_safe_tags_run_id_and_config_hash(monkeypatch) 
     assert metadata.app_name == "computer-app"
     assert metadata.name == "desktop-1"
     assert metadata.run_id == "run-123"
+    assert metadata.owner == "alice"
+    assert metadata.created_at == datetime(2026, 5, 12, 12, 0, tzinfo=UTC)
     assert metadata.config_hash == config_hash
     assert metadata.tags["computer-use"] == "true"
+    assert metadata.artifacts_dir == "/home/desktop/artifacts"
     assert metadata.vnc_url is None
 
 
@@ -255,6 +282,8 @@ def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:
                 "computer-use": "true",
                 "computer-use.run_id": "run-123",
                 "computer-use.config_hash": "abc",
+                "computer-use.owner": "alice",
+                "computer-use.created_at": "2026-05-12T12:00:00Z",
             },
         )
     ]
@@ -264,7 +293,161 @@ def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:
     assert FakeSandbox.list_calls == [{"computer-use": "true"}]
     assert refs[0].name == "desktop-1"
     assert refs[0].run_id == "run-123"
+    assert refs[0].owner == "alice"
+    assert refs[0].created_at == datetime(2026, 5, 12, 12, 0, tzinfo=UTC)
     assert refs[0].config_hash == "abc"
+
+
+def test_registry_invalid_created_at_does_not_crash_list(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.listed = [
+        FakeSandboxObject(
+            tags={
+                "computer-use": "true",
+                "computer-use.created_at": "not-a-date",
+            },
+        )
+    ]
+
+    refs = SandboxRegistry(app_name="computer-app").list()
+
+    assert refs[0].created_at is None
+    assert refs[0].tags["computer-use.created_at"] == "not-a-date"
+
+
+def test_registry_list_older_than_filters_valid_created_at(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.listed = [
+        FakeSandboxObject(
+            sandbox_id="old",
+            tags={
+                "computer-use": "true",
+                "computer-use.created_at": "2026-05-12T10:00:00Z",
+            },
+        ),
+        FakeSandboxObject(
+            sandbox_id="new",
+            tags={
+                "computer-use": "true",
+                "computer-use.created_at": "2026-05-12T12:00:00Z",
+            },
+        ),
+        FakeSandboxObject(sandbox_id="unknown", tags={"computer-use": "true"}),
+    ]
+
+    refs = SandboxRegistry(app_name="computer-app").list_older_than(
+        datetime(2026, 5, 12, 11, 0, tzinfo=UTC)
+    )
+
+    assert [ref.sandbox_id for ref in refs] == ["old"]
+
+
+def test_manager_cleanup_expired_dry_run_does_not_terminate(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    old = FakeSandboxObject(
+        sandbox_id="old",
+        tags={
+            "computer-use": "true",
+            "computer-use.owner": "alice",
+            "computer-use.run_id": "run-old",
+            "computer-use.created_at": "2026-05-12T10:00:00Z",
+        },
+    )
+    new = FakeSandboxObject(
+        sandbox_id="new",
+        tags={
+            "computer-use": "true",
+            "computer-use.owner": "alice",
+            "computer-use.created_at": "2026-05-12T12:00:00Z",
+        },
+    )
+    FakeSandbox.listed = [old, new]
+
+    result = ComputerSandboxManager(app_name="computer-app").cleanup_expired(
+        ttl_seconds=3600,
+        owner="alice",
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert FakeSandbox.list_calls == [{"computer-use": "true", "computer-use.owner": "alice"}]
+    assert result.dry_run is True
+    assert result.inspected_count == 2
+    assert result.matched_count == 1
+    assert result.terminated_count == 0
+    assert result.candidates[0].sandbox_id == "old"
+    assert result.candidates[0].reason == "expired"
+    assert result.skipped[0].sandbox_id == "new"
+    assert result.skipped[0].reason == "not_expired"
+    assert old.terminated is False
+    assert new.terminated is False
+
+
+def test_manager_cleanup_expired_execute_terminates_only_expired(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    old = FakeSandboxObject(
+        sandbox_id="old",
+        tags={
+            "computer-use": "true",
+            "computer-use.created_at": "2026-05-12T10:00:00Z",
+        },
+    )
+    new = FakeSandboxObject(
+        sandbox_id="new",
+        tags={
+            "computer-use": "true",
+            "computer-use.created_at": "2026-05-12T11:30:00Z",
+        },
+    )
+    FakeSandbox.listed = [old, new]
+
+    result = ComputerSandboxManager(app_name="computer-app").cleanup_expired(
+        ttl_seconds=3600,
+        dry_run=False,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.dry_run is False
+    assert result.matched_count == 1
+    assert result.terminated_count == 1
+    assert result.candidates[0].status == "terminated"
+    assert old.terminated is True
+    assert new.terminated is False
+
+
+def test_manager_cleanup_skips_missing_and_invalid_created_at(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    missing = FakeSandboxObject(sandbox_id="missing", tags={"computer-use": "true"})
+    invalid = FakeSandboxObject(
+        sandbox_id="invalid",
+        tags={"computer-use": "true", "computer-use.created_at": "not-a-date"},
+    )
+    FakeSandbox.listed = [missing, invalid]
+
+    result = ComputerSandboxManager(app_name="computer-app").cleanup_expired(
+        ttl_seconds=3600,
+        dry_run=False,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.matched_count == 0
+    assert result.terminated_count == 0
+    assert [(item.sandbox_id, item.reason) for item in result.skipped] == [
+        ("missing", "missing_created_at"),
+        ("invalid", "invalid_created_at"),
+    ]
+    assert missing.terminated is False
+    assert invalid.terminated is False
+
+
+def test_manager_terminate_uses_modal_sandbox_id_without_connect_token(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    sandbox = FakeSandboxObject(sandbox_id="sb-terminate")
+    FakeSandbox.from_id_result = sandbox
+
+    ComputerSandboxManager(app_name="computer-app").terminate("sb-terminate")
+
+    assert FakeSandbox.from_id_calls == ["sb-terminate"]
+    assert sandbox.terminated is True
 
 
 def test_registry_find_by_run_id_missing_returns_none(monkeypatch) -> None:

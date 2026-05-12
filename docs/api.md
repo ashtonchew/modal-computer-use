@@ -62,8 +62,35 @@ by default. Pass `on_config_mismatch="reuse"` only when the caller intentionally
 existing sandbox configuration.
 
 Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available: sandbox ID,
-app name, name, run ID, config hash, tags, and artifact directory. It does not include connect
-tokens or noVNC URLs produced outside explicit debug helpers.
+app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does
+not include connect tokens or noVNC URLs produced outside explicit debug helpers.
+
+## Modal manager lifecycle helpers
+
+`ComputerSandboxManager` is a thin Modal orchestration facade. It can create, attach, list,
+find by run ID, terminate by sandbox ID, and inspect stale sandboxes for cleanup. It does not own
+prompts, provider policies, messages, or task loops.
+
+```python
+from modal_computer_use import ComputerSandboxManager
+
+manager = ComputerSandboxManager(app_name="modal-computer-use")
+refs = manager.list(owner="alice")
+ref = manager.find_by_run_id("support-ticket-123")
+
+plan = manager.cleanup_expired(
+    ttl_seconds=3600,
+    owner="alice",
+    dry_run=True,  # default; does not terminate anything
+)
+```
+
+Cleanup uses the safe `computer-use.created_at` tag applied at sandbox creation. Missing or
+malformed creation timestamps are reported as skipped instead of guessed. Passing
+`dry_run=False` terminates only expired listed sandboxes with valid creation metadata and returns
+a `SandboxCleanupResult` containing counts plus safe per-sandbox candidate, skipped, and error
+items. Cleanup results do not include connect tokens, noVNC URLs, command output, artifact bytes,
+or provider credentials.
 
 `/v1/computer/status` includes a budget snapshot for actions, screenshots, artifact bytes
 (including recordings), and recording seconds.

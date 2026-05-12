@@ -114,6 +114,18 @@ Existing sandboxes with a `computer-use.config_hash` tag must match the requeste
 `attach_or_create` raises `ConfigConflictError` by default. Ambiguous run ID matches raise
 `SandboxAmbiguousError` instead of selecting one arbitrarily.
 
+For owner-scoped listing and conservative stale-sandbox cleanup, use the optional manager:
+
+```python
+from modal_computer_use import ComputerSandboxManager
+
+manager = ComputerSandboxManager()
+plan = manager.cleanup_expired(ttl_seconds=3600, owner="alice")  # dry-run by default
+```
+
+Cleanup uses safe creation metadata tags and skips sandboxes whose creation time is missing or
+malformed unless you terminate them explicitly by sandbox ID.
+
 ## Provider Adapters
 
 Adapters normalize provider-returned actions into the core action schema. They do not call provider APIs:
