@@ -1,5 +1,7 @@
 # `modal-computer-use`: Daytona-style computer-use primitives on Modal
 
+> **Superseded by [modal_computer_use_spec_v6.md](modal_computer_use_spec_v6.md).** Kept for historical reference; do not edit.
+
 **Status:** implementation plan and technical specification  
 **Prepared:** 2026-05-11  
 **Revision:** v5, best-practice architecture and implementation patch after competitor/API/security review  
