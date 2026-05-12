@@ -21,9 +21,18 @@ def test_recording_stop_updates_file_metadata_and_download(test_client) -> None:
     assert stopped.size_bytes > 0
     assert stopped.sha256
     assert stopped.duration_seconds is not None
+    assert stopped.stop_method == "mock"
+    assert "-stdin" in stopped.ffmpeg_args
     download = test_client.get(f"/v1/recordings/{started.id}/download")
     assert download.status_code == 200
     assert download.content.startswith(b"mock recording")
+
+    manifest = test_client.get("/v1/artifacts/manifest").json()
+    recording_entries = [
+        item for item in manifest if item["path"] == f"recordings/{started.id}.mp4"
+    ]
+    assert len(recording_entries) == 1
+    assert recording_entries[0]["content_type"] == "video/mp4"
 
 
 def test_recording_delete_removes_metadata(test_client) -> None:
@@ -96,6 +105,8 @@ def test_failed_recording_stop_reports_error_and_ffmpeg_tail(tmp_path, monkeypat
 
     assert stopped.status == "failed"
     assert stopped.error == "ffmpeg did not stop after SIGTERM; killed process"
+    assert stopped.return_code == -9
+    assert stopped.stop_method == "kill"
     assert stopped.stderr_tail == ["first line", "last ffmpeg error"]
     assert process.stdin.writes == [b"q\n"]
     assert process.stdin.closed is True
@@ -134,3 +145,56 @@ def test_recording_delete_removes_stderr_file(tmp_path, monkeypatch) -> None:
     assert (tmp_path / "recordings" / f"{started.id}.ffmpeg.stderr.log").exists()
     registry.delete(started.id)
     assert not (tmp_path / "recordings" / f"{started.id}.ffmpeg.stderr.log").exists()
+
+
+def test_recording_start_uses_deterministic_ffmpeg_argv(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class ExitedProcess:
+        stdin = None
+
+        def poll(self) -> int:
+            return 0
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = args
+        return ExitedProcess()
+
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _tool: "/usr/bin/ffmpeg")
+    registry = RecordingRegistry(
+        DaemonSettings(
+            backend="x11",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            display=":100",
+            desktop_width=800,
+            desktop_height=600,
+        ),
+        popen_factory=fake_popen,
+    )
+
+    started = registry.start(fps=7)
+
+    assert captured["args"] == [
+        "/usr/bin/ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-nostats",
+        "-stdin",
+        "-video_size",
+        "800x600",
+        "-framerate",
+        "7",
+        "-f",
+        "x11grab",
+        "-i",
+        ":100",
+        "-pix_fmt",
+        "yuv420p",
+        started.path,
+    ]
+    assert started.ffmpeg_args[0] == "ffmpeg"
+    assert started.ffmpeg_args[-1] == started.path

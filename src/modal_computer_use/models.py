@@ -202,6 +202,9 @@ class Recording(StrictBaseModel):
     stderr_path: str | None = None
     stderr_tail: list[str] = Field(default_factory=list)
     error: str | None = None
+    ffmpeg_args: list[str] = Field(default_factory=list)
+    return_code: int | None = None
+    stop_method: str | None = None
     started_at: datetime
     stopped_at: datetime | None = None
     duration_seconds: float | None = Field(default=None, ge=0)

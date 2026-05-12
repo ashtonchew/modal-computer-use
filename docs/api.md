@@ -23,6 +23,10 @@ Main namespaces:
 
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 
+`/v1/computer/status` includes a budget snapshot for actions, screenshots, artifact bytes
+(including recordings), and recording seconds.
+
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
-and bounded ffmpeg diagnostics (`stderr_path`, `stderr_tail`, `error`) when a recording fails
-or emits useful stderr. The daemon stores diagnostics as files and returns only a short tail.
+ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
+`stderr_tail`, `error`) when a recording fails or emits useful stderr. The daemon stores
+diagnostics as files and returns only a short tail.
