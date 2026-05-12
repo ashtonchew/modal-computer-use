@@ -9,6 +9,11 @@ Run this checklist before publishing a release or opening a production-readiness
 - `uv run python scripts/export_openapi.py --check`
 - `uv run pytest`
 - `uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json`
+- `uv build`
+
+The `Release Validation` GitHub Actions workflow repeats these checks on pull requests and pushes
+to `main`, uploads the benchmark report and distributions as artifacts, and runs the Modal smoke
+tests when `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets are configured.
 
 ## Targeted Checks
 
