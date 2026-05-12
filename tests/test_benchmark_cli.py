@@ -4,13 +4,14 @@ import json
 
 import pytest
 
-import modal_computer_use.benchmarks as benchmarks
+import modal_computer_use.benchmark_comparison as benchmark_comparison
 from modal_computer_use import cli
 from modal_computer_use.benchmarks import (
     TYPING_BENCHMARK_TEXT,
     run_action_batch_benchmark,
     run_benchmark_report,
     run_provider_comparison,
+    run_provider_comparison_mock_local,
     run_sandbox_exec_benchmark,
     run_type_100_chars_benchmark,
 )
@@ -93,6 +94,117 @@ def test_benchmark_compare_external_providers_skip_without_credentials(monkeypat
     assert "E2B_API_KEY is not set" in captured.out
 
 
+def test_benchmark_compare_mock_local_never_loads_live_external_providers(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("DAYTONA_API_KEY", "daytona-secret")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-secret")
+
+    def fail_import(*args, **kwargs):
+        raise AssertionError("mock-local should not import live provider SDKs")
+
+    monkeypatch.setattr(benchmark_comparison, "_import_provider_module", fail_import)
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--mock-local",
+            "--providers",
+            "daytona,e2b",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    serialized = json.dumps(payload)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["providers"]["daytona"]["status"] == "not_measured"
+    assert payload["providers"]["e2b"]["status"] == "not_measured"
+    assert "disabled in mock-local mode" in serialized
+    assert "secret" not in serialized
+
+
+def test_benchmark_compare_mock_local_preserves_modal_exec_runner() -> None:
+    class FakeProcess:
+        returncode = 0
+
+        def wait(self) -> None:
+            return None
+
+    calls = []
+
+    def run(command: tuple[str, ...], timeout: int) -> FakeProcess:
+        calls.append((command, timeout))
+        return FakeProcess()
+
+    payload = run_provider_comparison_mock_local(
+        providers=["modal-exec"],
+        iterations=1,
+        sandbox_exec_runner=run,
+    )
+
+    assert payload["ok"] is True
+    assert payload["providers"]["modal-exec"]["status"] == "ok"
+    assert payload["providers"]["modal-exec"]["cases"]["sandbox_exec_move_click"]["status"] == "ok"
+    assert len(calls) == 2
+
+
+def test_benchmark_compare_live_external_providers_skip_without_sdks(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("DAYTONA_API_KEY", "daytona-secret")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-secret")
+
+    def missing_sdk(*args, **kwargs):
+        raise ImportError("missing sdk")
+
+    monkeypatch.setattr(benchmark_comparison, "_import_provider_module", missing_sdk)
+
+    payload = run_provider_comparison(providers=["daytona", "e2b"], iterations=1)
+    serialized = json.dumps(payload)
+    assert payload["ok"] is True
+    assert payload["providers"]["daytona"]["status"] == "unavailable"
+    assert payload["providers"]["e2b"]["status"] == "unavailable"
+    assert "install the bench-daytona extra" in serialized
+    assert "install the bench-e2b extra" in serialized
+    assert "secret" not in serialized
+
+
+def test_benchmark_compare_redacts_nested_provider_observations() -> None:
+    observation = benchmark_comparison._safe_provider_observation(
+        {
+            "meta": {
+                "token": "secret-token",
+                "stdout": f"secret stdout {TYPING_BENCHMARK_TEXT}",
+            },
+            "url": "https://user:secret@example.test/vnc?token=secret",
+            "note": f"typed: {TYPING_BENCHMARK_TEXT}",
+        }
+    )
+
+    serialized = json.dumps(observation)
+    assert "secret-token" not in serialized
+    assert "secret stdout" not in serialized
+    assert "user:secret" not in serialized
+    assert "token=secret" not in serialized
+    assert TYPING_BENCHMARK_TEXT not in serialized
+    assert observation["url"]["redacted"] is True
+    assert observation["meta"]["token"]["redacted"] is True
+    assert "[redacted typed text]" in serialized
+
+
+def test_benchmark_compare_safe_provider_metadata_removes_url_credentials() -> None:
+    value = benchmark_comparison._safe_provider_metadata_value(
+        "https://user:secret@example.test/vnc?token=secret#frag"
+    )
+
+    assert value == "https://example.test/vnc"
+
+
 def test_benchmark_compare_requires_modal_daemon_target(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(["benchmark", "compare", "--provider", "modal-daemon"])
@@ -109,7 +221,7 @@ def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch)
             "https://example.com/vnc.html?password=secret"
         )
 
-    monkeypatch.setattr(benchmarks, "_run_adapter_provider", fail_provider)
+    monkeypatch.setattr(benchmark_comparison, "_run_adapter_provider", fail_provider)
 
     payload = run_provider_comparison(providers=["openai"], iterations=1)
     serialized = json.dumps(payload)

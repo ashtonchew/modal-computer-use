@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 import statistics
 import time
 from collections.abc import Callable
-from contextlib import redirect_stdout, suppress
+from contextlib import redirect_stdout
 from datetime import UTC, datetime
-from importlib import metadata as importlib_metadata
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,14 +17,10 @@ import httpx
 from fastapi.testclient import TestClient
 
 from ._version import __version__
-from .adapters.anthropic import AnthropicAdapter
-from .adapters.generic import ActionExecutor
-from .adapters.openai import OpenAIAdapter
 from .client import DaemonClient
 from .daemon.app import create_app
 from .daemon.settings import DaemonSettings
 from .errors import DaemonHTTPError
-from .models import ActionBatchResult, ActionItemResult
 from .transports.http import HTTPTransport
 
 BenchmarkMode = Literal["mock-local", "http"]
@@ -287,101 +281,28 @@ def run_provider_comparison(
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if iterations < 1:
-        raise ValueError("iterations must be >= 1")
+    from .benchmark_comparison import run_provider_comparison as run_comparison
 
-    selected = providers or list(DEFAULT_COMPARE_PROVIDERS)
-    failures: list[dict[str, Any]] = []
-    provider_results: dict[str, Any] = {}
-    for provider in selected:
-        try:
-            if provider == "modal-daemon":
-                result = _run_modal_daemon_provider(
-                    client=client,
-                    mode=mode,
-                    base_url=base_url,
-                    iterations=iterations,
-                    warmup_iterations=warmup_iterations,
-                )
-            elif provider == "modal-exec":
-                result = _provider_result(
-                    provider,
-                    cases={
-                        "sandbox_exec_move_click": run_sandbox_exec_benchmark(
-                            iterations=iterations,
-                            warmup_iterations=warmup_iterations,
-                            runner=sandbox_exec_runner,
-                            setup_failure=sandbox_exec_setup_failure,
-                        )
-                    },
-                    metadata={"transport": "Modal Sandbox.exec"},
-                )
-            elif provider in {"openai", "anthropic", "generic"}:
-                result = _run_adapter_provider(
-                    provider=provider,
-                    iterations=iterations,
-                    warmup_iterations=warmup_iterations,
-                )
-            elif provider == "daytona":
-                result = _run_daytona_provider(
-                    iterations=iterations,
-                    warmup_iterations=warmup_iterations,
-                )
-            elif provider == "e2b":
-                result = _run_e2b_provider(
-                    iterations=iterations,
-                    warmup_iterations=warmup_iterations,
-                )
-            else:
-                result = _provider_not_measured(str(provider), "unknown provider")
-        except Exception as exc:
-            result = _provider_result(
-                provider,
-                cases={
-                    "setup": _case_result(
-                        "setup",
-                        iterations,
-                        [],
-                        [
-                            _failure(
-                                "setup",
-                                phase="setup",
-                                iteration=0,
-                                exc=exc,
-                                redacted_text=PROVIDER_BENCHMARK_TEXT,
-                            )
-                        ],
-                    )
-                },
-            )
-        provider_results[provider] = result
-        failures.extend(_benchmark_failures(provider, result.get("failures", [])))
-    return {
-        "ok": not failures,
-        "benchmark": "provider-compare",
-        "generated_at": datetime.now(UTC).isoformat(),
-        "package_version": __version__,
-        "mode": mode,
-        "base_url": _safe_base_url(base_url),
-        "iterations": iterations,
-        "warmup_iterations": warmup_iterations,
-        "metadata": {
-            "environment": {
-                key: value
-                for key, value in (environment_metadata or {}).items()
-                if value is not None
-            },
-            "providers": selected,
-        },
-        "providers": provider_results,
-        "failures": failures,
-    }
+    return run_comparison(
+        providers=providers,
+        iterations=iterations,
+        client=client,
+        mode=mode,
+        base_url=base_url,
+        warmup_iterations=warmup_iterations,
+        sandbox_exec_runner=sandbox_exec_runner,
+        sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+        environment_metadata=environment_metadata,
+    )
 
 
 def run_provider_comparison_mock_local(
     *,
     providers: list[ComparisonProvider] | None = None,
     iterations: int,
+    sandbox_exec_runner: Callable[[tuple[str, ...], int], object] | None = None,
+    sandbox_exec_setup_failure: dict[str, Any] | None = None,
+    environment_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _with_mock_local_client(
         lambda client: run_provider_comparison(
@@ -390,6 +311,9 @@ def run_provider_comparison_mock_local(
             mode="mock-local",
             iterations=iterations,
             base_url="http://testserver",
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+            environment_metadata=environment_metadata,
         )
     )
 
@@ -742,369 +666,6 @@ class _SandboxExecBenchmark:
             )
 
 
-class _BenchmarkRecordingActions:
-    def __init__(self) -> None:
-        self.runs: list[dict[str, Any]] = []
-
-    def run(
-        self,
-        actions: list[Any],
-        *,
-        continue_on_error: bool = False,
-        screenshot_after: bool = False,
-        source: str = "sdk",
-    ) -> ActionBatchResult:
-        dumped = [action.model_dump(mode="json") for action in actions]
-        self.runs.append(
-            {
-                "actions": dumped,
-                "continue_on_error": continue_on_error,
-                "screenshot_after": screenshot_after,
-                "source": source,
-            }
-        )
-        return ActionBatchResult(
-            ok=True,
-            results=[
-                ActionItemResult(index=index, type=action["type"], ok=True)
-                for index, action in enumerate(dumped)
-            ],
-        )
-
-    def apply(self, action: Any) -> Any:
-        return self.run([action]).results[0]
-
-
-class _BenchmarkRecordingComputer:
-    def __init__(self) -> None:
-        self.actions = _BenchmarkRecordingActions()
-
-
-def _run_modal_daemon_provider(
-    *,
-    client: DaemonClient | None,
-    mode: str,
-    base_url: str | None,
-    iterations: int,
-    warmup_iterations: int,
-) -> dict[str, Any]:
-    if client is None:
-        return _provider_not_measured(
-            "modal-daemon",
-            "modal-daemon comparison requires --mock-local or --base-url",
-        )
-    action_batch = run_action_batch_benchmark(
-        client=client,
-        mode="mock-local" if mode == "mock-local" else "http",
-        iterations=iterations,
-        base_url=base_url,
-        warmup_iterations=warmup_iterations,
-    )
-    cases = {
-        "action_batch": _report_action_batch(action_batch),
-        "screenshot_full": run_screenshot_benchmark(
-            client=client,
-            name="screenshot_full",
-            request={"format": "png", "storage": "inline", "show_cursor": False},
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-        ),
-        "move_click": run_move_click_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-        ),
-        "type_100_chars": run_type_100_chars_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-        ),
-        "recording_start_stop": run_recording_start_stop_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-        ),
-        "cold_create_to_ready": _future_benchmark(
-            "not_measured",
-            "cold Modal Sandbox creation is measured by a live orchestration runner, "
-            "not this daemon target",
-        ),
-        "warm_attach_to_health": _future_benchmark(
-            "not_measured",
-            "warm attach requires Modal orchestration metadata",
-        ),
-    }
-    return _provider_result(
-        "modal-daemon",
-        cases=cases,
-        metadata={"transport": "daemon-http", "base_url": _safe_base_url(base_url)},
-    )
-
-
-def _run_adapter_provider(
-    *,
-    provider: ComparisonProvider,
-    iterations: int,
-    warmup_iterations: int,
-) -> dict[str, Any]:
-    failures: list[dict[str, Any]] = []
-    benchmark = _AdapterProviderBenchmark(provider)
-    samples, observations = _measure_observed_case(
-        name=f"{provider}_adapter_matrix",
-        iterations=iterations,
-        warmup_iterations=warmup_iterations,
-        operation=benchmark.run,
-        failures=failures,
-        redacted_text=PROVIDER_BENCHMARK_TEXT,
-    )
-    case = _case_result(f"{provider}_adapter_matrix", iterations, samples, failures)
-    case.update(
-        {
-            "actions": observations[-1]["actions"] if observations else benchmark.safe_actions,
-            "action_count": len(benchmark.safe_actions),
-            "last_result": observations[-1] if observations else None,
-        }
-    )
-    return _provider_result(
-        provider,
-        cases={"adapter_matrix": case},
-        metadata=benchmark.metadata,
-    )
-
-
-class _AdapterProviderBenchmark:
-    def __init__(self, provider: ComparisonProvider) -> None:
-        self.provider = provider
-        self.metadata = self._metadata()
-        self.safe_actions = [_safe_action_metadata(action) for action in self._provider_actions()]
-
-    def run(self) -> dict[str, Any]:
-        computer = _BenchmarkRecordingComputer()
-        actions = self._provider_actions()
-        start = time.perf_counter()
-        if self.provider == "openai":
-            OpenAIAdapter(computer).apply_many(actions)
-        elif self.provider == "anthropic":
-            AnthropicAdapter(computer, tool_version="computer_20250124").apply_many(actions)
-        elif self.provider == "generic":
-            ActionExecutor(computer).apply_many(actions)
-        else:
-            raise RuntimeError(f"unsupported adapter provider: {self.provider}")
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        run = computer.actions.runs[-1]
-        return {
-            "elapsed_ms": elapsed_ms,
-            "source": run["source"],
-            "actions": [_safe_action_metadata(action) for action in run["actions"]],
-        }
-
-    def _provider_actions(self) -> list[dict[str, Any]]:
-        if self.provider == "openai":
-            return [
-                {"type": "move", "x": 10, "y": 20},
-                {"type": "click", "x": 10, "y": 20, "button": "left"},
-                {"type": "type", "text": PROVIDER_BENCHMARK_TEXT},
-                {"type": "wait", "duration_ms": 0},
-            ]
-        if self.provider == "anthropic":
-            return [
-                {"action": "mouse_move", "coordinate": [10, 20]},
-                {"action": "left_click", "coordinate": [10, 20]},
-                {"action": "type", "text": PROVIDER_BENCHMARK_TEXT},
-                {"action": "wait", "duration_ms": 0},
-            ]
-        return [
-            {"type": "move", "x": 10, "y": 20},
-            {"type": "click", "x": 10, "y": 20, "button": "left"},
-            {"type": "type", "text": PROVIDER_BENCHMARK_TEXT},
-            {"type": "wait", "duration_ms": 0},
-        ]
-
-    def _metadata(self) -> dict[str, Any]:
-        if self.provider == "anthropic":
-            return {
-                "adapter": "AnthropicAdapter",
-                "tool_version": "computer_20250124",
-                "provider_api_calls": False,
-            }
-        if self.provider == "openai":
-            return {"adapter": "OpenAIAdapter", "provider_api_calls": False}
-        return {"adapter": "ActionExecutor", "provider_api_calls": False}
-
-
-def _run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
-    provider = "daytona"
-    api_key = os.environ.get("DAYTONA_API_KEY")
-    if not api_key:
-        return _provider_not_measured(provider, "DAYTONA_API_KEY is not set")
-    try:
-        daytona_module = __import__("daytona", fromlist=["Daytona"])
-    except ImportError:
-        return _provider_unavailable(
-            provider,
-            "install the bench-daytona extra to run Daytona benchmarks",
-        )
-
-    metadata = {
-        "sdk_package": "daytona",
-        "sdk_version": _package_version("daytona"),
-        "target": os.environ.get("DAYTONA_TARGET"),
-        "api_url": _safe_base_url(os.environ.get("DAYTONA_API_URL")),
-    }
-    benchmark = _DaytonaLiveBenchmark(daytona_module, api_key)
-    return _run_live_provider_cases(
-        provider=provider,
-        benchmark=benchmark,
-        cases=("cold_create_to_ready", "command_echo"),
-        iterations=iterations,
-        warmup_iterations=warmup_iterations,
-        metadata=metadata,
-    )
-
-
-def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
-    provider = "e2b"
-    api_key = os.environ.get("E2B_API_KEY")
-    if not api_key:
-        return _provider_not_measured(provider, "E2B_API_KEY is not set")
-    try:
-        e2b_module = __import__("e2b_desktop", fromlist=["Sandbox"])
-    except ImportError:
-        return _provider_unavailable(provider, "install the bench-e2b extra to run E2B benchmarks")
-
-    metadata = {
-        "sdk_package": "e2b-desktop",
-        "sdk_version": _package_version("e2b-desktop"),
-        "template": "desktop",
-    }
-    benchmark = _E2BLiveBenchmark(e2b_module)
-    return _run_live_provider_cases(
-        provider=provider,
-        benchmark=benchmark,
-        cases=("cold_create_to_ready", "screenshot_full", "move_click", "type_100_chars"),
-        iterations=iterations,
-        warmup_iterations=warmup_iterations,
-        metadata=metadata,
-    )
-
-
-class _DaytonaLiveBenchmark:
-    def __init__(self, daytona_module: Any, api_key: str) -> None:
-        self._module = daytona_module
-        config_cls = getattr(daytona_module, "DaytonaConfig", None)
-        client_cls = daytona_module.Daytona
-        self._client = client_cls(config_cls(api_key=api_key)) if config_cls else client_cls()
-
-    def cold_create_to_ready(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            return {"status": "ready"}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
-
-    def command_echo(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            process = sandbox.process
-            result = process.exec("python -c 'print(42)'", timeout=30)
-            exit_code = getattr(result, "exit_code", getattr(result, "return_code", 0))
-            if exit_code not in (None, 0):
-                raise RuntimeError("Daytona command exited nonzero")
-            return {"exit_code": exit_code}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
-
-    def _create_sandbox(self) -> Any:
-        create = self._client.create
-        params_cls = getattr(self._module, "CreateSandboxFromImageParams", None)
-        image_cls = getattr(self._module, "Image", None)
-        resources_cls = getattr(self._module, "Resources", None)
-        if params_cls and image_cls and resources_cls:
-            image = image_cls.debian_slim("3.12")
-            resources = resources_cls(cpu=1, memory=1, disk=3)
-            return create(params_cls(image=image, resources=resources))
-        return create()
-
-
-class _E2BLiveBenchmark:
-    def __init__(self, e2b_module: Any) -> None:
-        self._sandbox_cls = e2b_module.Sandbox
-
-    def cold_create_to_ready(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            return {"status": "ready"}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
-
-    def screenshot_full(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            screenshot = sandbox.screenshot()
-            size_bytes = _provider_payload_size(screenshot)
-            if size_bytes <= 0:
-                raise RuntimeError("E2B screenshot was empty")
-            return {"size_bytes": size_bytes}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
-
-    def move_click(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            _call_first_available(sandbox, ("move_mouse", "moveMouse"), 24, 24)
-            _call_first_available(sandbox, ("left_click", "leftClick"), 24, 24)
-            return {"action_count": 2}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
-
-    def type_100_chars(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            _call_first_available(sandbox, ("write", "type"), PROVIDER_BENCHMARK_TEXT)
-            return {"character_count": len(PROVIDER_BENCHMARK_TEXT)}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
-
-    def _create_sandbox(self) -> Any:
-        create = self._sandbox_cls.create
-        try:
-            return create(resolution=(1024, 768), timeout_ms=300_000)
-        except TypeError:
-            try:
-                return create(resolution=(1024, 768), timeoutMs=300_000)
-            except TypeError:
-                return create()
-
-
-def _run_live_provider_cases(
-    *,
-    provider: str,
-    benchmark: Any,
-    cases: tuple[str, ...],
-    iterations: int,
-    warmup_iterations: int,
-    metadata: dict[str, Any],
-) -> dict[str, Any]:
-    failures: list[dict[str, Any]] = []
-    results: dict[str, Any] = {}
-    for case in cases:
-        operation = getattr(benchmark, case)
-        samples, observations = _measure_observed_case(
-            name=case,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            operation=operation,
-            failures=failures,
-            redacted_text=PROVIDER_BENCHMARK_TEXT,
-        )
-        result = _case_result(case, iterations, samples, failures)
-        result["last_result"] = (
-            _safe_provider_observation(observations[-1]) if observations else None
-        )
-        results[case] = result
-    return _provider_result(provider, cases=results, metadata=metadata)
-
-
 def _measure_case(
     *,
     name: str,
@@ -1403,52 +964,6 @@ def _benchmark_failures(benchmark: str, failures: list[dict[str, Any]]) -> list[
     return [dict(failure, benchmark=benchmark) for failure in failures]
 
 
-def _provider_result(
-    provider: str,
-    *,
-    cases: dict[str, Any],
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    failures: list[dict[str, Any]] = []
-    measured = False
-    failed = False
-    for case_name, case in cases.items():
-        if not isinstance(case, dict):
-            continue
-        failures.extend(_benchmark_failures(case_name, case.get("failures", [])))
-        status = case.get("status")
-        failed = failed or status == "failed"
-        measured = measured or status == "ok"
-    if failed:
-        status = "failed"
-    elif measured:
-        status = "ok"
-    else:
-        statuses = {case.get("status") for case in cases.values() if isinstance(case, dict)}
-        status = "unavailable" if "unavailable" in statuses else "not_measured"
-    return {
-        "status": status,
-        "provider": provider,
-        "metadata": metadata or {},
-        "cases": cases,
-        "failures": failures,
-    }
-
-
-def _provider_not_measured(provider: str, reason: str) -> dict[str, Any]:
-    return _provider_result(
-        provider,
-        cases={"setup": {"status": "not_measured", "reason": reason, "failures": []}},
-    )
-
-
-def _provider_unavailable(provider: str, reason: str) -> dict[str, Any]:
-    return _provider_result(
-        provider,
-        cases={"setup": {"status": "unavailable", "reason": reason, "failures": []}},
-    )
-
-
 def _safe_screenshot_request(request: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -1462,33 +977,6 @@ def _safe_action_metadata(action: dict[str, Any]) -> dict[str, Any]:
     if "button" in action:
         metadata["button"] = action["button"]
     return metadata
-
-
-def _safe_provider_observation(observation: Any) -> dict[str, Any] | None:
-    if observation is None:
-        return None
-    if not isinstance(observation, dict):
-        return {"type": type(observation).__name__}
-    safe: dict[str, Any] = {}
-    for key, value in observation.items():
-        if key in {
-            "stdout",
-            "stderr",
-            "text",
-            "bytes",
-            "data",
-            "data_base64",
-            "url",
-            "auth_key",
-            "token",
-            "password",
-        }:
-            safe[key] = _redaction_marker(value)
-        elif isinstance(value, str):
-            safe[key] = _redact_text(value, PROVIDER_BENCHMARK_TEXT)
-        else:
-            safe[key] = value
-    return safe
 
 
 def _safe_screenshot_result(result: Any) -> dict[str, Any]:
@@ -1558,65 +1046,6 @@ def _extract_daemon_ms(result: dict[str, Any]) -> float | None:
     if daemon_ms < 0:
         raise RuntimeError("daemon action timing.daemon_ms was negative")
     return float(daemon_ms)
-
-
-def _package_version(package: str) -> str | None:
-    try:
-        return importlib_metadata.version(package)
-    except importlib_metadata.PackageNotFoundError:
-        return None
-
-
-def _cleanup_provider_sandbox(sandbox: Any) -> None:
-    for method_name in ("stop", "kill", "delete"):
-        method = getattr(sandbox, method_name, None)
-        if not callable(method):
-            continue
-        with suppress(Exception):
-            method()
-            return
-        with suppress(Exception):
-            method(force=True)
-            return
-
-
-def _call_first_available(target: Any, names: tuple[str, ...], *args: Any) -> Any:
-    for name in names:
-        method = getattr(target, name, None)
-        if callable(method):
-            return method(*args)
-    raise RuntimeError(f"provider object did not expose any of: {', '.join(names)}")
-
-
-def _provider_payload_size(value: Any) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, bytes | bytearray):
-        return len(value)
-    if isinstance(value, str):
-        return len(value.encode("utf-8"))
-    if hasattr(value, "read"):
-        current = value.read()
-        return _provider_payload_size(current)
-    if hasattr(value, "size_bytes"):
-        size = value.size_bytes
-        return int(size) if isinstance(size, int | float) else 0
-    if hasattr(value, "bytes"):
-        return _provider_payload_size(value.bytes)
-    if hasattr(value, "data"):
-        return _provider_payload_size(value.data)
-    return 0
-
-
-def _redaction_marker(value: Any) -> dict[str, Any]:
-    marker: dict[str, Any] = {"redacted": True}
-    if isinstance(value, str):
-        marker["length"] = len(value)
-    elif isinstance(value, bytes | bytearray):
-        marker["size_bytes"] = len(value)
-    elif isinstance(value, list | tuple | dict):
-        marker["items"] = len(value)
-    return marker
 
 
 def _failure(

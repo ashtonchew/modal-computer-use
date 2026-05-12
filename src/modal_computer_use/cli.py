@@ -242,6 +242,9 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
         result = run_provider_comparison_mock_local(
             providers=providers,
             iterations=args.iterations,
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+            environment_metadata=_benchmark_environment_metadata(args),
         )
     elif args.base_url:
         client = DaemonClient(args.base_url, token=args.token)
