@@ -1,22 +1,27 @@
 # Modal Deployment
 
-`ComputerSandbox.create()` lazily imports Modal, builds or accepts a Modal `Image`, and starts:
+`ComputerSandbox.create()` lazily imports Modal, builds or accepts a Modal `Image`, and starts the daemon inside the sandbox:
 
 ```bash
 python -m modal_computer_use.daemon
 ```
 
-The daemon listens on port `8080`. Modal readiness uses `modal.Probe.with_tcp(8080)` to
-wait until the daemon port is accepting connections; SDK/client readiness should still
-target `/readyz`, not only `/healthz`.
-Local repository commands still use `uv run`; the sandbox image command stays `python -m`
-because the Modal image API installs the package into the image runtime.
+## Readiness
 
-Current Modal docs state that Sandbox Connect Tokens authenticate HTTP/WebSocket requests to a server listening on port `8080`, and that outbound network restrictions use `block_network` and `cidr_allowlist`. noVNC should be exposed only with explicit `encrypted_ports=[6080]`.
-Sandbox tags are applied after creation with `Sandbox.set_tags()` and then used for
-`Sandbox.list(tags=...)` attach/recovery flows.
+The daemon listens on port `8080`. Modal waits for the port to accept connections via `modal.Probe.with_tcp(8080)`. SDK clients should poll `/readyz` rather than relying on the TCP probe, because `/healthz` only confirms the daemon process is alive, not that the desktop is up.
 
-`modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples, then call `computer.artifacts.sync()` when immediate visibility is required.
+The image launch command stays `python -m modal_computer_use.daemon`. Local repo work uses `uv run computer-use-daemon`. They differ because Modal installs the package into the image runtime; `uv run` is for the editable repo checkout.
+
+## Sandbox configuration
+
+Per current Modal docs, configure the Sandbox with:
+
+- **Connect Tokens** authenticate HTTP and WebSocket requests to the daemon on port `8080`. See [security.md](security.md).
+- **Network restrictions** use `block_network` and `cidr_allowlist` to limit outbound traffic.
+- **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
+- **Tags** are applied after creation with `Sandbox.set_tags()` and used for `Sandbox.list(tags=...)` attach and recovery flows.
+
+`modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples; call `computer.artifacts.sync()` when the file needs to be visible from outside the sandbox immediately.
 
 ## Authentication
 
@@ -28,12 +33,9 @@ uv run modal token new
 uv run pytest -m modal
 ```
 
-The Modal SDK reads credentials from `~/.modal.toml`, or from `MODAL_CONFIG_PATH` if set.
-In CI, use a Modal service user and expose `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as
-CI secrets. The repository does not auto-load `.env` for Modal SDK auth; `.env` files are
-better used through `modal.Secret.from_dotenv()` when creating remote runtime secrets.
+The Modal SDK reads credentials from `~/.modal.toml`, or from `MODAL_CONFIG_PATH` if set. In CI, use a Modal service user and expose `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as CI secrets. The repository does not auto-load `.env` for Modal SDK auth; `.env` files are better used through `modal.Secret.from_dotenv()` when creating remote runtime secrets.
 
-The noVNC view-only smoke test is opt-in because it creates a tunnel. To run it locally:
+The noVNC view-only smoke test is opt-in because it creates a tunnel:
 
 ```bash
 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest tests/test_modal_integration.py -q

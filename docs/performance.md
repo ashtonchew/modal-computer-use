@@ -1,3 +1,51 @@
 # Performance
 
-Batch actions reduce HTTP round trips. Screenshot storage can be inline, artifact-backed, or automatic. Browser prewarm, image choice, and optional GPU belong in Modal image/config decisions rather than the primitive API.
+Most latency in a computer-use loop comes from network round trips and screenshot encoding. This page lists the knobs that matter.
+
+## Batch actions
+
+The daemon's `/v1/actions/run` route accepts an ordered list of actions and executes them under one input lock. Each action is one HTTP round trip when sent individually; a 10-action batch is one. For multi-step interactions the model returns in a single turn, batch them.
+
+Batch limits live behind `COMPUTER_USE_MAX_BATCH_ACTIONS` (default `50`). The daemon validates the whole batch before running anything and returns per-action results. Use `continue_on_error=True` if a flaky action should not abort the rest.
+
+## Screenshot storage modes
+
+`screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
+
+- `inline` returns base64 in the HTTP response. Fast for small screenshots; expensive once the image is over a few hundred kilobytes.
+- `artifact` writes to disk and returns a `Screenshot` with `artifact_uri`. Cheaper to ship around, slower first hit.
+- `auto` (default) picks based on size.
+
+For agent loops that call screenshot every few actions, `auto` is usually the right answer.
+
+## Screenshot processing location
+
+`COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` controls where resize and re-encode happen:
+
+- `daemon` keeps the work inside the sandbox.
+- `client` ships raw bytes to the SDK and processes there.
+- `auto` picks based on pixel count.
+
+`client` cuts in-sandbox CPU at the cost of more bytes on the wire. Pick `client` if your sandbox is CPU-bound and your control plane is not; otherwise leave it on `auto`.
+
+## Browser prewarm
+
+If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. The daemon launches the configured browser at boot so the first `browser.open_url` does not pay startup cost.
+
+## Image profile
+
+`COMPUTER_USE_IMAGE_PROFILE` is a label reported by `/v1/capabilities`. The image you build for a Modal Sandbox should match it:
+
+- `standard`: minimum desktop stack.
+- `browser`: adds a browser and prewarm-friendly cache directories.
+- `browser-gpu`: adds GPU-accelerated rendering for browser-heavy workloads.
+
+Pick `browser-gpu` only when the agent is rendering 3D, video, or heavy WebGL; otherwise the GPU sits idle and costs money.
+
+## Post-action delay
+
+`COMPUTER_USE_POST_ACTION_DELAY_MS` (default `100`) inserts a sleep after every action so the desktop has time to settle. Lower it for headless workflows where you do not screenshot between actions; raise it if the next action consistently runs against a half-rendered UI.
+
+## When in doubt
+
+Leave the defaults. They work for the common cases. Profile first, tune second.
