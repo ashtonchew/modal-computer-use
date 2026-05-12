@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import subprocess
 
+from fastapi.testclient import TestClient
+
+from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.desktop import recordings as recordings_module
 from modal_computer_use.daemon.desktop.recordings import RecordingRegistry
 from modal_computer_use.daemon.settings import DaemonSettings
@@ -40,6 +43,46 @@ def test_recording_delete_removes_metadata(test_client) -> None:
 
     assert test_client.delete(f"/v1/recordings/{started['id']}").json() == {"ok": True}
     assert test_client.get(f"/v1/recordings/{started['id']}").status_code == 404
+
+
+def test_recording_dashboard_requires_same_auth(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/recordings/ui")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
+
+
+def test_recording_dashboard_renders_bounded_metadata_only(test_client) -> None:
+    started = Recording.model_validate(
+        test_client.post("/v1/recordings", json={"name": "demo", "fps": 5}).json()
+    )
+    stopped = Recording.model_validate(
+        test_client.post(f"/v1/recordings/{started.id}/stop").json()
+    )
+
+    response = test_client.get("/recordings/ui")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "demo" in body
+    assert str(stopped.size_bytes) in body
+    assert stopped.sha256 in body
+    assert stopped.artifact_uri in body
+    assert f"/v1/recordings/{started.id}/download" in body
+    assert f'href="/v1/recordings/{started.id}" data-method="DELETE"' in body
+    assert stopped.path not in body
+    assert "mock recording" not in body
+    assert "stderr_tail" not in body
 
 
 class _FakeStdin:

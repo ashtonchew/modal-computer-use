@@ -31,6 +31,7 @@ class DaemonSettings:
     browser: str | None = os.getenv("COMPUTER_USE_BROWSER") or None
     browser_prewarm: bool = _bool_env("COMPUTER_USE_BROWSER_PREWARM", False)
     artifacts_dir: Path = Path(os.getenv("COMPUTER_USE_ARTIFACTS_DIR", "/home/desktop/artifacts"))
+    artifacts_persistent: bool = _bool_env("COMPUTER_USE_ARTIFACTS_PERSISTENT", False)
     recordings_dir: Path = Path(
         os.getenv("COMPUTER_USE_RECORDINGS_DIR", "/home/desktop/recordings")
     )
@@ -57,6 +58,8 @@ class DaemonSettings:
     backend: str = os.getenv("COMPUTER_USE_BACKEND", "auto")
     max_batch_actions: int = _int_env("COMPUTER_USE_MAX_BATCH_ACTIONS", 50)
     max_batch_duration_ms: int = _int_env("COMPUTER_USE_MAX_BATCH_DURATION_MS", 30_000)
+    input_rate_limit_per_sec: int = _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 20)
+    otel_enabled: bool = _bool_env("COMPUTER_USE_OTEL_ENABLED", False)
     max_actions: int | None = (
         int(os.environ["COMPUTER_USE_MAX_ACTIONS"])
         if os.getenv("COMPUTER_USE_MAX_ACTIONS")

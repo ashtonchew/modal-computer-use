@@ -443,6 +443,7 @@ def _with_mock_local_client(callback: Callable[[DaemonClient], dict[str, Any]]) 
                     recordings_dir=root / "recordings",
                     trace_dir=root / "artifacts" / "traces",
                     local_token="dev",  # noqa: S106 - mock-local benchmark auth only.
+                    input_rate_limit_per_sec=0,
                 )
             )
             with TestClient(app, headers={"Authorization": "Bearer dev"}) as test_client:

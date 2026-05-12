@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from collections import deque
 from typing import Literal
 
 from fastapi import Request
@@ -59,6 +61,37 @@ def enforce(request: Request, *kinds: BudgetKind) -> None:
         raise _budget_error("recording duration budget exceeded", state)
 
 
+def reserve_action(request: Request) -> None:
+    error = action_reservation_error(request)
+    if error is not None:
+        raise error
+    request.app.state.action_count += 1
+    _record_action_rate(request)
+
+
+def action_reservation_error(request: Request) -> DaemonError | None:
+    settings = request.app.state.settings
+    if settings.max_actions is not None and request.app.state.action_count >= settings.max_actions:
+        return _budget_error("action budget exceeded", snapshot(request))
+    rate_limit = settings.input_rate_limit_per_sec
+    if rate_limit > 0:
+        now = time.monotonic()
+        window = request.app.state.action_rate_window
+        _prune_action_rate_window(window, now=now)
+        if len(window) >= rate_limit:
+            return DaemonError(
+                "action rate limit exceeded",
+                status_code=429,
+                code="rate_limited",
+                details={
+                    "rate_limit_per_sec": rate_limit,
+                    "retry_after_seconds": 1,
+                    "budgets": snapshot(request),
+                },
+            )
+    return None
+
+
 def _budget_error(message: str, state: dict[str, int | float | None]) -> DaemonError:
     return DaemonError(
         message,
@@ -66,3 +99,18 @@ def _budget_error(message: str, state: dict[str, int | float | None]) -> DaemonE
         code="budget_exceeded",
         details={"budgets": state},
     )
+
+
+def _record_action_rate(request: Request) -> None:
+    rate_limit = request.app.state.settings.input_rate_limit_per_sec
+    if rate_limit <= 0:
+        return
+    now = time.monotonic()
+    window = request.app.state.action_rate_window
+    _prune_action_rate_window(window, now=now)
+    window.append(now)
+
+
+def _prune_action_rate_window(window: deque[float], *, now: float) -> None:
+    while window and now - window[0] >= 1:
+        window.popleft()

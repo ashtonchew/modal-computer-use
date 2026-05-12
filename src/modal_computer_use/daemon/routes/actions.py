@@ -170,10 +170,18 @@ async def run(
                         break
                     continue
             try:
-                output = await asyncio.wait_for(
-                    _execute_action(action, request, call_id=call_id),
-                    timeout=timeout_seconds,
-                )
+                with request.app.state.tracer.span(
+                    "daemon.action",
+                    {
+                        "action.type": action.type,
+                        "action.sequence": index,
+                        "call_id": call_id,
+                    },
+                ):
+                    output = await asyncio.wait_for(
+                        _execute_action(action, request, call_id=call_id),
+                        timeout=timeout_seconds,
+                    )
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 budget_kinds = _budget_kinds_for_action(action)
                 if budget_kinds:
@@ -433,18 +441,18 @@ def _reserve_action_budget(
     index: int,
     action_type: str,
 ) -> ActionItemResult | None:
-    max_actions = request.app.state.settings.max_actions
-    if max_actions is not None and request.app.state.action_count >= max_actions:
+    error = budgets.action_reservation_error(request)
+    if error is not None:
         return ActionItemResult(
             index=index,
             type=action_type,
             ok=False,
             elapsed_ms=0,
-            error_code="budget_exceeded",
-            error="action budget exceeded",
-            output={"code": "budget_exceeded", "budgets": budgets.snapshot(request)},
+            error_code=error.code,
+            error=error.message,
+            output={"code": error.code, **error.details},
         )
-    request.app.state.action_count += 1
+    budgets.reserve_action(request)
     return None
 
 

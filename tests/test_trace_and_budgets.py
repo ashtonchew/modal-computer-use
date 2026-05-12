@@ -257,6 +257,73 @@ def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:
     }
 
 
+def test_action_rate_limit_stops_batch_without_executing_extra_actions(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+            input_rate_limit_per_sec=1,
+        )
+    )
+    calls = 0
+    original = app.state.backend.mouse_move
+
+    async def move(x: int, y: int):
+        nonlocal calls
+        calls += 1
+        return await original(x, y)
+
+    app.state.backend.mouse_move = move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {"type": "move", "x": 10, "y": 20},
+                    {"type": "move", "x": 30, "y": 40},
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert [item["error_code"] for item in body["results"]] == [None, "rate_limited"]
+    assert body["results"][1]["output"]["rate_limit_per_sec"] == 1
+    assert calls == 1
+    assert app.state.action_count == 1
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[1].error == {
+        "code": "rate_limited",
+        "message": "action rate limit exceeded",
+    }
+
+
+def test_action_rate_limit_applies_to_direct_mouse_routes(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            input_rate_limit_per_sec=1,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/mouse/move", json={"x": 10, "y": 20})
+        second = client.post("/v1/mouse/move", json={"x": 30, "y": 40})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["code"] == "rate_limited"
+    assert "token" not in str(second.json()).lower()
+
+
 def test_screenshot_action_budget_failure_is_single_traced_result(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

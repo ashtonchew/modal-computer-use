@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -17,6 +17,7 @@ from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError
+from modal_computer_use.observability import get_tracer
 
 from .routes import (
     actions,
@@ -61,12 +62,38 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         display=settings.display,
     )
     app.state.input_lock = asyncio.Lock()
-    app.state.artifacts = ArtifactStore(settings.artifacts_dir)
+    app.state.artifacts = ArtifactStore(
+        settings.artifacts_dir,
+        persistent=settings.artifacts_persistent,
+    )
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
     app.state.idempotency_cache = OrderedDict()
     app.state.action_count = 0
     app.state.screenshot_count = 0
+    app.state.action_rate_window = deque()
+    app.state.tracer = get_tracer(
+        enabled=settings.otel_enabled,
+        name="modal_computer_use.daemon",
+    )
     app.add_middleware(AuthMiddleware, settings=settings)
+
+    @app.middleware("http")
+    async def trace_route(request: Request, call_next):
+        path = request.scope.get("path") or ""
+        with app.state.tracer.span(
+            "daemon.route",
+            {
+                "http.method": request.method,
+                "http.route": path,
+            },
+        ) as span:
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                span.record_exception(exc)
+                raise
+            span.set_attribute("http.status_code", response.status_code)
+            return response
 
     @app.exception_handler(DaemonError)
     async def daemon_error_handler(_request: Request, exc: DaemonError) -> JSONResponse:
@@ -110,6 +137,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         commands.router,
         debug.router,
         session.router,
+        recordings.dashboard_router,
     ):
         app.include_router(router)
     return app
