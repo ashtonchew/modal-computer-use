@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from importlib import metadata as importlib_metadata
 from typing import Any, Literal
@@ -359,7 +360,8 @@ def _run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[st
     return _run_live_provider_cases(
         provider=provider,
         benchmark=benchmark,
-        cases=("cold_create_to_ready", "command_echo"),
+        cold_cases=("cold_create_to_ready",),
+        warm_cases=("screenshot_full", "move_click", "type_100_chars", "command_echo"),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
@@ -385,7 +387,8 @@ def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, A
     return _run_live_provider_cases(
         provider=provider,
         benchmark=benchmark,
-        cases=("cold_create_to_ready", "screenshot_full", "move_click", "type_100_chars"),
+        cold_cases=("cold_create_to_ready",),
+        warm_cases=("screenshot_full", "move_click", "type_100_chars", "command_echo"),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
@@ -400,23 +403,56 @@ class _DaytonaLiveBenchmark:
         self._client = client_cls(config_cls(api_key=api_key)) if config_cls else client_cls()
 
     def cold_create_to_ready(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
+        sandbox = self.create_ready_session()
         try:
-            return {"status": "ready"}
+            return self._status(sandbox)
         finally:
-            _cleanup_provider_sandbox(sandbox)
+            self.cleanup_session(sandbox)
 
-    def command_echo(self) -> dict[str, Any]:
+    def create_ready_session(self) -> Any:
         sandbox = self._create_sandbox()
         try:
-            process = sandbox.process
-            result = process.exec("python -c 'print(42)'", timeout=30)
-            exit_code = getattr(result, "exit_code", getattr(result, "return_code", 0))
-            if exit_code not in (None, 0):
-                raise RuntimeError("Daytona command exited nonzero")
-            return {"exit_code": exit_code}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
+            computer_use = _computer_use(sandbox)
+            _call_first_available(computer_use, ("start",))
+            return sandbox
+        except Exception:
+            self.cleanup_session(sandbox)
+            raise
+
+    def cleanup_session(self, sandbox: Any) -> None:
+        with suppress(Exception):
+            computer_use = _computer_use(sandbox)
+            _call_first_available(computer_use, ("stop",))
+        _cleanup_provider_sandbox(sandbox)
+
+    def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
+        screenshot = _call_first_available(
+            _computer_use(sandbox).screenshot,
+            ("take_full_screen", "full_screen", "take"),
+        )
+        size_bytes = _provider_payload_size(screenshot)
+        if size_bytes <= 0:
+            raise RuntimeError("Daytona screenshot was empty")
+        return {"size_bytes": size_bytes}
+
+    def move_click(self, sandbox: Any) -> dict[str, Any]:
+        mouse = _computer_use(sandbox).mouse
+        _call_first_available(mouse, ("move", "move_to"), 24, 24)
+        _call_first_available(mouse, ("click", "left_click"), 24, 24)
+        return {"action_count": 2}
+
+    def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
+        keyboard = _computer_use(sandbox).keyboard
+        _call_first_available(keyboard, ("type", "write"), core.PROVIDER_BENCHMARK_TEXT)
+        return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT)}
+
+    def command_echo(self, sandbox: Any) -> dict[str, Any]:
+        process = sandbox.process
+        result = process.exec("python -c 'print(42)'", timeout=30)
+        exit_code = _provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("Daytona command exited nonzero")
+        return {"exit_code": exit_code}
 
     def _create_sandbox(self) -> Any:
         create = self._client.create
@@ -429,69 +465,90 @@ class _DaytonaLiveBenchmark:
             return create(params_cls(image=image, resources=resources))
         return create()
 
+    def _status(self, sandbox: Any) -> dict[str, Any]:
+        computer_use = _computer_use(sandbox)
+        status_method = getattr(computer_use, "get_status", None)
+        if callable(status_method):
+            return {"status": "ready", "computer_use": _safe_provider_observation(status_method())}
+        return {"status": "ready"}
+
 
 class _E2BLiveBenchmark:
     def __init__(self, e2b_module: Any) -> None:
         self._sandbox_cls = e2b_module.Sandbox
 
     def cold_create_to_ready(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
+        sandbox = self.create_ready_session()
         try:
             return {"status": "ready"}
         finally:
-            _cleanup_provider_sandbox(sandbox)
+            self.cleanup_session(sandbox)
 
-    def screenshot_full(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            screenshot = sandbox.screenshot()
-            size_bytes = _provider_payload_size(screenshot)
-            if size_bytes <= 0:
-                raise RuntimeError("E2B screenshot was empty")
-            return {"size_bytes": size_bytes}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
+    def create_ready_session(self) -> Any:
+        return self._create_sandbox()
 
-    def move_click(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
-        try:
-            _call_first_available(sandbox, ("move_mouse", "moveMouse"), 24, 24)
-            _call_first_available(sandbox, ("left_click", "leftClick"), 24, 24)
-            return {"action_count": 2}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
+    def cleanup_session(self, sandbox: Any) -> None:
+        _cleanup_provider_sandbox(sandbox)
 
-    def type_100_chars(self) -> dict[str, Any]:
-        sandbox = self._create_sandbox()
+    def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
+        screenshot = sandbox.screenshot()
+        size_bytes = _provider_payload_size(screenshot)
+        if size_bytes <= 0:
+            raise RuntimeError("E2B screenshot was empty")
+        return {"size_bytes": size_bytes}
+
+    def move_click(self, sandbox: Any) -> dict[str, Any]:
+        _call_first_available(sandbox, ("move_mouse", "moveMouse"), 24, 24)
+        _call_first_available(sandbox, ("left_click", "leftClick"), 24, 24)
+        return {"action_count": 2}
+
+    def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
+        _call_first_available(sandbox, ("write", "type"), core.PROVIDER_BENCHMARK_TEXT)
+        return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT)}
+
+    def command_echo(self, sandbox: Any) -> dict[str, Any]:
+        commands = getattr(sandbox, "commands", None)
+        if commands is None:
+            raise RuntimeError("E2B sandbox did not expose commands")
+        run = getattr(commands, "run", None)
+        if not callable(run):
+            raise RuntimeError("E2B sandbox commands did not expose run")
         try:
-            _call_first_available(sandbox, ("write", "type"), core.PROVIDER_BENCHMARK_TEXT)
-            return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT)}
-        finally:
-            _cleanup_provider_sandbox(sandbox)
+            result = run("python -c 'print(42)'", timeout=30)
+        except TypeError:
+            result = run("python -c 'print(42)'")
+        exit_code = _provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("E2B command exited nonzero")
+        return {"exit_code": exit_code}
 
     def _create_sandbox(self) -> Any:
         create = self._sandbox_cls.create
         try:
-            return create(resolution=(1024, 768), timeout_ms=300_000)
+            return create(resolution=(1024, 768), timeout=300)
         except TypeError:
             try:
-                return create(resolution=(1024, 768), timeoutMs=300_000)
+                return create(resolution=(1024, 768), timeout_ms=300_000)
             except TypeError:
-                return create()
+                try:
+                    return create(resolution=(1024, 768), timeoutMs=300_000)
+                except TypeError:
+                    return create()
 
 
 def _run_live_provider_cases(
     *,
     provider: str,
     benchmark: Any,
-    cases: tuple[str, ...],
+    cold_cases: tuple[str, ...],
+    warm_cases: tuple[str, ...],
     iterations: int,
     warmup_iterations: int,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     results: dict[str, Any] = {}
-    for case in cases:
+    for case in cold_cases:
         operation = getattr(benchmark, case)
         samples, observations = core._measure_observed_case(
             name=case,
@@ -506,7 +563,47 @@ def _run_live_provider_cases(
             _safe_provider_observation(observations[-1]) if observations else None
         )
         results[case] = result
+    if warm_cases:
+        sandbox: Any | None = None
+        try:
+            sandbox = benchmark.create_ready_session()
+        except Exception as exc:
+            for case in warm_cases:
+                failure = core._failure(
+                    case,
+                    phase="setup",
+                    iteration=0,
+                    exc=exc,
+                    redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+                )
+                results[case] = core._case_result(case, iterations, [], [failure])
+        else:
+            try:
+                for case in warm_cases:
+                    operation = getattr(benchmark, case)
+                    samples, observations = core._measure_observed_case(
+                        name=case,
+                        iterations=iterations,
+                        warmup_iterations=warmup_iterations,
+                        operation=_bind_provider_operation(operation, sandbox),
+                        failures=failures,
+                        redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+                    )
+                    result = core._case_result(case, iterations, samples, failures)
+                    result["last_result"] = (
+                        _safe_provider_observation(observations[-1]) if observations else None
+                    )
+                    results[case] = result
+            finally:
+                benchmark.cleanup_session(sandbox)
     return _provider_result(provider, cases=results, metadata=metadata)
+
+
+def _bind_provider_operation(operation: Callable[[Any], Any], sandbox: Any) -> Callable[[], Any]:
+    def run() -> Any:
+        return operation(sandbox)
+
+    return run
 
 
 def _provider_result(
@@ -597,7 +694,7 @@ def _is_sensitive_provider_key(key: str) -> bool:
         "api_key",
         "token",
         "password",
-    } or normalized.endswith("_token")
+    } or normalized.endswith(("_token", "_url", "_uri"))
 
 
 def _safe_provider_metadata_value(value: str | None) -> str | None:
@@ -620,7 +717,7 @@ def _package_version(package: str) -> str | None:
 
 
 def _cleanup_provider_sandbox(sandbox: Any) -> None:
-    for method_name in ("stop", "kill", "delete"):
+    for method_name in ("delete", "kill", "stop"):
         method = getattr(sandbox, method_name, None)
         if not callable(method):
             continue
@@ -630,6 +727,15 @@ def _cleanup_provider_sandbox(sandbox: Any) -> None:
         with suppress(Exception):
             method(force=True)
             return
+
+
+def _computer_use(sandbox: Any) -> Any:
+    computer_use = getattr(sandbox, "computer_use", None)
+    if computer_use is None:
+        computer_use = getattr(sandbox, "computerUse", None)
+    if computer_use is None:
+        raise RuntimeError("provider sandbox did not expose computer use")
+    return computer_use
 
 
 def _call_first_available(target: Any, names: tuple[str, ...], *args: Any) -> Any:
@@ -657,6 +763,25 @@ def _provider_payload_size(value: Any) -> int:
         return _provider_payload_size(value.bytes)
     if hasattr(value, "data"):
         return _provider_payload_size(value.data)
+    if hasattr(value, "image"):
+        return _provider_payload_size(value.image)
+    if hasattr(value, "image_base64"):
+        return _provider_payload_size(value.image_base64)
+    if hasattr(value, "base64"):
+        return _provider_payload_size(value.base64)
+    return 0
+
+
+def _provider_exit_code(result: Any) -> int | None:
+    for attr in ("exit_code", "return_code", "code"):
+        value = getattr(result, attr, None)
+        if value is not None:
+            return int(value)
+    if isinstance(result, dict):
+        for key in ("exit_code", "return_code", "code"):
+            value = result.get(key)
+            if value is not None:
+                return int(value)
     return 0
 
 

@@ -142,6 +142,12 @@ safe metadata when present. E2B runs require `E2B_API_KEY`. Missing credentials 
 `not_measured` provider entries rather than crashes. Missing optional SDK packages produce
 `unavailable` entries.
 
+Provider-live comparisons split lifecycle cost from warm primitive cost. `cold_create_to_ready`
+creates a fresh provider sandbox, starts or verifies the desktop computer-use surface where the
+SDK exposes one, records that cold readiness timing, and deletes the sandbox. Screenshot,
+move/click, typing, and command cases then run on one separate ready sandbox per provider so their
+samples do not include sandbox creation. Cleanup is attempted once after the warm primitive cases.
+
 Keep comparisons fair:
 
 - Pin SDK versions through the benchmark extras instead of using floating latest packages.

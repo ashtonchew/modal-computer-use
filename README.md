@@ -98,6 +98,8 @@ The default comparison runs the Modal daemon plus OpenAI, Anthropic, and generic
 normalization/execution without calling provider APIs. Daytona and E2B live runs are credential
 gated and report `not_measured` when `DAYTONA_API_KEY` or `E2B_API_KEY` is absent. Install pinned
 provider extras with `uv sync --extra bench-daytona --extra bench-e2b` before live provider runs.
+Live provider reports separate cold create-to-ready timing from warm screenshot, action, typing,
+and command cases that reuse a ready sandbox.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
 including benchmark regeneration and boundary scans.

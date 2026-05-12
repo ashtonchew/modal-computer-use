@@ -205,6 +205,201 @@ def test_benchmark_compare_safe_provider_metadata_removes_url_credentials() -> N
     assert value == "https://example.test/vnc"
 
 
+def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatch) -> None:
+    sandboxes = []
+
+    class FakeDaytonaConfig:
+        def __init__(self, *, api_key: str):
+            assert api_key == "daytona-secret"
+
+    class FakeMouse:
+        def __init__(self, calls: list[str]):
+            self._calls = calls
+
+        def move(self, x: int, y: int) -> None:
+            self._calls.append(f"move:{x}:{y}")
+
+        def click(self, x: int, y: int) -> None:
+            self._calls.append(f"click:{x}:{y}")
+
+    class FakeKeyboard:
+        def __init__(self, calls: list[str]):
+            self._calls = calls
+
+        def type(self, text: str) -> None:
+            self._calls.append(f"type:{len(text)}")
+
+    class FakeScreenshot:
+        def __init__(self, calls: list[str]):
+            self._calls = calls
+
+        def take_full_screen(self) -> bytes:
+            self._calls.append("screenshot")
+            return b"png"
+
+    class FakeComputerUse:
+        def __init__(self, calls: list[str]):
+            self._calls = calls
+            self.mouse = FakeMouse(calls)
+            self.keyboard = FakeKeyboard(calls)
+            self.screenshot = FakeScreenshot(calls)
+
+        def start(self) -> None:
+            self._calls.append("computer_use_start")
+
+        def stop(self) -> None:
+            self._calls.append("computer_use_stop")
+
+        def get_status(self) -> dict[str, str]:
+            return {"desktop": "ready"}
+
+    class FakeProcess:
+        def __init__(self, calls: list[str]):
+            self._calls = calls
+
+        def exec(self, command: str, *, timeout: int):
+            assert command == "python -c 'print(42)'"
+            assert timeout == 30
+            self._calls.append("command")
+            return {"exit_code": 0}
+
+    class FakeSandbox:
+        def __init__(self):
+            self.calls: list[str] = []
+            self.computer_use = FakeComputerUse(self.calls)
+            self.process = FakeProcess(self.calls)
+            sandboxes.append(self)
+
+        def stop(self) -> None:
+            self.calls.append("sandbox_stop")
+
+        def delete(self) -> None:
+            self.calls.append("sandbox_delete")
+
+    class FakeDaytona:
+        def __init__(self, config: FakeDaytonaConfig):
+            self.config = config
+
+        def create(self) -> FakeSandbox:
+            return FakeSandbox()
+
+    class FakeDaytonaModule:
+        Daytona = FakeDaytona
+        DaytonaConfig = FakeDaytonaConfig
+
+    monkeypatch.setenv("DAYTONA_API_KEY", "daytona-secret")
+    monkeypatch.setattr(
+        benchmark_comparison,
+        "_import_provider_module",
+        lambda *args: FakeDaytonaModule,
+    )
+
+    payload = run_provider_comparison(
+        providers=["daytona"],
+        iterations=1,
+        warmup_iterations=0,
+    )
+    serialized = json.dumps(payload)
+
+    assert payload["ok"] is True
+    assert payload["providers"]["daytona"]["status"] == "ok"
+    assert {
+        "cold_create_to_ready",
+        "screenshot_full",
+        "move_click",
+        "type_100_chars",
+        "command_echo",
+    } <= set(payload["providers"]["daytona"]["cases"])
+    assert len(sandboxes) == 2
+    assert sandboxes[0].calls == ["computer_use_start", "computer_use_stop", "sandbox_delete"]
+    assert "screenshot" in sandboxes[1].calls
+    assert "move:24:24" in sandboxes[1].calls
+    assert "click:24:24" in sandboxes[1].calls
+    assert "type:100" in sandboxes[1].calls
+    assert "command" in sandboxes[1].calls
+    assert sandboxes[1].calls[-2:] == ["computer_use_stop", "sandbox_delete"]
+    assert TYPING_BENCHMARK_TEXT not in serialized
+
+
+def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
+    monkeypatch,
+) -> None:
+    sandboxes = []
+    create_kwargs = []
+
+    class FakeCommands:
+        def __init__(self, calls: list[str]):
+            self._calls = calls
+
+        def run(self, command: str, *, timeout: int):
+            assert command == "python -c 'print(42)'"
+            assert timeout == 30
+            self._calls.append("command")
+            return {"exit_code": 0}
+
+    class FakeSandbox:
+        def __init__(self):
+            self.calls: list[str] = []
+            self.commands = FakeCommands(self.calls)
+            sandboxes.append(self)
+
+        @classmethod
+        def create(cls, **kwargs):
+            create_kwargs.append(kwargs)
+            return cls()
+
+        def screenshot(self) -> bytes:
+            self.calls.append("screenshot")
+            return b"png"
+
+        def move_mouse(self, x: int, y: int) -> None:
+            self.calls.append(f"move:{x}:{y}")
+
+        def left_click(self, x: int, y: int) -> None:
+            self.calls.append(f"click:{x}:{y}")
+
+        def write(self, text: str) -> None:
+            self.calls.append(f"type:{len(text)}")
+
+        def delete(self) -> None:
+            self.calls.append("delete")
+
+    class FakeE2BModule:
+        Sandbox = FakeSandbox
+
+    monkeypatch.setenv("E2B_API_KEY", "e2b-secret")
+    monkeypatch.setattr(
+        benchmark_comparison,
+        "_import_provider_module",
+        lambda *args: FakeE2BModule,
+    )
+
+    payload = run_provider_comparison(
+        providers=["e2b"],
+        iterations=1,
+        warmup_iterations=0,
+    )
+    serialized = json.dumps(payload)
+
+    assert payload["ok"] is True
+    assert payload["providers"]["e2b"]["status"] == "ok"
+    assert create_kwargs == [
+        {"resolution": (1024, 768), "timeout": 300},
+        {"resolution": (1024, 768), "timeout": 300},
+    ]
+    assert len(sandboxes) == 2
+    assert sandboxes[0].calls == ["delete"]
+    assert sandboxes[1].calls == [
+        "screenshot",
+        "move:24:24",
+        "click:24:24",
+        "type:100",
+        "command",
+        "delete",
+    ]
+    assert TYPING_BENCHMARK_TEXT not in serialized
+
+
 def test_benchmark_compare_requires_modal_daemon_target(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(["benchmark", "compare", "--provider", "modal-daemon"])
@@ -218,7 +413,7 @@ def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch)
     def fail_provider(**kwargs):
         raise RuntimeError(
             f"Authorization: Bearer secret-token {TYPING_BENCHMARK_TEXT} "
-            "https://example.com/vnc.html?password=secret"
+            "https://user:secret@example.com/vnc.html?password=secret"
         )
 
     monkeypatch.setattr(benchmark_comparison, "_run_adapter_provider", fail_provider)
@@ -229,6 +424,7 @@ def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch)
     assert payload["ok"] is False
     assert payload["providers"]["openai"]["status"] == "failed"
     assert "secret-token" not in serialized
+    assert "user:secret" not in serialized
     assert TYPING_BENCHMARK_TEXT not in serialized
     assert "password=secret" not in serialized
     assert "[redacted typed text]" in serialized

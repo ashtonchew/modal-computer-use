@@ -1082,12 +1082,12 @@ def _redact_text(value: Any, redacted_text: str | None) -> Any:
         output = value
         if redacted_text:
             output = output.replace(redacted_text, "[redacted typed text]")
+        output = re.sub(r"https?://[^'\"\s<>]+", _redact_url_match, output)
         replacements = [
             (r"(?i)(authorization:\s*bearer\s+)[^\s,;]+", r"\1[redacted]"),
             (r"(?i)(bearer\s+)[a-z0-9._~+/=-]+", r"\1[redacted]"),
             (r"(?i)(api[_-]?key['\"]?\s*[:=]\s*['\"]?)[^'\"\s,;]+", r"\1[redacted]"),
             (r"(?i)(token['\"]?\s*[:=]\s*['\"]?)[^'\"\s,;]+", r"\1[redacted]"),
-            (r"(https?://[^?\s]+)\?[^ \n\t]+", r"\1?[redacted-query]"),
         ]
         for pattern, replacement in replacements:
             output = re.sub(pattern, replacement, output)
@@ -1100,6 +1100,19 @@ def _redact_text(value: Any, redacted_text: str | None) -> Any:
             for key, item in value.items()
         }
     return value
+
+
+def _redact_url_match(match: re.Match[str]) -> str:
+    value = match.group(0)
+    trailing = ""
+    while value and value[-1] in ".,);]":
+        trailing = value[-1] + trailing
+        value = value[:-1]
+    safe = _safe_base_url(value) or "[redacted-url]"
+    parsed = urlsplit(value)
+    if parsed.query:
+        safe = f"{safe}?[redacted-query]"
+    return f"{safe}{trailing}"
 
 
 def _is_timeout_exception(exc: Exception) -> bool:
