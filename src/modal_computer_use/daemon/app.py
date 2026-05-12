@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -62,7 +63,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.state.input_lock = asyncio.Lock()
     app.state.artifacts = ArtifactStore(settings.artifacts_dir)
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
-    app.state.idempotency_cache = {}
+    app.state.idempotency_cache = OrderedDict()
     app.state.action_count = 0
     app.state.screenshot_count = 0
     app.add_middleware(AuthMiddleware, settings=settings)

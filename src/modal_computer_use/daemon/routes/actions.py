@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -58,8 +60,18 @@ async def run(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ActionBatchResult:
     cache = request.app.state.idempotency_cache
+    request_fingerprint = _request_fingerprint(payload)
+    _prune_idempotency_cache(request)
     if idempotency_key and idempotency_key in cache:
-        return ActionBatchResult.model_validate(cache[idempotency_key])
+        entry = cache[idempotency_key]
+        if entry["fingerprint"] != request_fingerprint:
+            raise DaemonError(
+                "idempotency key was already used with a different request body",
+                status_code=409,
+                code="idempotency_key_conflict",
+            )
+        cache.move_to_end(idempotency_key)
+        return ActionBatchResult.model_validate(entry["result"])
     if len(payload.actions) > request.app.state.settings.max_batch_actions:
         raise DaemonError(
             "batch exceeds max_batch_actions",
@@ -80,13 +92,27 @@ async def run(
             code="action_validation_failed",
             details={"errors": validation_errors},
         )
+    timeout_errors = _validate_action_timeouts(
+        payload, request.app.state.settings.max_action_timeout_ms
+    )
+    if timeout_errors:
+        raise DaemonError(
+            "action timeout validation failed",
+            status_code=422,
+            code="action_validation_failed",
+            details={"errors": timeout_errors},
+        )
     results: list[ActionItemResult] = []
     screenshot = None
     async with request.app.state.input_lock:
         for index, action in enumerate(payload.actions):
             start = time.perf_counter()
+            timeout_ms = _effective_action_timeout_ms(action, payload, request)
             try:
-                output = await _execute_action(action, request, call_id=call_id)
+                output = await asyncio.wait_for(
+                    _execute_action(action, request, call_id=call_id),
+                    timeout=timeout_ms / 1000,
+                )
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 item = ActionItemResult(
                     index=index,
@@ -112,7 +138,7 @@ async def run(
                         }
                     },
                 )
-            except Exception as exc:
+            except TimeoutError:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
@@ -121,6 +147,38 @@ async def run(
                     type=action.type,
                     ok=False,
                     elapsed_ms=elapsed_ms,
+                    error_code="timeout",
+                    error=f"action timed out after {timeout_ms} ms",
+                    output={"code": "timeout", "timeout_ms": timeout_ms},
+                )
+                results.append(item)
+                _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
+                logger.info(
+                    "action failed",
+                    extra={
+                        "extra": {
+                            "call_id": call_id,
+                            "sequence": index,
+                            "action": _redacted_action(action),
+                            "ok": False,
+                            "elapsed_ms": elapsed_ms,
+                            "error_code": "timeout",
+                        }
+                    },
+                )
+                if not payload.continue_on_error:
+                    break
+            except Exception as exc:
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                with suppress(Exception):
+                    await request.app.state.backend.release_all()
+                error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                item = ActionItemResult(
+                    index=index,
+                    type=action.type,
+                    ok=False,
+                    elapsed_ms=elapsed_ms,
+                    error_code=error_code,
                     error=str(exc),
                 )
                 results.append(item)
@@ -134,6 +192,7 @@ async def run(
                             "action": _redacted_action(action),
                             "ok": False,
                             "elapsed_ms": elapsed_ms,
+                            "error_code": error_code,
                             "error": str(exc),
                         }
                     },
@@ -155,8 +214,68 @@ async def run(
         ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
     )
     if idempotency_key:
-        cache[idempotency_key] = result.model_dump(mode="json")
+        cache[idempotency_key] = {
+            "fingerprint": request_fingerprint,
+            "created_at": time.monotonic(),
+            "result": result.model_dump(mode="json"),
+        }
+        _prune_idempotency_cache(request)
     return result
+
+
+def _request_fingerprint(payload: ActionBatchRequest) -> str:
+    encoded = json.dumps(
+        payload.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _prune_idempotency_cache(request: Request) -> None:
+    cache = request.app.state.idempotency_cache
+    settings = request.app.state.settings
+    now = time.monotonic()
+    ttl_seconds = settings.idempotency_cache_ttl_seconds
+    if ttl_seconds > 0:
+        for key in list(cache.keys()):
+            if now - cache[key]["created_at"] <= ttl_seconds:
+                continue
+            cache.pop(key, None)
+    max_entries = settings.idempotency_cache_max_entries
+    while max_entries > 0 and len(cache) > max_entries:
+        cache.popitem(last=False)
+
+
+def _validate_action_timeouts(
+    payload: ActionBatchRequest, max_action_timeout_ms: int
+) -> list[str]:
+    errors: list[str] = []
+    if payload.max_action_timeout_ms is not None and (
+        payload.max_action_timeout_ms > max_action_timeout_ms
+    ):
+        errors.append(
+            "max_action_timeout_ms "
+            f"{payload.max_action_timeout_ms} exceeds configured maximum {max_action_timeout_ms}"
+        )
+    for index, action in enumerate(payload.actions):
+        timeout_ms = getattr(action, "timeout_ms", None)
+        if timeout_ms is not None and timeout_ms > max_action_timeout_ms:
+            errors.append(
+                f"actions[{index}] timeout_ms {timeout_ms} exceeds configured maximum "
+                f"{max_action_timeout_ms}"
+            )
+    return errors
+
+
+def _effective_action_timeout_ms(
+    action: Any, payload: ActionBatchRequest, request: Request
+) -> int:
+    if action.timeout_ms is not None:
+        return action.timeout_ms
+    if payload.max_action_timeout_ms is not None:
+        return payload.max_action_timeout_ms
+    return request.app.state.settings.default_action_timeout_ms
 
 
 async def _execute_action(action: Any, request: Request, *, call_id: str) -> dict[str, Any]:

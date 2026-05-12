@@ -273,6 +273,8 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
             config.actions.screenshot_processing_location
         ),
         "COMPUTER_USE_POST_ACTION_DELAY_MS": str(config.actions.post_action_delay_ms),
+        "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS": str(config.actions.default_action_timeout_ms),
+        "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
         "COMPUTER_USE_MAX_BATCH_ACTIONS": str(config.actions.max_batch_actions),

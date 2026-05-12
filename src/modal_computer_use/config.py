@@ -94,6 +94,13 @@ class ActionConfig(StrictBaseModel):
     max_batch_actions: int = Field(default=50, ge=1, le=500)
     max_batch_duration_ms: int = Field(default=30_000, ge=1, le=600_000)
     default_action_timeout_ms: int = Field(default=5_000, ge=1, le=300_000)
+    max_action_timeout_ms: int = Field(default=300_000, ge=1, le=600_000)
+
+    @model_validator(mode="after")
+    def _valid_timeouts(self) -> ActionConfig:
+        if self.default_action_timeout_ms > self.max_action_timeout_ms:
+            raise ValueError("default_action_timeout_ms must not exceed max_action_timeout_ms")
+        return self
 
 
 class BudgetConfig(StrictBaseModel):

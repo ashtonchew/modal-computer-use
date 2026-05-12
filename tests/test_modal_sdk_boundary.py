@@ -127,6 +127,8 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert args == ("python", "-m", "modal_computer_use.daemon")
     assert kwargs["app"] == "app:modal-computer-use"
     assert kwargs["env"]["COMPUTER_USE_RUN_ID"] == "run-123"
+    assert kwargs["env"]["COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS"] == "5000"
+    assert kwargs["env"]["COMPUTER_USE_MAX_ACTION_TIMEOUT_MS"] == "300000"
     assert kwargs["encrypted_ports"] == [6080]
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs

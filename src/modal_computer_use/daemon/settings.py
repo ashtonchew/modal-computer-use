@@ -41,6 +41,14 @@ class DaemonSettings:
         "COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION", "auto"
     )
     post_action_delay_ms: int = _int_env("COMPUTER_USE_POST_ACTION_DELAY_MS", 100)
+    default_action_timeout_ms: int = _int_env("COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS", 5_000)
+    max_action_timeout_ms: int = _int_env("COMPUTER_USE_MAX_ACTION_TIMEOUT_MS", 300_000)
+    idempotency_cache_max_entries: int = _int_env(
+        "COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES", 1_000
+    )
+    idempotency_cache_ttl_seconds: int = _int_env(
+        "COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS", 3_600
+    )
     local_token: str | None = os.getenv("COMPUTER_USE_LOCAL_TOKEN") or None
     require_connect_user: bool = _bool_env("COMPUTER_USE_REQUIRE_CONNECT_USER", True)
     reject_query_tokens: bool = _bool_env("COMPUTER_USE_REJECT_QUERY_TOKENS", True)

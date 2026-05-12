@@ -26,6 +26,12 @@ The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and
 `/v1/computer/status` includes a budget snapshot for actions, screenshots, artifact bytes
 (including recordings), and recording seconds.
 
+`/v1/actions/run` executes ordered batches with per-action timeouts. Timeout precedence is
+`action.timeout_ms`, then request `max_action_timeout_ms`, then daemon default. Values above
+the configured daemon maximum are rejected. `Idempotency-Key` replays the original complete
+batch result without re-executing actions, incrementing budgets, or duplicating trace/artifact
+writes; reusing a key with a different request body returns `409`.
+
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
 ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
 `stderr_tail`, `error`) when a recording fails or emits useful stderr. The daemon stores

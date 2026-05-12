@@ -464,6 +464,7 @@ class ActionItemResult(StrictBaseModel):
     type: str
     ok: bool
     elapsed_ms: float | None = Field(default=None, ge=0)
+    error_code: str | None = None
     error: str | None = None
     output: dict[str, Any] = Field(default_factory=dict)
 
