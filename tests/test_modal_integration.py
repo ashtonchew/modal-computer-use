@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -181,6 +183,104 @@ def test_modal_manager_attach_reuse_cleanup_smoke() -> None:
 
 
 @pytest.mark.modal
+def test_modal_manager_cleanup_multiple_owned_sandboxes_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandboxManager
+
+    suffix = uuid.uuid4().hex[:10]
+    owner = f"mcu-v1-owner-scale-{suffix}"
+    manager = ComputerSandboxManager()
+    computers = []
+
+    try:
+        for index in range(2):
+            computers.append(
+                manager.create(
+                    config=ComputerConfig(run_id=f"mcu-v1-cleanup-{suffix}-{index}"),
+                    owner=owner,
+                    tags={"computer-use.smoke": "v1-manager-cleanup"},
+                    wait=False,
+                )
+            )
+
+        refs = manager.list(owner=owner)
+        sandbox_ids = {
+            computer.metadata().sandbox_id for computer in computers if computer.metadata()
+        }
+        assert sandbox_ids
+        assert sandbox_ids.issubset({ref.sandbox_id for ref in refs})
+
+        future = datetime.now(UTC) + timedelta(minutes=5)
+        dry_run = manager.cleanup_expired(
+            ttl_seconds=1,
+            owner=owner,
+            dry_run=True,
+            now=future,
+        )
+        assert sandbox_ids.issubset({item.sandbox_id for item in dry_run.candidates})
+        assert dry_run.terminated_count == 0
+
+        cleanup = manager.cleanup_expired(
+            ttl_seconds=1,
+            owner=owner,
+            dry_run=False,
+            now=future,
+        )
+        assert sandbox_ids.issubset({item.sandbox_id for item in cleanup.candidates})
+        assert cleanup.terminated_count >= len(sandbox_ids)
+    finally:
+        for computer in computers:
+            computer.detach()
+
+
+@pytest.mark.modal
+def test_modal_attach_by_id_from_separate_process_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+
+    suffix = uuid.uuid4().hex[:10]
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id=f"mcu-v1-cross-process-{suffix}"),
+        tags={"computer-use.smoke": "v1-cross-process-attach"},
+    )
+    try:
+        metadata = computer.metadata()
+        assert metadata is not None
+        sandbox_id = metadata.sandbox_id
+        code = """
+from modal_computer_use import ComputerSandbox
+import os
+
+computer = ComputerSandbox.attach(sandbox_id=os.environ["MCU_ATTACH_SANDBOX_ID"], wait=True)
+try:
+    ready = computer.status().ready
+finally:
+    computer.detach()
+raise SystemExit(0 if ready else 1)
+"""
+        env = os.environ.copy()
+        env["MCU_ATTACH_SANDBOX_ID"] = sandbox_id
+        result = subprocess.run(  # noqa: S603 - fixed interpreter, no shell.
+            [sys.executable, "-c", code],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert sandbox_id not in result.stdout
+        assert sandbox_id not in result.stderr
+    finally:
+        computer.terminate()
+        computer.detach()
+
+
+@pytest.mark.modal
 def test_modal_volume_artifact_sync_smoke() -> None:
     _skip_without_modal_auth()
     _skip_without_v1_smoke()
@@ -218,6 +318,9 @@ def test_modal_volume_artifact_sync_smoke() -> None:
         assert sync.persistent is True
         assert sync.synced_paths == ["/home/desktop/artifacts"]
         assert "v2" in (sync.message or "")
+        computer.terminate()
+        computer.detach()
+        computer = None
         assert b"".join(volume.read_file(proof_path)) == proof
     finally:
         if computer is not None:
@@ -235,7 +338,9 @@ def test_modal_snapshot_directory_smoke() -> None:
 
     suffix = uuid.uuid4().hex[:10]
     marker_path = f"snapshots/{suffix}.txt"
+    nested_path = f"snapshots/nested/{suffix}.txt"
     marker = f"snapshot marker {suffix}\n".encode()
+    nested = f"nested snapshot marker {suffix}\n".encode()
     computer = None
     restored = None
 
@@ -245,6 +350,7 @@ def test_modal_snapshot_directory_smoke() -> None:
             tags={"computer-use.smoke": "v1-snapshot-source"},
         )
         computer.artifacts.write_bytes(marker_path, marker, "text/plain")
+        computer.artifacts.write_bytes(nested_path, nested, "text/plain")
         snapshot_image = computer.snapshot_directory("/home/desktop/artifacts/snapshots")
         computer.terminate()
         computer.detach()
@@ -256,6 +362,7 @@ def test_modal_snapshot_directory_smoke() -> None:
         )
         restored.mount_image("/home/desktop/artifacts/snapshots", snapshot_image)
         assert restored.artifacts.read_bytes(marker_path) == marker
+        assert restored.artifacts.read_bytes(nested_path) == nested
     finally:
         if computer is not None:
             computer.terminate()
@@ -263,3 +370,67 @@ def test_modal_snapshot_directory_smoke() -> None:
         if restored is not None:
             restored.terminate()
             restored.detach()
+
+
+@pytest.mark.modal
+def test_modal_browser_profile_open_url_screenshot_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use.config import BrowserConfig, ResourceConfig
+
+    suffix = uuid.uuid4().hex[:10]
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(
+            run_id=f"mcu-v1-browser-{suffix}",
+            browser=BrowserConfig(kind="chromium", prewarm=True),
+            resources=ResourceConfig(profile="browser"),
+        ),
+        tags={"computer-use.smoke": "v1-browser-profile"},
+    )
+    try:
+        opened = computer.browser.open_url("https://example.com")
+        assert opened.ok is True
+        screenshot = computer.screenshots.full(storage="inline")
+        assert screenshot.width > 0
+        assert screenshot.height > 0
+        assert screenshot.size_bytes > 0
+        assert screenshot.sha256
+    finally:
+        computer.terminate()
+        computer.detach()
+
+
+@pytest.mark.modal
+def test_modal_action_rate_limit_live_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use.config import ActionConfig
+
+    suffix = uuid.uuid4().hex[:10]
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(
+            run_id=f"mcu-v1-rate-limit-{suffix}",
+            actions=ActionConfig(input_rate_limit_per_sec=1),
+        ),
+        tags={"computer-use.smoke": "v1-rate-limit"},
+    )
+    try:
+        result = computer.actions.run(
+            [
+                {"type": "move", "x": 10, "y": 10},
+                {"type": "move", "x": 20, "y": 20},
+            ],
+            continue_on_error=True,
+        )
+        assert result.ok is False
+        assert [item.ok for item in result.results] == [True, False]
+        assert result.results[1].error_code == "rate_limited"
+        assert result.results[1].output["code"] == "rate_limited"
+        assert "retry_after_seconds" in result.results[1].output
+    finally:
+        computer.terminate()
+        computer.detach()

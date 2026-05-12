@@ -6,6 +6,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      run_modal_smoke:
+        description: "Run protected live Modal smoke tests"
+        type: boolean
+        default: false
 
 jobs:
   core:
@@ -74,6 +79,9 @@ jobs:
       - name: Build package
         run: uv build
 
+      - name: Validate package metadata
+        run: uvx twine check dist/*
+
       - name: Validate wheel install
         run: |
           uv venv /tmp/mcu-wheel-smoke --python 3.12
@@ -97,9 +105,92 @@ jobs:
           assert modal_computer_use.__version__
           assert app.title == "modal-computer-use daemon"
           PY
+          /tmp/mcu-wheel-smoke/bin/python - <<'PY'
+          from importlib.metadata import entry_points
+
+          scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
+          assert scripts["computer-use"] == "modal_computer_use.cli:main"
+          assert scripts["computer-use-daemon"] == "modal_computer_use.daemon.__main__:main"
+          PY
+          /tmp/mcu-wheel-smoke/bin/computer-use --help >/tmp/mcu-computer-use-help.txt
+          /tmp/mcu-wheel-smoke/bin/computer-use trace --help >/tmp/mcu-trace-help.txt
+          /tmp/mcu-wheel-smoke/bin/computer-use benchmark action-batch --mock-local --iterations 1 >/tmp/mcu-benchmark.json
+
+      - name: Validate installed daemon entry point
+        run: |
+          COMPUTER_USE_BACKEND=mock \
+          COMPUTER_USE_LOCAL_TOKEN=dev \
+          COMPUTER_USE_REQUIRE_CONNECT_USER=false \
+          COMPUTER_USE_ARTIFACTS_DIR=/tmp/mcu-daemon-artifacts \
+          COMPUTER_USE_RECORDINGS_DIR=/tmp/mcu-daemon-recordings \
+          COMPUTER_USE_TRACE_DIR=/tmp/mcu-daemon-traces \
+          /tmp/mcu-wheel-smoke/bin/computer-use-daemon >/tmp/mcu-daemon.log 2>&1 &
+          pid=$!
+          trap 'kill $pid || true' EXIT
+          /tmp/mcu-wheel-smoke/bin/python - <<'PY'
+          import time
+
+          import httpx
+
+          headers = {"Authorization": "Bearer dev"}
+          for _ in range(60):
+              try:
+                  assert httpx.get("http://127.0.0.1:8080/healthz", timeout=1).status_code == 200
+                  assert httpx.get("http://127.0.0.1:8080/readyz", timeout=1).status_code == 200
+                  assert httpx.get(
+                      "http://127.0.0.1:8080/v1/version",
+                      headers=headers,
+                      timeout=1,
+                  ).status_code == 200
+                  assert httpx.get(
+                      "http://127.0.0.1:8080/v1/capabilities",
+                      headers=headers,
+                      timeout=1,
+                  ).status_code == 200
+                  break
+              except Exception:
+                  time.sleep(0.25)
+          else:
+              raise RuntimeError("installed daemon did not become ready")
+          PY
+
+      - name: Validate sdist install
+        run: |
+          uv venv /tmp/mcu-sdist-smoke --python 3.12
+          uv pip install --python /tmp/mcu-sdist-smoke/bin/python dist/*.tar.gz
+          cd /tmp
+          /tmp/mcu-sdist-smoke/bin/python -c "import modal_computer_use; assert modal_computer_use.__version__"
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
           name: distributions
           path: dist/*
+
+  modal-smoke:
+    name: Protected Modal smoke
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke
+    environment: modal-smoke
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra modal
+
+      - name: Run protected live Modal smoke
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE: "1"
+          MODAL_COMPUTER_USE_RUN_V1_SMOKE: "1"
+        run: uv run pytest -m modal tests/test_modal_integration.py -q

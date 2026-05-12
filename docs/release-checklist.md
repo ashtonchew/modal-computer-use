@@ -10,10 +10,12 @@ Run this checklist before publishing a release or opening a production-readiness
 - `uv run pytest -q`
 - `uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json`
 - `uv build`
+- `uvx twine check dist/*`
 
 The `Release Validation` GitHub Actions workflow repeats these checks on pull requests and pushes
-to `main` and uploads the benchmark report and distributions as artifacts. It intentionally does
-not require Modal credentials in GitHub.
+to `main`, validates wheel/sdist installability, validates installed console scripts, smoke-tests
+the installed daemon entry point, and uploads the benchmark report and distributions as artifacts.
+The default jobs intentionally do not require Modal credentials in GitHub.
 
 Run live Modal smoke tests from a trusted developer machine or protected release environment with
 local Modal auth:
@@ -29,10 +31,17 @@ MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
   uv run pytest -m modal tests/test_modal_integration.py -q
 ```
 
-Expected state on May 12, 2026: live manager attach/reuse/config-conflict/cleanup passes; Volume
-v2 artifact sync commits with `sync <artifacts_dir>` and is visible through `Volume.read_file`;
-directory snapshot restore uses Modal's documented `snapshot_directory` plus `mount_image` flow
-and should pass.
+Expected state on May 12, 2026: live manager attach/reuse/config-conflict/cleanup passes; multiple
+owned test sandboxes clean up by owner; attach by sandbox ID works from a separate Python process;
+Volume v2 artifact sync commits with `sync <artifacts_dir>` and is visible through
+`Volume.read_file` after sandbox termination; directory snapshot restore uses Modal's documented
+`snapshot_directory` plus `mount_image` flow and preserves nested files; browser profile smoke
+opens a URL and captures a screenshot; live daemon rate limiting returns structured `rate_limited`
+results.
+
+The GitHub Actions workflow also has a protected manual `modal-smoke` job. Run it with
+`workflow_dispatch` and `run_modal_smoke=true` only from a protected environment with
+`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` configured as secrets.
 
 Do not store personal Modal tokens in repository or CI configuration. If a future workspace needs
 fully automated Modal CI, use a Modal service user scoped to a restricted Modal Environment rather
@@ -46,6 +55,20 @@ Run these targeted checks before the full suite when changing release-critical s
 uv run pytest tests/test_benchmark_cli.py -q
 uv run pytest tests/test_modal_sdk_boundary.py tests/test_imports.py -q
 uv run pytest tests/test_adapters.py tests/test_trace_replay.py -q
+uv build
+uvx twine check dist/*
+uv venv /tmp/mcu-wheel-smoke --python 3.12
+uv pip install --python /tmp/mcu-wheel-smoke/bin/python dist/*.whl
+/tmp/mcu-wheel-smoke/bin/computer-use --help
+/tmp/mcu-wheel-smoke/bin/computer-use trace --help
+/tmp/mcu-wheel-smoke/bin/computer-use benchmark action-batch --mock-local --iterations 1
+COMPUTER_USE_BACKEND=mock \
+COMPUTER_USE_LOCAL_TOKEN=dev \
+COMPUTER_USE_REQUIRE_CONNECT_USER=false \
+COMPUTER_USE_ARTIFACTS_DIR=/tmp/mcu-daemon-artifacts \
+COMPUTER_USE_RECORDINGS_DIR=/tmp/mcu-daemon-recordings \
+COMPUTER_USE_TRACE_DIR=/tmp/mcu-daemon-traces \
+  /tmp/mcu-wheel-smoke/bin/computer-use-daemon
 uv run python -m py_compile \
   examples/04_warm_pool.py \
   examples/browser_profile.py \
