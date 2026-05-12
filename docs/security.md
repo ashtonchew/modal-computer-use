@@ -41,6 +41,10 @@ Recordings are artifacts. Treat recording paths, artifact URIs, and recording by
 run data unless your application has explicitly sanitized and retained them. See
 `examples/recording_lifecycle.py` for a lifecycle example that reports only bounded metadata.
 
+Volume and snapshot examples follow the same rule: print bounded metadata, not raw artifact URIs,
+paths, or bytes. A filesystem snapshot Image ID is operational metadata; store it in your own
+access-controlled system if you need to restore from it later.
+
 ## Provider credentials
 
 Core does not require OpenAI or Anthropic credentials. Provider SDK calls belong in user applications and examples, never in the daemon image.

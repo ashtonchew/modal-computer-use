@@ -83,6 +83,9 @@ class FakeSandboxObject:
     def tunnels(self) -> dict[int, object]:
         return {6080: SimpleNamespace(url="https://novnc.example")}
 
+    def snapshot_filesystem(self) -> object:
+        return SimpleNamespace(object_id="im-snapshot")
+
 
 class FakeSandbox:
     create_calls: ClassVar[list[tuple[tuple[str, ...], dict[str, object]]]] = []
@@ -163,6 +166,7 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert args == ("python", "-m", "modal_computer_use.daemon")
     assert kwargs["app"] == "app:modal-computer-use"
     assert kwargs["env"]["COMPUTER_USE_RUN_ID"] == "run-123"
+    assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "standard"
     assert kwargs["env"]["COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS"] == "5000"
     assert kwargs["env"]["COMPUTER_USE_MAX_ACTION_TIMEOUT_MS"] == "300000"
     assert kwargs["env"]["COMPUTER_USE_MAX_BATCH_DURATION_MS"] == "30000"
@@ -181,6 +185,24 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert FakeSandbox.created.set_tags_calls[0]["custom"] == "tag"
     assert computer.metadata().owner == "alice"
     assert computer.metadata().created_at is not None
+
+
+def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(
+        run_id="run-123",
+        browser=BrowserConfig(kind="chromium", prewarm=False),
+    )
+    config.resources.profile = "browser-gpu"
+    config.resources.gpu = "T4"
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["gpu"] == "T4"
+    assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "browser-gpu"
+    assert kwargs["env"]["COMPUTER_USE_BROWSER"] == "chromium"
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_PREWARM"] == "false"
 
 
 def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
@@ -448,6 +470,31 @@ def test_manager_terminate_uses_modal_sandbox_id_without_connect_token(monkeypat
 
     assert FakeSandbox.from_id_calls == ["sb-terminate"]
     assert sandbox.terminated is True
+
+
+def test_snapshot_filesystem_delegates_to_modal_sandbox(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"),
+        image=object(),
+        wait=False,
+    )
+
+    snapshot = computer.snapshot_filesystem()
+
+    assert snapshot.object_id == "im-snapshot"
+
+
+def test_snapshot_filesystem_requires_modal_backing() -> None:
+    computer = ComputerSandbox.local(token="dev")
+
+    try:
+        computer.snapshot_filesystem()
+    except SandboxUnavailableError as exc:
+        assert "filesystem snapshots require" in str(exc)
+    else:
+        raise AssertionError("expected local snapshot helper to fail")
 
 
 def test_registry_find_by_run_id_missing_returns_none(monkeypatch) -> None:

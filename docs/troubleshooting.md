@@ -61,6 +61,24 @@ creation time, config hash, and artifact directory when those tags are present. 
 `cleanup_expired(..., dry_run=True)` first to see candidates. Missing or invalid
 `computer-use.created_at` tags are skipped rather than terminated automatically.
 
+### Browser prewarm did not reduce first-page latency
+
+Confirm the sandbox is using a browser profile and that `/v1/capabilities` reports
+`image_profile` as `browser` or `browser-gpu`. Prewarm only helps browser startup cost; it does not
+make slow pages, network calls, or login flows faster.
+
+### Warm-pool sandbox expired before claim
+
+Keep an expiration timestamp with each sandbox ID and discard entries without enough TTL for the
+expected task. Always call `/readyz` after attach because a listed sandbox may still be shutting
+down or recovering.
+
+### Filesystem snapshot does not restore expected GUI state
+
+Use filesystem snapshots for files and installed application state. Do not rely on them as a
+guarantee for live window placement, browser memory, authenticated sessions, or in-flight GUI
+process state. Re-open applications and verify readiness after restoring.
+
 ## Security incidents
 
 ### A noVNC URL was shared accidentally

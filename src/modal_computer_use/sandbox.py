@@ -320,6 +320,20 @@ class ComputerSandbox:
     def debug_urls(self) -> DebugUrls:
         return self.debug.urls()
 
+    def snapshot_filesystem(self) -> object:
+        """Create a Modal filesystem snapshot image for this sandbox.
+
+        This is an orchestration helper over Modal's Sandbox API. It snapshots
+        filesystem state, not a provider loop, trace replay, or guaranteed GUI
+        memory state.
+        """
+        if self._sandbox is None or not hasattr(self._sandbox, "snapshot_filesystem"):
+            raise SandboxUnavailableError(
+                "filesystem snapshots require a Modal-backed sandbox with "
+                "Sandbox.snapshot_filesystem support"
+            )
+        return self._sandbox.snapshot_filesystem()
+
 
 def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, str]:
     env = {
@@ -332,6 +346,7 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_ARTIFACTS_DIR": config.storage.artifacts_dir,
         "COMPUTER_USE_TRACE_DIR": config.storage.trace_dir,
         "COMPUTER_USE_WINDOW_MANAGER": config.desktop.window_manager,
+        "COMPUTER_USE_IMAGE_PROFILE": config.resources.profile,
         "COMPUTER_USE_BROWSER": config.browser.kind
         if config.browser and config.browser.kind
         else "",

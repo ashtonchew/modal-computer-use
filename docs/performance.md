@@ -122,6 +122,8 @@ For agent loops that call screenshot every few actions, `auto` is usually the ri
 ## Browser prewarm
 
 If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. The daemon launches the configured browser at boot so the first `browser.open_url` does not pay startup cost.
+Use `examples/browser_profile.py` for an SDK-level pattern. Prewarm is optional and can be disabled
+with `BrowserConfig(prewarm=False)` for deterministic tests.
 
 ## Image profile
 
@@ -132,6 +134,22 @@ If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. T
 - `browser-gpu`: adds GPU-accelerated rendering for browser-heavy workloads.
 
 Pick `browser-gpu` only when the agent is rendering 3D, video, or heavy WebGL; otherwise the GPU sits idle and costs money.
+
+GPU is never enabled implicitly. Set both `ResourceConfig(profile="browser-gpu")` and a concrete
+`gpu` value, such as `"T4"`, when you want Modal to request a GPU.
+
+## Warm Pools
+
+Warm pools are a production orchestration pattern, not core lifecycle behavior. Keep ready sandbox
+IDs in your own queue, claim only entries with enough TTL left, and health-check `/readyz` before
+handing a sandbox to work. See `examples/04_warm_pool.py` for a minimal pattern.
+
+## Filesystem Snapshots
+
+`ComputerSandbox.snapshot_filesystem()` delegates to Modal's `Sandbox.snapshot_filesystem()` for a
+Modal-backed sandbox and returns a reusable Modal Image. Treat this as filesystem/app state first;
+do not assume it perfectly preserves GUI memory state or browser sessions. See
+`examples/snapshot_filesystem.py`.
 
 ## Post-action delay
 

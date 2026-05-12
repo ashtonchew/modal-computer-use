@@ -29,6 +29,16 @@ operational metadata such as `computer-use.run_id`, `computer-use.owner`,
 
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples; call `computer.artifacts.sync()` when the file needs to be visible from outside the sandbox immediately.
 
+Browser profiles are explicit. Use `ResourceConfig(profile="browser")` plus
+`BrowserConfig(kind="firefox" | "chromium", prewarm=True)` when browser startup dominates the
+measured workload. Use `profile="browser-gpu"` only with an explicit `gpu` value. The SDK passes
+`COMPUTER_USE_IMAGE_PROFILE`, `COMPUTER_USE_BROWSER`, and `COMPUTER_USE_BROWSER_PREWARM` into the
+daemon environment so `/v1/capabilities` and `/v1/computer/status` can report the selected profile.
+
+`ComputerSandbox.snapshot_filesystem()` delegates to Modal's filesystem snapshot API for a
+Modal-backed sandbox. The returned object is a Modal Image that can be used by caller-owned
+orchestration. The SDK does not automatically snapshot or restore sandboxes.
+
 ## Attach and recovery
 
 Use `ComputerSandbox.attach()` for known handles:

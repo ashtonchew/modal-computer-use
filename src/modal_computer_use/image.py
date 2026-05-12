@@ -56,6 +56,7 @@ def default_image(
         .env(
             {
                 "COMPUTER_USE_WINDOW_MANAGER": window_manager,
+                "COMPUTER_USE_IMAGE_PROFILE": profile,
                 "COMPUTER_USE_BROWSER_PREWARM": str(browser_prewarm).lower(),
                 "COMPUTER_USE_BROWSER": browser or "",
             }

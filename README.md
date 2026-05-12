@@ -85,6 +85,9 @@ uv run computer-use benchmark action-batch --base-url http://127.0.0.1:8080 --to
 
 The benchmark emits JSON with raw samples, summary timings, and the batch-vs-separate-call speedup.
 
+See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
+including benchmark regeneration and boundary scans.
+
 ## Modal Quickstart
 
 ```python
@@ -99,6 +102,9 @@ computer.detach()
 ```
 
 The Modal path uses Sandbox Connect Tokens for daemon access on port `8080`. noVNC is off by default and must be explicitly enabled.
+Browser-heavy workloads can opt into `ResourceConfig(profile="browser")` with
+`BrowserConfig(prewarm=True)`, or `profile="browser-gpu"` with an explicit `gpu` value after
+measurement shows rendering is the bottleneck. See `examples/browser_profile.py`.
 
 To reuse an existing run-scoped sandbox, use an explicit reuse policy:
 
