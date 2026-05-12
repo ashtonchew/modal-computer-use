@@ -12,8 +12,19 @@ Run this checklist before publishing a release or opening a production-readiness
 - `uv build`
 
 The `Release Validation` GitHub Actions workflow repeats these checks on pull requests and pushes
-to `main`, uploads the benchmark report and distributions as artifacts, and runs the Modal smoke
-tests when `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets are configured.
+to `main` and uploads the benchmark report and distributions as artifacts. It intentionally does
+not require Modal credentials in GitHub.
+
+Run live Modal smoke tests from a trusted developer machine or protected release environment with
+local Modal auth:
+
+```bash
+MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest -m modal tests/test_modal_integration.py -q
+```
+
+Do not store personal Modal tokens in repository or CI configuration. If a future workspace needs
+fully automated Modal CI, use a Modal service user scoped to a restricted Modal Environment rather
+than a human token.
 
 ## Targeted Checks
 

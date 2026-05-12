@@ -103,33 +103,3 @@ jobs:
         with:
           name: distributions
           path: dist/*
-
-  modal-smoke:
-    name: Modal smoke
-    runs-on: ubuntu-latest
-    env:
-      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-      MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE: "1"
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --extra dev --extra modal
-
-      - name: Run Modal smoke tests
-        if: env.MODAL_TOKEN_ID != '' && env.MODAL_TOKEN_SECRET != ''
-        run: uv run pytest -m modal tests/test_modal_integration.py -q
-
-      - name: Skip without Modal credentials
-        if: env.MODAL_TOKEN_ID == '' || env.MODAL_TOKEN_SECRET == ''
-        run: echo "Skipping Modal smoke because MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not configured."
