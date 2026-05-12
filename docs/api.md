@@ -1,12 +1,12 @@
 # API
 
-The public SDK starts with:
+The SDK is a thin Python client over the daemon's HTTP API. Start with:
 
 ```python
 from modal_computer_use import ComputerSandbox, ComputerConfig, DaemonClient
 ```
 
-Main namespaces:
+Namespaces on `ComputerSandbox`:
 
 - `computer.mouse`: `click`, `move`, `drag`, `scroll`, `down`, `up`, `position`
 - `computer.keyboard`: `type`, `press`, `hotkey`, `hold`, `supported_keys`
@@ -20,19 +20,29 @@ Main namespaces:
 - `computer.browser`: `open_url`, `status`
 - `computer.apps`: `launch`, `open_artifact`
 - `computer.commands`: `run`
+- `computer.input`: `release_all`
+- `computer.lifecycle`: `start`, `stop`, `restart`, `status`
+- `computer.processes`: `status`, `restart`, `logs`, `stderr`, `errors`
+- `computer.session`: `metadata`, `refresh`
+- `computer.debug`: `urls`, `vnc_url`
 
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 
 `/v1/computer/status` includes a budget snapshot for actions, screenshots, artifact bytes
 (including recordings), and recording seconds.
 
-`/v1/actions/run` executes ordered batches with per-action timeouts. Timeout precedence is
-`action.timeout_ms`, then request `max_action_timeout_ms`, then daemon default. Values above
-the configured daemon maximum are rejected. `Idempotency-Key` replays the original complete
-batch result without re-executing actions, incrementing budgets, or duplicating trace/artifact
-writes; reusing a key with a different request body returns `409`.
+`/v1/actions/run` executes ordered batches with per-action timeouts and a whole-batch duration
+limit. Timeout precedence is `action.timeout_ms`, then request `max_action_timeout_ms`, then
+daemon default; `screenshot_after` uses request `max_action_timeout_ms`, then daemon default.
+Values above the configured daemon maximum are rejected. The whole-batch duration limit is a
+hard deadline and stops the batch even when `continue_on_error` is true. Timeout results include
+`error_code="timeout"` and an output `scope` of `action` or `batch`. `Idempotency-Key` replays
+the original complete batch result without re-executing actions, incrementing budgets, or
+duplicating trace/artifact writes; reusing a key with a different request body returns `409`.
 
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
 ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
 `stderr_tail`, `error`) when a recording fails or emits useful stderr. The daemon stores
 diagnostics as files and returns only a short tail.
+
+For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v6.md](spec/modal_computer_use_spec_v6.md).
