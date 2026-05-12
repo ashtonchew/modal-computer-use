@@ -13,7 +13,7 @@ from .benchmarks import (
 )
 from .client import DaemonClient
 from .errors import ModalNotInstalledError, SandboxUnavailableError
-from .sandbox import modal_sandbox_exec_runner_from_id
+from .sandbox import ComputerSandbox, modal_sandbox_exec_runner_from_id
 from .tracing import ComputerTrace
 
 
@@ -29,7 +29,14 @@ def main(argv: list[str] | None = None) -> int:
 
     replay_parser = trace_subparsers.add_parser("replay")
     replay_parser.add_argument("path", type=Path)
-    replay_parser.add_argument("--dry-run", action="store_true", required=True)
+    replay_parser.add_argument("--dry-run", action="store_true")
+    replay_target = replay_parser.add_mutually_exclusive_group()
+    replay_target.add_argument("--base-url")
+    replay_target.add_argument("--sandbox-id")
+    replay_target.add_argument("--target-run-id", "--target", dest="target_run_id")
+    replay_parser.add_argument("--token")
+    replay_parser.add_argument("--app-name", default="modal-computer-use")
+    replay_parser.add_argument("--continue-on-error", action="store_true")
 
     benchmark_parser = subparsers.add_parser("benchmark")
     benchmark_subparsers = benchmark_parser.add_subparsers(
@@ -75,7 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "trace" and args.trace_command == "validate":
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
-        return _trace_replay(args.path)
+        if not args.dry_run and not (args.base_url or args.sandbox_id or args.target_run_id):
+            replay_parser.error(
+                "real replay requires --base-url, --sandbox-id, or --target-run-id"
+            )
+        return _trace_replay(args)
     if args.benchmark_command == "action-batch":
         return _benchmark_action_batch(args)
     return _benchmark_report(args)
@@ -87,10 +98,37 @@ def _trace_validate(path: Path) -> int:
     return 0 if result.ok else 1
 
 
-def _trace_replay(path: Path) -> int:
-    plan = ComputerTrace.load(path).replay(dry_run=True)
+def _trace_replay(args: argparse.Namespace) -> int:
+    trace = ComputerTrace.load(args.path)
+    if args.dry_run:
+        plan = trace.replay(dry_run=True)
+        _print_json(plan.to_dict())
+        return 0 if plan.ok else 1
+
+    target = _trace_replay_target(args)
+    try:
+        plan = trace.replay(
+            dry_run=False,
+            target=target,
+            stop_on_error=not args.continue_on_error,
+        )
+    finally:
+        target.detach()
     _print_json(plan.to_dict())
     return 0 if plan.ok else 1
+
+
+def _trace_replay_target(args: argparse.Namespace) -> ComputerSandbox:
+    if args.base_url:
+        return ComputerSandbox.local(base_url=args.base_url, token=args.token)
+    if args.sandbox_id:
+        return ComputerSandbox.attach(
+            sandbox_id=args.sandbox_id,
+            app_name=args.app_name,
+            token=args.token,
+            wait=True,
+        )
+    return ComputerSandbox.attach(run_id=args.target_run_id, app_name=args.app_name, wait=True)
 
 
 def _benchmark_action_batch(args: argparse.Namespace) -> int:

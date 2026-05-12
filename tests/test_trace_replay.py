@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from modal_computer_use.cli import main as cli_main
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.models import TraceEntry
+from modal_computer_use.models import ActionBatchResult, ActionItemResult, TraceEntry
 from modal_computer_use.tracing import ComputerTrace
 
 
@@ -112,6 +113,80 @@ def test_redacted_type_action_validates_but_is_not_executable_in_dry_run(tmp_pat
     assert plan.steps[0].reason == "typed text is redacted"
 
 
+def test_real_replay_executes_supported_actions_and_skips_redacted_text(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(
+        path,
+        [
+            _trace_entry(normalized_action={"type": "move", "x": 1, "y": 2}),
+            _trace_entry(
+                normalized_action={"type": "type", "text": {"redacted": True, "length": 6}},
+                redactions=["text"],
+            ),
+            _trace_entry(normalized_action={"type": "click", "button": "left"}),
+        ],
+    )
+    target = _FakeReplayTarget()
+
+    plan = ComputerTrace.load(path).replay(dry_run=False, target=target)
+
+    assert plan.ok is True
+    assert [step.status for step in plan.steps] == ["executed", "skipped", "executed"]
+    assert target.actions.seen == [
+        {"type": "move", "x": 1, "y": 2},
+        {"type": "click", "button": "left"},
+    ]
+
+
+def test_real_replay_stops_on_target_action_failure(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(
+        path,
+        [
+            _trace_entry(normalized_action={"type": "move", "x": 1, "y": 2}),
+            _trace_entry(normalized_action={"type": "move", "x": 3, "y": 4}),
+        ],
+    )
+    target = _FakeReplayTarget(fail_on=1)
+
+    plan = ComputerTrace.load(path).replay(dry_run=False, target=target)
+
+    assert plan.ok is False
+    assert [step.status for step in plan.steps] == ["executed", "failed"]
+    assert plan.steps[1].error["code"] == "action_failed"
+    assert len(target.actions.seen) == 2
+
+
+def test_real_replay_sanitizes_screenshot_payloads(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(path, [_trace_entry(normalized_action={"type": "screenshot"})])
+    target = _FakeReplayTarget(
+        output={
+            "data_base64": "SECRET_SCREENSHOT_BASE64",
+            "artifact_uri": "artifact://screenshots/after.png",
+        }
+    )
+
+    plan = ComputerTrace.load(path).replay(dry_run=False, target=target)
+
+    serialized = json.dumps(plan.to_dict())
+    assert "SECRET_SCREENSHOT_BASE64" not in serialized
+    assert plan.steps[0].result["results"][0]["output"]["data_base64"]["redacted"] is True
+    assert "artifact://screenshots/after.png" in serialized
+
+
+def test_replay_without_explicit_target_fails_closed(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(path, [_trace_entry()])
+
+    try:
+        ComputerTrace.load(path).replay(dry_run=False)
+    except ValueError as exc:
+        assert "explicit target" in str(exc)
+    else:
+        raise AssertionError("expected real replay without target to fail")
+
+
 def test_timeout_and_budget_errors_validate_with_stable_error_shape(tmp_path) -> None:
     path = tmp_path / "actions.ndjson"
     _write_entries(
@@ -187,6 +262,29 @@ def test_malformed_coordinate_space_fails_trace_entry_validation(tmp_path) -> No
     assert result.errors[0].line == 1
 
 
+def test_trace_coordinate_bounds_error_is_surfaced_before_replay(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(
+        path,
+        [
+            _trace_entry(
+                normalized_action={"type": "move", "x": 101, "y": 2},
+                coordinate_space={
+                    "desktop_width": 100,
+                    "desktop_height": 100,
+                    "image_width": 100,
+                    "image_height": 100,
+                },
+            )
+        ],
+    )
+
+    result = ComputerTrace.load(path).validate()
+
+    assert result.ok is False
+    assert result.errors[0].code == "coordinate_out_of_bounds"
+
+
 def test_cli_validate_returns_nonzero_for_invalid_trace(tmp_path, capsys) -> None:
     path = tmp_path / "actions.ndjson"
     path.write_text('{"bad"\n', encoding="utf-8")
@@ -226,3 +324,80 @@ def test_cli_replay_dry_run_returns_ordered_machine_readable_plan(tmp_path, caps
     assert body["executable_count"] == 1
     assert body["skipped_count"] == 1
     assert [step["kind"] for step in body["steps"]] == ["execute", "skip"]
+
+
+def test_cli_real_replay_requires_explicit_target(tmp_path, capsys) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(path, [_trace_entry()])
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main(["trace", "replay", str(path)])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "real replay requires" in captured.err
+
+
+def test_cli_real_replay_uses_explicit_base_url_target(tmp_path, capsys, monkeypatch) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(path, [_trace_entry(normalized_action={"type": "move", "x": 1, "y": 2})])
+    target = _FakeReplayTarget()
+
+    monkeypatch.setattr("modal_computer_use.cli._trace_replay_target", lambda _args: target)
+
+    exit_code = cli_main(
+        ["trace", "replay", str(path), "--base-url", "http://127.0.0.1:8080", "--token", "dev"]
+    )
+
+    captured = capsys.readouterr()
+    body = json.loads(captured.out)
+    assert exit_code == 0
+    assert body["dry_run"] is False
+    assert body["steps"][0]["status"] == "executed"
+    assert target.detached is True
+
+
+class _FakeReplayActions:
+    def __init__(
+        self,
+        *,
+        fail_on: int | None = None,
+        output: dict[str, object] | None = None,
+    ) -> None:
+        self.seen: list[dict[str, object]] = []
+        self.fail_on = fail_on
+        self.output = output or {}
+
+    def run(self, actions, *, source: str = "sdk"):
+        action = dict(actions[0])
+        self.seen.append(action)
+        ok = self.fail_on is None or len(self.seen) - 1 != self.fail_on
+        return ActionBatchResult(
+            ok=ok,
+            call_id="call_replay",
+            results=[
+                ActionItemResult(
+                    index=0,
+                    type=str(action["type"]),
+                    ok=ok,
+                    elapsed_ms=1,
+                    error_code=None if ok else "action_failed",
+                    error=None if ok else "failed during replay",
+                    output=self.output,
+                )
+            ],
+        )
+
+
+class _FakeReplayTarget:
+    def __init__(
+        self,
+        *,
+        fail_on: int | None = None,
+        output: dict[str, object] | None = None,
+    ) -> None:
+        self.actions = _FakeReplayActions(fail_on=fail_on, output=output)
+        self.detached = False
+
+    def detach(self) -> None:
+        self.detached = True

@@ -62,10 +62,17 @@ for local debugging.
 ```bash
 computer-use trace validate /home/desktop/artifacts/traces/actions.ndjson
 computer-use trace replay /home/desktop/artifacts/traces/actions.ndjson --dry-run
+computer-use trace replay /home/desktop/artifacts/traces/actions.ndjson --base-url http://127.0.0.1:8080 --token dev
+computer-use trace replay /home/desktop/artifacts/traces/actions.ndjson --target-run-id run-456
 ```
 
-Both commands emit JSON and return nonzero when validation fails. Dry-run replay never touches a
-daemon, Modal Sandbox, provider credentials, screenshots, or artifact contents. It only produces
-an ordered plan: executable normalized actions are marked `execute`; pseudo-actions such as
-`screenshot_after` and redacted typed text are marked `skip` with a reason. Controlled replay
-against a fresh sandbox is planned for v1.0.
+All commands emit JSON and return nonzero when validation or execution fails. Dry-run replay never
+touches a daemon, Modal Sandbox, provider credentials, screenshots, or artifact contents. It only
+produces an ordered plan: executable normalized actions are marked `execute`; pseudo-actions such
+as `screenshot_after` and redacted typed text are marked `skip` with a reason.
+
+Real replay requires an explicit target through `--base-url`, `--sandbox-id`, or `--target-run-id`.
+Replay validates the trace before contacting the target, executes supported normalized actions
+through `computer.actions`, skips redacted typed text, stops on the first failed action by default,
+and emits per-step status. Screenshot bytes and base64 payloads in replay results are redacted; safe
+metadata such as dimensions, hashes, and `artifact://` references remains available for debugging.

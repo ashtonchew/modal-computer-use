@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError
 
-from .models import TraceEntry, parse_action
+from .models import ActionBatchResult, CoordinateSpace, Point, Region, TraceEntry, parse_action
+from .observability import get_tracer
+
+if TYPE_CHECKING:
+    from .sandbox import ComputerSandbox
 
 
 class TraceWriter:
@@ -62,17 +66,25 @@ class ReplayStep:
     action_type: str
     action: dict[str, Any] | None = None
     reason: str | None = None
+    status: Literal["planned", "executed", "failed", "skipped"] = "planned"
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "kind": self.kind,
             "line": self.line,
             "action_type": self.action_type,
+            "status": self.status,
         }
         if self.action is not None:
             data["action"] = self.action
         if self.reason is not None:
             data["reason"] = self.reason
+        if self.result is not None:
+            data["result"] = self.result
+        if self.error is not None:
+            data["error"] = self.error
         return data
 
 
@@ -82,6 +94,7 @@ class TraceReplayPlan:
     dry_run: bool
     steps: list[ReplayStep]
     validation: TraceValidationResult
+    target: str | None = None
 
     @property
     def executable_count(self) -> int:
@@ -97,6 +110,7 @@ class TraceReplayPlan:
             "dry_run": self.dry_run,
             "executable_count": self.executable_count,
             "skipped_count": self.skipped_count,
+            "target": self.target,
             "steps": [step.to_dict() for step in self.steps],
             "validation": self.validation.to_dict(),
         }
@@ -214,7 +228,7 @@ class ComputerTrace:
             if action_type == "screenshot_after":
                 continue
             action_errors, action_warnings = _validate_normalized_action(
-                normalized, entry.redactions, record.line
+                normalized, entry.redactions, record.line, entry.coordinate_space
             )
             errors.extend(action_errors)
             warnings.extend(action_warnings)
@@ -227,13 +241,20 @@ class ComputerTrace:
             action_count=action_count,
         )
 
-    def replay(self, *, dry_run: bool = True) -> TraceReplayPlan:
-        if not dry_run:
-            raise NotImplementedError("controlled trace replay is planned for v1.0")
+    def replay(
+        self,
+        *,
+        dry_run: bool = True,
+        target: ComputerSandbox | None = None,
+        source: str = "trace-replay",
+        stop_on_error: bool = True,
+    ) -> TraceReplayPlan:
+        if not dry_run and target is None:
+            raise ValueError("controlled trace replay requires an explicit target sandbox")
         validation = self.validate()
         steps: list[ReplayStep] = []
         if not validation.ok:
-            return TraceReplayPlan(ok=False, dry_run=True, steps=steps, validation=validation)
+            return TraceReplayPlan(ok=False, dry_run=dry_run, steps=steps, validation=validation)
 
         for record in self._records:
             if record.entry is None or record.entry.normalized_action is None:
@@ -247,6 +268,7 @@ class ComputerTrace:
                         line=record.line,
                         action_type=action_type,
                         reason="metadata pseudo-action",
+                        status="skipped" if not dry_run else "planned",
                     )
                 )
                 continue
@@ -258,23 +280,98 @@ class ComputerTrace:
                         action_type=action_type,
                         action=normalized,
                         reason="typed text is redacted",
+                        status="skipped" if not dry_run else "planned",
                     )
                 )
                 continue
+
+            if dry_run:
+                steps.append(
+                    ReplayStep(
+                        kind="execute",
+                        line=record.line,
+                        action_type=action_type,
+                        action=normalized,
+                    )
+                )
+                continue
+
+            assert target is not None
+            try:
+                with get_tracer(name="modal_computer_use.trace_replay").span(
+                    "trace.replay.step",
+                    {
+                        "trace.line": record.line,
+                        "action.type": action_type,
+                    },
+                ):
+                    result = target.actions.run([normalized], source=source)
+            except Exception as exc:
+                steps.append(
+                    ReplayStep(
+                        kind="execute",
+                        line=record.line,
+                        action_type=action_type,
+                        action=normalized,
+                        status="failed",
+                        error={
+                            "code": "replay_action_failed",
+                            "message": str(exc),
+                            "type": type(exc).__name__,
+                        },
+                    )
+                )
+                if stop_on_error:
+                    break
+                continue
+
+            result_payload = _safe_batch_result(result)
+            first = result.results[0] if result.results else None
+            if first is not None and not first.ok:
+                steps.append(
+                    ReplayStep(
+                        kind="execute",
+                        line=record.line,
+                        action_type=action_type,
+                        action=normalized,
+                        status="failed",
+                        result=result_payload,
+                        error={
+                            "code": first.error_code or "replay_action_failed",
+                            "message": first.error or "trace replay action failed",
+                        },
+                    )
+                )
+                if stop_on_error:
+                    break
+                continue
+
             steps.append(
                 ReplayStep(
                     kind="execute",
                     line=record.line,
                     action_type=action_type,
                     action=normalized,
+                    status="executed",
+                    result=result_payload,
                 )
             )
 
-        return TraceReplayPlan(ok=True, dry_run=True, steps=steps, validation=validation)
+        ok = validation.ok and all(step.status != "failed" for step in steps)
+        return TraceReplayPlan(
+            ok=ok,
+            dry_run=dry_run,
+            steps=steps,
+            validation=validation,
+            target=_target_label(target) if target is not None else None,
+        )
 
 
 def _validate_normalized_action(
-    normalized: dict[str, Any], redactions: list[str], line: int
+    normalized: dict[str, Any],
+    redactions: list[str],
+    line: int,
+    entry_coordinate_space: CoordinateSpace | None = None,
 ) -> tuple[list[TraceValidationIssue], list[TraceValidationIssue]]:
     if normalized.get("type") == "type":
         text = normalized.get("text")
@@ -328,7 +425,105 @@ def _validate_normalized_action(
                 line=line,
             )
         ], []
+    coordinate_space = entry_coordinate_space or _coordinate_space_from_action_metadata(normalized)
+    if coordinate_space is not None:
+        return _validate_action_bounds(normalized, coordinate_space, line), []
     return [], []
+
+
+def _coordinate_space_from_action_metadata(normalized: dict[str, Any]) -> CoordinateSpace | None:
+    raw = normalized.get("coordinate_space")
+    if raw is None:
+        metadata = normalized.get("metadata")
+        if isinstance(metadata, dict):
+            raw = metadata.get("coordinate_space")
+    if raw is None:
+        return None
+    try:
+        return CoordinateSpace.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def _validate_action_bounds(
+    normalized: dict[str, Any],
+    coordinate_space: CoordinateSpace,
+    line: int,
+) -> list[TraceValidationIssue]:
+    errors: list[TraceValidationIssue] = []
+    for label, point in _normalized_points(normalized):
+        if point.x >= coordinate_space.desktop_width:
+            errors.append(
+                TraceValidationIssue(
+                    code="coordinate_out_of_bounds",
+                    message=(
+                        f"{label}.x {point.x} exceeds desktop width "
+                        f"{coordinate_space.desktop_width}"
+                    ),
+                    line=line,
+                )
+            )
+        if point.y >= coordinate_space.desktop_height:
+            errors.append(
+                TraceValidationIssue(
+                    code="coordinate_out_of_bounds",
+                    message=(
+                        f"{label}.y {point.y} exceeds desktop height "
+                        f"{coordinate_space.desktop_height}"
+                    ),
+                    line=line,
+                )
+            )
+    region = normalized.get("region")
+    if isinstance(region, dict):
+        try:
+            parsed_region = Region.model_validate(region)
+        except ValidationError:
+            parsed_region = None
+        if parsed_region is not None and (
+            parsed_region.right > coordinate_space.desktop_width
+            or parsed_region.bottom > coordinate_space.desktop_height
+        ):
+            errors.append(
+                TraceValidationIssue(
+                    code="coordinate_out_of_bounds",
+                    message="region extends beyond trace desktop geometry",
+                    line=line,
+                )
+            )
+    return errors
+
+
+def _normalized_points(
+    action: dict[str, Any],
+    *,
+    prefix: str = "action",
+) -> list[tuple[str, Point]]:
+    points: list[tuple[str, Point]] = []
+    x = action.get("x")
+    y = action.get("y")
+    if isinstance(x, int) and isinstance(y, int):
+        points.append((prefix, Point(x=x, y=y)))
+    for key_prefix in ("start", "end"):
+        px = action.get(f"{key_prefix}_x")
+        py = action.get(f"{key_prefix}_y")
+        if isinstance(px, int) and isinstance(py, int):
+            points.append((f"{prefix}.{key_prefix}", Point(x=px, y=py)))
+    path = action.get("path")
+    if isinstance(path, list):
+        for index, item in enumerate(path):
+            if not isinstance(item, dict):
+                continue
+            px = item.get("x")
+            py = item.get("y")
+            if isinstance(px, int) and isinstance(py, int):
+                points.append((f"{prefix}.path[{index}]", Point(x=px, y=py)))
+    nested = action.get("actions")
+    if isinstance(nested, list):
+        for index, item in enumerate(nested):
+            if isinstance(item, dict):
+                points.extend(_normalized_points(item, prefix=f"{prefix}.actions[{index}]"))
+    return points
 
 
 def _validate_result(entry: TraceEntry, line: int) -> list[TraceValidationIssue]:
@@ -450,3 +645,40 @@ def _is_redacted_text(value: Any) -> bool:
         and isinstance(value.get("length"), int)
         and value["length"] >= 0
     )
+
+
+def _safe_batch_result(result: ActionBatchResult) -> dict[str, Any]:
+    payload = result.model_dump(mode="json")
+    return _redact_replay_payload(payload)
+
+
+def _redact_replay_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in {"data_base64", "bytes"} and item is not None:
+                redacted[key] = {"redacted": True, "reason": "screenshot bytes"}
+            else:
+                redacted[key] = _redact_replay_payload(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_replay_payload(item) for item in value]
+    return value
+
+
+def _target_label(target: object | None) -> str | None:
+    if target is None:
+        return None
+    metadata = getattr(target, "metadata", lambda: None)()
+    if metadata is not None:
+        sandbox_id = getattr(metadata, "sandbox_id", None)
+        run_id = getattr(metadata, "run_id", None)
+        if sandbox_id and run_id:
+            return f"{sandbox_id} ({run_id})"
+        if sandbox_id:
+            return str(sandbox_id)
+        if run_id:
+            return str(run_id)
+    client = getattr(target, "client", None)
+    base_url = getattr(client, "base_url", None)
+    return str(base_url) if base_url else "explicit-target"
