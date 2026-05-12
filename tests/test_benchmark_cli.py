@@ -110,6 +110,28 @@ def test_benchmark_action_batch_non_ok_response_is_structured() -> None:
     assert payload["failures"][0]["type"] == "RuntimeError"
 
 
+def test_benchmark_action_batch_redacts_reported_base_url_credentials() -> None:
+    class SuccessfulClient:
+        base_url = "https://user:secret@example.com:443/daemon?token=secret#frag"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            return {"ok": True, "results": [{"ok": True}]}
+
+    payload = run_action_batch_benchmark(
+        client=SuccessfulClient(),
+        mode="http",
+        iterations=1,
+        base_url=SuccessfulClient.base_url,
+        warmup_iterations=0,
+    )
+
+    serialized = json.dumps(payload)
+    assert payload["base_url"] == "https://example.com:443/daemon"
+    assert "secret" not in serialized
+    assert "token" not in serialized
+
+
 def test_benchmark_action_batch_records_daemon_timing_attribution() -> None:
     class TimedClient:
         base_url = "http://testserver"
@@ -481,6 +503,43 @@ def test_benchmark_report_screenshot_failure_is_structured() -> None:
     assert payload["failures"][0]["type"] == "RuntimeError"
 
 
+def test_benchmark_report_redacts_reported_base_url_credentials() -> None:
+    class SuccessfulClient:
+        base_url = "https://user:secret@example.com/connect?token=secret"
+        recording_id = "rec_test"
+
+        def get_json(self, path: str, *, params=None):
+            if path == "/v1/version":
+                return {"daemon_version": "test"}
+            if path == "/v1/capabilities":
+                return {"image_profile": "standard"}
+            raise AssertionError(path)
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            if path == "/v1/actions/run":
+                return {"ok": True, "results": [{"ok": True}]}
+            if path == "/v1/screenshots/full":
+                return {"format": "png", "width": 10, "height": 10, "size_bytes": 100}
+            if path == "/v1/recordings":
+                return {"id": self.recording_id}
+            if path == f"/v1/recordings/{self.recording_id}/stop":
+                return {"status": "stopped", "format": "mp4", "size_bytes": 100}
+            raise AssertionError(path)
+
+    payload = run_benchmark_report(
+        client=SuccessfulClient(),
+        mode="http",
+        iterations=1,
+        base_url=SuccessfulClient.base_url,
+        warmup_iterations=0,
+    )
+
+    serialized = json.dumps(payload)
+    assert payload["base_url"] == "https://example.com/connect"
+    assert "secret" not in serialized
+    assert "token" not in serialized
+
+
 def test_benchmark_report_move_click_failure_is_structured() -> None:
     class FailingMoveClient:
         base_url = "http://testserver"
@@ -718,6 +777,8 @@ def test_benchmark_report_live_sandbox_exec_setup_failure_is_reported(monkeypatc
             "us-east-1",
             "--browser",
             "chromium",
+            "--image-profile",
+            "browser",
         ]
     )
 
@@ -729,6 +790,7 @@ def test_benchmark_report_live_sandbox_exec_setup_failure_is_reported(monkeypatc
     assert payload["failures"][-1]["benchmark"] == "sandbox_exec"
     assert payload["metadata"]["environment"] == {
         "browser": "chromium",
+        "image_profile": "browser",
         "modal_region": "us-east-1",
     }
     assert "dev-token" not in captured.out

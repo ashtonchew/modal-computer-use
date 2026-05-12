@@ -58,7 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     report_parser.add_argument("--resource-profile")
     report_parser.add_argument("--browser")
     report_parser.add_argument("--gpu")
-    report_parser.add_argument("--image-variant")
+    report_parser.add_argument("--image-profile", dest="image_profile")
+    report_parser.add_argument("--image-variant", dest="image_profile")
     report_parser.add_argument("--iterations", type=_positive_int, default=5)
     report_parser.add_argument("--output", type=Path)
     report_parser.add_argument("--json", action="store_true", default=True)
@@ -186,7 +187,7 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, str |
         "resource_profile": args.resource_profile,
         "browser": args.browser,
         "gpu": args.gpu,
-        "image_variant": args.image_variant,
+        "image_profile": args.image_profile,
     }
 
 

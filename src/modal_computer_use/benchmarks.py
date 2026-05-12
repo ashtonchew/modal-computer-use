@@ -10,6 +10,7 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi.testclient import TestClient
@@ -161,7 +162,7 @@ def run_benchmark_report(
         "generated_at": datetime.now(UTC).isoformat(),
         "package_version": __version__,
         "mode": mode,
-        "base_url": base_url,
+        "base_url": _safe_base_url(base_url),
         "iterations": iterations,
         "warmup_iterations": warmup_iterations,
         "metadata": metadata,
@@ -222,7 +223,7 @@ def run_action_batch_benchmark(
         "timestamp": datetime.now(UTC).isoformat(),
         "package_version": __version__,
         "mode": mode,
-        "base_url": base_url,
+        "base_url": _safe_base_url(base_url),
         "iterations": iterations,
         "warmup_iterations": warmup_iterations,
         "action_count": len(ACTION_BATCH_ACTIONS),
@@ -878,6 +879,18 @@ def _report_action_batch(result: dict[str, Any]) -> dict[str, Any]:
 
 def _future_benchmark(status: FutureBenchmarkStatus, reason: str) -> dict[str, str]:
     return {"status": status, "reason": reason}
+
+
+def _safe_base_url(base_url: str | None) -> str | None:
+    if base_url is None:
+        return None
+    parsed = urlsplit(base_url)
+    netloc = parsed.netloc
+    if parsed.username or parsed.password:
+        hostname = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        netloc = f"{hostname}{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
 
 
 def _benchmark_failures(benchmark: str, failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
