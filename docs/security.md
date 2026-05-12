@@ -21,6 +21,7 @@ See [configuration.md](configuration.md) for the full list of auth-related varia
 - `control`: a noVNC tunnel is created with full remote input.
 
 When noVNC is enabled, the URL grants live desktop access. Treat it as a [secret](glossary.md#novnc); never paste it into chat, tickets, or shared logs.
+See `examples/novnc_view_only.py` for a view-only pattern that reports only whether a URL exists.
 
 ## Logs
 
@@ -29,11 +30,35 @@ Structured logs redact typed text, clipboard text, screenshot bytes, tokens, pro
 Trace validation treats raw plaintext in `type` actions as unsafe. New action traces use
 `redactions=["text"]` and replace typed text with redaction metadata before writing NDJSON.
 Replay dry-runs skip redacted typed text because the original plaintext is intentionally absent.
+Provider adapter provenance is redacted before it is attached to normalized actions, and daemon
+traces promote only that redacted copy to `provider_action`.
 
 ## Artifacts
 
 Artifact paths are relative. Absolute paths, `..` segments, encoded traversal, symlink escapes, and control characters are rejected server-side. The artifact root defaults to `/home/desktop/artifacts`; see [artifacts.md](artifacts.md).
 
+Recordings are artifacts. Treat recording paths, artifact URIs, and recording bytes as sensitive
+run data unless your application has explicitly sanitized and retained them. See
+`examples/recording_lifecycle.py` for a lifecycle example that reports only bounded metadata.
+
 ## Provider credentials
 
 Core does not require OpenAI or Anthropic credentials. Provider SDK calls belong in user applications and examples, never in the daemon image.
+
+## Adapter policy hooks
+
+Adapters are not policy engines. They normalize provider-returned actions and call
+`computer.actions`; user code owns model calls, confirmation, domain allowlists, and takeover
+rules.
+
+Use `before_action` to inspect the normalized native action before execution. The hook sees the
+coordinates that will be sent to the daemon after any explicit `CoordinateSpace` transform.
+Returning `deny`, `ask_user`, or `handoff` stops execution before the action batch reaches the
+daemon.
+
+Treat screen content, typed text, clipboard text, provider fixtures, and provider-returned tool
+payloads as untrusted input. Fixtures should contain only synthetic actions and no credentials,
+tokens, screenshots, clipboard contents, or user data.
+
+See `examples/adapter_policy_hook.py` for a deterministic hook that stops risky native actions
+without provider credentials or model calls.
