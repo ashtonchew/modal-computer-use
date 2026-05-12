@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from modal_computer_use.models import Point, Region, ScreenshotOptions
+from modal_computer_use.models import Button, Point, Region, ScreenshotOptions, ScrollDirection
 
 
 class Schema(BaseModel):
@@ -44,7 +44,7 @@ class MouseMoveRequest(Point):
 class MouseClickRequest(Schema):
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
-    button: str = "left"
+    button: Button = "left"
     double: bool = False
     modifiers: list[str] = Field(default_factory=list)
 
@@ -60,14 +60,14 @@ class MouseDragRequest(Schema):
 
 
 class MouseScrollRequest(Schema):
-    direction: str = "down"
+    direction: ScrollDirection = "down"
     amount: int = Field(default=1, ge=1, le=10_000)
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
 
 
 class MouseButtonRequest(Schema):
-    button: str = "left"
+    button: Button = "left"
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
 
@@ -84,11 +84,32 @@ class ZoomScreenshotRequest(Schema):
     show_cursor: bool = True
     storage: str = "inline"
 
+    @field_validator("format")
+    @classmethod
+    def _valid_format(cls, value: str) -> str:
+        if value not in ("png", "jpeg", "webp"):
+            raise ValueError("format must be png, jpeg, or webp")
+        return value
+
+    @field_validator("storage")
+    @classmethod
+    def _valid_storage(cls, value: str) -> str:
+        if value not in ("inline", "artifact", "auto"):
+            raise ValueError("storage must be inline, artifact, or auto")
+        return value
+
 
 class RecordingStartRequest(Schema):
     name: str | None = None
     fps: int = Field(default=12, ge=1, le=120)
     format: str = "mp4"
+
+    @field_validator("format")
+    @classmethod
+    def _valid_format(cls, value: str) -> str:
+        if value != "mp4":
+            raise ValueError("format must be mp4")
+        return value
 
 
 class LaunchRequest(Schema):

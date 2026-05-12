@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Header, Request
@@ -29,19 +31,23 @@ from modal_computer_use.models import (
     ScreenshotAction,
     ScreenshotOptions,
     ScrollAction,
+    TraceEntry,
     TripleClickAction,
     TypeAction,
     ValidationResult,
     WaitAction,
     ZoomAction,
 )
+from modal_computer_use.tracing import TraceWriter
 
 router = APIRouter(prefix="/v1/actions")
+logger = logging.getLogger("modal_computer_use.daemon.actions")
 
 
 @router.post("/validate")
 async def validate(payload: ActionBatchRequest) -> ValidationResult:
-    return ValidationResult(ok=True, errors=[])
+    errors = _validate_actions(payload.actions, width=None, height=None)
+    return ValidationResult(ok=not errors, errors=errors)
 
 
 @router.post("/run")
@@ -61,6 +67,18 @@ async def run(
             details={"max_batch_actions": request.app.state.settings.max_batch_actions},
         )
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
+    validation_errors = _validate_actions(
+        payload.actions,
+        width=request.app.state.backend.width,
+        height=request.app.state.backend.height,
+    )
+    if validation_errors:
+        raise DaemonError(
+            "action validation failed",
+            status_code=422,
+            code="action_validation_failed",
+            details={"errors": validation_errors},
+        )
     results: list[ActionItemResult] = []
     screenshot = None
     async with request.app.state.input_lock:
@@ -69,30 +87,55 @@ async def run(
             try:
                 output = await _execute_action(action, request, call_id=call_id)
                 elapsed_ms = (time.perf_counter() - start) * 1000
-                results.append(
-                    ActionItemResult(
-                        index=index,
-                        type=action.type,
-                        ok=True,
-                        elapsed_ms=elapsed_ms,
-                        output=output or {},
-                    )
+                item = ActionItemResult(
+                    index=index,
+                    type=action.type,
+                    ok=True,
+                    elapsed_ms=elapsed_ms,
+                    output=output or {},
                 )
+                results.append(item)
                 if action.type not in ("screenshot", "zoom", "cursor_position"):
                     request.app.state.action_count += 1
                 _enforce_budgets(request)
+                _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
+                logger.info(
+                    "action executed",
+                    extra={
+                        "extra": {
+                            "call_id": call_id,
+                            "sequence": index,
+                            "action": _redacted_action(action),
+                            "ok": True,
+                            "elapsed_ms": elapsed_ms,
+                        }
+                    },
+                )
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
-                results.append(
-                    ActionItemResult(
-                        index=index,
-                        type=action.type,
-                        ok=False,
-                        elapsed_ms=elapsed_ms,
-                        error=str(exc),
-                    )
+                item = ActionItemResult(
+                    index=index,
+                    type=action.type,
+                    ok=False,
+                    elapsed_ms=elapsed_ms,
+                    error=str(exc),
+                )
+                results.append(item)
+                _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
+                logger.info(
+                    "action failed",
+                    extra={
+                        "extra": {
+                            "call_id": call_id,
+                            "sequence": index,
+                            "action": _redacted_action(action),
+                            "ok": False,
+                            "elapsed_ms": elapsed_ms,
+                            "error": str(exc),
+                        }
+                    },
                 )
                 if not payload.continue_on_error:
                     break
@@ -104,6 +147,8 @@ async def run(
                 call_id=call_id,
                 retention_class="trace",
             )
+            request.app.state.screenshot_count += 1
+            _enforce_budgets(request)
     result = ActionBatchResult(
         ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
     )
@@ -226,3 +271,96 @@ def _enforce_budgets(request: Request) -> None:
         and request.app.state.screenshot_count > settings.max_screenshots
     ):
         raise DaemonError("screenshot budget exceeded", status_code=429, code="budget_exceeded")
+    if settings.max_artifact_bytes is not None:
+        artifact_total = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
+        recording_total = request.app.state.recordings.total_size_bytes()
+        if artifact_total + recording_total > settings.max_artifact_bytes:
+            raise DaemonError(
+                "artifact byte budget exceeded",
+                status_code=429,
+                code="budget_exceeded",
+            )
+    if (
+        settings.max_recording_seconds is not None
+        and request.app.state.recordings.total_duration_seconds() > settings.max_recording_seconds
+    ):
+        raise DaemonError(
+            "recording duration budget exceeded", status_code=429, code="budget_exceeded"
+        )
+
+
+def _validate_actions(actions: list[Any], *, width: int | None, height: int | None) -> list[str]:
+    errors: list[str] = []
+    for index, action in enumerate(actions):
+        for point in _action_points(action):
+            if width is not None and point.x >= width:
+                errors.append(
+                    f"actions[{index}] x coordinate {point.x} exceeds desktop width {width}"
+                )
+            if height is not None and point.y >= height:
+                errors.append(
+                    f"actions[{index}] y coordinate {point.y} exceeds desktop height {height}"
+                )
+        region = getattr(action, "region", None)
+        if (
+            isinstance(region, Region)
+            and width is not None
+            and height is not None
+            and (region.right > width or region.bottom > height)
+        ):
+            errors.append(f"actions[{index}] region extends beyond desktop geometry")
+    return errors
+
+
+def _action_points(action: Any) -> list[Point]:
+    points: list[Point] = []
+    x = getattr(action, "x", None)
+    y = getattr(action, "y", None)
+    if isinstance(x, int) and isinstance(y, int):
+        points.append(Point(x=x, y=y))
+    for prefix in ("start", "end"):
+        px = getattr(action, f"{prefix}_x", None)
+        py = getattr(action, f"{prefix}_y", None)
+        if isinstance(px, int) and isinstance(py, int):
+            points.append(Point(x=px, y=py))
+    path = getattr(action, "path", None)
+    if path:
+        points.extend(path)
+    return points
+
+
+def _append_trace(
+    request: Request,
+    payload: ActionBatchRequest,
+    action: Any,
+    result: ActionItemResult,
+    *,
+    call_id: str,
+    sequence: int,
+) -> None:
+    if not request.app.state.settings.trace_actions:
+        return
+    writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
+    normalized = _redacted_action(action)
+    writer.append(
+        TraceEntry(
+            ts=datetime.now(UTC),
+            run_id=payload.run_id or request.app.state.settings.run_id,
+            call_id=call_id,
+            sequence=payload.sequence if payload.sequence is not None else sequence,
+            source=payload.source,
+            normalized_action=normalized,
+            result=result.model_dump(mode="json"),
+            elapsed_ms=result.elapsed_ms,
+            redactions=["text"] if isinstance(action, TypeAction) else [],
+            error={"message": result.error} if result.error else None,
+        )
+    )
+
+
+def _redacted_action(action: Any) -> dict[str, Any]:
+    data = action.model_dump(mode="json")
+    if isinstance(action, TypeAction):
+        text = action.text
+        data["text"] = {"redacted": True, "length": len(text)}
+    return data

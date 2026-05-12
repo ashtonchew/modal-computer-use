@@ -282,6 +282,12 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_MAX_SCREENSHOTS": ""
         if config.budgets.max_screenshots is None
         else str(config.budgets.max_screenshots),
+        "COMPUTER_USE_MAX_ARTIFACT_BYTES": ""
+        if config.budgets.max_artifact_bytes is None
+        else str(config.budgets.max_artifact_bytes),
+        "COMPUTER_USE_MAX_RECORDING_SECONDS": ""
+        if config.budgets.max_recording_seconds is None
+        else str(config.budgets.max_recording_seconds),
     }
     return env
 
