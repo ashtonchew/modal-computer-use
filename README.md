@@ -100,6 +100,20 @@ computer.detach()
 
 The Modal path uses Sandbox Connect Tokens for daemon access on port `8080`. noVNC is off by default and must be explicitly enabled.
 
+To reuse an existing run-scoped sandbox, use an explicit reuse policy:
+
+```python
+computer = ComputerSandbox.attach_or_create(
+    run_id="support-ticket-123",
+    config=ComputerConfig(),
+    reuse="by_run_id",  # "by_run_id", "by_name", or "never"
+)
+```
+
+Existing sandboxes with a `computer-use.config_hash` tag must match the requested config hash or
+`attach_or_create` raises `ConfigConflictError` by default. Ambiguous run ID matches raise
+`SandboxAmbiguousError` instead of selecting one arbitrarily.
+
 ## Provider Adapters
 
 Adapters normalize provider-returned actions into the core action schema. They do not call provider APIs:

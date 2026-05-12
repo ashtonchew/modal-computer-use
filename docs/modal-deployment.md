@@ -23,6 +23,30 @@ Per current Modal docs, configure the Sandbox with:
 
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples; call `computer.artifacts.sync()` when the file needs to be visible from outside the sandbox immediately.
 
+## Attach and recovery
+
+Use `ComputerSandbox.attach()` for known handles:
+
+- `sandbox_id` attaches directly with `modal.Sandbox.from_id`.
+- `name` attaches with `modal.Sandbox.from_name` inside the selected app.
+- `run_id` lists sandboxes tagged with `computer-use.run_id`.
+
+Run ID matches must be exact. If more than one running sandbox has the same run ID, the SDK raises
+`SandboxAmbiguousError` and the caller should attach by sandbox ID or name. Missing run ID matches
+raise `SandboxUnavailableError`.
+
+`ComputerSandbox.attach_or_create()` accepts `reuse="by_run_id"`, `reuse="by_name"`, or
+`reuse="never"`. The old boolean form is still accepted: `True` means `"by_run_id"` and `False`
+means `"never"`. Reuse policy is intentionally not part of `ComputerConfig`.
+
+Existing sandboxes are checked against the requested config when their
+`computer-use.config_hash` tag is available. A mismatch raises `ConfigConflictError` by default
+so incompatible desktop/runtime settings are not silently reused. Use
+`on_config_mismatch="reuse"` only for an intentional attach to the existing configuration.
+
+Attached metadata is limited to safe operational fields such as sandbox ID, app name, sandbox
+name, run ID, config hash, tags, and artifact directory. Connect tokens are never stored there.
+
 ## Authentication
 
 For local Modal smoke tests, prefer Modal's native local auth:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from .config import ComputerConfig
 from .models import SandboxRef
 from .registry import SandboxRegistry
-from .sandbox import ComputerSandbox
+from .sandbox import ComputerSandbox, ConfigMismatchPolicy, ReusePolicy
 
 
 class ComputerSandboxManager:
@@ -26,13 +26,19 @@ class ComputerSandboxManager:
         self,
         *,
         config: ComputerConfig | None = None,
-        reuse: bool = True,
+        run_id: str | None = None,
+        name: str | None = None,
+        reuse: bool | ReusePolicy = "by_run_id",
+        on_config_mismatch: ConfigMismatchPolicy = "raise",
         **kwargs: object,
     ) -> ComputerSandbox:
         return ComputerSandbox.attach_or_create(
             app_name=self.app_name,
             config=config,
+            run_id=run_id,
+            name=name,
             reuse=reuse,
+            on_config_mismatch=on_config_mismatch,
             **kwargs,
         )
 

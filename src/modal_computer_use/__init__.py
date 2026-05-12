@@ -11,6 +11,7 @@ from .config import (
     RuntimeConfig,
     StorageConfig,
 )
+from .errors import ConfigConflictError, SandboxAmbiguousError, SandboxUnavailableError
 from .manager import ComputerSandboxManager, SandboxManager
 from .models import (
     ActionBatchResult,
@@ -35,6 +36,7 @@ from .models import (
     ScreenshotOptions,
     X11Window,
 )
+from .registry import SandboxRegistry
 from .sandbox import ComputerSandbox
 
 __all__ = [
@@ -53,6 +55,7 @@ __all__ = [
     "ComputerSandbox",
     "ComputerSandboxManager",
     "ComputerStatus",
+    "ConfigConflictError",
     "CoordinateSpace",
     "DaemonClient",
     "DebugUrls",
@@ -66,8 +69,11 @@ __all__ = [
     "Region",
     "ResourceConfig",
     "RuntimeConfig",
+    "SandboxAmbiguousError",
     "SandboxManager",
     "SandboxRef",
+    "SandboxRegistry",
+    "SandboxUnavailableError",
     "Screenshot",
     "ScreenshotOptions",
     "StorageConfig",

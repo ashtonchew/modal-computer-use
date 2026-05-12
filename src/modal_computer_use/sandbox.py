@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Literal
 
 from ._version import __version__
 from .client import DaemonClient
 from .config import ComputerConfig, normalize_vnc_mode
-from .errors import ModalNotInstalledError, SandboxUnavailableError
+from .errors import (
+    ConfigConflictError,
+    ModalNotInstalledError,
+    SandboxAmbiguousError,
+    SandboxUnavailableError,
+)
 from .image import default_image
 from .models import ComputerStatus, DebugUrls, SandboxRef
 from .namespaces import (
@@ -29,6 +34,9 @@ from .namespaces import (
     WindowsNamespace,
 )
 from .state import compute_config_hash, default_tags, new_run_id
+
+ReusePolicy = Literal["by_run_id", "by_name", "never"]
+ConfigMismatchPolicy = Literal["raise", "reuse"]
 
 
 def modal_sandbox_exec_runner_from_id(sandbox_id: str):
@@ -197,17 +205,21 @@ class ComputerSandbox:
         elif name:
             sandbox = _sandbox_from_name(modal, app_name=app_name, name=name)
         elif run_id:
-            matches = list(modal.Sandbox.list(tags={"computer-use.run_id": run_id}))
-            if not matches:
-                raise SandboxUnavailableError(f"no running sandbox for run_id={run_id}")
-            sandbox = matches[0]
+            from .registry import SandboxRegistry
+
+            sandbox = SandboxRegistry(app_name=app_name).require_sandbox_by_run_id(run_id)
         else:
             raise ValueError("attach requires sandbox_id, name, run_id, or base_url")
+        metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
         token_info = sandbox.create_connect_token(
             user_metadata={"sdk": "modal-computer-use", "version": __version__}
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
-        return cls(DaemonClient(base_url=connect_base_url, token=connect_token), sandbox=sandbox)
+        return cls(
+            DaemonClient(base_url=connect_base_url, token=connect_token),
+            sandbox=sandbox,
+            metadata=metadata,
+        )
 
     @classmethod
     def attach_or_create(
@@ -215,16 +227,52 @@ class ComputerSandbox:
         *,
         config: ComputerConfig | None = None,
         app_name: str = "modal-computer-use",
-        reuse: bool = True,
+        run_id: str | None = None,
+        name: str | None = None,
+        reuse: bool | ReusePolicy = "by_run_id",
+        on_config_mismatch: ConfigMismatchPolicy = "raise",
         **kwargs: Any,
     ) -> ComputerSandbox:
         config = config or ComputerConfig()
-        if reuse and config.run_id:
+        if run_id is not None:
+            config.run_id = run_id
+        if on_config_mismatch not in ("raise", "reuse"):
+            raise ValueError("on_config_mismatch must be 'raise' or 'reuse'")
+        reuse_policy = _normalize_reuse_policy(reuse)
+        requested_hash = compute_config_hash(config)
+
+        if reuse_policy == "by_run_id" and config.run_id:
             try:
-                return cls.attach(run_id=config.run_id, app_name=app_name)
+                computer = cls.attach(run_id=config.run_id, app_name=app_name)
+                _check_config_hash(
+                    computer.metadata(),
+                    requested_hash=requested_hash,
+                    on_config_mismatch=on_config_mismatch,
+                )
+                return computer
+            except SandboxAmbiguousError:
+                raise
             except SandboxUnavailableError:
                 pass
-        return cls.create(config=config, app_name=app_name, **kwargs)
+        elif reuse_policy == "by_name":
+            if not name:
+                raise ValueError("reuse='by_name' requires name")
+            try:
+                computer = cls.attach(name=name, app_name=app_name)
+                _check_config_hash(
+                    computer.metadata(),
+                    requested_hash=requested_hash,
+                    on_config_mismatch=on_config_mismatch,
+                )
+                return computer
+            except SandboxAmbiguousError:
+                raise
+            except SandboxUnavailableError:
+                pass
+        elif reuse_policy != "never":
+            raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
+
+        return cls.create(config=config, app_name=app_name, name=name, **kwargs)
 
     def start(self) -> object:
         return self.lifecycle.start()
@@ -327,6 +375,43 @@ def _connect_token_parts(token_info: object) -> tuple[str, str | None]:
             "could not infer connect-token base URL from Modal SDK response"
         )
     return str(base_url).rstrip("/"), str(token) if token else None
+
+
+def _normalize_reuse_policy(reuse: bool | ReusePolicy) -> ReusePolicy:
+    if reuse is True:
+        return "by_run_id"
+    if reuse is False:
+        return "never"
+    if reuse in ("by_run_id", "by_name", "never"):
+        return reuse
+    raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
+
+
+def _metadata_from_sandbox(sandbox: object, *, app_name: str) -> SandboxRef:
+    from .registry import SandboxRegistry
+
+    return SandboxRegistry(app_name=app_name).ref_from_sandbox(sandbox)
+
+
+def _check_config_hash(
+    metadata: SandboxRef | None,
+    *,
+    requested_hash: str,
+    on_config_mismatch: ConfigMismatchPolicy,
+) -> None:
+    if metadata is None or metadata.config_hash is None:
+        return
+    if metadata.config_hash == requested_hash:
+        return
+    if on_config_mismatch == "reuse":
+        return
+    raise ConfigConflictError(
+        "existing sandbox config_hash does not match requested config; "
+        "terminate it, attach by sandbox_id intentionally, or pass on_config_mismatch='reuse'",
+        requested_hash=requested_hash,
+        existing_hash=metadata.config_hash,
+        sandbox_id=metadata.sandbox_id,
+    )
 
 
 def _readiness_probe(modal: object) -> object | None:

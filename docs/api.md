@@ -28,6 +28,43 @@ Namespaces on `ComputerSandbox`:
 
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 
+## Modal attach and reuse
+
+Modal mode supports three explicit attach paths:
+
+```python
+ComputerSandbox.attach(sandbox_id="sb-...")
+ComputerSandbox.attach(name="desktop-1", app_name="modal-computer-use")
+ComputerSandbox.attach(run_id="support-ticket-123")
+```
+
+`run_id` is the canonical sandbox lifetime identifier. `request_id` is only a deprecated
+configuration alias for compatibility boundaries.
+
+Use `attach_or_create` when a caller wants resumable run-scoped sandboxes:
+
+```python
+computer = ComputerSandbox.attach_or_create(
+    run_id="support-ticket-123",
+    config=ComputerConfig(),
+    reuse="by_run_id",  # "by_run_id", "by_name", or "never"
+)
+```
+
+For backward compatibility, `reuse=True` maps to `"by_run_id"` and `reuse=False` maps to
+`"never"`. `reuse="by_name"` requires `name=...`. Missing run ID or name matches create a new
+sandbox when creation arguments are supplied. Ambiguous run ID matches raise a structured
+`SandboxAmbiguousError` instead of selecting an arbitrary sandbox.
+
+When reusing an existing sandbox and the sandbox has a `computer-use.config_hash` tag, the SDK
+compares it with `compute_config_hash(config)`. Mismatches fail closed with `ConfigConflictError`
+by default. Pass `on_config_mismatch="reuse"` only when the caller intentionally accepts the
+existing sandbox configuration.
+
+Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available: sandbox ID,
+app name, name, run ID, config hash, tags, and artifact directory. It does not include connect
+tokens or noVNC URLs produced outside explicit debug helpers.
+
 `/v1/computer/status` includes a budget snapshot for actions, screenshots, artifact bytes
 (including recordings), and recording seconds.
 
@@ -79,5 +116,10 @@ Recording metadata includes the output path, `artifact_uri`, size, duration, SHA
 ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
 `stderr_tail`, `error`) when a recording fails or emits useful stderr. The daemon stores
 diagnostics as files and returns only a short tail.
+
+`computer.artifacts.sync()` returns `ArtifactSyncResult`. In the built-in local/daemon store it is
+an explicit no-op that reports `persistent=false` unless the store was configured as persistent.
+The SDK does not claim Modal Volume data is visible outside the sandbox unless a concrete Volume
+sync/commit path is configured and reported by the daemon.
 
 For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v6.md](spec/modal_computer_use_spec_v6.md).

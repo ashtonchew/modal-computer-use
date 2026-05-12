@@ -27,3 +27,24 @@ def test_artifact_symlink_escape(tmp_path) -> None:
     (tmp_path / "root" / "link").symlink_to(outside)
     with pytest.raises(ArtifactPathError):
         store.resolve("link")
+
+
+def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root")
+
+    result = store.sync()
+
+    assert result.ok is True
+    assert result.persistent is False
+    assert result.synced_paths == []
+    assert "no-op" in (result.message or "")
+
+
+def test_artifact_sync_reports_persistent_flag_when_configured(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root", persistent=True)
+
+    result = store.sync()
+
+    assert result.ok is True
+    assert result.persistent is True
+    assert result.synced_paths == []

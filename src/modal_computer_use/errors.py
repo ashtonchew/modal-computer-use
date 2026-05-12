@@ -12,6 +12,23 @@ class ConfigurationError(ComputerUseError):
     """Raised when configuration is invalid or unsupported."""
 
 
+class ConfigConflictError(ConfigurationError):
+    """Raised when an existing sandbox does not match the requested config."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        requested_hash: str | None = None,
+        existing_hash: str | None = None,
+        sandbox_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.requested_hash = requested_hash
+        self.existing_hash = existing_hash
+        self.sandbox_id = sandbox_id
+
+
 class AuthenticationError(ComputerUseError):
     """Raised when daemon authentication fails."""
 
@@ -55,6 +72,10 @@ class ModalNotInstalledError(ComputerUseError):
 
 class SandboxUnavailableError(ComputerUseError):
     """Raised when a sandbox cannot be found or contacted."""
+
+
+class SandboxAmbiguousError(SandboxUnavailableError):
+    """Raised when an attach query matches multiple sandboxes."""
 
 
 class ProcessExecutionError(ComputerUseError):
