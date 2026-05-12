@@ -52,6 +52,7 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
             start=start,
             end=end,
             path=payload.path,
+            button=payload.button,
             duration_ms=payload.duration_ms,
             modifiers=payload.modifiers,
         )

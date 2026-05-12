@@ -45,6 +45,7 @@ from modal_computer_use.models import (
     ValidationResult,
     WaitAction,
     ZoomAction,
+    parse_action,
 )
 from modal_computer_use.tracing import TraceWriter
 
@@ -547,6 +548,7 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
             start=start,
             end=end,
             path=action.path,
+            button=action.button,
             duration_ms=action.duration_ms,
             modifiers=action.modifiers,
         )
@@ -581,11 +583,23 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
     if isinstance(action, HoldKeyAction):
         await backend.key_down(action.key)
         try:
+            nested_results: list[dict[str, Any]] = []
+            for nested_action in _nested_hold_actions(action):
+                nested_start = time.perf_counter()
+                nested_output = await _execute_action(nested_action, request, call_id=call_id)
+                nested_results.append(
+                    {
+                        "type": nested_action.type,
+                        "ok": True,
+                        "elapsed_ms": (time.perf_counter() - nested_start) * 1000,
+                        "output": nested_output or {},
+                    }
+                )
             if action.duration_ms is not None:
                 await asyncio.sleep(action.duration_ms / 1000)
         finally:
             await backend.key_up(action.key)
-        return {}
+        return {"actions": nested_results} if action.actions else {}
     if isinstance(action, WaitAction):
         await asyncio.sleep(action.duration_ms / 1000)
         return {"duration_ms": action.duration_ms}
@@ -638,7 +652,42 @@ def _validate_actions(actions: list[Any], *, width: int | None, height: int | No
             and (region.right > width or region.bottom > height)
         ):
             errors.append(f"actions[{index}] region extends beyond desktop geometry")
+        if isinstance(action, HoldKeyAction) and action.actions:
+            for nested_index, nested_action in enumerate(action.actions):
+                try:
+                    parsed = parse_action(nested_action)
+                except Exception as exc:
+                    errors.append(
+                        f"actions[{index}].actions[{nested_index}] is invalid: {exc}"
+                    )
+                    continue
+                for point in _action_points(parsed):
+                    if width is not None and point.x >= width:
+                        errors.append(
+                            f"actions[{index}].actions[{nested_index}] x coordinate "
+                            f"{point.x} exceeds desktop width {width}"
+                        )
+                    if height is not None and point.y >= height:
+                        errors.append(
+                            f"actions[{index}].actions[{nested_index}] y coordinate "
+                            f"{point.y} exceeds desktop height {height}"
+                        )
+                nested_region = getattr(parsed, "region", None)
+                if (
+                    isinstance(nested_region, Region)
+                    and width is not None
+                    and height is not None
+                    and (nested_region.right > width or nested_region.bottom > height)
+                ):
+                    errors.append(
+                        f"actions[{index}].actions[{nested_index}] region extends beyond "
+                        "desktop geometry"
+                    )
     return errors
+
+
+def _nested_hold_actions(action: HoldKeyAction) -> list[Any]:
+    return [parse_action(item) for item in action.actions or []]
 
 
 def _action_points(action: Any) -> list[Point]:

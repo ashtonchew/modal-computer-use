@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +50,7 @@ class Supervisor:
         wm_command = ["openbox"] if self.settings.window_manager == "openbox" else ["startxfce4"]
         self._start_process("window_manager", wm_command)
         if self.settings.vnc_mode != "off":
+            password_file = self._vnc_password_file()
             x11vnc = [
                 "x11vnc",
                 "-display",
@@ -56,7 +58,8 @@ class Supervisor:
                 "-localhost",
                 "-forever",
                 "-shared",
-                "-nopw",
+                "-passwdfile",
+                str(password_file),
             ]
             if self.settings.vnc_mode == "view_only":
                 x11vnc.append("-viewonly")
@@ -142,6 +145,17 @@ class Supervisor:
             env=env,
             start_new_session=True,
         )
+
+    def _vnc_password_file(self) -> Path:
+        secret_dir = self.settings.artifacts_dir / ".secrets"
+        secret_dir.mkdir(parents=True, exist_ok=True)
+        secret_dir.chmod(0o700)
+        password_file = secret_dir / "x11vnc.pass"
+        if not password_file.exists():
+            password = self.settings.vnc_password or secrets.token_urlsafe(24)
+            password_file.write_text(password)
+            password_file.chmod(0o600)
+        return password_file
 
     @staticmethod
     def _tail(path: Path, tail: int) -> str:

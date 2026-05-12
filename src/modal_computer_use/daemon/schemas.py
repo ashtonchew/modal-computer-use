@@ -62,6 +62,7 @@ class MouseDragRequest(Schema):
     end_x: int | None = Field(default=None, ge=0)
     end_y: int | None = Field(default=None, ge=0)
     path: list[Point] | None = None
+    button: Button = "left"
     duration_ms: int = Field(default=500, ge=0, le=60_000)
     modifiers: list[str] = Field(default_factory=list)
 

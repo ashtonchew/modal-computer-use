@@ -21,6 +21,11 @@ See [configuration.md](configuration.md) for the full list of auth-related varia
 - `control`: a noVNC tunnel is created with full remote input.
 
 When noVNC is enabled, the URL grants live desktop access. Treat it as a [secret](glossary.md#novnc); never paste it into chat, tickets, or shared logs.
+The daemon starts `x11vnc` with a password file in both `view_only` and `control` modes. The SDK
+generates a per-sandbox VNC password when creating Modal sandboxes and does not include it in
+metadata, tags, URLs, or logs. If you need operator-controlled noVNC access, provide
+`COMPUTER_USE_VNC_PASSWORD` through your own secret channel and still treat the URL and password as
+secrets.
 See `examples/novnc_view_only.py` for a view-only pattern that reports only whether a URL exists.
 
 ## Logs

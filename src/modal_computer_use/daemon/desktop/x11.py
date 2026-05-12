@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import os
 import shutil
 import subprocess
@@ -62,6 +63,7 @@ class DesktopBackend(ABC):
         start: Point | None = None,
         end: Point | None = None,
         path: Sequence[Point] | None = None,
+        button: str = "left",
         duration_ms: int = 500,
         modifiers: Sequence[str] = (),
     ) -> Point:
@@ -217,6 +219,7 @@ class MockDesktopBackend(DesktopBackend):
         start: Point | None = None,
         end: Point | None = None,
         path: Sequence[Point] | None = None,
+        button: str = "left",
         duration_ms: int = 500,
         modifiers: Sequence[str] = (),
     ) -> Point:
@@ -456,6 +459,95 @@ class X11DesktopBackend(MockDesktopBackend):
         await self._run("xdotool", "click", "--repeat", str(count), button_number)
         return await super().mouse_click(x, y, button=button, count=count, modifiers=modifiers)
 
+    async def mouse_drag(
+        self,
+        *,
+        start: Point | None = None,
+        end: Point | None = None,
+        path: Sequence[Point] | None = None,
+        button: str = "left",
+        duration_ms: int = 500,
+        modifiers: Sequence[str] = (),
+    ) -> Point:
+        points = list(path or [])
+        if not points:
+            if start is not None:
+                await self.mouse_move(start.x, start.y)
+            elif end is None:
+                start = await self.mouse_position()
+            if end is not None:
+                points = [end]
+
+        interval_ms = 0
+        if points:
+            interval_ms = duration_ms // max(len(points), 1)
+        modifier_keys = [normalize_key(modifier) for modifier in modifiers]
+        for modifier in modifier_keys:
+            await self.key_down(modifier)
+        try:
+            await self.mouse_down(button)
+            for point in points:
+                await self._run(
+                    "xdotool",
+                    "mousemove",
+                    str(point.x),
+                    str(point.y),
+                )
+                if interval_ms > 0:
+                    await asyncio.sleep(interval_ms / 1000)
+        finally:
+            with contextlib.suppress(Exception):
+                await self.mouse_up(button)
+            for modifier in reversed(modifier_keys):
+                with contextlib.suppress(Exception):
+                    await self.key_up(modifier)
+        return await super().mouse_drag(
+            start=start,
+            end=end,
+            path=path,
+            button=button,
+            duration_ms=duration_ms,
+            modifiers=modifiers,
+        )
+
+    async def mouse_scroll(
+        self, direction: str, amount: int = 1, x: int | None = None, y: int | None = None
+    ) -> ActionResult:
+        if x is not None and y is not None:
+            await self.mouse_move(x, y)
+        button_number = {"up": "4", "down": "5", "left": "6", "right": "7"}[direction]
+        await self._run("xdotool", "click", "--repeat", str(amount), button_number)
+        return await super().mouse_scroll(direction, amount=amount, x=x, y=y)
+
+    async def mouse_down(
+        self, button: str = "left", x: int | None = None, y: int | None = None
+    ) -> ActionResult:
+        if x is not None and y is not None:
+            await self.mouse_move(x, y)
+        button_number = {"left": "1", "middle": "2", "right": "3"}[button]
+        await self._run("xdotool", "mousedown", button_number)
+        return await super().mouse_down(button, x=x, y=y)
+
+    async def mouse_up(
+        self, button: str = "left", x: int | None = None, y: int | None = None
+    ) -> ActionResult:
+        if x is not None and y is not None:
+            await self.mouse_move(x, y)
+        button_number = {"left": "1", "middle": "2", "right": "3"}[button]
+        await self._run("xdotool", "mouseup", button_number)
+        return await super().mouse_up(button, x=x, y=y)
+
+    async def mouse_position(self) -> Point:
+        result = await self._run("xdotool", "getmouselocation", "--shell")
+        values: dict[str, int] = {}
+        for line in result.stdout.splitlines():
+            key, _, value = line.partition("=")
+            if key in {"X", "Y"} and value.isdigit():
+                values[key] = int(value)
+        if "X" not in values or "Y" not in values:
+            return await super().mouse_position()
+        return await super().mouse_move(values["X"], values["Y"])
+
     async def keyboard_type(
         self, text: str, delay_ms: int = 10, method: str = "auto"
     ) -> ActionResult:
@@ -465,6 +557,30 @@ class X11DesktopBackend(MockDesktopBackend):
         else:
             await self._run("xdotool", "type", "--delay", str(delay_ms), text)
         return await super().keyboard_type(text, delay_ms=delay_ms, method=method)
+
+    async def keyboard_press(
+        self, key: str, modifiers: Sequence[str] = (), duration_ms: int = 0
+    ) -> ActionResult:
+        normalized_key = normalize_key(key)
+        modifier_keys = [normalize_key(modifier) for modifier in modifiers]
+        for modifier in modifier_keys:
+            await self.key_down(modifier)
+        try:
+            if duration_ms > 0:
+                await self.key_down(normalized_key)
+                await asyncio.sleep(duration_ms / 1000)
+                await self.key_up(normalized_key)
+            else:
+                await self._run("xdotool", "key", normalized_key)
+        finally:
+            for modifier in reversed(modifier_keys):
+                with contextlib.suppress(Exception):
+                    await self.key_up(modifier)
+        return await super().keyboard_press(
+            key,
+            modifiers=modifiers,
+            duration_ms=duration_ms,
+        )
 
     async def keyboard_hotkey(self, keys: Sequence[str], duration_ms: int = 0) -> ActionResult:
         combo = "+".join(normalize_key_combo(keys))
@@ -491,6 +607,19 @@ class X11DesktopBackend(MockDesktopBackend):
     async def clipboard_clear(self) -> ActionResult:
         await self._run("xclip", "-selection", "clipboard", input_text="")
         return await super().clipboard_clear()
+
+    async def release_all(self) -> ActionResult:
+        released = {"keys": sorted(self.held_keys), "buttons": sorted(self.held_buttons)}
+        for key in reversed(sorted(self.held_keys)):
+            with contextlib.suppress(Exception):
+                await self._run("xdotool", "keyup", key)
+        for button in reversed(sorted(self.held_buttons)):
+            button_number = {"left": "1", "middle": "2", "right": "3"}[button]
+            with contextlib.suppress(Exception):
+                await self._run("xdotool", "mouseup", button_number)
+        self.held_keys.clear()
+        self.held_buttons.clear()
+        return ActionResult(ok=True, output=released)
 
     async def screenshot(
         self,

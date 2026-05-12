@@ -30,6 +30,7 @@ class MouseNamespace(Namespace):
         end_y: int | None = None,
         *,
         path: list[Point] | None = None,
+        button: Literal["left", "middle", "right"] = "left",
         duration_ms: int = 500,
         modifiers: list[str] | None = None,
     ) -> Point:
@@ -39,6 +40,7 @@ class MouseNamespace(Namespace):
             "end_x": end_x,
             "end_y": end_y,
             "path": [point.model_dump() for point in path] if path else None,
+            "button": button,
             "duration_ms": duration_ms,
             "modifiers": modifiers or [],
         }

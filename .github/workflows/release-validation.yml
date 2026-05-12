@@ -39,7 +39,7 @@ jobs:
         run: uv run mypy src
 
       - name: Test
-        run: uv run pytest
+        run: uv run pytest -q
 
       - name: Generate benchmark report
         run: uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets as _secrets
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -180,7 +181,14 @@ class ComputerSandbox:
             vnc_url=_vnc_url(sandbox) if vnc_mode != "off" else None,
             artifacts_dir=config.storage.artifacts_dir,
         )
-        return cls(DaemonClient(base_url=base_url, token=token), sandbox=sandbox, metadata=metadata)
+        computer = cls(
+            DaemonClient(base_url=base_url, token=token),
+            sandbox=sandbox,
+            metadata=metadata,
+        )
+        if wait:
+            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+        return computer
 
     @classmethod
     def attach(
@@ -192,9 +200,14 @@ class ComputerSandbox:
         app_name: str = "modal-computer-use",
         base_url: str | None = None,
         token: str | None = None,
+        wait: bool = False,
+        readiness_timeout: float = 120.0,
     ) -> ComputerSandbox:
         if base_url:
-            return cls(DaemonClient(base_url=base_url, token=token))
+            computer = cls(DaemonClient(base_url=base_url, token=token))
+            if wait:
+                computer.wait_until_ready(timeout=readiness_timeout)
+            return computer
         try:
             import modal
         except ImportError as exc:
@@ -218,11 +231,14 @@ class ComputerSandbox:
             user_metadata={"sdk": "modal-computer-use", "version": __version__}
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
-        return cls(
+        computer = cls(
             DaemonClient(base_url=connect_base_url, token=connect_token),
             sandbox=sandbox,
             metadata=metadata,
         )
+        if wait:
+            computer.wait_until_ready(timeout=readiness_timeout)
+        return computer
 
     @classmethod
     def attach_or_create(
@@ -234,6 +250,8 @@ class ComputerSandbox:
         name: str | None = None,
         reuse: bool | ReusePolicy = "by_run_id",
         on_config_mismatch: ConfigMismatchPolicy = "raise",
+        wait: bool = True,
+        readiness_timeout: float | None = None,
         **kwargs: Any,
     ) -> ComputerSandbox:
         config = config or ComputerConfig()
@@ -246,7 +264,13 @@ class ComputerSandbox:
 
         if reuse_policy == "by_run_id" and config.run_id:
             try:
-                computer = cls.attach(run_id=config.run_id, app_name=app_name)
+                computer = cls.attach(
+                    run_id=config.run_id,
+                    app_name=app_name,
+                    wait=wait,
+                    readiness_timeout=readiness_timeout
+                    or config.runtime.readiness_timeout_seconds,
+                )
                 _check_config_hash(
                     computer.metadata(),
                     requested_hash=requested_hash,
@@ -261,7 +285,13 @@ class ComputerSandbox:
             if not name:
                 raise ValueError("reuse='by_name' requires name")
             try:
-                computer = cls.attach(name=name, app_name=app_name)
+                computer = cls.attach(
+                    name=name,
+                    app_name=app_name,
+                    wait=wait,
+                    readiness_timeout=readiness_timeout
+                    or config.runtime.readiness_timeout_seconds,
+                )
                 _check_config_hash(
                     computer.metadata(),
                     requested_hash=requested_hash,
@@ -275,7 +305,7 @@ class ComputerSandbox:
         elif reuse_policy != "never":
             raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
 
-        return cls.create(config=config, app_name=app_name, name=name, **kwargs)
+        return cls.create(config=config, app_name=app_name, name=name, wait=wait, **kwargs)
 
     def start(self) -> object:
         return self.lifecycle.start()
@@ -291,16 +321,22 @@ class ComputerSandbox:
 
     def wait_until_ready(self, timeout: float = 120.0, interval: float = 1.0) -> None:
         deadline = time.monotonic() + timeout
+        last_payload: object | None = None
+        last_error: Exception | None = None
         while True:
             try:
                 payload = self.client.get_json("/readyz")
+                last_payload = payload
+                last_error = None
                 if payload.get("ready") is True:
                     return
-            except Exception:
-                if time.monotonic() >= deadline:
-                    raise
+            except Exception as exc:
+                last_error = exc
             if time.monotonic() >= deadline:
-                raise TimeoutError("daemon did not become ready before timeout")
+                detail = _readiness_timeout_detail(last_payload, last_error)
+                raise TimeoutError(
+                    f"daemon did not become ready before timeout ({timeout:g}s){detail}"
+                )
             time.sleep(interval)
 
     def terminate(self) -> None:
@@ -361,6 +397,7 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
+        "COMPUTER_USE_VNC_PASSWORD": _secrets.token_urlsafe(24) if vnc_mode != "off" else "",
         "COMPUTER_USE_MAX_BATCH_ACTIONS": str(config.actions.max_batch_actions),
         "COMPUTER_USE_MAX_BATCH_DURATION_MS": str(config.actions.max_batch_duration_ms),
         "COMPUTER_USE_MAX_ACTIONS": ""
@@ -457,6 +494,18 @@ def _vnc_url(sandbox: object) -> str | None:
     if tunnel is None:
         return None
     return str(getattr(tunnel, "url", None) or getattr(tunnel, "tcp_socket", None) or "")
+
+
+def _readiness_timeout_detail(payload: object | None, error: Exception | None) -> str:
+    if isinstance(payload, dict):
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            return f"; last /readyz errors: {', '.join(str(item) for item in errors)}"
+        if payload:
+            return f"; last /readyz response: {payload}"
+    if error is not None:
+        return f"; last error: {type(error).__name__}: {error}"
+    return ""
 
 
 def _created_at_from_tags(tags: dict[str, str]) -> datetime | None:

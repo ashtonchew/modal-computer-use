@@ -79,6 +79,10 @@ ComputerSandbox.attach(run_id="support-ticket-123")
 `run_id` is the canonical sandbox lifetime identifier. `request_id` is only a deprecated
 configuration alias for compatibility boundaries.
 
+`ComputerSandbox.create(wait=True)` waits for both Modal's sandbox readiness probe, when the
+installed Modal SDK exposes it, and the daemon `/readyz` endpoint. `wait=False` returns after the
+connect token is created and does not poll daemon desktop readiness.
+
 Use `attach_or_create` when a caller wants resumable run-scoped sandboxes:
 
 ```python
@@ -98,6 +102,11 @@ When reusing an existing sandbox and the sandbox has a `computer-use.config_hash
 compares it with `compute_config_hash(config)`. Mismatches fail closed with `ConfigConflictError`
 by default. Pass `on_config_mismatch="reuse"` only when the caller intentionally accepts the
 existing sandbox configuration.
+
+`attach(...)` is non-blocking by default because callers may attach only to inspect metadata or
+terminate a sandbox. Pass `wait=True` to poll `/readyz` after attaching. `attach_or_create(...)`
+defaults to `wait=True` for both reused and newly-created sandboxes, so resumable workflows get a
+desktop-ready handle unless they explicitly pass `wait=False`.
 
 Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does

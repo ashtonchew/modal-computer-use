@@ -144,6 +144,12 @@ def fake_modal() -> SimpleNamespace:
 
 def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    readiness_calls: list[float] = []
+    monkeypatch.setattr(
+        ComputerSandbox,
+        "wait_until_ready",
+        lambda self, timeout=120.0, interval=1.0: readiness_calls.append(timeout),
+    )
     config = ComputerConfig(
         run_id="run-123",
         browser=BrowserConfig(kind="firefox"),
@@ -176,6 +182,7 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert "tags" not in kwargs
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.wait_until_ready_calls == [120]
+    assert readiness_calls == [120]
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.run_id"] == "run-123"
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.owner"] == "alice"
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.artifacts_dir"] == (
@@ -203,6 +210,7 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "browser-gpu"
     assert kwargs["env"]["COMPUTER_USE_BROWSER"] == "chromium"
     assert kwargs["env"]["COMPUTER_USE_BROWSER_PREWARM"] == "false"
+    assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"] == ""
 
 
 def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
@@ -214,6 +222,18 @@ def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
     assert kwargs["encrypted_ports"] == []
 
 
+def test_create_generates_vnc_password_without_exposing_it(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123", expose_vnc="view_only")
+
+    computer = ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_VNC_MODE"] == "view_only"
+    assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"]
+    assert "COMPUTER_USE_VNC_PASSWORD" not in computer.metadata().tags
+
+
 def test_attach_by_name_uses_current_from_name_signature(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
 
@@ -221,6 +241,68 @@ def test_attach_by_name_uses_current_from_name_signature(monkeypatch) -> None:
 
     assert FakeSandbox.from_name_calls == [("computer-app", "desktop-1")]
     assert FakeApp.lookups == []
+
+
+def test_attach_wait_polls_daemon_when_requested(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    readiness_calls: list[float] = []
+    monkeypatch.setattr(
+        ComputerSandbox,
+        "wait_until_ready",
+        lambda self, timeout=120.0, interval=1.0: readiness_calls.append(timeout),
+    )
+
+    ComputerSandbox.attach(
+        app_name="computer-app",
+        name="desktop-1",
+        wait=True,
+        readiness_timeout=7,
+    )
+
+    assert readiness_calls == [7]
+
+
+def test_wait_until_ready_retries_transient_failures() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_json(self, path: str) -> dict[str, object]:
+            self.calls += 1
+            if self.calls == 1:
+                raise ConnectionError("not listening yet")
+            return {"ready": True, "errors": []}
+
+    client = FakeClient()
+    ComputerSandbox(client).wait_until_ready(timeout=1, interval=0)
+
+    assert client.calls == 2
+
+
+def test_wait_until_ready_timeout_reports_last_readyz_errors() -> None:
+    class FakeClient:
+        def get_json(self, path: str) -> dict[str, object]:
+            return {"ready": False, "errors": ["window manager is not responding"]}
+
+    try:
+        ComputerSandbox(FakeClient()).wait_until_ready(timeout=0, interval=0)
+    except TimeoutError as exc:
+        assert "window manager is not responding" in str(exc)
+    else:
+        raise AssertionError("expected readiness timeout")
+
+
+def test_wait_until_ready_timeout_reports_transient_error() -> None:
+    class FakeClient:
+        def get_json(self, path: str) -> dict[str, object]:
+            raise ConnectionError("connection refused")
+
+    try:
+        ComputerSandbox(FakeClient()).wait_until_ready(timeout=0, interval=0)
+    except TimeoutError as exc:
+        assert "ConnectionError: connection refused" in str(exc)
+    else:
+        raise AssertionError("expected readiness timeout")
 
 
 def test_attach_by_run_id_lists_by_tags(monkeypatch) -> None:

@@ -1771,6 +1771,16 @@
       "MouseDragRequest": {
         "additionalProperties": false,
         "properties": {
+          "button": {
+            "default": "left",
+            "enum": [
+              "left",
+              "middle",
+              "right"
+            ],
+            "title": "Button",
+            "type": "string"
+          },
           "duration_ms": {
             "default": 500,
             "maximum": 60000.0,

@@ -53,6 +53,7 @@ class DaemonSettings:
     require_connect_user: bool = _bool_env("COMPUTER_USE_REQUIRE_CONNECT_USER", True)
     reject_query_tokens: bool = _bool_env("COMPUTER_USE_REJECT_QUERY_TOKENS", True)
     vnc_mode: str = os.getenv("COMPUTER_USE_VNC_MODE", "off")
+    vnc_password: str | None = os.getenv("COMPUTER_USE_VNC_PASSWORD") or None
     backend: str = os.getenv("COMPUTER_USE_BACKEND", "auto")
     max_batch_actions: int = _int_env("COMPUTER_USE_MAX_BATCH_ACTIONS", 50)
     max_batch_duration_ms: int = _int_env("COMPUTER_USE_MAX_BATCH_DURATION_MS", 30_000)
