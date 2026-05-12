@@ -22,3 +22,7 @@ Main namespaces:
 - `computer.commands`: `run`
 
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
+
+Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
+and bounded ffmpeg diagnostics (`stderr_path`, `stderr_tail`, `error`) when a recording fails
+or emits useful stderr. The daemon stores diagnostics as files and returns only a short tail.
