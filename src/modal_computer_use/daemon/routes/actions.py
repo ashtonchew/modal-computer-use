@@ -238,14 +238,15 @@ async def run(
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
                 error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                error = _action_error_message(action, exc)
                 item = ActionItemResult(
                     index=index,
                     type=action.type,
                     ok=False,
                     elapsed_ms=elapsed_ms,
                     error_code=error_code,
-                    error=str(exc),
-                    output=_exception_output(exc),
+                    error=error,
+                    output=_exception_output(exc, action),
                 )
                 results.append(item)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
@@ -442,12 +443,34 @@ def _reserve_action_budget(
     return None
 
 
-def _exception_output(exc: Exception) -> dict[str, Any]:
+def _exception_output(exc: Exception, action: Any | None = None) -> dict[str, Any]:
     if isinstance(exc, DaemonError):
         output: dict[str, Any] = {"code": exc.code}
         output.update(exc.details)
+        if isinstance(action, TypeAction):
+            return _redact_type_payload(output, action)
         return output
     return {}
+
+
+def _action_error_message(action: Any, exc: Exception) -> str:
+    message = str(exc)
+    if isinstance(action, TypeAction):
+        message = message.replace(action.text, "[redacted typed text]")
+    return message
+
+
+def _redact_type_payload(value: Any, action: TypeAction) -> Any:
+    if isinstance(value, str):
+        return value.replace(action.text, "[redacted typed text]")
+    if isinstance(value, list):
+        return [_redact_type_payload(item, action) for item in value]
+    if isinstance(value, dict):
+        return {
+            ("redacted_text" if key == "text" else key): _redact_type_payload(item, action)
+            for key, item in value.items()
+        }
+    return value
 
 
 def _batch_timeout_result(

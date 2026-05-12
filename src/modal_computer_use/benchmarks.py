@@ -35,6 +35,8 @@ MOVE_CLICK_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 24, "y": 24},
     {"type": "click", "x": 24, "y": 24, "button": "left"},
 ]
+TYPING_BENCHMARK_TEXT = "0123456789" * 10
+TYPING_BENCHMARK_METHOD = "auto"
 SANDBOX_EXEC_MOVE_CLICK_COMMAND: tuple[str, ...] = (
     "sh",
     "-lc",
@@ -95,6 +97,11 @@ def run_benchmark_report(
         iterations=iterations,
         warmup_iterations=warmup_iterations,
     )
+    type_100_chars = run_type_100_chars_benchmark(
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
     recording_start_stop = run_recording_start_stop_benchmark(
         client=client,
         iterations=iterations,
@@ -117,10 +124,7 @@ def run_benchmark_report(
         "screenshot_full": screenshot_full,
         "screenshot_compressed": screenshot_compressed,
         "move_click": move_click,
-        "type_100_chars": _future_benchmark(
-            "not_measured",
-            "typing benchmark is deferred to avoid adding typed text payloads to this pass",
-        ),
+        "type_100_chars": type_100_chars,
         "recording_start_stop": recording_start_stop,
         "sandbox_exec": sandbox_exec,
         "cold_create_to_ready": _future_benchmark(
@@ -138,6 +142,7 @@ def run_benchmark_report(
         _benchmark_failures("screenshot_compressed", screenshot_compressed.get("failures", []))
     )
     failures.extend(_benchmark_failures("move_click", move_click.get("failures", [])))
+    failures.extend(_benchmark_failures("type_100_chars", type_100_chars.get("failures", [])))
     failures.extend(
         _benchmark_failures("recording_start_stop", recording_start_stop.get("failures", []))
     )
@@ -314,6 +319,38 @@ def run_move_click_benchmark(
     return result
 
 
+def run_type_100_chars_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _Type100CharsBenchmark(client, TYPING_BENCHMARK_TEXT)
+    samples, observations = _measure_observed_case(
+        name="type_100_chars",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+        redacted_text=TYPING_BENCHMARK_TEXT,
+    )
+    result = _attributed_case_result("type_100_chars", iterations, samples, observations, failures)
+    result.update(
+        {
+            "action_count": 1,
+            "request": {
+                "character_count": len(TYPING_BENCHMARK_TEXT),
+                "method": TYPING_BENCHMARK_METHOD,
+            },
+        }
+    )
+    return result
+
+
 def run_recording_start_stop_benchmark(
     *,
     client: DaemonClient,
@@ -458,6 +495,29 @@ class _MoveClickBenchmark:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": MOVE_CLICK_ACTIONS, "source": "benchmark"},
+        )
+        _ensure_ok_result(result)
+        return {"daemon_ms": _extract_daemon_ms(result)}
+
+
+class _Type100CharsBenchmark:
+    def __init__(self, client: DaemonClient, text: str) -> None:
+        self._client = client
+        self._text = text
+
+    def run(self) -> dict[str, float | None]:
+        result = self._client.post_json(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "type",
+                        "text": self._text,
+                        "method": TYPING_BENCHMARK_METHOD,
+                    }
+                ],
+                "source": "benchmark",
+            },
         )
         _ensure_ok_result(result)
         return {"daemon_ms": _extract_daemon_ms(result)}
@@ -624,6 +684,7 @@ def _measure_observed_case(
     warmup_iterations: int,
     operation: Callable[[], Any],
     failures: list[dict[str, Any]],
+    redacted_text: str | None = None,
 ) -> tuple[list[float], list[Any]]:
     samples: list[float] = []
     observations: list[Any] = []
@@ -631,7 +692,15 @@ def _measure_observed_case(
         try:
             operation()
         except Exception as exc:
-            failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
+            failures.append(
+                _failure(
+                    name,
+                    phase="warmup",
+                    iteration=warmup_index,
+                    exc=exc,
+                    redacted_text=redacted_text,
+                )
+            )
             return samples, observations
     for iteration in range(iterations):
         start = time.perf_counter()
@@ -640,7 +709,14 @@ def _measure_observed_case(
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000
             failures.append(
-                _failure(name, phase="measure", iteration=iteration, exc=exc, elapsed_ms=elapsed_ms)
+                _failure(
+                    name,
+                    phase="measure",
+                    iteration=iteration,
+                    exc=exc,
+                    elapsed_ms=elapsed_ms,
+                    redacted_text=redacted_text,
+                )
             )
             continue
         samples.append((time.perf_counter() - start) * 1000)
@@ -899,25 +975,41 @@ def _failure(
     iteration: int,
     exc: Exception,
     elapsed_ms: float | None = None,
+    redacted_text: str | None = None,
 ) -> dict[str, Any]:
     failure: dict[str, Any] = {
         "case": case,
         "phase": phase,
         "iteration": iteration,
         "type": type(exc).__name__,
-        "message": str(exc),
+        "message": _redact_text(str(exc), redacted_text),
     }
     if elapsed_ms is not None:
         failure["elapsed_ms"] = elapsed_ms
     if isinstance(exc, DaemonHTTPError):
         failure["status_code"] = exc.status_code
         failure["code"] = exc.code
-        failure["details"] = exc.details
+        failure["details"] = _redact_text(exc.details, redacted_text)
     elif isinstance(exc, _SandboxExecBenchmarkError):
         failure["code"] = exc.code
     elif isinstance(exc, httpx.HTTPError):
         failure["code"] = "http_error"
     return failure
+
+
+def _redact_text(value: Any, redacted_text: str | None) -> Any:
+    if not redacted_text:
+        return value
+    if isinstance(value, str):
+        return value.replace(redacted_text, "[redacted typed text]")
+    if isinstance(value, list):
+        return [_redact_text(item, redacted_text) for item in value]
+    if isinstance(value, dict):
+        return {
+            ("redacted_text" if key == "text" else key): _redact_text(item, redacted_text)
+            for key, item in value.items()
+        }
+    return value
 
 
 def _is_timeout_exception(exc: Exception) -> bool:

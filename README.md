@@ -64,11 +64,12 @@ uv run computer-use benchmark report \
 
 The report emits JSON with action-batch, full screenshot, compressed screenshot, safe metadata,
 structured failures, and explicit `not_measured` entries for Modal/Sandbox.exec cases unless the
-live comparison is requested. It also measures a deterministic move+click action batch, optional
-`Sandbox.exec` move+click latency, and recording start/stop latency without including recording
-bytes, raw paths, artifact URIs, raw command strings, typed text, or clipboard text. Action hot
-paths include daemon-side timing attribution when the daemon returns `timing.daemon_ms`; old
-daemons without timing are reported as attribution unavailable.
+live comparison is requested. It also measures a deterministic move+click action batch,
+100-character typing latency, optional `Sandbox.exec` move+click latency, and recording
+start/stop latency without including recording bytes, raw paths, artifact URIs, raw command
+strings, typed text, or clipboard text. Action hot paths include daemon-side timing attribution
+when the daemon returns `timing.daemon_ms`; old daemons without timing are reported as
+attribution unavailable.
 
 Measure only the action batching hot path:
 

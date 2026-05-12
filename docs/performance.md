@@ -66,6 +66,8 @@ The current report includes:
 - `screenshot_full`: full-screen PNG screenshot latency and encoded byte size.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
+- `type_100_chars`: one deterministic 100-character typing action with safe length/method
+  metadata only.
 - `recording_start_stop`: recording start and stop call latency plus safe file metadata.
 - `sandbox_exec`: explicit live Modal `Sandbox.exec` comparison for the same move+click hot path,
   or `not_measured` when not requested.
@@ -74,6 +76,7 @@ The report never includes raw screenshot bytes, base64 image payloads, bearer to
 typed text, clipboard text, recording bytes, raw recording paths, artifact URIs, raw command
 strings, stdout, stderr, or ffmpeg argv. Any failed warmup or measured iteration is included under
 `failures`, partial successful samples remain in the report, and the command exits nonzero.
+Typing failures are redacted against the typed payload before they are included in benchmark JSON.
 
 ## Benchmark action batching
 

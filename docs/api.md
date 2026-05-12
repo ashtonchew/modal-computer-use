@@ -57,8 +57,8 @@ Benchmark tooling is available through `computer-use benchmark report` and
 `computer-use benchmark report --mock-local --iterations 5` for an in-process release-style
 report, or pass `--base-url`, optional `--token`, and optional `--output` for an already-running
 daemon. The report includes action-batch, move+click, full screenshot, compressed screenshot, and
-recording start/stop benchmarks, plus explicit `not_measured` entries for Modal/Sandbox.exec
-unless requested, cold create, warm attach, and deferred typing cases. Add
+100-character typing, and recording start/stop benchmarks, plus explicit `not_measured` entries
+for Modal/Sandbox.exec unless requested, cold create, and warm attach cases. Add
 `--include-sandbox-exec --sandbox-id <id>` with `--base-url` to attach to an existing Modal
 Sandbox and compare the daemon move+click hot path with a live `Sandbox.exec` `xdotool`
 move+click command. This mode never creates a sandbox. It returns nonzero when any warmup or
@@ -68,6 +68,7 @@ stdout, stderr tails, raw command strings, or ffmpeg argv.
 Action benchmark cases also include `daemon_samples_ms`, `daemon_summary_ms`,
 `overhead_samples_ms`, `overhead_summary_ms`, and `attribution`. Missing daemon timing is reported
 as unavailable for compatibility with old daemons; malformed timing is a structured failure.
+The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
 already-running daemon. The command emits JSON and returns nonzero when any warmup or measured

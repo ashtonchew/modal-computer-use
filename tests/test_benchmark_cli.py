@@ -6,9 +6,11 @@ import pytest
 
 from modal_computer_use import cli
 from modal_computer_use.benchmarks import (
+    TYPING_BENCHMARK_TEXT,
     run_action_batch_benchmark,
     run_benchmark_report,
     run_sandbox_exec_benchmark,
+    run_type_100_chars_benchmark,
 )
 from modal_computer_use.errors import ModalNotInstalledError
 
@@ -187,6 +189,103 @@ def test_benchmark_action_batch_malformed_timing_is_structured_failure() -> None
     assert payload["failures"][0]["message"] == "daemon action timing.daemon_ms was malformed"
 
 
+def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            assert headers is None
+            assert json["actions"][0]["type"] == "type"
+            assert json["actions"][0]["text"] == TYPING_BENCHMARK_TEXT
+            return {
+                "ok": True,
+                "results": [{"ok": True, "output": {"length": 100, "method": "auto"}}],
+                "timing": {"daemon_ms": 12.5},
+            }
+
+    payload = run_type_100_chars_benchmark(
+        client=TimedClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["request"] == {"character_count": 100, "method": "auto"}
+    assert payload["daemon_samples_ms"] == [12.5]
+    assert payload["attribution"]["status"] == "measured"
+    serialized = json.dumps(payload)
+    assert TYPING_BENCHMARK_TEXT not in serialized
+    assert '"text"' not in serialized
+
+
+def test_type_100_chars_missing_timing_is_unavailable_not_failure() -> None:
+    class OldClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            return {"ok": True, "results": [{"ok": True}]}
+
+    payload = run_type_100_chars_benchmark(
+        client=OldClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["attribution"] == {
+        "status": "unavailable",
+        "reason": "daemon response did not include timing.daemon_ms",
+    }
+    assert payload["daemon_samples_ms"] == []
+    assert payload["failures"] == []
+
+
+def test_type_100_chars_malformed_timing_is_structured_failure() -> None:
+    class MalformedTimingClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            return {"ok": True, "results": [{"ok": True}], "timing": {"daemon_ms": "fast"}}
+
+    payload = run_type_100_chars_benchmark(
+        client=MalformedTimingClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["failures"][0]["case"] == "type_100_chars"
+    assert payload["failures"][0]["message"] == "daemon action timing.daemon_ms was malformed"
+
+
+def test_type_100_chars_failure_does_not_leak_typed_payload(monkeypatch) -> None:
+    sentinel = "_".join(["SENTINEL", "TYPED", "PAYLOAD", "NO", "LEAK"])
+
+    class FailingTypeClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            raise RuntimeError(f"backend echoed {sentinel}")
+
+    monkeypatch.setattr("modal_computer_use.benchmarks.TYPING_BENCHMARK_TEXT", sentinel)
+
+    payload = run_type_100_chars_benchmark(
+        client=FailingTypeClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    serialized = json.dumps(payload)
+    assert payload["status"] == "failed"
+    assert payload["failures"][0]["message"] == "backend echoed [redacted typed text]"
+    assert sentinel not in serialized
+    assert '"text"' not in serialized
+
+
 def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     exit_code = cli.main(["benchmark", "report", "--mock-local", "--iterations", "2"])
 
@@ -211,6 +310,15 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert payload["benchmarks"]["move_click"]["daemon_summary_ms"]["mean"] is not None
     assert payload["benchmarks"]["move_click"]["overhead_summary_ms"]["mean"] is not None
     assert payload["benchmarks"]["move_click"]["action_count"] == 2
+    typing = payload["benchmarks"]["type_100_chars"]
+    assert typing["status"] == "ok"
+    assert len(typing["samples_ms"]) == 2
+    assert typing["summary_ms"]["mean"] is not None
+    assert typing["daemon_samples_ms"]
+    assert typing["daemon_summary_ms"]["mean"] is not None
+    assert typing["overhead_summary_ms"]["mean"] is not None
+    assert typing["attribution"]["status"] == "measured"
+    assert typing["request"] == {"character_count": 100, "method": "auto"}
     assert (
         payload["benchmarks"]["action_batch"]["cases"]["separate_5_actions"]["attribution"][
             "status"
@@ -238,8 +346,8 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert payload["benchmarks"]["screenshot_compressed"]["summary_bytes"]["mean"] is not None
     assert payload["benchmarks"]["sandbox_exec"]["status"] == "not_measured"
     assert payload["benchmarks"]["cold_create_to_ready"]["status"] == "not_measured"
-    assert payload["benchmarks"]["type_100_chars"]["status"] == "not_measured"
     assert payload["failures"] == []
+    assert TYPING_BENCHMARK_TEXT not in captured.out
     assert "data_base64" not in captured.out
     assert '"bytes"' not in captured.out
     assert '"path"' not in captured.out
@@ -272,7 +380,7 @@ def test_benchmark_report_writes_output_and_prints_json(tmp_path, capsys) -> Non
     written = json.loads(output.read_text())
     assert exit_code == 0
     assert printed["ok"] is True
-    assert written["benchmarks"].keys() == printed["benchmarks"].keys()
+    assert written == printed
 
 
 def test_benchmark_report_invalid_iterations_rejected(capsys) -> None:

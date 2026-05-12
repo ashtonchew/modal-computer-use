@@ -86,3 +86,21 @@ def test_action_batch_includes_safe_daemon_timing(test_client) -> None:
     assert "xdotool" not in serialized
     assert "stdout" not in serialized.lower()
     assert "stderr" not in serialized.lower()
+
+
+def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
+    sentinel = "_".join(["SENTINEL", "TYPED", "PAYLOAD", "NO", "LEAK"])
+
+    async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
+        raise RuntimeError(f"typing failed for {text}")
+
+    app.state.backend.keyboard_type = fail_type
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "type", "text": sentinel}]},
+    ).json()
+
+    serialized = str(result)
+    assert result["ok"] is False
+    assert result["results"][0]["error"] == "typing failed for [redacted typed text]"
+    assert sentinel not in serialized
