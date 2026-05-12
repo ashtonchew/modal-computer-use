@@ -27,6 +27,8 @@ Namespaces on `ComputerSandbox`:
 - `computer.debug`: `urls`, `vnc_url`
 
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
+The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verified with
+`uv run python scripts/export_openapi.py --check`.
 
 ## Provider adapters
 

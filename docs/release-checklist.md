@@ -6,6 +6,7 @@ Run this checklist before publishing a release or opening a production-readiness
 
 - `uv run ruff check .`
 - `uv run mypy src`
+- `uv run python scripts/export_openapi.py --check`
 - `uv run pytest`
 - `uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json`
 
