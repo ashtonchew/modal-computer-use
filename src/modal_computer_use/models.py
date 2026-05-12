@@ -469,11 +469,16 @@ class ActionItemResult(StrictBaseModel):
     output: dict[str, Any] = Field(default_factory=dict)
 
 
+class ActionBatchTiming(StrictBaseModel):
+    daemon_ms: float = Field(ge=0)
+
+
 class ActionBatchResult(StrictBaseModel):
     ok: bool
     call_id: str | None = None
     results: list[ActionItemResult]
     screenshot: Screenshot | None = None
+    timing: ActionBatchTiming | None = None
 
 
 class ActionBatchRequest(StrictBaseModel):

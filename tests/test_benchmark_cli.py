@@ -108,6 +108,85 @@ def test_benchmark_action_batch_non_ok_response_is_structured() -> None:
     assert payload["failures"][0]["type"] == "RuntimeError"
 
 
+def test_benchmark_action_batch_records_daemon_timing_attribution() -> None:
+    class TimedClient:
+        base_url = "http://testserver"
+        calls = 0
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            assert headers is None
+            self.calls += 1
+            return {
+                "ok": True,
+                "results": [{"ok": True}],
+                "timing": {"daemon_ms": float(self.calls)},
+            }
+
+    payload = run_action_batch_benchmark(
+        client=TimedClient(),
+        mode="mock-local",
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["ok"] is True
+    batch = payload["cases"]["batch_5_actions"]
+    separate = payload["cases"]["separate_5_actions"]
+    assert batch["attribution"]["status"] == "measured"
+    assert batch["daemon_samples_ms"] == [1.0]
+    assert batch["daemon_summary_ms"]["mean"] == 1.0
+    assert batch["overhead_summary_ms"]["mean"] is not None
+    assert separate["attribution"]["status"] == "measured"
+    assert separate["daemon_samples_ms"] == [20.0]
+
+
+def test_benchmark_action_batch_missing_timing_is_unavailable_not_failure() -> None:
+    class OldClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            return {"ok": True, "results": [{"ok": True}]}
+
+    payload = run_action_batch_benchmark(
+        client=OldClient(),
+        mode="mock-local",
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["ok"] is True
+    assert payload["cases"]["batch_5_actions"]["attribution"] == {
+        "status": "unavailable",
+        "reason": "daemon response did not include timing.daemon_ms",
+    }
+    assert payload["cases"]["batch_5_actions"]["daemon_samples_ms"] == []
+    assert payload["failures"] == []
+
+
+def test_benchmark_action_batch_malformed_timing_is_structured_failure() -> None:
+    class MalformedTimingClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            return {"ok": True, "results": [{"ok": True}], "timing": {"daemon_ms": "fast"}}
+
+    payload = run_action_batch_benchmark(
+        client=MalformedTimingClient(),
+        mode="mock-local",
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["ok"] is False
+    assert payload["cases"]["batch_5_actions"]["status"] == "failed"
+    assert payload["failures"][0]["case"] == "batch_5_actions"
+    assert payload["failures"][0]["type"] == "RuntimeError"
+    assert payload["failures"][0]["message"] == "daemon action timing.daemon_ms was malformed"
+
+
 def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     exit_code = cli.main(["benchmark", "report", "--mock-local", "--iterations", "2"])
 
@@ -127,7 +206,25 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert len(payload["benchmarks"]["screenshot_compressed"]["samples_ms"]) == 2
     assert len(payload["benchmarks"]["move_click"]["samples_ms"]) == 2
     assert payload["benchmarks"]["move_click"]["summary_ms"]["mean"] is not None
+    assert payload["benchmarks"]["move_click"]["attribution"]["status"] == "measured"
+    assert len(payload["benchmarks"]["move_click"]["daemon_samples_ms"]) == 2
+    assert payload["benchmarks"]["move_click"]["daemon_summary_ms"]["mean"] is not None
+    assert payload["benchmarks"]["move_click"]["overhead_summary_ms"]["mean"] is not None
     assert payload["benchmarks"]["move_click"]["action_count"] == 2
+    assert (
+        payload["benchmarks"]["action_batch"]["cases"]["separate_5_actions"]["attribution"][
+            "status"
+        ]
+        == "measured"
+    )
+    assert (
+        len(
+            payload["benchmarks"]["action_batch"]["cases"]["separate_5_actions"][
+                "daemon_samples_ms"
+            ]
+        )
+        == 2
+    )
     recording = payload["benchmarks"]["recording_start_stop"]
     assert len(recording["start_samples_ms"]) == 2
     assert len(recording["stop_samples_ms"]) == 2

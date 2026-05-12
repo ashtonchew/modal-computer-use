@@ -8,6 +8,11 @@ The daemon's `/v1/actions/run` route accepts an ordered list of actions and exec
 
 Batch limits live behind `COMPUTER_USE_MAX_BATCH_ACTIONS` (default `50`). The daemon validates the whole batch before running anything and returns per-action results. Use `continue_on_error=True` if a flaky action should not abort the rest.
 
+Action batch responses include `timing.daemon_ms`, a daemon-side elapsed time for the batch route.
+Benchmark reports use it to split total SDK round-trip latency from daemon execution time and
+derive client/network/transport overhead. Older daemons that do not return timing are reported as
+`attribution.status="unavailable"` rather than failed.
+
 ## Benchmark report
 
 Use the release report command to measure current daemon hot paths without model credentials:
@@ -49,6 +54,11 @@ benchmark entries keyed by name, raw millisecond samples, timing summaries, scre
 summaries, structured failures, and explicit `not_measured` entries for future Modal/Sandbox.exec
 cases unless live comparison is requested. Use `--output benchmark-report.json` to also write the
 same JSON to disk.
+
+For action hot paths, `samples_ms` is total client-side elapsed time. When the daemon returns
+`timing.daemon_ms`, reports also include `daemon_samples_ms`, `daemon_summary_ms`,
+`overhead_samples_ms`, and `overhead_summary_ms`. For the separate-call action benchmark, each
+daemon sample is the sum of daemon timings for the five calls in that measured iteration.
 
 The current report includes:
 

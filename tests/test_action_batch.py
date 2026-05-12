@@ -71,3 +71,18 @@ def test_action_batch_idempotency(test_client) -> None:
         "/v1/actions/run", json=payload, headers={"Idempotency-Key": "abc"}
     ).json()
     assert first["call_id"] == second["call_id"]
+
+
+def test_action_batch_includes_safe_daemon_timing(test_client) -> None:
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+    ).json()
+
+    assert result["ok"] is True
+    assert set(result["timing"]) == {"daemon_ms"}
+    assert result["timing"]["daemon_ms"] >= 0
+    serialized = str(result)
+    assert "xdotool" not in serialized
+    assert "stdout" not in serialized.lower()
+    assert "stderr" not in serialized.lower()

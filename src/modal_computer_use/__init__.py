@@ -14,6 +14,7 @@ from .config import (
 from .manager import ComputerSandboxManager, SandboxManager
 from .models import (
     ActionBatchResult,
+    ActionBatchTiming,
     ActionDecision,
     ActionItemResult,
     ActionResult,
@@ -38,6 +39,7 @@ from .sandbox import ComputerSandbox
 
 __all__ = [
     "ActionBatchResult",
+    "ActionBatchTiming",
     "ActionConfig",
     "ActionDecision",
     "ActionItemResult",

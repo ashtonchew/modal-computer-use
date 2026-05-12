@@ -189,22 +189,26 @@ def run_action_batch_benchmark(
 
     benchmark = _ActionBatchBenchmark(client)
     failures: list[dict[str, Any]] = []
-    batch_samples = _measure_case(
+    batch_samples, batch_observations = _measure_observed_case(
         name="batch_5_actions",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         operation=benchmark.run_batch,
         failures=failures,
     )
-    separate_samples = _measure_case(
+    separate_samples, separate_observations = _measure_observed_case(
         name="separate_5_actions",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         operation=benchmark.run_separate,
         failures=failures,
     )
-    batch_case = _case_result("batch_5_actions", iterations, batch_samples, failures)
-    separate_case = _case_result("separate_5_actions", iterations, separate_samples, failures)
+    batch_case = _attributed_case_result(
+        "batch_5_actions", iterations, batch_samples, batch_observations, failures
+    )
+    separate_case = _attributed_case_result(
+        "separate_5_actions", iterations, separate_samples, separate_observations, failures
+    )
     comparison = _comparison(batch_case, separate_case)
     ok = not failures
     return {
@@ -293,14 +297,14 @@ def run_move_click_benchmark(
 
     failures: list[dict[str, Any]] = []
     benchmark = _MoveClickBenchmark(client)
-    samples = _measure_case(
+    samples, observations = _measure_observed_case(
         name="move_click",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         operation=benchmark.run,
         failures=failures,
     )
-    result = _case_result("move_click", iterations, samples, failures)
+    result = _attributed_case_result("move_click", iterations, samples, observations, failures)
     result.update(
         {
             "action_count": len(MOVE_CLICK_ACTIONS),
@@ -424,32 +428,39 @@ class _ActionBatchBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run_batch(self) -> None:
+    def run_batch(self) -> dict[str, float | None]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": ACTION_BATCH_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
+        return {"daemon_ms": _extract_daemon_ms(result)}
 
-    def run_separate(self) -> None:
+    def run_separate(self) -> dict[str, float | None]:
+        daemon_samples: list[float | None] = []
         for action in ACTION_BATCH_ACTIONS:
             result = self._client.post_json(
                 "/v1/actions/run",
                 json={"actions": [action], "source": "benchmark"},
             )
             _ensure_ok_result(result)
+            daemon_samples.append(_extract_daemon_ms(result))
+        if any(sample is None for sample in daemon_samples):
+            return {"daemon_ms": None}
+        return {"daemon_ms": sum(sample for sample in daemon_samples if sample is not None)}
 
 
 class _MoveClickBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run(self) -> None:
+    def run(self) -> dict[str, float | None]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": MOVE_CLICK_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
+        return {"daemon_ms": _extract_daemon_ms(result)}
 
 
 class _ScreenshotBenchmark:
@@ -654,6 +665,40 @@ def _case_result(
     }
 
 
+def _attributed_case_result(
+    name: str,
+    iterations: int,
+    samples: list[float],
+    observations: list[Any],
+    failures: list[dict[str, Any]],
+) -> dict[str, Any]:
+    result = _case_result(name, iterations, samples, failures)
+    daemon_samples: list[float] = []
+    overhead_samples: list[float] = []
+    for sample_ms, observation in zip(samples, observations, strict=False):
+        if not isinstance(observation, dict):
+            continue
+        daemon_ms = observation.get("daemon_ms")
+        if daemon_ms is None:
+            continue
+        daemon_samples.append(daemon_ms)
+        overhead_samples.append(max(sample_ms - daemon_ms, 0.0))
+    attribution = {
+        "status": "measured" if daemon_samples else "unavailable",
+        "reason": None if daemon_samples else "daemon response did not include timing.daemon_ms",
+    }
+    result.update(
+        {
+            "daemon_samples_ms": daemon_samples,
+            "daemon_summary_ms": _summary(daemon_samples),
+            "overhead_samples_ms": overhead_samples,
+            "overhead_summary_ms": _summary(overhead_samples),
+            "attribution": attribution,
+        }
+    )
+    return result
+
+
 def _summary(samples: list[float]) -> dict[str, float | None]:
     if not samples:
         return {"min": None, "p50": None, "p95": None, "mean": None, "max": None}
@@ -831,6 +876,20 @@ def _ensure_ok_result(result: Any) -> None:
         raise RuntimeError("daemon returned a non-object action response")
     if result.get("ok") is not True:
         raise RuntimeError("daemon action response was not ok")
+
+
+def _extract_daemon_ms(result: dict[str, Any]) -> float | None:
+    timing = result.get("timing")
+    if timing is None:
+        return None
+    if not isinstance(timing, dict):
+        raise RuntimeError("daemon action timing was malformed")
+    daemon_ms = timing.get("daemon_ms")
+    if isinstance(daemon_ms, bool) or not isinstance(daemon_ms, int | float):
+        raise RuntimeError("daemon action timing.daemon_ms was malformed")
+    if daemon_ms < 0:
+        raise RuntimeError("daemon action timing.daemon_ms was negative")
+    return float(daemon_ms)
 
 
 def _failure(

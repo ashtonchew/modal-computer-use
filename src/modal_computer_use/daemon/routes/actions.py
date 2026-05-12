@@ -17,6 +17,7 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import (
     ActionBatchRequest,
     ActionBatchResult,
+    ActionBatchTiming,
     ActionItemResult,
     ClickAction,
     CursorPositionAction,
@@ -102,6 +103,7 @@ async def run(
             code="action_validation_failed",
             details={"errors": timeout_errors},
         )
+    batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
     screenshot = None
     batch_timed_out = False
@@ -326,7 +328,11 @@ async def run(
                         request, payload, failed_screenshot, item, call_id=call_id
                     )
     result = ActionBatchResult(
-        ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
+        ok=all(item.ok for item in results),
+        call_id=call_id,
+        results=results,
+        screenshot=screenshot,
+        timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
     )
     if idempotency_key:
         cache[idempotency_key] = {

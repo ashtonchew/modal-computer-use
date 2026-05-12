@@ -41,7 +41,10 @@ the original complete batch result without re-executing actions, incrementing bu
 duplicating trace/artifact writes; reusing a key with a different request body returns `409`.
 Action budgets count attempted executable desktop actions after validation, including failed
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
-instead, and cursor-position queries do not consume the action budget.
+instead, and cursor-position queries do not consume the action budget. Successful action-route
+responses include safe timing metadata as `timing.daemon_ms`, measured inside the daemon for the
+batch request. The timing object contains only elapsed milliseconds and no command strings,
+stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
 
 Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. Use
 `computer-use trace validate <path>` to validate trace NDJSON and
@@ -62,6 +65,9 @@ move+click command. This mode never creates a sandbox. It returns nonzero when a
 measured iteration fails. Recording benchmark output includes safe metadata such as status,
 format, size, duration, and stop method, but not recording bytes, raw paths, artifact URIs,
 stdout, stderr tails, raw command strings, or ffmpeg argv.
+Action benchmark cases also include `daemon_samples_ms`, `daemon_summary_ms`,
+`overhead_samples_ms`, `overhead_summary_ms`, and `attribution`. Missing daemon timing is reported
+as unavailable for compatibility with old daemons; malformed timing is a structured failure.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
 already-running daemon. The command emits JSON and returns nonzero when any warmup or measured
