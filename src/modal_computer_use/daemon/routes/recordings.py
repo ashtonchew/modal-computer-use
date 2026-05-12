@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 
-from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.schemas import RecordingStartRequest
 from modal_computer_use.models import Recording
 
@@ -17,15 +17,14 @@ async def start(payload: RecordingStartRequest, request: Request) -> Recording:
     rec = request.app.state.recordings.start(
         name=payload.name, fps=payload.fps, format=payload.format
     )
-    _enforce_recording_budget(request)
+    budgets.enforce(request, "recordings")
     return rec
 
 
 @router.post("/{recording_id}/stop")
 async def stop(recording_id: str, request: Request) -> Recording:
     rec = request.app.state.recordings.stop(recording_id)
-    _enforce_recording_budget(request)
-    _enforce_artifact_budget(request)
+    budgets.enforce(request, "recordings", "artifacts")
     return rec
 
 
@@ -56,25 +55,3 @@ async def download(recording_id: str, request: Request) -> FileResponse:
 async def delete(recording_id: str, request: Request) -> dict[str, bool]:
     request.app.state.recordings.delete(recording_id)
     return {"ok": True}
-
-
-def _enforce_artifact_budget(request: Request) -> None:
-    limit = request.app.state.settings.max_artifact_bytes
-    if limit is None:
-        return
-    artifact_total = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
-    recording_total = request.app.state.recordings.total_size_bytes()
-    if artifact_total + recording_total > limit:
-        raise DaemonError("artifact byte budget exceeded", status_code=429, code="budget_exceeded")
-
-
-def _enforce_recording_budget(request: Request) -> None:
-    limit = request.app.state.settings.max_recording_seconds
-    if limit is None:
-        return
-    if request.app.state.recordings.total_duration_seconds() > limit:
-        raise DaemonError(
-            "recording duration budget exceeded",
-            status_code=429,
-            code="budget_exceeded",
-        )

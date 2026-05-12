@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, Request
 
+from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import (
     ActionBatchRequest,
@@ -97,7 +98,7 @@ async def run(
                 results.append(item)
                 if action.type not in ("screenshot", "zoom", "cursor_position"):
                     request.app.state.action_count += 1
-                _enforce_budgets(request)
+                budgets.enforce(request)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
                     "action executed",
@@ -148,7 +149,7 @@ async def run(
                 retention_class="trace",
             )
             request.app.state.screenshot_count += 1
-            _enforce_budgets(request)
+            budgets.enforce(request)
             _append_screenshot_after_trace(request, payload, screenshot, call_id=call_id)
     result = ActionBatchResult(
         ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
@@ -263,33 +264,6 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
     )
 
 
-def _enforce_budgets(request: Request) -> None:
-    settings = request.app.state.settings
-    if settings.max_actions is not None and request.app.state.action_count > settings.max_actions:
-        raise DaemonError("action budget exceeded", status_code=429, code="budget_exceeded")
-    if (
-        settings.max_screenshots is not None
-        and request.app.state.screenshot_count > settings.max_screenshots
-    ):
-        raise DaemonError("screenshot budget exceeded", status_code=429, code="budget_exceeded")
-    if settings.max_artifact_bytes is not None:
-        artifact_total = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
-        recording_total = request.app.state.recordings.total_size_bytes()
-        if artifact_total + recording_total > settings.max_artifact_bytes:
-            raise DaemonError(
-                "artifact byte budget exceeded",
-                status_code=429,
-                code="budget_exceeded",
-            )
-    if (
-        settings.max_recording_seconds is not None
-        and request.app.state.recordings.total_duration_seconds() > settings.max_recording_seconds
-    ):
-        raise DaemonError(
-            "recording duration budget exceeded", status_code=429, code="budget_exceeded"
-        )
-
-
 def _validate_actions(actions: list[Any], *, width: int | None, height: int | None) -> list[str]:
     errors: list[str] = []
     for index, action in enumerate(actions):
@@ -353,6 +327,8 @@ def _append_trace(
             normalized_action=normalized,
             result=result.model_dump(mode="json"),
             elapsed_ms=result.elapsed_ms,
+            screenshot_after_uri=_screenshot_uri(result),
+            coordinate_space=_coordinate_space(result),
             redactions=["text"] if isinstance(action, TypeAction) else [],
             error={"message": result.error} if result.error else None,
         )
@@ -389,6 +365,17 @@ def _append_screenshot_after_trace(
             coordinate_space=screenshot.coordinate_space,
         )
     )
+
+
+def _screenshot_uri(result: ActionItemResult) -> str | None:
+    output = result.output or {}
+    uri = output.get("artifact_uri")
+    return uri if isinstance(uri, str) else None
+
+
+def _coordinate_space(result: ActionItemResult) -> Any:
+    output = result.output or {}
+    return output.get("coordinate_space")
 
 
 def _redacted_action(action: Any) -> dict[str, Any]:

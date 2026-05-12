@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from modal_computer_use.daemon import budgets
 from modal_computer_use.models import ComputerStatus, LifecycleResult
 
 router = APIRouter(prefix="/v1/computer")
@@ -19,10 +20,7 @@ async def status(request: Request) -> ComputerStatus:
         height=backend.height,
         processes=request.app.state.supervisor.statuses(),
         resources={"profile": request.app.state.settings.image_profile},
-        budgets={
-            "actions": request.app.state.action_count,
-            "screenshots": request.app.state.screenshot_count,
-        },
+        budgets=budgets.snapshot(request),
     )
 
 

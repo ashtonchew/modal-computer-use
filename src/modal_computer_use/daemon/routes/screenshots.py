@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.validation import validate_region
 from modal_computer_use.daemon.schemas import ScreenshotRequest, ZoomScreenshotRequest
@@ -30,7 +31,7 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
             options,
             artifact_store=request.app.state.artifacts,
         )
-        _enforce_budgets(request)
+        budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
 
@@ -48,7 +49,7 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
             region=payload.region,
             artifact_store=request.app.state.artifacts,
         )
-        _enforce_budgets(request)
+        budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
 
@@ -73,23 +74,5 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
             region=region,
             artifact_store=request.app.state.artifacts,
         )
-        _enforce_budgets(request)
+        budgets.enforce(request, "screenshots", "artifacts")
         return shot
-
-
-def _enforce_budgets(request: Request) -> None:
-    settings = request.app.state.settings
-    if (
-        settings.max_screenshots is not None
-        and request.app.state.screenshot_count > settings.max_screenshots
-    ):
-        raise DaemonError("screenshot budget exceeded", status_code=429, code="budget_exceeded")
-    if settings.max_artifact_bytes is not None:
-        artifact_total = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
-        recording_total = request.app.state.recordings.total_size_bytes()
-        if artifact_total + recording_total > settings.max_artifact_bytes:
-            raise DaemonError(
-                "artifact byte budget exceeded",
-                status_code=429,
-                code="budget_exceeded",
-            )

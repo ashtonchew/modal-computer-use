@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import Request
+
+from modal_computer_use.daemon.errors import DaemonError
+
+BudgetKind = Literal["actions", "screenshots", "artifacts", "recordings", "all"]
+
+
+def snapshot(request: Request) -> dict[str, int | float | None]:
+    settings = request.app.state.settings
+    artifact_bytes = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
+    recording_bytes = request.app.state.recordings.total_size_bytes()
+    return {
+        "actions": request.app.state.action_count,
+        "max_actions": settings.max_actions,
+        "screenshots": request.app.state.screenshot_count,
+        "max_screenshots": settings.max_screenshots,
+        "artifact_bytes": artifact_bytes + recording_bytes,
+        "max_artifact_bytes": settings.max_artifact_bytes,
+        "recording_seconds": request.app.state.recordings.total_duration_seconds(),
+        "max_recording_seconds": settings.max_recording_seconds,
+    }
+
+
+def enforce(request: Request, *kinds: BudgetKind) -> None:
+    settings = request.app.state.settings
+    checks = set(kinds or ("all",))
+    state = snapshot(request)
+    if "all" in checks:
+        checks.update(("actions", "screenshots", "artifacts", "recordings"))
+
+    if (
+        "actions" in checks
+        and settings.max_actions is not None
+        and request.app.state.action_count > settings.max_actions
+    ):
+        raise _budget_error("action budget exceeded", state)
+    if (
+        "screenshots" in checks
+        and settings.max_screenshots is not None
+        and request.app.state.screenshot_count > settings.max_screenshots
+    ):
+        raise _budget_error("screenshot budget exceeded", state)
+    if (
+        "artifacts" in checks
+        and settings.max_artifact_bytes is not None
+        and state["artifact_bytes"] > settings.max_artifact_bytes
+    ):
+        raise _budget_error("artifact byte budget exceeded", state)
+    if (
+        "recordings" in checks
+        and settings.max_recording_seconds is not None
+        and request.app.state.recordings.total_duration_seconds()
+        > settings.max_recording_seconds
+    ):
+        raise _budget_error("recording duration budget exceeded", state)
+
+
+def _budget_error(message: str, state: dict[str, int | float | None]) -> DaemonError:
+    return DaemonError(
+        message,
+        status_code=429,
+        code="budget_exceeded",
+        details={"budgets": state},
+    )

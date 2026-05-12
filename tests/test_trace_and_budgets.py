@@ -62,6 +62,45 @@ def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
     assert entries[1].coordinate_space is not None
 
 
+def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "zoom",
+                        "region": {"x": 10, "y": 20, "width": 100, "height": 50},
+                        "scale": 2,
+                        "options": {"storage": "artifact"},
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 1
+    assert entries[0].normalized_action is not None
+    assert entries[0].normalized_action["type"] == "zoom"
+    assert entries[0].screenshot_after_uri is not None
+    assert entries[0].screenshot_after_uri.startswith("artifact://screenshots/")
+    assert entries[0].coordinate_space is not None
+    assert entries[0].coordinate_space.source_region is not None
+    assert entries[0].coordinate_space.source_region.x == 10
+    assert entries[0].coordinate_space.image_width == 200
+
+
 def test_screenshot_budget_exceeded(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
