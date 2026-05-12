@@ -32,3 +32,11 @@ The Modal SDK reads credentials from `~/.modal.toml`, or from `MODAL_CONFIG_PATH
 In CI, use a Modal service user and expose `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as
 CI secrets. The repository does not auto-load `.env` for Modal SDK auth; `.env` files are
 better used through `modal.Secret.from_dotenv()` when creating remote runtime secrets.
+
+The noVNC view-only smoke test is opt-in because it creates a tunnel. To run it locally:
+
+```bash
+MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest tests/test_modal_integration.py -q
+```
+
+The test checks daemon readiness and process state without printing noVNC URLs or tokens.
