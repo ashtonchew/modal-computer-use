@@ -17,3 +17,18 @@ Sandbox tags are applied after creation with `Sandbox.set_tags()` and then used 
 `Sandbox.list(tags=...)` attach/recovery flows.
 
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples, then call `computer.artifacts.sync()` when immediate visibility is required.
+
+## Authentication
+
+For local Modal smoke tests, prefer Modal's native local auth:
+
+```bash
+uv sync --extra modal
+uv run modal token new
+uv run pytest -m modal
+```
+
+The Modal SDK reads credentials from `~/.modal.toml`, or from `MODAL_CONFIG_PATH` if set.
+In CI, use a Modal service user and expose `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` as
+CI secrets. The repository does not auto-load `.env` for Modal SDK auth; `.env` files are
+better used through `modal.Secret.from_dotenv()` when creating remote runtime secrets.

@@ -53,7 +53,6 @@ def default_image(
         modal.Image.debian_slim(python_version="3.12")
         .apt_install(*packages)
         .pip_install_from_pyproject("pyproject.toml")
-        .add_local_python_source("modal_computer_use")
         .env(
             {
                 "COMPUTER_USE_WINDOW_MANAGER": window_manager,
@@ -61,6 +60,7 @@ def default_image(
                 "COMPUTER_USE_BROWSER": browser or "",
             }
         )
+        .add_local_python_source("modal_computer_use")
     )
     return image
 
