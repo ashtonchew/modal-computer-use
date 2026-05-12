@@ -46,7 +46,13 @@ ffmpeg was killed hard before it could flush its trailer. Always stop a recordin
 
 ### Artifacts are not visible outside Modal
 
-Ephemeral sandbox artifacts live inside the sandbox and disappear when it exits. If you mount a Modal Volume, visibility depends on Volume sync, commit, and reload semantics. Call `computer.artifacts.sync()` where configured, then check the Volume from outside.
+Ephemeral sandbox artifacts live inside the sandbox and disappear when it exits. If you mount a
+Modal Volume, visibility depends on Modal commit and reload semantics. For Modal Volume v2 mounts,
+configure `StorageConfig(persist_artifacts=True)` and call `computer.artifacts.sync()`; the daemon
+runs `sync <artifacts_dir>` inside the sandbox and reports failure if the mountpoint commit fails.
+Modal Volume v1 is not a supported immediate-sync target for this package; use run-scoped paths,
+avoid concurrent writes to the same file, and reload already-mounted reader containers before
+checking for committed changes.
 
 ## Deployment
 
@@ -77,7 +83,10 @@ down or recovering.
 
 Use filesystem snapshots for files and installed application state. Do not rely on them as a
 guarantee for live window placement, browser memory, authenticated sessions, or in-flight GUI
-process state. Re-open applications and verify readiness after restoring.
+process state. Prefer the documented directory flow: `snapshot_directory(path)` on the source
+sandbox, create a fresh normal computer-use sandbox, then `mount_image(path, snapshot_image)`.
+Creating the desktop sandbox directly from a directory snapshot image is not a supported restore
+pattern for this package. Re-open applications and verify readiness after restoring.
 
 ## Security incidents
 

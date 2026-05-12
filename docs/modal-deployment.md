@@ -27,7 +27,13 @@ operational metadata such as `computer-use.run_id`, `computer-use.owner`,
 `computer-use.created_at`, `computer-use.config_hash`, `computer-use.window_manager`, and
 `computer-use.artifacts_dir`.
 
-`modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes in user configuration or examples; call `computer.artifacts.sync()` when the file needs to be visible from outside the sandbox immediately.
+`modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes
+in user configuration or examples. For immediate visibility before sandbox termination, use a
+Modal Volume v2 mount and set `StorageConfig(persist_artifacts=True)`;
+`computer.artifacts.sync()` then runs Modal's documented `sync <artifacts_dir>` mountpoint commit
+inside the sandbox. Modal Volume v1 is not a supported immediate-sync target for this package.
+Readers already running with the same Volume still need `Volume.reload()` or
+`Sandbox.reload_volumes()` before they can observe committed changes.
 
 Browser profiles are explicit. Use `ResourceConfig(profile="browser")` plus
 `BrowserConfig(kind="firefox" | "chromium", prewarm=True)` when browser startup dominates the
@@ -35,9 +41,14 @@ measured workload. Use `profile="browser-gpu"` only with an explicit `gpu` value
 `COMPUTER_USE_IMAGE_PROFILE`, `COMPUTER_USE_BROWSER`, and `COMPUTER_USE_BROWSER_PREWARM` into the
 daemon environment so `/v1/capabilities` and `/v1/computer/status` can report the selected profile.
 
-`ComputerSandbox.snapshot_filesystem()` delegates to Modal's filesystem snapshot API for a
-Modal-backed sandbox. The returned object is a Modal Image that can be used by caller-owned
-orchestration. The SDK does not automatically snapshot or restore sandboxes.
+`ComputerSandbox.snapshot_directory(path)` delegates to Modal's documented
+`Sandbox.snapshot_directory(path)` API for a Modal-backed sandbox. Restore by creating a fresh
+normal computer-use sandbox and calling `computer.mount_image(path, snapshot_image)`, matching
+Modal's `mount_image` pattern. Do not use a directory snapshot as the whole desktop base image:
+live smoke on May 12, 2026 found that path did not reach desktop readiness. Directory snapshots
+are documented by Modal as 30-day images after last creation or use; store durable artifacts in a
+Volume or external system instead. `snapshot_filesystem()` remains a compatibility helper for
+SDKs exposing that older method.
 
 ## Attach and recovery
 
@@ -95,3 +106,16 @@ MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest tests/test_modal_integration.
 ```
 
 The test checks daemon readiness and process state without printing noVNC URLs or tokens.
+
+The protected v1 smoke tests exercise live manager attach/reuse/cleanup, honest Volume sync
+semantics, and directory snapshot restore:
+
+```bash
+MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
+  uv run pytest -m modal tests/test_modal_integration.py -q
+```
+
+As of May 12, 2026, manager lifecycle passes live. Volume v2 sync commits with
+`sync <artifacts_dir>` and is visible through `Volume.read_file`. Snapshot restore uses Modal's
+documented `snapshot_directory` plus `mount_image` flow rather than treating a directory snapshot
+as the whole desktop image.

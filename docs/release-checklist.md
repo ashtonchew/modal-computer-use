@@ -22,6 +22,18 @@ local Modal auth:
 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest -m modal tests/test_modal_integration.py -q
 ```
 
+For v1 release candidates, also run the protected manager/Volume/snapshot smoke:
+
+```bash
+MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
+  uv run pytest -m modal tests/test_modal_integration.py -q
+```
+
+Expected state on May 12, 2026: live manager attach/reuse/config-conflict/cleanup passes; Volume
+v2 artifact sync commits with `sync <artifacts_dir>` and is visible through `Volume.read_file`;
+directory snapshot restore uses Modal's documented `snapshot_directory` plus `mount_image` flow
+and should pass.
+
 Do not store personal Modal tokens in repository or CI configuration. If a future workspace needs
 fully automated Modal CI, use a Modal service user scoped to a restricted Modal Environment rather
 than a human token.
@@ -77,8 +89,10 @@ that prints secrets.
 ## Compatibility
 
 - OpenAI and Anthropic fixture tests pass and unknown provider actions fail closed by default.
-- Modal boundary tests cover `Sandbox.create`, connect tokens, readiness probes, encrypted noVNC ports, tags/listing, attach/reuse, cleanup, and filesystem snapshot delegation.
+- Modal boundary tests cover `Sandbox.create`, connect tokens, readiness probes, encrypted noVNC ports, tags/listing, attach/reuse, cleanup, and directory snapshot/mount delegation.
 - Modal smoke tests remain marked and skipped unless credentials are explicitly available.
+- Protected v1 Modal smoke covers manager lifecycle live, honest Volume sync behavior, and
+  directory snapshot restore through `mount_image`.
 
 ## Performance
 

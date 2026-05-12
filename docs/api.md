@@ -30,6 +30,15 @@ The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and
 The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verified with
 `uv run python scripts/export_openapi.py --check`.
 
+## Observability
+
+Structured JSON logs are enabled by default and redact secret-bearing fields. Optional
+OpenTelemetry is disabled by default and only activates when `COMPUTER_USE_OTEL_ENABLED=true` and
+`opentelemetry-api` is importable in the current environment. The implemented span boundaries are
+SDK request, daemon route, daemon action execution, artifact write/sync, and trace replay step.
+Attributes use bounded route/action metadata, never query strings, Authorization headers, typed
+text, clipboard text, screenshot bytes, recording bytes, stdout, or stderr.
+
 ## Provider adapters
 
 `OpenAIAdapter`, `AnthropicAdapter`, and `ActionExecutor` are translation layers over
@@ -82,6 +91,12 @@ configuration alias for compatibility boundaries.
 `ComputerSandbox.create(wait=True)` waits for both Modal's sandbox readiness probe, when the
 installed Modal SDK exposes it, and the daemon `/readyz` endpoint. `wait=False` returns after the
 connect token is created and does not poll daemon desktop readiness.
+
+`ComputerSandbox.snapshot_directory(path)` and `ComputerSandbox.mount_image(path, image)` expose
+Modal's documented directory snapshot flow for filesystem state. `snapshot_filesystem()` remains a
+compatibility helper for SDKs that expose it, but v1 examples restore directory snapshots by
+mounting them into a fresh normal computer-use sandbox instead of using the snapshot image as the
+whole desktop image.
 
 Use `attach_or_create` when a caller wants resumable run-scoped sandboxes:
 
@@ -156,12 +171,19 @@ instead, and cursor-position queries do not consume the action budget. Successfu
 responses include safe timing metadata as `timing.daemon_ms`, measured inside the daemon for the
 batch request. The timing object contains only elapsed milliseconds and no command strings,
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
+`actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a
+simple per-daemon rolling one-second action limit. The limit applies to `/v1/actions/run` and
+direct mouse/keyboard mutation routes; failures return `rate_limited` without executing the
+over-limit action.
 
 Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. Use
 `computer-use trace validate <path>` to validate trace NDJSON and
 `computer-use trace replay <path> --dry-run` to produce a replay plan without contacting a
-daemon, Modal, provider APIs, screenshots, or artifact storage. Both commands emit JSON and
-return nonzero for invalid traces.
+daemon, Modal, provider APIs, screenshots, or artifact storage. Use
+`computer-use trace replay <path> --base-url <daemon-url> --token <token>` for local replay, or
+`--target-run-id` / `--sandbox-id` for Modal-backed replay. Real replay validates first, skips
+redacted typed text, executes supported normalized actions through the target sandbox, redacts
+screenshot bytes/base64 in emitted results, and returns nonzero for validation or action failures.
 
 Benchmark tooling is available through `computer-use benchmark report` and
 `computer-use benchmark action-batch`. Use
@@ -196,7 +218,13 @@ diagnostics as files and returns only a short tail.
 
 `computer.artifacts.sync()` returns `ArtifactSyncResult`. In the built-in local/daemon store it is
 an explicit no-op that reports `persistent=false` unless the store was configured as persistent.
-The SDK does not claim Modal Volume data is visible outside the sandbox unless a concrete Volume
-sync/commit path is configured and reported by the daemon.
+When `storage.persist_artifacts=True` sets `COMPUTER_USE_ARTIFACTS_PERSISTENT=true`, the daemon
+runs Modal's documented Volume v2 `sync <artifacts_dir>` mountpoint command and reports `ok=true`
+only if that command succeeds. Local orchestration can then verify data through
+`Volume.read_file` or CLI `modal volume get`. Modal Volume v1 is not a supported immediate-sync
+target for this package. Already-mounted reader containers must use `Volume.reload()` /
+`Sandbox.reload_volumes()` before checking for committed changes. Reload can fail with open files,
+and concurrent writes to the same Volume paths are last-writer-wins, so production artifact paths
+should be run-scoped.
 
 For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v6.md](spec/modal_computer_use_spec_v6.md).

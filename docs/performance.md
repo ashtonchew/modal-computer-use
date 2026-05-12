@@ -158,10 +158,12 @@ handing a sandbox to work. See `examples/04_warm_pool.py` for a minimal pattern.
 
 ## Filesystem Snapshots
 
-`ComputerSandbox.snapshot_filesystem()` delegates to Modal's `Sandbox.snapshot_filesystem()` for a
-Modal-backed sandbox and returns a reusable Modal Image. Treat this as filesystem/app state first;
-do not assume it perfectly preserves GUI memory state or browser sessions. See
-`examples/snapshot_filesystem.py`.
+`ComputerSandbox.snapshot_directory(path)` delegates to Modal's documented
+`Sandbox.snapshot_directory(path)` and returns a reusable Modal Image for that directory. Restore
+by creating a fresh normal computer-use sandbox and calling `computer.mount_image(path, image)`.
+Treat snapshots as filesystem/app state first; do not assume they preserve GUI memory state or
+browser sessions. Modal documents directory snapshots as retained for 30 days after last creation
+or use, so use Volumes or external storage for durable artifacts. See `examples/snapshot_filesystem.py`.
 
 ## Post-action delay
 

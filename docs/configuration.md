@@ -39,6 +39,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `COMPUTER_USE_MAX_BATCH_ACTIONS` | int | `50` | Hard cap on actions per batch request. |
+| `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | int | `20` | Rolling one-second per-sandbox limit for executable input actions. Set `0` to disable in trusted benchmark or local test harnesses. |
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | int | `5000` | Per-action timeout when the request does not specify one. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | int | `300000` | Upper bound a request can ask for. |
 | `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `100` | Sleep inserted after every action to let the desktop settle. |
@@ -59,6 +60,12 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | `COMPUTER_USE_TRACE_DIR` | path | `/home/desktop/artifacts/traces` | Trace NDJSON directory. |
 | `COMPUTER_USE_TRACE_ACTIONS` | bool | `false` | Append every action to `actions.ndjson`. |
 | `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` | string | `auto` | Where to resize and encode screenshots. `auto`, `daemon`, or `client`. |
+
+## Observability
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `COMPUTER_USE_OTEL_ENABLED` | bool | `false` | Enables optional OpenTelemetry spans when `opentelemetry-api` is installed. Disabled mode does not import or require OpenTelemetry packages. Spans use bounded route/action/artifact metadata only. |
 
 ## Boolean parsing
 

@@ -90,6 +90,13 @@ The benchmark emits JSON with raw samples, summary timings, and the batch-vs-sep
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
 including benchmark regeneration and boundary scans.
 
+## Observability
+
+The daemon writes structured JSON logs with secret redaction. Optional OpenTelemetry is off by
+default; set `COMPUTER_USE_OTEL_ENABLED=true` in an environment that already installs
+`opentelemetry-api` to emit bounded spans for SDK requests, daemon routes, action execution,
+artifact write/sync, and trace replay.
+
 ## Modal Quickstart
 
 ```python
@@ -122,6 +129,13 @@ Existing sandboxes with a `computer-use.config_hash` tag must match the requeste
 `attach_or_create` raises `ConfigConflictError` by default. Ambiguous run ID matches raise
 `SandboxAmbiguousError` instead of selecting one arbitrarily.
 
+For Volume-backed artifacts, mount a Modal Volume v2 at `storage.artifacts_dir` and set
+`StorageConfig(persist_artifacts=True)`. In that verified path, `computer.artifacts.sync()` runs
+`sync <artifacts_dir>` inside the sandbox so files are visible through Modal Volume APIs before
+termination. Already-mounted Modal readers must reload their Volume view before observing
+committed changes, and concurrent writes to the same paths should be avoided. Modal Volume v1 is
+not a supported immediate-sync target for this package.
+
 For owner-scoped listing and conservative stale-sandbox cleanup, use the optional manager:
 
 ```python
@@ -133,6 +147,11 @@ plan = manager.cleanup_expired(ttl_seconds=3600, owner="alice")  # dry-run by de
 
 Cleanup uses safe creation metadata tags and skips sandboxes whose creation time is missing or
 malformed unless you terminate them explicitly by sandbox ID.
+
+For filesystem snapshots, use Modal's directory snapshot flow:
+`computer.snapshot_directory("/home/desktop/artifacts")`, then create a fresh normal sandbox and
+call `computer.mount_image("/home/desktop/artifacts", snapshot_image)`. Directory snapshots are
+not durable storage and should not be used as the whole desktop base image.
 
 ## Provider Adapters
 
@@ -149,6 +168,17 @@ Unknown provider actions fail closed by default. Pass an explicit `CoordinateSpa
 saw a resized screenshot; adapters never silently scale coordinates.
 When tracing is enabled, adapter actions preserve redacted provider provenance alongside the
 native action that the daemon executed.
+
+Trace replay can validate a run without contacting a daemon, or replay supported normalized
+actions into an explicit target:
+
+```bash
+uv run computer-use trace replay artifacts/traces/actions.ndjson --dry-run
+uv run computer-use trace replay artifacts/traces/actions.ndjson --base-url http://127.0.0.1:8080 --token dev
+```
+
+Real replay skips redacted typed text, stops on action failure by default, and redacts screenshot
+bytes/base64 in emitted JSON while preserving safe artifact references and metadata.
 
 Provider-shaped screenshot helpers are available for user-owned loops:
 

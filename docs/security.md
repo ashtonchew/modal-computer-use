@@ -32,6 +32,17 @@ See `examples/novnc_view_only.py` for a view-only pattern that reports only whet
 
 Structured logs redact typed text, clipboard text, screenshot bytes, tokens, provider keys, noVNC URLs, and artifact bytes. They retain lengths, hashes, dimensions, action types, elapsed time, and `call_id` so traces remain useful for debugging.
 
+Optional OpenTelemetry is disabled by default. When `COMPUTER_USE_OTEL_ENABLED=true` and
+`opentelemetry-api` is installed by the application image, spans are emitted at SDK request,
+daemon route, action execution, artifact write/sync, and trace replay boundaries. Span attributes
+use route paths and bounded action/artifact metadata; they do not include query strings,
+Authorization headers, typed text, clipboard text, screenshot bytes, recording bytes, stdout, or
+stderr.
+
+The daemon enforces action budgets and a simple per-sandbox rolling action rate limit. Over-limit
+requests fail with structured `budget_exceeded` or `rate_limited` errors and do not include typed
+text, clipboard text, raw command output, tokens, screenshot bytes, or artifact bytes.
+
 Trace validation treats raw plaintext in `type` actions as unsafe. New action traces use
 `redactions=["text"]` and replace typed text with redaction metadata before writing NDJSON.
 Replay dry-runs skip redacted typed text because the original plaintext is intentionally absent.
@@ -49,6 +60,9 @@ run data unless your application has explicitly sanitized and retained them. See
 Volume and snapshot examples follow the same rule: print bounded metadata, not raw artifact URIs,
 paths, or bytes. A filesystem snapshot Image ID is operational metadata; store it in your own
 access-controlled system if you need to restore from it later.
+When artifact persistence is enabled, `artifacts.sync()` reports only bounded sync status. It does
+not expose raw mount paths, command output, or stderr. Until a daemon-side Modal Volume commit path
+is live-verified, the sync result fails honestly instead of claiming external persistence.
 
 ## Provider credentials
 

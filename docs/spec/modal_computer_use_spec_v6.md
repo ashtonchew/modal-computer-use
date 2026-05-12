@@ -877,6 +877,8 @@ class ComputerSandbox:
     def terminate(self) -> None: ...
     def detach(self) -> None: ...
     def snapshot_filesystem(self) -> modal.Image: ...
+    def snapshot_directory(self, path: str = "/home/desktop/artifacts") -> modal.Image: ...
+    def mount_image(self, path: str, image: modal.Image) -> None: ...
 ```
 
 `from_run_id(create_if_missing=True)` is removed from the primary public surface. Creation requires config, image, VNC mode, secrets, volumes, and conflict behavior, so the explicit method is `attach_or_create(...)`.
@@ -2580,8 +2582,9 @@ This surface should be optional and small. Modal already has first-class sandbox
 Expose snapshot helpers:
 
 ```python
-image = computer.snapshot_filesystem()
-computer2 = ComputerSandbox.create(image=image)
+image = computer.snapshot_directory("/home/desktop/artifacts")
+computer2 = ComputerSandbox.create()
+computer2.mount_image("/home/desktop/artifacts", image)
 ```
 
 Use cases:
@@ -2591,7 +2594,10 @@ Use cases:
 - Reproducible QA baselines.
 - Debugging a failed run.
 
-Avoid promising that memory snapshots or GUI state persistence will work perfectly. Filesystem snapshots are the first reliable target.
+Avoid promising that memory snapshots or GUI state persistence will work perfectly. Directory
+snapshots are filesystem helpers; Modal's documented restore path mounts the snapshot image into a
+fresh sandbox with `mount_image`, and directory snapshots are not durable storage beyond Modal's
+documented retention window.
 
 ### 16.5 Updated storage recommendation after reference repo review
 
@@ -2604,7 +2610,10 @@ Recommended storage hierarchy:
 3. **Large shared datasets or browser profiles:** use `modal.Volume`, CloudBucketMount, or bake immutable assets into the image.
 4. **Legacy compatibility only:** mention `NetworkFileSystem` only when explaining why older examples use it. Do not use it in v1 defaults.
 
-For Volumes v2, the daemon can run `sync` on the mountpoint after saving important artifacts when the caller asks for immediate persistence. Otherwise document that Volume sync/commit/reload semantics affect when files become visible outside the sandbox.
+For Volumes v2, `artifacts.sync()` should run Modal's documented `sync <mountpoint>` command inside
+the sandbox and report success only after that command exits successfully. Modal Volume v1 should
+not be exposed as a selectable immediate-sync mode for this package; if users mount v1 Volumes,
+visibility depends on Modal's normal background/final commit behavior plus reader reload.
 
 ### 16.6 Artifact layout
 
@@ -3065,7 +3074,8 @@ Competitor parity level:
 Included features:
 
 - Stable OpenAPI and SDK API.
-- `ComputerSandboxManager` deployed Modal class.
+- `ComputerSandboxManager` Modal orchestration facade; deployable manager class remains an example
+  or future packaging layer rather than a provider/model loop.
 - `attach_or_create` with config hash, owner, TTL, cleanup.
 - Volume-backed artifacts/recordings with explicit sync.
 - Snapshot example and documented limitations.
