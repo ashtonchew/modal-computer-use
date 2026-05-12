@@ -149,6 +149,7 @@ async def run(
             )
             request.app.state.screenshot_count += 1
             _enforce_budgets(request)
+            _append_screenshot_after_trace(request, payload, screenshot, call_id=call_id)
     result = ActionBatchResult(
         ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
     )
@@ -354,6 +355,38 @@ def _append_trace(
             elapsed_ms=result.elapsed_ms,
             redactions=["text"] if isinstance(action, TypeAction) else [],
             error={"message": result.error} if result.error else None,
+        )
+    )
+
+
+def _append_screenshot_after_trace(
+    request: Request,
+    payload: ActionBatchRequest,
+    screenshot: Any,
+    *,
+    call_id: str,
+) -> None:
+    if not request.app.state.settings.trace_actions:
+        return
+    writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
+    writer.append(
+        TraceEntry(
+            ts=datetime.now(UTC),
+            run_id=payload.run_id or request.app.state.settings.run_id,
+            call_id=call_id,
+            sequence=payload.sequence,
+            source=payload.source,
+            normalized_action={"type": "screenshot_after"},
+            result={
+                "ok": True,
+                "format": screenshot.format,
+                "width": screenshot.width,
+                "height": screenshot.height,
+                "size_bytes": screenshot.size_bytes,
+                "artifact_uri": screenshot.artifact_uri,
+            },
+            screenshot_after_uri=screenshot.artifact_uri,
+            coordinate_space=screenshot.coordinate_space,
         )
     )
 

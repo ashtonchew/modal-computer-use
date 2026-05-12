@@ -32,6 +32,36 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
     assert entries[0].redactions == ["text"]
 
 
+def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+                "screenshot_options": {"storage": "artifact"},
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 2
+    assert entries[1].normalized_action == {"type": "screenshot_after"}
+    assert entries[1].screenshot_after_uri is not None
+    assert entries[1].screenshot_after_uri.startswith("artifact://screenshots/")
+    assert entries[1].coordinate_space is not None
+
+
 def test_screenshot_budget_exceeded(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
