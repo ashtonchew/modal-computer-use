@@ -50,11 +50,23 @@ Against a running daemon:
 uv run computer-use benchmark report --base-url http://127.0.0.1:8080 --token dev --iterations 5
 ```
 
+To add the live Modal `Sandbox.exec` hot-path comparison, attach to an existing sandbox
+explicitly:
+
+```bash
+uv run computer-use benchmark report \
+  --base-url https://connect.modal.run \
+  --token "$MODAL_CONNECT_TOKEN" \
+  --sandbox-id sb-... \
+  --include-sandbox-exec \
+  --iterations 5
+```
+
 The report emits JSON with action-batch, full screenshot, compressed screenshot, safe metadata,
-structured failures, and explicit `not_measured` entries for Modal/Sandbox.exec cases that are not
-run by this command. It also measures a deterministic move+click action batch and recording
-start/stop latency without including recording bytes, raw paths, artifact URIs, typed text, or
-clipboard text.
+structured failures, and explicit `not_measured` entries for Modal/Sandbox.exec cases unless the
+live comparison is requested. It also measures a deterministic move+click action batch, optional
+`Sandbox.exec` move+click latency, and recording start/stop latency without including recording
+bytes, raw paths, artifact URIs, raw command strings, typed text, or clipboard text.
 
 Measure only the action batching hot path:
 

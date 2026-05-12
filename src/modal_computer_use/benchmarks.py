@@ -23,7 +23,6 @@ from .transports.http import HTTPTransport
 
 BenchmarkMode = Literal["mock-local", "http"]
 FutureBenchmarkStatus = Literal["not_measured", "unsupported"]
-
 ACTION_BATCH_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 10, "y": 10},
     {"type": "cursor_position"},
@@ -36,6 +35,11 @@ MOVE_CLICK_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 24, "y": 24},
     {"type": "click", "x": 24, "y": 24, "button": "left"},
 ]
+SANDBOX_EXEC_MOVE_CLICK_COMMAND: tuple[str, ...] = (
+    "sh",
+    "-lc",
+    "command -v xdotool >/dev/null 2>&1 || exit 127; xdotool mousemove 24 24 click 1",
+)
 
 
 def run_benchmark_report(
@@ -45,12 +49,20 @@ def run_benchmark_report(
     iterations: int,
     base_url: str | None = None,
     warmup_iterations: int = 1,
+    include_sandbox_exec: bool = False,
+    sandbox_exec_runner: Callable[[tuple[str, ...], int], object] | None = None,
+    sandbox_exec_setup_failure: dict[str, Any] | None = None,
+    environment_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
 
     failures: list[dict[str, Any]] = []
     metadata = _collect_metadata(client, failures)
+    if environment_metadata:
+        metadata["environment"] = {
+            key: value for key, value in environment_metadata.items() if value is not None
+        }
     action_batch = run_action_batch_benchmark(
         client=client,
         mode=mode,
@@ -88,6 +100,18 @@ def run_benchmark_report(
         iterations=iterations,
         warmup_iterations=warmup_iterations,
     )
+    if include_sandbox_exec:
+        sandbox_exec = run_sandbox_exec_benchmark(
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            runner=sandbox_exec_runner,
+            setup_failure=sandbox_exec_setup_failure,
+        )
+    else:
+        sandbox_exec = _future_benchmark(
+            "not_measured",
+            "Sandbox.exec comparison requires explicit --include-sandbox-exec live mode",
+        )
     benchmarks = {
         "action_batch": _report_action_batch(action_batch),
         "screenshot_full": screenshot_full,
@@ -98,10 +122,7 @@ def run_benchmark_report(
             "typing benchmark is deferred to avoid adding typed text payloads to this pass",
         ),
         "recording_start_stop": recording_start_stop,
-        "sandbox_exec": _future_benchmark(
-            "not_measured",
-            "Sandbox.exec comparison requires an explicit Modal/live mode and is not run here",
-        ),
+        "sandbox_exec": sandbox_exec,
         "cold_create_to_ready": _future_benchmark(
             "not_measured",
             "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
@@ -120,6 +141,15 @@ def run_benchmark_report(
     failures.extend(
         _benchmark_failures("recording_start_stop", recording_start_stop.get("failures", []))
     )
+    if include_sandbox_exec:
+        failures.extend(_benchmark_failures("sandbox_exec", sandbox_exec.get("failures", [])))
+        if sandbox_exec.get("status") in {"ok", "failed"}:
+            sandbox_exec["comparison"] = _named_case_comparison(
+                "daemon_move_click",
+                move_click,
+                "sandbox_exec_move_click",
+                sandbox_exec,
+            )
     ok = not failures
     return {
         "ok": ok,
@@ -311,6 +341,55 @@ def run_recording_start_stop_benchmark(
     }
 
 
+def run_sandbox_exec_benchmark(
+    *,
+    iterations: int,
+    warmup_iterations: int = 1,
+    runner: Callable[[tuple[str, ...], int], object] | None,
+    setup_failure: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    if setup_failure is not None:
+        failures.append(setup_failure)
+    elif runner is None:
+        failures.append(
+            {
+                "case": "sandbox_exec_move_click",
+                "phase": "setup",
+                "iteration": 0,
+                "type": "RuntimeError",
+                "message": "Sandbox.exec runner was not configured",
+                "code": "sandbox_exec_not_configured",
+            }
+        )
+    if failures:
+        result = _case_result("sandbox_exec_move_click", iterations, [], failures)
+    else:
+        benchmark = _SandboxExecBenchmark(runner)
+        samples = _measure_case(
+            name="sandbox_exec_move_click",
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            operation=benchmark.run,
+            failures=failures,
+        )
+        result = _case_result("sandbox_exec_move_click", iterations, samples, failures)
+    result.update(
+        {
+            "command": {
+                "tool": "xdotool",
+                "action_count": len(MOVE_CLICK_ACTIONS),
+                "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_ACTIONS],
+                "timeout_seconds": 10,
+            }
+        }
+    )
+    return result
+
+
 def _with_mock_local_client(callback: Callable[[DaemonClient], dict[str, Any]]) -> dict[str, Any]:
     with TemporaryDirectory(prefix="modal-computer-use-benchmark-") as temp_dir:
         root = Path(temp_dir)
@@ -401,6 +480,51 @@ class _RecordingStartStopBenchmark:
         recording_id = _recording_id(started)
         stopped = self._client.post_json(f"/v1/recordings/{recording_id}/stop")
         return _safe_recording_result(stopped)
+
+
+class _SandboxExecBenchmark:
+    def __init__(self, runner: Callable[[tuple[str, ...], int], object]) -> None:
+        self._runner = runner
+
+    def run(self) -> None:
+        try:
+            process = self._runner(SANDBOX_EXEC_MOVE_CLICK_COMMAND, 10)
+        except Exception as exc:
+            if _is_timeout_exception(exc):
+                raise _SandboxExecBenchmarkError(
+                    "sandbox_exec_timeout",
+                    "Sandbox.exec command timed out",
+                ) from exc
+            raise _SandboxExecBenchmarkError(
+                "sandbox_exec_start_failed",
+                "Sandbox.exec failed before returning a process handle",
+            ) from exc
+        try:
+            wait = getattr(process, "wait", None)
+            wait_result = wait() if callable(wait) else None
+        except Exception as exc:
+            if not _is_timeout_exception(exc):
+                raise _SandboxExecBenchmarkError(
+                    "sandbox_exec_wait_failed",
+                    "Sandbox.exec process wait failed",
+                ) from exc
+            raise _SandboxExecBenchmarkError(
+                "sandbox_exec_timeout",
+                "Sandbox.exec command timed out",
+            ) from exc
+        return_code = getattr(process, "returncode", None)
+        if return_code is None and isinstance(wait_result, int):
+            return_code = wait_result
+        if return_code == 127:
+            raise _SandboxExecBenchmarkError(
+                "sandbox_exec_missing_tool",
+                "Sandbox.exec command could not find xdotool in the sandbox",
+            )
+        if return_code not in (None, 0):
+            raise _SandboxExecBenchmarkError(
+                "sandbox_exec_nonzero_exit",
+                "Sandbox.exec command exited nonzero",
+            )
 
 
 def _measure_case(
@@ -573,6 +697,32 @@ def _comparison(batch_case: dict[str, Any], separate_case: dict[str, Any]) -> di
     }
 
 
+def _named_case_comparison(
+    left_name: str,
+    left_case: dict[str, Any],
+    right_name: str,
+    right_case: dict[str, Any],
+) -> dict[str, Any]:
+    left_mean = left_case["summary_ms"]["mean"]
+    right_mean = right_case["summary_ms"]["mean"]
+    if left_mean in (None, 0) or right_mean is None:
+        return {
+            "status": "not_available",
+            "left": left_name,
+            "right": right_name,
+            "mean_speedup": None,
+            "mean_delta_ms": None,
+        }
+    return {
+        "status": "measured",
+        "left": left_name,
+        "right": right_name,
+        "mean_speedup": right_mean / left_mean,
+        "mean_delta_ms": right_mean - left_mean,
+        "left_faster": left_mean < right_mean,
+    }
+
+
 def _collect_metadata(client: DaemonClient, failures: list[dict[str, Any]]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     try:
@@ -704,6 +854,18 @@ def _failure(
         failure["status_code"] = exc.status_code
         failure["code"] = exc.code
         failure["details"] = exc.details
+    elif isinstance(exc, _SandboxExecBenchmarkError):
+        failure["code"] = exc.code
     elif isinstance(exc, httpx.HTTPError):
         failure["code"] = "http_error"
     return failure
+
+
+def _is_timeout_exception(exc: Exception) -> bool:
+    return isinstance(exc, TimeoutError) or "Timeout" in type(exc).__name__
+
+
+class _SandboxExecBenchmarkError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code

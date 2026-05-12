@@ -6,6 +6,7 @@ from typing import ClassVar
 from modal_computer_use import ComputerConfig, ComputerSandbox
 from modal_computer_use.config import BrowserConfig
 from modal_computer_use.registry import SandboxRegistry
+from modal_computer_use.sandbox import modal_sandbox_exec_runner_from_id
 
 
 class FakeProbe:
@@ -55,6 +56,9 @@ class FakeSandboxObject:
     def create_connect_token(self, *, user_metadata: dict[str, str]) -> FakeConnectToken:
         assert user_metadata["sdk"] == "modal-computer-use"
         return FakeConnectToken()
+
+    def exec(self, *args: str, timeout: int | None = None) -> object:
+        return SimpleNamespace(args=args, timeout=timeout, returncode=0)
 
     def tunnels(self) -> dict[int, object]:
         return {6080: SimpleNamespace(url="https://novnc.example")}
@@ -168,6 +172,18 @@ def test_attach_by_run_id_lists_by_tags(monkeypatch) -> None:
     ComputerSandbox.attach(run_id="run-123")
 
     assert FakeSandbox.list_calls == [{"computer-use.run_id": "run-123"}]
+
+
+def test_modal_sandbox_exec_runner_attaches_by_id(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    runner = modal_sandbox_exec_runner_from_id("sb-123")
+    process = runner(("xdotool", "mousemove", "24", "24"), 10)
+
+    assert FakeSandbox.from_id_calls == ["sb-123"]
+    assert process.args == ("xdotool", "mousemove", "24", "24")
+    assert process.timeout == 10
+    assert process.returncode == 0
 
 
 def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:

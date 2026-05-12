@@ -12,6 +12,8 @@ from .benchmarks import (
     run_benchmark_report_mock_local,
 )
 from .client import DaemonClient
+from .errors import ModalNotInstalledError, SandboxUnavailableError
+from .sandbox import modal_sandbox_exec_runner_from_id
 from .tracing import ComputerTrace
 
 
@@ -46,11 +48,29 @@ def main(argv: list[str] | None = None) -> int:
     report_mode.add_argument("--base-url")
     report_mode.add_argument("--mock-local", action="store_true")
     report_parser.add_argument("--token")
+    report_parser.add_argument(
+        "--include-sandbox-exec",
+        action="store_true",
+        help="also compare the daemon move+click hot path with Modal Sandbox.exec",
+    )
+    report_parser.add_argument("--sandbox-id")
+    report_parser.add_argument("--modal-region")
+    report_parser.add_argument("--resource-profile")
+    report_parser.add_argument("--browser")
+    report_parser.add_argument("--gpu")
+    report_parser.add_argument("--image-variant")
     report_parser.add_argument("--iterations", type=_positive_int, default=5)
     report_parser.add_argument("--output", type=Path)
     report_parser.add_argument("--json", action="store_true", default=True)
 
     args = parser.parse_args(argv)
+    if args.command == "benchmark" and args.benchmark_command == "report":
+        if args.mock_local and args.include_sandbox_exec:
+            report_parser.error(
+                "--include-sandbox-exec requires --base-url and an existing --sandbox-id"
+            )
+        if args.include_sandbox_exec and not args.sandbox_id:
+            report_parser.error("--include-sandbox-exec requires --sandbox-id")
     if args.command == "trace" and args.trace_command == "validate":
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
@@ -94,6 +114,13 @@ def _benchmark_report(args: argparse.Namespace) -> int:
     if args.mock_local:
         result = run_benchmark_report_mock_local(iterations=args.iterations)
     else:
+        sandbox_exec_runner = None
+        sandbox_exec_setup_failure = None
+        if args.include_sandbox_exec:
+            try:
+                sandbox_exec_runner = modal_sandbox_exec_runner_from_id(args.sandbox_id)
+            except Exception as exc:
+                sandbox_exec_setup_failure = _sandbox_exec_setup_failure(exc)
         client = DaemonClient(args.base_url, token=args.token)
         try:
             result = run_benchmark_report(
@@ -101,6 +128,10 @@ def _benchmark_report(args: argparse.Namespace) -> int:
                 mode="http",
                 iterations=args.iterations,
                 base_url=args.base_url,
+                include_sandbox_exec=args.include_sandbox_exec,
+                sandbox_exec_runner=sandbox_exec_runner,
+                sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+                environment_metadata=_benchmark_environment_metadata(args),
             )
         finally:
             client.close()
@@ -125,6 +156,38 @@ def _print_json(data: dict[str, Any]) -> None:
 
 def _json_string(data: dict[str, Any]) -> str:
     return json.dumps(data, indent=2, sort_keys=True)
+
+
+def _sandbox_exec_setup_failure(exc: Exception) -> dict[str, Any]:
+    code = "sandbox_exec_attach_failed"
+    message = "could not attach to the requested Modal Sandbox"
+    if isinstance(exc, ModalNotInstalledError):
+        code = "modal_not_installed"
+        message = str(exc)
+    elif isinstance(exc, SandboxUnavailableError):
+        code = "sandbox_unavailable"
+        message = str(exc)
+    elif "NotFound" in type(exc).__name__:
+        code = "sandbox_not_found"
+        message = "could not find the requested Modal Sandbox"
+    return {
+        "case": "sandbox_exec_move_click",
+        "phase": "setup",
+        "iteration": 0,
+        "type": type(exc).__name__,
+        "message": message,
+        "code": code,
+    }
+
+
+def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, str | None]:
+    return {
+        "modal_region": args.modal_region,
+        "resource_profile": args.resource_profile,
+        "browser": args.browser,
+        "gpu": args.gpu,
+        "image_variant": args.image_variant,
+    }
 
 
 if __name__ == "__main__":

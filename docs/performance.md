@@ -25,10 +25,30 @@ uv run computer-use benchmark report \
   --iterations 5
 ```
 
+To compare the daemon hot path with live Modal `Sandbox.exec`, pass an existing sandbox ID
+explicitly:
+
+```bash
+uv run computer-use benchmark report \
+  --base-url https://connect.modal.run \
+  --token "$MODAL_CONNECT_TOKEN" \
+  --sandbox-id sb-... \
+  --include-sandbox-exec \
+  --iterations 5
+```
+
+This mode attaches to the supplied sandbox only; it does not create Modal resources. The
+`Sandbox.exec` case runs a safe `xdotool` move+click command and records timing, action count,
+tool name, and structured failures. It does not print raw shell strings, stdout, stderr, tokens,
+or noVNC URLs. Missing Modal SDK, failed attach, missing desktop tool, timeout, and nonzero exit
+are reported distinctly, and the command exits nonzero once the comparison is explicitly
+requested and fails.
+
 The report emits JSON with top-level run metadata, safe daemon version/capability metadata,
 benchmark entries keyed by name, raw millisecond samples, timing summaries, screenshot byte-size
 summaries, structured failures, and explicit `not_measured` entries for future Modal/Sandbox.exec
-cases. Use `--output benchmark-report.json` to also write the same JSON to disk.
+cases unless live comparison is requested. Use `--output benchmark-report.json` to also write the
+same JSON to disk.
 
 The current report includes:
 
@@ -37,11 +57,13 @@ The current report includes:
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
 - `recording_start_stop`: recording start and stop call latency plus safe file metadata.
+- `sandbox_exec`: explicit live Modal `Sandbox.exec` comparison for the same move+click hot path,
+  or `not_measured` when not requested.
 
 The report never includes raw screenshot bytes, base64 image payloads, bearer tokens, noVNC URLs,
-typed text, clipboard text, recording bytes, raw recording paths, artifact URIs, or ffmpeg argv.
-Any failed warmup or measured iteration is included under `failures`, partial successful samples
-remain in the report, and the command exits nonzero.
+typed text, clipboard text, recording bytes, raw recording paths, artifact URIs, raw command
+strings, stdout, stderr, or ffmpeg argv. Any failed warmup or measured iteration is included under
+`failures`, partial successful samples remain in the report, and the command exits nonzero.
 
 ## Benchmark action batching
 

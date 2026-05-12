@@ -31,6 +31,24 @@ from .namespaces import (
 from .state import compute_config_hash, default_tags, new_run_id
 
 
+def modal_sandbox_exec_runner_from_id(sandbox_id: str):
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "Sandbox.exec benchmark requires the modal extra, for example "
+            "`uv sync --extra modal` in this repository or "
+            "`uv add 'modal-computer-use[modal]'` downstream"
+        ) from exc
+
+    sandbox = modal.Sandbox.from_id(sandbox_id)
+
+    def run(command: tuple[str, ...], timeout: int) -> object:
+        return sandbox.exec(*command, timeout=timeout)
+
+    return run
+
+
 class ComputerSandbox:
     def __init__(
         self,
