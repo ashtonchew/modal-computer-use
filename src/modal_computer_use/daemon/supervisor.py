@@ -23,6 +23,7 @@ class Supervisor:
         self.names = ["xvfb", "window_manager", "x11vnc", "novnc"]
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.log_dir = settings.artifacts_dir / "logs"
+        self.commands: dict[str, list[str]] = {}
 
     async def start(self) -> None:
         if self.settings.backend == "mock":
@@ -78,12 +79,20 @@ class Supervisor:
 
     async def restart(self, name: str | None = None) -> None:
         if name:
+            if name not in self.names:
+                raise ValueError(f"unknown process: {name}")
             self.restart_counts[name] = self.restart_counts.get(name, 0) + 1
             process = self.processes.get(name)
             if process is not None and process.poll() is None:
                 process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
             if self.settings.backend != "mock":
-                await self.start()
+                command = self.commands.get(name)
+                if command is not None:
+                    self._start_process(name, command)
         else:
             for process_name in self.names:
                 self.restart_counts[process_name] = self.restart_counts.get(process_name, 0) + 1
@@ -118,6 +127,7 @@ class Supervisor:
         return self._tail(self.log_dir / f"{name}.stderr.log", tail)
 
     def _start_process(self, name: str, command: list[str]) -> None:
+        self.commands[name] = command
         existing = self.processes.get(name)
         if existing is not None and existing.poll() is None:
             return

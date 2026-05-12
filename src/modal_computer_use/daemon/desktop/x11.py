@@ -386,7 +386,7 @@ class X11DesktopBackend(MockDesktopBackend):
     async def ready(self) -> tuple[bool, list[str]]:
         missing = [
             tool
-            for tool in ("xdotool", "wmctrl", "maim", "xclip", "xsel", "xdpyinfo")
+            for tool in ("xdotool", "wmctrl", "maim", "xclip", "xsel", "xdpyinfo", "ffmpeg")
             if shutil.which(tool) is None
         ]
         if missing:
@@ -394,6 +394,17 @@ class X11DesktopBackend(MockDesktopBackend):
         result = await self._run("xdpyinfo", timeout=2, check=False)
         if result.returncode != 0:
             return False, ["xdpyinfo could not reach display"]
+        wm = await self._run("wmctrl", "-m", timeout=2, check=False)
+        if wm.returncode != 0:
+            return False, ["window manager is not responding"]
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+            temp_path = Path(handle.name)
+        try:
+            shot = await self._run("maim", str(temp_path), timeout=3, check=False)
+            if shot.returncode != 0 or not temp_path.exists() or temp_path.stat().st_size == 0:
+                return False, ["screenshot capture failed"]
+        finally:
+            temp_path.unlink(missing_ok=True)
         return True, []
 
     async def _run(
