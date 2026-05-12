@@ -52,7 +52,9 @@ uv run computer-use benchmark report --base-url http://127.0.0.1:8080 --token de
 
 The report emits JSON with action-batch, full screenshot, compressed screenshot, safe metadata,
 structured failures, and explicit `not_measured` entries for Modal/Sandbox.exec cases that are not
-run by this command.
+run by this command. It also measures a deterministic move+click action batch and recording
+start/stop latency without including recording bytes, raw paths, artifact URIs, typed text, or
+clipboard text.
 
 Measure only the action batching hot path:
 

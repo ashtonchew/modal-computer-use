@@ -32,6 +32,11 @@ ACTION_BATCH_ACTIONS: list[dict[str, Any]] = [
     {"type": "cursor_position"},
 ]
 
+MOVE_CLICK_ACTIONS: list[dict[str, Any]] = [
+    {"type": "move", "x": 24, "y": 24},
+    {"type": "click", "x": 24, "y": 24, "button": "left"},
+]
+
 
 def run_benchmark_report(
     *,
@@ -73,22 +78,26 @@ def run_benchmark_report(
         iterations=iterations,
         warmup_iterations=warmup_iterations,
     )
+    move_click = run_move_click_benchmark(
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
+    recording_start_stop = run_recording_start_stop_benchmark(
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
     benchmarks = {
         "action_batch": _report_action_batch(action_batch),
         "screenshot_full": screenshot_full,
         "screenshot_compressed": screenshot_compressed,
-        "move_click": _future_benchmark(
-            "not_measured",
-            "move+click benchmark will be added after the report surface is stable",
-        ),
+        "move_click": move_click,
         "type_100_chars": _future_benchmark(
             "not_measured",
             "typing benchmark is deferred to avoid adding typed text payloads to this pass",
         ),
-        "recording_start_stop": _future_benchmark(
-            "not_measured",
-            "recording benchmark is deferred until live file-size validation is covered",
-        ),
+        "recording_start_stop": recording_start_stop,
         "sandbox_exec": _future_benchmark(
             "not_measured",
             "Sandbox.exec comparison requires an explicit Modal/live mode and is not run here",
@@ -106,6 +115,10 @@ def run_benchmark_report(
     failures.extend(_benchmark_failures("screenshot_full", screenshot_full.get("failures", [])))
     failures.extend(
         _benchmark_failures("screenshot_compressed", screenshot_compressed.get("failures", []))
+    )
+    failures.extend(_benchmark_failures("move_click", move_click.get("failures", [])))
+    failures.extend(
+        _benchmark_failures("recording_start_stop", recording_start_stop.get("failures", []))
     )
     ok = not failures
     return {
@@ -239,6 +252,65 @@ def run_screenshot_benchmark(
     return result
 
 
+def run_move_click_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _MoveClickBenchmark(client)
+    samples = _measure_case(
+        name="move_click",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _case_result("move_click", iterations, samples, failures)
+    result.update(
+        {
+            "action_count": len(MOVE_CLICK_ACTIONS),
+            "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_ACTIONS],
+        }
+    )
+    return result
+
+
+def run_recording_start_stop_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _RecordingStartStopBenchmark(client)
+    start_samples, stop_samples, observations = _measure_recording_start_stop(
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        benchmark=benchmark,
+        failures=failures,
+    )
+    return {
+        "status": "failed" if failures else "ok",
+        "iterations": iterations,
+        "successful_iterations": len(observations),
+        "start_samples_ms": start_samples,
+        "stop_samples_ms": stop_samples,
+        "start_summary_ms": _summary(start_samples),
+        "stop_summary_ms": _summary(stop_samples),
+        "request": {"format": "mp4", "fps": 5},
+        "last_result": observations[-1] if observations else None,
+        "failures": failures,
+    }
+
+
 def _with_mock_local_client(callback: Callable[[DaemonClient], dict[str, Any]]) -> dict[str, Any]:
     with TemporaryDirectory(prefix="modal-computer-use-benchmark-") as temp_dir:
         root = Path(temp_dir)
@@ -289,6 +361,18 @@ class _ActionBatchBenchmark:
             _ensure_ok_result(result)
 
 
+class _MoveClickBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+    def run(self) -> None:
+        result = self._client.post_json(
+            "/v1/actions/run",
+            json={"actions": MOVE_CLICK_ACTIONS, "source": "benchmark"},
+        )
+        _ensure_ok_result(result)
+
+
 class _ScreenshotBenchmark:
     def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
         self._client = client
@@ -297,6 +381,26 @@ class _ScreenshotBenchmark:
     def run(self) -> dict[str, Any]:
         result = self._client.post_json("/v1/screenshots/full", json=self._request)
         return _safe_screenshot_result(result)
+
+
+class _RecordingStartStopBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+    def run(self) -> dict[str, Any]:
+        started = self.start()
+        return self.stop(started)
+
+    def start(self) -> Any:
+        return self._client.post_json(
+            "/v1/recordings",
+            json={"name": "benchmark", "fps": 5, "format": "mp4"},
+        )
+
+    def stop(self, started: Any) -> dict[str, Any]:
+        recording_id = _recording_id(started)
+        stopped = self._client.post_json(f"/v1/recordings/{recording_id}/stop")
+        return _safe_recording_result(stopped)
 
 
 def _measure_case(
@@ -315,6 +419,67 @@ def _measure_case(
         failures=failures,
     )
     return samples
+
+
+def _measure_recording_start_stop(
+    *,
+    iterations: int,
+    warmup_iterations: int,
+    benchmark: _RecordingStartStopBenchmark,
+    failures: list[dict[str, Any]],
+) -> tuple[list[float], list[float], list[dict[str, Any]]]:
+    start_samples: list[float] = []
+    stop_samples: list[float] = []
+    observations: list[dict[str, Any]] = []
+    for warmup_index in range(warmup_iterations):
+        try:
+            benchmark.run()
+        except Exception as exc:
+            failures.append(
+                _failure(
+                    "recording_start_stop",
+                    phase="warmup",
+                    iteration=warmup_index,
+                    exc=exc,
+                )
+            )
+            return start_samples, stop_samples, observations
+    for iteration in range(iterations):
+        start = time.perf_counter()
+        try:
+            started = benchmark.start()
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            failures.append(
+                _failure(
+                    "recording_start",
+                    phase="measure",
+                    iteration=iteration,
+                    exc=exc,
+                    elapsed_ms=elapsed_ms,
+                )
+            )
+            continue
+        start_samples.append((time.perf_counter() - start) * 1000)
+
+        stop = time.perf_counter()
+        try:
+            observation = benchmark.stop(started)
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - stop) * 1000
+            failures.append(
+                _failure(
+                    "recording_stop",
+                    phase="measure",
+                    iteration=iteration,
+                    exc=exc,
+                    elapsed_ms=elapsed_ms,
+                )
+            )
+            continue
+        stop_samples.append((time.perf_counter() - stop) * 1000)
+        observations.append(observation)
+    return start_samples, stop_samples, observations
 
 
 def _measure_observed_case(
@@ -456,6 +621,13 @@ def _safe_screenshot_request(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _safe_action_metadata(action: dict[str, Any]) -> dict[str, Any]:
+    metadata = {"type": action["type"]}
+    if "button" in action:
+        metadata["button"] = action["button"]
+    return metadata
+
+
 def _safe_screenshot_result(result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise RuntimeError("daemon returned a non-object screenshot response")
@@ -471,6 +643,36 @@ def _safe_screenshot_result(result: Any) -> dict[str, Any]:
         "storage": "artifact" if result.get("artifact_uri") else "inline",
         "artifact_backed": result.get("artifact_uri") is not None,
         "cursor_visible": result.get("cursor_visible"),
+    }
+
+
+def _recording_id(result: Any) -> str:
+    if not isinstance(result, dict):
+        raise RuntimeError("daemon returned a non-object recording start response")
+    recording_id = result.get("id")
+    if not isinstance(recording_id, str) or not recording_id:
+        raise RuntimeError("daemon recording start response missing id")
+    return recording_id
+
+
+def _safe_recording_result(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise RuntimeError("daemon returned a non-object recording stop response")
+    required = ("status", "format", "size_bytes")
+    missing = [key for key in required if key not in result]
+    if missing:
+        raise RuntimeError(f"daemon recording stop response missing fields: {', '.join(missing)}")
+    if result["status"] != "stopped":
+        raise RuntimeError(f"daemon recording status was {result['status']}")
+    return {
+        "status": result["status"],
+        "format": result["format"],
+        "fps": result.get("fps"),
+        "size_bytes": result["size_bytes"],
+        "artifact_backed": result.get("artifact_uri") is not None,
+        "duration_seconds": result.get("duration_seconds"),
+        "stop_method": result.get("stop_method"),
+        "return_code": result.get("return_code"),
     }
 
 

@@ -28,17 +28,20 @@ uv run computer-use benchmark report \
 The report emits JSON with top-level run metadata, safe daemon version/capability metadata,
 benchmark entries keyed by name, raw millisecond samples, timing summaries, screenshot byte-size
 summaries, structured failures, and explicit `not_measured` entries for future Modal/Sandbox.exec
-or recording cases. Use `--output benchmark-report.json` to also write the same JSON to disk.
+cases. Use `--output benchmark-report.json` to also write the same JSON to disk.
 
 The current report includes:
 
 - `action_batch`: one five-action batch request compared with five separate action requests.
 - `screenshot_full`: full-screen PNG screenshot latency and encoded byte size.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
+- `move_click`: one deterministic move+click action batch.
+- `recording_start_stop`: recording start and stop call latency plus safe file metadata.
 
 The report never includes raw screenshot bytes, base64 image payloads, bearer tokens, noVNC URLs,
-typed text, or clipboard text. Any failed warmup or measured iteration is included under
-`failures`, partial successful samples remain in the report, and the command exits nonzero.
+typed text, clipboard text, recording bytes, raw recording paths, artifact URIs, or ffmpeg argv.
+Any failed warmup or measured iteration is included under `failures`, partial successful samples
+remain in the report, and the command exits nonzero.
 
 ## Benchmark action batching
 

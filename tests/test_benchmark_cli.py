@@ -84,7 +84,7 @@ def test_benchmark_action_batch_non_ok_response_is_structured() -> None:
     class FailingClient:
         base_url = "http://testserver"
 
-        def post_json(self, path: str, *, json, headers=None):
+        def post_json(self, path: str, *, json=None, headers=None):
             assert path == "/v1/actions/run"
             assert headers is None
             return {"ok": False, "results": []}
@@ -120,14 +120,29 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert len(payload["benchmarks"]["action_batch"]["cases"]["batch_5_actions"]["samples_ms"]) == 2
     assert len(payload["benchmarks"]["screenshot_full"]["samples_ms"]) == 2
     assert len(payload["benchmarks"]["screenshot_compressed"]["samples_ms"]) == 2
+    assert len(payload["benchmarks"]["move_click"]["samples_ms"]) == 2
+    assert payload["benchmarks"]["move_click"]["summary_ms"]["mean"] is not None
+    assert payload["benchmarks"]["move_click"]["action_count"] == 2
+    recording = payload["benchmarks"]["recording_start_stop"]
+    assert len(recording["start_samples_ms"]) == 2
+    assert len(recording["stop_samples_ms"]) == 2
+    assert recording["start_summary_ms"]["mean"] is not None
+    assert recording["stop_summary_ms"]["p95"] is not None
+    assert recording["last_result"]["status"] == "stopped"
+    assert recording["last_result"]["format"] == "mp4"
+    assert recording["last_result"]["size_bytes"] > 0
+    assert recording["last_result"]["duration_seconds"] is not None
     assert payload["benchmarks"]["screenshot_full"]["last_result"]["size_bytes"] > 0
     assert payload["benchmarks"]["screenshot_compressed"]["summary_bytes"]["mean"] is not None
     assert payload["benchmarks"]["sandbox_exec"]["status"] == "not_measured"
-    assert payload["benchmarks"]["recording_start_stop"]["status"] == "not_measured"
     assert payload["benchmarks"]["cold_create_to_ready"]["status"] == "not_measured"
+    assert payload["benchmarks"]["type_100_chars"]["status"] == "not_measured"
     assert payload["failures"] == []
     assert "data_base64" not in captured.out
     assert '"bytes"' not in captured.out
+    assert '"path"' not in captured.out
+    assert "artifact://" not in captured.out
+    assert "mock recording" not in captured.out
     assert "hello" not in captured.out
     assert "clipboard text" not in captured.out.lower()
     assert "dev-token" not in captured.out
@@ -222,6 +237,7 @@ def test_benchmark_report_failure_is_structured(monkeypatch, capsys) -> None:
 def test_benchmark_report_screenshot_failure_is_structured() -> None:
     class FailingClient:
         base_url = "http://testserver"
+        recording_id = "rec_test"
 
         def get_json(self, path: str, *, params=None):
             if path == "/v1/version":
@@ -230,11 +246,15 @@ def test_benchmark_report_screenshot_failure_is_structured() -> None:
                 return {"image_profile": "standard"}
             raise AssertionError(path)
 
-        def post_json(self, path: str, *, json, headers=None):
+        def post_json(self, path: str, *, json=None, headers=None):
             if path == "/v1/actions/run":
                 return {"ok": True, "results": [{"ok": True}]}
             if path == "/v1/screenshots/full":
                 return {"format": "png", "width": 10}
+            if path == "/v1/recordings":
+                return {"id": self.recording_id}
+            if path == f"/v1/recordings/{self.recording_id}/stop":
+                return {"status": "stopped", "format": "mp4", "size_bytes": 100}
             raise AssertionError(path)
 
     payload = run_benchmark_report(
@@ -249,3 +269,78 @@ def test_benchmark_report_screenshot_failure_is_structured() -> None:
     assert payload["benchmarks"]["screenshot_full"]["status"] == "failed"
     assert payload["failures"][0]["benchmark"] == "screenshot_full"
     assert payload["failures"][0]["type"] == "RuntimeError"
+
+
+def test_benchmark_report_move_click_failure_is_structured() -> None:
+    class FailingMoveClient:
+        base_url = "http://testserver"
+        recording_id = "rec_test"
+
+        def get_json(self, path: str, *, params=None):
+            if path == "/v1/version":
+                return {"daemon_version": "test"}
+            if path == "/v1/capabilities":
+                return {"image_profile": "standard"}
+            raise AssertionError(path)
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            if path == "/v1/actions/run":
+                if len(json["actions"]) == 2:
+                    return {"ok": False, "results": []}
+                return {"ok": True, "results": [{"ok": True}]}
+            if path == "/v1/screenshots/full":
+                return {"format": "png", "width": 10, "height": 10, "size_bytes": 100}
+            if path == "/v1/recordings":
+                return {"id": self.recording_id}
+            if path == f"/v1/recordings/{self.recording_id}/stop":
+                return {"status": "stopped", "format": "mp4", "size_bytes": 100}
+            raise AssertionError(path)
+
+    payload = run_benchmark_report(
+        client=FailingMoveClient(),
+        mode="mock-local",
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["ok"] is False
+    assert payload["benchmarks"]["move_click"]["status"] == "failed"
+    assert payload["failures"][0]["benchmark"] == "move_click"
+    assert payload["failures"][0]["case"] == "move_click"
+
+
+def test_benchmark_report_recording_failure_is_structured() -> None:
+    class FailingRecordingClient:
+        base_url = "http://testserver"
+
+        def get_json(self, path: str, *, params=None):
+            if path == "/v1/version":
+                return {"daemon_version": "test"}
+            if path == "/v1/capabilities":
+                return {"image_profile": "standard"}
+            raise AssertionError(path)
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            if path == "/v1/actions/run":
+                return {"ok": True, "results": [{"ok": True}]}
+            if path == "/v1/screenshots/full":
+                return {"format": "png", "width": 10, "height": 10, "size_bytes": 100}
+            if path == "/v1/recordings":
+                return {"id": "rec_test"}
+            if path == "/v1/recordings/rec_test/stop":
+                return {"status": "failed", "format": "mp4", "size_bytes": 0}
+            raise AssertionError(path)
+
+    payload = run_benchmark_report(
+        client=FailingRecordingClient(),
+        mode="mock-local",
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["ok"] is False
+    assert payload["benchmarks"]["recording_start_stop"]["status"] == "failed"
+    assert payload["failures"][0]["benchmark"] == "recording_start_stop"
+    assert payload["failures"][0]["case"] == "recording_stop"
+    assert payload["failures"][0]["type"] == "RuntimeError"
+    assert payload["failures"][0]["message"] == "daemon recording status was failed"
