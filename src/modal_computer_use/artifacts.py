@@ -4,6 +4,8 @@ import hashlib
 import json
 import mimetypes
 import os
+import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -49,9 +51,16 @@ def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: boo
 
 
 class ArtifactStore:
-    def __init__(self, root: str | Path, *, persistent: bool = False) -> None:
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        persistent: bool = False,
+        sync_runner: Callable[[str], subprocess.CompletedProcess[str]] | None = None,
+    ) -> None:
         self.root = Path(root)
         self.persistent = persistent
+        self._sync_runner = sync_runner or _run_mountpoint_sync
         self.root.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -186,9 +195,34 @@ class ArtifactStore:
         return entries
 
     def sync(self) -> ArtifactSyncResult:
+        if self.persistent:
+            result = self._sync_runner(str(self.root))
+            if result.returncode != 0:
+                return ArtifactSyncResult(
+                    ok=False,
+                    persistent=True,
+                    synced_paths=[],
+                    message="Modal Volume v2 sync failed inside the sandbox",
+                )
+            return ArtifactSyncResult(
+                ok=True,
+                persistent=True,
+                synced_paths=[self.root.as_posix()],
+                message="Modal Volume v2 mountpoint synced",
+            )
         return ArtifactSyncResult(
             ok=True,
             persistent=self.persistent,
             synced_paths=[],
             message="artifact sync is a no-op without configured Modal Volume semantics",
         )
+
+
+def _run_mountpoint_sync(path: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - fixed executable with daemon-owned mountpoint.
+        ["/bin/sync", path],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )

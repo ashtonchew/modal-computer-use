@@ -370,6 +370,29 @@ class ComputerSandbox:
             )
         return self._sandbox.snapshot_filesystem()
 
+    def snapshot_directory(self, path: str = "/home/desktop/artifacts") -> object:
+        """Snapshot a directory from a Modal-backed sandbox as a Modal Image.
+
+        Modal's current documented restore path for Sandbox directory snapshots is
+        `snapshot_directory(path)` followed by `mount_image(path, snapshot)` on a
+        fresh sandbox. Prefer this helper for artifacts, project files, and other
+        directory-scoped state.
+        """
+        if self._sandbox is None or not hasattr(self._sandbox, "snapshot_directory"):
+            raise SandboxUnavailableError(
+                "directory snapshots require a Modal-backed sandbox with "
+                "Sandbox.snapshot_directory support"
+            )
+        return self._sandbox.snapshot_directory(path)
+
+    def mount_image(self, path: str, image: object) -> None:
+        """Mount a Modal Image into a running Modal-backed sandbox."""
+        if self._sandbox is None or not hasattr(self._sandbox, "mount_image"):
+            raise SandboxUnavailableError(
+                "mount_image requires a Modal-backed sandbox with Sandbox.mount_image support"
+            )
+        self._sandbox.mount_image(path, image)
+
 
 def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, str]:
     env = {
@@ -380,6 +403,7 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_DISPLAY_DEPTH": str(config.desktop.display_depth),
         "COMPUTER_USE_RECORDINGS_DIR": config.storage.recordings_dir,
         "COMPUTER_USE_ARTIFACTS_DIR": config.storage.artifacts_dir,
+        "COMPUTER_USE_ARTIFACTS_PERSISTENT": str(config.storage.persist_artifacts).lower(),
         "COMPUTER_USE_TRACE_DIR": config.storage.trace_dir,
         "COMPUTER_USE_WINDOW_MANAGER": config.desktop.window_manager,
         "COMPUTER_USE_IMAGE_PROFILE": config.resources.profile,
@@ -395,6 +419,7 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_POST_ACTION_DELAY_MS": str(config.actions.post_action_delay_ms),
         "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS": str(config.actions.default_action_timeout_ms),
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
+        "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
         "COMPUTER_USE_VNC_PASSWORD": _secrets.token_urlsafe(24) if vnc_mode != "off" else "",

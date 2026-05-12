@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -90,3 +92,174 @@ def test_modal_novnc_view_only_smoke() -> None:
     finally:
         computer.terminate()
         computer.detach()
+
+
+def _skip_without_v1_smoke() -> None:
+    if os.getenv("MODAL_COMPUTER_USE_RUN_V1_SMOKE") != "1":
+        pytest.skip("Set MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 to run protected v1 Modal smoke")
+
+
+@pytest.mark.modal
+def test_modal_manager_attach_reuse_cleanup_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager
+    from modal_computer_use.errors import ConfigConflictError
+
+    suffix = uuid.uuid4().hex[:10]
+    run_id = f"mcu-v1-manager-{suffix}"
+    name = f"mcu-v1-manager-{suffix}"
+    owner = f"mcu-v1-owner-{suffix}"
+    manager = ComputerSandboxManager()
+    computer = None
+    cleaned_up = False
+
+    try:
+        config = ComputerConfig(run_id=run_id)
+        computer = manager.create(
+            config=config,
+            name=name,
+            owner=owner,
+            tags={"computer-use.smoke": "v1-manager"},
+        )
+        metadata = computer.metadata()
+        assert metadata is not None
+        assert metadata.sandbox_id
+
+        listed = manager.list(owner=owner)
+        assert any(ref.sandbox_id == metadata.sandbox_id for ref in listed)
+        found = manager.find_by_run_id(run_id)
+        assert found is not None
+        assert found.sandbox_id == metadata.sandbox_id
+
+        attached_by_id = ComputerSandbox.attach(sandbox_id=metadata.sandbox_id, wait=True)
+        try:
+            assert attached_by_id.status().ready is True
+        finally:
+            attached_by_id.detach()
+
+        attached_by_run_id = ComputerSandbox.attach(run_id=run_id, wait=True)
+        try:
+            assert attached_by_run_id.status().ready is True
+        finally:
+            attached_by_run_id.detach()
+
+        reused = manager.attach_or_create(config=config, wait=True)
+        try:
+            assert reused.metadata() is not None
+            assert reused.metadata().sandbox_id == metadata.sandbox_id
+        finally:
+            reused.detach()
+
+        mismatch = ComputerConfig(run_id=run_id)
+        mismatch.desktop.resolution = (1280, 720)
+        with pytest.raises(ConfigConflictError):
+            manager.attach_or_create(config=mismatch, wait=False)
+
+        dry_run = manager.cleanup_expired(
+            ttl_seconds=1,
+            owner=owner,
+            dry_run=True,
+            now=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        assert any(item.sandbox_id == metadata.sandbox_id for item in dry_run.candidates)
+
+        cleanup = manager.cleanup_expired(
+            ttl_seconds=1,
+            owner=owner,
+            dry_run=False,
+            now=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        cleaned_up = any(item.sandbox_id == metadata.sandbox_id for item in cleanup.candidates)
+        assert cleaned_up is True
+    finally:
+        if computer is not None:
+            if not cleaned_up:
+                computer.terminate()
+            computer.detach()
+
+
+@pytest.mark.modal
+def test_modal_volume_artifact_sync_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    import modal
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use.config import StorageConfig
+
+    suffix = uuid.uuid4().hex[:10]
+    volume_name = f"mcu-v1-artifacts-{suffix}"
+    proof_path = f"proof/{suffix}.txt"
+    proof = f"volume proof {suffix}\n".encode()
+    from modal_proto import api_pb2
+
+    volume = modal.Volume.from_name(
+        volume_name,
+        create_if_missing=True,
+        version=api_pb2.VolumeFsVersion.Value("VOLUME_FS_VERSION_V2"),
+    ).hydrate()
+    computer = None
+
+    try:
+        computer = ComputerSandbox.create(
+            config=ComputerConfig(
+                run_id=f"mcu-v1-volume-{suffix}",
+                storage=StorageConfig(persist_artifacts=True),
+            ),
+            volumes={"/home/desktop/artifacts": volume},
+            tags={"computer-use.smoke": "v1-volume"},
+        )
+        computer.artifacts.write_bytes(proof_path, proof, "text/plain")
+        sync = computer.artifacts.sync()
+        assert sync.ok is True
+        assert sync.persistent is True
+        assert sync.synced_paths == ["/home/desktop/artifacts"]
+        assert "v2" in (sync.message or "")
+        assert b"".join(volume.read_file(proof_path)) == proof
+    finally:
+        if computer is not None:
+            computer.terminate()
+            computer.detach()
+        modal.Volume.objects.delete(volume_name, allow_missing=True)
+
+
+@pytest.mark.modal
+def test_modal_snapshot_directory_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+
+    suffix = uuid.uuid4().hex[:10]
+    marker_path = f"snapshots/{suffix}.txt"
+    marker = f"snapshot marker {suffix}\n".encode()
+    computer = None
+    restored = None
+
+    try:
+        computer = ComputerSandbox.create(
+            config=ComputerConfig(run_id=f"mcu-v1-snapshot-source-{suffix}"),
+            tags={"computer-use.smoke": "v1-snapshot-source"},
+        )
+        computer.artifacts.write_bytes(marker_path, marker, "text/plain")
+        snapshot_image = computer.snapshot_directory("/home/desktop/artifacts/snapshots")
+        computer.terminate()
+        computer.detach()
+        computer = None
+
+        restored = ComputerSandbox.create(
+            config=ComputerConfig(run_id=f"mcu-v1-snapshot-restore-{suffix}"),
+            tags={"computer-use.smoke": "v1-snapshot-restore"},
+        )
+        restored.mount_image("/home/desktop/artifacts/snapshots", snapshot_image)
+        assert restored.artifacts.read_bytes(marker_path) == marker
+    finally:
+        if computer is not None:
+            computer.terminate()
+            computer.detach()
+        if restored is not None:
+            restored.terminate()
+            restored.detach()

@@ -58,6 +58,7 @@ class FakeSandboxObject:
         self._tags = tags or {}
         self.set_tags_calls: list[dict[str, str]] = []
         self.wait_until_ready_calls: list[int] = []
+        self.mount_image_calls: list[tuple[str, object]] = []
         self.terminated = False
 
     def set_tags(self, tags: dict[str, str]) -> None:
@@ -85,6 +86,12 @@ class FakeSandboxObject:
 
     def snapshot_filesystem(self) -> object:
         return SimpleNamespace(object_id="im-snapshot")
+
+    def snapshot_directory(self, path: str) -> object:
+        return SimpleNamespace(object_id="im-dir-snapshot", path=path)
+
+    def mount_image(self, path: str, image: object) -> None:
+        self.mount_image_calls.append((path, image))
 
 
 class FakeSandbox:
@@ -172,9 +179,11 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert args == ("python", "-m", "modal_computer_use.daemon")
     assert kwargs["app"] == "app:modal-computer-use"
     assert kwargs["env"]["COMPUTER_USE_RUN_ID"] == "run-123"
+    assert kwargs["env"]["COMPUTER_USE_ARTIFACTS_PERSISTENT"] == "false"
     assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "standard"
     assert kwargs["env"]["COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS"] == "5000"
     assert kwargs["env"]["COMPUTER_USE_MAX_ACTION_TIMEOUT_MS"] == "300000"
+    assert kwargs["env"]["COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC"] == "20"
     assert kwargs["env"]["COMPUTER_USE_MAX_BATCH_DURATION_MS"] == "30000"
     assert kwargs["encrypted_ports"] == [6080]
     assert kwargs["readiness_probe"] == "tcp:8080"
@@ -577,6 +586,37 @@ def test_snapshot_filesystem_requires_modal_backing() -> None:
         assert "filesystem snapshots require" in str(exc)
     else:
         raise AssertionError("expected local snapshot helper to fail")
+
+
+def test_snapshot_directory_and_mount_image_delegate_to_modal_sandbox(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"),
+        image=object(),
+        wait=False,
+    )
+
+    snapshot = computer.snapshot_directory("/home/desktop/artifacts/snapshots")
+    computer.mount_image("/home/desktop/artifacts/snapshots", snapshot)
+
+    assert snapshot.object_id == "im-dir-snapshot"
+    assert snapshot.path == "/home/desktop/artifacts/snapshots"
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.mount_image_calls == [
+        ("/home/desktop/artifacts/snapshots", snapshot)
+    ]
+
+
+def test_snapshot_directory_requires_modal_backing() -> None:
+    computer = ComputerSandbox.local(token="dev")
+
+    try:
+        computer.snapshot_directory("/home/desktop/artifacts")
+    except SandboxUnavailableError as exc:
+        assert "directory snapshots require" in str(exc)
+    else:
+        raise AssertionError("expected local directory snapshot helper to fail")
 
 
 def test_registry_find_by_run_id_missing_returns_none(monkeypatch) -> None:

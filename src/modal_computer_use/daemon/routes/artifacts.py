@@ -21,7 +21,8 @@ async def manifest(request: Request, prefix: str = "") -> list[ArtifactInfo]:
 
 @router.post("/sync")
 async def sync(request: Request) -> ArtifactSyncResult:
-    return request.app.state.artifacts.sync()
+    with request.app.state.tracer.span("daemon.artifact.sync"):
+        return request.app.state.artifacts.sync()
 
 
 @router.get("/{path:path}")
@@ -34,11 +35,15 @@ async def read_artifact(path: str, request: Request) -> Response:
 async def write_artifact(path: str, request: Request) -> ArtifactInfo:
     try:
         data = await request.body()
-        return request.app.state.artifacts.write_bytes(
-            path,
-            data,
-            content_type=request.headers.get("content-type"),
-        )
+        with request.app.state.tracer.span(
+            "daemon.artifact.write",
+            {"artifact.size_bytes": len(data)},
+        ):
+            return request.app.state.artifacts.write_bytes(
+                path,
+                data,
+                content_type=request.headers.get("content-type"),
+            )
     except ArtifactPathError:
         raise
 
