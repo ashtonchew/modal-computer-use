@@ -4,11 +4,13 @@ import json
 
 import pytest
 
+import modal_computer_use.benchmarks as benchmarks
 from modal_computer_use import cli
 from modal_computer_use.benchmarks import (
     TYPING_BENCHMARK_TEXT,
     run_action_batch_benchmark,
     run_benchmark_report,
+    run_provider_comparison,
     run_sandbox_exec_benchmark,
     run_type_100_chars_benchmark,
 )
@@ -53,6 +55,71 @@ def test_benchmark_action_batch_requires_one_mode(capsys) -> None:
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
     assert "one of the arguments" in captured.err
+
+
+def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
+    exit_code = cli.main(["benchmark", "compare", "--mock-local", "--iterations", "1"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["benchmark"] == "provider-compare"
+    assert payload["mode"] == "mock-local"
+    assert payload["providers"]["modal-daemon"]["status"] == "ok"
+    assert payload["providers"]["openai"]["metadata"]["provider_api_calls"] is False
+    assert payload["providers"]["anthropic"]["metadata"]["tool_version"] == "computer_20250124"
+    assert payload["providers"]["generic"]["metadata"]["adapter"] == "ActionExecutor"
+    assert "0123456789" not in captured.out
+    assert '"text"' not in captured.out
+    assert "Bearer" not in captured.out
+
+
+def test_benchmark_compare_external_providers_skip_without_credentials(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+
+    exit_code = cli.main(
+        ["benchmark", "compare", "--providers", "daytona,e2b", "--iterations", "1"]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["providers"]["daytona"]["status"] == "not_measured"
+    assert payload["providers"]["e2b"]["status"] == "not_measured"
+    assert "DAYTONA_API_KEY is not set" in captured.out
+    assert "E2B_API_KEY is not set" in captured.out
+
+
+def test_benchmark_compare_requires_modal_daemon_target(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "compare", "--provider", "modal-daemon"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "modal-daemon comparison requires --mock-local or --base-url" in captured.err
+
+
+def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch) -> None:
+    def fail_provider(**kwargs):
+        raise RuntimeError(
+            f"Authorization: Bearer secret-token {TYPING_BENCHMARK_TEXT} "
+            "https://example.com/vnc.html?password=secret"
+        )
+
+    monkeypatch.setattr(benchmarks, "_run_adapter_provider", fail_provider)
+
+    payload = run_provider_comparison(providers=["openai"], iterations=1)
+    serialized = json.dumps(payload)
+
+    assert payload["ok"] is False
+    assert payload["providers"]["openai"]["status"] == "failed"
+    assert "secret-token" not in serialized
+    assert TYPING_BENCHMARK_TEXT not in serialized
+    assert "password=secret" not in serialized
+    assert "[redacted typed text]" in serialized
 
 
 def test_benchmark_action_batch_failure_is_structured(monkeypatch, capsys) -> None:

@@ -6,10 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from .benchmarks import (
+    DEFAULT_COMPARE_PROVIDERS,
+    ComparisonProvider,
     run_action_batch_benchmark,
     run_action_batch_benchmark_mock_local,
     run_benchmark_report,
     run_benchmark_report_mock_local,
+    run_provider_comparison,
+    run_provider_comparison_mock_local,
 )
 from .client import DaemonClient
 from .errors import ModalNotInstalledError, SandboxUnavailableError
@@ -71,6 +75,40 @@ def main(argv: list[str] | None = None) -> int:
     report_parser.add_argument("--output", type=Path)
     report_parser.add_argument("--json", action="store_true", default=True)
 
+    compare_parser = benchmark_subparsers.add_parser("compare")
+    compare_mode = compare_parser.add_mutually_exclusive_group()
+    compare_mode.add_argument("--base-url")
+    compare_mode.add_argument("--mock-local", action="store_true")
+    compare_parser.add_argument("--token")
+    compare_parser.add_argument(
+        "--provider",
+        action="append",
+        choices=[
+            "modal-daemon",
+            "modal-exec",
+            "openai",
+            "anthropic",
+            "generic",
+            "daytona",
+            "e2b",
+        ],
+        help="provider to benchmark; may be passed more than once",
+    )
+    compare_parser.add_argument(
+        "--providers",
+        help="comma-separated provider list; defaults to modal-daemon,openai,anthropic,generic",
+    )
+    compare_parser.add_argument("--sandbox-id")
+    compare_parser.add_argument("--modal-region")
+    compare_parser.add_argument("--resource-profile")
+    compare_parser.add_argument("--browser")
+    compare_parser.add_argument("--gpu")
+    compare_parser.add_argument("--image-profile", dest="image_profile")
+    compare_parser.add_argument("--image-variant", dest="image_profile")
+    compare_parser.add_argument("--iterations", type=_positive_int, default=5)
+    compare_parser.add_argument("--output", type=Path)
+    compare_parser.add_argument("--json", action="store_true", default=True)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -79,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.include_sandbox_exec and not args.sandbox_id:
             report_parser.error("--include-sandbox-exec requires --sandbox-id")
+    if args.command == "benchmark" and args.benchmark_command == "compare":
+        providers = _compare_providers(args)
+        if "modal-daemon" in providers and not (args.mock_local or args.base_url):
+            compare_parser.error("modal-daemon comparison requires --mock-local or --base-url")
+        if "modal-exec" in providers and not args.sandbox_id:
+            compare_parser.error("modal-exec comparison requires --sandbox-id")
     if args.command == "trace" and args.trace_command == "validate":
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
@@ -89,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         return _trace_replay(args)
     if args.benchmark_command == "action-batch":
         return _benchmark_action_batch(args)
+    if args.benchmark_command == "compare":
+        return _benchmark_compare(args)
     return _benchmark_report(args)
 
 
@@ -180,6 +226,68 @@ def _benchmark_report(args: argparse.Namespace) -> int:
         args.output.write_text(f"{output}\n", encoding="utf-8")
     print(output)
     return 0 if result["ok"] else 1
+
+
+def _benchmark_compare(args: argparse.Namespace) -> int:
+    providers = _compare_providers(args)
+    sandbox_exec_runner = None
+    sandbox_exec_setup_failure = None
+    if "modal-exec" in providers:
+        try:
+            sandbox_exec_runner = modal_sandbox_exec_runner_from_id(args.sandbox_id)
+        except Exception as exc:
+            sandbox_exec_setup_failure = _sandbox_exec_setup_failure(exc)
+
+    if args.mock_local:
+        result = run_provider_comparison_mock_local(
+            providers=providers,
+            iterations=args.iterations,
+        )
+    elif args.base_url:
+        client = DaemonClient(args.base_url, token=args.token)
+        try:
+            result = run_provider_comparison(
+                providers=providers,
+                client=client,
+                mode="http",
+                iterations=args.iterations,
+                base_url=args.base_url,
+                sandbox_exec_runner=sandbox_exec_runner,
+                sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+                environment_metadata=_benchmark_environment_metadata(args),
+            )
+        finally:
+            client.close()
+    else:
+        result = run_provider_comparison(
+            providers=providers,
+            mode="provider-live",
+            iterations=args.iterations,
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+            environment_metadata=_benchmark_environment_metadata(args),
+        )
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result["ok"] else 1
+
+
+def _compare_providers(args: argparse.Namespace) -> list[ComparisonProvider]:
+    values: list[str] = []
+    if args.providers:
+        values.extend(provider.strip() for provider in args.providers.split(","))
+    if args.provider:
+        values.extend(args.provider)
+    if not values:
+        return list(DEFAULT_COMPARE_PROVIDERS)
+    allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b"}
+    invalid = [provider for provider in values if provider not in allowed]
+    if invalid:
+        raise SystemExit(f"invalid provider: {', '.join(invalid)}")
+    return values  # type: ignore[return-value]
 
 
 def _positive_int(value: str) -> int:

@@ -87,6 +87,18 @@ uv run computer-use benchmark action-batch --base-url http://127.0.0.1:8080 --to
 
 The benchmark emits JSON with raw samples, summary timings, and the batch-vs-separate-call speedup.
 
+Compare benchmark surfaces across the Modal daemon, adapter matrix, and optional live providers:
+
+```bash
+uv run computer-use benchmark compare --mock-local --iterations 5
+uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
+```
+
+The default comparison runs the Modal daemon plus OpenAI, Anthropic, and generic adapter
+normalization/execution without calling provider APIs. Daytona and E2B live runs are credential
+gated and report `not_measured` when `DAYTONA_API_KEY` or `E2B_API_KEY` is absent. Install pinned
+provider extras with `uv sync --extra bench-daytona --extra bench-e2b` before live provider runs.
+
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
 including benchmark regeneration and boundary scans.
 

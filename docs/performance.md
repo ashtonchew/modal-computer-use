@@ -111,6 +111,47 @@ The command emits JSON with metadata, raw millisecond samples, summary timings, 
 
 The benchmark performs one warmup iteration per case before measuring. Any daemon error or exception is included under `failures`, and the command exits nonzero. The built-in action set avoids text-entry and clipboard actions so benchmark output does not include typed or clipboard text.
 
+## Provider comparison
+
+Use the comparison benchmark when you want one JSON report across Modal daemon behavior,
+adapter compatibility, and optional live Daytona/E2B runs:
+
+```bash
+uv run computer-use benchmark compare --mock-local --iterations 5
+```
+
+By default this measures:
+
+- `modal-daemon`: daemon action batching, screenshots, move+click, 100-character typing, and recording start/stop.
+- `openai`: OpenAI computer-action adapter normalization and native action execution against an in-process recorder.
+- `anthropic`: Anthropic computer-action adapter normalization for `computer_20250124` and native action execution against an in-process recorder.
+- `generic`: provider-neutral `ActionExecutor` execution against an in-process recorder.
+
+Adapter cases do not call OpenAI, Anthropic, or any model API. They measure translation and
+execution-path overhead only, which keeps the benchmark deterministic and credential-free.
+
+Live external providers are explicit:
+
+```bash
+uv sync --extra bench-daytona --extra bench-e2b
+uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
+```
+
+Daytona runs require `DAYTONA_API_KEY`; `DAYTONA_API_URL` and `DAYTONA_TARGET` are reported as
+safe metadata when present. E2B runs require `E2B_API_KEY`. Missing credentials produce
+`not_measured` provider entries rather than crashes. Missing optional SDK packages produce
+`unavailable` entries.
+
+Keep comparisons fair:
+
+- Pin SDK versions through the benchmark extras instead of using floating latest packages.
+- Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
+- Compare deterministic SDK primitives before comparing model-driven task completion.
+- Do not include noVNC stream URLs, provider API keys, typed text, screenshot bytes, stdout,
+  stderr, artifact URIs, or recording paths in saved reports.
+- Treat Daytona/E2B provider timing as total SDK/provider round-trip timing unless their SDKs
+  expose daemon-internal timing; only this package's daemon currently reports `timing.daemon_ms`.
+
 ## Screenshot storage modes
 
 `screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
