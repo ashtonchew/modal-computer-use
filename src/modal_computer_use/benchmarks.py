@@ -22,6 +22,7 @@ from .errors import DaemonHTTPError
 from .transports.http import HTTPTransport
 
 BenchmarkMode = Literal["mock-local", "http"]
+FutureBenchmarkStatus = Literal["not_measured", "unsupported"]
 
 ACTION_BATCH_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 10, "y": 10},
@@ -30,6 +31,106 @@ ACTION_BATCH_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 20, "y": 20},
     {"type": "cursor_position"},
 ]
+
+
+def run_benchmark_report(
+    *,
+    client: DaemonClient,
+    mode: BenchmarkMode,
+    iterations: int,
+    base_url: str | None = None,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    metadata = _collect_metadata(client, failures)
+    action_batch = run_action_batch_benchmark(
+        client=client,
+        mode=mode,
+        iterations=iterations,
+        base_url=base_url,
+        warmup_iterations=warmup_iterations,
+    )
+    screenshot_full = run_screenshot_benchmark(
+        client=client,
+        name="screenshot_full",
+        request={"format": "png", "storage": "inline", "show_cursor": False},
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
+    screenshot_compressed = run_screenshot_benchmark(
+        client=client,
+        name="screenshot_compressed",
+        request={
+            "format": "jpeg",
+            "quality": 60,
+            "scale": 0.5,
+            "storage": "inline",
+            "show_cursor": False,
+        },
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
+    benchmarks = {
+        "action_batch": _report_action_batch(action_batch),
+        "screenshot_full": screenshot_full,
+        "screenshot_compressed": screenshot_compressed,
+        "move_click": _future_benchmark(
+            "not_measured",
+            "move+click benchmark will be added after the report surface is stable",
+        ),
+        "type_100_chars": _future_benchmark(
+            "not_measured",
+            "typing benchmark is deferred to avoid adding typed text payloads to this pass",
+        ),
+        "recording_start_stop": _future_benchmark(
+            "not_measured",
+            "recording benchmark is deferred until live file-size validation is covered",
+        ),
+        "sandbox_exec": _future_benchmark(
+            "not_measured",
+            "Sandbox.exec comparison requires an explicit Modal/live mode and is not run here",
+        ),
+        "cold_create_to_ready": _future_benchmark(
+            "not_measured",
+            "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
+        ),
+        "warm_attach_to_health": _future_benchmark(
+            "not_measured",
+            "warm attach requires Modal orchestration and is outside this report mode",
+        ),
+    }
+    failures.extend(_benchmark_failures("action_batch", action_batch.get("failures", [])))
+    failures.extend(_benchmark_failures("screenshot_full", screenshot_full.get("failures", [])))
+    failures.extend(
+        _benchmark_failures("screenshot_compressed", screenshot_compressed.get("failures", []))
+    )
+    ok = not failures
+    return {
+        "ok": ok,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "package_version": __version__,
+        "mode": mode,
+        "base_url": base_url,
+        "iterations": iterations,
+        "warmup_iterations": warmup_iterations,
+        "metadata": metadata,
+        "benchmarks": benchmarks,
+        "failures": failures,
+    }
+
+
+def run_benchmark_report_mock_local(*, iterations: int) -> dict[str, Any]:
+    return _with_mock_local_client(
+        lambda client: run_benchmark_report(
+            client=client,
+            mode="mock-local",
+            iterations=iterations,
+            base_url="http://testserver",
+        )
+    )
 
 
 def run_action_batch_benchmark(
@@ -88,6 +189,57 @@ def run_action_batch_benchmark(
 
 
 def run_action_batch_benchmark_mock_local(*, iterations: int) -> dict[str, Any]:
+    return _with_mock_local_client(
+        lambda client: run_action_batch_benchmark(
+            client=client,
+            mode="mock-local",
+            iterations=iterations,
+            base_url="http://testserver",
+        )
+    )
+
+
+def run_screenshot_benchmark(
+    *,
+    client: DaemonClient,
+    name: str,
+    request: dict[str, Any],
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _ScreenshotBenchmark(client, request)
+    samples, observations = _measure_observed_case(
+        name=name,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _case_result(name, iterations, samples, failures)
+    result.update(
+        {
+            "request": _safe_screenshot_request(request),
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    return result
+
+
+def _with_mock_local_client(callback: Callable[[DaemonClient], dict[str, Any]]) -> dict[str, Any]:
     with TemporaryDirectory(prefix="modal-computer-use-benchmark-") as temp_dir:
         root = Path(temp_dir)
         with redirect_stdout(StringIO()):
@@ -112,12 +264,7 @@ def run_action_batch_benchmark_mock_local(*, iterations: int) -> dict[str, Any]:
                     transport=transport,
                 )
                 try:
-                    return run_action_batch_benchmark(
-                        client=client,
-                        mode="mock-local",
-                        iterations=iterations,
-                        base_url="http://testserver",
-                    )
+                    return callback(client)
                 finally:
                     client.close()
 
@@ -142,6 +289,16 @@ class _ActionBatchBenchmark:
             _ensure_ok_result(result)
 
 
+class _ScreenshotBenchmark:
+    def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
+        self._client = client
+        self._request = request
+
+    def run(self) -> dict[str, Any]:
+        result = self._client.post_json("/v1/screenshots/full", json=self._request)
+        return _safe_screenshot_result(result)
+
+
 def _measure_case(
     *,
     name: str,
@@ -150,17 +307,36 @@ def _measure_case(
     operation: Callable[[], None],
     failures: list[dict[str, Any]],
 ) -> list[float]:
+    samples, _observations = _measure_observed_case(
+        name=name,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=operation,
+        failures=failures,
+    )
+    return samples
+
+
+def _measure_observed_case(
+    *,
+    name: str,
+    iterations: int,
+    warmup_iterations: int,
+    operation: Callable[[], Any],
+    failures: list[dict[str, Any]],
+) -> tuple[list[float], list[Any]]:
     samples: list[float] = []
+    observations: list[Any] = []
     for warmup_index in range(warmup_iterations):
         try:
             operation()
         except Exception as exc:
             failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
-            return samples
+            return samples, observations
     for iteration in range(iterations):
         start = time.perf_counter()
         try:
-            operation()
+            observation = operation()
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000
             failures.append(
@@ -168,7 +344,8 @@ def _measure_case(
             )
             continue
         samples.append((time.perf_counter() - start) * 1000)
-    return samples
+        observations.append(observation)
+    return samples, observations
 
 
 def _case_result(
@@ -228,6 +405,72 @@ def _comparison(batch_case: dict[str, Any], separate_case: dict[str, Any]) -> di
         "batch_vs_separate_speedup": speedup,
         "mean_delta_ms": separate_mean - batch_mean,
         "batch_faster": batch_mean < separate_mean,
+    }
+
+
+def _collect_metadata(client: DaemonClient, failures: list[dict[str, Any]]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    try:
+        metadata["version"] = client.get_json("/v1/version")
+    except Exception as exc:
+        failures.append(_failure("metadata_version", phase="setup", iteration=0, exc=exc))
+    try:
+        capabilities = client.get_json("/v1/capabilities")
+    except Exception as exc:
+        failures.append(_failure("metadata_capabilities", phase="setup", iteration=0, exc=exc))
+    else:
+        metadata["capabilities"] = {
+            "primitives": capabilities.get("primitives"),
+            "screenshot_formats": capabilities.get("screenshot_formats"),
+            "action_types": capabilities.get("action_types"),
+            "image_profile": capabilities.get("image_profile"),
+            "vnc_enabled": capabilities.get("vnc_enabled"),
+        }
+    return metadata
+
+
+def _report_action_batch(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "failed" if result.get("failures") else "ok",
+        "action_count": result.get("action_count"),
+        "actions": result.get("actions"),
+        "cases": result.get("cases"),
+        "comparison": result.get("comparison"),
+        "failures": result.get("failures", []),
+    }
+
+
+def _future_benchmark(status: FutureBenchmarkStatus, reason: str) -> dict[str, str]:
+    return {"status": status, "reason": reason}
+
+
+def _benchmark_failures(benchmark: str, failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(failure, benchmark=benchmark) for failure in failures]
+
+
+def _safe_screenshot_request(request: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in request.items()
+        if key not in {"bytes", "data_base64", "text", "clipboard", "token"}
+    }
+
+
+def _safe_screenshot_result(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise RuntimeError("daemon returned a non-object screenshot response")
+    required = ("format", "width", "height", "size_bytes")
+    missing = [key for key in required if key not in result]
+    if missing:
+        raise RuntimeError(f"daemon screenshot response missing fields: {', '.join(missing)}")
+    return {
+        "format": result["format"],
+        "width": result["width"],
+        "height": result["height"],
+        "size_bytes": result["size_bytes"],
+        "storage": "artifact" if result.get("artifact_uri") else "inline",
+        "artifact_backed": result.get("artifact_uri") is not None,
+        "cursor_visible": result.get("cursor_visible"),
     }
 
 

@@ -49,12 +49,18 @@ Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. U
 daemon, Modal, provider APIs, screenshots, or artifact storage. Both commands emit JSON and
 return nonzero for invalid traces.
 
-Benchmark tooling is available through `computer-use benchmark action-batch`. Use
-`computer-use benchmark action-batch --mock-local --iterations 5` for an in-process mock daemon,
-or pass `--base-url` and optional `--token` for an already-running daemon. The command emits JSON
-and returns nonzero when any warmup or measured iteration fails. It compares one five-action batch
-request with five separate action requests; `Sandbox.exec` is explicitly marked `not_measured` in
-this version.
+Benchmark tooling is available through `computer-use benchmark report` and
+`computer-use benchmark action-batch`. Use
+`computer-use benchmark report --mock-local --iterations 5` for an in-process release-style
+report, or pass `--base-url`, optional `--token`, and optional `--output` for an already-running
+daemon. The report includes action-batch, full screenshot, and compressed screenshot benchmarks,
+plus explicit `not_measured` entries for Modal/Sandbox.exec and recording cases that are not run
+by this local/live-daemon command. It returns nonzero when any warmup or measured iteration fails.
+Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
+benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
+already-running daemon. The command emits JSON and returns nonzero when any warmup or measured
+iteration fails. It compares one five-action batch request with five separate action requests;
+`Sandbox.exec` is explicitly marked `not_measured` in this version.
 
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
 ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,

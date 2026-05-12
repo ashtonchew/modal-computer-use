@@ -8,6 +8,38 @@ The daemon's `/v1/actions/run` route accepts an ordered list of actions and exec
 
 Batch limits live behind `COMPUTER_USE_MAX_BATCH_ACTIONS` (default `50`). The daemon validates the whole batch before running anything and returns per-action results. Use `continue_on_error=True` if a flaky action should not abort the rest.
 
+## Benchmark report
+
+Use the release report command to measure current daemon hot paths without model credentials:
+
+```bash
+uv run computer-use benchmark report --mock-local --iterations 5
+```
+
+Against a running daemon:
+
+```bash
+uv run computer-use benchmark report \
+  --base-url http://127.0.0.1:8080 \
+  --token dev \
+  --iterations 5
+```
+
+The report emits JSON with top-level run metadata, safe daemon version/capability metadata,
+benchmark entries keyed by name, raw millisecond samples, timing summaries, screenshot byte-size
+summaries, structured failures, and explicit `not_measured` entries for future Modal/Sandbox.exec
+or recording cases. Use `--output benchmark-report.json` to also write the same JSON to disk.
+
+The current report includes:
+
+- `action_batch`: one five-action batch request compared with five separate action requests.
+- `screenshot_full`: full-screen PNG screenshot latency and encoded byte size.
+- `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
+
+The report never includes raw screenshot bytes, base64 image payloads, bearer tokens, noVNC URLs,
+typed text, or clipboard text. Any failed warmup or measured iteration is included under
+`failures`, partial successful samples remain in the report, and the command exits nonzero.
+
 ## Benchmark action batching
 
 Use the benchmark CLI to measure the daemon hot path without model credentials:

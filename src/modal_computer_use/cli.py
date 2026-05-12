@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .benchmarks import run_action_batch_benchmark, run_action_batch_benchmark_mock_local
+from .benchmarks import (
+    run_action_batch_benchmark,
+    run_action_batch_benchmark_mock_local,
+    run_benchmark_report,
+    run_benchmark_report_mock_local,
+)
 from .client import DaemonClient
 from .tracing import ComputerTrace
 
@@ -36,12 +41,23 @@ def main(argv: list[str] | None = None) -> int:
     action_batch_parser.add_argument("--iterations", type=_positive_int, default=5)
     action_batch_parser.add_argument("--json", action="store_true", default=True)
 
+    report_parser = benchmark_subparsers.add_parser("report")
+    report_mode = report_parser.add_mutually_exclusive_group(required=True)
+    report_mode.add_argument("--base-url")
+    report_mode.add_argument("--mock-local", action="store_true")
+    report_parser.add_argument("--token")
+    report_parser.add_argument("--iterations", type=_positive_int, default=5)
+    report_parser.add_argument("--output", type=Path)
+    report_parser.add_argument("--json", action="store_true", default=True)
+
     args = parser.parse_args(argv)
     if args.command == "trace" and args.trace_command == "validate":
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
         return _trace_replay(args.path)
-    return _benchmark_action_batch(args)
+    if args.benchmark_command == "action-batch":
+        return _benchmark_action_batch(args)
+    return _benchmark_report(args)
 
 
 def _trace_validate(path: Path) -> int:
@@ -74,6 +90,28 @@ def _benchmark_action_batch(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
+def _benchmark_report(args: argparse.Namespace) -> int:
+    if args.mock_local:
+        result = run_benchmark_report_mock_local(iterations=args.iterations)
+    else:
+        client = DaemonClient(args.base_url, token=args.token)
+        try:
+            result = run_benchmark_report(
+                client=client,
+                mode="http",
+                iterations=args.iterations,
+                base_url=args.base_url,
+            )
+        finally:
+            client.close()
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result["ok"] else 1
+
+
 def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
@@ -82,7 +120,11 @@ def _positive_int(value: str) -> int:
 
 
 def _print_json(data: dict[str, Any]) -> None:
-    print(json.dumps(data, indent=2, sort_keys=True))
+    print(_json_string(data))
+
+
+def _json_string(data: dict[str, Any]) -> str:
+    return json.dumps(data, indent=2, sort_keys=True)
 
 
 if __name__ == "__main__":

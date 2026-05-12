@@ -38,7 +38,23 @@ print(shot.width, shot.height, shot.sha256)
 
 ## Benchmarking
 
-Measure the action batching hot path without Modal or model credentials:
+Generate a release-style benchmark report without Modal or model credentials:
+
+```bash
+uv run computer-use benchmark report --mock-local --iterations 5
+```
+
+Against a running daemon:
+
+```bash
+uv run computer-use benchmark report --base-url http://127.0.0.1:8080 --token dev --iterations 5
+```
+
+The report emits JSON with action-batch, full screenshot, compressed screenshot, safe metadata,
+structured failures, and explicit `not_measured` entries for Modal/Sandbox.exec cases that are not
+run by this command.
+
+Measure only the action batching hot path:
 
 ```bash
 uv run computer-use benchmark action-batch --mock-local --iterations 5
