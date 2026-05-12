@@ -8,7 +8,11 @@ import pytest
 
 @pytest.mark.modal
 def test_modal_smoke_skipped_without_credentials() -> None:
-    if importlib.util.find_spec("modal") is None or not os.getenv("MODAL_TOKEN_ID"):
+    if (
+        importlib.util.find_spec("modal") is None
+        or not os.getenv("MODAL_TOKEN_ID")
+        or not os.getenv("MODAL_TOKEN_SECRET")
+    ):
         pytest.skip("Modal SDK or credentials are not configured")
     from modal_computer_use import ComputerConfig, ComputerSandbox
 

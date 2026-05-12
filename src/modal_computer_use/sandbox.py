@@ -120,19 +120,20 @@ class ComputerSandbox:
             "idle_timeout": config.runtime.idle_timeout_seconds,
             "secrets": secrets or [],
             "volumes": volumes or {},
-            "environment_variables": env,
+            "env": env,
             "block_network": config.network.block_all,
             "cidr_allowlist": config.network.cidr_allowlist,
             "name": name,
-            "tags": sandbox_tags,
             **sandbox_kwargs,
         }
-        if hasattr(modal, "web_server"):
-            create_kwargs["readiness_probe"] = modal.web_server(
-                port=8080,
-                startup_timeout=config.runtime.readiness_timeout_seconds,
-            )
+        if config.runtime.modal_region:
+            create_kwargs["region"] = config.runtime.modal_region
+        readiness_probe = _readiness_probe(modal)
+        if readiness_probe is not None:
+            create_kwargs["readiness_probe"] = readiness_probe
         sandbox = modal.Sandbox.create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
+        if hasattr(sandbox, "set_tags"):
+            sandbox.set_tags(sandbox_tags)
         if wait and hasattr(sandbox, "wait_until_ready"):
             sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         token_info = sandbox.create_connect_token(
@@ -176,8 +177,7 @@ class ComputerSandbox:
         if sandbox_id:
             sandbox = modal.Sandbox.from_id(sandbox_id)
         elif name:
-            app = modal.App.lookup(app_name, create_if_missing=False)
-            sandbox = modal.Sandbox.from_name(name, app=app)
+            sandbox = _sandbox_from_name(modal, app_name=app_name, name=name)
         elif run_id:
             matches = list(modal.Sandbox.list(tags={"computer-use.run_id": run_id}))
             if not matches:
@@ -300,6 +300,22 @@ def _connect_token_parts(token_info: object) -> tuple[str, str | None]:
             "could not infer connect-token base URL from Modal SDK response"
         )
     return str(base_url).rstrip("/"), str(token) if token else None
+
+
+def _readiness_probe(modal: object) -> object | None:
+    probe = getattr(modal, "Probe", None)
+    with_tcp = getattr(probe, "with_tcp", None)
+    if with_tcp is None:
+        return None
+    return with_tcp(8080)
+
+
+def _sandbox_from_name(modal: object, *, app_name: str, name: str) -> object:
+    try:
+        return modal.Sandbox.from_name(app_name, name)
+    except TypeError:
+        app = modal.App.lookup(app_name, create_if_missing=False)
+        return modal.Sandbox.from_name(name, app=app)
 
 
 def _vnc_url(sandbox: object) -> str | None:
