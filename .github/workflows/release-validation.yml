@@ -24,7 +24,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install scan tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: command -v rg || (sudo apt-get update && sudo apt-get install -y ripgrep)
 
       - name: Install dependencies
         run: uv sync --extra dev --extra modal
