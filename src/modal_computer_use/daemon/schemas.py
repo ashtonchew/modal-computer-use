@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from modal_computer_use.models import Button, Point, Region, ScreenshotOptions, ScrollDirection
 
@@ -48,6 +49,12 @@ class MouseClickRequest(Schema):
     double: bool = False
     modifiers: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _coordinate_pair(self) -> MouseClickRequest:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("x and y must be supplied together")
+        return self
+
 
 class MouseDragRequest(Schema):
     start_x: int | None = Field(default=None, ge=0)
@@ -58,6 +65,18 @@ class MouseDragRequest(Schema):
     duration_ms: int = Field(default=500, ge=0, le=60_000)
     modifiers: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _valid_drag_shape(self) -> MouseDragRequest:
+        if (self.start_x is None) != (self.start_y is None):
+            raise ValueError("start coordinates must be supplied as x/y pairs")
+        if (self.end_x is None) != (self.end_y is None):
+            raise ValueError("end coordinates must be supplied as x/y pairs")
+        if self.path is not None and len(self.path) < 2:
+            raise ValueError("drag path must contain at least two points")
+        if self.path is None and self.end_x is None and self.end_y is None:
+            raise ValueError("drag requires path or end coordinates")
+        return self
+
 
 class MouseScrollRequest(Schema):
     direction: ScrollDirection = "down"
@@ -65,11 +84,23 @@ class MouseScrollRequest(Schema):
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
 
+    @model_validator(mode="after")
+    def _coordinate_pair(self) -> MouseScrollRequest:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("x and y must be supplied together")
+        return self
+
 
 class MouseButtonRequest(Schema):
     button: Button = "left"
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _coordinate_pair(self) -> MouseButtonRequest:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("x and y must be supplied together")
+        return self
 
 
 class ScreenshotRequest(ScreenshotOptions):
@@ -116,6 +147,23 @@ class LaunchRequest(Schema):
     command: str
     args: list[str] = Field(default_factory=list)
 
+    @field_validator("command")
+    @classmethod
+    def _valid_command(cls, value: str) -> str:
+        if not value or value.strip() != value:
+            raise ValueError("command must be non-empty and trimmed")
+        if any(char.isspace() for char in value) or "\x00" in value or "/" in value:
+            raise ValueError("command must be a single executable name")
+        return value
+
+    @field_validator("args")
+    @classmethod
+    def _valid_args(cls, value: list[str]) -> list[str]:
+        for arg in value:
+            if "\x00" in arg:
+                raise ValueError("args must not contain NUL bytes")
+        return value
+
 
 class OpenArtifactRequest(Schema):
     path: str
@@ -124,6 +172,16 @@ class OpenArtifactRequest(Schema):
 class BrowserOpenUrlRequest(Schema):
     url: str
     wait_for_window: bool = True
+
+    @field_validator("url")
+    @classmethod
+    def _valid_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("url must be an absolute http or https URL")
+        if parsed.username or parsed.password:
+            raise ValueError("url must not include credentials")
+        return value
 
 
 class CommandRunRequest(Schema):
