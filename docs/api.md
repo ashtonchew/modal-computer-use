@@ -162,9 +162,12 @@ for Modal/Sandbox.exec unless requested, cold create, and warm attach cases. Add
 `--include-sandbox-exec --sandbox-id <id>` with `--base-url` to attach to an existing Modal
 Sandbox and compare the daemon move+click hot path with a live `Sandbox.exec` `xdotool`
 move+click command. This mode never creates a sandbox. It returns nonzero when any warmup or
-measured iteration fails. Recording benchmark output includes safe metadata such as status,
-format, size, duration, and stop method, but not recording bytes, raw paths, artifact URIs,
-stdout, stderr tails, raw command strings, or ffmpeg argv.
+measured iteration fails. Use `--modal-region`, `--resource-profile`, `--browser`, `--gpu`, and
+`--image-profile` to attach caller-supplied environment labels to the report; these flags are
+metadata only and do not create or modify Modal resources. Recording benchmark output includes
+safe metadata such as status, format, size, duration, and stop method, but not recording bytes,
+raw paths, artifact URIs, stdout, stderr tails, raw command strings, or ffmpeg argv. Reported
+`base_url` values strip userinfo, query strings, and fragments before JSON is printed or written.
 Action benchmark cases also include `daemon_samples_ms`, `daemon_summary_ms`,
 `overhead_samples_ms`, `overhead_summary_ms`, and `attribution`. Missing daemon timing is reported
 as unavailable for compatibility with old daemons; malformed timing is a structured failure.

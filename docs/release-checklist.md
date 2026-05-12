@@ -33,6 +33,10 @@ Run this checklist before publishing a release or opening a production-readiness
 
 ## Performance
 
-- Benchmark output distinguishes `measured`, `not_measured`, and failed cases.
+- Benchmark output distinguishes `ok`, `failed`, `not_measured`, `unsupported`, and
+  `unavailable` cases.
+- Benchmark output does not include URL query strings, URL userinfo, bearer tokens, noVNC URLs,
+  raw command strings, stdout, stderr, typed text, clipboard text, screenshot bytes, recording
+  bytes, raw paths, or artifact URIs.
 - Browser prewarm and GPU guidance is documented as optional and measured-workload dependent.
 - Warm-pool and snapshot examples remain example-level; core lifecycle does not auto-create pools, snapshots, public tunnels, or Volumes.

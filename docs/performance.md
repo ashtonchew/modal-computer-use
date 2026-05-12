@@ -38,6 +38,7 @@ uv run computer-use benchmark report \
   --base-url https://connect.modal.run \
   --token "$MODAL_CONNECT_TOKEN" \
   --sandbox-id sb-... \
+  --image-profile browser \
   --include-sandbox-exec \
   --iterations 5
 ```
@@ -53,7 +54,18 @@ The report emits JSON with top-level run metadata, safe daemon version/capabilit
 benchmark entries keyed by name, raw millisecond samples, timing summaries, screenshot byte-size
 summaries, structured failures, and explicit `not_measured` entries for future Modal/Sandbox.exec
 cases unless live comparison is requested. Use `--output benchmark-report.json` to also write the
-same JSON to disk.
+same JSON to disk. The reported `base_url` strips URL userinfo, query strings, and fragments so
+tokens are not copied into saved reports.
+
+Benchmark status fields are deliberately explicit:
+
+- `ok`: measured successfully.
+- `failed`: requested but one or more warmup or measured iterations failed.
+- `not_measured`: not attempted in this report mode, usually because it would create or attach to
+  Modal resources unless explicitly requested.
+- `unsupported`: known unsupported case.
+- `unavailable`: compatible daemon metadata was missing, such as older daemons without
+  `timing.daemon_ms`.
 
 For action hot paths, `samples_ms` is total client-side elapsed time. When the daemon returns
 `timing.daemon_ms`, reports also include `daemon_samples_ms`, `daemon_summary_ms`,

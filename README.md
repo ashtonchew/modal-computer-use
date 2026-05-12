@@ -58,6 +58,7 @@ uv run computer-use benchmark report \
   --base-url https://connect.modal.run \
   --token "$MODAL_CONNECT_TOKEN" \
   --sandbox-id sb-... \
+  --image-profile browser \
   --include-sandbox-exec \
   --iterations 5
 ```
@@ -69,7 +70,8 @@ live comparison is requested. It also measures a deterministic move+click action
 start/stop latency without including recording bytes, raw paths, artifact URIs, raw command
 strings, typed text, or clipboard text. Action hot paths include daemon-side timing attribution
 when the daemon returns `timing.daemon_ms`; old daemons without timing are reported as
-attribution unavailable.
+attribution unavailable. Reported URLs strip userinfo, query strings, and fragments before they
+are written to JSON.
 
 Measure only the action batching hot path:
 
