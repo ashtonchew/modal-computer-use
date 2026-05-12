@@ -4,6 +4,10 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
+from modal_computer_use.adapters.provenance import (
+    PROVIDER_ACTION_METADATA_KEY,
+    PROVIDER_ACTION_REDACTIONS_METADATA_KEY,
+)
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.tracing import load_trace
@@ -32,6 +36,52 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
     assert entries[0].normalized_action is not None
     assert entries[0].normalized_action["text"] == {"redacted": True, "length": 12}
     assert entries[0].redactions == ["text"]
+
+
+def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "type",
+                        "text": "secret value",
+                        "metadata": {
+                            "policy": "fixture",
+                            PROVIDER_ACTION_METADATA_KEY: {
+                                "type": "type",
+                                "text": {"redacted": True, "length": 12},
+                            },
+                            PROVIDER_ACTION_REDACTIONS_METADATA_KEY: ["text"],
+                        },
+                    }
+                ],
+                "source": "openai-adapter",
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 1
+    assert entries[0].provider_action == {
+        "type": "type",
+        "text": {"redacted": True, "length": 12},
+    }
+    assert entries[0].normalized_action is not None
+    assert entries[0].normalized_action["metadata"] == {"policy": "fixture"}
+    assert entries[0].normalized_action["text"] == {"redacted": True, "length": 12}
+    assert entries[0].redactions == ["text", "provider_action.text"]
 
 
 def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:

@@ -137,6 +137,23 @@ adapter = AnthropicAdapter(computer, tool_version="computer_20250124")
 adapter.apply({"action": "mouse_move", "coordinate": [500, 300]})
 ```
 
+Unknown provider actions fail closed by default. Pass an explicit `CoordinateSpace` when the model
+saw a resized screenshot; adapters never silently scale coordinates.
+When tracing is enabled, adapter actions preserve redacted provider provenance alongside the
+native action that the daemon executed.
+
+Provider-shaped screenshot helpers are available for user-owned loops:
+
+```python
+from modal_computer_use.adapters.openai import openai_computer_call_output
+
+shot = computer.screenshots.full()
+input_item = openai_computer_call_output(shot, call_id="call_123")
+```
+
+The helpers are pure conversions from native `Screenshot`/`ActionResult` models. They do not call
+provider APIs or import provider SDKs.
+
 ## Security Defaults
 
 - No unauthenticated public daemon endpoint in Modal mode.

@@ -28,6 +28,42 @@ Namespaces on `ComputerSandbox`:
 
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 
+## Provider adapters
+
+`OpenAIAdapter`, `AnthropicAdapter`, and `ActionExecutor` are translation layers over
+`computer.actions`. They validate provider-returned action JSON, normalize it to the native
+action schema, optionally apply an explicit `CoordinateSpace`, run the `before_action` hook, and
+then call the SDK action namespace. They do not instantiate provider clients, call provider APIs,
+hold prompts, or own confirmation policy.
+
+Unknown provider actions raise `UnsupportedActionError` by default. `allow_unknown=True` is an
+explicit compatibility escape hatch that normalizes unknown provider payloads to a zero-duration
+wait with redacted provider-action metadata.
+
+Adapter-normalized actions carry redacted provider provenance in action metadata. When daemon
+action tracing is enabled, the trace writer promotes that metadata to `TraceEntry.provider_action`
+and keeps `TraceEntry.normalized_action` as the native action that was executed. Typed text and
+other sensitive provider fields are replaced with redaction metadata before they can be written to
+trace NDJSON.
+
+Provider-shaped output helpers are pure conversion helpers over native models. Use
+`openai_computer_call_output(screenshot, call_id=...)` to build an OpenAI
+`computer_call_output` item from a native `Screenshot`. Use `anthropic_tool_result(...)` to build
+an Anthropic `tool_result` from a native `Screenshot` or safe `ActionResult` summary. These helpers
+do not call provider APIs, do not import provider SDKs, and keep native screenshot metadata
+available through `openai_screenshot_metadata(...)` and `anthropic_screenshot_metadata(...)`
+without putting raw bytes or base64 payloads in metadata.
+
+Policy hooks run before execution and see the normalized native action after any explicit
+coordinate transform. If a hook returns anything other than `ActionDecision(decision="allow")`,
+the executor raises before sending the batch to the daemon.
+
+Anthropic tool versions are gated. `computer_20241022` supports the reference action set such as
+`mouse_move`, click variants, destination-only drag, `key`, `type`, `screenshot`, and
+`cursor_position`. `computer_20250124` adds enhanced input actions such as `scroll`,
+`left_mouse_down`, `left_mouse_up`, `hold_key`, `wait`, and `triple_click`. `computer_20251124`
+adds `zoom`. Older versions reject newer actions instead of accepting them silently.
+
 ## Modal attach and reuse
 
 Modal mode supports three explicit attach paths:

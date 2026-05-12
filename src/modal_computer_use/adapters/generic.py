@@ -27,17 +27,19 @@ class ActionExecutor:
         after_action: AfterHook | None = None,
         coordinate_space: CoordinateSpace | None = None,
         allow_unknown: bool = False,
+        source: str = "generic-adapter",
     ) -> None:
         self.computer = computer
         self.before_action = before_action
         self.after_action = after_action
         self.coordinate_space = coordinate_space
         self.allow_unknown = allow_unknown
+        self.source = source
 
     def apply(self, action: ComputerAction | dict[str, Any]) -> ActionResult:
-        normalized = parse_action(action)
+        normalized = self._transform(parse_action(action))
         self._policy(normalized)
-        result = self.computer.actions.apply(self._transform(normalized))
+        result = self.computer.actions.apply(normalized)
         if self.after_action:
             self.after_action(normalized, result)
         return result
@@ -56,7 +58,7 @@ class ActionExecutor:
             normalized,
             continue_on_error=continue_on_error,
             screenshot_after=screenshot_after,
-            source="generic-adapter",
+            source=self.source,
         )
         if self.after_action:
             for action in normalized:
@@ -89,6 +91,9 @@ class ActionExecutor:
                 Point(x=action.end_x, y=action.end_y)
             )
             updates.update({"end_x": point.x, "end_y": point.y})
+        path = getattr(action, "path", None)
+        if path:
+            updates["path"] = [self.coordinate_space.to_desktop(point) for point in path]
         if not updates:
             return action
         return action.model_copy(update=updates)

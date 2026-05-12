@@ -51,6 +51,9 @@ By default, typed text and clipboard text are redacted from traces. The action t
 uses `redactions=["text"]` for typed text and stores `normalized_action.text` as
 `{"redacted": true, "length": <characters>}`. The validator accepts older
 `typed_text` redaction names with a warning, but new traces should use `text`.
+When actions came through a provider adapter, `provider_action` is populated from the adapter's
+redacted provenance metadata. Provider typed text is reported as `provider_action.text` in
+`redactions`.
 Tokens and noVNC URLs are always redacted. Full plaintext capture is opt-in and intended only
 for local debugging.
 

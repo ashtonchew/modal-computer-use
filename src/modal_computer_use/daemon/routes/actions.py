@@ -12,6 +12,10 @@ from typing import Any
 
 from fastapi import APIRouter, Header, Request
 
+from modal_computer_use.adapters.provenance import (
+    PROVIDER_ACTION_METADATA_KEY,
+    PROVIDER_ACTION_REDACTIONS_METADATA_KEY,
+)
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import (
@@ -667,6 +671,9 @@ def _append_trace(
         return
     writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
     normalized = _redacted_action(action)
+    provider_action, provider_redactions = _provider_trace_metadata(normalized)
+    redactions = ["text"] if isinstance(action, TypeAction) else []
+    redactions.extend(provider_redactions)
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
@@ -674,12 +681,13 @@ def _append_trace(
             call_id=call_id,
             sequence=payload.sequence if payload.sequence is not None else sequence,
             source=payload.source,
+            provider_action=provider_action,
             normalized_action=normalized,
             result=result.model_dump(mode="json"),
             elapsed_ms=result.elapsed_ms,
             screenshot_after_uri=_screenshot_uri(result),
             coordinate_space=_coordinate_space(result),
-            redactions=["text"] if isinstance(action, TypeAction) else [],
+            redactions=redactions,
             error=_trace_error(result),
         )
     )
@@ -751,3 +759,21 @@ def _redacted_action(action: Any) -> dict[str, Any]:
         text = action.text
         data["text"] = {"redacted": True, "length": len(text)}
     return data
+
+
+def _provider_trace_metadata(
+    normalized_action: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    metadata = normalized_action.get("metadata")
+    if not isinstance(metadata, dict):
+        return None, []
+    provider_action = metadata.pop(PROVIDER_ACTION_METADATA_KEY, None)
+    raw_redactions = metadata.pop(PROVIDER_ACTION_REDACTIONS_METADATA_KEY, [])
+    if not metadata:
+        normalized_action["metadata"] = {}
+    redactions = [
+        f"provider_action.{item}"
+        for item in raw_redactions
+        if isinstance(item, str) and item
+    ]
+    return provider_action if isinstance(provider_action, dict) else None, redactions
