@@ -26,6 +26,10 @@ When noVNC is enabled, the URL grants live desktop access. Treat it as a [secret
 
 Structured logs redact typed text, clipboard text, screenshot bytes, tokens, provider keys, noVNC URLs, and artifact bytes. They retain lengths, hashes, dimensions, action types, elapsed time, and `call_id` so traces remain useful for debugging.
 
+Trace validation treats raw plaintext in `type` actions as unsafe. New action traces use
+`redactions=["text"]` and replace typed text with redaction metadata before writing NDJSON.
+Replay dry-runs skip redacted typed text because the original plaintext is intentionally absent.
+
 ## Artifacts
 
 Artifact paths are relative. Absolute paths, `..` segments, encoded traversal, symlink escapes, and control characters are rejected server-side. The artifact root defaults to `/home/desktop/artifacts`; see [artifacts.md](artifacts.md).

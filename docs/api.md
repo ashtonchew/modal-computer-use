@@ -43,6 +43,12 @@ Action budgets count attempted executable desktop actions after validation, incl
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
 instead, and cursor-position queries do not consume the action budget.
 
+Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. Use
+`computer-use trace validate <path>` to validate trace NDJSON and
+`computer-use trace replay <path> --dry-run` to produce a replay plan without contacting a
+daemon, Modal, provider APIs, screenshots, or artifact storage. Both commands emit JSON and
+return nonzero for invalid traces.
+
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
 ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
 `stderr_tail`, `error`) when a recording fails or emits useful stderr. The daemon stores

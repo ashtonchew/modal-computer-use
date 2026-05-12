@@ -31,6 +31,7 @@ dev = [
 ]
 
 [project.scripts]
+computer-use = "modal_computer_use.cli:main"
 computer-use-daemon = "modal_computer_use.daemon.__main__:main"
 
 [tool.hatch.build.targets.wheel]
