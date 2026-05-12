@@ -1339,11 +1339,11 @@ Version response:
 ```json
 {
   "api_version": "v1",
-  "daemon_version": "0.2.0",
-  "sdk_min_version": "0.2.0",
-  "sdk_max_version": "0.x",
+  "daemon_version": "1.0.0",
+  "sdk_min_version": "1.0.0",
+  "sdk_max_version": "1.x",
   "image_profile": "browser",
-  "modal_computer_use_package": "0.2.0"
+  "modal_computer_use_package": "1.0.0"
 }
 ```
 

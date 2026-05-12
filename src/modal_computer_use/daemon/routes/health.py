@@ -30,8 +30,8 @@ async def readyz(request: Request) -> dict[str, object]:
 async def version(request: Request) -> VersionInfo:
     return VersionInfo(
         daemon_version=__version__,
-        sdk_min_version="0.1.0",
-        sdk_max_version="0.x",
+        sdk_min_version="1.0.0",
+        sdk_max_version="1.x",
         image_profile=request.app.state.settings.image_profile,
         modal_computer_use_package=__version__,
     )

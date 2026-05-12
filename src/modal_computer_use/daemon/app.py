@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     configure_logging()
     settings = settings or get_settings()
-    app = FastAPI(title="modal-computer-use daemon", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="modal-computer-use daemon", version="1.0.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.supervisor = Supervisor(settings)
     app.state.backend = choose_backend(
