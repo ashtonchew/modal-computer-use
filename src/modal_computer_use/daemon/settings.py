@@ -55,6 +55,7 @@ class DaemonSettings:
     vnc_mode: str = os.getenv("COMPUTER_USE_VNC_MODE", "off")
     backend: str = os.getenv("COMPUTER_USE_BACKEND", "auto")
     max_batch_actions: int = _int_env("COMPUTER_USE_MAX_BATCH_ACTIONS", 50)
+    max_batch_duration_ms: int = _int_env("COMPUTER_USE_MAX_BATCH_DURATION_MS", 30_000)
     max_actions: int | None = (
         int(os.environ["COMPUTER_USE_MAX_ACTIONS"])
         if os.getenv("COMPUTER_USE_MAX_ACTIONS")

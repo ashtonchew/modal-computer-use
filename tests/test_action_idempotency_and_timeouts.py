@@ -147,7 +147,11 @@ def test_action_timeout_releases_input_and_stops_batch(tmp_path) -> None:
     assert body["ok"] is False
     assert len(body["results"]) == 1
     assert body["results"][0]["error_code"] == "timeout"
-    assert body["results"][0]["output"] == {"code": "timeout", "timeout_ms": 10}
+    assert body["results"][0]["output"] == {
+        "code": "timeout",
+        "timeout_ms": 10,
+        "scope": "action",
+    }
     assert app.state.backend.held_buttons == set()
     assert app.state.action_count == 0
 
@@ -193,3 +197,83 @@ def test_action_timeout_rejects_values_above_configured_max(tmp_path) -> None:
     assert response.status_code == 422
     assert response.json()["code"] == "action_validation_failed"
     assert "timeout_ms 26 exceeds configured maximum 25" in response.json()["details"]["errors"][0]
+
+
+def test_batch_duration_timeout_stops_later_actions_even_with_continue_on_error(
+    tmp_path,
+) -> None:
+    app = _app(
+        tmp_path,
+        default_action_timeout_ms=1_000,
+        max_batch_duration_ms=20,
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "continue_on_error": True,
+                "actions": [
+                    {"type": "wait", "duration_ms": 100, "timeout_ms": 1_000},
+                    {"type": "move", "x": 10, "y": 20},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert len(body["results"]) == 1
+    assert body["results"][0]["type"] == "wait"
+    assert body["results"][0]["error_code"] == "timeout"
+    assert body["results"][0]["output"] == {
+        "code": "timeout",
+        "timeout_ms": 20,
+        "scope": "batch",
+    }
+    assert app.state.action_count == 0
+    assert app.state.screenshot_count == 0
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
+
+
+def test_screenshot_after_timeout_returns_failed_result_without_incrementing_budget(
+    tmp_path,
+) -> None:
+    app = _app(tmp_path, default_action_timeout_ms=10, trace_actions=True)
+    calls = 0
+
+    async def slow_screenshot(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(1)
+
+    app.state.backend.screenshot = slow_screenshot
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["screenshot"] is None
+    assert [item["type"] for item in body["results"]] == ["move", "screenshot_after"]
+    assert body["results"][1]["error_code"] == "timeout"
+    assert body["results"][1]["output"] == {
+        "code": "timeout",
+        "timeout_ms": 10,
+        "scope": "action",
+    }
+    assert calls == 1
+    assert app.state.action_count == 1
+    assert app.state.screenshot_count == 0
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 2
+    assert entries[1].normalized_action == {"type": "screenshot_after"}
+    assert entries[1].error is not None
+    assert entries[1].error["code"] == "timeout"

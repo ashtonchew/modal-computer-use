@@ -278,6 +278,7 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
         "COMPUTER_USE_MAX_BATCH_ACTIONS": str(config.actions.max_batch_actions),
+        "COMPUTER_USE_MAX_BATCH_DURATION_MS": str(config.actions.max_batch_duration_ms),
         "COMPUTER_USE_MAX_ACTIONS": ""
         if config.budgets.max_actions is None
         else str(config.budgets.max_actions),

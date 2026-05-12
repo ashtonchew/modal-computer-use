@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
@@ -99,6 +101,36 @@ def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_pat
     assert entries[0].coordinate_space.source_region is not None
     assert entries[0].coordinate_space.source_region.x == 10
     assert entries[0].coordinate_space.image_width == 200
+
+
+def test_action_trace_error_includes_code(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+            default_action_timeout_ms=10,
+        )
+    )
+
+    async def slow_move(x: int, y: int):
+        await asyncio.sleep(1)
+
+    app.state.backend.mouse_move = slow_move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].error is not None
+    assert entries[0].error["code"] == "timeout"
+    assert "timed out" in entries[0].error["message"]
 
 
 def test_screenshot_budget_exceeded(tmp_path) -> None:

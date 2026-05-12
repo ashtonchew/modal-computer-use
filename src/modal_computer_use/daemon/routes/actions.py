@@ -104,14 +104,45 @@ async def run(
         )
     results: list[ActionItemResult] = []
     screenshot = None
+    batch_timed_out = False
     async with request.app.state.input_lock:
+        batch_timeout_ms = request.app.state.settings.max_batch_duration_ms
+        batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
         for index, action in enumerate(payload.actions):
+            remaining_batch_seconds = _remaining_seconds(batch_deadline)
+            if remaining_batch_seconds <= 0:
+                item = _batch_timeout_result(
+                    index=index,
+                    action_type=action.type,
+                    batch_timeout_ms=batch_timeout_ms,
+                    elapsed_ms=0,
+                )
+                results.append(item)
+                batch_timed_out = True
+                _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
+                logger.info(
+                    "action failed",
+                    extra={
+                        "extra": {
+                            "call_id": call_id,
+                            "sequence": index,
+                            "action": _redacted_action(action),
+                            "ok": False,
+                            "elapsed_ms": 0,
+                            "error_code": "timeout",
+                            "timeout_scope": "batch",
+                        }
+                    },
+                )
+                break
             start = time.perf_counter()
             timeout_ms = _effective_action_timeout_ms(action, payload, request)
+            timeout_seconds = min(timeout_ms / 1000, remaining_batch_seconds)
+            timeout_scope = "batch" if timeout_seconds < (timeout_ms / 1000) else "action"
             try:
                 output = await asyncio.wait_for(
                     _execute_action(action, request, call_id=call_id),
-                    timeout=timeout_ms / 1000,
+                    timeout=timeout_seconds,
                 )
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 item = ActionItemResult(
@@ -142,16 +173,24 @@ async def run(
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
+                effective_timeout_ms = (
+                    batch_timeout_ms if timeout_scope == "batch" else timeout_ms
+                )
                 item = ActionItemResult(
                     index=index,
                     type=action.type,
                     ok=False,
                     elapsed_ms=elapsed_ms,
                     error_code="timeout",
-                    error=f"action timed out after {timeout_ms} ms",
-                    output={"code": "timeout", "timeout_ms": timeout_ms},
+                    error=f"{timeout_scope} timed out after {effective_timeout_ms} ms",
+                    output={
+                        "code": "timeout",
+                        "timeout_ms": effective_timeout_ms,
+                        "scope": timeout_scope,
+                    },
                 )
                 results.append(item)
+                batch_timed_out = timeout_scope == "batch"
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
                     "action failed",
@@ -163,10 +202,11 @@ async def run(
                             "ok": False,
                             "elapsed_ms": elapsed_ms,
                             "error_code": "timeout",
+                            "timeout_scope": timeout_scope,
                         }
                     },
                 )
-                if not payload.continue_on_error:
+                if batch_timed_out or not payload.continue_on_error:
                     break
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start) * 1000
@@ -193,23 +233,56 @@ async def run(
                             "ok": False,
                             "elapsed_ms": elapsed_ms,
                             "error_code": error_code,
-                            "error": str(exc),
                         }
                     },
                 )
                 if not payload.continue_on_error:
                     break
-        if payload.screenshot_after:
+        if payload.screenshot_after and not batch_timed_out:
             options = payload.screenshot_options or ScreenshotOptions()
-            screenshot = await request.app.state.backend.screenshot(
-                options,
-                artifact_store=request.app.state.artifacts,
-                call_id=call_id,
-                retention_class="trace",
-            )
-            request.app.state.screenshot_count += 1
-            budgets.enforce(request)
-            _append_screenshot_after_trace(request, payload, screenshot, call_id=call_id)
+            start = time.perf_counter()
+            timeout_ms = _effective_screenshot_after_timeout_ms(payload, request)
+            remaining_batch_seconds = _remaining_seconds(batch_deadline)
+            if remaining_batch_seconds <= 0:
+                item = _screenshot_after_timeout_result(
+                    index=len(results),
+                    elapsed_ms=0,
+                    timeout_ms=batch_timeout_ms,
+                    scope="batch",
+                )
+                results.append(item)
+                _append_screenshot_after_trace(request, payload, None, item, call_id=call_id)
+            else:
+                timeout_seconds = min(timeout_ms / 1000, remaining_batch_seconds)
+                timeout_scope = "batch" if timeout_seconds < (timeout_ms / 1000) else "action"
+                try:
+                    screenshot = await asyncio.wait_for(
+                        request.app.state.backend.screenshot(
+                            options,
+                            artifact_store=request.app.state.artifacts,
+                            call_id=call_id,
+                            retention_class="trace",
+                        ),
+                        timeout=timeout_seconds,
+                    )
+                    request.app.state.screenshot_count += 1
+                    budgets.enforce(request)
+                    _append_screenshot_after_trace(
+                        request, payload, screenshot, None, call_id=call_id
+                    )
+                except TimeoutError:
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    effective_timeout_ms = (
+                        batch_timeout_ms if timeout_scope == "batch" else timeout_ms
+                    )
+                    item = _screenshot_after_timeout_result(
+                        index=len(results),
+                        elapsed_ms=elapsed_ms,
+                        timeout_ms=effective_timeout_ms,
+                        scope=timeout_scope,
+                    )
+                    results.append(item)
+                    _append_screenshot_after_trace(request, payload, None, item, call_id=call_id)
     result = ActionBatchResult(
         ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
     )
@@ -276,6 +349,54 @@ def _effective_action_timeout_ms(
     if payload.max_action_timeout_ms is not None:
         return payload.max_action_timeout_ms
     return request.app.state.settings.default_action_timeout_ms
+
+
+def _effective_screenshot_after_timeout_ms(
+    payload: ActionBatchRequest, request: Request
+) -> int:
+    if payload.max_action_timeout_ms is not None:
+        return payload.max_action_timeout_ms
+    return request.app.state.settings.default_action_timeout_ms
+
+
+def _remaining_seconds(deadline: float) -> float:
+    return max(0, deadline - time.perf_counter())
+
+
+def _batch_timeout_result(
+    *,
+    index: int,
+    action_type: str,
+    batch_timeout_ms: int,
+    elapsed_ms: float,
+) -> ActionItemResult:
+    return ActionItemResult(
+        index=index,
+        type=action_type,
+        ok=False,
+        elapsed_ms=elapsed_ms,
+        error_code="timeout",
+        error=f"batch timed out after {batch_timeout_ms} ms",
+        output={"code": "timeout", "timeout_ms": batch_timeout_ms, "scope": "batch"},
+    )
+
+
+def _screenshot_after_timeout_result(
+    *,
+    index: int,
+    elapsed_ms: float,
+    timeout_ms: int,
+    scope: str,
+) -> ActionItemResult:
+    return ActionItemResult(
+        index=index,
+        type="screenshot_after",
+        ok=False,
+        elapsed_ms=elapsed_ms,
+        error_code="timeout",
+        error=f"{scope} timed out after {timeout_ms} ms",
+        output={"code": "timeout", "timeout_ms": timeout_ms, "scope": scope},
+    )
 
 
 async def _execute_action(action: Any, request: Request, *, call_id: str) -> dict[str, Any]:
@@ -449,7 +570,7 @@ def _append_trace(
             screenshot_after_uri=_screenshot_uri(result),
             coordinate_space=_coordinate_space(result),
             redactions=["text"] if isinstance(action, TypeAction) else [],
-            error={"message": result.error} if result.error else None,
+            error=_trace_error(result),
         )
     )
 
@@ -457,7 +578,8 @@ def _append_trace(
 def _append_screenshot_after_trace(
     request: Request,
     payload: ActionBatchRequest,
-    screenshot: Any,
+    screenshot: Any | None,
+    result: ActionItemResult | None,
     *,
     call_id: str,
 ) -> None:
@@ -472,18 +594,34 @@ def _append_screenshot_after_trace(
             sequence=payload.sequence,
             source=payload.source,
             normalized_action={"type": "screenshot_after"},
-            result={
-                "ok": True,
-                "format": screenshot.format,
-                "width": screenshot.width,
-                "height": screenshot.height,
-                "size_bytes": screenshot.size_bytes,
-                "artifact_uri": screenshot.artifact_uri,
-            },
-            screenshot_after_uri=screenshot.artifact_uri,
-            coordinate_space=screenshot.coordinate_space,
+            result=(
+                result.model_dump(mode="json")
+                if result is not None
+                else {
+                    "ok": True,
+                    "format": screenshot.format,
+                    "width": screenshot.width,
+                    "height": screenshot.height,
+                    "size_bytes": screenshot.size_bytes,
+                    "artifact_uri": screenshot.artifact_uri,
+                }
+            ),
+            screenshot_after_uri=screenshot.artifact_uri if screenshot is not None else None,
+            coordinate_space=screenshot.coordinate_space if screenshot is not None else None,
+            error=_trace_error(result) if result is not None else None,
         )
     )
+
+
+def _trace_error(result: ActionItemResult) -> dict[str, Any] | None:
+    if result.error is None and result.error_code is None:
+        return None
+    error: dict[str, Any] = {}
+    if result.error_code is not None:
+        error["code"] = result.error_code
+    if result.error is not None:
+        error["message"] = result.error
+    return error
 
 
 def _screenshot_uri(result: ActionItemResult) -> str | None:
