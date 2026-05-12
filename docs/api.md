@@ -39,6 +39,9 @@ hard deadline and stops the batch even when `continue_on_error` is true. Timeout
 `error_code="timeout"` and an output `scope` of `action` or `batch`. `Idempotency-Key` replays
 the original complete batch result without re-executing actions, incrementing budgets, or
 duplicating trace/artifact writes; reusing a key with a different request body returns `409`.
+Action budgets count attempted executable desktop actions after validation, including failed
+and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
+instead, and cursor-position queries do not consume the action budget.
 
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
 ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,

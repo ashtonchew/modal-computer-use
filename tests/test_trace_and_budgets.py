@@ -133,6 +133,157 @@ def test_action_trace_error_includes_code(tmp_path) -> None:
     assert "timed out" in entries[0].error["message"]
 
 
+def test_failed_action_counts_against_action_budget_and_traces_error(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def fail_move(x: int, y: int):
+        raise RuntimeError("synthetic move failure")
+
+    app.state.backend.mouse_move = fail_move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["results"][0]["error_code"] == "action_failed"
+    assert app.state.action_count == 1
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].error == {
+        "code": "action_failed",
+        "message": "synthetic move failure",
+    }
+
+
+def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+            max_actions=0,
+        )
+    )
+    calls = 0
+
+    async def move(x: int, y: int):
+        nonlocal calls
+        calls += 1
+
+    app.state.backend.mouse_move = move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["results"][0]["error_code"] == "budget_exceeded"
+    assert body["results"][0]["output"]["code"] == "budget_exceeded"
+    assert body["results"][0]["output"]["budgets"]["actions"] == 0
+    assert calls == 0
+    assert app.state.action_count == 0
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].error == {
+        "code": "budget_exceeded",
+        "message": "action budget exceeded",
+    }
+
+
+def test_screenshot_action_budget_failure_is_single_traced_result(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+            max_screenshots=0,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {"type": "screenshot", "options": {"storage": "artifact"}},
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert len(body["results"]) == 1
+    assert body["results"][0]["type"] == "screenshot"
+    assert body["results"][0]["error_code"] == "budget_exceeded"
+    assert body["results"][0]["output"]["budgets"]["screenshots"] == 1
+    assert app.state.action_count == 0
+    assert app.state.screenshot_count == 1
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 1
+    assert entries[0].error is not None
+    assert entries[0].error["code"] == "budget_exceeded"
+
+
+def test_screenshot_after_budget_failure_records_trace_shape(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+            max_screenshots=0,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+                "screenshot_options": {"storage": "artifact"},
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["screenshot"] is None
+    assert [item["type"] for item in body["results"]] == ["move", "screenshot_after"]
+    assert body["results"][1]["error_code"] == "budget_exceeded"
+    assert body["results"][1]["output"]["budgets"]["screenshots"] == 1
+    assert app.state.action_count == 1
+    assert app.state.screenshot_count == 1
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 2
+    assert entries[1].normalized_action == {"type": "screenshot_after"}
+    assert entries[1].screenshot_after_uri is not None
+    assert entries[1].coordinate_space is not None
+    assert entries[1].error is not None
+    assert entries[1].error["code"] == "budget_exceeded"
+
+
 def test_screenshot_budget_exceeded(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

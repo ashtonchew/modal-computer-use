@@ -139,12 +139,38 @@ async def run(
             timeout_ms = _effective_action_timeout_ms(action, payload, request)
             timeout_seconds = min(timeout_ms / 1000, remaining_batch_seconds)
             timeout_scope = "batch" if timeout_seconds < (timeout_ms / 1000) else "action"
+            if _counts_against_action_budget(action):
+                budget_item = _reserve_action_budget(request, index=index, action_type=action.type)
+                if budget_item is not None:
+                    results.append(budget_item)
+                    _append_trace(
+                        request, payload, action, budget_item, call_id=call_id, sequence=index
+                    )
+                    logger.info(
+                        "action failed",
+                        extra={
+                            "extra": {
+                                "call_id": call_id,
+                                "sequence": index,
+                                "action": _redacted_action(action),
+                                "ok": False,
+                                "elapsed_ms": 0,
+                                "error_code": "budget_exceeded",
+                            }
+                        },
+                    )
+                    if not payload.continue_on_error:
+                        break
+                    continue
             try:
                 output = await asyncio.wait_for(
                     _execute_action(action, request, call_id=call_id),
                     timeout=timeout_seconds,
                 )
                 elapsed_ms = (time.perf_counter() - start) * 1000
+                budget_kinds = _budget_kinds_for_action(action)
+                if budget_kinds:
+                    budgets.enforce(request, *budget_kinds)
                 item = ActionItemResult(
                     index=index,
                     type=action.type,
@@ -153,9 +179,6 @@ async def run(
                     output=output or {},
                 )
                 results.append(item)
-                if action.type not in ("screenshot", "zoom", "cursor_position"):
-                    request.app.state.action_count += 1
-                budgets.enforce(request)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
                     "action executed",
@@ -220,6 +243,7 @@ async def run(
                     elapsed_ms=elapsed_ms,
                     error_code=error_code,
                     error=str(exc),
+                    output=_exception_output(exc),
                 )
                 results.append(item)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
@@ -266,7 +290,7 @@ async def run(
                         timeout=timeout_seconds,
                     )
                     request.app.state.screenshot_count += 1
-                    budgets.enforce(request)
+                    budgets.enforce(request, "screenshots", "artifacts")
                     _append_screenshot_after_trace(
                         request, payload, screenshot, None, call_id=call_id
                     )
@@ -283,6 +307,24 @@ async def run(
                     )
                     results.append(item)
                     _append_screenshot_after_trace(request, payload, None, item, call_id=call_id)
+                except Exception as exc:
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                    failed_screenshot = screenshot
+                    screenshot = None
+                    item = ActionItemResult(
+                        index=len(results),
+                        type="screenshot_after",
+                        ok=False,
+                        elapsed_ms=elapsed_ms,
+                        error_code=error_code,
+                        error=str(exc),
+                        output=_exception_output(exc),
+                    )
+                    results.append(item)
+                    _append_screenshot_after_trace(
+                        request, payload, failed_screenshot, item, call_id=call_id
+                    )
     result = ActionBatchResult(
         ok=all(item.ok for item in results), call_id=call_id, results=results, screenshot=screenshot
     )
@@ -361,6 +403,45 @@ def _effective_screenshot_after_timeout_ms(
 
 def _remaining_seconds(deadline: float) -> float:
     return max(0, deadline - time.perf_counter())
+
+
+def _counts_against_action_budget(action: Any) -> bool:
+    return not isinstance(action, ScreenshotAction | ZoomAction | CursorPositionAction)
+
+
+def _budget_kinds_for_action(action: Any) -> tuple[budgets.BudgetKind, ...]:
+    if isinstance(action, ScreenshotAction | ZoomAction):
+        return ("screenshots", "artifacts")
+    return ()
+
+
+def _reserve_action_budget(
+    request: Request,
+    *,
+    index: int,
+    action_type: str,
+) -> ActionItemResult | None:
+    max_actions = request.app.state.settings.max_actions
+    if max_actions is not None and request.app.state.action_count >= max_actions:
+        return ActionItemResult(
+            index=index,
+            type=action_type,
+            ok=False,
+            elapsed_ms=0,
+            error_code="budget_exceeded",
+            error="action budget exceeded",
+            output={"code": "budget_exceeded", "budgets": budgets.snapshot(request)},
+        )
+    request.app.state.action_count += 1
+    return None
+
+
+def _exception_output(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, DaemonError):
+        output: dict[str, Any] = {"code": exc.code}
+        output.update(exc.details)
+        return output
+    return {}
 
 
 def _batch_timeout_result(

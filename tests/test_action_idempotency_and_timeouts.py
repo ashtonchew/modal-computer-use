@@ -70,7 +70,7 @@ def test_idempotency_replay_preserves_failed_action_without_reexecution(tmp_path
     assert first.json()["ok"] is False
     assert second.json() == first.json()
     assert calls == 1
-    assert app.state.action_count == 0
+    assert app.state.action_count == 1
 
 
 def test_idempotency_replay_does_not_duplicate_screenshot_after_or_trace(tmp_path) -> None:
@@ -153,7 +153,7 @@ def test_action_timeout_releases_input_and_stops_batch(tmp_path) -> None:
         "scope": "action",
     }
     assert app.state.backend.held_buttons == set()
-    assert app.state.action_count == 0
+    assert app.state.action_count == 1
 
 
 def test_action_timeout_continue_on_error_executes_next_action(tmp_path) -> None:
@@ -183,7 +183,7 @@ def test_action_timeout_continue_on_error_executes_next_action(tmp_path) -> None
     assert app.state.backend.cursor.x == 10
     assert app.state.backend.cursor.y == 20
     assert app.state.backend.held_buttons == set()
-    assert app.state.action_count == 1
+    assert app.state.action_count == 2
 
 
 def test_action_timeout_rejects_values_above_configured_max(tmp_path) -> None:
@@ -231,7 +231,7 @@ def test_batch_duration_timeout_stops_later_actions_even_with_continue_on_error(
         "timeout_ms": 20,
         "scope": "batch",
     }
-    assert app.state.action_count == 0
+    assert app.state.action_count == 1
     assert app.state.screenshot_count == 0
     assert app.state.backend.cursor.x == 0
     assert app.state.backend.cursor.y == 0

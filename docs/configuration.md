@@ -44,7 +44,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `100` | Sleep inserted after every action to let the desktop settle. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | int | `1000` | Idempotency-key cache size. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | int | `3600` | Idempotency-key cache TTL. |
-| `COMPUTER_USE_MAX_ACTIONS` | int | unset | Optional ceiling on total actions per run. Returns `budget_exceeded` past this. |
+| `COMPUTER_USE_MAX_ACTIONS` | int | unset | Optional ceiling on attempted executable desktop actions per run. Failed and timed-out actions count; validation failures, idempotency replays, screenshots, zooms, and cursor-position queries do not. |
 | `COMPUTER_USE_MAX_SCREENSHOTS` | int | unset | Optional ceiling on total screenshots per run. |
 | `COMPUTER_USE_MAX_ARTIFACT_BYTES` | int | unset | Optional ceiling on artifact bytes written per run. |
 | `COMPUTER_USE_MAX_RECORDING_SECONDS` | int | unset | Optional ceiling on recording duration per run. |
