@@ -32,7 +32,8 @@ def _modal() -> object:
         import modal
     except ImportError as exc:
         raise ModalNotInstalledError(
-            "Modal APIs require `pip install modal-computer-use[modal]`"
+            "Modal APIs require the modal extra, for example `uv sync --extra modal` "
+            "in this repository or `uv add 'modal-computer-use[modal]'` downstream"
         ) from exc
     return modal
 

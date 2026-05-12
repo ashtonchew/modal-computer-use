@@ -15,7 +15,9 @@ class SandboxRegistry:
             import modal
         except ImportError as exc:
             raise ModalNotInstalledError(
-                "Modal registry APIs require `pip install modal-computer-use[modal]`"
+                "Modal registry APIs require the modal extra, for example "
+                "`uv sync --extra modal` in this repository or "
+                "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
         return modal
 

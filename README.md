@@ -6,20 +6,24 @@ It is not an autonomous agent framework. Model loops belong in examples or user 
 
 ## Install
 
+For repository development:
+
 ```bash
-python -m pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 For Modal creation APIs:
 
 ```bash
-python -m pip install -e ".[modal]"
+uv sync --extra modal
 ```
+
+Downstream projects can install the published package with `uv add modal-computer-use`.
 
 ## Local Daemon Quickstart
 
 ```bash
-COMPUTER_USE_BACKEND=mock COMPUTER_USE_LOCAL_TOKEN=dev computer-use-daemon
+COMPUTER_USE_BACKEND=mock COMPUTER_USE_LOCAL_TOKEN=dev uv run computer-use-daemon
 ```
 
 ```python

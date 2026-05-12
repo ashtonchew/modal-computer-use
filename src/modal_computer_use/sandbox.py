@@ -90,7 +90,9 @@ class ComputerSandbox:
             import modal
         except ImportError as exc:
             raise ModalNotInstalledError(
-                "ComputerSandbox.create requires `pip install modal-computer-use[modal]`"
+                "ComputerSandbox.create requires the modal extra, for example "
+                "`uv sync --extra modal` in this repository or "
+                "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
 
         config = config or ComputerConfig()
@@ -167,7 +169,9 @@ class ComputerSandbox:
             import modal
         except ImportError as exc:
             raise ModalNotInstalledError(
-                "ComputerSandbox.attach requires `pip install modal-computer-use[modal]`"
+                "ComputerSandbox.attach requires the modal extra, for example "
+                "`uv sync --extra modal` in this repository or "
+                "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
         if sandbox_id:
             sandbox = modal.Sandbox.from_id(sandbox_id)

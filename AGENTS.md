@@ -13,10 +13,10 @@ This repository implements daemon-first computer-use primitives for Modal Sandbo
 
 ## Development
 
-- Install: `python -m pip install -e ".[dev]"`
-- Lint: `ruff check .`
-- Tests: `pytest`
-- Types: `mypy src`
+- Install: `uv sync --extra dev`
+- Lint: `uv run ruff check .`
+- Tests: `uv run pytest`
+- Types: `uv run mypy src`
 
 ## Release Criteria
 

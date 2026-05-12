@@ -422,7 +422,7 @@ The public API should be boring, guessable, and semantically precise. Apply thes
 |---|---|---|
 | Repo / distribution | `modal-computer-use` | Matches the domain term. |
 | Import package | `modal_computer_use` | Standard Python package spelling. |
-| Daemon binary | `computer-use-daemon` | Optional console script; examples prefer `python -m modal_computer_use.daemon`. |
+| Daemon binary | `computer-use-daemon` | Optional console script; local repository examples prefer `uv run python -m modal_computer_use.daemon`. |
 | Daemon module | `modal_computer_use.daemon` | No acronym-based top-level daemon module. |
 | OS user | `desktop` | Describes the runtime user. |
 | OS home | `/home/desktop` | Keeps recordings/artifacts under the desktop user's home. |
@@ -661,7 +661,7 @@ The daemon should live inside the same Python package as `modal_computer_use.dae
 Recommended:
 
 - Root package: `modal-computer-use`, installed by users locally.
-- Daemon package path: `modal_computer_use.daemon`, executed with `python -m modal_computer_use.daemon`.
+- Daemon package path: `modal_computer_use.daemon`, executed with `uv run python -m modal_computer_use.daemon` during repository development and `python -m modal_computer_use.daemon` inside the Modal sandbox image.
 - Daemon binary/console script: `computer-use-daemon` as a convenience alias.
 - Optional extras: `modal-computer-use[openai]`, `modal-computer-use[anthropic]`, `modal-computer-use[server-examples]`, `modal-computer-use[otel]`, and `modal-computer-use[dev]`.
 - Optional deployed Modal manager: implemented as an example or extra, not as the only way to use the SDK.
@@ -772,7 +772,7 @@ The sandbox command should start the daemon entrypoint:
 python -m modal_computer_use.daemon
 ```
 
-The package may also expose a console script named `computer-use-daemon`, but examples should prefer the `python -m` form because it is stable under editable installs and copied source trees. The daemon, not a shell script, should supervise child processes. This makes lifecycle, restart, logs, health, readiness, capabilities, and errors observable through the same API.
+The package may also expose a console script named `computer-use-daemon`, but local repository examples should prefer the `uv run python -m` form because it is stable under editable installs and copied source trees. The actual Modal sandbox command can stay `python -m modal_computer_use.daemon` because the image runtime does not need to carry the `uv` binary. The daemon, not a shell script, should supervise child processes. This makes lifecycle, restart, logs, health, readiness, capabilities, and errors observable through the same API.
 
 
 ### 6.3 Environment variables
