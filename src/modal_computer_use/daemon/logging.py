@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import sys
+from datetime import UTC, datetime
+from typing import Any
+
+SENSITIVE_KEYS = {"token", "authorization", "text", "data_base64", "bytes", "clipboard", "vnc"}
+
+
+def redact(value: Any) -> Any:
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if any(sensitive in lowered for sensitive in SENSITIVE_KEYS):
+                if isinstance(item, str):
+                    result[key] = {
+                        "redacted": True,
+                        "length": len(item),
+                        "sha256": hashlib.sha256(item.encode()).hexdigest(),
+                    }
+                else:
+                    result[key] = {"redacted": True}
+            else:
+                result[key] = redact(item)
+        return result
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": datetime.now(UTC).isoformat(),
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        extra = getattr(record, "extra", None)
+        if isinstance(extra, dict):
+            payload.update(redact(extra))
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, separators=(",", ":"))
+
+
+def configure_logging(level: int = logging.INFO) -> None:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+    root = logging.getLogger("modal_computer_use")
+    root.handlers[:] = [handler]
+    root.setLevel(level)

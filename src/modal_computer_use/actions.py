@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from .models import ComputerAction, Point, parse_action
+
+KEY_ALIASES: dict[str, str] = {
+    "alt": "alt",
+    "option": "alt",
+    "backspace": "BackSpace",
+    "bksp": "BackSpace",
+    "cmd": "super",
+    "command": "super",
+    "ctrl": "ctrl",
+    "control": "ctrl",
+    "delete": "Delete",
+    "del": "Delete",
+    "enter": "Return",
+    "return": "Return",
+    "esc": "Escape",
+    "escape": "Escape",
+    "left": "Left",
+    "right": "Right",
+    "up": "Up",
+    "down": "Down",
+    "pageup": "Page_Up",
+    "page_up": "Page_Up",
+    "pagedown": "Page_Down",
+    "page_down": "Page_Down",
+    "shift": "shift",
+    "space": "space",
+    "super": "super",
+    "tab": "Tab",
+}
+
+
+def normalize_key(key: str) -> str:
+    stripped = key.strip()
+    if not stripped:
+        raise ValueError("key must be non-empty")
+    lowered = stripped.lower().replace("-", "_")
+    if lowered in KEY_ALIASES:
+        return KEY_ALIASES[lowered]
+    if len(stripped) == 1:
+        return stripped
+    if lowered.startswith("f") and lowered[1:].isdigit():
+        number = int(lowered[1:])
+        if 1 <= number <= 24:
+            return f"F{number}"
+    return stripped
+
+
+def normalize_key_combo(keys: str | Iterable[str]) -> list[str]:
+    if isinstance(keys, str):
+        parts = [part for part in keys.replace("+", " ").split() if part]
+    else:
+        parts = list(keys)
+    if not parts:
+        raise ValueError("key combo must contain at least one key")
+    return [normalize_key(part) for part in parts]
+
+
+def normalize_actions(actions: Iterable[ComputerAction | dict]) -> list[ComputerAction]:
+    return [parse_action(action) for action in actions]
+
+
+def transform_point(point: Point, coordinate_space: object | None) -> Point:
+    if coordinate_space is None:
+        return point
+    to_desktop = getattr(coordinate_space, "to_desktop", None)
+    if not callable(to_desktop):
+        return point
+    return to_desktop(point)

@@ -1,0 +1,479 @@
+{
+  "base_url": "http://testserver",
+  "benchmarks": {
+    "action_batch": {
+      "action_count": 5,
+      "actions": [
+        {
+          "type": "move"
+        },
+        {
+          "type": "cursor_position"
+        },
+        {
+          "type": "wait"
+        },
+        {
+          "type": "move"
+        },
+        {
+          "type": "cursor_position"
+        }
+      ],
+      "cases": {
+        "batch_5_actions": {
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            0.19037490710616112,
+            0.17558294348418713,
+            0.23737503215670586,
+            0.16787508502602577,
+            0.17366698011755943
+          ],
+          "daemon_summary_ms": {
+            "max": 0.23737503215670586,
+            "mean": 0.18897498957812786,
+            "min": 0.16787508502602577,
+            "p50": 0.17558294348418713,
+            "p95": 0.22797500714659688
+          },
+          "failures": [],
+          "iterations": 5,
+          "overhead_samples_ms": [
+            0.6996248848736286,
+            0.6256671622395515,
+            0.6342090200632811,
+            0.6860839203000069,
+            0.6394579540938139
+          ],
+          "overhead_summary_ms": {
+            "max": 0.6996248848736286,
+            "mean": 0.6570085883140564,
+            "min": 0.6256671622395515,
+            "p50": 0.6394579540938139,
+            "p95": 0.6969166919589043
+          },
+          "samples_ms": [
+            0.8899997919797897,
+            0.8012501057237387,
+            0.8715840522199869,
+            0.8539590053260326,
+            0.8131249342113733
+          ],
+          "status": "ok",
+          "successful_iterations": 5,
+          "summary_ms": {
+            "max": 0.8899997919797897,
+            "mean": 0.8459835778921843,
+            "min": 0.8012501057237387,
+            "p50": 0.8539590053260326,
+            "p95": 0.8863166440278292
+          }
+        },
+        "sandbox_exec": {
+          "reason": "Sandbox.exec comparison is unsupported in this benchmark pass",
+          "status": "not_measured"
+        },
+        "separate_5_actions": {
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            0.21687406115233898,
+            0.2025424037128687,
+            0.26391702704131603,
+            0.2014178317040205,
+            0.24975137785077095
+          ],
+          "daemon_summary_ms": {
+            "max": 0.26391702704131603,
+            "mean": 0.22690054029226303,
+            "min": 0.2014178317040205,
+            "p50": 0.21687406115233898,
+            "p95": 0.261083897203207
+          },
+          "failures": [],
+          "iterations": 5,
+          "overhead_samples_ms": [
+            2.737917937338352,
+            2.7679994236677885,
+            3.0966249760240316,
+            2.7324981056153774,
+            2.8992067091166973
+          ],
+          "overhead_summary_ms": {
+            "max": 3.0966249760240316,
+            "mean": 2.8468494303524494,
+            "min": 2.7324981056153774,
+            "p50": 2.7679994236677885,
+            "p95": 3.0571413226425648
+          },
+          "samples_ms": [
+            2.954791998490691,
+            2.970541827380657,
+            3.3605420030653477,
+            2.933915937319398,
+            3.1489580869674683
+          ],
+          "status": "ok",
+          "successful_iterations": 5,
+          "summary_ms": {
+            "max": 3.3605420030653477,
+            "mean": 3.0737499706447124,
+            "min": 2.933915937319398,
+            "p50": 2.970541827380657,
+            "p95": 3.318225219845772
+          }
+        }
+      },
+      "comparison": {
+        "batch_faster": true,
+        "batch_vs_separate_speedup": 3.633344725559725,
+        "mean_delta_ms": 2.227766392752528,
+        "status": "measured"
+      },
+      "failures": [],
+      "status": "ok"
+    },
+    "cold_create_to_ready": {
+      "reason": "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
+      "status": "not_measured"
+    },
+    "move_click": {
+      "action_count": 2,
+      "actions": [
+        {
+          "type": "move"
+        },
+        {
+          "button": "left",
+          "type": "click"
+        }
+      ],
+      "attribution": {
+        "reason": null,
+        "status": "measured"
+      },
+      "daemon_samples_ms": [
+        0.08891685865819454,
+        0.07724994793534279,
+        0.08629192598164082,
+        0.07308297790586948,
+        0.07429206743836403
+      ],
+      "daemon_summary_ms": {
+        "max": 0.08891685865819454,
+        "mean": 0.07996675558388233,
+        "min": 0.07308297790586948,
+        "p50": 0.07724994793534279,
+        "p95": 0.0883918721228838
+      },
+      "failures": [],
+      "iterations": 5,
+      "overhead_samples_ms": [
+        0.6247921846807003,
+        0.5839590448886156,
+        0.5559581331908703,
+        0.5547921173274517,
+        0.6405410822480917
+      ],
+      "overhead_summary_ms": {
+        "max": 0.6405410822480917,
+        "mean": 0.5920085124671459,
+        "min": 0.5547921173274517,
+        "p50": 0.5839590448886156,
+        "p95": 0.6373913027346134
+      },
+      "samples_ms": [
+        0.7137090433388948,
+        0.6612089928239584,
+        0.6422500591725111,
+        0.6278750952333212,
+        0.7148331496864557
+      ],
+      "status": "ok",
+      "successful_iterations": 5,
+      "summary_ms": {
+        "max": 0.7148331496864557,
+        "mean": 0.6719752680510283,
+        "min": 0.6278750952333212,
+        "p50": 0.6612089928239584,
+        "p95": 0.7146083284169436
+      }
+    },
+    "recording_start_stop": {
+      "failures": [],
+      "iterations": 5,
+      "last_result": {
+        "artifact_backed": true,
+        "duration_seconds": 0.000861,
+        "format": "mp4",
+        "fps": 5,
+        "return_code": null,
+        "size_bytes": 32,
+        "status": "stopped",
+        "stop_method": "mock"
+      },
+      "request": {
+        "format": "mp4",
+        "fps": 5
+      },
+      "start_samples_ms": [
+        0.7256658282130957,
+        0.6732500623911619,
+        0.7018330506980419,
+        0.6808748003095388,
+        0.6903749890625477
+      ],
+      "start_summary_ms": {
+        "max": 0.7256658282130957,
+        "mean": 0.6943997461348772,
+        "min": 0.6732500623911619,
+        "p50": 0.6903749890625477,
+        "p95": 0.7208992727100849
+      },
+      "status": "ok",
+      "stop_samples_ms": [
+        0.8357081096619368,
+        0.8290829136967659,
+        0.779750058427453,
+        0.9577921591699123,
+        1.0070840362459421
+      ],
+      "stop_summary_ms": {
+        "max": 1.0070840362459421,
+        "mean": 0.881883455440402,
+        "min": 0.779750058427453,
+        "p50": 0.8357081096619368,
+        "p95": 0.9972256608307362
+      },
+      "successful_iterations": 5
+    },
+    "sandbox_exec": {
+      "reason": "Sandbox.exec comparison requires explicit --include-sandbox-exec live mode",
+      "status": "not_measured"
+    },
+    "screenshot_compressed": {
+      "failures": [],
+      "iterations": 5,
+      "last_result": {
+        "artifact_backed": false,
+        "cursor_visible": false,
+        "format": "jpeg",
+        "height": 450,
+        "size_bytes": 9642,
+        "storage": "inline",
+        "width": 720
+      },
+      "request": {
+        "format": "jpeg",
+        "quality": 60,
+        "scale": 0.5,
+        "show_cursor": false,
+        "storage": "inline"
+      },
+      "samples_bytes": [
+        9642,
+        9642,
+        9642,
+        9642,
+        9642
+      ],
+      "samples_ms": [
+        1.244792016223073,
+        1.1897918302565813,
+        1.2377919629216194,
+        1.5972910914570093,
+        1.235542120411992
+      ],
+      "status": "ok",
+      "successful_iterations": 5,
+      "summary_bytes": {
+        "max": 9642.0,
+        "mean": 9642.0,
+        "min": 9642.0,
+        "p50": 9642.0,
+        "p95": 9642.0
+      },
+      "summary_ms": {
+        "max": 1.5972910914570093,
+        "mean": 1.301041804254055,
+        "min": 1.1897918302565813,
+        "p50": 1.2377919629216194,
+        "p95": 1.526791276410222
+      }
+    },
+    "screenshot_full": {
+      "failures": [],
+      "iterations": 5,
+      "last_result": {
+        "artifact_backed": false,
+        "cursor_visible": false,
+        "format": "png",
+        "height": 900,
+        "size_bytes": 5965,
+        "storage": "inline",
+        "width": 1440
+      },
+      "request": {
+        "format": "png",
+        "show_cursor": false,
+        "storage": "inline"
+      },
+      "samples_bytes": [
+        5965,
+        5965,
+        5965,
+        5965,
+        5965
+      ],
+      "samples_ms": [
+        5.608500214293599,
+        5.470749922096729,
+        5.4021249525249,
+        5.516833160072565,
+        5.386249860748649
+      ],
+      "status": "ok",
+      "successful_iterations": 5,
+      "summary_bytes": {
+        "max": 5965.0,
+        "mean": 5965.0,
+        "min": 5965.0,
+        "p50": 5965.0,
+        "p95": 5965.0
+      },
+      "summary_ms": {
+        "max": 5.608500214293599,
+        "mean": 5.4768916219472885,
+        "min": 5.386249860748649,
+        "p50": 5.470749922096729,
+        "p95": 5.590166803449392
+      }
+    },
+    "type_100_chars": {
+      "action_count": 1,
+      "attribution": {
+        "reason": null,
+        "status": "measured"
+      },
+      "daemon_samples_ms": [
+        0.048208050429821014,
+        0.03879121504724026,
+        0.04529207944869995,
+        0.03879191353917122,
+        0.04141591489315033
+      ],
+      "daemon_summary_ms": {
+        "max": 0.048208050429821014,
+        "mean": 0.042499834671616554,
+        "min": 0.03879121504724026,
+        "p50": 0.04141591489315033,
+        "p95": 0.0476248562335968
+      },
+      "failures": [],
+      "iterations": 5,
+      "overhead_samples_ms": [
+        0.5325418896973133,
+        0.5469168536365032,
+        0.5849578883498907,
+        0.5317081231623888,
+        0.5551681388169527
+      ],
+      "overhead_summary_ms": {
+        "max": 0.5849578883498907,
+        "mean": 0.5502585787326097,
+        "min": 0.5317081231623888,
+        "p50": 0.5469168536365032,
+        "p95": 0.5789999384433031
+      },
+      "request": {
+        "character_count": 100,
+        "method": "auto"
+      },
+      "samples_ms": [
+        0.5807499401271343,
+        0.5857080686837435,
+        0.6302499677985907,
+        0.57050003670156,
+        0.596584053710103
+      ],
+      "status": "ok",
+      "successful_iterations": 5,
+      "summary_ms": {
+        "max": 0.6302499677985907,
+        "mean": 0.5927584134042263,
+        "min": 0.57050003670156,
+        "p50": 0.5857080686837435,
+        "p95": 0.6235167849808931
+      }
+    },
+    "warm_attach_to_health": {
+      "reason": "warm attach requires Modal orchestration and is outside this report mode",
+      "status": "not_measured"
+    }
+  },
+  "failures": [],
+  "generated_at": "2026-05-12T06:35:11.466703+00:00",
+  "iterations": 5,
+  "metadata": {
+    "capabilities": {
+      "action_types": [
+        "move",
+        "click",
+        "double_click",
+        "triple_click",
+        "drag",
+        "scroll",
+        "mouse_down",
+        "mouse_up",
+        "type",
+        "keypress",
+        "hotkey",
+        "hold_key",
+        "wait",
+        "screenshot",
+        "zoom",
+        "cursor_position",
+        "release_all"
+      ],
+      "image_profile": "standard",
+      "primitives": [
+        "mouse",
+        "keyboard",
+        "clipboard",
+        "screenshots",
+        "recordings",
+        "display",
+        "windows",
+        "actions",
+        "artifacts",
+        "browser",
+        "apps",
+        "commands"
+      ],
+      "screenshot_formats": [
+        "png",
+        "jpeg",
+        "webp"
+      ],
+      "vnc_enabled": false
+    },
+    "version": {
+      "api_version": "v1",
+      "daemon_version": "0.1.0",
+      "image_profile": "standard",
+      "modal_computer_use_package": "0.1.0",
+      "sdk_max_version": "0.x",
+      "sdk_min_version": "0.1.0"
+    }
+  },
+  "mode": "mock-local",
+  "ok": true,
+  "package_version": "0.1.0",
+  "warmup_iterations": 1
+}

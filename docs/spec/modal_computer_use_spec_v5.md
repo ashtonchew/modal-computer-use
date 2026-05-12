@@ -1,5 +1,7 @@
 # `modal-computer-use`: Daytona-style computer-use primitives on Modal
 
+> **Superseded by [modal_computer_use_spec_v6.md](modal_computer_use_spec_v6.md).** Kept for historical reference; do not edit.
+
 **Status:** implementation plan and technical specification  
 **Prepared:** 2026-05-11  
 **Revision:** v5, best-practice architecture and implementation patch after competitor/API/security review  
@@ -271,8 +273,7 @@ computer.mouse.click(320, 240)
 computer.keyboard.type("hello")
 shot = computer.screenshots.full(format="png")
 
-print(shot.width, shot.height, len(shot.data))
-print(computer.vnc_url)
+print({"width": shot.width, "height": shot.height, "remote_view_enabled": computer.debug.urls().vnc is not None})
 
 computer.terminate()
 ```
@@ -3148,7 +3149,7 @@ computer = ComputerSandbox.create(
 )
 computer.wait_until_ready()
 
-print("VNC:", computer.debug.vnc_url())
+print({"remote_view_enabled": computer.debug.urls().vnc is not None})
 
 computer.mouse.click(100, 100)
 computer.keyboard.hotkey("ctrl", "l")

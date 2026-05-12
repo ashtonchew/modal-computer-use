@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from fastapi import Request
+
+from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.models import Point, Region
+
+
+def validate_point(request: Request, point: Point, *, field: str = "coordinate") -> None:
+    width = request.app.state.backend.width
+    height = request.app.state.backend.height
+    if point.x >= width or point.y >= height:
+        raise DaemonError(
+            f"{field} is outside desktop geometry",
+            status_code=422,
+            code="coordinate_out_of_bounds",
+            details={"field": field, "width": width, "height": height},
+        )
+
+
+def validate_optional_point(
+    request: Request,
+    *,
+    x: int | None,
+    y: int | None,
+    field: str = "coordinate",
+) -> None:
+    if x is None and y is None:
+        return
+    if x is None or y is None:
+        raise DaemonError(
+            f"{field} requires both x and y",
+            status_code=422,
+            code="coordinate_pair_required",
+            details={"field": field},
+        )
+    validate_point(request, Point(x=x, y=y), field=field)
+
+
+def validate_region(request: Request, region: Region, *, field: str = "region") -> None:
+    width = request.app.state.backend.width
+    height = request.app.state.backend.height
+    if region.right > width or region.bottom > height:
+        raise DaemonError(
+            f"{field} extends beyond desktop geometry",
+            status_code=422,
+            code="region_out_of_bounds",
+            details={"field": field, "width": width, "height": height},
+        )
