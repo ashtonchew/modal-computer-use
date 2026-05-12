@@ -36,6 +36,22 @@ shot = computer.screenshots.full(show_cursor=True)
 print(shot.width, shot.height, shot.sha256)
 ```
 
+## Benchmarking
+
+Measure the action batching hot path without Modal or model credentials:
+
+```bash
+uv run computer-use benchmark action-batch --mock-local --iterations 5
+```
+
+Against a running daemon:
+
+```bash
+uv run computer-use benchmark action-batch --base-url http://127.0.0.1:8080 --token dev --iterations 5
+```
+
+The benchmark emits JSON with raw samples, summary timings, and the batch-vs-separate-call speedup.
+
 ## Modal Quickstart
 
 ```python

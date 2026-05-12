@@ -8,6 +8,27 @@ The daemon's `/v1/actions/run` route accepts an ordered list of actions and exec
 
 Batch limits live behind `COMPUTER_USE_MAX_BATCH_ACTIONS` (default `50`). The daemon validates the whole batch before running anything and returns per-action results. Use `continue_on_error=True` if a flaky action should not abort the rest.
 
+## Benchmark action batching
+
+Use the benchmark CLI to measure the daemon hot path without model credentials:
+
+```bash
+uv run computer-use benchmark action-batch --mock-local --iterations 5
+```
+
+Against a running daemon:
+
+```bash
+uv run computer-use benchmark action-batch \
+  --base-url http://127.0.0.1:8080 \
+  --token dev \
+  --iterations 5
+```
+
+The command emits JSON with metadata, raw millisecond samples, summary timings, and a batch-vs-separate-call comparison. It measures one request containing five safe actions against five separate action requests. The `Sandbox.exec` comparison is reported as `not_measured` in this version; no Modal Sandbox is created by the benchmark.
+
+The benchmark performs one warmup iteration per case before measuring. Any daemon error or exception is included under `failures`, and the command exits nonzero. The built-in action set avoids text-entry and clipboard actions so benchmark output does not include typed or clipboard text.
+
 ## Screenshot storage modes
 
 `screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
