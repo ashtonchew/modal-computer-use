@@ -191,6 +191,22 @@ unless resource fields are exposed. Modal default live runs stay `partial` unles
 explicitly configured, because Modal bills on the higher of requested resources or actual usage.
 Adapter-only providers return `not_applicable` because they do not create provider resources.
 
+Modal live runs can also attach a separate `billing_reconciliation` object when the billed Modal
+object is tagged and the caller provides a Modal billing report window. This uses
+`modal.billing.workspace_billing_report` with requested tag names, filters rows by required benchmark
+tags, and sums only matched row costs. It intentionally does not overwrite `cost_estimate`: the
+estimate is immediate public-rate comparison context, while reconciliation is delayed Modal-reported
+billing telemetry for the tag/window. Reconciliation can return `matched`, `not_available_yet`,
+`no_matching_tags`, `not_measured`, `unavailable`, or `failed`. Short benchmark runs often need a
+later query because Modal billing report data is delayed and reported in full intervals. Modal rounds
+partial `start` values down to the interval boundary and excludes partial `end` intervals; requested
+tag keys can be absent when they were not in use, and tag changes apply to the whole reported
+interval. Saved reconciliation metadata omits raw billing rows, object ids, URLs, tokens,
+stdout/stderr, and provider payloads.
+For strongest attribution, run the benchmark in an isolated Modal App or ensure the required tags are
+present on the Modal object whose rows appear in `workspace_billing_report`; Sandbox-only tags should
+be validated against a live report before relying on them for cost attribution.
+
 E2B's default desktop typing can be much slower than move/click or screenshot cases because its
 provider default GUI typing API may chunk text and add delay between chunks. The benchmark records
 that provider default path rather than tuning E2B-specific typing arguments, so compare tuned typing

@@ -60,6 +60,32 @@ def modal_sandbox_exec_runner_from_id(sandbox_id: str):
     return run
 
 
+def modal_workspace_billing_report(
+    *,
+    start: datetime,
+    end: datetime | None,
+    resolution: str,
+    tag_names: list[str] | None,
+) -> list[object]:
+    try:
+        import modal.billing
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "Modal billing reconciliation requires the modal extra, for example "
+            "`uv sync --extra modal` in this repository or "
+            "`uv add 'modal-computer-use[modal]'` downstream"
+        ) from exc
+
+    return list(
+        modal.billing.workspace_billing_report(
+            start=start,
+            end=end,
+            resolution=resolution,
+            tag_names=tag_names,
+        )
+    )
+
+
 class ComputerSandbox:
     def __init__(
         self,

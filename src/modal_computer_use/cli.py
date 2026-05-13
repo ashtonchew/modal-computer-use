@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .benchmark_billing import modal_billing_reconciliation_request
 from .benchmarks import (
     DEFAULT_COMPARE_PROVIDERS,
     ComparisonProvider,
@@ -109,6 +111,42 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--iterations", type=_positive_int, default=5)
     compare_parser.add_argument("--output", type=Path)
     compare_parser.add_argument(
+        "--modal-billing-reconcile",
+        action="store_true",
+        help="query Modal billing report data for a tagged modal-daemon benchmark run",
+    )
+    compare_parser.add_argument(
+        "--modal-billing-start",
+        help="UTC/ISO start timestamp for Modal billing reconciliation",
+    )
+    compare_parser.add_argument(
+        "--modal-billing-end",
+        help="UTC/ISO end timestamp for Modal billing reconciliation; defaults to now",
+    )
+    compare_parser.add_argument(
+        "--modal-billing-resolution",
+        default="h",
+        help="Modal billing report resolution; defaults to h",
+    )
+    compare_parser.add_argument(
+        "--modal-billing-buffer-seconds",
+        type=int,
+        default=0,
+        help="subtract this many seconds from the reconciliation end time",
+    )
+    compare_parser.add_argument(
+        "--modal-billing-tag",
+        action="append",
+        default=[],
+        help="required billing tag as key=value; repeat for each attribution tag",
+    )
+    compare_parser.add_argument(
+        "--modal-billing-tag-name",
+        action="append",
+        default=[],
+        help="tag name to request from Modal billing reports; repeatable",
+    )
+    compare_parser.add_argument(
         "--env-file",
         type=Path,
         help="load provider benchmark credentials from a dotenv file; existing env vars win",
@@ -129,6 +167,17 @@ def main(argv: list[str] | None = None) -> int:
             compare_parser.error("modal-daemon comparison requires --mock-local or --base-url")
         if "modal-exec" in providers and not args.sandbox_id:
             compare_parser.error("modal-exec comparison requires --sandbox-id")
+        if args.modal_billing_reconcile:
+            if "modal-daemon" not in providers:
+                compare_parser.error("--modal-billing-reconcile requires provider modal-daemon")
+            if not args.modal_billing_start:
+                compare_parser.error("--modal-billing-reconcile requires --modal-billing-start")
+            if not args.modal_billing_tag:
+                compare_parser.error("--modal-billing-reconcile requires --modal-billing-tag")
+            _parse_cli_datetime(args.modal_billing_start, parser=compare_parser)
+            if args.modal_billing_end:
+                _parse_cli_datetime(args.modal_billing_end, parser=compare_parser)
+            _parse_key_value_pairs(args.modal_billing_tag, parser=compare_parser)
         if args.env_file is not None and not args.env_file.is_file():
             compare_parser.error("--env-file must point to an existing file")
     if args.command == "trace" and args.trace_command == "validate":
@@ -373,14 +422,62 @@ def _sandbox_exec_setup_failure(exc: Exception) -> dict[str, Any]:
     }
 
 
-def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, str | None]:
-    return {
+def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
         "modal_region": args.modal_region,
         "resource_profile": args.resource_profile,
         "browser": args.browser,
         "gpu": args.gpu,
         "image_profile": args.image_profile,
     }
+    if getattr(args, "modal_billing_reconcile", False):
+        metadata["modal_billing_reconciliation"] = modal_billing_reconciliation_request(
+            start=_parse_cli_datetime(args.modal_billing_start),
+            end=_parse_cli_datetime(args.modal_billing_end) if args.modal_billing_end else None,
+            resolution=args.modal_billing_resolution,
+            buffer_seconds=args.modal_billing_buffer_seconds,
+            required_tags=_parse_key_value_pairs(args.modal_billing_tag),
+            tag_names=args.modal_billing_tag_name or None,
+        )
+    return metadata
+
+
+def _parse_cli_datetime(
+    value: str,
+    *,
+    parser: argparse.ArgumentParser | None = None,
+) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        if parser is not None:
+            parser.error("Modal billing timestamps must be ISO datetimes")
+        raise
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _parse_key_value_pairs(
+    values: list[str],
+    *,
+    parser: argparse.ArgumentParser | None = None,
+) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        key, separator, raw_value = value.partition("=")
+        if not separator:
+            if parser is not None:
+                parser.error("--modal-billing-tag must be key=value")
+            raise SystemExit(f"invalid key=value pair: {value}")
+        key = key.strip()
+        raw_value = raw_value.strip()
+        if not key or not raw_value:
+            if parser is not None:
+                parser.error("--modal-billing-tag must include non-empty key and value")
+            raise SystemExit(f"invalid key=value pair: {value}")
+        parsed[key] = raw_value
+    return parsed
 
 
 if __name__ == "__main__":

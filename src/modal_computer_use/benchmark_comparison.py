@@ -14,6 +14,7 @@ from ._version import __version__
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.generic import ActionExecutor
 from .adapters.openai import OpenAIAdapter
+from .benchmark_billing import reconcile_modal_billing_from_metadata
 from .benchmark_costs import estimate_provider_cost
 from .client import DaemonClient
 from .models import ActionBatchResult, ActionItemResult
@@ -240,6 +241,7 @@ def _run_modal_daemon_provider(
         metadata=metadata,
         runtime_seconds=runtime_seconds,
         verification=_run_modal_daemon_verification(client),
+        billing_reconciliation=reconcile_modal_billing_from_metadata(environment_metadata),
     )
 
 
@@ -908,6 +910,7 @@ def _provider_result(
     metadata: dict[str, Any] | None = None,
     runtime_seconds: float | None = None,
     verification: dict[str, Any] | None = None,
+    billing_reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     measured = False
@@ -936,6 +939,8 @@ def _provider_result(
     }
     if verification is not None:
         result["verification"] = verification
+    if billing_reconciliation is not None:
+        result["billing_reconciliation"] = billing_reconciliation
     result["cost_estimate"] = estimate_provider_cost(
         provider,
         provider_status=status,

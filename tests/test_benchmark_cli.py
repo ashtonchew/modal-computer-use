@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
+import modal_computer_use.benchmark_billing as benchmark_billing
 import modal_computer_use.benchmark_comparison as benchmark_comparison
 from modal_computer_use import cli
 from modal_computer_use.benchmark_costs import estimate_provider_cost
@@ -151,6 +154,224 @@ def test_daytona_default_resources_produce_estimated_cost() -> None:
     assert estimate["total"]["amount"] == pytest.approx(
         sum(component["amount"] for component in estimate["components"])
     )
+
+
+def test_modal_cost_estimate_requires_explicit_resources() -> None:
+    partial = estimate_provider_cost(
+        "modal-daemon",
+        provider_status="ok",
+        runtime_seconds=10.0,
+        metadata={"environment": {"modal_cold_create_to_ready_ms": 10000}},
+    )
+    estimated = estimate_provider_cost(
+        "modal-daemon",
+        provider_status="ok",
+        runtime_seconds=10.0,
+        metadata={
+            "environment": {
+                "modal_cpu_count": 0.125,
+                "modal_memory_gib": 0.125,
+            }
+        },
+    )
+
+    assert partial["status"] == "partial"
+    assert "cpu allocation was unavailable" in partial["notes"]
+    assert "memory allocation was unavailable" in partial["notes"]
+    assert estimated["status"] == "estimated"
+    assert estimated["inputs"]["cpu_count"] == 0.125
+    assert estimated["inputs"]["memory_gib"] == 0.125
+    assert estimated["total"]["amount"] == pytest.approx(
+        sum(component["amount"] for component in estimated["components"])
+    )
+
+
+def test_modal_billing_reconciliation_filters_and_sums_tagged_rows() -> None:
+    request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+        end=datetime(2026, 5, 13, 2, 0, tzinfo=UTC),
+        required_tags={
+            "benchmark": "provider-compare",
+            "benchmark_run_id": "provider_compare_test",
+            "provider": "modal-daemon",
+        },
+    )
+
+    def report_loader(start, end, resolution, tag_names):
+        assert start == datetime(2026, 5, 13, 1, 0, tzinfo=UTC)
+        assert end == datetime(2026, 5, 13, 2, 0, tzinfo=UTC)
+        assert resolution == "h"
+        assert tag_names == ["benchmark", "benchmark_run_id", "provider"]
+        return [
+            {
+                "cost": Decimal("0.12"),
+                "interval_start": datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+                "tags": {
+                    "benchmark": "provider-compare",
+                    "benchmark_run_id": "provider_compare_test",
+                    "provider": "modal-daemon",
+                },
+                "object_id": "secret-object-id",
+            },
+            {
+                "cost": Decimal("9.99"),
+                "interval_start": datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+                "tags": {
+                    "benchmark": "provider-compare",
+                    "benchmark_run_id": "other",
+                    "provider": "modal-daemon",
+                },
+            },
+        ]
+
+    result = benchmark_billing.reconcile_modal_billing(request, report_loader=report_loader)
+    serialized = json.dumps(result)
+
+    assert result["status"] == "matched"
+    assert result["matched_row_count"] == 1
+    assert result["row_count"] == 2
+    assert result["total"]["amount"] == pytest.approx(0.12)
+    assert "secret-object-id" not in serialized
+
+
+def test_modal_billing_reconciliation_handles_unavailable_and_pending() -> None:
+    request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+        end=datetime(2026, 5, 13, 2, 0, tzinfo=UTC),
+        required_tags={"benchmark_run_id": "provider_compare_test"},
+    )
+
+    unavailable = benchmark_billing.reconcile_modal_billing(
+        request,
+        report_loader=lambda *args: (_ for _ in ()).throw(ImportError("no modal")),
+    )
+    pending = benchmark_billing.reconcile_modal_billing(
+        request,
+        report_loader=lambda *args: [],
+    )
+
+    assert unavailable["status"] == "unavailable"
+    assert pending["status"] == "not_available_yet"
+
+
+def test_modal_billing_reconciliation_distinguishes_tag_mismatch() -> None:
+    request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 15, tzinfo=UTC),
+        end=datetime(2026, 5, 13, 1, 45, tzinfo=UTC),
+        required_tags={"benchmark_run_id": "provider_compare_test"},
+    )
+
+    result = benchmark_billing.reconcile_modal_billing(
+        request,
+        report_loader=lambda *args: [
+            {
+                "cost": Decimal("0.12"),
+                "interval_start": datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+                "tags": {"provider": "modal-daemon"},
+            }
+        ],
+    )
+
+    assert result["status"] == "no_matching_tags"
+    assert result["row_count"] == 1
+    assert "full intervals" in " ".join(result["notes"])
+
+
+def test_modal_billing_reconciliation_treats_modal_missing_as_unavailable() -> None:
+    request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+        end=datetime(2026, 5, 13, 2, 0, tzinfo=UTC),
+        required_tags={"benchmark_run_id": "provider_compare_test"},
+    )
+
+    result = benchmark_billing.reconcile_modal_billing(
+        request,
+        report_loader=lambda *args: (_ for _ in ()).throw(
+            ModalNotInstalledError("modal not installed")
+        ),
+    )
+
+    assert result["status"] == "unavailable"
+
+
+def test_benchmark_compare_modal_billing_tag_must_be_key_value(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "benchmark",
+                "compare",
+                "--mock-local",
+                "--providers",
+                "modal-daemon",
+                "--modal-billing-reconcile",
+                "--modal-billing-start",
+                "2026-05-13T01:00:00Z",
+                "--modal-billing-tag",
+                "not-a-pair",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "--modal-billing-tag must be key=value" in captured.err
+
+
+def test_benchmark_compare_modal_billing_default_end_resolves_during_reconciliation(
+    monkeypatch,
+) -> None:
+    seen = {}
+
+    def fake_reconcile(metadata):
+        seen["request"] = metadata["modal_billing_reconciliation"]
+        return {"status": "not_available_yet"}
+
+    monkeypatch.setattr(
+        benchmark_comparison,
+        "reconcile_modal_billing_from_metadata",
+        fake_reconcile,
+    )
+
+    payload = run_provider_comparison_mock_local(
+        providers=["modal-daemon"],
+        iterations=1,
+        environment_metadata={
+            "modal_billing_reconciliation": benchmark_billing.modal_billing_reconciliation_request(
+                start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+                end=None,
+                required_tags={"benchmark_run_id": "provider_compare_test"},
+            )
+        },
+    )
+
+    assert payload["providers"]["modal-daemon"]["billing_reconciliation"]["status"] == (
+        "not_available_yet"
+    )
+    assert seen["request"]["end"] is None
+
+
+def test_modal_daemon_provider_attaches_billing_reconciliation_separately(monkeypatch) -> None:
+    reconciliation = {
+        "status": "matched",
+        "source": "modal.billing.workspace_billing_report",
+        "total": {"amount": 0.01, "unit": "report_window"},
+    }
+    monkeypatch.setattr(
+        benchmark_comparison,
+        "reconcile_modal_billing_from_metadata",
+        lambda metadata: reconciliation,
+    )
+
+    payload = run_provider_comparison_mock_local(
+        providers=["modal-daemon"],
+        iterations=1,
+        environment_metadata={
+            "modal_billing_reconciliation": {"start": "2026-05-13T01:00:00Z"},
+        },
+    )
+
+    provider = payload["providers"]["modal-daemon"]
+    assert provider["billing_reconciliation"] == reconciliation
+    assert provider["cost_estimate"]["status"] == "unknown"
 
 
 def test_benchmark_compare_live_external_providers_loads_cwd_dotenv(

@@ -115,6 +115,27 @@ rates and measured sandbox wall-clock runtime; this is an approximation for comp
 actual billing statement.
 Default Daytona runs estimate cost from provider-returned resources or documented default sandbox
 resources. Modal default runs remain partial unless CPU and memory are explicitly configured.
+For Modal runs whose billed Modal object was created with attribution tags, `benchmark compare` can
+also attach delayed Modal billing report reconciliation without replacing `cost_estimate`:
+
+```bash
+uv run computer-use benchmark compare --base-url "$COMPUTER_USE_DAEMON_URL" \
+  --providers modal-daemon \
+  --modal-billing-reconcile \
+  --modal-billing-start 2026-05-13T01:00:00Z \
+  --modal-billing-end 2026-05-13T02:00:00Z \
+  --modal-billing-tag benchmark=provider-compare \
+  --modal-billing-tag benchmark_run_id=provider_compare_abc123 \
+  --modal-billing-tag provider=modal-daemon
+```
+
+Modal billing reports can lag and are bucketed by full reporting intervals, so short runs may report
+`not_available_yet` until the relevant interval is closed and collected, or `no_matching_tags` when
+rows exist but the requested tags do not match. The reconciliation output is additive
+`billing_reconciliation` metadata from Modal's billing report API; it is useful telemetry for a
+tagged run, but still separate from invoices, credits, discounts, and account-level billing
+adjustments. For strongest attribution, use an isolated Modal App or verify that the tags you filter
+on appear in `workspace_billing_report` rows for that run.
 When supported, provider reports include readback proof metadata for final cursor position and typed
 keypress delivery. These proof probes use provider-native computer-use APIs for actuation and avoid
 serializing typed text.
