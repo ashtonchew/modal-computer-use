@@ -113,6 +113,8 @@ deterministic multi-click sequence, 100-character typing, 1000-character typing,
 command echo cases. Provider reports also include `cost_estimate` metadata based on public pricing
 rates and measured sandbox wall-clock runtime; this is an approximation for comparison, not an
 actual billing statement.
+Default Daytona runs estimate cost from provider-returned resources or documented default sandbox
+resources. Modal default runs remain partial unless CPU and memory are explicitly configured.
 When supported, provider reports include readback proof metadata for final cursor position and typed
 keypress delivery. These proof probes use provider-native computer-use APIs for actuation and avoid
 serializing typed text.

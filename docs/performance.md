@@ -185,6 +185,10 @@ resources. Cost estimates use public pricing rates, the measured cold and warm s
 runtime including warmup, and safe resource assumptions when available. They are approximate
 comparison metadata, not actual billing data. Unknown CPU, memory, storage, GPU, or leaked cleanup
 duration produces `partial`, `unknown`, or `not_measured` status instead of a fake zero-cost total.
+Daytona default live runs use documented default sandbox resources, or provider-returned resource
+fields when available, so their cost can be `estimated`; custom Daytona snapshots stay `partial`
+unless resource fields are exposed. Modal default live runs stay `partial` unless CPU and memory are
+explicitly configured, because Modal bills on the higher of requested resources or actual usage.
 Adapter-only providers return `not_applicable` because they do not create provider resources.
 
 E2B's default desktop typing can be much slower than move/click or screenshot cases because its

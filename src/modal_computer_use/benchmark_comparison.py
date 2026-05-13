@@ -395,6 +395,8 @@ def _run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[st
         "sandbox_source": "snapshot" if snapshot else "default_snapshot",
         "snapshot": _safe_provider_metadata_value(snapshot),
     }
+    if not snapshot:
+        metadata.update(_daytona_default_resource_metadata())
     benchmark = _DaytonaLiveBenchmark(
         daytona_module,
         api_key=api_key,
@@ -585,6 +587,22 @@ class _DaytonaLiveBenchmark:
         if callable(status_method):
             return {"status": "ready", "computer_use": _safe_provider_observation(status_method())}
         return {"status": "ready"}
+
+    def resource_metadata(self, sandbox: Any) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        cpu = _provider_numeric_attr(sandbox, ("cpu", "cpu_count"))
+        memory = _provider_numeric_attr(sandbox, ("memory", "memory_gib"))
+        disk = _provider_numeric_attr(sandbox, ("disk", "storage_gib"))
+        if cpu is not None:
+            metadata["cpu_count"] = cpu
+            metadata["cpu_count_source"] = "provider_sandbox_metadata"
+        if memory is not None:
+            metadata["memory_gib"] = memory
+            metadata["memory_gib_source"] = "provider_sandbox_metadata"
+        if disk is not None:
+            metadata["storage_gib"] = disk
+            metadata["storage_gib_source"] = "provider_sandbox_metadata"
+        return metadata
 
     def verify_readbacks(self, sandbox: Any) -> dict[str, Any]:
         def run_command(command: str, timeout: int) -> str:
@@ -805,6 +823,11 @@ def _run_live_provider_cases(
                 results[case] = core._case_result(case, iterations, [], [failure])
         else:
             try:
+                resource_metadata = getattr(benchmark, "resource_metadata", None)
+                if callable(resource_metadata):
+                    metadata = _merge_provider_resource_metadata(
+                        metadata, resource_metadata(sandbox)
+                    )
                 for case in warm_cases:
                     operation = getattr(benchmark, case)
                     samples, observations = core._measure_observed_case(
@@ -1159,6 +1182,15 @@ def _provider_point_xy(value: Any) -> tuple[int, int] | None:
     return x, y
 
 
+def _provider_numeric_attr(value: Any, names: tuple[str, ...]) -> float | None:
+    for name in names:
+        raw_value = value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+        parsed = _float_or_none(raw_value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _parse_key_value_output(output: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in output.splitlines():
@@ -1175,6 +1207,19 @@ def _int_or_none(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _provider_not_measured(provider: str, reason: str) -> dict[str, Any]:
@@ -1225,6 +1270,35 @@ def _modal_cold_create_to_ready_case(environment_metadata: dict[str, Any] | None
     result = core._case_result("cold_create_to_ready", 1, [float(value)], [])
     result["source"] = "live_orchestration_metadata"
     return result
+
+
+def _daytona_default_resource_metadata() -> dict[str, Any]:
+    return {
+        "cpu_count": 1,
+        "cpu_count_source": "public_default_sandbox_resources",
+        "memory_gib": 1,
+        "memory_gib_source": "public_default_sandbox_resources",
+        "storage_gib": 3,
+        "storage_gib_source": "public_default_sandbox_resources",
+        "cost_notes": [
+            "Daytona default sandbox resources are documented as 1 vCPU, 1 GiB memory, "
+            "and 3 GiB disk; storage estimate does not account for account-level free allowance"
+        ],
+    }
+
+
+def _merge_provider_resource_metadata(
+    metadata: dict[str, Any], resource_metadata: dict[str, Any]
+) -> dict[str, Any]:
+    if not resource_metadata:
+        return metadata
+    merged = {**metadata, **resource_metadata}
+    if any(
+        resource_metadata.get(key) == "provider_sandbox_metadata"
+        for key in ("cpu_count_source", "memory_gib_source", "storage_gib_source")
+    ):
+        merged.pop("cost_notes", None)
+    return merged
 
 
 def _safe_provider_observation(observation: Any) -> dict[str, Any] | None:

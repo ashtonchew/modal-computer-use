@@ -128,6 +128,31 @@ def test_provider_cost_estimate_is_partial_without_unknown_resource_zeroes() -> 
     assert "memory allocation was unavailable" in estimate["notes"]
 
 
+def test_daytona_default_resources_produce_estimated_cost() -> None:
+    estimate = estimate_provider_cost(
+        "daytona",
+        provider_status="ok",
+        runtime_seconds=10.0,
+        metadata=benchmark_comparison._daytona_default_resource_metadata(),
+    )
+
+    assert estimate["status"] == "estimated"
+    assert estimate["inputs"] == {
+        "duration_seconds": 10.0,
+        "cpu_count": 1.0,
+        "memory_gib": 1.0,
+        "storage_gib": 3.0,
+    }
+    assert [component["resource"] for component in estimate["components"]] == [
+        "cpu",
+        "memory",
+        "storage",
+    ]
+    assert estimate["total"]["amount"] == pytest.approx(
+        sum(component["amount"] for component in estimate["components"])
+    )
+
+
 def test_benchmark_compare_live_external_providers_loads_cwd_dotenv(
     monkeypatch, tmp_path, capsys
 ) -> None:
@@ -471,6 +496,9 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
     class FakeSandbox:
         def __init__(self):
             self.calls: list[str] = []
+            self.cpu = 1
+            self.memory = 1
+            self.disk = 3
             self.computer_use = FakeComputerUse(self.calls)
             self.process = FakeProcess(self.calls)
             sandboxes.append(self)
@@ -524,7 +552,14 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
         "type_1000_chars",
         "command_echo",
     } <= set(payload["providers"]["daytona"]["cases"])
-    assert payload["providers"]["daytona"]["cost_estimate"]["status"] == "partial"
+    assert payload["providers"]["daytona"]["metadata"]["cpu_count"] == 1
+    assert payload["providers"]["daytona"]["metadata"]["memory_gib"] == 1
+    assert payload["providers"]["daytona"]["metadata"]["storage_gib"] == 3
+    assert payload["providers"]["daytona"]["metadata"]["cpu_count_source"] == (
+        "provider_sandbox_metadata"
+    )
+    assert payload["providers"]["daytona"]["cost_estimate"]["status"] == "estimated"
+    assert payload["providers"]["daytona"]["cost_estimate"]["total"]["amount"] > 0
     assert len(sandboxes) == 2
     assert create_args == [(), ()]
     assert sandboxes[0].calls == [
