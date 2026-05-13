@@ -452,10 +452,20 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
             self._calls = calls
 
         def exec(self, command: str, *, timeout: int):
-            assert command == "sh -lc 'printf 42'"
-            assert timeout == 30
-            self._calls.append("command")
-            return {"exit_code": 0}
+            if command == "sh -lc 'printf 42'":
+                assert timeout == 30
+                self._calls.append("command")
+                return {"exit_code": 0}
+            if "xdotool getmouselocation" in command:
+                return {"exit_code": 0, "result": "X=16\nY=128\n"}
+            if "rm -f " in command:
+                return {"exit_code": 0, "result": ""}
+            if "grep -c" in command:
+                return {
+                    "exit_code": 0,
+                    "result": f"keypress_count={len(benchmark_comparison.TYPE_READBACK_TEXT)}\n",
+                }
+            raise AssertionError(command)
 
     class FakeSandbox:
         def __init__(self):
@@ -529,10 +539,14 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
     assert "click:128:128" in sandboxes[1].calls
     assert "type:100" in sandboxes[1].calls
     assert "type:1000" in sandboxes[1].calls
+    assert f"type:{len(benchmark_comparison.TYPE_READBACK_TEXT)}" in sandboxes[1].calls
     assert "command" in sandboxes[1].calls
     assert sandboxes[1].calls[-2:] == ["computer_use_stop", "client_delete"]
+    assert payload["providers"]["daytona"]["verification"]["cursor_position"]["status"] == "ok"
+    assert payload["providers"]["daytona"]["verification"]["type_text"]["status"] == "ok"
     assert TYPING_BENCHMARK_TEXT not in serialized
     assert TYPE_1000_CHARS_TEXT not in serialized
+    assert benchmark_comparison.TYPE_READBACK_TEXT not in serialized
 
 
 def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
@@ -546,10 +560,22 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
             self._calls = calls
 
         def run(self, command: str, *, timeout: int):
-            assert command == "sh -lc 'printf 42'"
-            assert timeout == 30
-            self._calls.append("command")
-            return {"exit_code": 0}
+            if command == "sh -lc 'printf 42'":
+                assert timeout == 30
+                self._calls.append("command")
+                return {"exit_code": 0}
+            if "xdotool getmouselocation" in command:
+                return {"exit_code": 0, "stdout": "X=16\nY=128\n"}
+            if "rm -f " in command:
+                return {"exit_code": 0, "stdout": ""}
+            if "grep -c" in command:
+                return {
+                    "exit_code": 0,
+                    "stdout": f"keypress_count={len(benchmark_comparison.TYPE_READBACK_TEXT)}\n",
+                }
+            if command == "xdotool key Return ctrl+d":
+                return {"exit_code": 0, "stdout": ""}
+            raise AssertionError(command)
 
     class FakeSandbox:
         def __init__(self):
@@ -624,10 +650,14 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         "type:100",
         "type:1000",
         "command",
+        f"type:{len(benchmark_comparison.TYPE_READBACK_TEXT)}",
         "delete",
     ]
+    assert payload["providers"]["e2b"]["verification"]["cursor_position"]["status"] == "ok"
+    assert payload["providers"]["e2b"]["verification"]["type_text"]["status"] == "ok"
     assert TYPING_BENCHMARK_TEXT not in serialized
     assert TYPE_1000_CHARS_TEXT not in serialized
+    assert benchmark_comparison.TYPE_READBACK_TEXT not in serialized
 
 
 def test_benchmark_compare_e2b_move_click_avoids_noop_synced_move() -> None:

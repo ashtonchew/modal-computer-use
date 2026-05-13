@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -18,6 +19,10 @@ from .client import DaemonClient
 from .models import ActionBatchResult, ActionItemResult
 
 ProviderMode = Literal["mock-local", "http", "provider-live"]
+TYPE_READBACK_TEXT = "mcu-readback-0123456789"
+TYPE_READBACK_FILE = "/tmp/modal-computer-use-type-readback-xev.log"  # noqa: S108
+TYPE_READBACK_PID_FILE = "/tmp/modal-computer-use-type-readback-xev.pid"  # noqa: S108
+TYPE_READBACK_TITLE = "mcu-type-readback"
 
 
 def run_provider_comparison(
@@ -236,6 +241,7 @@ def _run_modal_daemon_provider(
         cases=cases,
         metadata=metadata,
         runtime_seconds=runtime_seconds,
+        verification=_run_modal_daemon_verification(client),
     )
 
 
@@ -582,6 +588,38 @@ class _DaytonaLiveBenchmark:
             return {"status": "ready", "computer_use": _safe_provider_observation(status_method())}
         return {"status": "ready"}
 
+    def verify_readbacks(self, sandbox: Any) -> dict[str, Any]:
+        def run_command(command: str, timeout: int) -> str:
+            return self._run_command(sandbox, command, timeout=timeout)
+
+        def type_text(text: str) -> Any:
+            return _call_first_available(
+                _computer_use(sandbox).keyboard,
+                ("type", "write"),
+                text,
+            )
+
+        return {
+            "cursor_position": _verification_step(
+                lambda: _verify_provider_cursor_position(run_command),
+                redacted_text=None,
+            ),
+            "type_text": _verification_step(
+                lambda: _verify_provider_type_readback(
+                    type_text=type_text,
+                    run_command=run_command,
+                ),
+                redacted_text=TYPE_READBACK_TEXT,
+            ),
+        }
+
+    def _run_command(self, sandbox: Any, command: str, *, timeout: int) -> str:
+        result = sandbox.process.exec(f"sh -lc {shlex.quote(command)}", timeout=timeout)
+        exit_code = _provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("provider readback command exited nonzero")
+        return _provider_stdout(result)
+
 
 class _E2BLiveBenchmark:
     def __init__(self, e2b_module: Any, *, template: str | None) -> None:
@@ -672,6 +710,43 @@ class _E2BLiveBenchmark:
             create_kwargs["template"] = self._template
         return create(**create_kwargs)
 
+    def verify_readbacks(self, sandbox: Any) -> dict[str, Any]:
+        def run_command(command: str, timeout: int) -> str:
+            return self._run_command(sandbox, command, timeout=timeout)
+
+        def type_text(text: str) -> Any:
+            return _call_first_available(sandbox, ("write", "type"), text)
+
+        return {
+            "cursor_position": _verification_step(
+                lambda: _verify_provider_cursor_position(run_command),
+                redacted_text=None,
+            ),
+            "type_text": _verification_step(
+                lambda: _verify_provider_type_readback(
+                    type_text=type_text,
+                    run_command=run_command,
+                ),
+                redacted_text=TYPE_READBACK_TEXT,
+            ),
+        }
+
+    def _run_command(self, sandbox: Any, command: str, *, timeout: int) -> str:
+        commands = getattr(sandbox, "commands", None)
+        if commands is None:
+            raise RuntimeError("E2B sandbox did not expose commands")
+        run = getattr(commands, "run", None)
+        if not callable(run):
+            raise RuntimeError("E2B sandbox commands did not expose run")
+        try:
+            result = run(command, timeout=timeout)
+        except TypeError:
+            result = run(command)
+        exit_code = _provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("provider readback command exited nonzero")
+        return _provider_stdout(result)
+
 
 def _run_live_provider_cases(
     *,
@@ -687,6 +762,7 @@ def _run_live_provider_cases(
     results: dict[str, Any] = {}
     measured_runtime_seconds = 0.0
     warm_cleanup_failed = False
+    verification: dict[str, Any] | None = None
     for case in cold_cases:
         operation = getattr(benchmark, case)
         case_start = time.perf_counter()
@@ -738,6 +814,15 @@ def _run_live_provider_cases(
                     )
                     results[case] = result
             finally:
+                verifier = getattr(benchmark, "verify_readbacks", None)
+                if callable(verifier):
+                    try:
+                        verification = _safe_provider_observation(verifier(sandbox))
+                    except Exception as exc:
+                        verification = {
+                            "status": "failed",
+                            "message": core._redact_text(str(exc), TYPE_READBACK_TEXT),
+                        }
                 before_cleanup_errors = len(getattr(benchmark, "cleanup_errors", []))
                 benchmark.cleanup_session(sandbox)
                 warm_cleanup_failed = (
@@ -755,6 +840,7 @@ def _run_live_provider_cases(
         cases=results,
         metadata=metadata,
         runtime_seconds=measured_runtime_seconds,
+        verification=verification,
     )
 
 
@@ -791,6 +877,7 @@ def _provider_result(
     cases: dict[str, Any],
     metadata: dict[str, Any] | None = None,
     runtime_seconds: float | None = None,
+    verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     measured = False
@@ -817,6 +904,8 @@ def _provider_result(
         "cases": cases,
         "failures": failures,
     }
+    if verification is not None:
+        result["verification"] = verification
     result["cost_estimate"] = estimate_provider_cost(
         provider,
         provider_status=status,
@@ -824,6 +913,185 @@ def _provider_result(
         metadata=safe_metadata,
     )
     return result
+
+
+def _run_modal_daemon_verification(client: DaemonClient) -> dict[str, Any]:
+    def run_command(command: str, timeout: int) -> str:
+        return _run_modal_command(client, command, timeout=timeout)
+
+    return {
+        "cursor_position": _verification_step(
+            lambda: _verify_provider_cursor_position(run_command),
+            redacted_text=None,
+        ),
+        "type_text": _verification_step(
+            lambda: _verify_modal_type_readback(client),
+            redacted_text=TYPE_READBACK_TEXT,
+        ),
+    }
+
+
+def _run_modal_command(client: DaemonClient, command: str, *, timeout: int) -> str:
+    result = client.post_json(
+        "/v1/commands/run",
+        json={"command": ["sh", "-lc", command], "timeout": timeout},
+    )
+    if not isinstance(result, dict) or not result.get("ok", False):
+        raise RuntimeError("daemon readback command failed")
+    output = result.get("output") if isinstance(result.get("output"), dict) else {}
+    stdout = output.get("stdout") if isinstance(output, dict) else ""
+    return stdout if isinstance(stdout, str) else ""
+
+
+def _verify_modal_type_readback(client: DaemonClient) -> dict[str, Any]:
+    def run_command(command: str, timeout: int) -> str:
+        return _run_modal_command(client, command, timeout=timeout)
+
+    setup = _run_type_readback_setup(run_command)
+    if setup["status"] != "ready":
+        return setup
+    run_command(
+        f"xdotool type --delay 10 {shlex.quote(TYPE_READBACK_TEXT)}",
+        10,
+    )
+    result = _read_type_readback_file(run_command)
+    result["method"] = "daemon_xdotool_backend_probe"
+    return result
+
+
+def _verify_provider_cursor_position(run_command: Callable[[str, int], str]) -> dict[str, Any]:
+    expected = _expected_sequence_cursor_position()
+    output = run_command("xdotool getmouselocation --shell", 10)
+    observed = _parse_xdotool_position(output)
+    ok = observed == expected
+    return {
+        "status": "ok" if ok else "failed",
+        "expected": {"x": expected[0], "y": expected[1]},
+        "observed": {"x": observed[0], "y": observed[1]} if observed is not None else None,
+    }
+
+
+def _verification_step(
+    operation: Callable[[], dict[str, Any]],
+    *,
+    redacted_text: str | None,
+) -> dict[str, Any]:
+    try:
+        return operation()
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "message": core._redact_text(str(exc), redacted_text),
+        }
+
+
+def _verify_provider_type_readback(
+    *,
+    type_text: Callable[[str], Any],
+    run_command: Callable[[str, int], str],
+) -> dict[str, Any]:
+    setup = _run_type_readback_setup(run_command)
+    if setup["status"] != "ready":
+        return setup
+    type_text(TYPE_READBACK_TEXT)
+    return _read_type_readback_file(run_command)
+
+
+def _run_type_readback_setup(run_command: Callable[[str, int], str]) -> dict[str, Any]:
+    output = run_command(_type_readback_setup_command(), 15)
+    if output.startswith("unsupported:"):
+        return {
+            "status": "unsupported",
+            "reason": output.strip(),
+        }
+    return {"status": "ready"}
+
+
+def _read_type_readback_file(run_command: Callable[[str, int], str]) -> dict[str, Any]:
+    output = run_command(_type_readback_result_command(), 10)
+    observed = _parse_key_value_output(output)
+    expected_count = len(TYPE_READBACK_TEXT)
+    observed_count = _int_or_none(observed.get("keypress_count"))
+    ok = observed_count is not None and observed_count >= expected_count
+    return {
+        "status": "ok" if ok else "failed",
+        "expected": {"minimum_keypress_count": expected_count},
+        "observed": {
+            "keypress_count": observed_count,
+        },
+    }
+
+
+def _type_readback_setup_command() -> str:
+    target = shlex.quote(TYPE_READBACK_FILE)
+    pid_file = shlex.quote(TYPE_READBACK_PID_FILE)
+    title = shlex.quote(TYPE_READBACK_TITLE)
+    return (
+        "if ! command -v xev >/dev/null 2>&1; then "
+        "printf 'unsupported:no-xev\\n'; exit 0; fi; "
+        "if ! command -v xdotool >/dev/null 2>&1; then "
+        "printf 'unsupported:no-xdotool\\n'; exit 0; fi; "
+        f"rm -f {target} {pid_file}; "
+        f"xev -event keyboard -name {title} -geometry 220x120+0+0 > {target} 2>&1 & "
+        f"printf '%s\\n' \"$!\" > {pid_file}; "
+        "window=''; i=0; "
+        "while [ \"$i\" -lt 10 ]; do "
+        f"window=$(xdotool search --onlyvisible --name {title} 2>/dev/null | tail -n 1); "
+        "if [ -n \"$window\" ]; then break; fi; "
+        "sleep 0.2; i=$((i + 1)); "
+        "done; "
+        "if [ -z \"$window\" ]; then printf 'unsupported:no-readback-window\\n'; exit 0; fi; "
+        "xdotool windowactivate --sync \"$window\" >/dev/null 2>&1 || "
+        "printf 'unsupported:cannot-activate-readback-window\\n'; "
+        "xdotool mousemove --window \"$window\" 10 10 >/dev/null 2>&1 || true; "
+        "xdotool click 1 >/dev/null 2>&1 || true"
+    )
+
+
+def _type_readback_result_command() -> str:
+    target = shlex.quote(TYPE_READBACK_FILE)
+    pid_file = shlex.quote(TYPE_READBACK_PID_FILE)
+    return (
+        "sleep 0.2; "
+        f"if [ -f {pid_file} ]; then kill $(cat {pid_file}) >/dev/null 2>&1 || true; fi; "
+        f"if [ ! -f {target} ]; then printf 'missing=1\\n'; exit 0; fi; "
+        f"count=$(grep -c 'KeyPress event' {target} 2>/dev/null || true); "
+        "printf 'keypress_count=%s\\n' \"$count\""
+    )
+
+
+def _expected_sequence_cursor_position() -> tuple[int, int]:
+    for action in reversed(core.MOVE_CLICK_SEQUENCE_ACTIONS):
+        if action["type"] == "move":
+            return int(action["x"]), int(action["y"])
+    raise RuntimeError("move/click sequence did not include a move action")
+
+
+def _parse_xdotool_position(output: str) -> tuple[int, int] | None:
+    values = _parse_key_value_output(output)
+    x = _int_or_none(values.get("X"))
+    y = _int_or_none(values.get("Y"))
+    if x is None or y is None:
+        return None
+    return x, y
+
+
+def _parse_key_value_output(output: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in output.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip()] = value.strip()
+    return values
+
+
+def _int_or_none(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def _provider_not_measured(provider: str, reason: str) -> dict[str, Any]:
@@ -1041,6 +1309,27 @@ def _provider_exit_code(result: Any) -> int | None:
             if value is not None:
                 return int(value)
     return 0
+
+
+def _provider_stdout(result: Any) -> str:
+    if isinstance(result, dict):
+        for key in ("stdout", "result", "output"):
+            value = result.get(key)
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                nested = value.get("stdout") or value.get("result")
+                if isinstance(nested, str):
+                    return nested
+    for attr in ("stdout", "result", "output"):
+        value = getattr(result, attr, None)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            nested = value.get("stdout") or value.get("result")
+            if isinstance(nested, str):
+                return nested
+    return ""
 
 
 def _redaction_marker(value: Any) -> dict[str, Any]:
