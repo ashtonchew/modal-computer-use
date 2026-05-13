@@ -108,6 +108,7 @@ class ComputerSandbox:
         image: object | None = None,
         expose_vnc: bool | str | None = None,
         tags: dict[str, str] | None = None,
+        app_tags: dict[str, str] | None = None,
         secrets: list[object] | None = None,
         volumes: dict[str, object] | None = None,
         owner: str | None = None,
@@ -134,6 +135,8 @@ class ComputerSandbox:
             browser_prewarm=config.browser.prewarm if config.browser else False,
         )
         app = modal.App.lookup(app_name, create_if_missing=True)
+        if app_tags:
+            _set_modal_object_tags(app, app_tags)
         env = _daemon_environment(config, vnc_mode=vnc_mode)
         sandbox_tags = {**default_tags(config, owner=owner), **(tags or {})}
         ports = [6080] if vnc_mode != "off" else []
@@ -161,7 +164,7 @@ class ComputerSandbox:
             create_kwargs["readiness_probe"] = readiness_probe
         sandbox = modal.Sandbox.create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
         if hasattr(sandbox, "set_tags"):
-            sandbox.set_tags(sandbox_tags)
+            _set_modal_object_tags(sandbox, sandbox_tags)
         if wait and hasattr(sandbox, "wait_until_ready"):
             sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         token_info = sandbox.create_connect_token(
@@ -544,3 +547,16 @@ def _created_at_from_tags(tags: dict[str, str]) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _set_modal_object_tags(target: object, tags: dict[str, str]) -> None:
+    set_tags = getattr(target, "set_tags", None)
+    if not callable(set_tags):
+        return
+    existing_tags: dict[str, str] = {}
+    get_tags = getattr(target, "get_tags", None)
+    if callable(get_tags):
+        raw_tags = get_tags()
+        if isinstance(raw_tags, dict):
+            existing_tags = {str(key): str(value) for key, value in raw_tags.items()}
+    set_tags({**existing_tags, **tags})
