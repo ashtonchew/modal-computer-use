@@ -203,9 +203,10 @@ partial `start` values down to the interval boundary and excludes partial `end` 
 tag keys can be absent when they were not in use, and tag changes apply to the whole reported
 interval. Saved reconciliation metadata omits raw billing rows, object ids, URLs, tokens,
 stdout/stderr, and provider payloads.
-For strongest attribution, run the benchmark in an isolated Modal App or ensure the required tags are
-present on the Modal object whose rows appear in `workspace_billing_report`; Sandbox-only tags should
-be validated against a live report before relying on them for cost attribution.
+For strongest attribution, run the benchmark in an isolated Modal App and pass the benchmark tags as
+`app_tags` to `ComputerSandbox.create(...)`, because Modal billing reports surface tags from the
+billed Modal object. Sandbox tags remain useful for operational lookup/debugging, but they should not
+be the only billing attribution mechanism.
 
 E2B's default desktop typing can be much slower than move/click or screenshot cases because its
 provider default GUI typing API may chunk text and add delay between chunks. The benchmark records

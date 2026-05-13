@@ -134,8 +134,10 @@ Modal billing reports can lag and are bucketed by full reporting intervals, so s
 rows exist but the requested tags do not match. The reconciliation output is additive
 `billing_reconciliation` metadata from Modal's billing report API; it is useful telemetry for a
 tagged run, but still separate from invoices, credits, discounts, and account-level billing
-adjustments. For strongest attribution, use an isolated Modal App or verify that the tags you filter
-on appear in `workspace_billing_report` rows for that run.
+adjustments. For strongest attribution, pass benchmark tags as `app_tags` to
+`ComputerSandbox.create(...)` and use an isolated benchmark `app_name`, because Modal billing reports
+surface tags from the billed Modal object. Sandbox tags are still useful for lookup/debugging, but
+should not be the only billing attribution mechanism.
 When supported, provider reports include readback proof metadata for final cursor position and typed
 keypress delivery. These proof probes use provider-native computer-use APIs for actuation and avoid
 serializing typed text.
