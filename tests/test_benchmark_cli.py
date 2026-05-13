@@ -293,10 +293,12 @@ def test_benchmark_compare_safe_provider_metadata_removes_url_credentials() -> N
 
 def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatch) -> None:
     sandboxes = []
+    create_args = []
 
     class FakeDaytonaConfig:
-        def __init__(self, *, api_key: str):
+        def __init__(self, *, api_key: str, target: str | None = None):
             assert api_key == "daytona-secret"
+            assert target == "us"
 
     class FakeMouse:
         def __init__(self, calls: list[str]):
@@ -366,14 +368,19 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
         def __init__(self, config: FakeDaytonaConfig):
             self.config = config
 
-        def create(self) -> FakeSandbox:
+        def create(self, *args) -> FakeSandbox:
+            create_args.append(args)
             return FakeSandbox()
+
+        def delete(self, sandbox: FakeSandbox) -> None:
+            sandbox.calls.append("client_delete")
 
     class FakeDaytonaModule:
         Daytona = FakeDaytona
         DaytonaConfig = FakeDaytonaConfig
 
     monkeypatch.setenv("DAYTONA_API_KEY", "daytona-secret")
+    monkeypatch.setenv("DAYTONA_TARGET", "us")
     monkeypatch.setattr(
         benchmark_comparison,
         "_import_provider_module",
@@ -389,6 +396,8 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
 
     assert payload["ok"] is True
     assert payload["providers"]["daytona"]["status"] == "ok"
+    assert payload["providers"]["daytona"]["metadata"]["sandbox_source"] == "default_snapshot"
+    assert payload["providers"]["daytona"]["metadata"]["target"] == "us"
     assert {
         "cold_create_to_ready",
         "screenshot_full",
@@ -397,13 +406,14 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
         "command_echo",
     } <= set(payload["providers"]["daytona"]["cases"])
     assert len(sandboxes) == 2
-    assert sandboxes[0].calls == ["computer_use_start", "computer_use_stop", "sandbox_delete"]
+    assert create_args == [(), ()]
+    assert sandboxes[0].calls == ["computer_use_start", "computer_use_stop", "client_delete"]
     assert "screenshot" in sandboxes[1].calls
     assert "move:24:24" in sandboxes[1].calls
     assert "click:24:24" in sandboxes[1].calls
     assert "type:100" in sandboxes[1].calls
     assert "command" in sandboxes[1].calls
-    assert sandboxes[1].calls[-2:] == ["computer_use_stop", "sandbox_delete"]
+    assert sandboxes[1].calls[-2:] == ["computer_use_stop", "client_delete"]
     assert TYPING_BENCHMARK_TEXT not in serialized
 
 
@@ -469,9 +479,10 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
 
     assert payload["ok"] is True
     assert payload["providers"]["e2b"]["status"] == "ok"
+    assert payload["providers"]["e2b"]["metadata"]["template_source"] == "default_desktop"
     assert create_kwargs == [
-        {"resolution": (1024, 768), "timeout": 300},
-        {"resolution": (1024, 768), "timeout": 300},
+        {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300},
+        {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300},
     ]
     assert len(sandboxes) == 2
     assert sandboxes[0].calls == ["delete"]

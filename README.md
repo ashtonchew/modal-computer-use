@@ -103,6 +103,9 @@ Provider-live comparison loads a local `.env` from the current working directory
 an explicit dotenv file passed with `--env-file`. Already exported environment variables take
 precedence over `.env` values. Keep real keys in untracked `.env` files; use `.env.example` for the
 non-secret key names.
+By default, Daytona uses `daytona.create()` with Daytona's default Computer Use-capable snapshot,
+and E2B uses the default `desktop` template. Set `DAYTONA_SNAPSHOT` or `E2B_TEMPLATE` only when
+you intentionally want to benchmark a custom prebuilt baseline.
 Live provider reports separate cold create-to-ready timing from warm screenshot, action, typing,
 and command cases that reuse a ready sandbox.
 

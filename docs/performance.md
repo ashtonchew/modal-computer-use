@@ -149,6 +149,14 @@ environment variables, so shell and CI secrets remain authoritative. Modal SDK a
 separate; keep using `~/.modal.toml`, `MODAL_CONFIG_PATH`, or Modal token environment variables for
 Modal itself.
 
+The default live baselines use each provider's documented out-of-box desktop surface: Daytona calls
+`daytona.create()` with no create params so the default Computer Use-capable snapshot is used, and
+E2B creates the default `desktop` sandbox template at `1024x768`, DPI `96`, display `:0`. Set
+`DAYTONA_SNAPSHOT` or `E2B_TEMPLATE` only for a named custom prebuilt baseline, and compare those
+results separately from out-of-box provider results. Daytona custom images are not used by default
+because Daytona documents VNC and Computer Use as requiring the default image unless the custom
+image installs the required desktop/VNC/X11 packages.
+
 Provider-live comparisons split lifecycle cost from warm primitive cost. `cold_create_to_ready`
 creates a fresh provider sandbox, starts or verifies the desktop computer-use surface where the
 SDK exposes one, records that cold readiness timing, and deletes the sandbox. Screenshot,

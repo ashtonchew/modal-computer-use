@@ -350,13 +350,22 @@ def _run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[st
             "install the bench-daytona extra to run Daytona benchmarks",
         )
 
+    snapshot = os.environ.get("DAYTONA_SNAPSHOT")
     metadata = {
         "sdk_package": "daytona",
         "sdk_version": _package_version("daytona"),
         "target": _safe_provider_metadata_value(os.environ.get("DAYTONA_TARGET")),
         "api_url": core._safe_base_url(os.environ.get("DAYTONA_API_URL")),
+        "sandbox_source": "snapshot" if snapshot else "default_snapshot",
+        "snapshot": _safe_provider_metadata_value(snapshot),
     }
-    benchmark = _DaytonaLiveBenchmark(daytona_module, api_key)
+    benchmark = _DaytonaLiveBenchmark(
+        daytona_module,
+        api_key=api_key,
+        api_url=os.environ.get("DAYTONA_API_URL"),
+        target=os.environ.get("DAYTONA_TARGET"),
+        snapshot=snapshot,
+    )
     return _run_live_provider_cases(
         provider=provider,
         benchmark=benchmark,
@@ -378,12 +387,17 @@ def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, A
     except ImportError:
         return _provider_unavailable(provider, "install the bench-e2b extra to run E2B benchmarks")
 
+    template = os.environ.get("E2B_TEMPLATE")
     metadata = {
         "sdk_package": "e2b-desktop",
         "sdk_version": _package_version("e2b-desktop"),
-        "template": "desktop",
+        "template": _safe_provider_metadata_value(template),
+        "template_source": "explicit" if template else "default_desktop",
+        "resolution": "1024x768",
+        "dpi": 96,
+        "display": ":0",
     }
-    benchmark = _E2BLiveBenchmark(e2b_module)
+    benchmark = _E2BLiveBenchmark(e2b_module, template=template)
     return _run_live_provider_cases(
         provider=provider,
         benchmark=benchmark,
@@ -396,11 +410,28 @@ def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, A
 
 
 class _DaytonaLiveBenchmark:
-    def __init__(self, daytona_module: Any, api_key: str) -> None:
+    def __init__(
+        self,
+        daytona_module: Any,
+        *,
+        api_key: str,
+        api_url: str | None,
+        target: str | None,
+        snapshot: str | None,
+    ) -> None:
         self._module = daytona_module
+        self._snapshot = snapshot
         config_cls = getattr(daytona_module, "DaytonaConfig", None)
         client_cls = daytona_module.Daytona
-        self._client = client_cls(config_cls(api_key=api_key)) if config_cls else client_cls()
+        if config_cls is None:
+            self._client = client_cls()
+        else:
+            config_kwargs = {"api_key": api_key}
+            if api_url:
+                config_kwargs["api_url"] = api_url
+            if target:
+                config_kwargs["target"] = target
+            self._client = client_cls(config_cls(**config_kwargs))
 
     def cold_create_to_ready(self) -> dict[str, Any]:
         sandbox = self.create_ready_session()
@@ -423,6 +454,9 @@ class _DaytonaLiveBenchmark:
         with suppress(Exception):
             computer_use = _computer_use(sandbox)
             _call_first_available(computer_use, ("stop",))
+        with suppress(Exception):
+            self._client.delete(sandbox)
+            return
         _cleanup_provider_sandbox(sandbox)
 
     def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
@@ -456,13 +490,11 @@ class _DaytonaLiveBenchmark:
 
     def _create_sandbox(self) -> Any:
         create = self._client.create
-        params_cls = getattr(self._module, "CreateSandboxFromImageParams", None)
-        image_cls = getattr(self._module, "Image", None)
-        resources_cls = getattr(self._module, "Resources", None)
-        if params_cls and image_cls and resources_cls:
-            image = image_cls.debian_slim("3.12")
-            resources = resources_cls(cpu=1, memory=1, disk=3)
-            return create(params_cls(image=image, resources=resources))
+        if self._snapshot:
+            params_cls = getattr(self._module, "CreateSandboxFromSnapshotParams", None)
+            if params_cls is None:
+                raise RuntimeError("Daytona SDK did not expose snapshot creation params")
+            return create(params_cls(snapshot=self._snapshot))
         return create()
 
     def _status(self, sandbox: Any) -> dict[str, Any]:
@@ -474,8 +506,9 @@ class _DaytonaLiveBenchmark:
 
 
 class _E2BLiveBenchmark:
-    def __init__(self, e2b_module: Any) -> None:
+    def __init__(self, e2b_module: Any, *, template: str | None) -> None:
         self._sandbox_cls = e2b_module.Sandbox
+        self._template = template
 
     def cold_create_to_ready(self) -> dict[str, Any]:
         sandbox = self.create_ready_session()
@@ -524,8 +557,16 @@ class _E2BLiveBenchmark:
 
     def _create_sandbox(self) -> Any:
         create = self._sandbox_cls.create
+        create_kwargs: dict[str, Any] = {
+            "resolution": (1024, 768),
+            "dpi": 96,
+            "display": ":0",
+            "timeout": 300,
+        }
+        if self._template:
+            create_kwargs["template"] = self._template
         try:
-            return create(resolution=(1024, 768), timeout=300)
+            return create(**create_kwargs)
         except TypeError:
             try:
                 return create(resolution=(1024, 768), timeout_ms=300_000)
