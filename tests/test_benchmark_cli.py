@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -92,6 +93,91 @@ def test_benchmark_compare_external_providers_skip_without_credentials(monkeypat
     assert payload["providers"]["e2b"]["status"] == "not_measured"
     assert "DAYTONA_API_KEY is not set" in captured.out
     assert "E2B_API_KEY is not set" in captured.out
+
+
+def test_benchmark_compare_live_external_providers_loads_cwd_dotenv(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    tmp_path.joinpath(".env").write_text(
+        "DAYTONA_API_KEY=daytona-from-dotenv\nE2B_API_KEY=e2b-from-dotenv\n",
+        encoding="utf-8",
+    )
+
+    def missing_sdk(*args, **kwargs):
+        raise ImportError("missing sdk")
+
+    monkeypatch.setattr(benchmark_comparison, "_import_provider_module", missing_sdk)
+
+    exit_code = cli.main(
+        ["benchmark", "compare", "--providers", "daytona,e2b", "--iterations", "1"]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    serialized = json.dumps(payload)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["providers"]["daytona"]["status"] == "unavailable"
+    assert payload["providers"]["e2b"]["status"] == "unavailable"
+    assert "DAYTONA_API_KEY is not set" not in serialized
+    assert "E2B_API_KEY is not set" not in serialized
+    assert "daytona-from-dotenv" not in serialized
+    assert "e2b-from-dotenv" not in serialized
+
+
+def test_benchmark_compare_env_file_does_not_override_existing_env(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    env_file = tmp_path / "provider.env"
+    env_file.write_text("E2B_API_KEY=e2b-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-from-shell")
+
+    def missing_sdk(*args, **kwargs):
+        raise ImportError("missing sdk")
+
+    monkeypatch.setattr(benchmark_comparison, "_import_provider_module", missing_sdk)
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "e2b",
+            "--iterations",
+            "1",
+            "--env-file",
+            str(env_file),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    serialized = captured.out
+    assert exit_code == 0
+    assert "install the bench-e2b extra" in serialized
+    assert os.environ["E2B_API_KEY"] == "e2b-from-shell"
+    assert "e2b-from-shell" not in serialized
+    assert "e2b-from-dotenv" not in serialized
+
+
+def test_benchmark_compare_env_file_must_exist(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "benchmark",
+                "compare",
+                "--providers",
+                "e2b",
+                "--env-file",
+                "/tmp/does-not-exist-provider.env",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "--env-file must point to an existing file" in captured.err
 
 
 def test_benchmark_compare_mock_local_never_loads_live_external_providers(

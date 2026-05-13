@@ -92,12 +92,17 @@ Compare benchmark surfaces across the Modal daemon, adapter matrix, and optional
 ```bash
 uv run computer-use benchmark compare --mock-local --iterations 5
 uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
+uv run computer-use benchmark compare --providers daytona,e2b --env-file .env --iterations 5
 ```
 
 The default comparison runs the Modal daemon plus OpenAI, Anthropic, and generic adapter
 normalization/execution without calling provider APIs. Daytona and E2B live runs are credential
 gated and report `not_measured` when `DAYTONA_API_KEY` or `E2B_API_KEY` is absent. Install pinned
 provider extras with `uv sync --extra bench-daytona --extra bench-e2b` before live provider runs.
+Provider-live comparison loads a local `.env` from the current working directory when present, or
+an explicit dotenv file passed with `--env-file`. Already exported environment variables take
+precedence over `.env` values. Keep real keys in untracked `.env` files; use `.env.example` for the
+non-secret key names.
 Live provider reports separate cold create-to-ready timing from warm screenshot, action, typing,
 and command cases that reuse a ready sandbox.
 

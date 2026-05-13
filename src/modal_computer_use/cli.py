@@ -107,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("--image-variant", dest="image_profile")
     compare_parser.add_argument("--iterations", type=_positive_int, default=5)
     compare_parser.add_argument("--output", type=Path)
+    compare_parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="load provider benchmark credentials from a dotenv file; existing env vars win",
+    )
     compare_parser.add_argument("--json", action="store_true", default=True)
 
     args = parser.parse_args(argv)
@@ -123,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
             compare_parser.error("modal-daemon comparison requires --mock-local or --base-url")
         if "modal-exec" in providers and not args.sandbox_id:
             compare_parser.error("modal-exec comparison requires --sandbox-id")
+        if args.env_file is not None and not args.env_file.is_file():
+            compare_parser.error("--env-file must point to an existing file")
     if args.command == "trace" and args.trace_command == "validate":
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
@@ -230,6 +237,8 @@ def _benchmark_report(args: argparse.Namespace) -> int:
 
 def _benchmark_compare(args: argparse.Namespace) -> int:
     providers = _compare_providers(args)
+    if not args.mock_local and _has_live_external_provider(providers):
+        _load_benchmark_env_file(args.env_file)
     sandbox_exec_runner = None
     sandbox_exec_setup_failure = None
     if "modal-exec" in providers:
@@ -291,6 +300,19 @@ def _compare_providers(args: argparse.Namespace) -> list[ComparisonProvider]:
     if invalid:
         raise SystemExit(f"invalid provider: {', '.join(invalid)}")
     return values  # type: ignore[return-value]
+
+
+def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:
+    return any(provider in {"daytona", "e2b"} for provider in providers)
+
+
+def _load_benchmark_env_file(env_file: Path | None) -> None:
+    from dotenv import load_dotenv
+
+    path = env_file or Path.cwd() / ".env"
+    if not path.is_file():
+        return
+    load_dotenv(path, override=False)
 
 
 def _positive_int(value: str) -> int:

@@ -135,12 +135,19 @@ Live external providers are explicit:
 ```bash
 uv sync --extra bench-daytona --extra bench-e2b
 uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
+uv run computer-use benchmark compare --providers daytona,e2b --env-file .env --iterations 5
 ```
 
 Daytona runs require `DAYTONA_API_KEY`; `DAYTONA_API_URL` and `DAYTONA_TARGET` are reported as
 safe metadata when present. E2B runs require `E2B_API_KEY`. Missing credentials produce
 `not_measured` provider entries rather than crashes. Missing optional SDK packages produce
 `unavailable` entries.
+
+For local development, provider-live comparison reads a current-working-directory `.env` file when
+one exists, or the file passed with `--env-file`. Dotenv values never override already exported
+environment variables, so shell and CI secrets remain authoritative. Modal SDK authentication stays
+separate; keep using `~/.modal.toml`, `MODAL_CONFIG_PATH`, or Modal token environment variables for
+Modal itself.
 
 Provider-live comparisons split lifecycle cost from warm primitive cost. `cold_create_to_ready`
 creates a fresh provider sandbox, starts or verifies the desktop computer-use surface where the
