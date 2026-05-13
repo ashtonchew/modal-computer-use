@@ -43,6 +43,44 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
     assert entries[0].redactions == ["text"]
 
 
+def test_action_trace_redacts_nested_hold_typed_text(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [{"type": "type", "text": "nested secret"}],
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert "nested secret" not in raw_trace
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].normalized_action is not None
+    assert entries[0].normalized_action["actions"][0]["text"] == {
+        "redacted": True,
+        "length": 13,
+        "sha256": hashlib.sha256(b"nested secret").hexdigest(),
+    }
+    assert entries[0].redactions == ["actions[0].text"]
+
+
 def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

@@ -488,7 +488,7 @@ def parse_action(action: ComputerAction | dict[str, Any]) -> ComputerAction:
     try:
         return ComputerActionAdapter.validate_python(action)
     except Exception as exc:  # pydantic exposes multiple validation exception paths.
-        raise ActionValidationError(str(exc)) from exc
+        raise ActionValidationError("invalid action payload") from exc
 
 
 class ActionItemResult(StrictBaseModel):
@@ -518,6 +518,7 @@ class ActionBatchRequest(StrictBaseModel):
     screenshot_after: bool = False
     screenshot_options: ScreenshotOptions | None = None
     continue_on_error: bool = False
+    idempotency_key: str | None = None
     source: str = "sdk"
     call_id: str | None = None
     run_id: str | None = None

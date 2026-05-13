@@ -94,6 +94,27 @@ def test_raw_typed_text_is_rejected_as_unsafe(tmp_path) -> None:
     assert result.errors[0].code == "unsafe_typed_text"
 
 
+def test_nested_raw_typed_text_is_rejected_as_unsafe(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(
+        path,
+        [
+            _trace_entry(
+                normalized_action={
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [{"type": "type", "text": "secret"}],
+                },
+            )
+        ],
+    )
+
+    result = ComputerTrace.load(path).validate()
+
+    assert result.ok is False
+    assert result.errors[0].code == "unsafe_typed_text"
+
+
 def test_redacted_type_action_validates_but_is_not_executable_in_dry_run(tmp_path) -> None:
     path = tmp_path / "actions.ndjson"
     _write_entries(
@@ -111,6 +132,31 @@ def test_redacted_type_action_validates_but_is_not_executable_in_dry_run(tmp_pat
     plan = trace.replay(dry_run=True)
     assert plan.steps[0].kind == "skip"
     assert plan.steps[0].reason == "typed text is redacted"
+
+
+def test_nested_redacted_type_action_validates_and_is_skipped_in_replay(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(
+        path,
+        [
+            _trace_entry(
+                normalized_action={
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "type", "text": {"redacted": True, "length": 6}}
+                    ],
+                },
+                redactions=["actions[0].text"],
+            )
+        ],
+    )
+
+    trace = ComputerTrace.load(path)
+    assert trace.validate().ok is True
+    plan = trace.replay(dry_run=True)
+    assert plan.steps[0].kind == "skip"
+    assert plan.steps[0].reason == "nested typed text is redacted"
 
 
 def test_real_replay_executes_supported_actions_and_skips_redacted_text(tmp_path) -> None:
@@ -242,6 +288,26 @@ def test_unsafe_artifact_uri_is_rejected(tmp_path) -> None:
         "unsafe_artifact_uri",
         "unsafe_artifact_uri",
     ]
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "artifact://screenshots/%2e%2e/secret.png",
+        "artifact://screenshots/%252e%252e/secret.png",
+        "artifact://screenshots%2f%2e%2e%2fsecret.png",
+        "artifact://manifest.ndjson",
+        "artifact://.Secrets/x",
+    ],
+)
+def test_encoded_or_control_artifact_uri_is_rejected(uri: str, tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(path, [_trace_entry(screenshot_after_uri=uri)])
+
+    result = ComputerTrace.load(path).validate()
+
+    assert result.ok is False
+    assert result.errors[0].code == "unsafe_artifact_uri"
 
 
 def test_malformed_coordinate_space_fails_trace_entry_validation(tmp_path) -> None:

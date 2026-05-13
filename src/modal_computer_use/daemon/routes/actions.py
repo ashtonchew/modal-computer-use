@@ -19,6 +19,7 @@ from modal_computer_use.adapters.provenance import (
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.screenshots import enforce_screenshot_options_pixels
+from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
     ActionBatchRequest,
     ActionBatchResult,
@@ -77,17 +78,18 @@ async def run(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ActionBatchResult:
     cache = request.app.state.idempotency_cache
+    effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
     _prune_idempotency_cache(request)
-    if idempotency_key and idempotency_key in cache:
-        entry = cache[idempotency_key]
+    if effective_idempotency_key and effective_idempotency_key in cache:
+        entry = cache[effective_idempotency_key]
         if entry["fingerprint"] != request_fingerprint:
             raise DaemonError(
                 "idempotency key was already used with a different request body",
                 status_code=409,
                 code="idempotency_key_conflict",
             )
-        cache.move_to_end(idempotency_key)
+        cache.move_to_end(effective_idempotency_key)
         return ActionBatchResult.model_validate(entry["result"])
     if len(payload.actions) > request.app.state.settings.max_batch_actions:
         raise DaemonError(
@@ -218,6 +220,10 @@ async def run(
                         }
                     },
                 )
+                if _uses_post_action_delay(action) and (
+                    payload.screenshot_after or index < len(payload.actions) - 1
+                ):
+                    await _post_action_delay(request, batch_deadline)
             except TimeoutError:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
@@ -261,7 +267,7 @@ async def run(
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
-                error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                error_code = _exception_code(exc)
                 error = _action_error_message(action, exc)
                 item = ActionItemResult(
                     index=index,
@@ -270,7 +276,7 @@ async def run(
                     elapsed_ms=elapsed_ms,
                     error_code=error_code,
                     error=error,
-                    output=_exception_output(exc, action),
+                    output=_exception_output(exc, action, request=request),
                 )
                 results.append(item)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
@@ -287,6 +293,12 @@ async def run(
                         }
                     },
                 )
+                if (
+                    payload.continue_on_error
+                    and _uses_post_action_delay(action)
+                    and index < len(payload.actions) - 1
+                ):
+                    await _post_action_delay(request, batch_deadline)
                 if not payload.continue_on_error:
                     break
         if payload.screenshot_after and not batch_timed_out:
@@ -307,6 +319,12 @@ async def run(
                 timeout_seconds = min(timeout_ms / 1000, remaining_batch_seconds)
                 timeout_scope = "batch" if timeout_seconds < (timeout_ms / 1000) else "action"
                 try:
+                    enforce_screenshot_options_pixels(
+                        request,
+                        source_width=request.app.state.backend.width,
+                        source_height=request.app.state.backend.height,
+                        scale=options.scale,
+                    )
                     screenshot_budget_error = budgets.screenshot_reservation_error(request)
                     if screenshot_budget_error is not None:
                         raise screenshot_budget_error
@@ -339,7 +357,7 @@ async def run(
                     _append_screenshot_after_trace(request, payload, None, item, call_id=call_id)
                 except Exception as exc:
                     elapsed_ms = (time.perf_counter() - start) * 1000
-                    error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                    error_code = _exception_code(exc)
                     failed_screenshot = screenshot
                     screenshot = None
                     item = ActionItemResult(
@@ -349,7 +367,7 @@ async def run(
                         elapsed_ms=elapsed_ms,
                         error_code=error_code,
                         error=str(exc),
-                        output=_exception_output(exc),
+                        output=_exception_output(exc, request=request),
                     )
                     results.append(item)
                     _append_screenshot_after_trace(
@@ -362,8 +380,8 @@ async def run(
         screenshot=screenshot,
         timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
     )
-    if idempotency_key:
-        cache[idempotency_key] = {
+    if effective_idempotency_key:
+        cache[effective_idempotency_key] = {
             "fingerprint": request_fingerprint,
             "created_at": time.monotonic(),
             "result": result.model_dump(mode="json"),
@@ -372,9 +390,21 @@ async def run(
     return result
 
 
+def _effective_idempotency_key(
+    payload: ActionBatchRequest, header_key: str | None
+) -> str | None:
+    if header_key and payload.idempotency_key and header_key != payload.idempotency_key:
+        raise DaemonError(
+            "Idempotency-Key header and body idempotency_key differ",
+            status_code=409,
+            code="idempotency_key_conflict",
+        )
+    return header_key or payload.idempotency_key
+
+
 def _request_fingerprint(payload: ActionBatchRequest) -> str:
     encoded = json.dumps(
-        payload.model_dump(mode="json"),
+        payload.model_dump(mode="json", exclude={"idempotency_key"}),
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -449,6 +479,20 @@ def _budget_kinds_for_action(action: Any) -> tuple[budgets.BudgetKind, ...]:
     return ()
 
 
+def _uses_post_action_delay(action: Any) -> bool:
+    return not isinstance(action, WaitAction | ScreenshotAction | ZoomAction | CursorPositionAction)
+
+
+async def _post_action_delay(request: Request, batch_deadline: float) -> None:
+    delay_ms = request.app.state.settings.post_action_delay_ms
+    if delay_ms <= 0:
+        return
+    remaining_seconds = _remaining_seconds(batch_deadline)
+    if remaining_seconds <= 0:
+        return
+    await asyncio.sleep(min(delay_ms / 1000, remaining_seconds))
+
+
 def _reserve_action_budget(
     request: Request,
     *,
@@ -470,12 +514,27 @@ def _reserve_action_budget(
     return None
 
 
-def _exception_output(exc: Exception, action: Any | None = None) -> dict[str, Any]:
+def _exception_code(exc: Exception) -> str:
+    if isinstance(exc, DaemonError):
+        return exc.code
+    if isinstance(exc, BudgetExceededError):
+        return "budget_exceeded"
+    return "action_failed"
+
+
+def _exception_output(
+    exc: Exception, action: Any | None = None, *, request: Request | None = None
+) -> dict[str, Any]:
     if isinstance(exc, DaemonError):
         output: dict[str, Any] = {"code": exc.code}
         output.update(exc.details)
         if isinstance(action, TypeAction):
             return _redact_type_payload(output, action)
+        return output
+    if isinstance(exc, BudgetExceededError):
+        output = {"code": "budget_exceeded"}
+        if request is not None:
+            output["budgets"] = budgets.snapshot(request)
         return output
     return {}
 
@@ -762,10 +821,10 @@ def _append_trace(
     if not request.app.state.settings.trace_actions:
         return
     writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
-    normalized = _redacted_action(action)
+    normalized, redactions = _redacted_action_and_paths(action)
     provider_action, provider_redactions = _provider_trace_metadata(normalized)
-    redactions = ["text"] if isinstance(action, TypeAction) else []
     redactions.extend(provider_redactions)
+    redactions = list(dict.fromkeys(redactions))
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
@@ -846,15 +905,50 @@ def _coordinate_space(result: ActionItemResult) -> Any:
 
 
 def _redacted_action(action: Any) -> dict[str, Any]:
+    return _redacted_action_and_paths(action)[0]
+
+
+def _redacted_action_and_paths(action: Any) -> tuple[dict[str, Any], list[str]]:
     data = action.model_dump(mode="json")
-    if isinstance(action, TypeAction):
-        text = action.text
-        data["text"] = {
-            "redacted": True,
-            "length": len(text),
-            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        }
-    return data
+    redacted, redactions = _redact_action_payload(data)
+    return redacted if isinstance(redacted, dict) else data, redactions
+
+
+def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str]]:
+    redactions: list[str] = []
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        is_type_action = value.get("type") == "type" and isinstance(value.get("text"), str)
+        for key, item in value.items():
+            item_path = f"{path}.{key}" if path else key
+            if key == PROVIDER_ACTION_METADATA_KEY:
+                redacted[key] = item
+                continue
+            if is_type_action and key == "text":
+                redacted[key] = _redacted_text(item)
+                redactions.append(item_path)
+                continue
+            redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
+            redacted[key] = redacted_item
+            redactions.extend(child_redactions)
+        return redacted, redactions
+    if isinstance(value, list):
+        redacted_items = []
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]" if path else f"[{index}]"
+            redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
+            redacted_items.append(redacted_item)
+            redactions.extend(child_redactions)
+        return redacted_items, redactions
+    return value, []
+
+
+def _redacted_text(text: str) -> dict[str, Any]:
+    return {
+        "redacted": True,
+        "length": len(text),
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
 
 
 def _provider_trace_metadata(
@@ -872,4 +966,10 @@ def _provider_trace_metadata(
         for item in raw_redactions
         if isinstance(item, str) and item
     ]
-    return provider_action if isinstance(provider_action, dict) else None, redactions
+    if isinstance(provider_action, dict):
+        provider_action, inferred_redactions = _redact_action_payload(
+            provider_action, path="provider_action"
+        )
+        redactions.extend(inferred_redactions)
+        return provider_action if isinstance(provider_action, dict) else None, redactions
+    return None, redactions

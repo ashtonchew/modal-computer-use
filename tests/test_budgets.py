@@ -87,3 +87,60 @@ def test_screenshot_artifact_write_is_rejected_before_file_persists(tmp_path) ->
     assert response.json()["code"] == "budget_exceeded"
     assert not list((artifacts_dir / "screenshots").glob("*.png"))
     assert not (artifacts_dir / "manifest.ndjson").exists()
+
+
+def test_action_screenshot_artifact_budget_failure_uses_budget_code(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=artifacts_dir,
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_artifact_bytes=1,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "screenshot", "options": {"storage": "artifact"}}]},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["results"][0]["error_code"] == "budget_exceeded"
+    assert body["results"][0]["output"]["code"] == "budget_exceeded"
+    assert not list((artifacts_dir / "screenshots").glob("*.png"))
+    assert not (artifacts_dir / "manifest.ndjson").exists()
+
+
+def test_screenshot_after_artifact_budget_failure_uses_budget_code(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=artifacts_dir,
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_artifact_bytes=1,
+            post_action_delay_ms=0,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 1, "y": 2}],
+                "screenshot_after": True,
+                "screenshot_options": {"storage": "artifact"},
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["results"][-1]["type"] == "screenshot_after"
+    assert body["results"][-1]["error_code"] == "budget_exceeded"
+    assert body["results"][-1]["output"]["code"] == "budget_exceeded"
+    assert not list((artifacts_dir / "screenshots").glob("*.png"))

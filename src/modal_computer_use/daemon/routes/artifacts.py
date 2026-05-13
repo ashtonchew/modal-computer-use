@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse
 
 from modal_computer_use.artifacts import normalize_artifact_path
 from modal_computer_use.daemon import budgets
@@ -32,9 +32,11 @@ async def sync(request: Request) -> ArtifactSyncResult:
 
 
 @router.get("/{path:path}")
-async def read_artifact(path: str, request: Request) -> Response:
-    data = request.app.state.artifacts.read_bytes(path)
-    return Response(data, media_type="application/octet-stream")
+async def read_artifact(path: str, request: Request) -> FileResponse:
+    target = request.app.state.artifacts.resolve(path)
+    if not target.is_file():
+        raise FileNotFoundError(path)
+    return FileResponse(target, media_type="application/octet-stream")
 
 
 @router.put("/{path:path}")

@@ -39,7 +39,7 @@ class ActionExecutor:
 
     def apply(self, action: ComputerAction | dict[str, Any]) -> ActionResult:
         normalized = self._transform(parse_action(action))
-        self._policy(normalized)
+        self._policy_tree(normalized)
         result = self.computer.actions.apply(normalized)
         if self.after_action:
             self.after_action(normalized, result)
@@ -54,7 +54,7 @@ class ActionExecutor:
     ) -> ActionBatchResult:
         normalized = [self._transform(parse_action(action)) for action in actions]
         for action in normalized:
-            self._policy(action)
+            self._policy_tree(action)
         result = self.computer.actions.run(
             normalized,
             continue_on_error=continue_on_error,
@@ -66,10 +66,24 @@ class ActionExecutor:
                 self.after_action(action, result)
         return result
 
+    def _policy_tree(self, action: ComputerAction) -> None:
+        self._policy(action)
+        if getattr(action, "type", None) != "hold_key":
+            return
+        for nested in getattr(action, "actions", None) or []:
+            self._policy_tree(parse_action(nested))
+
     def _policy(self, action: ComputerAction) -> None:
         if not self.before_action:
             return
-        decision = self.before_action(action, {})
+        decision = self.before_action(
+            action,
+            {
+                "source": self.source,
+                "coordinate_space": self.coordinate_space,
+                "coordinates_transformed": self.coordinate_space is not None,
+            },
+        )
         if decision and decision.decision != "allow":
             raise UnsupportedActionError(decision.reason or f"action denied: {action.type}")
 
@@ -107,6 +121,12 @@ class ActionExecutor:
                 width=max(1, bottom_right.x - top_left.x),
                 height=max(1, bottom_right.y - top_left.y),
             )
+        nested_actions = getattr(action, "actions", None)
+        if getattr(action, "type", None) == "hold_key" and nested_actions:
+            updates["actions"] = [
+                self._transform(parse_action(item)).model_dump(mode="json")
+                for item in nested_actions
+            ]
         if not updates:
             return action
         return action.model_copy(update=updates)

@@ -158,8 +158,18 @@ class OpenAIAdapter:
     def apply(self, action: dict[str, Any]) -> ActionResult:
         return self.executor.apply(self.normalize(action))
 
-    def apply_many(self, actions: Iterable[dict[str, Any]]) -> ActionBatchResult:
-        return self.executor.apply_many([self.normalize(action) for action in actions])
+    def apply_many(
+        self,
+        actions: Iterable[dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_after: bool = False,
+    ) -> ActionBatchResult:
+        return self.executor.apply_many(
+            [self.normalize(action) for action in actions],
+            continue_on_error=continue_on_error,
+            screenshot_after=screenshot_after,
+        )
 
 
 def openai_computer_call_output(

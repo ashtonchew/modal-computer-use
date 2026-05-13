@@ -117,6 +117,7 @@ def test_artifact_sync_runs_mountpoint_sync_for_persistent_volume(tmp_path) -> N
     store = ArtifactStore(
         tmp_path / "root",
         persistent=True,
+        persistent_verified=True,
         sync_runner=runner,
     )
 
@@ -128,6 +129,29 @@ def test_artifact_sync_runs_mountpoint_sync_for_persistent_volume(tmp_path) -> N
     assert calls == [(tmp_path / "root").as_posix()]
 
 
+def test_artifact_sync_fails_closed_when_persistence_is_unverified(tmp_path) -> None:
+    calls: list[str] = []
+
+    def runner(path: str) -> subprocess.CompletedProcess[str]:
+        calls.append(path)
+        return subprocess.CompletedProcess(["sync", path], 0, "", "")
+
+    store = ArtifactStore(
+        tmp_path / "root",
+        persistent=True,
+        persistent_verified=False,
+        sync_runner=runner,
+    )
+
+    result = store.sync()
+
+    assert result.ok is False
+    assert result.persistent is True
+    assert result.synced_paths == []
+    assert "verified Modal Volume" in (result.message or "")
+    assert calls == []
+
+
 def test_artifact_sync_reports_mountpoint_sync_failure(tmp_path) -> None:
     def runner(path: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(["sync", path], 1, "", "failed")
@@ -135,6 +159,7 @@ def test_artifact_sync_reports_mountpoint_sync_failure(tmp_path) -> None:
     store = ArtifactStore(
         tmp_path / "root",
         persistent=True,
+        persistent_verified=True,
         sync_runner=runner,
     )
 

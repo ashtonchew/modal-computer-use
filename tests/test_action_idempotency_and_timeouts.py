@@ -123,6 +123,62 @@ def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     assert app.state.action_count == 1
 
 
+def test_body_idempotency_key_replays_without_reexecution(tmp_path) -> None:
+    app = _app(tmp_path)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            json={
+                "idempotency_key": "body-idem",
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+            },
+        )
+        second = client.post(
+            "/v1/actions/run",
+            json={
+                "idempotency_key": "body-idem",
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert app.state.action_count == 1
+
+
+def test_header_and_body_idempotency_key_mismatch_is_rejected(tmp_path) -> None:
+    app = _app(tmp_path)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "header-idem"},
+            json={
+                "idempotency_key": "body-idem",
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "idempotency_key_conflict"
+    assert app.state.action_count == 0
+
+
+def test_post_action_delay_runs_before_screenshot_after(tmp_path) -> None:
+    app = _app(tmp_path, post_action_delay_ms=25)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["timing"]["daemon_ms"] >= 20
+
+
 def test_action_timeout_releases_input_and_stops_batch(tmp_path) -> None:
     app = _app(tmp_path, default_action_timeout_ms=10)
 

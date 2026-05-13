@@ -251,6 +251,34 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"] == ""
 
 
+def test_create_rejects_persistent_artifacts_without_volume_mount(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(storage={"persist_artifacts": True})
+
+    try:
+        ComputerSandbox.create(config=config, image=object(), wait=False)
+    except ConfigConflictError as exc:
+        assert "persist_artifacts=True requires a Volume" in str(exc)
+    else:
+        raise AssertionError("expected missing artifact volume mount to fail")
+
+
+def test_create_marks_persistent_artifact_volume_mount(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(storage={"persist_artifacts": True})
+
+    ComputerSandbox.create(
+        config=config,
+        image=object(),
+        volumes={"/home/desktop": object()},
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_ARTIFACTS_PERSISTENT"] == "true"
+    assert kwargs["env"]["COMPUTER_USE_ARTIFACTS_VOLUME_MOUNTED"] == "true"
+
+
 def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
 

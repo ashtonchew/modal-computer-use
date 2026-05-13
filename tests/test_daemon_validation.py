@@ -141,6 +141,97 @@ def test_action_screenshot_enforces_output_pixel_budget(tmp_path) -> None:
     assert zoom.json()["results"][0]["error_code"] == "screenshot_too_large"
 
 
+def test_screenshot_after_enforces_output_pixel_budget(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            screenshot_max_pixels=1_000,
+            post_action_delay_ms=0,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 1, "y": 2}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["screenshot"] is None
+    assert body["results"][-1]["type"] == "screenshot_after"
+    assert body["results"][-1]["error_code"] == "screenshot_too_large"
+    assert app.state.screenshot_count == 0
+
+
+def test_validation_error_response_does_not_echo_typed_text(tmp_path) -> None:
+    sentinel = "SECRET_TYPED_TEXT"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "type", "text": f"{sentinel}\t"}]},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+    assert sentinel not in response.text
+    assert "input" not in response.text
+
+
+def test_nested_hold_validation_error_does_not_echo_typed_text(tmp_path) -> None:
+    sentinel = "NESTED_TYPED_SECRET"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        action_response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [{"type": "type", "text": f"{sentinel}\t"}],
+                    }
+                ]
+            },
+        )
+        keyboard_response = client.post(
+            "/v1/keyboard/hold",
+            json={
+                "key": "shift",
+                "actions": [{"type": "type", "text": f"{sentinel}\t"}],
+            },
+        )
+
+    assert action_response.status_code == 422
+    assert keyboard_response.status_code == 422
+    assert sentinel not in action_response.text
+    assert sentinel not in keyboard_response.text
+
+
 def test_browser_open_url_rejects_non_http_urls(test_client) -> None:
     response = test_client.post("/v1/browser/open-url", json={"url": "file:///etc/passwd"})
 

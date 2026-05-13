@@ -57,11 +57,15 @@ class ArtifactStore:
         root: str | Path,
         *,
         persistent: bool = False,
+        persistent_verified: bool | None = None,
         max_total_bytes: int | None = None,
         sync_runner: Callable[[str], subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self.root = Path(root)
         self.persistent = persistent
+        self.persistent_verified = (
+            persistent if persistent_verified is None else persistent_verified
+        )
         self.max_total_bytes = max_total_bytes
         self._sync_runner = sync_runner or _run_mountpoint_sync
         self.root.mkdir(parents=True, exist_ok=True)
@@ -257,6 +261,16 @@ class ArtifactStore:
 
     def sync(self) -> ArtifactSyncResult:
         if self.persistent:
+            if not self.persistent_verified:
+                return ArtifactSyncResult(
+                    ok=False,
+                    persistent=True,
+                    synced_paths=[],
+                    message=(
+                        "persistent artifact sync requested without a verified Modal Volume "
+                        "mount for the artifact root"
+                    ),
+                )
             result = self._sync_runner(str(self.root))
             if result.returncode != 0:
                 return ArtifactSyncResult(

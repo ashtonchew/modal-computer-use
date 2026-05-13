@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from modal_computer_use.artifacts import ArtifactStore
@@ -66,6 +67,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.state.artifacts = ArtifactStore(
         settings.artifacts_dir,
         persistent=settings.artifacts_persistent,
+        persistent_verified=settings.artifacts_volume_mounted,
         max_total_bytes=settings.max_artifact_bytes,
     )
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
@@ -122,6 +124,19 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
             content={"code": "budget_exceeded", "message": str(exc), "details": {}},
         )
 
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": "request validation failed",
+                "details": {"errors": _validation_errors_without_inputs(exc)},
+            },
+        )
+
     @app.exception_handler(FileNotFoundError)
     async def not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
         return JSONResponse(
@@ -152,3 +167,16 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     ):
         app.include_router(router)
     return app
+
+
+def _validation_errors_without_inputs(exc: RequestValidationError) -> list[dict[str, object]]:
+    errors: list[dict[str, object]] = []
+    for item in exc.errors():
+        errors.append(
+            {
+                "loc": item.get("loc", ()),
+                "msg": item.get("msg", "validation error"),
+                "type": item.get("type", "value_error"),
+            }
+        )
+    return errors

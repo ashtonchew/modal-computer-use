@@ -60,7 +60,7 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             "nested hold action validation failed",
             status_code=422,
             code="action_validation_failed",
-            details={"errors": [str(exc)]},
+            details={"errors": ["invalid nested hold action"]},
         ) from exc
     errors = _validate_actions(
         nested_actions,

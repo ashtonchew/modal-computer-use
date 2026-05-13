@@ -27,6 +27,17 @@
             "title": "Continue On Error",
             "type": "boolean"
           },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
           "max_action_timeout_ms": {
             "anyOf": [
               {

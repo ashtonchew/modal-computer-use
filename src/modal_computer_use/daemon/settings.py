@@ -57,6 +57,9 @@ class DaemonSettings:
     artifacts_persistent: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_ARTIFACTS_PERSISTENT", False)
     )
+    artifacts_volume_mounted: bool = field(
+        default_factory=lambda: _bool_env("COMPUTER_USE_ARTIFACTS_VOLUME_MOUNTED", False)
+    )
     recordings_dir: Path = field(
         default_factory=lambda: _path_env(
             "COMPUTER_USE_RECORDINGS_DIR", "/home/desktop/recordings"

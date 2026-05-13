@@ -76,7 +76,4 @@ class DaemonClient:
         return TypeAdapter(list[model]).validate_python(payload)  # type: ignore[valid-type]
 
     def download(self, path: str, local_path: str | Path) -> Path:
-        target = Path(local_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(self.get_bytes(path))
-        return target
+        return self.transport.stream_download(path, local_path)
