@@ -19,6 +19,7 @@ from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 from modal_computer_use.observability import get_tracer
+from modal_computer_use.redaction import safe_exception_payload
 
 from .routes import (
     actions,
@@ -142,6 +143,17 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=404,
             content={"code": "not_found", "message": str(exc), "details": {}},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": "internal_error",
+                "message": "internal server error",
+                "details": safe_exception_payload(exc),
+            },
         )
 
     for router in (

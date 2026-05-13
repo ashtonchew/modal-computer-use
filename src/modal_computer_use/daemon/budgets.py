@@ -61,6 +61,16 @@ def enforce(request: Request, *kinds: BudgetKind) -> None:
         raise _budget_error("recording duration budget exceeded", state)
 
 
+def recording_start_error(request: Request) -> DaemonError | None:
+    settings = request.app.state.settings
+    if settings.max_recording_seconds is None:
+        return None
+    state = snapshot(request)
+    if request.app.state.recordings.total_duration_seconds() >= settings.max_recording_seconds:
+        return _budget_error("recording duration budget exceeded", state)
+    return None
+
+
 def enforce_artifact_write(request: Request, path: str, incoming_size: int) -> None:
     settings = request.app.state.settings
     if settings.max_artifact_bytes is None:

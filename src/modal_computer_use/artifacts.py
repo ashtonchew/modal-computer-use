@@ -76,6 +76,7 @@ class ArtifactStore:
 
     def resolve(self, path: str, *, allow_empty: bool = False, public: bool = True) -> Path:
         relative = normalize_artifact_path(path, allow_empty=allow_empty, public=public)
+        self._reject_symlink_components(relative)
         candidate = (self.root / relative).resolve()
         root = self.root.resolve()
         try:
@@ -84,9 +85,18 @@ class ArtifactStore:
             raise ArtifactPathError("artifact path escapes root") from exc
         if common != str(root):
             raise ArtifactPathError("artifact path escapes root")
-        if candidate.exists() and candidate.is_symlink():
-            raise ArtifactPathError("artifact symlink escapes are not allowed")
         return candidate
+
+    def _reject_symlink_components(self, relative: str) -> None:
+        if not relative:
+            return
+        current = self.root
+        for part in Path(relative).parts:
+            current = current / part
+            if current.is_symlink():
+                raise ArtifactPathError("artifact symlinks are not public")
+            if not current.exists():
+                return
 
     def _info(
         self,
@@ -206,6 +216,8 @@ class ArtifactStore:
         paths = [base] if base.is_file() else [item for item in base.rglob("*") if item.exists()]
         infos: list[ArtifactInfo] = []
         for item in sorted(paths):
+            if item.is_symlink():
+                raise ArtifactPathError("artifact symlinks are not public")
             resolved = item.resolve()
             common = os.path.commonpath([str(root), str(resolved)])
             if common != str(root):

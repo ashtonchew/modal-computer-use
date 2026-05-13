@@ -51,16 +51,19 @@ class ActionExecutor:
         *,
         continue_on_error: bool = False,
         screenshot_after: bool = False,
+        max_action_timeout_ms: int | None = None,
     ) -> ActionBatchResult:
         normalized = [self._transform(parse_action(action)) for action in actions]
         for action in normalized:
             self._policy_tree(action)
-        result = self.computer.actions.run(
-            normalized,
-            continue_on_error=continue_on_error,
-            screenshot_after=screenshot_after,
-            source=self.source,
-        )
+        run_kwargs: dict[str, Any] = {
+            "continue_on_error": continue_on_error,
+            "screenshot_after": screenshot_after,
+            "source": self.source,
+        }
+        if max_action_timeout_ms is not None:
+            run_kwargs["max_action_timeout_ms"] = max_action_timeout_ms
+        result = self.computer.actions.run(normalized, **run_kwargs)
         if self.after_action:
             for action in normalized:
                 self.after_action(action, result)

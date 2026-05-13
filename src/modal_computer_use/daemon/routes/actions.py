@@ -77,20 +77,8 @@ async def run(
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ActionBatchResult:
-    cache = request.app.state.idempotency_cache
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
-    _prune_idempotency_cache(request)
-    if effective_idempotency_key and effective_idempotency_key in cache:
-        entry = cache[effective_idempotency_key]
-        if entry["fingerprint"] != request_fingerprint:
-            raise DaemonError(
-                "idempotency key was already used with a different request body",
-                status_code=409,
-                code="idempotency_key_conflict",
-            )
-        cache.move_to_end(effective_idempotency_key)
-        return ActionBatchResult.model_validate(entry["result"])
     if len(payload.actions) > request.app.state.settings.max_batch_actions:
         raise DaemonError(
             "batch exceeds max_batch_actions",
@@ -125,7 +113,21 @@ async def run(
     results: list[ActionItemResult] = []
     screenshot = None
     batch_timed_out = False
+    screenshot_after_blocked = False
     async with request.app.state.input_lock:
+        cache = request.app.state.idempotency_cache
+        _prune_idempotency_cache(request)
+        if effective_idempotency_key and effective_idempotency_key in cache:
+            entry = cache[effective_idempotency_key]
+            if entry["fingerprint"] != request_fingerprint:
+                raise DaemonError(
+                    "idempotency key was already used with a different request body",
+                    status_code=409,
+                    code="idempotency_key_conflict",
+                )
+            cache.move_to_end(effective_idempotency_key)
+            return ActionBatchResult.model_validate(entry["result"])
+
         batch_timeout_ms = request.app.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
         for index, action in enumerate(payload.actions):
@@ -162,6 +164,7 @@ async def run(
             if _counts_against_action_budget(action):
                 budget_item = _reserve_action_budget(request, index=index, action_type=action.type)
                 if budget_item is not None:
+                    screenshot_after_blocked = True
                     results.append(budget_item)
                     _append_trace(
                         request, payload, action, budget_item, call_id=call_id, sequence=index
@@ -192,7 +195,13 @@ async def run(
                     },
                 ):
                     output = await asyncio.wait_for(
-                        _execute_action(action, request, call_id=call_id),
+                        _execute_action(
+                            action,
+                            request,
+                            call_id=call_id,
+                            payload=payload,
+                            batch_deadline=batch_deadline,
+                        ),
                         timeout=timeout_seconds,
                     )
                 elapsed_ms = (time.perf_counter() - start) * 1000
@@ -268,6 +277,8 @@ async def run(
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
                 error_code = _exception_code(exc)
+                if error_code in {"budget_exceeded", "rate_limited"}:
+                    screenshot_after_blocked = True
                 error = _action_error_message(action, exc)
                 item = ActionItemResult(
                     index=index,
@@ -301,7 +312,7 @@ async def run(
                     await _post_action_delay(request, batch_deadline)
                 if not payload.continue_on_error:
                     break
-        if payload.screenshot_after and not batch_timed_out:
+        if payload.screenshot_after and not batch_timed_out and not screenshot_after_blocked:
             options = payload.screenshot_options or ScreenshotOptions()
             start = time.perf_counter()
             timeout_ms = _effective_screenshot_after_timeout_ms(payload, request)
@@ -366,28 +377,28 @@ async def run(
                         ok=False,
                         elapsed_ms=elapsed_ms,
                         error_code=error_code,
-                        error=str(exc),
+                        error=sanitize_text(str(exc)),
                         output=_exception_output(exc, request=request),
                     )
                     results.append(item)
                     _append_screenshot_after_trace(
                         request, payload, failed_screenshot, item, call_id=call_id
                     )
-    result = ActionBatchResult(
-        ok=all(item.ok for item in results),
-        call_id=call_id,
-        results=results,
-        screenshot=screenshot,
-        timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
-    )
-    if effective_idempotency_key:
-        cache[effective_idempotency_key] = {
-            "fingerprint": request_fingerprint,
-            "created_at": time.monotonic(),
-            "result": result.model_dump(mode="json"),
-        }
-        _prune_idempotency_cache(request)
-    return result
+        result = ActionBatchResult(
+            ok=all(item.ok for item in results),
+            call_id=call_id,
+            results=results,
+            screenshot=screenshot,
+            timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
+        )
+        if effective_idempotency_key:
+            cache[effective_idempotency_key] = {
+                "fingerprint": request_fingerprint,
+                "created_at": time.monotonic(),
+                "result": result.model_dump(mode="json"),
+            }
+            _prune_idempotency_cache(request)
+        return result
 
 
 def _effective_idempotency_key(
@@ -437,14 +448,26 @@ def _validate_action_timeouts(
             "max_action_timeout_ms "
             f"{payload.max_action_timeout_ms} exceeds configured maximum {max_action_timeout_ms}"
         )
-    for index, action in enumerate(payload.actions):
+    for action_path, action in _iter_timeout_actions(payload.actions):
         timeout_ms = getattr(action, "timeout_ms", None)
         if timeout_ms is not None and timeout_ms > max_action_timeout_ms:
             errors.append(
-                f"actions[{index}] timeout_ms {timeout_ms} exceeds configured maximum "
+                f"{action_path} timeout_ms {timeout_ms} exceeds configured maximum "
                 f"{max_action_timeout_ms}"
             )
     return errors
+
+
+def _iter_timeout_actions(actions: list[Any], *, path: str = "actions"):
+    for index, action in enumerate(actions):
+        action_path = f"{path}[{index}]"
+        yield action_path, action
+        if isinstance(action, HoldKeyAction) and action.actions:
+            nested = []
+            for nested_action in action.actions:
+                with suppress(Exception):
+                    nested.append(parse_action(nested_action))
+            yield from _iter_timeout_actions(nested, path=f"{action_path}.actions")
 
 
 def _effective_action_timeout_ms(
@@ -595,7 +618,14 @@ def _screenshot_after_timeout_result(
     )
 
 
-async def _execute_action(action: Any, request: Request, *, call_id: str) -> dict[str, Any]:
+async def _execute_action(
+    action: Any,
+    request: Request,
+    *,
+    call_id: str,
+    payload: ActionBatchRequest | None = None,
+    batch_deadline: float | None = None,
+) -> dict[str, Any]:
     backend = request.app.state.backend
     if isinstance(action, MoveAction):
         point = await backend.mouse_move(action.x, action.y)
@@ -669,7 +699,27 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
                 if _counts_against_action_budget(nested_action):
                     budgets.reserve_action(request)
                 nested_start = time.perf_counter()
-                nested_output = await _execute_action(nested_action, request, call_id=call_id)
+                nested_call = _execute_action(
+                    nested_action,
+                    request,
+                    call_id=call_id,
+                    payload=payload,
+                    batch_deadline=batch_deadline,
+                )
+                if payload is not None:
+                    nested_timeout_seconds = (
+                        _effective_action_timeout_ms(nested_action, payload, request) / 1000
+                    )
+                    if batch_deadline is not None:
+                        nested_timeout_seconds = min(
+                            nested_timeout_seconds,
+                            _remaining_seconds(batch_deadline),
+                        )
+                    nested_output = await asyncio.wait_for(
+                        nested_call, timeout=nested_timeout_seconds
+                    )
+                else:
+                    nested_output = await nested_call
                 nested_results.append(
                     {
                         "type": nested_action.type,
@@ -928,6 +978,10 @@ def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str
                 redacted[key] = _redacted_text(item)
                 redactions.append(item_path)
                 continue
+            if _is_sensitive_trace_key(str(key)):
+                redacted[key] = _redacted_sensitive_value(item)
+                redactions.append(item_path)
+                continue
             redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
             redacted[key] = redacted_item
             redactions.extend(child_redactions)
@@ -940,6 +994,10 @@ def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str
             redacted_items.append(redacted_item)
             redactions.extend(child_redactions)
         return redacted_items, redactions
+    if isinstance(value, str):
+        sanitized = sanitize_text(value)
+        if sanitized != value:
+            return sanitized, [path] if path else []
     return value, []
 
 
@@ -949,6 +1007,59 @@ def _redacted_text(text: str) -> dict[str, Any]:
         "length": len(text),
         "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
+
+
+_SENSITIVE_TRACE_KEYS = {
+    "api_key",
+    "artifact_bytes",
+    "artifact_uri",
+    "authorization",
+    "bearer",
+    "bytes",
+    "clipboard",
+    "clipboard_text",
+    "connect_token",
+    "content",
+    "data",
+    "data_base64",
+    "image",
+    "image_bytes",
+    "no_vnc_url",
+    "novnc_url",
+    "password",
+    "raw_path",
+    "screenshot",
+    "screenshot_bytes",
+    "stderr",
+    "stdout",
+    "text",
+    "token",
+    "typed_text",
+    "url",
+    "vnc_url",
+}
+
+
+def _is_sensitive_trace_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return normalized in _SENSITIVE_TRACE_KEYS or normalized.endswith("_token")
+
+
+def _redacted_sensitive_value(value: Any) -> dict[str, Any]:
+    if _is_redaction_marker(value):
+        return value
+    marker: dict[str, Any] = {"redacted": True}
+    if isinstance(value, str):
+        marker["length"] = len(value)
+    elif isinstance(value, bytes):
+        marker["size_bytes"] = len(value)
+    elif isinstance(value, list | tuple | dict):
+        marker["items"] = len(value)
+    return marker
+
+
+def _is_redaction_marker(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("redacted") is True
 
 
 def _provider_trace_metadata(

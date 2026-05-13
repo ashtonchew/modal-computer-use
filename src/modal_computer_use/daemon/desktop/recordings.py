@@ -104,7 +104,7 @@ class RecordingRegistry:
         self._recordings[recording_id] = rec
         return rec
 
-    def stop(self, recording_id: str) -> Recording:
+    def stop(self, recording_id: str, *, append_manifest: bool = True) -> Recording:
         rec = self.get(recording_id)
         if rec.status != "recording":
             return rec
@@ -164,9 +164,15 @@ class RecordingRegistry:
             }
         )
         self._recordings[recording_id] = stopped
-        if stopped.status == "stopped" and self.artifact_store is not None:
+        if stopped.status == "stopped" and self.artifact_store is not None and append_manifest:
             self.artifact_store.append_manifest(_recording_artifact(stopped, path))
         return stopped
+
+    def append_manifest(self, recording_id: str) -> None:
+        rec = self.get(recording_id)
+        if rec.status != "stopped" or self.artifact_store is None:
+            return
+        self.artifact_store.append_manifest(_recording_artifact(rec, Path(rec.path)))
 
     def list(self) -> list[Recording]:
         return list(self._recordings.values())
@@ -182,6 +188,12 @@ class RecordingRegistry:
         process = self._processes.pop(recording_id, None)
         if process is not None and process.poll() is None:
             process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                with suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
         Path(rec.path).unlink(missing_ok=True)
         if rec.stderr_path:
             Path(rec.stderr_path).unlink(missing_ok=True)

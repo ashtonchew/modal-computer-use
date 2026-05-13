@@ -65,6 +65,11 @@ class DaemonSettings:
             "COMPUTER_USE_RECORDINGS_DIR", "/home/desktop/recordings"
         )
     )
+    runtime_dir: Path = field(
+        default_factory=lambda: _path_env(
+            "COMPUTER_USE_RUNTIME_DIR", "/tmp/modal-computer-use"  # noqa: S108
+        )
+    )
     trace_dir: Path = field(
         default_factory=lambda: _path_env(
             "COMPUTER_USE_TRACE_DIR", "/home/desktop/artifacts/traces"

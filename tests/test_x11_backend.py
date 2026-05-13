@@ -142,6 +142,7 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
     backend = RecordingX11Backend()
 
     async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
         if args[:2] == ("xdotool", "getmouselocation"):
             return subprocess.CompletedProcess(args, 0, "X=0\nY=0\n", "")
         Image.new("RGB", (100, 100), "white").save(args[-1])
@@ -160,6 +161,29 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
 
     assert screenshot.artifact_uri is not None
     assert screenshot.data_base64 is None
+
+
+def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
+    backend = RecordingX11Backend()
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        if args[:2] == ("xdotool", "getmouselocation"):
+            return subprocess.CompletedProcess(args, 0, "X=0\nY=0\n", "")
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+
+    async def capture() -> None:
+        await backend.screenshot(ScreenshotOptions(show_cursor=False))
+        await backend.screenshot(ScreenshotOptions(show_cursor=True))
+
+    anyio.run(capture)
+
+    maim_commands = [command for command in backend.commands if command and command[0] == "maim"]
+    assert maim_commands[0][1] == "-u"
+    assert "-u" not in maim_commands[1]
 
 
 def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:

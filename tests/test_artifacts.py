@@ -51,6 +51,31 @@ def test_artifact_symlink_escape(tmp_path) -> None:
         store.resolve("link")
 
 
+def test_artifact_symlink_alias_to_control_path_is_rejected(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root")
+    store.manifest_path.write_text("secret manifest")
+    (tmp_path / "root" / "public").symlink_to(store.manifest_path)
+
+    with pytest.raises(ArtifactPathError):
+        store.read_bytes("public")
+
+    with pytest.raises(ArtifactPathError):
+        store.write_bytes("public", b"overwrite")
+
+    assert store.manifest_path.read_text() == "secret manifest"
+
+
+def test_artifact_symlink_parent_alias_to_control_path_is_rejected(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root")
+    trace_dir = tmp_path / "root" / "traces"
+    trace_dir.mkdir()
+    (trace_dir / "actions.ndjson").write_text("secret trace")
+    (tmp_path / "root" / "alias").symlink_to(trace_dir)
+
+    with pytest.raises(ArtifactPathError):
+        store.read_bytes("alias/actions.ndjson")
+
+
 def test_artifact_list_rejects_symlink_escape(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "root")
     outside = tmp_path / "outside.txt"
@@ -66,12 +91,15 @@ def test_artifact_route_rejects_vnc_password_control_path(tmp_path) -> None:
         backend="mock",
         artifacts_dir=tmp_path / "artifacts",
         recordings_dir=tmp_path / "recordings",
+        runtime_dir=tmp_path / "runtime",
         local_token="dev",
         vnc_mode="control",
         vnc_password="secret-pass",
     )
     app = create_app(settings)
-    Supervisor(settings)._vnc_password_file()
+    password_file = Supervisor(settings)._vnc_password_file()
+    assert password_file.read_text() == "secret-pass"
+    assert not password_file.is_relative_to(settings.artifacts_dir)
 
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         response = client.get("/v1/artifacts/.secrets/x11vnc.pass")

@@ -131,6 +131,54 @@ def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) 
     assert entries[0].redactions == ["text", "provider_action.text"]
 
 
+def test_action_trace_redacts_sensitive_metadata(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "move",
+                        "x": 10,
+                        "y": 20,
+                        "metadata": {
+                            "authorization": "Bearer metadata-secret",
+                            "url": "https://novnc.example/?token=metadata-secret",
+                            "note": "Bearer note-secret artifact://screenshots/private.png",
+                        },
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert "metadata-secret" not in raw_trace
+    assert "note-secret" not in raw_trace
+    assert "artifact://screenshots/private.png" not in raw_trace
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].normalized_action is not None
+    metadata = entries[0].normalized_action["metadata"]
+    assert metadata["authorization"]["redacted"] is True
+    assert metadata["url"]["redacted"] is True
+    assert metadata["note"] == "Bearer [redacted] [redacted]"
+    assert entries[0].redactions == [
+        "metadata.authorization",
+        "metadata.url",
+        "metadata.note",
+    ]
+
+
 def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
@@ -298,6 +346,41 @@ def test_failed_action_sanitizes_secret_bearing_exception_text_in_response_and_t
     assert "artifact://screenshots/private.png" not in trace_payload
 
 
+def test_screenshot_after_sanitizes_secret_bearing_exception_text(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def fail_screenshot(*_args, **_kwargs):
+        raise RuntimeError("Bearer shot-secret artifact://screenshots/private.png")
+
+    app.state.backend.screenshot = fail_screenshot
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    serialized = response.text
+    assert "shot-secret" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    trace_payload = entries[1].model_dump_json()
+    assert "shot-secret" not in trace_payload
+    assert "artifact://screenshots/private.png" not in trace_payload
+
+
 def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
@@ -336,6 +419,38 @@ def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:
         "code": "budget_exceeded",
         "message": "action budget exceeded",
     }
+
+
+def test_action_budget_failure_suppresses_screenshot_after(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+            max_actions=0,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+                "screenshot_options": {"storage": "artifact"},
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["screenshot"] is None
+    assert [item["type"] for item in body["results"]] == ["move"]
+    assert app.state.screenshot_count == 0
+    assert not list((tmp_path / "artifacts" / "screenshots").glob("*.png"))
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 1
 
 
 def test_action_rate_limit_stops_batch_without_executing_extra_actions(tmp_path) -> None:

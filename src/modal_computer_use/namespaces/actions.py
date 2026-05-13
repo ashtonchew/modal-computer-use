@@ -29,7 +29,11 @@ class ActionsNamespace(Namespace):
         continue_on_error: bool = False,
         screenshot_after: bool = False,
         screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
         idempotency_key: str | None = None,
+        call_id: str | None = None,
+        run_id: str | None = None,
+        sequence: int | None = None,
         source: str = "sdk",
     ) -> ActionBatchResult:
         normalized = [parse_action(action) for action in actions]
@@ -41,6 +45,10 @@ class ActionsNamespace(Namespace):
             "screenshot_options": screenshot_options.model_dump(mode="json")
             if screenshot_options
             else None,
+            "max_action_timeout_ms": max_action_timeout_ms,
+            "call_id": call_id,
+            "run_id": run_id,
+            "sequence": sequence,
             "source": source,
         }
         return ActionBatchResult.model_validate(

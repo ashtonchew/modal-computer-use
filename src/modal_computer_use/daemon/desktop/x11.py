@@ -717,6 +717,8 @@ class X11DesktopBackend(MockDesktopBackend):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         command = ["maim"]
+        if not options.show_cursor:
+            command.append("-u")
         if region:
             command.extend(["-g", f"{region.width}x{region.height}+{region.x}+{region.y}"])
         command.append(str(temp_path))

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from modal_computer_use.daemon import budgets
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.schemas import RecordingStartRequest
 from modal_computer_use.models import Recording
 
@@ -16,17 +17,29 @@ dashboard_router = APIRouter()
 
 @router.post("")
 async def start(payload: RecordingStartRequest, request: Request) -> Recording:
+    budget_error = budgets.recording_start_error(request)
+    if budget_error is not None:
+        raise budget_error
     rec = request.app.state.recordings.start(
         name=payload.name, fps=payload.fps, format=payload.format
     )
-    budgets.enforce(request, "recordings")
+    try:
+        budgets.enforce(request, "recordings")
+    except DaemonError:
+        request.app.state.recordings.delete(rec.id)
+        raise
     return rec
 
 
 @router.post("/{recording_id}/stop")
 async def stop(recording_id: str, request: Request) -> Recording:
-    rec = request.app.state.recordings.stop(recording_id)
-    budgets.enforce(request, "recordings", "artifacts")
+    rec = request.app.state.recordings.stop(recording_id, append_manifest=False)
+    try:
+        budgets.enforce(request, "recordings", "artifacts")
+    except DaemonError:
+        request.app.state.recordings.delete(recording_id)
+        raise
+    request.app.state.recordings.append_manifest(recording_id)
     return rec
 
 

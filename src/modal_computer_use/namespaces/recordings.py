@@ -27,10 +27,7 @@ class RecordingsNamespace(Namespace):
         return Recording.model_validate(self._client.get_json(f"/v1/recordings/{recording_id}"))
 
     def download(self, recording_id: str, local_path: str | Path) -> Path:
-        target = Path(local_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(self._client.get_bytes(f"/v1/recordings/{recording_id}/download"))
-        return target
+        return self._client.download(f"/v1/recordings/{recording_id}/download", local_path)
 
     def delete(self, recording_id: str) -> None:
         self._client.delete_json(f"/v1/recordings/{recording_id}")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.daemon.supervisor import Supervisor
 
@@ -10,6 +12,7 @@ def test_supervisor_restarts_only_named_process(tmp_path) -> None:
             backend="x11",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
         )
     )
@@ -40,6 +43,7 @@ def test_supervisor_uses_server_side_view_only_vnc(tmp_path) -> None:
             backend="x11",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
             vnc_mode="view_only",
         )
@@ -69,6 +73,7 @@ def test_supervisor_vnc_off_does_not_start_vnc_processes(tmp_path) -> None:
             backend="x11",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
             vnc_mode="off",
         )
@@ -94,6 +99,7 @@ def test_supervisor_control_vnc_requires_password_and_allows_input(tmp_path) -> 
             backend="x11",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
             vnc_mode="control",
             vnc_password="test-password",
@@ -114,5 +120,7 @@ def test_supervisor_control_vnc_requires_password_and_allows_input(tmp_path) -> 
     assert "-viewonly" not in x11vnc
     assert "-nopw" not in x11vnc
     password_file = x11vnc[x11vnc.index("-passwdfile") + 1]
-    assert (tmp_path / "artifacts" / ".secrets" / "x11vnc.pass").read_text() == "test-password"
+    assert (tmp_path / "artifacts" / ".secrets" / "x11vnc.pass").exists() is False
+    assert password_file.startswith(str(tmp_path / "runtime" / ".secrets"))
     assert password_file.endswith("x11vnc.pass")
+    assert Path(password_file).read_text() == "test-password"

@@ -20,6 +20,15 @@ class TypeRequest(TextRequest):
     delay_ms: int = Field(default=10, ge=0, le=10_000)
     method: Literal["auto", "xdotool", "clipboard"] = "auto"
 
+    @field_validator("text")
+    @classmethod
+    def _safe_text(cls, value: str) -> str:
+        for char in value:
+            code = ord(char)
+            if code < 32 and char not in ("\n", "\r"):
+                raise ValueError("control characters are not allowed; use keypress/hotkey")
+        return value
+
 
 class KeyRequest(Schema):
     key: str

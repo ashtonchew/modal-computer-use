@@ -33,10 +33,11 @@ def test_status_includes_budget_snapshot(tmp_path) -> None:
 
 
 def test_recording_stop_counts_recording_bytes_against_artifact_budget(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
     app = create_app(
         DaemonSettings(
             backend="mock",
-            artifacts_dir=tmp_path / "artifacts",
+            artifacts_dir=artifacts_dir,
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             max_artifact_bytes=1,
@@ -49,6 +50,26 @@ def test_recording_stop_counts_recording_bytes_against_artifact_budget(tmp_path)
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
     assert response.json()["details"]["budgets"]["artifact_bytes"] > 1
+    assert not list((artifacts_dir / "recordings").glob("*.mp4"))
+    assert not (artifacts_dir / "manifest.ndjson").exists()
+
+
+def test_recording_start_rejects_exhausted_duration_budget_without_state(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_recording_seconds=0,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/recordings", json={})
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert app.state.recordings.list() == []
 
 
 def test_direct_artifact_write_enforces_artifact_byte_budget(tmp_path) -> None:

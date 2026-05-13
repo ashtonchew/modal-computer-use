@@ -147,11 +147,11 @@ class Supervisor:
         )
 
     def _vnc_password_file(self) -> Path:
-        secret_dir = self.settings.artifacts_dir / ".secrets"
+        secret_dir = self.settings.runtime_dir / ".secrets"
         secret_dir.mkdir(parents=True, exist_ok=True)
         secret_dir.chmod(0o700)
         password_file = secret_dir / "x11vnc.pass"
-        if not password_file.exists():
+        if self.settings.vnc_password is not None or not password_file.exists():
             password = self.settings.vnc_password or secrets.token_urlsafe(24)
             password_file.write_text(password)
             password_file.chmod(0o600)

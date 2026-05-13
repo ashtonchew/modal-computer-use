@@ -265,6 +265,15 @@ def test_direct_keyboard_type_rejects_unknown_method(test_client) -> None:
     assert response.status_code == 422
 
 
+def test_direct_keyboard_type_rejects_control_characters(test_client) -> None:
+    response = test_client.post(
+        "/v1/keyboard/type",
+        json={"text": "hello\t"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_direct_keyboard_hold_executes_nested_actions(test_client, app) -> None:
     response = test_client.post(
         "/v1/keyboard/hold",
