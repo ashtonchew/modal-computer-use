@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
-from .errors import ArtifactPathError
+from .errors import ArtifactPathError, BudgetExceededError
 from .models import ArtifactInfo, ArtifactSyncResult
 
 CONTROL_PATHS = {
@@ -57,10 +57,12 @@ class ArtifactStore:
         root: str | Path,
         *,
         persistent: bool = False,
+        max_total_bytes: int | None = None,
         sync_runner: Callable[[str], subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self.root = Path(root)
         self.persistent = persistent
+        self.max_total_bytes = max_total_bytes
         self._sync_runner = sync_runner or _run_mountpoint_sync
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -125,6 +127,7 @@ class ArtifactStore:
     ) -> ArtifactInfo:
         relative = normalize_artifact_path(path)
         target = self.resolve(relative)
+        self._enforce_write_budget(target, len(data))
         parent = target.parent.resolve()
         root = self.root.resolve()
         if os.path.commonpath([str(root), str(parent)]) != str(root):
@@ -155,12 +158,14 @@ class ArtifactStore:
     ) -> ArtifactInfo:
         relative = normalize_artifact_path(path)
         target = self.resolve(relative)
+        source_path = Path(source)
+        self._enforce_write_budget(target, source_path.stat().st_size)
         parent = target.parent.resolve()
         root = self.root.resolve()
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
+        shutil.copyfile(source_path, target)
         info = self._info(
             target,
             public_path=relative,
@@ -208,6 +213,25 @@ class ArtifactStore:
                 continue
             infos.append(self._info(item, public_path=public_path))
         return infos
+
+    def _enforce_write_budget(self, target: Path, incoming_size: int) -> None:
+        if self.max_total_bytes is None:
+            return
+        root = self.root.resolve()
+        existing_total = 0
+        if self.root.exists():
+            for item in self.root.rglob("*"):
+                try:
+                    resolved = item.resolve()
+                    if os.path.commonpath([str(root), str(resolved)]) != str(root):
+                        continue
+                except (OSError, ValueError):
+                    continue
+                if item.is_file():
+                    existing_total += item.stat().st_size
+        existing_target_size = target.stat().st_size if target.is_file() else 0
+        if existing_total - existing_target_size + incoming_size > self.max_total_bytes:
+            raise BudgetExceededError("artifact byte budget exceeded")
 
     def append_manifest(self, info: ArtifactInfo) -> None:
         payload = {"ts": datetime.now(UTC).isoformat(), **info.model_dump(mode="json")}

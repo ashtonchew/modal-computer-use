@@ -18,6 +18,7 @@ from modal_computer_use.adapters.provenance import (
 )
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.screenshots import enforce_screenshot_options_pixels
 from modal_computer_use.models import (
     ActionBatchRequest,
     ActionBatchResult,
@@ -47,6 +48,7 @@ from modal_computer_use.models import (
     ZoomAction,
     parse_action,
 )
+from modal_computer_use.redaction import sanitize_text
 from modal_computer_use.tracing import TraceWriter
 
 router = APIRouter(prefix="/v1/actions")
@@ -479,7 +481,7 @@ def _exception_output(exc: Exception, action: Any | None = None) -> dict[str, An
 
 
 def _action_error_message(action: Any, exc: Exception) -> str:
-    message = str(exc)
+    message = sanitize_text(str(exc))
     if isinstance(action, TypeAction):
         message = message.replace(action.text, "[redacted typed text]")
     return message
@@ -627,6 +629,12 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
         return {"duration_ms": action.duration_ms}
     if isinstance(action, ScreenshotAction):
         options = action.options or ScreenshotOptions()
+        enforce_screenshot_options_pixels(
+            request,
+            source_width=request.app.state.backend.width,
+            source_height=request.app.state.backend.height,
+            scale=options.scale,
+        )
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
@@ -638,12 +646,19 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
     if isinstance(action, ZoomAction):
         options = action.options or ScreenshotOptions(scale=action.scale, show_cursor=True)
         options.scale = action.scale
+        region = Region.model_validate(action.region)
+        enforce_screenshot_options_pixels(
+            request,
+            source_width=region.width,
+            source_height=region.height,
+            scale=options.scale,
+        )
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
         shot = await backend.screenshot(
             options,
-            region=Region.model_validate(action.region),
+            region=region,
             artifact_store=request.app.state.artifacts,
             call_id=call_id,
         )

@@ -11,6 +11,7 @@ from modal_computer_use.models import (
     ComputerAction,
     CoordinateSpace,
     Point,
+    Region,
     parse_action,
 )
 
@@ -94,6 +95,18 @@ class ActionExecutor:
         path = getattr(action, "path", None)
         if path:
             updates["path"] = [self.coordinate_space.to_desktop(point) for point in path]
+        region = getattr(action, "region", None)
+        if isinstance(region, Region):
+            top_left = self.coordinate_space.to_desktop(Point(x=region.x, y=region.y))
+            bottom_right = self.coordinate_space.to_desktop(
+                Point(x=region.right, y=region.bottom)
+            )
+            updates["region"] = Region(
+                x=top_left.x,
+                y=top_left.y,
+                width=max(1, bottom_right.x - top_left.x),
+                height=max(1, bottom_right.y - top_left.y),
+            )
         if not updates:
             return action
         return action.model_copy(update=updates)

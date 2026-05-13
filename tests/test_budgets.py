@@ -67,3 +67,23 @@ def test_direct_artifact_write_enforces_artifact_byte_budget(tmp_path) -> None:
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
     assert response.json()["details"]["budgets"]["artifact_bytes"] == 2
+
+
+def test_screenshot_artifact_write_is_rejected_before_file_persists(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=artifacts_dir,
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_artifact_bytes=1,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/screenshots/full", json={"storage": "artifact"})
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert not list((artifacts_dir / "screenshots").glob("*.png"))
+    assert not (artifacts_dir / "manifest.ndjson").exists()

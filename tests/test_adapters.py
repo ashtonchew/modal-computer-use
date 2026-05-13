@@ -416,6 +416,7 @@ def test_action_executor_applies_coordinate_space_to_all_point_shapes() -> None:
             {"type": "scroll", "x": 14, "y": 15, "direction": "down", "amount": 1},
             {"type": "drag", "start_x": 1, "start_y": 2, "end_x": 3, "end_y": 4},
             {"type": "drag", "path": [{"x": 5, "y": 6}, {"x": 7, "y": 8}]},
+            {"type": "zoom", "region": {"x": 10, "y": 10, "width": 20, "height": 20}},
         ]
     )
 
@@ -426,6 +427,7 @@ def test_action_executor_applies_coordinate_space_to_all_point_shapes() -> None:
     assert (actions[3]["start_x"], actions[3]["start_y"]) == (2, 4)
     assert (actions[3]["end_x"], actions[3]["end_y"]) == (6, 8)
     assert actions[4]["path"] == [{"x": 10, "y": 12}, {"x": 14, "y": 16}]
+    assert actions[5]["region"] == {"x": 20, "y": 20, "width": 40, "height": 40}
 
 
 def test_action_executor_policy_sees_transformed_action_and_denies_before_execution() -> None:

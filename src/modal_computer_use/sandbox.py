@@ -427,7 +427,9 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
-        "COMPUTER_USE_VNC_PASSWORD": _secrets.token_urlsafe(24) if vnc_mode != "off" else "",
+        "COMPUTER_USE_VNC_PASSWORD": (
+            config.vnc_password or _secrets.token_urlsafe(24) if vnc_mode != "off" else ""
+        ),
         "COMPUTER_USE_MAX_BATCH_ACTIONS": str(config.actions.max_batch_actions),
         "COMPUTER_USE_MAX_BATCH_DURATION_MS": str(config.actions.max_batch_duration_ms),
         "COMPUTER_USE_MAX_ACTIONS": ""

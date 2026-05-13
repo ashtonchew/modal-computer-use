@@ -272,6 +272,21 @@ def test_create_generates_vnc_password_without_exposing_it(monkeypatch) -> None:
     assert "COMPUTER_USE_VNC_PASSWORD" not in computer.metadata().tags
 
 
+def test_create_uses_configured_vnc_password(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    configured_value = "known-value"
+    config = ComputerConfig(
+        run_id="run-123",
+        expose_vnc="view_only",
+        vnc_password=configured_value,
+    )
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"] == configured_value
+
+
 def test_attach_by_name_uses_current_from_name_signature(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
 

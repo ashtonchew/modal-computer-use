@@ -226,6 +226,40 @@ def test_failed_action_counts_against_action_budget_and_traces_error(tmp_path) -
     }
 
 
+def test_failed_action_sanitizes_secret_bearing_exception_text_in_response_and_trace(
+    tmp_path,
+) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def fail_move(x: int, y: int):
+        raise RuntimeError("Bearer supersecret artifact://screenshots/private.png")
+
+    app.state.backend.mouse_move = fail_move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert response.status_code == 200
+    serialized = response.text
+    assert "supersecret" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    trace_payload = entries[0].model_dump_json()
+    assert "supersecret" not in trace_payload
+    assert "artifact://screenshots/private.png" not in trace_payload
+
+
 def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

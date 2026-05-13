@@ -3,9 +3,13 @@ from __future__ import annotations
 import subprocess
 
 import anyio
+import pytest
+from PIL import Image
 
+from modal_computer_use.artifacts import ArtifactStore
+from modal_computer_use.daemon.desktop import x11 as x11_module
 from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend
-from modal_computer_use.models import Point
+from modal_computer_use.models import Point, ScreenshotOptions
 
 
 class RecordingX11Backend(X11DesktopBackend):
@@ -132,3 +136,58 @@ def test_x11_cursor_position_reads_xdotool_shell_output() -> None:
 
     assert point == Point(x=12, y=34)
     assert backend.cursor == Point(x=12, y=34)
+
+
+def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, monkeypatch) -> None:
+    backend = RecordingX11Backend()
+
+    async def write_png(*args: str, **_kwargs):
+        if args[:2] == ("xdotool", "getmouselocation"):
+            return subprocess.CompletedProcess(args, 0, "X=0\nY=0\n", "")
+        Image.new("RGB", (100, 100), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+    monkeypatch.setattr(x11_module, "_encode_image", lambda *_args, **_kwargs: b"x" * 1_000_001)
+
+    async def capture():
+        return await backend.screenshot(
+            ScreenshotOptions(storage="auto"),
+            artifact_store=ArtifactStore(tmp_path / "artifacts"),
+        )
+
+    screenshot = anyio.run(capture)
+
+    assert screenshot.artifact_uri is not None
+    assert screenshot.data_base64 is None
+
+
+def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
+    backend = X11DesktopBackend(width=100, height=100)
+    state = {"killed": False, "waited": False}
+
+    class HangingProcess:
+        returncode = None
+
+        async def communicate(self, _input=None):
+            await anyio.sleep_forever()
+
+        def kill(self):
+            state["killed"] = True
+            self.returncode = -9
+
+        async def wait(self):
+            state["waited"] = True
+
+    async def create_process(*_args, **_kwargs):
+        return HangingProcess()
+
+    async def run_command():
+        return await backend._run("xdotool", "mousemove", "1", "2", timeout=0.01)
+
+    monkeypatch.setattr(x11_module.asyncio, "create_subprocess_exec", create_process)
+
+    with pytest.raises(TimeoutError):
+        anyio.run(run_command)
+
+    assert state == {"killed": True, "waited": True}

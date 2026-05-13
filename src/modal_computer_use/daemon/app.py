@@ -16,7 +16,7 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
-from modal_computer_use.errors import ArtifactPathError
+from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 from modal_computer_use.observability import get_tracer
 
 from .routes import (
@@ -66,6 +66,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.state.artifacts = ArtifactStore(
         settings.artifacts_dir,
         persistent=settings.artifacts_persistent,
+        max_total_bytes=settings.max_artifact_bytes,
     )
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
     app.state.idempotency_cache = OrderedDict()
@@ -110,6 +111,15 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=400,
             content={"code": "unsafe_artifact_path", "message": str(exc), "details": {}},
+        )
+
+    @app.exception_handler(BudgetExceededError)
+    async def budget_exceeded_error_handler(
+        _request: Request, exc: BudgetExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"code": "budget_exceeded", "message": str(exc), "details": {}},
         )
 
     @app.exception_handler(FileNotFoundError)

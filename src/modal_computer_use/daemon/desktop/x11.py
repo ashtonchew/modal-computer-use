@@ -441,10 +441,18 @@ class X11DesktopBackend(MockDesktopBackend):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(input_text.encode() if input_text is not None else None),
-            timeout=timeout,
-        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(input_text.encode() if input_text is not None else None),
+                timeout=timeout,
+            )
+        except (TimeoutError, asyncio.CancelledError):
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                with contextlib.suppress(Exception):
+                    await process.wait()
+            raise
         completed = subprocess.CompletedProcess(
             args,
             process.returncode or 0,
@@ -731,7 +739,7 @@ class X11DesktopBackend(MockDesktopBackend):
         )
         artifact_uri = None
         data_base64 = base64.b64encode(data).decode("ascii")
-        if options.storage == "artifact":
+        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
             if artifact_store is None:
                 raise RuntimeError("artifact_store required for artifact screenshot storage")
             suffix = "jpg" if options.format == "jpeg" else options.format

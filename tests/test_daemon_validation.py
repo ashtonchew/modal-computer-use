@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
+from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.settings import DaemonSettings
+
 
 def test_direct_mouse_routes_reject_out_of_bounds_coordinates(test_client) -> None:
     response = test_client.post("/v1/mouse/move", json={"x": 1440, "y": 1})
@@ -73,6 +78,67 @@ def test_zoom_screenshot_rejects_out_of_bounds_region(test_client) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "region_out_of_bounds"
+
+
+def test_scaled_screenshot_routes_enforce_output_pixel_budget(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            screenshot_max_pixels=1440 * 900,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        full = client.post("/v1/screenshots/full", json={"scale": 2})
+        region = client.post(
+            "/v1/screenshots/region",
+            json={"region": {"x": 0, "y": 0, "width": 720, "height": 450}, "scale": 3},
+        )
+
+    assert full.status_code == 413
+    assert full.json()["code"] == "screenshot_too_large"
+    assert region.status_code == 413
+    assert region.json()["code"] == "screenshot_too_large"
+
+
+def test_action_screenshot_enforces_output_pixel_budget(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            screenshot_max_pixels=1_000,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        screenshot = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "screenshot"}]},
+        )
+        zoom = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "zoom",
+                        "region": {"x": 0, "y": 0, "width": 100, "height": 100},
+                        "scale": 2,
+                    }
+                ]
+            },
+        )
+
+    assert screenshot.status_code == 200
+    assert screenshot.json()["ok"] is False
+    assert screenshot.json()["results"][0]["error_code"] == "screenshot_too_large"
+    assert zoom.status_code == 200
+    assert zoom.json()["ok"] is False
+    assert zoom.json()["results"][0]["error_code"] == "screenshot_too_large"
 
 
 def test_browser_open_url_rejects_non_http_urls(test_client) -> None:
