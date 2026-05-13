@@ -361,9 +361,9 @@ def test_screenshot_action_budget_failure_is_single_traced_result(tmp_path) -> N
     assert len(body["results"]) == 1
     assert body["results"][0]["type"] == "screenshot"
     assert body["results"][0]["error_code"] == "budget_exceeded"
-    assert body["results"][0]["output"]["budgets"]["screenshots"] == 1
+    assert body["results"][0]["output"]["budgets"]["screenshots"] == 0
     assert app.state.action_count == 0
-    assert app.state.screenshot_count == 1
+    assert app.state.screenshot_count == 0
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 1
     assert entries[0].error is not None
@@ -398,14 +398,14 @@ def test_screenshot_after_budget_failure_records_trace_shape(tmp_path) -> None:
     assert body["screenshot"] is None
     assert [item["type"] for item in body["results"]] == ["move", "screenshot_after"]
     assert body["results"][1]["error_code"] == "budget_exceeded"
-    assert body["results"][1]["output"]["budgets"]["screenshots"] == 1
+    assert body["results"][1]["output"]["budgets"]["screenshots"] == 0
     assert app.state.action_count == 1
-    assert app.state.screenshot_count == 1
+    assert app.state.screenshot_count == 0
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 2
     assert entries[1].normalized_action == {"type": "screenshot_after"}
-    assert entries[1].screenshot_after_uri is not None
-    assert entries[1].coordinate_space is not None
+    assert entries[1].screenshot_after_uri is None
+    assert entries[1].coordinate_space is None
     assert entries[1].error is not None
     assert entries[1].error["code"] == "budget_exceeded"
 
@@ -426,6 +426,31 @@ def test_screenshot_budget_exceeded(tmp_path) -> None:
 
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
+
+
+def test_direct_screenshot_failure_does_not_increment_budget(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def fail_screenshot(*args, **kwargs):
+        raise RuntimeError("synthetic screenshot failure")
+
+    app.state.backend.screenshot = fail_screenshot
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.post("/v1/screenshots/full", json={})
+
+    assert response.status_code == 500
+    assert app.state.screenshot_count == 0
 
 
 def test_artifact_byte_budget_exceeded_after_artifact_screenshot(tmp_path) -> None:

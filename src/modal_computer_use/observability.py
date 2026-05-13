@@ -5,6 +5,8 @@ import os
 from types import TracebackType
 from typing import Any, Self
 
+from modal_computer_use.redaction import redacted_exception
+
 
 def _env_enabled() -> bool:
     value = os.getenv("COMPUTER_USE_OTEL_ENABLED")
@@ -37,6 +39,9 @@ class OptionalSpan:
         traceback: TracebackType | None,
     ) -> bool | None:
         if self._context_manager is not None:
+            if exc is not None:
+                sanitized = redacted_exception(exc)
+                return self._context_manager.__exit__(type(sanitized), sanitized, None)
             return self._context_manager.__exit__(exc_type, exc, traceback)
         return None
 
@@ -46,7 +51,7 @@ class OptionalSpan:
 
     def record_exception(self, exc: BaseException) -> None:
         if self._span is not None:
-            self._span.record_exception(exc)
+            self._span.record_exception(redacted_exception(exc))
 
 
 class OptionalTracer:

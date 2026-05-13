@@ -111,6 +111,23 @@ def action_reservation_error(request: Request) -> DaemonError | None:
     return None
 
 
+def screenshot_reservation_error(request: Request) -> DaemonError | None:
+    settings = request.app.state.settings
+    if (
+        settings.max_screenshots is not None
+        and request.app.state.screenshot_count >= settings.max_screenshots
+    ):
+        return _budget_error("screenshot budget exceeded", snapshot(request))
+    return None
+
+
+def reserve_screenshot(request: Request) -> None:
+    error = screenshot_reservation_error(request)
+    if error is not None:
+        raise error
+    request.app.state.screenshot_count += 1
+
+
 def _budget_error(message: str, state: dict[str, int | float | None]) -> DaemonError:
     return DaemonError(
         message,

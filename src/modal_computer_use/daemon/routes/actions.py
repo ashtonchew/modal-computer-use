@@ -305,6 +305,9 @@ async def run(
                 timeout_seconds = min(timeout_ms / 1000, remaining_batch_seconds)
                 timeout_scope = "batch" if timeout_seconds < (timeout_ms / 1000) else "action"
                 try:
+                    screenshot_budget_error = budgets.screenshot_reservation_error(request)
+                    if screenshot_budget_error is not None:
+                        raise screenshot_budget_error
                     screenshot = await asyncio.wait_for(
                         request.app.state.backend.screenshot(
                             options,
@@ -314,7 +317,7 @@ async def run(
                         ),
                         timeout=timeout_seconds,
                     )
-                    request.app.state.screenshot_count += 1
+                    budgets.reserve_screenshot(request)
                     budgets.enforce(request, "screenshots", "artifacts")
                     _append_screenshot_after_trace(
                         request, payload, screenshot, None, call_id=call_id
@@ -578,10 +581,10 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
             y=action.y,
         )
         return result.output
-    if isinstance(action, MouseDownAction):
-        result = await backend.mouse_down(action.button, action.x, action.y)
-        return result.output
-    if isinstance(action, MouseUpAction):
+    if isinstance(action, MouseDownAction | MouseUpAction):
+        if action.type == "mouse_down":
+            result = await backend.mouse_down(action.button, action.x, action.y)
+            return result.output
         result = await backend.mouse_up(action.button, action.x, action.y)
         return result.output
     if isinstance(action, TypeAction):
@@ -624,21 +627,27 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
         return {"duration_ms": action.duration_ms}
     if isinstance(action, ScreenshotAction):
         options = action.options or ScreenshotOptions()
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await backend.screenshot(
             options, artifact_store=request.app.state.artifacts, call_id=call_id
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         return shot.model_dump(mode="json")
     if isinstance(action, ZoomAction):
         options = action.options or ScreenshotOptions(scale=action.scale, show_cursor=True)
         options.scale = action.scale
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await backend.screenshot(
             options,
             region=Region.model_validate(action.region),
             artifact_store=request.app.state.artifacts,
             call_id=call_id,
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         return shot.model_dump(mode="json")
     if isinstance(action, CursorPositionAction):
         point = await backend.mouse_position()

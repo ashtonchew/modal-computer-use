@@ -26,11 +26,14 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
     _enforce_pixels(request, request.app.state.backend.width, request.app.state.backend.height)
     options = ScreenshotOptions.model_validate(payload.model_dump(exclude={"region"}))
     async with request.app.state.input_lock:
-        request.app.state.screenshot_count += 1
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await request.app.state.backend.screenshot(
             options,
             artifact_store=request.app.state.artifacts,
         )
+        request.app.state.screenshot_count += 1
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -43,12 +46,15 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
     _enforce_pixels(request, payload.region.width, payload.region.height)
     options = ScreenshotOptions.model_validate(payload.model_dump(exclude={"region"}))
     async with request.app.state.input_lock:
-        request.app.state.screenshot_count += 1
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await request.app.state.backend.screenshot(
             options,
             region=payload.region,
             artifact_store=request.app.state.artifacts,
         )
+        request.app.state.screenshot_count += 1
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -68,11 +74,14 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         storage=payload.storage,  # type: ignore[arg-type]
     )
     async with request.app.state.input_lock:
-        request.app.state.screenshot_count += 1
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await request.app.state.backend.screenshot(
             options,
             region=region,
             artifact_store=request.app.state.artifacts,
         )
+        request.app.state.screenshot_count += 1
         budgets.enforce(request, "screenshots", "artifacts")
         return shot

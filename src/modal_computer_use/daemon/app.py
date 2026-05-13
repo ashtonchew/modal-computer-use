@@ -60,6 +60,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         width=settings.desktop_width,
         height=settings.desktop_height,
         display=settings.display,
+        browser=settings.browser,
     )
     app.state.input_lock = asyncio.Lock()
     app.state.artifacts = ArtifactStore(

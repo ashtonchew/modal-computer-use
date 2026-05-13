@@ -28,6 +28,22 @@ def test_action_batch_rejects_partial_mouse_button_coordinate_pairs(test_client)
     assert up.status_code == 422
 
 
+def test_action_batch_mouse_up_releases_button(test_client, app) -> None:
+    response = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {"type": "mouse_down", "button": "left"},
+                {"type": "mouse_up", "button": "left"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert app.state.backend.held_buttons == set()
+
+
 def test_region_screenshot_rejects_out_of_bounds_region(test_client) -> None:
     response = test_client.post(
         "/v1/screenshots/region",
@@ -81,3 +97,24 @@ def test_app_launch_rejects_shell_command_shape(test_client) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_direct_keyboard_type_rejects_unknown_method(test_client) -> None:
+    response = test_client.post(
+        "/v1/keyboard/type",
+        json={"text": "hello", "method": "bogus"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_direct_keyboard_hold_executes_nested_actions(test_client, app) -> None:
+    response = test_client.post(
+        "/v1/keyboard/hold",
+        json={"key": "shift", "actions": [{"type": "move", "x": 7, "y": 8}]},
+    )
+
+    assert response.status_code == 200
+    assert app.state.backend.cursor.x == 7
+    assert app.state.backend.cursor.y == 8
+    assert app.state.backend.held_keys == set()

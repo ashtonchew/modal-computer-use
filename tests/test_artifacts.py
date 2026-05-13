@@ -12,7 +12,18 @@ from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError
 
 
-@pytest.mark.parametrize("path", ["/tmp/x", "../x", "a/%2e%2e/x", "manifest.ndjson", "a/\x00b"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/tmp/x",
+        "../x",
+        "a/%2e%2e/x",
+        "manifest.ndjson",
+        "a/\x00b",
+        ".Secrets/x",
+        "a/.Control/x",
+    ],
+)
 def test_artifact_path_rejects_unsafe(path: str) -> None:
     with pytest.raises(ArtifactPathError):
         normalize_artifact_path(path)
@@ -64,6 +75,22 @@ def test_artifact_route_rejects_vnc_password_control_path(tmp_path) -> None:
 
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         response = client.get("/v1/artifacts/.secrets/x11vnc.pass")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "unsafe_artifact_path"
+
+
+def test_artifact_route_rejects_mixed_case_control_segment(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.put("/v1/artifacts/.Secrets/x11vnc.pass", content=b"secret")
 
     assert response.status_code == 400
     assert response.json()["code"] == "unsafe_artifact_path"

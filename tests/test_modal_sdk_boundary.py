@@ -198,7 +198,8 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     )
 
     assert computer.metadata() is not None
-    assert computer.metadata().vnc_url == "https://novnc.example"
+    assert computer.metadata().vnc_url is None
+    assert computer.debug_urls().vnc == "https://novnc.example"
     assert FakeProbe.calls == [8080]
     args, kwargs = FakeSandbox.create_calls[0]
     assert args == ("python", "-m", "modal_computer_use.daemon")

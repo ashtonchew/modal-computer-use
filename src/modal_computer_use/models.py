@@ -379,20 +379,23 @@ class ScrollAction(BaseAction):
         return self
 
 
-class MouseDownAction(BaseAction):
-    type: Literal["mouse_down"] = "mouse_down"
+class MouseButtonAction(BaseAction):
     button: Button = "left"
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def _coordinate_pair(self) -> MouseDownAction:
+    def _coordinate_pair(self) -> MouseButtonAction:
         if (self.x is None) != (self.y is None):
             raise ValueError("x and y must be supplied together")
         return self
 
 
-class MouseUpAction(MouseDownAction):
+class MouseDownAction(MouseButtonAction):
+    type: Literal["mouse_down"] = "mouse_down"
+
+
+class MouseUpAction(MouseButtonAction):
     type: Literal["mouse_up"] = "mouse_up"
 
 

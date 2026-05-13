@@ -12,6 +12,7 @@ class RecordingX11Backend(X11DesktopBackend):
     def __init__(self) -> None:
         super().__init__(width=100, height=100)
         self.commands: list[tuple[str, ...]] = []
+        self.spawned: list[tuple[str, ...]] = []
 
     async def _run(
         self,
@@ -27,6 +28,17 @@ class RecordingX11Backend(X11DesktopBackend):
             else ""
         )
         return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    async def _spawn(self, *args: str):
+        self.spawned.append(args)
+
+        class Process:
+            pid = 1234
+
+            def poll(self):
+                return None
+
+        return Process()
 
 
 def test_x11_mouse_drag_uses_xdotool_down_move_up() -> None:
@@ -59,6 +71,40 @@ def test_x11_scroll_and_button_hold_are_real_xdotool_commands() -> None:
     assert ("xdotool", "click", "--repeat", "3", "5") in backend.commands
     assert ("xdotool", "mousedown", "3") in backend.commands
     assert ("xdotool", "mouseup", "3") in backend.commands
+
+
+def test_x11_mouse_click_applies_and_releases_modifiers() -> None:
+    backend = RecordingX11Backend()
+
+    async def click() -> None:
+        await backend.mouse_click(4, 5, modifiers=["shift", "ctrl"])
+
+    anyio.run(click)
+
+    assert backend.commands == [
+        ("xdotool", "mousemove", "4", "5"),
+        ("xdotool", "keydown", "shift"),
+        ("xdotool", "keydown", "ctrl"),
+        ("xdotool", "click", "--repeat", "1", "1"),
+        ("xdotool", "keyup", "ctrl"),
+        ("xdotool", "keyup", "shift"),
+    ]
+    assert backend.held_keys == set()
+
+
+def test_x11_launch_and_open_url_spawn_desktop_process() -> None:
+    backend = RecordingX11Backend()
+    backend.browser = "chromium"
+
+    launched = anyio.run(backend.launch, "firefox", ["--new-window"])
+    opened = anyio.run(backend.open_url, "https://example.com", False)
+
+    assert launched.ok is True
+    assert opened.ok is True
+    assert backend.spawned == [
+        ("firefox", "--new-window"),
+        ("chromium", "https://example.com"),
+    ]
 
 
 def test_x11_keyboard_press_hotkey_hold_and_release_all() -> None:

@@ -3192,6 +3192,11 @@
           },
           "method": {
             "default": "auto",
+            "enum": [
+              "auto",
+              "xdotool",
+              "clipboard"
+            ],
             "title": "Method",
             "type": "string"
           },

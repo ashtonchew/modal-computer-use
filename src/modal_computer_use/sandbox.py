@@ -181,7 +181,7 @@ class ComputerSandbox:
             config_hash=compute_config_hash(config),
             status="started",
             tags=sandbox_tags,
-            vnc_url=_vnc_url(sandbox) if vnc_mode != "off" else None,
+            vnc_url=None,
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = cls(
@@ -357,6 +357,8 @@ class ComputerSandbox:
         return self._metadata
 
     def debug_urls(self) -> DebugUrls:
+        if self._sandbox is not None:
+            return DebugUrls(vnc=_vnc_url(self._sandbox), daemon=None, recording_dashboard=None)
         return self.debug.urls()
 
     def snapshot_filesystem(self) -> object:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -18,7 +18,7 @@ class TextRequest(Schema):
 
 class TypeRequest(TextRequest):
     delay_ms: int = Field(default=10, ge=0, le=10_000)
-    method: str = "auto"
+    method: Literal["auto", "xdotool", "clipboard"] = "auto"
 
 
 class KeyRequest(Schema):

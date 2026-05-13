@@ -29,6 +29,9 @@ def test_recording_stop_updates_file_metadata_and_download(test_client) -> None:
     download = test_client.get(f"/v1/recordings/{started.id}/download")
     assert download.status_code == 200
     assert download.content.startswith(b"mock recording")
+    artifact = test_client.get(f"/v1/artifacts/recordings/{started.id}.mp4")
+    assert artifact.status_code == 200
+    assert artifact.content == download.content
 
     manifest = test_client.get("/v1/artifacts/manifest").json()
     recording_entries = [

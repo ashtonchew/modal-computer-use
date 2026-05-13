@@ -5,7 +5,12 @@ from pydantic import ValidationError
 
 from modal_computer_use import ComputerConfig, CoordinateSpace, Point, Region
 from modal_computer_use.errors import ActionValidationError
-from modal_computer_use.models import ScreenshotOptions, parse_action
+from modal_computer_use.models import (
+    MouseDownAction,
+    MouseUpAction,
+    ScreenshotOptions,
+    parse_action,
+)
 
 
 def test_config_aliases_and_vnc_normalization() -> None:
@@ -43,3 +48,10 @@ def test_action_union_validation() -> None:
     assert action.type == "click"
     with pytest.raises(ActionValidationError):
         parse_action({"type": "drag"})
+
+
+def test_mouse_up_action_is_not_mouse_down_action() -> None:
+    action = parse_action({"type": "mouse_up", "button": "left"})
+
+    assert isinstance(action, MouseUpAction)
+    assert not isinstance(action, MouseDownAction)

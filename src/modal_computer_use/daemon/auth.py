@@ -16,8 +16,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.settings = settings
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if request.url.path in {"/healthz", "/readyz"}:
-            return await call_next(request)
         if self.settings.reject_query_tokens and "_modal_connect_token" in request.query_params:
             return JSONResponse(
                 status_code=401,
@@ -26,6 +24,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     "message": "query-string tokens are disabled; use Authorization header",
                 },
             )
+        if request.url.path in {"/healthz", "/readyz"}:
+            return await call_next(request)
         if self.settings.local_token:
             if not _is_loopback_request(request):
                 return JSONResponse(
