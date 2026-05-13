@@ -78,7 +78,11 @@ The current report includes:
 - `screenshot_full`: full-screen PNG screenshot latency and encoded byte size.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
+- `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
+  moves in provider SDKs that synchronize cursor movement.
 - `type_100_chars`: one deterministic 100-character typing action with safe length/method
+  metadata only.
+- `type_1000_chars`: one deterministic 1000-character typing action with safe length/method
   metadata only.
 - `recording_start_stop`: recording start and stop call latency plus safe file metadata.
 - `sandbox_exec`: explicit live Modal `Sandbox.exec` comparison for the same move+click hot path,
@@ -122,7 +126,8 @@ uv run computer-use benchmark compare --mock-local --iterations 5
 
 By default this measures:
 
-- `modal-daemon`: daemon action batching, screenshots, move+click, 100-character typing, and recording start/stop.
+- `modal-daemon`: daemon action batching, screenshots, move+click, move/click sequence,
+  100-character typing, 1000-character typing, command echo, and recording start/stop.
 - `openai`: OpenAI computer-action adapter normalization and native action execution against an in-process recorder.
 - `anthropic`: Anthropic computer-action adapter normalization for `computer_20250124` and native action execution against an in-process recorder.
 - `generic`: provider-neutral `ActionExecutor` execution against an in-process recorder.
@@ -162,14 +167,28 @@ image installs the required desktop/VNC/X11 packages.
 Provider-live comparisons split lifecycle cost from warm primitive cost. `cold_create_to_ready`
 creates a fresh provider sandbox, starts or verifies the desktop computer-use surface where the
 SDK exposes one, records that cold readiness timing, and deletes the sandbox. Screenshot,
-move/click, typing, and command cases then run on one separate ready sandbox per provider so their
-samples do not include sandbox creation. Cleanup is attempted once after the warm primitive cases.
+move/click, deterministic move/click sequence, 100-character typing, 1000-character typing, and
+command cases then run on one separate ready sandbox per provider so their samples do not include
+sandbox creation. Cleanup is attempted once after the warm primitive cases.
+
+Each provider entry includes additive `cost_estimate` metadata when a provider can create billable
+resources. Cost estimates use public pricing rates, the measured cold and warm sandbox wall-clock
+runtime including warmup, and safe resource assumptions when available. They are approximate
+comparison metadata, not actual billing data. Unknown CPU, memory, storage, GPU, or leaked cleanup
+duration produces `partial`, `unknown`, or `not_measured` status instead of a fake zero-cost total.
+Adapter-only providers return `not_applicable` because they do not create provider resources.
+
+E2B's default desktop typing can be much slower than move/click or screenshot cases because its
+provider default GUI typing API may chunk text and add delay between chunks. The benchmark records
+that provider default path rather than tuning E2B-specific typing arguments, so compare tuned typing
+separately if you change provider defaults.
 
 Keep comparisons fair:
 
 - Pin SDK versions through the benchmark extras instead of using floating latest packages.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
+- Treat public-rate `cost_estimate` values as approximate comparison context, not billing truth.
 - Do not include noVNC stream URLs, provider API keys, typed text, screenshot bytes, stdout,
   stderr, artifact URIs, or recording paths in saved reports.
 - Treat Daytona/E2B provider timing as total SDK/provider round-trip timing unless their SDKs

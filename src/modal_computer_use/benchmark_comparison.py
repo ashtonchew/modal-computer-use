@@ -13,6 +13,7 @@ from ._version import __version__
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.generic import ActionExecutor
 from .adapters.openai import OpenAIAdapter
+from .benchmark_costs import estimate_provider_cost
 from .client import DaemonClient
 from .models import ActionBatchResult, ActionItemResult
 
@@ -48,6 +49,7 @@ def run_provider_comparison(
                 warmup_iterations=warmup_iterations,
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+                environment_metadata=environment_metadata,
             )
         except Exception as exc:
             result = _provider_result(
@@ -103,6 +105,7 @@ def _run_provider(
     warmup_iterations: int,
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
+    environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if provider == "modal-daemon":
         return _run_modal_daemon_provider(
@@ -111,6 +114,7 @@ def _run_provider(
             base_url=base_url,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            environment_metadata=environment_metadata,
         )
     if provider == "modal-exec":
         return _provider_result(
@@ -124,6 +128,7 @@ def _run_provider(
                 )
             },
             metadata={"transport": "Modal Sandbox.exec"},
+            runtime_seconds=None,
         )
     if provider in {"openai", "anthropic", "generic"}:
         return _run_adapter_provider(
@@ -155,6 +160,7 @@ def _run_modal_daemon_provider(
     base_url: str | None,
     iterations: int,
     warmup_iterations: int,
+    environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if client is None:
         return _provider_not_measured(
@@ -182,7 +188,17 @@ def _run_modal_daemon_provider(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "move_click_sequence": core.run_move_click_sequence_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
         "type_100_chars": core.run_type_100_chars_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+        "type_1000_chars": core.run_type_1000_chars_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
@@ -207,10 +223,19 @@ def _run_modal_daemon_provider(
             "warm attach requires Modal orchestration metadata",
         ),
     }
+    metadata = {
+        "transport": "daemon-http",
+        "base_url": core._safe_base_url(base_url),
+        "environment": {
+            key: value for key, value in (environment_metadata or {}).items() if value is not None
+        },
+    }
+    runtime_seconds = _modal_daemon_runtime_seconds(environment_metadata)
     return _provider_result(
         "modal-daemon",
         cases=cases,
-        metadata={"transport": "daemon-http", "base_url": core._safe_base_url(base_url)},
+        metadata=metadata,
+        runtime_seconds=runtime_seconds,
     )
 
 
@@ -242,6 +267,7 @@ def _run_adapter_provider(
         provider,
         cases={"adapter_matrix": case},
         metadata=benchmark.metadata,
+        runtime_seconds=None,
     )
 
 
@@ -376,7 +402,14 @@ def _run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[st
         provider=provider,
         benchmark=benchmark,
         cold_cases=("cold_create_to_ready",),
-        warm_cases=("screenshot_full", "move_click", "type_100_chars", "command_echo"),
+        warm_cases=(
+            "screenshot_full",
+            "move_click",
+            "move_click_sequence",
+            "type_100_chars",
+            "type_1000_chars",
+            "command_echo",
+        ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
@@ -402,13 +435,22 @@ def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, A
         "resolution": "1024x768",
         "dpi": 96,
         "display": ":0",
+        "cpu_count": 2,
+        "cpu_count_source": "public_default_desktop_pricing",
     }
     benchmark = _E2BLiveBenchmark(e2b_module, template=template)
     return _run_live_provider_cases(
         provider=provider,
         benchmark=benchmark,
         cold_cases=("cold_create_to_ready",),
-        warm_cases=("screenshot_full", "move_click", "type_100_chars", "command_echo"),
+        warm_cases=(
+            "screenshot_full",
+            "move_click",
+            "move_click_sequence",
+            "type_100_chars",
+            "type_1000_chars",
+            "command_echo",
+        ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
@@ -490,10 +532,29 @@ class _DaytonaLiveBenchmark:
         _call_first_available(mouse, ("click", "left_click"), 24, 24)
         return {"action_count": 2}
 
+    def move_click_sequence(self, sandbox: Any) -> dict[str, Any]:
+        mouse = _computer_use(sandbox).mouse
+        for action in core.MOVE_CLICK_SEQUENCE_ACTIONS:
+            if action["type"] == "move":
+                _call_first_available(mouse, ("move", "move_to"), action["x"], action["y"])
+            elif action["type"] == "click":
+                _call_first_available(
+                    mouse,
+                    ("click", "left_click"),
+                    action["x"],
+                    action["y"],
+                )
+        return {"action_count": len(core.MOVE_CLICK_SEQUENCE_ACTIONS)}
+
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         keyboard = _computer_use(sandbox).keyboard
         _call_first_available(keyboard, ("type", "write"), core.PROVIDER_BENCHMARK_TEXT)
-        return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT)}
+        return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT), "method": "provider_default"}
+
+    def type_1000_chars(self, sandbox: Any) -> dict[str, Any]:
+        keyboard = _computer_use(sandbox).keyboard
+        _call_first_available(keyboard, ("type", "write"), core.TYPE_1000_CHARS_TEXT)
+        return {"character_count": len(core.TYPE_1000_CHARS_TEXT), "method": "provider_default"}
 
     def command_echo(self, sandbox: Any) -> dict[str, Any]:
         process = sandbox.process
@@ -560,9 +621,28 @@ class _E2BLiveBenchmark:
         _call_first_available(sandbox, ("left_click", "leftClick"))
         return {"action_count": 2}
 
+    def move_click_sequence(self, sandbox: Any) -> dict[str, Any]:
+        offset = self._move_click_count % 2
+        self._move_click_count += 1
+        for action in core.MOVE_CLICK_SEQUENCE_ACTIONS:
+            if action["type"] == "move":
+                _call_first_available(
+                    sandbox,
+                    ("move_mouse", "moveMouse"),
+                    action["x"] + offset,
+                    action["y"] + offset,
+                )
+            elif action["type"] == "click":
+                _call_first_available(sandbox, ("left_click", "leftClick"))
+        return {"action_count": len(core.MOVE_CLICK_SEQUENCE_ACTIONS)}
+
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         _call_first_available(sandbox, ("write", "type"), core.PROVIDER_BENCHMARK_TEXT)
-        return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT)}
+        return {"character_count": len(core.PROVIDER_BENCHMARK_TEXT), "method": "provider_default"}
+
+    def type_1000_chars(self, sandbox: Any) -> dict[str, Any]:
+        _call_first_available(sandbox, ("write", "type"), core.TYPE_1000_CHARS_TEXT)
+        return {"character_count": len(core.TYPE_1000_CHARS_TEXT), "method": "provider_default"}
 
     def command_echo(self, sandbox: Any) -> dict[str, Any]:
         commands = getattr(sandbox, "commands", None)
@@ -605,16 +685,20 @@ def _run_live_provider_cases(
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     results: dict[str, Any] = {}
+    measured_runtime_seconds = 0.0
+    warm_cleanup_failed = False
     for case in cold_cases:
         operation = getattr(benchmark, case)
+        case_start = time.perf_counter()
         samples, observations = core._measure_observed_case(
             name=case,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             operation=operation,
             failures=failures,
-            redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+            redacted_text=_provider_case_redacted_text(case),
         )
+        measured_runtime_seconds += time.perf_counter() - case_start
         result = core._case_result(case, iterations, samples, failures)
         result["last_result"] = (
             _safe_provider_observation(observations[-1]) if observations else None
@@ -622,16 +706,18 @@ def _run_live_provider_cases(
         results[case] = result
     if warm_cases:
         sandbox: Any | None = None
+        warm_start = time.perf_counter()
         try:
             sandbox = benchmark.create_ready_session()
         except Exception as exc:
+            measured_runtime_seconds += time.perf_counter() - warm_start
             for case in warm_cases:
                 failure = core._failure(
                     case,
                     phase="setup",
                     iteration=0,
                     exc=exc,
-                    redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+                    redacted_text=_provider_case_redacted_text(case),
                 )
                 results[case] = core._case_result(case, iterations, [], [failure])
         else:
@@ -644,7 +730,7 @@ def _run_live_provider_cases(
                         warmup_iterations=warmup_iterations,
                         operation=_bind_provider_operation(operation, sandbox),
                         failures=failures,
-                        redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+                        redacted_text=_provider_case_redacted_text(case),
                     )
                     result = core._case_result(case, iterations, samples, failures)
                     result["last_result"] = (
@@ -652,11 +738,24 @@ def _run_live_provider_cases(
                     )
                     results[case] = result
             finally:
+                before_cleanup_errors = len(getattr(benchmark, "cleanup_errors", []))
                 benchmark.cleanup_session(sandbox)
+                warm_cleanup_failed = (
+                    len(getattr(benchmark, "cleanup_errors", [])) > before_cleanup_errors
+                )
+                measured_runtime_seconds += time.perf_counter() - warm_start
     cleanup_case = _provider_cleanup_case(benchmark)
     if cleanup_case is not None:
         results["cleanup"] = cleanup_case
-    return _provider_result(provider, cases=results, metadata=metadata)
+    if warm_cleanup_failed:
+        metadata = dict(metadata)
+        metadata["cost_notes"] = ["cleanup failed; leaked resources may incur unmeasured cost"]
+    return _provider_result(
+        provider,
+        cases=results,
+        metadata=metadata,
+        runtime_seconds=measured_runtime_seconds,
+    )
 
 
 def _bind_provider_operation(operation: Callable[[Any], Any], sandbox: Any) -> Callable[[], Any]:
@@ -691,6 +790,7 @@ def _provider_result(
     *,
     cases: dict[str, Any],
     metadata: dict[str, Any] | None = None,
+    runtime_seconds: float | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     measured = False
@@ -709,13 +809,21 @@ def _provider_result(
     else:
         statuses = {case.get("status") for case in cases.values() if isinstance(case, dict)}
         status = "unavailable" if "unavailable" in statuses else "not_measured"
-    return {
+    safe_metadata = metadata or {}
+    result = {
         "status": status,
         "provider": provider,
-        "metadata": metadata or {},
+        "metadata": safe_metadata,
         "cases": cases,
         "failures": failures,
     }
+    result["cost_estimate"] = estimate_provider_cost(
+        provider,
+        provider_status=status,
+        runtime_seconds=runtime_seconds,
+        metadata=safe_metadata,
+    )
+    return result
 
 
 def _provider_not_measured(provider: str, reason: str) -> dict[str, Any]:
@@ -730,6 +838,25 @@ def _provider_unavailable(provider: str, reason: str) -> dict[str, Any]:
         provider,
         cases={"setup": {"status": "unavailable", "reason": reason, "failures": []}},
     )
+
+
+def _provider_case_redacted_text(case: str) -> str | None:
+    if case == "type_1000_chars":
+        return core.TYPE_1000_CHARS_TEXT
+    return core.PROVIDER_BENCHMARK_TEXT
+
+
+def _modal_daemon_runtime_seconds(environment_metadata: dict[str, Any] | None) -> float | None:
+    if not environment_metadata:
+        return None
+    value = environment_metadata.get("modal_cold_create_to_ready_ms")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if value <= 0:
+        return None
+    return float(value) / 1000.0
 
 
 def _safe_provider_observation(observation: Any) -> dict[str, Any] | None:

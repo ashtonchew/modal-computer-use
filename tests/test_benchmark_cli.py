@@ -7,14 +7,18 @@ import pytest
 
 import modal_computer_use.benchmark_comparison as benchmark_comparison
 from modal_computer_use import cli
+from modal_computer_use.benchmark_costs import estimate_provider_cost
 from modal_computer_use.benchmarks import (
+    TYPE_1000_CHARS_TEXT,
     TYPING_BENCHMARK_TEXT,
     run_action_batch_benchmark,
     run_benchmark_report,
+    run_move_click_sequence_benchmark,
     run_provider_comparison,
     run_provider_comparison_mock_local,
     run_sandbox_exec_benchmark,
     run_type_100_chars_benchmark,
+    run_type_1000_chars_benchmark,
 )
 from modal_computer_use.errors import ModalNotInstalledError
 
@@ -70,9 +74,12 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     assert payload["mode"] == "mock-local"
     assert payload["providers"]["modal-daemon"]["status"] == "ok"
     assert payload["providers"]["modal-daemon"]["cases"]["command_echo"]["status"] == "ok"
+    assert payload["providers"]["modal-daemon"]["cases"]["move_click_sequence"]["status"] == "ok"
+    assert payload["providers"]["modal-daemon"]["cases"]["type_1000_chars"]["status"] == "ok"
     assert payload["providers"]["openai"]["metadata"]["provider_api_calls"] is False
     assert payload["providers"]["anthropic"]["metadata"]["tool_version"] == "computer_20250124"
     assert payload["providers"]["generic"]["metadata"]["adapter"] == "ActionExecutor"
+    assert payload["providers"]["openai"]["cost_estimate"]["status"] == "not_applicable"
     assert "0123456789" not in captured.out
     assert '"text"' not in captured.out
     assert "Bearer" not in captured.out
@@ -95,8 +102,29 @@ def test_benchmark_compare_external_providers_skip_without_credentials(
     assert payload["ok"] is True
     assert payload["providers"]["daytona"]["status"] == "not_measured"
     assert payload["providers"]["e2b"]["status"] == "not_measured"
+    assert payload["providers"]["daytona"]["cost_estimate"]["status"] == "not_measured"
+    assert payload["providers"]["e2b"]["cost_estimate"]["status"] == "not_measured"
     assert "DAYTONA_API_KEY is not set" in captured.out
     assert "E2B_API_KEY is not set" in captured.out
+
+
+def test_provider_cost_estimate_is_partial_without_unknown_resource_zeroes() -> None:
+    estimate = estimate_provider_cost(
+        "e2b",
+        provider_status="ok",
+        runtime_seconds=10.0,
+        metadata={"cpu_count": 2},
+    )
+
+    assert estimate["status"] == "partial"
+    assert estimate["inputs"]["cpu_count"] == 2.0
+    assert estimate["inputs"]["memory_gib"] is None
+    assert len(estimate["components"]) == 1
+    assert estimate["components"][0]["amount"] == pytest.approx(0.00028)
+    assert estimate["total"]["amount"] == pytest.approx(
+        sum(component["amount"] for component in estimate["components"])
+    )
+    assert "memory allocation was unavailable" in estimate["notes"]
 
 
 def test_benchmark_compare_live_external_providers_loads_cwd_dotenv(
@@ -479,9 +507,12 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
         "cold_create_to_ready",
         "screenshot_full",
         "move_click",
+        "move_click_sequence",
         "type_100_chars",
+        "type_1000_chars",
         "command_echo",
     } <= set(payload["providers"]["daytona"]["cases"])
+    assert payload["providers"]["daytona"]["cost_estimate"]["status"] == "partial"
     assert len(sandboxes) == 2
     assert create_args == [(), ()]
     assert sandboxes[0].calls == [
@@ -493,10 +524,14 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
     assert sandboxes[1].calls.count("screenshot") == 2
     assert "move:24:24" in sandboxes[1].calls
     assert "click:24:24" in sandboxes[1].calls
+    assert "move:16:16" in sandboxes[1].calls
+    assert "click:128:128" in sandboxes[1].calls
     assert "type:100" in sandboxes[1].calls
+    assert "type:1000" in sandboxes[1].calls
     assert "command" in sandboxes[1].calls
     assert sandboxes[1].calls[-2:] == ["computer_use_stop", "client_delete"]
     assert TYPING_BENCHMARK_TEXT not in serialized
+    assert TYPE_1000_CHARS_TEXT not in serialized
 
 
 def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
@@ -562,6 +597,9 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
     assert payload["ok"] is True
     assert payload["providers"]["e2b"]["status"] == "ok"
     assert payload["providers"]["e2b"]["metadata"]["template_source"] == "default_desktop"
+    assert payload["providers"]["e2b"]["cost_estimate"]["status"] == "partial"
+    assert payload["providers"]["e2b"]["cost_estimate"]["components"][0]["resource"] == "cpu"
+    assert payload["providers"]["e2b"]["cost_estimate"]["total"]["amount"] > 0
     assert create_kwargs == [
         {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300},
         {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300},
@@ -573,11 +611,21 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         "screenshot",
         "move:24:24",
         "click:None:None",
+        "move:17:17",
+        "click:None:None",
+        "move:129:17",
+        "click:None:None",
+        "move:129:129",
+        "click:None:None",
+        "move:17:129",
+        "click:None:None",
         "type:100",
+        "type:1000",
         "command",
         "delete",
     ]
     assert TYPING_BENCHMARK_TEXT not in serialized
+    assert TYPE_1000_CHARS_TEXT not in serialized
 
 
 def test_benchmark_compare_e2b_move_click_avoids_noop_synced_move() -> None:
@@ -606,6 +654,53 @@ def test_benchmark_compare_e2b_move_click_avoids_noop_synced_move() -> None:
     benchmark.move_click(sandbox)
 
     assert sandbox.calls == ["move:24:24", "click", "move:25:25", "click"]
+
+
+def test_benchmark_compare_e2b_move_click_sequence_avoids_repeated_synced_moves() -> None:
+    class FakeSandbox:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def move_mouse(self, x: int, y: int) -> None:
+            self.calls.append(f"move:{x}:{y}")
+
+        def left_click(self) -> None:
+            self.calls.append("click")
+
+    class FakeSandboxClass:
+        @classmethod
+        def create(cls, **kwargs):
+            return FakeSandbox()
+
+    class FakeE2BModule:
+        Sandbox = FakeSandboxClass
+
+    benchmark = benchmark_comparison._E2BLiveBenchmark(FakeE2BModule, template=None)
+    sandbox = FakeSandbox()
+
+    benchmark.move_click_sequence(sandbox)
+    benchmark.move_click_sequence(sandbox)
+
+    assert sandbox.calls[:8] == [
+        "move:16:16",
+        "click",
+        "move:128:16",
+        "click",
+        "move:128:128",
+        "click",
+        "move:16:128",
+        "click",
+    ]
+    assert sandbox.calls[8:] == [
+        "move:17:17",
+        "click",
+        "move:129:17",
+        "click",
+        "move:129:129",
+        "click",
+        "move:17:129",
+        "click",
+    ]
 
 
 def test_benchmark_compare_e2b_create_type_error_is_not_silently_retried(
@@ -978,6 +1073,112 @@ def test_type_100_chars_failure_does_not_leak_typed_payload(monkeypatch) -> None
     assert '"text"' not in serialized
 
 
+def test_type_1000_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            assert headers is None
+            assert json["actions"][0]["type"] == "type"
+            assert json["actions"][0]["text"] == TYPE_1000_CHARS_TEXT
+            assert json["actions"][0]["method"] == "xdotool"
+            return {
+                "ok": True,
+                "results": [{"ok": True, "output": {"length": 1000, "method": "xdotool"}}],
+                "timing": {"daemon_ms": 125.0},
+            }
+
+    payload = run_type_1000_chars_benchmark(
+        client=TimedClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["request"] == {"character_count": 1000, "method": "xdotool"}
+    assert payload["daemon_samples_ms"] == [125.0]
+    assert payload["attribution"]["status"] == "measured"
+    serialized = json.dumps(payload)
+    assert TYPE_1000_CHARS_TEXT not in serialized
+    assert '"text"' not in serialized
+
+
+def test_type_1000_chars_failure_does_not_leak_typed_payload(monkeypatch) -> None:
+    sentinel = "_".join(["SENTINEL", "TYPED", "PAYLOAD", "1000", "NO", "LEAK"])
+
+    class FailingTypeClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            raise RuntimeError(f"backend echoed {sentinel}")
+
+    monkeypatch.setattr("modal_computer_use.benchmarks.TYPE_1000_CHARS_TEXT", sentinel)
+
+    payload = run_type_1000_chars_benchmark(
+        client=FailingTypeClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    serialized = json.dumps(payload)
+    assert payload["status"] == "failed"
+    assert payload["failures"][0]["message"] == "backend echoed [redacted typed text]"
+    assert sentinel not in serialized
+    assert '"text"' not in serialized
+
+
+def test_move_click_sequence_benchmark_uses_safe_metadata_and_attribution() -> None:
+    seen_actions = []
+
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            seen_actions.extend(json["actions"])
+            return {
+                "ok": True,
+                "results": [{"ok": True} for _action in json["actions"]],
+                "timing": {"daemon_ms": 18.0},
+            }
+
+    payload = run_move_click_sequence_benchmark(
+        client=TimedClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["action_count"] == 8
+    assert payload["actions"] == [
+        {"type": "move"},
+        {"type": "click", "button": "left"},
+        {"type": "move"},
+        {"type": "click", "button": "left"},
+        {"type": "move"},
+        {"type": "click", "button": "left"},
+        {"type": "move"},
+        {"type": "click", "button": "left"},
+    ]
+    assert payload["daemon_samples_ms"] == [18.0]
+    assert payload["attribution"]["status"] == "measured"
+    serialized = json.dumps(payload)
+    assert '"x"' not in serialized
+    assert '"y"' not in serialized
+    assert [action["type"] for action in seen_actions] == [
+        "move",
+        "click",
+        "move",
+        "click",
+        "move",
+        "click",
+        "move",
+        "click",
+    ]
+
+
 def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     exit_code = cli.main(["benchmark", "report", "--mock-local", "--iterations", "2"])
 
@@ -1002,6 +1203,12 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert payload["benchmarks"]["move_click"]["daemon_summary_ms"]["mean"] is not None
     assert payload["benchmarks"]["move_click"]["overhead_summary_ms"]["mean"] is not None
     assert payload["benchmarks"]["move_click"]["action_count"] == 2
+    move_sequence = payload["benchmarks"]["move_click_sequence"]
+    assert move_sequence["status"] == "ok"
+    assert len(move_sequence["samples_ms"]) == 2
+    assert move_sequence["summary_ms"]["mean"] is not None
+    assert move_sequence["daemon_samples_ms"]
+    assert move_sequence["action_count"] == 8
     typing = payload["benchmarks"]["type_100_chars"]
     assert typing["status"] == "ok"
     assert len(typing["samples_ms"]) == 2
@@ -1011,6 +1218,10 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert typing["overhead_summary_ms"]["mean"] is not None
     assert typing["attribution"]["status"] == "measured"
     assert typing["request"] == {"character_count": 100, "method": "xdotool"}
+    typing_1000 = payload["benchmarks"]["type_1000_chars"]
+    assert typing_1000["status"] == "ok"
+    assert len(typing_1000["samples_ms"]) == 2
+    assert typing_1000["request"] == {"character_count": 1000, "method": "xdotool"}
     assert (
         payload["benchmarks"]["action_batch"]["cases"]["separate_5_actions"]["attribution"][
             "status"

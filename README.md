@@ -108,7 +108,11 @@ By default, Daytona uses `daytona.create()` with Daytona's default Computer Use-
 and E2B uses the default `desktop` template. Set `DAYTONA_SNAPSHOT` or `E2B_TEMPLATE` only when
 you intentionally want to benchmark a custom prebuilt baseline.
 Live provider reports separate cold create-to-ready timing from warm screenshot, action, typing,
-and command cases that reuse a ready sandbox.
+and command cases that reuse a ready sandbox. The warm primitive set includes single move/click,
+deterministic multi-click sequence, 100-character typing, 1000-character typing, screenshot, and
+command echo cases. Provider reports also include `cost_estimate` metadata based on public pricing
+rates and measured sandbox wall-clock runtime; this is an approximation for comparison, not an
+actual billing statement.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
 including benchmark regeneration and boundary scans.

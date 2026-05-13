@@ -52,7 +52,18 @@ MOVE_CLICK_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 24, "y": 24},
     {"type": "click", "x": 24, "y": 24, "button": "left"},
 ]
+MOVE_CLICK_SEQUENCE_ACTIONS: list[dict[str, Any]] = [
+    {"type": "move", "x": 16, "y": 16},
+    {"type": "click", "x": 16, "y": 16, "button": "left"},
+    {"type": "move", "x": 128, "y": 16},
+    {"type": "click", "x": 128, "y": 16, "button": "left"},
+    {"type": "move", "x": 128, "y": 128},
+    {"type": "click", "x": 128, "y": 128, "button": "left"},
+    {"type": "move", "x": 16, "y": 128},
+    {"type": "click", "x": 16, "y": 128, "button": "left"},
+]
 TYPING_BENCHMARK_TEXT = "0123456789" * 10
+TYPE_1000_CHARS_TEXT = "0123456789" * 100
 TYPING_BENCHMARK_METHOD = "xdotool"
 PROVIDER_BENCHMARK_TEXT = TYPING_BENCHMARK_TEXT
 COMMAND_ECHO_COMMAND: tuple[str, ...] = ("sh", "-lc", "printf 42")
@@ -116,7 +127,17 @@ def run_benchmark_report(
         iterations=iterations,
         warmup_iterations=warmup_iterations,
     )
+    move_click_sequence = run_move_click_sequence_benchmark(
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
     type_100_chars = run_type_100_chars_benchmark(
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
+    type_1000_chars = run_type_1000_chars_benchmark(
         client=client,
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -143,7 +164,9 @@ def run_benchmark_report(
         "screenshot_full": screenshot_full,
         "screenshot_compressed": screenshot_compressed,
         "move_click": move_click,
+        "move_click_sequence": move_click_sequence,
         "type_100_chars": type_100_chars,
+        "type_1000_chars": type_1000_chars,
         "recording_start_stop": recording_start_stop,
         "sandbox_exec": sandbox_exec,
         "cold_create_to_ready": _future_benchmark(
@@ -161,7 +184,11 @@ def run_benchmark_report(
         _benchmark_failures("screenshot_compressed", screenshot_compressed.get("failures", []))
     )
     failures.extend(_benchmark_failures("move_click", move_click.get("failures", [])))
+    failures.extend(
+        _benchmark_failures("move_click_sequence", move_click_sequence.get("failures", []))
+    )
     failures.extend(_benchmark_failures("type_100_chars", type_100_chars.get("failures", [])))
+    failures.extend(_benchmark_failures("type_1000_chars", type_1000_chars.get("failures", [])))
     failures.extend(
         _benchmark_failures("recording_start_stop", recording_start_stop.get("failures", []))
     )
@@ -387,6 +414,36 @@ def run_move_click_benchmark(
     return result
 
 
+def run_move_click_sequence_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _MoveClickSequenceBenchmark(client)
+    samples, observations = _measure_observed_case(
+        name="move_click_sequence",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _attributed_case_result(
+        "move_click_sequence", iterations, samples, observations, failures
+    )
+    result.update(
+        {
+            "action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS),
+            "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_SEQUENCE_ACTIONS],
+        }
+    )
+    return result
+
+
 def run_type_100_chars_benchmark(
     *,
     client: DaemonClient,
@@ -397,7 +454,7 @@ def run_type_100_chars_benchmark(
         raise ValueError("iterations must be >= 1")
 
     failures: list[dict[str, Any]] = []
-    benchmark = _Type100CharsBenchmark(client, TYPING_BENCHMARK_TEXT)
+    benchmark = _TypeCharsBenchmark(client, TYPING_BENCHMARK_TEXT, TYPING_BENCHMARK_METHOD)
     samples, observations = _measure_observed_case(
         name="type_100_chars",
         iterations=iterations,
@@ -412,6 +469,38 @@ def run_type_100_chars_benchmark(
             "action_count": 1,
             "request": {
                 "character_count": len(TYPING_BENCHMARK_TEXT),
+                "method": TYPING_BENCHMARK_METHOD,
+            },
+        }
+    )
+    return result
+
+
+def run_type_1000_chars_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _TypeCharsBenchmark(client, TYPE_1000_CHARS_TEXT, TYPING_BENCHMARK_METHOD)
+    samples, observations = _measure_observed_case(
+        name="type_1000_chars",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+        redacted_text=TYPE_1000_CHARS_TEXT,
+    )
+    result = _attributed_case_result("type_1000_chars", iterations, samples, observations, failures)
+    result.update(
+        {
+            "action_count": 1,
+            "request": {
+                "character_count": len(TYPE_1000_CHARS_TEXT),
                 "method": TYPING_BENCHMARK_METHOD,
             },
         }
@@ -597,10 +686,24 @@ class _MoveClickBenchmark:
         return {"daemon_ms": _extract_daemon_ms(result)}
 
 
-class _Type100CharsBenchmark:
-    def __init__(self, client: DaemonClient, text: str) -> None:
+class _MoveClickSequenceBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+    def run(self) -> dict[str, float | None]:
+        result = self._client.post_json(
+            "/v1/actions/run",
+            json={"actions": MOVE_CLICK_SEQUENCE_ACTIONS, "source": "benchmark"},
+        )
+        _ensure_ok_result(result)
+        return {"daemon_ms": _extract_daemon_ms(result)}
+
+
+class _TypeCharsBenchmark:
+    def __init__(self, client: DaemonClient, text: str, method: str) -> None:
         self._client = client
         self._text = text
+        self._method = method
 
     def run(self) -> dict[str, float | None]:
         result = self._client.post_json(
@@ -610,7 +713,7 @@ class _Type100CharsBenchmark:
                     {
                         "type": "type",
                         "text": self._text,
-                        "method": TYPING_BENCHMARK_METHOD,
+                        "method": self._method,
                     }
                 ],
                 "source": "benchmark",
