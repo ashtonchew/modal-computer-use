@@ -77,9 +77,12 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     assert "Bearer" not in captured.out
 
 
-def test_benchmark_compare_external_providers_skip_without_credentials(monkeypatch, capsys) -> None:
+def test_benchmark_compare_external_providers_skip_without_credentials(
+    monkeypatch, tmp_path, capsys
+) -> None:
     monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
     monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(
         ["benchmark", "compare", "--providers", "daytona,e2b", "--iterations", "1"]
@@ -167,10 +170,11 @@ def test_benchmark_compare_env_file_loads_only_provider_keys(
 ) -> None:
     env_file = tmp_path / "provider.env"
     env_file.write_text(
-        "E2B_API_KEY=e2b-from-dotenv\nMODAL_CONFIG_PATH=/tmp/should-not-load\n",
+        "E2B_API_KEY=e2b-from-dotenv\nMODAL_CONFIG_PATH=/tmp/should-not-load\nE2B_TEMPLATE=\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.delenv("E2B_TEMPLATE", raising=False)
     monkeypatch.delenv("MODAL_CONFIG_PATH", raising=False)
 
     def missing_sdk(*args, **kwargs):
@@ -195,6 +199,7 @@ def test_benchmark_compare_env_file_loads_only_provider_keys(
     assert exit_code == 0
     assert "install the bench-e2b extra" in captured.out
     assert os.environ["E2B_API_KEY"] == "e2b-from-dotenv"
+    assert "E2B_TEMPLATE" not in os.environ
     assert "MODAL_CONFIG_PATH" not in os.environ
     assert "/tmp/should-not-load" not in captured.out
 
@@ -388,9 +393,13 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
         def __init__(self, calls: list[str]):
             self._calls = calls
 
-        def take_full_screen(self) -> bytes:
+        def take_full_screen(self):
             self._calls.append("screenshot")
-            return b"png"
+            return type(
+                "ScreenshotResponse",
+                (),
+                {"size_bytes": None, "screenshot": "base64-png"},
+            )()
 
     class FakeComputerUse:
         def __init__(self, calls: list[str]):
@@ -474,8 +483,13 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
     } <= set(payload["providers"]["daytona"]["cases"])
     assert len(sandboxes) == 2
     assert create_args == [(), ()]
-    assert sandboxes[0].calls == ["computer_use_start", "computer_use_stop", "client_delete"]
-    assert "screenshot" in sandboxes[1].calls
+    assert sandboxes[0].calls == [
+        "computer_use_start",
+        "screenshot",
+        "computer_use_stop",
+        "client_delete",
+    ]
+    assert sandboxes[1].calls.count("screenshot") == 2
     assert "move:24:24" in sandboxes[1].calls
     assert "click:24:24" in sandboxes[1].calls
     assert "type:100" in sandboxes[1].calls
@@ -552,8 +566,9 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300},
     ]
     assert len(sandboxes) == 2
-    assert sandboxes[0].calls == ["delete"]
+    assert sandboxes[0].calls == ["screenshot", "delete"]
     assert sandboxes[1].calls == [
+        "screenshot",
         "screenshot",
         "move:24:24",
         "click:24:24",

@@ -447,6 +447,7 @@ class _DaytonaLiveBenchmark:
         try:
             computer_use = _computer_use(sandbox)
             _call_first_available(computer_use, ("start",))
+            _wait_for_provider_screenshot_ready(self.screenshot_full, sandbox)
             return sandbox
         except Exception:
             self.cleanup_session(sandbox)
@@ -528,7 +529,13 @@ class _E2BLiveBenchmark:
             self.cleanup_session(sandbox)
 
     def create_ready_session(self) -> Any:
-        return self._create_sandbox()
+        sandbox = self._create_sandbox()
+        try:
+            _wait_for_provider_screenshot_ready(self.screenshot_full, sandbox)
+            return sandbox
+        except Exception:
+            self.cleanup_session(sandbox)
+            raise
 
     def cleanup_session(self, sandbox: Any) -> None:
         self.cleanup_errors.extend(_cleanup_provider_sandbox(sandbox))
@@ -649,6 +656,26 @@ def _bind_provider_operation(operation: Callable[[Any], Any], sandbox: Any) -> C
         return operation(sandbox)
 
     return run
+
+
+def _wait_for_provider_screenshot_ready(
+    screenshot_operation: Callable[[Any], dict[str, Any]],
+    sandbox: Any,
+    *,
+    attempts: int = 5,
+    delay_seconds: float = 1.0,
+) -> None:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            screenshot_operation(sandbox)
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(delay_seconds)
+    if last_error is not None:
+        raise last_error
 
 
 def _provider_result(
@@ -839,17 +866,32 @@ def _provider_payload_size(value: Any) -> int:
         return _provider_payload_size(current)
     if hasattr(value, "size_bytes"):
         size = value.size_bytes
-        return int(size) if isinstance(size, int | float) else 0
+        if size is not None:
+            return int(size) if isinstance(size, int | float) else 0
     if hasattr(value, "bytes"):
-        return _provider_payload_size(value.bytes)
+        payload = value.bytes
+        if payload is not None:
+            return _provider_payload_size(payload)
     if hasattr(value, "data"):
-        return _provider_payload_size(value.data)
+        payload = value.data
+        if payload is not None:
+            return _provider_payload_size(payload)
     if hasattr(value, "image"):
-        return _provider_payload_size(value.image)
+        payload = value.image
+        if payload is not None:
+            return _provider_payload_size(payload)
+    if hasattr(value, "screenshot"):
+        payload = value.screenshot
+        if payload is not None:
+            return _provider_payload_size(payload)
     if hasattr(value, "image_base64"):
-        return _provider_payload_size(value.image_base64)
+        payload = value.image_base64
+        if payload is not None:
+            return _provider_payload_size(payload)
     if hasattr(value, "base64"):
-        return _provider_payload_size(value.base64)
+        payload = value.base64
+        if payload is not None:
+            return _provider_payload_size(payload)
     return 0
 
 

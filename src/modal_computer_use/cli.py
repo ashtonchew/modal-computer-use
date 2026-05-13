@@ -320,7 +320,7 @@ def _load_benchmark_env_file(env_file: Path | None) -> None:
     if not path.is_file():
         return
     for key, value in dotenv_values(path).items():
-        if key in _BENCHMARK_ENV_KEYS and value is not None and key not in os.environ:
+        if key in _BENCHMARK_ENV_KEYS and value and key not in os.environ:
             os.environ[key] = value
 
 
