@@ -30,11 +30,34 @@ class FakeProbe:
 
 class FakeApp:
     lookups: ClassVar[list[tuple[str, bool]]] = []
+    objects: ClassVar[list[FakeAppObject]] = []
 
     @classmethod
-    def lookup(cls, app_name: str, *, create_if_missing: bool) -> str:
+    def lookup(cls, app_name: str, *, create_if_missing: bool) -> FakeAppObject:
         cls.lookups.append((app_name, create_if_missing))
-        return f"app:{app_name}"
+        app = FakeAppObject(app_name)
+        cls.objects.append(app)
+        return app
+
+
+class FakeAppObject:
+    def __init__(self, app_name: str) -> None:
+        self.app_name = app_name
+        self._tags = {"existing": "app-tag"}
+        self.set_tags_calls: list[dict[str, str]] = []
+
+    def __eq__(self, value: object) -> bool:
+        return value == f"app:{self.app_name}"
+
+    def __repr__(self) -> str:
+        return f"app:{self.app_name}"
+
+    def set_tags(self, tags: dict[str, str]) -> None:
+        self.set_tags_calls.append(tags)
+        self._tags = tags
+
+    def get_tags(self) -> dict[str, str]:
+        return self._tags
 
 
 class FakeConnectToken:
@@ -137,6 +160,7 @@ class FakeSandbox:
 def fake_modal() -> SimpleNamespace:
     FakeProbe.calls = []
     FakeApp.lookups = []
+    FakeApp.objects = []
     FakeSandbox.create_calls = []
     FakeSandbox.from_name_calls = []
     FakeSandbox.from_id_calls = []
@@ -169,6 +193,7 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
         name="desktop-1",
         owner="alice",
         tags={"custom": "tag"},
+        app_tags={"benchmark": "provider-compare"},
         wait=True,
     )
 
@@ -199,6 +224,9 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     )
     assert "computer-use.created_at" in FakeSandbox.created.set_tags_calls[0]
     assert FakeSandbox.created.set_tags_calls[0]["custom"] == "tag"
+    assert FakeApp.objects[0].set_tags_calls == [
+        {"existing": "app-tag", "benchmark": "provider-compare"}
+    ]
     assert computer.metadata().owner == "alice"
     assert computer.metadata().created_at is not None
 
