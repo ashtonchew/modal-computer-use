@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -123,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.include_sandbox_exec and not args.sandbox_id:
             report_parser.error("--include-sandbox-exec requires --sandbox-id")
     if args.command == "benchmark" and args.benchmark_command == "compare":
-        providers = _compare_providers(args)
+        providers = _compare_providers(args, parser=compare_parser)
         if "modal-daemon" in providers and not (args.mock_local or args.base_url):
             compare_parser.error("modal-daemon comparison requires --mock-local or --base-url")
         if "modal-exec" in providers and not args.sandbox_id:
@@ -287,7 +288,11 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
-def _compare_providers(args: argparse.Namespace) -> list[ComparisonProvider]:
+def _compare_providers(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser | None = None,
+) -> list[ComparisonProvider]:
     values: list[str] = []
     if args.providers:
         values.extend(provider.strip() for provider in args.providers.split(","))
@@ -298,6 +303,8 @@ def _compare_providers(args: argparse.Namespace) -> list[ComparisonProvider]:
     allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b"}
     invalid = [provider for provider in values if provider not in allowed]
     if invalid:
+        if parser is not None:
+            parser.error(f"invalid provider: {', '.join(invalid)}")
         raise SystemExit(f"invalid provider: {', '.join(invalid)}")
     return values  # type: ignore[return-value]
 
@@ -307,12 +314,26 @@ def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:
 
 
 def _load_benchmark_env_file(env_file: Path | None) -> None:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
 
     path = env_file or Path.cwd() / ".env"
     if not path.is_file():
         return
-    load_dotenv(path, override=False)
+    for key, value in dotenv_values(path).items():
+        if key in _BENCHMARK_ENV_KEYS and value is not None and key not in os.environ:
+            os.environ[key] = value
+
+
+_BENCHMARK_ENV_KEYS = frozenset(
+    {
+        "DAYTONA_API_KEY",
+        "DAYTONA_API_URL",
+        "DAYTONA_TARGET",
+        "DAYTONA_SNAPSHOT",
+        "E2B_API_KEY",
+        "E2B_TEMPLATE",
+    }
+)
 
 
 def _positive_int(value: str) -> int:

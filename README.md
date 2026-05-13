@@ -101,8 +101,9 @@ gated and report `not_measured` when `DAYTONA_API_KEY` or `E2B_API_KEY` is absen
 provider extras with `uv sync --extra bench-daytona --extra bench-e2b` before live provider runs.
 Provider-live comparison loads a local `.env` from the current working directory when present, or
 an explicit dotenv file passed with `--env-file`. Already exported environment variables take
-precedence over `.env` values. Keep real keys in untracked `.env` files; use `.env.example` for the
-non-secret key names.
+precedence over `.env` values. Only the documented Daytona/E2B benchmark keys are imported from
+dotenv files; unrelated variables such as Modal auth/config are ignored. Keep real keys in
+untracked `.env` files; use `.env.example` for the non-secret key names.
 By default, Daytona uses `daytona.create()` with Daytona's default Computer Use-capable snapshot,
 and E2B uses the default `desktop` template. Set `DAYTONA_SNAPSHOT` or `E2B_TEMPLATE` only when
 you intentionally want to benchmark a custom prebuilt baseline.

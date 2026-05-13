@@ -145,9 +145,11 @@ safe metadata when present. E2B runs require `E2B_API_KEY`. Missing credentials 
 
 For local development, provider-live comparison reads a current-working-directory `.env` file when
 one exists, or the file passed with `--env-file`. Dotenv values never override already exported
-environment variables, so shell and CI secrets remain authoritative. Modal SDK authentication stays
-separate; keep using `~/.modal.toml`, `MODAL_CONFIG_PATH`, or Modal token environment variables for
-Modal itself.
+environment variables, so shell and CI secrets remain authoritative. Only the documented Daytona
+and E2B benchmark keys are imported from dotenv files; unrelated variables such as Modal auth,
+proxy settings, or arbitrary application config are ignored. Modal SDK authentication stays
+separate; keep using `~/.modal.toml`, `MODAL_CONFIG_PATH`, or Modal token environment variables
+for Modal itself.
 
 The default live baselines use each provider's documented out-of-box desktop surface: Daytona calls
 `daytona.create()` with no create params so the default Computer Use-capable snapshot is used, and

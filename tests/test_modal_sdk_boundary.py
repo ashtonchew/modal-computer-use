@@ -924,3 +924,9 @@ def test_core_modules_do_not_import_provider_sdks() -> None:
         assert "from openai" not in text, path
         assert "import anthropic" not in text, path
         assert "from anthropic" not in text, path
+        assert "import daytona" not in text, path
+        assert "from daytona" not in text, path
+        assert "import e2b" not in text, path
+        assert "from e2b" not in text, path
+        assert "import e2b_desktop" not in text, path
+        assert "from e2b_desktop" not in text, path

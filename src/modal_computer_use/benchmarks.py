@@ -960,6 +960,18 @@ def _safe_base_url(base_url: str | None) -> str | None:
     return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
 
 
+def _safe_url_origin(url: str | None) -> str | None:
+    if url is None:
+        return None
+    parsed = urlsplit(url)
+    netloc = parsed.netloc
+    if parsed.username or parsed.password:
+        hostname = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        netloc = f"{hostname}{port}"
+    return urlunsplit((parsed.scheme, netloc, "", "", ""))
+
+
 def _benchmark_failures(benchmark: str, failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [dict(failure, benchmark=benchmark) for failure in failures]
 
@@ -1108,10 +1120,10 @@ def _redact_url_match(match: re.Match[str]) -> str:
     while value and value[-1] in ".,);]":
         trailing = value[-1] + trailing
         value = value[:-1]
-    safe = _safe_base_url(value) or "[redacted-url]"
     parsed = urlsplit(value)
-    if parsed.query:
-        safe = f"{safe}?[redacted-query]"
+    safe = _safe_url_origin(value) or "[redacted-url]"
+    if parsed.path or parsed.query or parsed.fragment:
+        safe = f"{safe}/[redacted-url]"
     return f"{safe}{trailing}"
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -421,6 +422,7 @@ class _DaytonaLiveBenchmark:
     ) -> None:
         self._module = daytona_module
         self._snapshot = snapshot
+        self.cleanup_errors: list[tuple[str, Exception]] = []
         config_cls = getattr(daytona_module, "DaytonaConfig", None)
         client_cls = daytona_module.Daytona
         if config_cls is None:
@@ -454,10 +456,17 @@ class _DaytonaLiveBenchmark:
         with suppress(Exception):
             computer_use = _computer_use(sandbox)
             _call_first_available(computer_use, ("stop",))
-        with suppress(Exception):
+        client_delete_error: Exception | None = None
+        try:
             self._client.delete(sandbox)
             return
-        _cleanup_provider_sandbox(sandbox)
+        except Exception as exc:
+            client_delete_error = exc
+        cleanup_errors = _cleanup_provider_sandbox(sandbox)
+        if cleanup_errors:
+            if client_delete_error is not None:
+                self.cleanup_errors.append(("client.delete", client_delete_error))
+            self.cleanup_errors.extend(cleanup_errors)
 
     def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
         screenshot = _call_first_available(
@@ -509,6 +518,7 @@ class _E2BLiveBenchmark:
     def __init__(self, e2b_module: Any, *, template: str | None) -> None:
         self._sandbox_cls = e2b_module.Sandbox
         self._template = template
+        self.cleanup_errors: list[tuple[str, Exception]] = []
 
     def cold_create_to_ready(self) -> dict[str, Any]:
         sandbox = self.create_ready_session()
@@ -521,7 +531,7 @@ class _E2BLiveBenchmark:
         return self._create_sandbox()
 
     def cleanup_session(self, sandbox: Any) -> None:
-        _cleanup_provider_sandbox(sandbox)
+        self.cleanup_errors.extend(_cleanup_provider_sandbox(sandbox))
 
     def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
         screenshot = sandbox.screenshot()
@@ -565,16 +575,7 @@ class _E2BLiveBenchmark:
         }
         if self._template:
             create_kwargs["template"] = self._template
-        try:
-            return create(**create_kwargs)
-        except TypeError:
-            try:
-                return create(resolution=(1024, 768), timeout_ms=300_000)
-            except TypeError:
-                try:
-                    return create(resolution=(1024, 768), timeoutMs=300_000)
-                except TypeError:
-                    return create()
+        return create(**create_kwargs)
 
 
 def _run_live_provider_cases(
@@ -637,6 +638,9 @@ def _run_live_provider_cases(
                     results[case] = result
             finally:
                 benchmark.cleanup_session(sandbox)
+    cleanup_case = _provider_cleanup_case(benchmark)
+    if cleanup_case is not None:
+        results["cleanup"] = cleanup_case
     return _provider_result(provider, cases=results, metadata=metadata)
 
 
@@ -720,7 +724,7 @@ def _redact_provider_value(value: Any, *, key: str | None = None) -> Any:
 
 
 def _is_sensitive_provider_key(key: str) -> bool:
-    normalized = key.lower().replace("-", "_")
+    normalized = _normalize_provider_key(key)
     return normalized in {
         "stdout",
         "stderr",
@@ -728,6 +732,13 @@ def _is_sensitive_provider_key(key: str) -> bool:
         "bytes",
         "data",
         "data_base64",
+        "secret",
+        "client_secret",
+        "access_key",
+        "secret_key",
+        "private_key",
+        "credential",
+        "credentials",
         "url",
         "auth_key",
         "authorization",
@@ -735,14 +746,19 @@ def _is_sensitive_provider_key(key: str) -> bool:
         "api_key",
         "token",
         "password",
-    } or normalized.endswith(("_token", "_url", "_uri"))
+    } or normalized.endswith(("_token", "_url", "_uri", "_secret", "_key"))
+
+
+def _normalize_provider_key(key: str) -> str:
+    underscored = re.sub(r"(?<!^)(?=[A-Z])", "_", key)
+    return underscored.lower().replace("-", "_")
 
 
 def _safe_provider_metadata_value(value: str | None) -> str | None:
     if value is None:
         return None
     if value.startswith(("http://", "https://")):
-        return core._safe_base_url(value)
+        return core._safe_url_origin(value)
     return core._redact_text(value, core.PROVIDER_BENCHMARK_TEXT)
 
 
@@ -757,17 +773,41 @@ def _package_version(package: str) -> str | None:
         return None
 
 
-def _cleanup_provider_sandbox(sandbox: Any) -> None:
+def _cleanup_provider_sandbox(sandbox: Any) -> list[tuple[str, Exception]]:
+    errors: list[tuple[str, Exception]] = []
     for method_name in ("delete", "kill", "stop"):
         method = getattr(sandbox, method_name, None)
         if not callable(method):
             continue
-        with suppress(Exception):
+        try:
             method()
-            return
-        with suppress(Exception):
+            return []
+        except Exception as exc:
+            errors.append((method_name, exc))
+        try:
             method(force=True)
-            return
+            return []
+        except Exception as exc:
+            errors.append((f"{method_name}(force=True)", exc))
+    return errors
+
+
+def _provider_cleanup_case(benchmark: Any) -> dict[str, Any] | None:
+    errors = getattr(benchmark, "cleanup_errors", [])
+    if not errors:
+        return None
+    failures = []
+    for index, (method, exc) in enumerate(errors):
+        failure = core._failure(
+            "cleanup",
+            phase="cleanup",
+            iteration=index,
+            exc=exc,
+            redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+        )
+        failure["method"] = method
+        failures.append(failure)
+    return core._case_result("cleanup", len(failures), [], failures)
 
 
 def _computer_use(sandbox: Any) -> Any:

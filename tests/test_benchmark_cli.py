@@ -162,6 +162,43 @@ def test_benchmark_compare_env_file_does_not_override_existing_env(
     assert "e2b-from-dotenv" not in serialized
 
 
+def test_benchmark_compare_env_file_loads_only_provider_keys(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    env_file = tmp_path / "provider.env"
+    env_file.write_text(
+        "E2B_API_KEY=e2b-from-dotenv\nMODAL_CONFIG_PATH=/tmp/should-not-load\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.delenv("MODAL_CONFIG_PATH", raising=False)
+
+    def missing_sdk(*args, **kwargs):
+        raise ImportError("missing sdk")
+
+    monkeypatch.setattr(benchmark_comparison, "_import_provider_module", missing_sdk)
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "e2b",
+            "--iterations",
+            "1",
+            "--env-file",
+            str(env_file),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "install the bench-e2b extra" in captured.out
+    assert os.environ["E2B_API_KEY"] == "e2b-from-dotenv"
+    assert "MODAL_CONFIG_PATH" not in os.environ
+    assert "/tmp/should-not-load" not in captured.out
+
+
 def test_benchmark_compare_env_file_must_exist(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(
@@ -178,6 +215,15 @@ def test_benchmark_compare_env_file_must_exist(capsys) -> None:
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
     assert "--env-file must point to an existing file" in captured.err
+
+
+def test_benchmark_compare_invalid_comma_provider_uses_argparse_error(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "compare", "--providers", "e2b,nope"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "invalid provider: nope" in captured.err
 
 
 def test_benchmark_compare_mock_local_never_loads_live_external_providers(
@@ -266,6 +312,9 @@ def test_benchmark_compare_redacts_nested_provider_observations() -> None:
             "meta": {
                 "token": "secret-token",
                 "stdout": f"secret stdout {TYPING_BENCHMARK_TEXT}",
+                "clientSecret": "client-secret",
+                "accessKey": "access-secret",
+                "streamUrl": "https://user:secret@example.test/vnc?token=secret",
             },
             "url": "https://user:secret@example.test/vnc?token=secret",
             "note": f"typed: {TYPING_BENCHMARK_TEXT}",
@@ -275,6 +324,8 @@ def test_benchmark_compare_redacts_nested_provider_observations() -> None:
     serialized = json.dumps(observation)
     assert "secret-token" not in serialized
     assert "secret stdout" not in serialized
+    assert "client-secret" not in serialized
+    assert "access-secret" not in serialized
     assert "user:secret" not in serialized
     assert "token=secret" not in serialized
     assert TYPING_BENCHMARK_TEXT not in serialized
@@ -288,7 +339,23 @@ def test_benchmark_compare_safe_provider_metadata_removes_url_credentials() -> N
         "https://user:secret@example.test/vnc?token=secret#frag"
     )
 
-    assert value == "https://example.test/vnc"
+    assert value == "https://example.test"
+
+
+def test_benchmark_compare_provider_failure_redacts_url_paths(monkeypatch) -> None:
+    def fail_provider(**kwargs):
+        raise RuntimeError("stream https://user:secret@example.com/sandbox/token/vnc?password=secret")
+
+    monkeypatch.setattr(benchmark_comparison, "_run_adapter_provider", fail_provider)
+
+    payload = run_provider_comparison(providers=["openai"], iterations=1)
+    serialized = json.dumps(payload)
+
+    assert payload["ok"] is False
+    assert "user:secret" not in serialized
+    assert "sandbox/token/vnc" not in serialized
+    assert "password=secret" not in serialized
+    assert "https://example.com/[redacted-url]" in serialized
 
 
 def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatch) -> None:
@@ -495,6 +562,93 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         "delete",
     ]
     assert TYPING_BENCHMARK_TEXT not in serialized
+
+
+def test_benchmark_compare_e2b_create_type_error_is_not_silently_retried(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class FakeSandbox:
+        @classmethod
+        def create(cls, **kwargs):
+            calls.append(kwargs)
+            raise TypeError("internal provider type error")
+
+    class FakeE2BModule:
+        Sandbox = FakeSandbox
+
+    monkeypatch.setenv("E2B_API_KEY", "e2b-secret")
+    monkeypatch.setattr(
+        benchmark_comparison,
+        "_import_provider_module",
+        lambda *args: FakeE2BModule,
+    )
+
+    payload = run_provider_comparison(
+        providers=["e2b"],
+        iterations=1,
+        warmup_iterations=0,
+    )
+    serialized = json.dumps(payload)
+
+    assert payload["ok"] is False
+    assert payload["providers"]["e2b"]["status"] == "failed"
+    assert len(calls) == 2
+    assert calls[0] == {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300}
+    assert "internal provider type error" in serialized
+
+
+def test_benchmark_compare_e2b_cleanup_failure_is_reported(monkeypatch) -> None:
+    class FakeCommands:
+        def run(self, command: str, *, timeout: int):
+            return {"exit_code": 0}
+
+    class FakeSandbox:
+        commands = FakeCommands()
+
+        @classmethod
+        def create(cls, **kwargs):
+            return cls()
+
+        def screenshot(self) -> bytes:
+            return b"png"
+
+        def move_mouse(self, x: int, y: int) -> None:
+            return None
+
+        def left_click(self, x: int, y: int) -> None:
+            return None
+
+        def write(self, text: str) -> None:
+            return None
+
+        def delete(self) -> None:
+            raise RuntimeError("delete failed https://user:secret@example.com/vnc?token=secret")
+
+    class FakeE2BModule:
+        Sandbox = FakeSandbox
+
+    monkeypatch.setenv("E2B_API_KEY", "e2b-secret")
+    monkeypatch.setattr(
+        benchmark_comparison,
+        "_import_provider_module",
+        lambda *args: FakeE2BModule,
+    )
+
+    payload = run_provider_comparison(
+        providers=["e2b"],
+        iterations=1,
+        warmup_iterations=0,
+    )
+    serialized = json.dumps(payload)
+
+    assert payload["ok"] is False
+    assert payload["providers"]["e2b"]["status"] == "failed"
+    assert payload["providers"]["e2b"]["cases"]["cleanup"]["status"] == "failed"
+    assert "delete failed" in serialized
+    assert "user:secret" not in serialized
+    assert "token=secret" not in serialized
 
 
 def test_benchmark_compare_requires_modal_daemon_target(capsys) -> None:
