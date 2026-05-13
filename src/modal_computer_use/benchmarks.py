@@ -65,6 +65,7 @@ MOVE_CLICK_SEQUENCE_ACTIONS: list[dict[str, Any]] = [
 TYPING_BENCHMARK_TEXT = "0123456789" * 10
 TYPE_1000_CHARS_TEXT = "0123456789" * 100
 TYPING_BENCHMARK_METHOD = "xdotool"
+TYPE_1000_CHARS_TIMEOUT_MS = 30_000
 PROVIDER_BENCHMARK_TEXT = TYPING_BENCHMARK_TEXT
 COMMAND_ECHO_COMMAND: tuple[str, ...] = ("sh", "-lc", "printf 42")
 SANDBOX_EXEC_MOVE_CLICK_COMMAND: tuple[str, ...] = (
@@ -454,7 +455,11 @@ def run_type_100_chars_benchmark(
         raise ValueError("iterations must be >= 1")
 
     failures: list[dict[str, Any]] = []
-    benchmark = _TypeCharsBenchmark(client, TYPING_BENCHMARK_TEXT, TYPING_BENCHMARK_METHOD)
+    benchmark = _TypeCharsBenchmark(
+        client,
+        TYPING_BENCHMARK_TEXT,
+        method=TYPING_BENCHMARK_METHOD,
+    )
     samples, observations = _measure_observed_case(
         name="type_100_chars",
         iterations=iterations,
@@ -486,7 +491,12 @@ def run_type_1000_chars_benchmark(
         raise ValueError("iterations must be >= 1")
 
     failures: list[dict[str, Any]] = []
-    benchmark = _TypeCharsBenchmark(client, TYPE_1000_CHARS_TEXT, TYPING_BENCHMARK_METHOD)
+    benchmark = _TypeCharsBenchmark(
+        client,
+        TYPE_1000_CHARS_TEXT,
+        method=TYPING_BENCHMARK_METHOD,
+        timeout_ms=TYPE_1000_CHARS_TIMEOUT_MS,
+    )
     samples, observations = _measure_observed_case(
         name="type_1000_chars",
         iterations=iterations,
@@ -502,6 +512,7 @@ def run_type_1000_chars_benchmark(
             "request": {
                 "character_count": len(TYPE_1000_CHARS_TEXT),
                 "method": TYPING_BENCHMARK_METHOD,
+                "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
             },
         }
     )
@@ -700,22 +711,31 @@ class _MoveClickSequenceBenchmark:
 
 
 class _TypeCharsBenchmark:
-    def __init__(self, client: DaemonClient, text: str, method: str) -> None:
+    def __init__(
+        self,
+        client: DaemonClient,
+        text: str,
+        *,
+        method: str,
+        timeout_ms: int | None = None,
+    ) -> None:
         self._client = client
         self._text = text
         self._method = method
+        self._timeout_ms = timeout_ms
 
     def run(self) -> dict[str, float | None]:
+        action: dict[str, Any] = {
+            "type": "type",
+            "text": self._text,
+            "method": self._method,
+        }
+        if self._timeout_ms is not None:
+            action["timeout_ms"] = self._timeout_ms
         result = self._client.post_json(
             "/v1/actions/run",
             json={
-                "actions": [
-                    {
-                        "type": "type",
-                        "text": self._text,
-                        "method": self._method,
-                    }
-                ],
+                "actions": [action],
                 "source": "benchmark",
             },
         )
