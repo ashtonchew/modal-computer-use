@@ -11,3 +11,4 @@ build/
 .DS_Store
 htmlcov/
 .coverage
+benchmark-results/
