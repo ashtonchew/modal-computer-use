@@ -95,6 +95,11 @@ strings, stdout, stderr, or ffmpeg argv. Any failed warmup or measured iteration
 `failures`, partial successful samples remain in the report, and the command exits nonzero.
 Typing failures are redacted against the typed payload before they are included in benchmark JSON.
 
+For interpretation notes and one captured live run set, see:
+
+- [Provider benchmark results interpretation](benchmark-results-interpretation.md)
+- [Provider benchmark results, 2026-05-13](benchmark-results-2026-05-13.md)
+
 ## Benchmark action batching
 
 Use the benchmark CLI to measure the daemon hot path without model credentials:
