@@ -153,7 +153,8 @@ def test_artifact_sync_runs_mountpoint_sync_for_persistent_volume(tmp_path) -> N
 
     assert result.ok is True
     assert result.persistent is True
-    assert result.synced_paths == [(tmp_path / "root").as_posix()]
+    assert result.synced_paths == ["artifact-root"]
+    assert (tmp_path / "root").as_posix() not in result.model_dump_json()
     assert calls == [(tmp_path / "root").as_posix()]
 
 

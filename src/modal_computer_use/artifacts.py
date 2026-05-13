@@ -294,7 +294,7 @@ class ArtifactStore:
             return ArtifactSyncResult(
                 ok=True,
                 persistent=True,
-                synced_paths=[self.root.as_posix()],
+                synced_paths=["artifact-root"],
                 message="Modal Volume v2 mountpoint synced",
             )
         return ArtifactSyncResult(

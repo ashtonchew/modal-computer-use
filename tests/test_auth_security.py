@@ -113,3 +113,25 @@ def test_json_formatter_redacts_exception_messages() -> None:
     assert payload["exc_info"]["redacted"] is True
     serialized = json.dumps(payload)
     assert "typed secret should not appear" not in serialized
+
+
+def test_json_formatter_redacts_provider_credentials_in_extra() -> None:
+    formatter = JsonFormatter()
+    record = logging.getLogger("modal_computer_use.test").makeRecord(
+        "modal_computer_use.test",
+        logging.INFO,
+        __file__,
+        1,
+        "safe message",
+        (),
+        exc_info=None,
+        extra={"extra": {"api_key": "sk-test-secret", "password": "pw-secret"}},
+    )
+
+    payload = json.loads(formatter.format(record))
+    serialized = json.dumps(payload)
+
+    assert payload["api_key"]["redacted"] is True
+    assert payload["password"]["redacted"] is True
+    assert "sk-test-secret" not in serialized
+    assert "pw-secret" not in serialized

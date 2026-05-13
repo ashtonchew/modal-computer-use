@@ -9,7 +9,19 @@ from typing import Any
 
 from modal_computer_use.redaction import safe_exception_payload, sanitize_text
 
-SENSITIVE_KEYS = {"token", "authorization", "text", "data_base64", "bytes", "clipboard", "vnc"}
+SENSITIVE_KEYS = {
+    "api_key",
+    "authorization",
+    "bytes",
+    "clipboard",
+    "credential",
+    "data_base64",
+    "password",
+    "secret",
+    "text",
+    "token",
+    "vnc",
+}
 
 
 def redact(value: Any) -> Any:
