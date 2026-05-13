@@ -113,6 +113,9 @@ deterministic multi-click sequence, 100-character typing, 1000-character typing,
 command echo cases. Provider reports also include `cost_estimate` metadata based on public pricing
 rates and measured sandbox wall-clock runtime; this is an approximation for comparison, not an
 actual billing statement.
+When supported, provider reports include readback proof metadata for final cursor position and typed
+keypress delivery. These proof probes use provider-native computer-use APIs for actuation and avoid
+serializing typed text.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
 including benchmark regeneration and boundary scans.

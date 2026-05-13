@@ -172,11 +172,13 @@ move/click, deterministic move/click sequence, 100-character typing, 1000-charac
 command cases then run on one separate ready sandbox per provider so their samples do not include
 sandbox creation. Cleanup is attempted once after the warm primitive cases.
 
-Provider entries may also include `verification` readbacks. Cursor readback checks the final X11
-cursor position after the deterministic move/click sequence when `xdotool` is available. Typing
-readback starts a focused `xev` target and verifies that keypress events reached that target without
-serializing the typed text. Providers without the required desktop readback tools report
-`unsupported` or `failed` verification while keeping the primitive timing cases separate.
+Provider entries may also include `verification` readbacks. Cursor readback checks the final cursor
+position after the deterministic move/click sequence, using provider-native cursor APIs where they
+exist and falling back to X11 command probes for daemon-compatible desktops. Typing readback starts
+a controlled `xev` target as a detached process and verifies that keypress events reached that target
+without serializing the typed text. The typing actuation step uses the same provider or daemon
+computer-use primitive being benchmarked. Providers without the required desktop readback tools
+report `unsupported` or `failed` verification while keeping the primitive timing cases separate.
 
 Each provider entry includes additive `cost_estimate` metadata when a provider can create billable
 resources. Cost estimates use public pricing rates, the measured cold and warm sandbox wall-clock

@@ -23,6 +23,8 @@ TYPE_READBACK_TEXT = "mcu-readback-0123456789"
 TYPE_READBACK_FILE = "/tmp/modal-computer-use-type-readback-xev.log"  # noqa: S108
 TYPE_READBACK_PID_FILE = "/tmp/modal-computer-use-type-readback-xev.pid"  # noqa: S108
 TYPE_READBACK_TITLE = "mcu-type-readback"
+TYPE_READBACK_FOCUS_X = 40
+TYPE_READBACK_FOCUS_Y = 60
 
 
 def run_provider_comparison(
@@ -218,11 +220,7 @@ def _run_modal_daemon_provider(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "cold_create_to_ready": core._future_benchmark(
-            "not_measured",
-            "cold Modal Sandbox creation is measured by a live orchestration runner, "
-            "not this daemon target",
-        ),
+        "cold_create_to_ready": _modal_cold_create_to_ready_case(environment_metadata),
         "warm_attach_to_health": core._future_benchmark(
             "not_measured",
             "warm attach requires Modal orchestration metadata",
@@ -592,6 +590,14 @@ class _DaytonaLiveBenchmark:
         def run_command(command: str, timeout: int) -> str:
             return self._run_command(sandbox, command, timeout=timeout)
 
+        def focus_target() -> None:
+            _call_first_available(
+                _computer_use(sandbox).mouse,
+                ("click", "left_click"),
+                TYPE_READBACK_FOCUS_X,
+                TYPE_READBACK_FOCUS_Y,
+            )
+
         def type_text(text: str) -> Any:
             return _call_first_available(
                 _computer_use(sandbox).keyboard,
@@ -601,12 +607,13 @@ class _DaytonaLiveBenchmark:
 
         return {
             "cursor_position": _verification_step(
-                lambda: _verify_provider_cursor_position(run_command),
+                lambda: _verify_daytona_cursor_position(sandbox),
                 redacted_text=None,
             ),
             "type_text": _verification_step(
                 lambda: _verify_provider_type_readback(
                     type_text=type_text,
+                    focus_target=focus_target,
                     run_command=run_command,
                 ),
                 redacted_text=TYPE_READBACK_TEXT,
@@ -947,16 +954,74 @@ def _verify_modal_type_readback(client: DaemonClient) -> dict[str, Any]:
     def run_command(command: str, timeout: int) -> str:
         return _run_modal_command(client, command, timeout=timeout)
 
+    def focus_target() -> None:
+        _run_modal_actions(
+            client,
+            [
+                {"type": "move", "x": TYPE_READBACK_FOCUS_X, "y": TYPE_READBACK_FOCUS_Y},
+                {
+                    "type": "click",
+                    "x": TYPE_READBACK_FOCUS_X,
+                    "y": TYPE_READBACK_FOCUS_Y,
+                    "button": "left",
+                },
+            ],
+        )
+
+    def type_text(text: str) -> None:
+        _run_modal_actions(
+            client,
+            [
+                {
+                    "type": "type",
+                    "text": text,
+                    "method": "xdotool",
+                    "delay_ms": 10,
+                }
+            ],
+        )
+
     setup = _run_type_readback_setup(run_command)
     if setup["status"] != "ready":
         return setup
-    run_command(
-        f"xdotool type --delay 10 {shlex.quote(TYPE_READBACK_TEXT)}",
-        10,
-    )
+    focus_target()
+    type_text(TYPE_READBACK_TEXT)
     result = _read_type_readback_file(run_command)
-    result["method"] = "daemon_xdotool_backend_probe"
+    result["method"] = "daemon_action_type"
     return result
+
+
+def _run_modal_actions(client: DaemonClient, actions: list[dict[str, Any]]) -> None:
+    result = client.post_json("/v1/actions/run", json={"actions": actions})
+    if not _action_batch_ok(result):
+        raise RuntimeError("daemon readback action failed")
+
+
+def _action_batch_ok(result: Any) -> bool:
+    if isinstance(result, ActionBatchResult):
+        return result.ok
+    if isinstance(result, dict):
+        value = result.get("ok")
+        if isinstance(value, bool):
+            return value
+        items = result.get("results")
+        if isinstance(items, list):
+            return all(isinstance(item, dict) and item.get("ok") is True for item in items)
+    return False
+
+
+def _verify_daytona_cursor_position(sandbox: Any) -> dict[str, Any]:
+    expected = _expected_sequence_cursor_position()
+    observed = _provider_point_xy(
+        _call_first_available(_computer_use(sandbox).mouse, ("get_position", "position"))
+    )
+    ok = observed == expected
+    return {
+        "status": "ok" if ok else "failed",
+        "expected": {"x": expected[0], "y": expected[1]},
+        "observed": {"x": observed[0], "y": observed[1]} if observed is not None else None,
+        "method": "computer_use.mouse.get_position",
+    }
 
 
 def _verify_provider_cursor_position(run_command: Callable[[str, int], str]) -> dict[str, Any]:
@@ -988,11 +1053,14 @@ def _verification_step(
 def _verify_provider_type_readback(
     *,
     type_text: Callable[[str], Any],
+    focus_target: Callable[[], Any] | None = None,
     run_command: Callable[[str, int], str],
 ) -> dict[str, Any]:
     setup = _run_type_readback_setup(run_command)
     if setup["status"] != "ready":
         return setup
+    if focus_target is not None:
+        focus_target()
     type_text(TYPE_READBACK_TEXT)
     return _read_type_readback_file(run_command)
 
@@ -1026,25 +1094,28 @@ def _type_readback_setup_command() -> str:
     target = shlex.quote(TYPE_READBACK_FILE)
     pid_file = shlex.quote(TYPE_READBACK_PID_FILE)
     title = shlex.quote(TYPE_READBACK_TITLE)
+    launcher = shlex.quote(
+        "import os, subprocess, sys; "
+        "env = os.environ.copy(); "
+        "env['DISPLAY'] = env.get('DISPLAY') or ':0'; "
+        "out = open(sys.argv[1], 'wb'); "
+        "process = subprocess.Popen("
+        "['xev', '-event', 'keyboard', '-name', sys.argv[3], '-geometry', '220x120+0+0'], "
+        "stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, "
+        "env=env, start_new_session=True"
+        "); "
+        "open(sys.argv[2], 'w').write(str(process.pid))"
+    )
     return (
+        "export DISPLAY=${DISPLAY:-:0}; "
         "if ! command -v xev >/dev/null 2>&1; then "
         "printf 'unsupported:no-xev\\n'; exit 0; fi; "
-        "if ! command -v xdotool >/dev/null 2>&1; then "
-        "printf 'unsupported:no-xdotool\\n'; exit 0; fi; "
+        "python_bin=$(command -v python3 || command -v python || true); "
+        "if [ -z \"$python_bin\" ]; then printf 'unsupported:no-python\\n'; exit 0; fi; "
         f"rm -f {target} {pid_file}; "
-        f"xev -event keyboard -name {title} -geometry 220x120+0+0 > {target} 2>&1 & "
-        f"printf '%s\\n' \"$!\" > {pid_file}; "
-        "window=''; i=0; "
-        "while [ \"$i\" -lt 10 ]; do "
-        f"window=$(xdotool search --onlyvisible --name {title} 2>/dev/null | tail -n 1); "
-        "if [ -n \"$window\" ]; then break; fi; "
-        "sleep 0.2; i=$((i + 1)); "
-        "done; "
-        "if [ -z \"$window\" ]; then printf 'unsupported:no-readback-window\\n'; exit 0; fi; "
-        "xdotool windowactivate --sync \"$window\" >/dev/null 2>&1 || "
-        "printf 'unsupported:cannot-activate-readback-window\\n'; "
-        "xdotool mousemove --window \"$window\" 10 10 >/dev/null 2>&1 || true; "
-        "xdotool click 1 >/dev/null 2>&1 || true"
+        f"\"$python_bin\" -c {launcher} {target} {pid_file} {title}; "
+        "sleep 0.5; "
+        "printf 'ready=1\\n'"
     )
 
 
@@ -1071,6 +1142,18 @@ def _parse_xdotool_position(output: str) -> tuple[int, int] | None:
     values = _parse_key_value_output(output)
     x = _int_or_none(values.get("X"))
     y = _int_or_none(values.get("Y"))
+    if x is None or y is None:
+        return None
+    return x, y
+
+
+def _provider_point_xy(value: Any) -> tuple[int, int] | None:
+    if isinstance(value, dict):
+        x = _int_or_none(value.get("x"))
+        y = _int_or_none(value.get("y"))
+    else:
+        x = _int_or_none(getattr(value, "x", None))
+        y = _int_or_none(getattr(value, "y", None))
     if x is None or y is None:
         return None
     return x, y
@@ -1125,6 +1208,23 @@ def _modal_daemon_runtime_seconds(environment_metadata: dict[str, Any] | None) -
     if value <= 0:
         return None
     return float(value) / 1000.0
+
+
+def _modal_cold_create_to_ready_case(environment_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    value = (
+        None
+        if not environment_metadata
+        else environment_metadata.get("modal_cold_create_to_ready_ms")
+    )
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        return core._future_benchmark(
+            "not_measured",
+            "cold Modal Sandbox creation is measured by a live orchestration runner, "
+            "not this daemon target",
+        )
+    result = core._case_result("cold_create_to_ready", 1, [float(value)], [])
+    result["source"] = "live_orchestration_metadata"
+    return result
 
 
 def _safe_provider_observation(observation: Any) -> dict[str, Any] | None:

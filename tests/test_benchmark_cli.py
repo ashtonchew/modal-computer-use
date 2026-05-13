@@ -412,6 +412,9 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
         def click(self, x: int, y: int) -> None:
             self._calls.append(f"click:{x}:{y}")
 
+        def get_position(self):
+            return type("MousePositionResponse", (), {"x": 16, "y": 128})()
+
     class FakeKeyboard:
         def __init__(self, calls: list[str]):
             self._calls = calls
@@ -456,8 +459,6 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
                 assert timeout == 30
                 self._calls.append("command")
                 return {"exit_code": 0}
-            if "xdotool getmouselocation" in command:
-                return {"exit_code": 0, "result": "X=16\nY=128\n"}
             if "rm -f " in command:
                 return {"exit_code": 0, "result": ""}
             if "grep -c" in command:
@@ -539,6 +540,7 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
     assert "click:128:128" in sandboxes[1].calls
     assert "type:100" in sandboxes[1].calls
     assert "type:1000" in sandboxes[1].calls
+    assert "click:40:60" in sandboxes[1].calls
     assert f"type:{len(benchmark_comparison.TYPE_READBACK_TEXT)}" in sandboxes[1].calls
     assert "command" in sandboxes[1].calls
     assert sandboxes[1].calls[-2:] == ["computer_use_stop", "client_delete"]
