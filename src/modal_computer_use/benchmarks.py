@@ -53,7 +53,7 @@ MOVE_CLICK_ACTIONS: list[dict[str, Any]] = [
     {"type": "click", "x": 24, "y": 24, "button": "left"},
 ]
 TYPING_BENCHMARK_TEXT = "0123456789" * 10
-TYPING_BENCHMARK_METHOD = "auto"
+TYPING_BENCHMARK_METHOD = "xdotool"
 PROVIDER_BENCHMARK_TEXT = TYPING_BENCHMARK_TEXT
 SANDBOX_EXEC_MOVE_CLICK_COMMAND: tuple[str, ...] = (
     "sh",

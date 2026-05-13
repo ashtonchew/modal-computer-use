@@ -492,7 +492,7 @@ class _DaytonaLiveBenchmark:
 
     def command_echo(self, sandbox: Any) -> dict[str, Any]:
         process = sandbox.process
-        result = process.exec("python -c 'print(42)'", timeout=30)
+        result = process.exec("sh -lc 'printf 42'", timeout=30)
         exit_code = _provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
@@ -564,9 +564,9 @@ class _E2BLiveBenchmark:
         if not callable(run):
             raise RuntimeError("E2B sandbox commands did not expose run")
         try:
-            result = run("python -c 'print(42)'", timeout=30)
+            result = run("sh -lc 'printf 42'", timeout=30)
         except TypeError:
-            result = run("python -c 'print(42)'")
+            result = run("sh -lc 'printf 42'")
         exit_code = _provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("E2B command exited nonzero")

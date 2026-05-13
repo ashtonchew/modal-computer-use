@@ -422,7 +422,7 @@ def test_benchmark_compare_daytona_live_uses_computer_use_and_deletes(monkeypatc
             self._calls = calls
 
         def exec(self, command: str, *, timeout: int):
-            assert command == "python -c 'print(42)'"
+            assert command == "sh -lc 'printf 42'"
             assert timeout == 30
             self._calls.append("command")
             return {"exit_code": 0}
@@ -509,7 +509,7 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
             self._calls = calls
 
         def run(self, command: str, *, timeout: int):
-            assert command == "python -c 'print(42)'"
+            assert command == "sh -lc 'printf 42'"
             assert timeout == 30
             self._calls.append("command")
             return {"exit_code": 0}
@@ -863,7 +863,7 @@ def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
             assert json["actions"][0]["text"] == TYPING_BENCHMARK_TEXT
             return {
                 "ok": True,
-                "results": [{"ok": True, "output": {"length": 100, "method": "auto"}}],
+                "results": [{"ok": True, "output": {"length": 100, "method": "xdotool"}}],
                 "timing": {"daemon_ms": 12.5},
             }
 
@@ -874,7 +874,7 @@ def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
     )
 
     assert payload["status"] == "ok"
-    assert payload["request"] == {"character_count": 100, "method": "auto"}
+    assert payload["request"] == {"character_count": 100, "method": "xdotool"}
     assert payload["daemon_samples_ms"] == [12.5]
     assert payload["attribution"]["status"] == "measured"
     serialized = json.dumps(payload)
@@ -981,7 +981,7 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert typing["daemon_summary_ms"]["mean"] is not None
     assert typing["overhead_summary_ms"]["mean"] is not None
     assert typing["attribution"]["status"] == "measured"
-    assert typing["request"] == {"character_count": 100, "method": "auto"}
+    assert typing["request"] == {"character_count": 100, "method": "xdotool"}
     assert (
         payload["benchmarks"]["action_batch"]["cases"]["separate_5_actions"]["attribution"][
             "status"
