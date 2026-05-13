@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 
 from fastapi.testclient import TestClient
 
@@ -34,7 +35,11 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 1
     assert entries[0].normalized_action is not None
-    assert entries[0].normalized_action["text"] == {"redacted": True, "length": 12}
+    assert entries[0].normalized_action["text"] == {
+        "redacted": True,
+        "length": 12,
+        "sha256": hashlib.sha256(b"secret value").hexdigest(),
+    }
     assert entries[0].redactions == ["text"]
 
 
@@ -80,7 +85,11 @@ def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) 
     }
     assert entries[0].normalized_action is not None
     assert entries[0].normalized_action["metadata"] == {"policy": "fixture"}
-    assert entries[0].normalized_action["text"] == {"redacted": True, "length": 12}
+    assert entries[0].normalized_action["text"] == {
+        "redacted": True,
+        "length": 12,
+        "sha256": hashlib.sha256(b"secret value").hexdigest(),
+    }
     assert entries[0].redactions == ["text", "provider_action.text"]
 
 

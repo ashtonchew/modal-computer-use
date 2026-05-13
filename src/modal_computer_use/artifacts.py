@@ -17,7 +17,7 @@ CONTROL_PATHS = {
     "manifest.ndjson",
     "traces/actions.ndjson",
 }
-CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use"}
+CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets"}
 
 
 def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: bool = True) -> str:
@@ -158,7 +158,7 @@ class ArtifactStore:
             target.unlink()
 
     def list(self, prefix: str = "") -> list[ArtifactInfo]:
-        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=False)
+        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=True)
         base = self.resolve(safe_prefix, allow_empty=True, public=False)
         if not base.exists():
             return []
@@ -166,10 +166,16 @@ class ArtifactStore:
         paths = [base] if base.is_file() else [item for item in base.rglob("*") if item.exists()]
         infos: list[ArtifactInfo] = []
         for item in sorted(paths):
-            if item.name == "manifest.ndjson":
+            resolved = item.resolve()
+            common = os.path.commonpath([str(root), str(resolved)])
+            if common != str(root):
+                raise ArtifactPathError("artifact symlink escapes are not allowed")
+            relative = os.path.relpath(str(resolved), str(root)).replace(os.sep, "/")
+            try:
+                public_path = normalize_artifact_path(relative, public=True)
+            except ArtifactPathError:
                 continue
-            relative = item.resolve().relative_to(root).as_posix()
-            infos.append(self._info(item, public_path=relative))
+            infos.append(self._info(item, public_path=public_path))
         return infos
 
     def append_manifest(self, info: ArtifactInfo) -> None:

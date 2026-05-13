@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
+from modal_computer_use.daemon import budgets
 from modal_computer_use.errors import ArtifactPathError
 from modal_computer_use.models import ArtifactInfo, ArtifactSyncResult
 
@@ -39,11 +40,14 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
             "daemon.artifact.write",
             {"artifact.size_bytes": len(data)},
         ):
-            return request.app.state.artifacts.write_bytes(
+            budgets.enforce_artifact_write(request, path, len(data))
+            info = request.app.state.artifacts.write_bytes(
                 path,
                 data,
                 content_type=request.headers.get("content-type"),
             )
+            budgets.enforce(request, "artifacts")
+            return info
     except ArtifactPathError:
         raise
 

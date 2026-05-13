@@ -61,6 +61,25 @@ def enforce(request: Request, *kinds: BudgetKind) -> None:
         raise _budget_error("recording duration budget exceeded", state)
 
 
+def enforce_artifact_write(request: Request, path: str, incoming_size: int) -> None:
+    settings = request.app.state.settings
+    if settings.max_artifact_bytes is None:
+        return
+    state = snapshot(request)
+    existing_size = 0
+    try:
+        target = request.app.state.artifacts.resolve(path)
+    except Exception:
+        target = None
+    if target is not None and target.is_file():
+        existing_size = target.stat().st_size
+    projected = int(state["artifact_bytes"] or 0) - existing_size + incoming_size
+    if projected > settings.max_artifact_bytes:
+        projected_state = dict(state)
+        projected_state["artifact_bytes"] = projected
+        raise _budget_error("artifact byte budget exceeded", projected_state)
+
+
 def reserve_action(request: Request) -> None:
     error = action_reservation_error(request)
     if error is not None:

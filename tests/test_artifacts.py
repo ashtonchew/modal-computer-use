@@ -3,8 +3,12 @@ from __future__ import annotations
 import subprocess
 
 import pytest
+from fastapi.testclient import TestClient
 
 from modal_computer_use.artifacts import ArtifactStore, normalize_artifact_path
+from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError
 
 
@@ -12,6 +16,11 @@ from modal_computer_use.errors import ArtifactPathError
 def test_artifact_path_rejects_unsafe(path: str) -> None:
     with pytest.raises(ArtifactPathError):
         normalize_artifact_path(path)
+
+
+def test_artifact_path_rejects_secret_control_segment() -> None:
+    with pytest.raises(ArtifactPathError):
+        normalize_artifact_path(".secrets/x11vnc.pass")
 
 
 def test_artifact_store_roundtrip(tmp_path) -> None:
@@ -29,6 +38,35 @@ def test_artifact_symlink_escape(tmp_path) -> None:
     (tmp_path / "root" / "link").symlink_to(outside)
     with pytest.raises(ArtifactPathError):
         store.resolve("link")
+
+
+def test_artifact_list_rejects_symlink_escape(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    (tmp_path / "root" / "link").symlink_to(outside)
+
+    with pytest.raises(ArtifactPathError):
+        store.list()
+
+
+def test_artifact_route_rejects_vnc_password_control_path(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+        vnc_mode="control",
+        vnc_password="secret-pass",
+    )
+    app = create_app(settings)
+    Supervisor(settings)._vnc_password_file()
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.get("/v1/artifacts/.secrets/x11vnc.pass")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "unsafe_artifact_path"
 
 
 def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:

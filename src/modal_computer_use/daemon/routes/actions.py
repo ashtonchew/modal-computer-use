@@ -54,8 +54,17 @@ logger = logging.getLogger("modal_computer_use.daemon.actions")
 
 
 @router.post("/validate")
-async def validate(payload: ActionBatchRequest) -> ValidationResult:
-    errors = _validate_actions(payload.actions, width=None, height=None)
+async def validate(payload: ActionBatchRequest, request: Request) -> ValidationResult:
+    errors = _validate_actions(
+        payload.actions,
+        width=request.app.state.backend.width,
+        height=request.app.state.backend.height,
+    )
+    if len(payload.actions) > request.app.state.settings.max_batch_actions:
+        errors.append(
+            "batch exceeds max_batch_actions "
+            f"{request.app.state.settings.max_batch_actions}"
+        )
     return ValidationResult(ok=not errors, errors=errors)
 
 
@@ -593,6 +602,8 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
         try:
             nested_results: list[dict[str, Any]] = []
             for nested_action in _nested_hold_actions(action):
+                if _counts_against_action_budget(nested_action):
+                    budgets.reserve_action(request)
                 nested_start = time.perf_counter()
                 nested_output = await _execute_action(nested_action, request, call_id=call_id)
                 nested_results.append(
@@ -814,7 +825,11 @@ def _redacted_action(action: Any) -> dict[str, Any]:
     data = action.model_dump(mode="json")
     if isinstance(action, TypeAction):
         text = action.text
-        data["text"] = {"redacted": True, "length": len(text)}
+        data["text"] = {
+            "redacted": True,
+            "length": len(text),
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
     return data
 
 

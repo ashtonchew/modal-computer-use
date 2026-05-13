@@ -38,6 +38,20 @@ def test_local_token_mode_rejects_missing_and_invalid_bearer_token(tmp_path) -> 
     assert invalid.json()["code"] == "unauthorized"
 
 
+def test_local_token_mode_rejects_non_loopback_clients(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"Authorization": "Bearer dev"},
+    ) as client:
+        response = client.get("/v1/version")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "local_token_requires_loopback"
+
+
 def test_query_connect_tokens_are_rejected_when_configured(tmp_path) -> None:
     app = _app(tmp_path, require_connect_user=False, reject_query_tokens=True)
 

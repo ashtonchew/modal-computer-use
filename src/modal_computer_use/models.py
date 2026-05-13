@@ -385,6 +385,12 @@ class MouseDownAction(BaseAction):
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
 
+    @model_validator(mode="after")
+    def _coordinate_pair(self) -> MouseDownAction:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("x and y must be supplied together")
+        return self
+
 
 class MouseUpAction(MouseDownAction):
     type: Literal["mouse_up"] = "mouse_up"

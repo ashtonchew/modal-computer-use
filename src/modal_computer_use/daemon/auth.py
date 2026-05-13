@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
@@ -25,6 +27,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 },
             )
         if self.settings.local_token:
+            if not _is_loopback_request(request):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "code": "local_token_requires_loopback",
+                        "message": "local bearer token mode is restricted to loopback clients",
+                    },
+                )
             expected = f"Bearer {self.settings.local_token}"
             if request.headers.get("authorization") != expected:
                 return JSONResponse(
@@ -40,3 +50,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 },
             )
         return await call_next(request)
+
+
+def _is_loopback_request(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    if host in {"localhost", "testclient"}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
