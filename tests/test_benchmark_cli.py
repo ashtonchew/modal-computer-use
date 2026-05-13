@@ -69,6 +69,7 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     assert payload["benchmark"] == "provider-compare"
     assert payload["mode"] == "mock-local"
     assert payload["providers"]["modal-daemon"]["status"] == "ok"
+    assert payload["providers"]["modal-daemon"]["cases"]["command_echo"]["status"] == "ok"
     assert payload["providers"]["openai"]["metadata"]["provider_api_calls"] is False
     assert payload["providers"]["anthropic"]["metadata"]["tool_version"] == "computer_20250124"
     assert payload["providers"]["generic"]["metadata"]["adapter"] == "ActionExecutor"
@@ -532,7 +533,7 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         def move_mouse(self, x: int, y: int) -> None:
             self.calls.append(f"move:{x}:{y}")
 
-        def left_click(self, x: int, y: int) -> None:
+        def left_click(self, x: int | None = None, y: int | None = None) -> None:
             self.calls.append(f"click:{x}:{y}")
 
         def write(self, text: str) -> None:
@@ -571,12 +572,40 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         "screenshot",
         "screenshot",
         "move:24:24",
-        "click:24:24",
+        "click:None:None",
         "type:100",
         "command",
         "delete",
     ]
     assert TYPING_BENCHMARK_TEXT not in serialized
+
+
+def test_benchmark_compare_e2b_move_click_avoids_noop_synced_move() -> None:
+    class FakeSandbox:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def move_mouse(self, x: int, y: int) -> None:
+            self.calls.append(f"move:{x}:{y}")
+
+        def left_click(self) -> None:
+            self.calls.append("click")
+
+    class FakeSandboxClass:
+        @classmethod
+        def create(cls, **kwargs):
+            return FakeSandbox()
+
+    class FakeE2BModule:
+        Sandbox = FakeSandboxClass
+
+    benchmark = benchmark_comparison._E2BLiveBenchmark(FakeE2BModule, template=None)
+    sandbox = FakeSandbox()
+
+    benchmark.move_click(sandbox)
+    benchmark.move_click(sandbox)
+
+    assert sandbox.calls == ["move:24:24", "click", "move:25:25", "click"]
 
 
 def test_benchmark_compare_e2b_create_type_error_is_not_silently_retried(

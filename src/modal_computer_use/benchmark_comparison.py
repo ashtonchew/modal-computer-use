@@ -187,6 +187,11 @@ def _run_modal_daemon_provider(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "command_echo": core.run_command_echo_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
         "recording_start_stop": core.run_recording_start_stop_benchmark(
             client=client,
             iterations=iterations,
@@ -520,6 +525,7 @@ class _E2BLiveBenchmark:
         self._sandbox_cls = e2b_module.Sandbox
         self._template = template
         self.cleanup_errors: list[tuple[str, Exception]] = []
+        self._move_click_count = 0
 
     def cold_create_to_ready(self) -> dict[str, Any]:
         sandbox = self.create_ready_session()
@@ -548,8 +554,10 @@ class _E2BLiveBenchmark:
         return {"size_bytes": size_bytes}
 
     def move_click(self, sandbox: Any) -> dict[str, Any]:
-        _call_first_available(sandbox, ("move_mouse", "moveMouse"), 24, 24)
-        _call_first_available(sandbox, ("left_click", "leftClick"), 24, 24)
+        offset = self._move_click_count % 2
+        self._move_click_count += 1
+        _call_first_available(sandbox, ("move_mouse", "moveMouse"), 24 + offset, 24 + offset)
+        _call_first_available(sandbox, ("left_click", "leftClick"))
         return {"action_count": 2}
 
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:

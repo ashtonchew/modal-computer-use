@@ -55,6 +55,7 @@ MOVE_CLICK_ACTIONS: list[dict[str, Any]] = [
 TYPING_BENCHMARK_TEXT = "0123456789" * 10
 TYPING_BENCHMARK_METHOD = "xdotool"
 PROVIDER_BENCHMARK_TEXT = TYPING_BENCHMARK_TEXT
+COMMAND_ECHO_COMMAND: tuple[str, ...] = ("sh", "-lc", "printf 42")
 SANDBOX_EXEC_MOVE_CLICK_COMMAND: tuple[str, ...] = (
     "sh",
     "-lc",
@@ -418,6 +419,34 @@ def run_type_100_chars_benchmark(
     return result
 
 
+def run_command_echo_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _CommandEchoBenchmark(client)
+    samples, observations = _measure_observed_case(
+        name="command_echo",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _case_result("command_echo", iterations, samples, failures)
+    result.update(
+        {
+            "command": {"argv": list(COMMAND_ECHO_COMMAND), "timeout_seconds": 30},
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    return result
+
+
 def run_recording_start_stop_benchmark(
     *,
     client: DaemonClient,
@@ -589,6 +618,20 @@ class _Type100CharsBenchmark:
         )
         _ensure_ok_result(result)
         return {"daemon_ms": _extract_daemon_ms(result)}
+
+
+class _CommandEchoBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+    def run(self) -> dict[str, Any]:
+        result = self._client.post_json(
+            "/v1/commands/run",
+            json={"command": list(COMMAND_ECHO_COMMAND), "timeout": 30},
+        )
+        _ensure_ok_result(result)
+        output = result.get("output") if isinstance(result, dict) else {}
+        return {"exit_code": output.get("returncode") if isinstance(output, dict) else None}
 
 
 class _ScreenshotBenchmark:
