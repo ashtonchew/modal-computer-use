@@ -437,6 +437,8 @@ def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, A
         "display": ":0",
         "cpu_count": 2,
         "cpu_count_source": "public_default_desktop_pricing",
+        "memory_gib": 1,
+        "memory_gib_source": "public_default_desktop_pricing",
     }
     benchmark = _E2BLiveBenchmark(e2b_module, template=template)
     return _run_live_provider_cases(
@@ -622,15 +624,13 @@ class _E2BLiveBenchmark:
         return {"action_count": 2}
 
     def move_click_sequence(self, sandbox: Any) -> dict[str, Any]:
-        offset = self._move_click_count % 2
-        self._move_click_count += 1
         for action in core.MOVE_CLICK_SEQUENCE_ACTIONS:
             if action["type"] == "move":
                 _call_first_available(
                     sandbox,
                     ("move_mouse", "moveMouse"),
-                    action["x"] + offset,
-                    action["y"] + offset,
+                    action["x"],
+                    action["y"],
                 )
             elif action["type"] == "click":
                 _call_first_available(sandbox, ("left_click", "leftClick"))

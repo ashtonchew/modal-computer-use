@@ -597,8 +597,9 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
     assert payload["ok"] is True
     assert payload["providers"]["e2b"]["status"] == "ok"
     assert payload["providers"]["e2b"]["metadata"]["template_source"] == "default_desktop"
-    assert payload["providers"]["e2b"]["cost_estimate"]["status"] == "partial"
+    assert payload["providers"]["e2b"]["cost_estimate"]["status"] == "estimated"
     assert payload["providers"]["e2b"]["cost_estimate"]["components"][0]["resource"] == "cpu"
+    assert payload["providers"]["e2b"]["cost_estimate"]["components"][1]["resource"] == "memory"
     assert payload["providers"]["e2b"]["cost_estimate"]["total"]["amount"] > 0
     assert create_kwargs == [
         {"resolution": (1024, 768), "dpi": 96, "display": ":0", "timeout": 300},
@@ -611,13 +612,13 @@ def test_benchmark_compare_e2b_live_reuses_ready_sandbox_and_uses_python_kwargs(
         "screenshot",
         "move:24:24",
         "click:None:None",
-        "move:17:17",
+        "move:16:16",
         "click:None:None",
-        "move:129:17",
+        "move:128:16",
         "click:None:None",
-        "move:129:129",
+        "move:128:128",
         "click:None:None",
-        "move:17:129",
+        "move:16:128",
         "click:None:None",
         "type:100",
         "type:1000",
@@ -681,7 +682,7 @@ def test_benchmark_compare_e2b_move_click_sequence_avoids_repeated_synced_moves(
     benchmark.move_click_sequence(sandbox)
     benchmark.move_click_sequence(sandbox)
 
-    assert sandbox.calls[:8] == [
+    expected = [
         "move:16:16",
         "click",
         "move:128:16",
@@ -691,16 +692,8 @@ def test_benchmark_compare_e2b_move_click_sequence_avoids_repeated_synced_moves(
         "move:16:128",
         "click",
     ]
-    assert sandbox.calls[8:] == [
-        "move:17:17",
-        "click",
-        "move:129:17",
-        "click",
-        "move:129:129",
-        "click",
-        "move:17:129",
-        "click",
-    ]
+    assert sandbox.calls[:8] == expected
+    assert sandbox.calls[8:] == expected
 
 
 def test_benchmark_compare_e2b_create_type_error_is_not_silently_retried(
@@ -803,7 +796,8 @@ def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch)
     def fail_provider(**kwargs):
         raise RuntimeError(
             f"Authorization: Bearer secret-token {TYPING_BENCHMARK_TEXT} "
-            "https://user:secret@example.com/vnc.html?password=secret"
+            "https://user:secret@example.com/vnc.html?password=secret "
+            '{"apiKey":"secret","clientSecret":"secret"}'
         )
 
     monkeypatch.setattr(benchmark_comparison, "_run_adapter_provider", fail_provider)
@@ -817,6 +811,7 @@ def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch)
     assert "user:secret" not in serialized
     assert TYPING_BENCHMARK_TEXT not in serialized
     assert "password=secret" not in serialized
+    assert '"secret"' not in serialized
     assert "[redacted typed text]" in serialized
 
 

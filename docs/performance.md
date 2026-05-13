@@ -75,7 +75,8 @@ daemon sample is the sum of daemon timings for the five calls in that measured i
 The current report includes:
 
 - `action_batch`: one five-action batch request compared with five separate action requests.
-- `screenshot_full`: full-screen PNG screenshot latency and encoded byte size.
+- `screenshot_full`: full-screen screenshot latency and provider-returned encoded payload byte
+  size.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
 - `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
@@ -189,6 +190,8 @@ Keep comparisons fair:
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
 - Treat public-rate `cost_estimate` values as approximate comparison context, not billing truth.
+- Treat screenshot byte summaries as provider-returned payload size; providers that return base64
+  screenshots report encoded transfer bytes rather than decoded image bytes.
 - Do not include noVNC stream URLs, provider API keys, typed text, screenshot bytes, stdout,
   stderr, artifact URIs, or recording paths in saved reports.
 - Treat Daytona/E2B provider timing as total SDK/provider round-trip timing unless their SDKs

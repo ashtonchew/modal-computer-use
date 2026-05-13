@@ -1244,8 +1244,11 @@ def _redact_text(value: Any, redacted_text: str | None) -> Any:
         replacements = [
             (r"(?i)(authorization:\s*bearer\s+)[^\s,;]+", r"\1[redacted]"),
             (r"(?i)(bearer\s+)[a-z0-9._~+/=-]+", r"\1[redacted]"),
-            (r"(?i)(api[_-]?key['\"]?\s*[:=]\s*['\"]?)[^'\"\s,;]+", r"\1[redacted]"),
-            (r"(?i)(token['\"]?\s*[:=]\s*['\"]?)[^'\"\s,;]+", r"\1[redacted]"),
+            (
+                r"(?i)(api[_-]?key|apiKey|clientSecret|secret|token)"
+                r"(['\"]?\s*[:=]\s*['\"]?)[^'\"\s,;}]+",
+                r"\1\2[redacted]",
+            ),
         ]
         for pattern, replacement in replacements:
             output = re.sub(pattern, replacement, output)
