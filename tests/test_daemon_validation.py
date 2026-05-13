@@ -232,6 +232,34 @@ def test_nested_hold_validation_error_does_not_echo_typed_text(tmp_path) -> None
     assert sentinel not in keyboard_response.text
 
 
+def test_action_batch_rejects_unsupported_key_before_execution(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {"type": "move", "x": 10, "y": 20},
+                    {"type": "keypress", "key": "definitely-not-a-key"},
+                ]
+            },
+        )
+        position = client.get("/v1/mouse/position")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert "not a supported key" in response.text
+    assert position.json() == {"x": 0, "y": 0}
+
+
 def test_browser_open_url_rejects_non_http_urls(test_client) -> None:
     response = test_client.post("/v1/browser/open-url", json={"url": "file:///etc/passwd"})
 

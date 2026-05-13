@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -75,6 +76,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.state.idempotency_cache = OrderedDict()
     app.state.action_count = 0
     app.state.screenshot_count = 0
+    app.state.last_activity_at = time.monotonic()
     app.state.action_rate_window = deque()
     app.state.tracer = get_tracer(
         enabled=settings.otel_enabled,

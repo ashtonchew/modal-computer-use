@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.actions import KEY_ALIASES
+from modal_computer_use.actions import KEY_ALIASES, is_supported_key
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.actions import (
@@ -32,6 +32,7 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
 
 @router.post("/press")
 async def press(payload: KeyRequest, request: Request) -> ActionResult:
+    _validate_keys(payload.key, *payload.modifiers)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_press(
@@ -43,6 +44,7 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hotkey")
 async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
+    _validate_keys(*payload.keys)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_hotkey(
@@ -53,6 +55,7 @@ async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hold")
 async def hold(payload: HoldRequest, request: Request) -> ActionResult:
+    _validate_keys(payload.key)
     try:
         nested_actions = [parse_action(action) for action in payload.actions]
     except ActionValidationError as exc:
@@ -96,3 +99,14 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
 @router.get("/keys")
 async def supported_keys() -> dict[str, str]:
     return KEY_ALIASES
+
+
+def _validate_keys(*keys: str) -> None:
+    invalid = [key for key in keys if not is_supported_key(key)]
+    if invalid:
+        raise DaemonError(
+            "unsupported key",
+            status_code=422,
+            code="unsupported_key",
+            details={"keys": invalid},
+        )

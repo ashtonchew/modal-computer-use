@@ -137,6 +137,9 @@ class DaemonSettings:
     max_recording_seconds: int | None = field(
         default_factory=lambda: _optional_int_env("COMPUTER_USE_MAX_RECORDING_SECONDS")
     )
+    max_idle_seconds: int | None = field(
+        default_factory=lambda: _optional_int_env("COMPUTER_USE_MAX_IDLE_SECONDS")
+    )
     image_profile: str = field(
         default_factory=lambda: os.getenv("COMPUTER_USE_IMAGE_PROFILE", "standard")
     )

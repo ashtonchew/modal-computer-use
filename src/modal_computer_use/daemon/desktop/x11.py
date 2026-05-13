@@ -554,9 +554,16 @@ class X11DesktopBackend(MockDesktopBackend):
         modifiers: Sequence[str] = (),
     ) -> Point:
         points = list(path or [])
+        moved_to_path_start = False
+        if points and start is None:
+            start = points[0]
+            await self.mouse_move(start.x, start.y)
+            points = points[1:]
+            moved_to_path_start = True
         if not points:
             if start is not None:
-                await self.mouse_move(start.x, start.y)
+                if not moved_to_path_start:
+                    await self.mouse_move(start.x, start.y)
             elif end is None:
                 start = await self.mouse_position()
             if end is not None:

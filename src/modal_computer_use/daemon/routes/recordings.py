@@ -28,6 +28,7 @@ async def start(payload: RecordingStartRequest, request: Request) -> Recording:
     except DaemonError:
         request.app.state.recordings.delete(rec.id)
         raise
+    budgets.touch_activity(request)
     return rec
 
 
@@ -40,6 +41,7 @@ async def stop(recording_id: str, request: Request) -> Recording:
         request.app.state.recordings.delete(recording_id)
         raise
     request.app.state.recordings.append_manifest(recording_id)
+    budgets.touch_activity(request)
     return rec
 
 

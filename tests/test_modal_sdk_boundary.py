@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
-from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager
+from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager, DaemonClient
 from modal_computer_use.config import BrowserConfig
 from modal_computer_use.errors import (
     ConfigConflictError,
@@ -171,6 +171,16 @@ def fake_modal() -> SimpleNamespace:
     FakeSandbox.from_name_error = None
     FakeSandbox.from_id_result = None
     return SimpleNamespace(App=FakeApp, Probe=FakeProbe, Sandbox=FakeSandbox)
+
+
+def test_computer_sandbox_context_manager_terminates_modal_sandbox() -> None:
+    sandbox = FakeSandboxObject()
+    computer = ComputerSandbox(DaemonClient(base_url="http://127.0.0.1:1"), sandbox=sandbox)
+
+    with computer as active:
+        assert active is computer
+
+    assert sandbox.terminated is True
 
 
 def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:

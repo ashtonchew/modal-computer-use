@@ -52,7 +52,7 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
             options,
             artifact_store=request.app.state.artifacts,
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -78,7 +78,7 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
             region=payload.region,
             artifact_store=request.app.state.artifacts,
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -106,6 +106,6 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
             region=region,
             artifact_store=request.app.state.artifacts,
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot

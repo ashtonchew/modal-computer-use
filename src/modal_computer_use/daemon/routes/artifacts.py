@@ -83,6 +83,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                 info.content_type = content_type
             store.append_manifest(info)
             budgets.enforce(request, "artifacts")
+            budgets.touch_activity(request)
             return info
     except ArtifactPathError:
         raise

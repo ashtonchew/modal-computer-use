@@ -369,6 +369,15 @@ class ComputerSandbox:
     def metadata(self) -> SandboxRef | None:
         return self._metadata
 
+    def __enter__(self) -> ComputerSandbox:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        try:
+            self.terminate()
+        finally:
+            self.client.close()
+
     def debug_urls(self) -> DebugUrls:
         if self._sandbox is not None:
             return DebugUrls(vnc=_vnc_url(self._sandbox), daemon=None, recording_dashboard=None)
@@ -460,6 +469,9 @@ def _daemon_environment(
         "COMPUTER_USE_MAX_RECORDING_SECONDS": ""
         if config.budgets.max_recording_seconds is None
         else str(config.budgets.max_recording_seconds),
+        "COMPUTER_USE_MAX_IDLE_SECONDS": ""
+        if config.budgets.max_idle_seconds is None
+        else str(config.budgets.max_idle_seconds),
     }
     return env
 

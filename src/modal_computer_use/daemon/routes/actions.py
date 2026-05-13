@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, Request
 
+from modal_computer_use.actions import is_supported_key
 from modal_computer_use.adapters.provenance import (
     PROVIDER_ACTION_METADATA_KEY,
     PROVIDER_ACTION_REDACTIONS_METADATA_KEY,
@@ -216,6 +217,8 @@ async def run(
                     output=output or {},
                 )
                 results.append(item)
+                if item.ok:
+                    budgets.touch_activity(request)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
                     "action executed",
@@ -350,6 +353,7 @@ async def run(
                     )
                     budgets.reserve_screenshot(request)
                     budgets.enforce(request, "screenshots", "artifacts")
+                    budgets.touch_activity(request)
                     _append_screenshot_after_trace(
                         request, payload, screenshot, None, call_id=call_id
                     )
@@ -787,6 +791,8 @@ async def _execute_action(
 def _validate_actions(actions: list[Any], *, width: int | None, height: int | None) -> list[str]:
     errors: list[str] = []
     for index, action in enumerate(actions):
+        key_errors = _key_validation_errors(action, field=f"actions[{index}]")
+        errors.extend(key_errors)
         for point in _action_points(action):
             if width is not None and point.x >= width:
                 errors.append(
@@ -836,6 +842,30 @@ def _validate_actions(actions: list[Any], *, width: int | None, height: int | No
                         "desktop geometry"
                     )
     return errors
+
+
+def _key_validation_errors(action: Any, *, field: str) -> list[str]:
+    keys: list[tuple[str, str]] = []
+    if isinstance(action, KeyPressAction):
+        keys.append((f"{field}.key", action.key))
+        keys.extend(
+            (f"{field}.modifiers[{index}]", key)
+            for index, key in enumerate(action.modifiers)
+        )
+    elif isinstance(action, HotkeyAction):
+        keys.extend((f"{field}.keys[{index}]", key) for index, key in enumerate(action.keys))
+    elif isinstance(action, HoldKeyAction):
+        keys.append((f"{field}.key", action.key))
+    elif isinstance(action, ClickAction | DoubleClickAction | TripleClickAction | DragAction):
+        keys.extend(
+            (f"{field}.modifiers[{index}]", key)
+            for index, key in enumerate(action.modifiers)
+        )
+    return [
+        f"{path} is not a supported key: {key}"
+        for path, key in keys
+        if not is_supported_key(key)
+    ]
 
 
 def _nested_hold_actions(action: HoldKeyAction) -> list[Any]:

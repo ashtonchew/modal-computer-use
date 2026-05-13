@@ -58,10 +58,12 @@ def test_x11_mouse_drag_uses_xdotool_down_move_up() -> None:
     point = anyio.run(drag)
 
     assert point == Point(x=8, y=9)
-    assert ("xdotool", "mousedown", "3") in backend.commands
-    assert ("xdotool", "mousemove", "1", "2") in backend.commands
-    assert ("xdotool", "mousemove", "8", "9") in backend.commands
-    assert ("xdotool", "mouseup", "3") in backend.commands
+    assert backend.commands[:4] == [
+        ("xdotool", "mousemove", "1", "2"),
+        ("xdotool", "mousedown", "3"),
+        ("xdotool", "mousemove", "8", "9"),
+        ("xdotool", "mouseup", "3"),
+    ]
 
 
 def test_x11_scroll_and_button_hold_are_real_xdotool_commands() -> None:
