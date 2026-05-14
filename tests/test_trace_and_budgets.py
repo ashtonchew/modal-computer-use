@@ -218,7 +218,7 @@ def test_action_trace_redacts_sensitive_metadata(tmp_path) -> None:
     ]
 
 
-def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
+def test_action_trace_keeps_artifact_screenshot_after_uri_out_of_top_level(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -243,12 +243,37 @@ def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 2
     assert entries[1].normalized_action == {"type": "screenshot_after"}
-    assert entries[1].screenshot_after_uri is not None
-    assert entries[1].screenshot_after_uri.startswith("artifact://screenshots/")
+    assert entries[1].screenshot_after_uri is None
     assert entries[1].coordinate_space is not None
 
 
-def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_path) -> None:
+def test_action_trace_does_not_write_raw_artifact_uris(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+                "screenshot_options": {"storage": "artifact"},
+            },
+        )
+
+    assert response.status_code == 200
+    trace_payload = (tmp_path / "traces" / "actions.ndjson").read_text(encoding="utf-8")
+    assert "artifact://screenshots/" not in trace_payload
+
+
+def test_action_trace_records_screenshot_action_coordinate_space_without_raw_uri(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -279,8 +304,7 @@ def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_pat
     assert len(entries) == 1
     assert entries[0].normalized_action is not None
     assert entries[0].normalized_action["type"] == "zoom"
-    assert entries[0].screenshot_after_uri is not None
-    assert entries[0].screenshot_after_uri.startswith("artifact://screenshots/")
+    assert entries[0].screenshot_after_uri is None
     assert entries[0].coordinate_space is not None
     assert entries[0].coordinate_space.source_region is not None
     assert entries[0].coordinate_space.source_region.x == 10

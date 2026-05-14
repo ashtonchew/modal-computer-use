@@ -136,6 +136,32 @@ def test_idempotency_replay_does_not_duplicate_screenshot_after_or_trace(tmp_pat
     assert len(load_trace(tmp_path / "traces" / "actions.ndjson")) == 2
 
 
+def test_idempotency_replay_returns_cached_result_when_desktop_becomes_unready(tmp_path) -> None:
+    app = _app(tmp_path)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-ready"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+        async def not_ready():
+            return False, ["desktop stopped after original request"]
+
+        app.state.backend.ready = not_ready
+        second = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-ready"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert app.state.action_count == 1
+
+
 def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     app = _app(tmp_path)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
@@ -390,3 +416,24 @@ def test_screenshot_after_timeout_returns_failed_result_without_incrementing_bud
     assert entries[1].normalized_action == {"type": "screenshot_after"}
     assert entries[1].error is not None
     assert entries[1].error["code"] == "timeout"
+
+
+def test_screenshot_after_timeout_releases_held_inputs(tmp_path) -> None:
+    app = _app(tmp_path, default_action_timeout_ms=10)
+
+    async def slow_screenshot(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    app.state.backend.screenshot = slow_screenshot
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "mouse_down", "button": "left"}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert app.state.backend.held_buttons == set()

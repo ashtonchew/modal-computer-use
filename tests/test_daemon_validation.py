@@ -162,6 +162,38 @@ def test_action_screenshot_enforces_output_pixel_budget(tmp_path) -> None:
     assert "screenshot output" in zoom.text
 
 
+def test_action_zoom_validates_effective_scale_before_execution(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            screenshot_max_pixels=10_000,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "zoom",
+                        "region": {"x": 0, "y": 0, "width": 100, "height": 100},
+                        "scale": 2,
+                        "options": {"scale": 1},
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert "screenshot output" in response.text
+    assert app.state.screenshot_count == 0
+
+
 def test_screenshot_after_enforces_output_pixel_budget(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

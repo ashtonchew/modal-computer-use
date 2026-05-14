@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
 
+from modal_computer_use.daemon import budgets
 from modal_computer_use.models import ProcessStatus
 
 router = APIRouter(prefix="/v1/processes")
@@ -14,7 +15,9 @@ async def process_status(name: str, request: Request) -> ProcessStatus:
 
 @router.post("/{name}/restart")
 async def process_restart(name: str, request: Request) -> ProcessStatus:
+    budgets.enforce_idle(request)
     await request.app.state.supervisor.restart(name)
+    budgets.touch_activity(request)
     return request.app.state.supervisor.status(name)
 
 

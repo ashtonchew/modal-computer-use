@@ -92,6 +92,11 @@ async def run(
             code="action_validation_failed",
             details={"errors": validation_errors},
         )
+    cached = _cached_idempotency_result(
+        request, effective_idempotency_key, request_fingerprint
+    )
+    if cached is not None:
+        return cached
     await ensure_desktop_ready(request)
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
@@ -100,17 +105,11 @@ async def run(
     screenshot_after_blocked = False
     async with request.app.state.input_lock:
         cache = request.app.state.idempotency_cache
-        _prune_idempotency_cache(request)
-        if effective_idempotency_key and effective_idempotency_key in cache:
-            entry = cache[effective_idempotency_key]
-            if entry["fingerprint"] != request_fingerprint:
-                raise DaemonError(
-                    "idempotency key was already used with a different request body",
-                    status_code=409,
-                    code="idempotency_key_conflict",
-                )
-            cache.move_to_end(effective_idempotency_key)
-            return ActionBatchResult.model_validate(entry["result"])
+        cached = _cached_idempotency_result(
+            request, effective_idempotency_key, request_fingerprint
+        )
+        if cached is not None:
+            return cached
 
         batch_timeout_ms = request.app.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
@@ -342,6 +341,7 @@ async def run(
                     )
                 except TimeoutError:
                     elapsed_ms = (time.perf_counter() - start) * 1000
+                    await _release_all_suppressed(request)
                     effective_timeout_ms = (
                         batch_timeout_ms if timeout_scope == "batch" else timeout_ms
                     )
@@ -355,6 +355,7 @@ async def run(
                     _append_screenshot_after_trace(request, payload, None, item, call_id=call_id)
                 except Exception as exc:
                     elapsed_ms = (time.perf_counter() - start) * 1000
+                    await _release_all_suppressed(request)
                     error_code = _exception_code(exc)
                     failed_screenshot = screenshot
                     screenshot = None
@@ -407,6 +408,26 @@ def _request_fingerprint(payload: ActionBatchRequest) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _cached_idempotency_result(
+    request: Request, key: str | None, fingerprint: str
+) -> ActionBatchResult | None:
+    _prune_idempotency_cache(request)
+    if not key:
+        return None
+    cache = request.app.state.idempotency_cache
+    if key not in cache:
+        return None
+    entry = cache[key]
+    if entry["fingerprint"] != fingerprint:
+        raise DaemonError(
+            "idempotency key was already used with a different request body",
+            status_code=409,
+            code="idempotency_key_conflict",
+        )
+    cache.move_to_end(key)
+    return ActionBatchResult.model_validate(entry["result"])
 
 
 def _prune_idempotency_cache(request: Request) -> None:
@@ -483,13 +504,12 @@ def _validate_screenshot_pixel_budget(
                 )
             )
         elif isinstance(action, ZoomAction):
-            options = action.options or ScreenshotOptions(scale=action.scale)
             errors.extend(
                 _screenshot_pixel_errors(
                     request,
                     source_width=action.region.width,
                     source_height=action.region.height,
-                    scale=options.scale,
+                    scale=action.scale,
                     label=action_path,
                 )
             )
@@ -598,6 +618,11 @@ async def _post_action_delay(request: Request, batch_deadline: float) -> None:
     if remaining_seconds <= 0:
         return
     await asyncio.sleep(min(delay_ms / 1000, remaining_seconds))
+
+
+async def _release_all_suppressed(request: Request) -> None:
+    with suppress(Exception):
+        await request.app.state.backend.release_all()
 
 
 def _reserve_action_budget(
@@ -1006,7 +1031,7 @@ def _append_trace(
             normalized_action=normalized,
             result=trace_result,
             elapsed_ms=result.elapsed_ms,
-            screenshot_after_uri=_screenshot_uri(result),
+            screenshot_after_uri=None,
             coordinate_space=_coordinate_space(result),
             redactions=redactions,
             error=_trace_error(result),
@@ -1099,7 +1124,7 @@ def _append_screenshot_after_trace(
             source=payload.source,
             normalized_action={"type": "screenshot_after"},
             result=trace_result,
-            screenshot_after_uri=screenshot.artifact_uri if screenshot is not None else None,
+            screenshot_after_uri=None,
             coordinate_space=screenshot.coordinate_space if screenshot is not None else None,
             redactions=redactions,
             error=_trace_error(result) if result is not None else None,

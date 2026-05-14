@@ -40,17 +40,23 @@ async def status(request: Request) -> ComputerStatus:
 
 @router.post("/start")
 async def start(request: Request) -> LifecycleResult:
+    budgets.enforce_idle(request)
     await request.app.state.supervisor.start()
+    budgets.touch_activity(request)
     return LifecycleResult(ok=True, status="running")
 
 
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
+    budgets.enforce_idle(request)
     await request.app.state.supervisor.stop()
+    budgets.touch_activity(request)
     return LifecycleResult(ok=True, status="stopped")
 
 
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
+    budgets.enforce_idle(request)
     await request.app.state.supervisor.restart()
+    budgets.touch_activity(request)
     return LifecycleResult(ok=True, status="running")
