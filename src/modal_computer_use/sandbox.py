@@ -127,6 +127,15 @@ class ComputerSandbox:
         config = config or ComputerConfig()
         if not config.run_id:
             config.run_id = new_run_id()
+        volumes = volumes or {}
+        artifact_volume_mounted = _has_artifact_volume_mount(
+            volumes, config.storage.artifacts_dir
+        )
+        if config.storage.persist_artifacts and not artifact_volume_mounted:
+            raise ConfigConflictError(
+                "persist_artifacts=True requires a Volume mounted at storage.artifacts_dir "
+                "or one of its parent directories"
+            )
         vnc_mode = normalize_vnc_mode(expose_vnc if expose_vnc is not None else config.expose_vnc)
         image = image or default_image(
             profile=config.resources.profile,
@@ -137,7 +146,11 @@ class ComputerSandbox:
         app = modal.App.lookup(app_name, create_if_missing=True)
         if app_tags:
             _set_modal_object_tags(app, app_tags)
-        env = _daemon_environment(config, vnc_mode=vnc_mode)
+        env = _daemon_environment(
+            config,
+            vnc_mode=vnc_mode,
+            artifact_volume_mounted=artifact_volume_mounted,
+        )
         sandbox_tags = {**default_tags(config, owner=owner), **(tags or {})}
         ports = [6080] if vnc_mode != "off" else []
         create_kwargs: dict[str, Any] = {
@@ -150,7 +163,7 @@ class ComputerSandbox:
             "timeout": config.runtime.timeout_seconds,
             "idle_timeout": config.runtime.idle_timeout_seconds,
             "secrets": secrets or [],
-            "volumes": volumes or {},
+            "volumes": volumes,
             "env": env,
             "block_network": config.network.block_all,
             "cidr_allowlist": config.network.cidr_allowlist,
@@ -181,7 +194,7 @@ class ComputerSandbox:
             config_hash=compute_config_hash(config),
             status="started",
             tags=sandbox_tags,
-            vnc_url=_vnc_url(sandbox) if vnc_mode != "off" else None,
+            vnc_url=None,
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = cls(
@@ -356,7 +369,18 @@ class ComputerSandbox:
     def metadata(self) -> SandboxRef | None:
         return self._metadata
 
+    def __enter__(self) -> ComputerSandbox:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        try:
+            self.terminate()
+        finally:
+            self.client.close()
+
     def debug_urls(self) -> DebugUrls:
+        if self._sandbox is not None:
+            return DebugUrls(vnc=_vnc_url(self._sandbox), daemon=None, recording_dashboard=None)
         return self.debug.urls()
 
     def snapshot_filesystem(self) -> object:
@@ -397,7 +421,9 @@ class ComputerSandbox:
         self._sandbox.mount_image(path, image)
 
 
-def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, str]:
+def _daemon_environment(
+    config: ComputerConfig, *, vnc_mode: str, artifact_volume_mounted: bool = False
+) -> dict[str, str]:
     env = {
         "COMPUTER_USE_RUN_ID": config.run_id or "",
         "COMPUTER_USE_DESKTOP_WIDTH": str(config.desktop.resolution[0]),
@@ -407,6 +433,7 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_RECORDINGS_DIR": config.storage.recordings_dir,
         "COMPUTER_USE_ARTIFACTS_DIR": config.storage.artifacts_dir,
         "COMPUTER_USE_ARTIFACTS_PERSISTENT": str(config.storage.persist_artifacts).lower(),
+        "COMPUTER_USE_ARTIFACTS_VOLUME_MOUNTED": str(artifact_volume_mounted).lower(),
         "COMPUTER_USE_TRACE_DIR": config.storage.trace_dir,
         "COMPUTER_USE_WINDOW_MANAGER": config.desktop.window_manager,
         "COMPUTER_USE_IMAGE_PROFILE": config.resources.profile,
@@ -425,7 +452,9 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
-        "COMPUTER_USE_VNC_PASSWORD": _secrets.token_urlsafe(24) if vnc_mode != "off" else "",
+        "COMPUTER_USE_VNC_PASSWORD": (
+            config.vnc_password or _secrets.token_urlsafe(24) if vnc_mode != "off" else ""
+        ),
         "COMPUTER_USE_MAX_BATCH_ACTIONS": str(config.actions.max_batch_actions),
         "COMPUTER_USE_MAX_BATCH_DURATION_MS": str(config.actions.max_batch_duration_ms),
         "COMPUTER_USE_MAX_ACTIONS": ""
@@ -440,8 +469,25 @@ def _daemon_environment(config: ComputerConfig, *, vnc_mode: str) -> dict[str, s
         "COMPUTER_USE_MAX_RECORDING_SECONDS": ""
         if config.budgets.max_recording_seconds is None
         else str(config.budgets.max_recording_seconds),
+        "COMPUTER_USE_MAX_IDLE_SECONDS": ""
+        if config.budgets.max_idle_seconds is None
+        else str(config.budgets.max_idle_seconds),
     }
     return env
+
+
+def _has_artifact_volume_mount(volumes: dict[str, object], artifacts_dir: str) -> bool:
+    artifact_path = _normalize_mount_path(artifacts_dir)
+    for mount_path in volumes:
+        mount = _normalize_mount_path(str(mount_path))
+        if artifact_path == mount or artifact_path.startswith(f"{mount}/"):
+            return True
+    return False
+
+
+def _normalize_mount_path(path: str) -> str:
+    normalized = "/" + path.strip("/")
+    return normalized.rstrip("/") or "/"
 
 
 def _connect_token_parts(token_info: object) -> tuple[str, str | None]:

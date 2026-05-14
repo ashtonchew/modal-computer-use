@@ -12,12 +12,15 @@ from typing import Any
 
 from fastapi import APIRouter, Header, Request
 
+from modal_computer_use.actions import is_supported_key
 from modal_computer_use.adapters.provenance import (
     PROVIDER_ACTION_METADATA_KEY,
     PROVIDER_ACTION_REDACTIONS_METADATA_KEY,
 )
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.screenshots import enforce_screenshot_options_pixels
+from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
     ActionBatchRequest,
     ActionBatchResult,
@@ -47,6 +50,7 @@ from modal_computer_use.models import (
     ZoomAction,
     parse_action,
 )
+from modal_computer_use.redaction import sanitize_text
 from modal_computer_use.tracing import TraceWriter
 
 router = APIRouter(prefix="/v1/actions")
@@ -54,8 +58,8 @@ logger = logging.getLogger("modal_computer_use.daemon.actions")
 
 
 @router.post("/validate")
-async def validate(payload: ActionBatchRequest) -> ValidationResult:
-    errors = _validate_actions(payload.actions, width=None, height=None)
+async def validate(payload: ActionBatchRequest, request: Request) -> ValidationResult:
+    errors = _validate_batch_request(payload, request)
     return ValidationResult(ok=not errors, errors=errors)
 
 
@@ -65,19 +69,8 @@ async def run(
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ActionBatchResult:
-    cache = request.app.state.idempotency_cache
+    effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
-    _prune_idempotency_cache(request)
-    if idempotency_key and idempotency_key in cache:
-        entry = cache[idempotency_key]
-        if entry["fingerprint"] != request_fingerprint:
-            raise DaemonError(
-                "idempotency key was already used with a different request body",
-                status_code=409,
-                code="idempotency_key_conflict",
-            )
-        cache.move_to_end(idempotency_key)
-        return ActionBatchResult.model_validate(entry["result"])
     if len(payload.actions) > request.app.state.settings.max_batch_actions:
         raise DaemonError(
             "batch exceeds max_batch_actions",
@@ -86,11 +79,7 @@ async def run(
             details={"max_batch_actions": request.app.state.settings.max_batch_actions},
         )
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
-    validation_errors = _validate_actions(
-        payload.actions,
-        width=request.app.state.backend.width,
-        height=request.app.state.backend.height,
-    )
+    validation_errors = _validate_batch_request(payload, request)
     if validation_errors:
         raise DaemonError(
             "action validation failed",
@@ -98,21 +87,25 @@ async def run(
             code="action_validation_failed",
             details={"errors": validation_errors},
         )
-    timeout_errors = _validate_action_timeouts(
-        payload, request.app.state.settings.max_action_timeout_ms
-    )
-    if timeout_errors:
-        raise DaemonError(
-            "action timeout validation failed",
-            status_code=422,
-            code="action_validation_failed",
-            details={"errors": timeout_errors},
-        )
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
     screenshot = None
     batch_timed_out = False
+    screenshot_after_blocked = False
     async with request.app.state.input_lock:
+        cache = request.app.state.idempotency_cache
+        _prune_idempotency_cache(request)
+        if effective_idempotency_key and effective_idempotency_key in cache:
+            entry = cache[effective_idempotency_key]
+            if entry["fingerprint"] != request_fingerprint:
+                raise DaemonError(
+                    "idempotency key was already used with a different request body",
+                    status_code=409,
+                    code="idempotency_key_conflict",
+                )
+            cache.move_to_end(effective_idempotency_key)
+            return ActionBatchResult.model_validate(entry["result"])
+
         batch_timeout_ms = request.app.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
         for index, action in enumerate(payload.actions):
@@ -149,6 +142,7 @@ async def run(
             if _counts_against_action_budget(action):
                 budget_item = _reserve_action_budget(request, index=index, action_type=action.type)
                 if budget_item is not None:
+                    screenshot_after_blocked = True
                     results.append(budget_item)
                     _append_trace(
                         request, payload, action, budget_item, call_id=call_id, sequence=index
@@ -179,7 +173,13 @@ async def run(
                     },
                 ):
                     output = await asyncio.wait_for(
-                        _execute_action(action, request, call_id=call_id),
+                        _execute_action(
+                            action,
+                            request,
+                            call_id=call_id,
+                            payload=payload,
+                            batch_deadline=batch_deadline,
+                        ),
                         timeout=timeout_seconds,
                     )
                 elapsed_ms = (time.perf_counter() - start) * 1000
@@ -194,6 +194,8 @@ async def run(
                     output=output or {},
                 )
                 results.append(item)
+                if item.ok:
+                    budgets.touch_activity(request)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
                     "action executed",
@@ -207,6 +209,10 @@ async def run(
                         }
                     },
                 )
+                if _uses_post_action_delay(action) and (
+                    payload.screenshot_after or index < len(payload.actions) - 1
+                ):
+                    await _post_action_delay(request, batch_deadline)
             except TimeoutError:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
@@ -250,7 +256,9 @@ async def run(
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
-                error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                error_code = _exception_code(exc)
+                if error_code in {"budget_exceeded", "rate_limited"}:
+                    screenshot_after_blocked = True
                 error = _action_error_message(action, exc)
                 item = ActionItemResult(
                     index=index,
@@ -259,7 +267,7 @@ async def run(
                     elapsed_ms=elapsed_ms,
                     error_code=error_code,
                     error=error,
-                    output=_exception_output(exc, action),
+                    output=_exception_output(exc, action, request=request),
                 )
                 results.append(item)
                 _append_trace(request, payload, action, item, call_id=call_id, sequence=index)
@@ -276,9 +284,15 @@ async def run(
                         }
                     },
                 )
+                if (
+                    payload.continue_on_error
+                    and _uses_post_action_delay(action)
+                    and index < len(payload.actions) - 1
+                ):
+                    await _post_action_delay(request, batch_deadline)
                 if not payload.continue_on_error:
                     break
-        if payload.screenshot_after and not batch_timed_out:
+        if payload.screenshot_after and not batch_timed_out and not screenshot_after_blocked:
             options = payload.screenshot_options or ScreenshotOptions()
             start = time.perf_counter()
             timeout_ms = _effective_screenshot_after_timeout_ms(payload, request)
@@ -296,6 +310,15 @@ async def run(
                 timeout_seconds = min(timeout_ms / 1000, remaining_batch_seconds)
                 timeout_scope = "batch" if timeout_seconds < (timeout_ms / 1000) else "action"
                 try:
+                    enforce_screenshot_options_pixels(
+                        request,
+                        source_width=request.app.state.backend.width,
+                        source_height=request.app.state.backend.height,
+                        scale=options.scale,
+                    )
+                    screenshot_budget_error = budgets.screenshot_reservation_error(request)
+                    if screenshot_budget_error is not None:
+                        raise screenshot_budget_error
                     screenshot = await asyncio.wait_for(
                         request.app.state.backend.screenshot(
                             options,
@@ -305,8 +328,9 @@ async def run(
                         ),
                         timeout=timeout_seconds,
                     )
-                    request.app.state.screenshot_count += 1
+                    budgets.reserve_screenshot(request)
                     budgets.enforce(request, "screenshots", "artifacts")
+                    budgets.touch_activity(request)
                     _append_screenshot_after_trace(
                         request, payload, screenshot, None, call_id=call_id
                     )
@@ -325,7 +349,7 @@ async def run(
                     _append_screenshot_after_trace(request, payload, None, item, call_id=call_id)
                 except Exception as exc:
                     elapsed_ms = (time.perf_counter() - start) * 1000
-                    error_code = exc.code if isinstance(exc, DaemonError) else "action_failed"
+                    error_code = _exception_code(exc)
                     failed_screenshot = screenshot
                     screenshot = None
                     item = ActionItemResult(
@@ -334,33 +358,45 @@ async def run(
                         ok=False,
                         elapsed_ms=elapsed_ms,
                         error_code=error_code,
-                        error=str(exc),
-                        output=_exception_output(exc),
+                        error=sanitize_text(str(exc)),
+                        output=_exception_output(exc, request=request),
                     )
                     results.append(item)
                     _append_screenshot_after_trace(
                         request, payload, failed_screenshot, item, call_id=call_id
                     )
-    result = ActionBatchResult(
-        ok=all(item.ok for item in results),
-        call_id=call_id,
-        results=results,
-        screenshot=screenshot,
-        timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
-    )
-    if idempotency_key:
-        cache[idempotency_key] = {
-            "fingerprint": request_fingerprint,
-            "created_at": time.monotonic(),
-            "result": result.model_dump(mode="json"),
-        }
-        _prune_idempotency_cache(request)
-    return result
+        result = ActionBatchResult(
+            ok=all(item.ok for item in results),
+            call_id=call_id,
+            results=results,
+            screenshot=screenshot,
+            timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
+        )
+        if effective_idempotency_key:
+            cache[effective_idempotency_key] = {
+                "fingerprint": request_fingerprint,
+                "created_at": time.monotonic(),
+                "result": result.model_dump(mode="json"),
+            }
+            _prune_idempotency_cache(request)
+        return result
+
+
+def _effective_idempotency_key(
+    payload: ActionBatchRequest, header_key: str | None
+) -> str | None:
+    if header_key and payload.idempotency_key and header_key != payload.idempotency_key:
+        raise DaemonError(
+            "Idempotency-Key header and body idempotency_key differ",
+            status_code=409,
+            code="idempotency_key_conflict",
+        )
+    return header_key or payload.idempotency_key
 
 
 def _request_fingerprint(payload: ActionBatchRequest) -> str:
     encoded = json.dumps(
-        payload.model_dump(mode="json"),
+        payload.model_dump(mode="json", exclude={"idempotency_key"}),
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -393,14 +429,108 @@ def _validate_action_timeouts(
             "max_action_timeout_ms "
             f"{payload.max_action_timeout_ms} exceeds configured maximum {max_action_timeout_ms}"
         )
-    for index, action in enumerate(payload.actions):
+    for action_path, action in _iter_timeout_actions(payload.actions):
         timeout_ms = getattr(action, "timeout_ms", None)
         if timeout_ms is not None and timeout_ms > max_action_timeout_ms:
             errors.append(
-                f"actions[{index}] timeout_ms {timeout_ms} exceeds configured maximum "
+                f"{action_path} timeout_ms {timeout_ms} exceeds configured maximum "
                 f"{max_action_timeout_ms}"
             )
     return errors
+
+
+def _validate_batch_request(payload: ActionBatchRequest, request: Request) -> list[str]:
+    errors = _validate_actions(
+        payload.actions,
+        width=request.app.state.backend.width,
+        height=request.app.state.backend.height,
+    )
+    if len(payload.actions) > request.app.state.settings.max_batch_actions:
+        errors.append(
+            "batch exceeds max_batch_actions "
+            f"{request.app.state.settings.max_batch_actions}"
+        )
+    errors.extend(
+        _validate_action_timeouts(payload, request.app.state.settings.max_action_timeout_ms)
+    )
+    errors.extend(_validate_screenshot_pixel_budget(payload, request))
+    return errors
+
+
+def _validate_screenshot_pixel_budget(
+    payload: ActionBatchRequest, request: Request
+) -> list[str]:
+    errors: list[str] = []
+    backend = request.app.state.backend
+    for action_path, action in _iter_action_tree(payload.actions):
+        if isinstance(action, ScreenshotAction):
+            options = action.options or ScreenshotOptions()
+            errors.extend(
+                _screenshot_pixel_errors(
+                    request,
+                    source_width=backend.width,
+                    source_height=backend.height,
+                    scale=options.scale,
+                    label=action_path,
+                )
+            )
+        elif isinstance(action, ZoomAction):
+            options = action.options or ScreenshotOptions(scale=action.scale)
+            errors.extend(
+                _screenshot_pixel_errors(
+                    request,
+                    source_width=action.region.width,
+                    source_height=action.region.height,
+                    scale=options.scale,
+                    label=action_path,
+                )
+            )
+    if payload.screenshot_after:
+        options = payload.screenshot_options or ScreenshotOptions()
+        errors.extend(
+            _screenshot_pixel_errors(
+                request,
+                source_width=backend.width,
+                source_height=backend.height,
+                scale=options.scale,
+                label="screenshot_after",
+            )
+        )
+    return errors
+
+
+def _screenshot_pixel_errors(
+    request: Request,
+    *,
+    source_width: int,
+    source_height: int,
+    scale: float,
+    label: str,
+) -> list[str]:
+    output_pixels = round(source_width * scale) * round(source_height * scale)
+    max_pixels = request.app.state.settings.screenshot_max_pixels
+    if output_pixels <= max_pixels:
+        return []
+    return [
+        f"{label} screenshot output {output_pixels} pixels exceeds "
+        f"max screenshot pixels {max_pixels}"
+    ]
+
+
+def _iter_timeout_actions(actions: list[Any], *, path: str = "actions"):
+    yield from _iter_action_tree(actions, path=path)
+
+
+def _iter_action_tree(actions: list[Any], *, path: str = "actions"):
+    for index, action in enumerate(actions):
+        action_path = f"{path}[{index}]"
+        yield action_path, action
+        if isinstance(action, HoldKeyAction) and action.actions:
+            nested = []
+            for nested_action in action.actions:
+                with suppress(Exception):
+                    nested.append(parse_action(nested_action))
+            yield from _iter_action_tree(nested, path=f"{action_path}.actions")
 
 
 def _effective_action_timeout_ms(
@@ -435,6 +565,20 @@ def _budget_kinds_for_action(action: Any) -> tuple[budgets.BudgetKind, ...]:
     return ()
 
 
+def _uses_post_action_delay(action: Any) -> bool:
+    return not isinstance(action, WaitAction | ScreenshotAction | ZoomAction | CursorPositionAction)
+
+
+async def _post_action_delay(request: Request, batch_deadline: float) -> None:
+    delay_ms = request.app.state.settings.post_action_delay_ms
+    if delay_ms <= 0:
+        return
+    remaining_seconds = _remaining_seconds(batch_deadline)
+    if remaining_seconds <= 0:
+        return
+    await asyncio.sleep(min(delay_ms / 1000, remaining_seconds))
+
+
 def _reserve_action_budget(
     request: Request,
     *,
@@ -456,18 +600,33 @@ def _reserve_action_budget(
     return None
 
 
-def _exception_output(exc: Exception, action: Any | None = None) -> dict[str, Any]:
+def _exception_code(exc: Exception) -> str:
+    if isinstance(exc, DaemonError):
+        return exc.code
+    if isinstance(exc, BudgetExceededError):
+        return "budget_exceeded"
+    return "action_failed"
+
+
+def _exception_output(
+    exc: Exception, action: Any | None = None, *, request: Request | None = None
+) -> dict[str, Any]:
     if isinstance(exc, DaemonError):
         output: dict[str, Any] = {"code": exc.code}
         output.update(exc.details)
         if isinstance(action, TypeAction):
             return _redact_type_payload(output, action)
         return output
+    if isinstance(exc, BudgetExceededError):
+        output = {"code": "budget_exceeded"}
+        if request is not None:
+            output["budgets"] = budgets.snapshot(request)
+        return output
     return {}
 
 
 def _action_error_message(action: Any, exc: Exception) -> str:
-    message = str(exc)
+    message = sanitize_text(str(exc))
     if isinstance(action, TypeAction):
         message = message.replace(action.text, "[redacted typed text]")
     return message
@@ -522,7 +681,14 @@ def _screenshot_after_timeout_result(
     )
 
 
-async def _execute_action(action: Any, request: Request, *, call_id: str) -> dict[str, Any]:
+async def _execute_action(
+    action: Any,
+    request: Request,
+    *,
+    call_id: str,
+    payload: ActionBatchRequest | None = None,
+    batch_deadline: float | None = None,
+) -> dict[str, Any]:
     backend = request.app.state.backend
     if isinstance(action, MoveAction):
         point = await backend.mouse_move(action.x, action.y)
@@ -569,10 +735,10 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
             y=action.y,
         )
         return result.output
-    if isinstance(action, MouseDownAction):
-        result = await backend.mouse_down(action.button, action.x, action.y)
-        return result.output
-    if isinstance(action, MouseUpAction):
+    if isinstance(action, MouseDownAction | MouseUpAction):
+        if action.type == "mouse_down":
+            result = await backend.mouse_down(action.button, action.x, action.y)
+            return result.output
         result = await backend.mouse_up(action.button, action.x, action.y)
         return result.output
     if isinstance(action, TypeAction):
@@ -593,8 +759,30 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
         try:
             nested_results: list[dict[str, Any]] = []
             for nested_action in _nested_hold_actions(action):
+                if _counts_against_action_budget(nested_action):
+                    budgets.reserve_action(request)
                 nested_start = time.perf_counter()
-                nested_output = await _execute_action(nested_action, request, call_id=call_id)
+                nested_call = _execute_action(
+                    nested_action,
+                    request,
+                    call_id=call_id,
+                    payload=payload,
+                    batch_deadline=batch_deadline,
+                )
+                if payload is not None:
+                    nested_timeout_seconds = (
+                        _effective_action_timeout_ms(nested_action, payload, request) / 1000
+                    )
+                    if batch_deadline is not None:
+                        nested_timeout_seconds = min(
+                            nested_timeout_seconds,
+                            _remaining_seconds(batch_deadline),
+                        )
+                    nested_output = await asyncio.wait_for(
+                        nested_call, timeout=nested_timeout_seconds
+                    )
+                else:
+                    nested_output = await nested_call
                 nested_results.append(
                     {
                         "type": nested_action.type,
@@ -613,21 +801,40 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
         return {"duration_ms": action.duration_ms}
     if isinstance(action, ScreenshotAction):
         options = action.options or ScreenshotOptions()
+        enforce_screenshot_options_pixels(
+            request,
+            source_width=request.app.state.backend.width,
+            source_height=request.app.state.backend.height,
+            scale=options.scale,
+        )
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await backend.screenshot(
             options, artifact_store=request.app.state.artifacts, call_id=call_id
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         return shot.model_dump(mode="json")
     if isinstance(action, ZoomAction):
         options = action.options or ScreenshotOptions(scale=action.scale, show_cursor=True)
         options.scale = action.scale
+        region = Region.model_validate(action.region)
+        enforce_screenshot_options_pixels(
+            request,
+            source_width=region.width,
+            source_height=region.height,
+            scale=options.scale,
+        )
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await backend.screenshot(
             options,
-            region=Region.model_validate(action.region),
+            region=region,
             artifact_store=request.app.state.artifacts,
             call_id=call_id,
         )
-        request.app.state.screenshot_count += 1
+        budgets.reserve_screenshot(request)
         return shot.model_dump(mode="json")
     if isinstance(action, CursorPositionAction):
         point = await backend.mouse_position()
@@ -640,17 +847,26 @@ async def _execute_action(action: Any, request: Request, *, call_id: str) -> dic
     )
 
 
-def _validate_actions(actions: list[Any], *, width: int | None, height: int | None) -> list[str]:
+def _validate_actions(
+    actions: list[Any],
+    *,
+    width: int | None,
+    height: int | None,
+    path: str = "actions",
+) -> list[str]:
     errors: list[str] = []
     for index, action in enumerate(actions):
+        action_path = f"{path}[{index}]"
+        key_errors = _key_validation_errors(action, field=action_path)
+        errors.extend(key_errors)
         for point in _action_points(action):
             if width is not None and point.x >= width:
                 errors.append(
-                    f"actions[{index}] x coordinate {point.x} exceeds desktop width {width}"
+                    f"{action_path} x coordinate {point.x} exceeds desktop width {width}"
                 )
             if height is not None and point.y >= height:
                 errors.append(
-                    f"actions[{index}] y coordinate {point.y} exceeds desktop height {height}"
+                    f"{action_path} y coordinate {point.y} exceeds desktop height {height}"
                 )
         region = getattr(action, "region", None)
         if (
@@ -659,39 +875,51 @@ def _validate_actions(actions: list[Any], *, width: int | None, height: int | No
             and height is not None
             and (region.right > width or region.bottom > height)
         ):
-            errors.append(f"actions[{index}] region extends beyond desktop geometry")
+            errors.append(f"{action_path} region extends beyond desktop geometry")
         if isinstance(action, HoldKeyAction) and action.actions:
+            parsed_nested = []
             for nested_index, nested_action in enumerate(action.actions):
                 try:
                     parsed = parse_action(nested_action)
                 except Exception as exc:
                     errors.append(
-                        f"actions[{index}].actions[{nested_index}] is invalid: {exc}"
+                        f"{action_path}.actions[{nested_index}] is invalid: {exc}"
                     )
                     continue
-                for point in _action_points(parsed):
-                    if width is not None and point.x >= width:
-                        errors.append(
-                            f"actions[{index}].actions[{nested_index}] x coordinate "
-                            f"{point.x} exceeds desktop width {width}"
-                        )
-                    if height is not None and point.y >= height:
-                        errors.append(
-                            f"actions[{index}].actions[{nested_index}] y coordinate "
-                            f"{point.y} exceeds desktop height {height}"
-                        )
-                nested_region = getattr(parsed, "region", None)
-                if (
-                    isinstance(nested_region, Region)
-                    and width is not None
-                    and height is not None
-                    and (nested_region.right > width or nested_region.bottom > height)
-                ):
-                    errors.append(
-                        f"actions[{index}].actions[{nested_index}] region extends beyond "
-                        "desktop geometry"
-                    )
+                parsed_nested.append(parsed)
+            errors.extend(
+                _validate_actions(
+                    parsed_nested,
+                    width=width,
+                    height=height,
+                    path=f"{action_path}.actions",
+                )
+            )
     return errors
+
+
+def _key_validation_errors(action: Any, *, field: str) -> list[str]:
+    keys: list[tuple[str, str]] = []
+    if isinstance(action, KeyPressAction):
+        keys.append((f"{field}.key", action.key))
+        keys.extend(
+            (f"{field}.modifiers[{index}]", key)
+            for index, key in enumerate(action.modifiers)
+        )
+    elif isinstance(action, HotkeyAction):
+        keys.extend((f"{field}.keys[{index}]", key) for index, key in enumerate(action.keys))
+    elif isinstance(action, HoldKeyAction):
+        keys.append((f"{field}.key", action.key))
+    elif isinstance(action, ClickAction | DoubleClickAction | TripleClickAction | DragAction):
+        keys.extend(
+            (f"{field}.modifiers[{index}]", key)
+            for index, key in enumerate(action.modifiers)
+        )
+    return [
+        f"{path} is not a supported key: {key}"
+        for path, key in keys
+        if not is_supported_key(key)
+    ]
 
 
 def _nested_hold_actions(action: HoldKeyAction) -> list[Any]:
@@ -727,10 +955,10 @@ def _append_trace(
     if not request.app.state.settings.trace_actions:
         return
     writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
-    normalized = _redacted_action(action)
+    normalized, redactions = _redacted_action_and_paths(action)
     provider_action, provider_redactions = _provider_trace_metadata(normalized)
-    redactions = ["text"] if isinstance(action, TypeAction) else []
     redactions.extend(provider_redactions)
+    redactions = list(dict.fromkeys(redactions))
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
@@ -811,11 +1039,111 @@ def _coordinate_space(result: ActionItemResult) -> Any:
 
 
 def _redacted_action(action: Any) -> dict[str, Any]:
+    return _redacted_action_and_paths(action)[0]
+
+
+def _redacted_action_and_paths(action: Any) -> tuple[dict[str, Any], list[str]]:
     data = action.model_dump(mode="json")
-    if isinstance(action, TypeAction):
-        text = action.text
-        data["text"] = {"redacted": True, "length": len(text)}
-    return data
+    redacted, redactions = _redact_action_payload(data)
+    return redacted if isinstance(redacted, dict) else data, redactions
+
+
+def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str]]:
+    redactions: list[str] = []
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        is_type_action = value.get("type") == "type" and isinstance(value.get("text"), str)
+        for key, item in value.items():
+            item_path = f"{path}.{key}" if path else key
+            if key == PROVIDER_ACTION_METADATA_KEY:
+                redacted[key] = item
+                continue
+            if is_type_action and key == "text":
+                redacted[key] = _redacted_text(item)
+                redactions.append(item_path)
+                continue
+            if _is_sensitive_trace_key(str(key)):
+                redacted[key] = _redacted_sensitive_value(item)
+                redactions.append(item_path)
+                continue
+            redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
+            redacted[key] = redacted_item
+            redactions.extend(child_redactions)
+        return redacted, redactions
+    if isinstance(value, list):
+        redacted_items = []
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]" if path else f"[{index}]"
+            redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
+            redacted_items.append(redacted_item)
+            redactions.extend(child_redactions)
+        return redacted_items, redactions
+    if isinstance(value, str):
+        sanitized = sanitize_text(value)
+        if sanitized != value:
+            return sanitized, [path] if path else []
+    return value, []
+
+
+def _redacted_text(text: str) -> dict[str, Any]:
+    return {
+        "redacted": True,
+        "length": len(text),
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
+
+
+_SENSITIVE_TRACE_KEYS = {
+    "api_key",
+    "artifact_bytes",
+    "artifact_uri",
+    "authorization",
+    "bearer",
+    "bytes",
+    "clipboard",
+    "clipboard_text",
+    "connect_token",
+    "content",
+    "data",
+    "data_base64",
+    "image",
+    "image_bytes",
+    "no_vnc_url",
+    "novnc_url",
+    "password",
+    "raw_path",
+    "screenshot",
+    "screenshot_bytes",
+    "stderr",
+    "stdout",
+    "text",
+    "token",
+    "typed_text",
+    "url",
+    "vnc_url",
+}
+
+
+def _is_sensitive_trace_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return normalized in _SENSITIVE_TRACE_KEYS or normalized.endswith("_token")
+
+
+def _redacted_sensitive_value(value: Any) -> dict[str, Any]:
+    if _is_redaction_marker(value):
+        return value
+    marker: dict[str, Any] = {"redacted": True}
+    if isinstance(value, str):
+        marker["length"] = len(value)
+    elif isinstance(value, bytes):
+        marker["size_bytes"] = len(value)
+    elif isinstance(value, list | tuple | dict):
+        marker["items"] = len(value)
+    return marker
+
+
+def _is_redaction_marker(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("redacted") is True
 
 
 def _provider_trace_metadata(
@@ -833,4 +1161,10 @@ def _provider_trace_metadata(
         for item in raw_redactions
         if isinstance(item, str) and item
     ]
-    return provider_action if isinstance(provider_action, dict) else None, redactions
+    if isinstance(provider_action, dict):
+        provider_action, inferred_redactions = _redact_action_payload(
+            provider_action, path="provider_action"
+        )
+        redactions.extend(inferred_redactions)
+        return provider_action if isinstance(provider_action, dict) else None, redactions
+    return None, redactions

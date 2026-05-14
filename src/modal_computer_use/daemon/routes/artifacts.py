@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
-from fastapi.responses import Response
+import tempfile
+from pathlib import Path
 
+from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
+
+from modal_computer_use.artifacts import normalize_artifact_path
+from modal_computer_use.daemon import budgets
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.errors import ArtifactPathError
 from modal_computer_use.models import ArtifactInfo, ArtifactSyncResult
 
@@ -26,24 +32,59 @@ async def sync(request: Request) -> ArtifactSyncResult:
 
 
 @router.get("/{path:path}")
-async def read_artifact(path: str, request: Request) -> Response:
-    data = request.app.state.artifacts.read_bytes(path)
-    return Response(data, media_type="application/octet-stream")
+async def read_artifact(path: str, request: Request) -> FileResponse:
+    target = request.app.state.artifacts.resolve(path)
+    if not target.is_file():
+        raise FileNotFoundError(path)
+    return FileResponse(target, media_type="application/octet-stream")
 
 
 @router.put("/{path:path}")
 async def write_artifact(path: str, request: Request) -> ArtifactInfo:
     try:
-        data = await request.body()
+        public_path = normalize_artifact_path(path)
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                incoming_size = int(content_length)
+            except ValueError as exc:
+                raise DaemonError(
+                    "invalid Content-Length header",
+                    status_code=400,
+                    code="invalid_content_length",
+                ) from exc
+            budgets.enforce_artifact_write(request, public_path, incoming_size)
+        store = request.app.state.artifacts
+        target = store.resolve(public_path)
+        temp_dir = store.resolve(".control/uploads", allow_empty=False, public=False)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        total = 0
         with request.app.state.tracer.span(
             "daemon.artifact.write",
-            {"artifact.size_bytes": len(data)},
+            {"artifact.has_content_length": content_length is not None},
         ):
-            return request.app.state.artifacts.write_bytes(
-                path,
-                data,
-                content_type=request.headers.get("content-type"),
-            )
+            with tempfile.NamedTemporaryFile(dir=temp_dir, delete=False) as handle:
+                temp_path = Path(handle.name)
+                try:
+                    async for chunk in request.stream():
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        budgets.enforce_artifact_write(request, public_path, total)
+                        handle.write(chunk)
+                except Exception:
+                    temp_path.unlink(missing_ok=True)
+                    raise
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.replace(target)
+            info = store._info(target, public_path=public_path)
+            content_type = request.headers.get("content-type")
+            if content_type:
+                info.content_type = content_type
+            store.append_manifest(info)
+            budgets.enforce(request, "artifacts")
+            budgets.touch_activity(request)
+            return info
     except ArtifactPathError:
         raise
 

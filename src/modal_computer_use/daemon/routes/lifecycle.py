@@ -11,6 +11,20 @@ router = APIRouter(prefix="/v1/computer")
 @router.get("/status")
 async def status(request: Request) -> ComputerStatus:
     backend = request.app.state.backend
+    process_statuses = request.app.state.supervisor.statuses()
+    if process_statuses and all(
+        process.status == "stopped" for process in process_statuses.values()
+    ):
+        return ComputerStatus(
+            status="stopped",
+            ready=False,
+            display=request.app.state.settings.display,
+            width=backend.width,
+            height=backend.height,
+            processes=process_statuses,
+            resources={"profile": request.app.state.settings.image_profile},
+            budgets=budgets.snapshot(request),
+        )
     ready, _ = await backend.ready()
     return ComputerStatus(
         status="running" if ready else "degraded",
@@ -18,7 +32,7 @@ async def status(request: Request) -> ComputerStatus:
         display=request.app.state.settings.display,
         width=backend.width,
         height=backend.height,
-        processes=request.app.state.supervisor.statuses(),
+        processes=process_statuses,
         resources={"profile": request.app.state.settings.image_profile},
         budgets=budgets.snapshot(request),
     )

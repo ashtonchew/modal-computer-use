@@ -168,6 +168,38 @@ def test_hold_key_nested_action_validation_uses_desktop_bounds(test_client) -> N
     assert "actions[0].actions[0] x coordinate 2000" in response.json()["details"]["errors"][0]
 
 
+def test_hold_key_nested_actions_count_against_action_budget(test_client, app) -> None:
+    app.state.settings = type(app.state.settings)(
+        backend="mock",
+        artifacts_dir=app.state.settings.artifacts_dir,
+        recordings_dir=app.state.settings.recordings_dir,
+        local_token="dev",
+        max_actions=1,
+    )
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "move", "x": 1, "y": 2},
+                        {"type": "move", "x": 3, "y": 4},
+                    ],
+                }
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert result["results"][0]["error_code"] == "budget_exceeded"
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
+    assert app.state.action_count == 1
+
+
 def test_drag_action_passes_requested_button_to_backend(test_client, app) -> None:
     seen: dict[str, object] = {}
     original = app.state.backend.mouse_drag

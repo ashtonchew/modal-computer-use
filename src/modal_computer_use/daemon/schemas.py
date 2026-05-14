@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -18,7 +18,16 @@ class TextRequest(Schema):
 
 class TypeRequest(TextRequest):
     delay_ms: int = Field(default=10, ge=0, le=10_000)
-    method: str = "auto"
+    method: Literal["auto", "xdotool", "clipboard"] = "auto"
+
+    @field_validator("text")
+    @classmethod
+    def _safe_text(cls, value: str) -> str:
+        for char in value:
+            code = ord(char)
+            if code < 32 and char not in ("\n", "\r"):
+                raise ValueError("control characters are not allowed; use keypress/hotkey")
+        return value
 
 
 class KeyRequest(Schema):

@@ -4,6 +4,7 @@ import importlib.util
 import os
 import subprocess
 import sys
+import tomllib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,7 +16,16 @@ def _has_modal_auth() -> bool:
     if os.getenv("MODAL_TOKEN_ID") and os.getenv("MODAL_TOKEN_SECRET"):
         return True
     config_path = Path(os.getenv("MODAL_CONFIG_PATH", "~/.modal.toml")).expanduser()
-    return config_path.is_file()
+    if not config_path.is_file():
+        return False
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    profiles = [config]
+    if isinstance(config.get("profile"), dict):
+        profiles.extend(item for item in config["profile"].values() if isinstance(item, dict))
+    return any(profile.get("token_id") and profile.get("token_secret") for profile in profiles)
 
 
 def _skip_without_modal_auth() -> None:

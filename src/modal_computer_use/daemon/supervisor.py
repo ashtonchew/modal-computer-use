@@ -25,8 +25,11 @@ class Supervisor:
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.log_dir = settings.artifacts_dir / "logs"
         self.commands: dict[str, list[str]] = {}
+        self.running = False
 
     async def start(self) -> None:
+        self.running = True
+        self.started_at = datetime.now(UTC)
         if self.settings.backend == "mock":
             return
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -70,6 +73,7 @@ class Supervisor:
             )
 
     async def stop(self) -> None:
+        self.running = False
         for name in reversed(self.names):
             process = self.processes.get(name)
             if process is None or process.poll() is not None:
@@ -105,7 +109,7 @@ class Supervisor:
     def status(self, name: str) -> ProcessStatus:
         process = self.processes.get(name)
         if self.settings.backend == "mock" and name in self.names:
-            state = "running"
+            state = "running" if self.running else "stopped"
         elif process is None:
             state = "stopped" if name in self.names else "unknown"
         else:
@@ -147,11 +151,11 @@ class Supervisor:
         )
 
     def _vnc_password_file(self) -> Path:
-        secret_dir = self.settings.artifacts_dir / ".secrets"
+        secret_dir = self.settings.runtime_dir / ".secrets"
         secret_dir.mkdir(parents=True, exist_ok=True)
         secret_dir.chmod(0o700)
         password_file = secret_dir / "x11vnc.pass"
-        if not password_file.exists():
+        if self.settings.vnc_password is not None or not password_file.exists():
             password = self.settings.vnc_password or secrets.token_urlsafe(24)
             password_file.write_text(password)
             password_file.chmod(0o600)

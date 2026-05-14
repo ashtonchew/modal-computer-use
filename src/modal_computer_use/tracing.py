@@ -7,8 +7,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError
 
+from .artifacts import normalize_artifact_path
+from .errors import ArtifactPathError
 from .models import ActionBatchResult, CoordinateSpace, Point, Region, TraceEntry, parse_action
 from .observability import get_tracer
+from .redaction import sanitize_text
 
 if TYPE_CHECKING:
     from .sandbox import ComputerSandbox
@@ -284,6 +287,18 @@ class ComputerTrace:
                     )
                 )
                 continue
+            if _contains_redacted_type_action(normalized):
+                steps.append(
+                    ReplayStep(
+                        kind="skip",
+                        line=record.line,
+                        action_type=action_type,
+                        action=normalized,
+                        reason="nested typed text is redacted",
+                        status="skipped" if not dry_run else "planned",
+                    )
+                )
+                continue
 
             if dry_run:
                 steps.append(
@@ -316,7 +331,7 @@ class ComputerTrace:
                         status="failed",
                         error={
                             "code": "replay_action_failed",
-                            "message": str(exc),
+                            "message": sanitize_text(str(exc)),
                             "type": type(exc).__name__,
                         },
                     )
@@ -338,7 +353,7 @@ class ComputerTrace:
                         result=result_payload,
                         error={
                             "code": first.error_code or "replay_action_failed",
-                            "message": first.error or "trace replay action failed",
+                            "message": sanitize_text(first.error or "trace replay action failed"),
                         },
                     )
                 )
@@ -414,6 +429,12 @@ def _validate_normalized_action(
                 )
             ]
         return [], []
+
+    nested_errors, nested_warnings = _validate_nested_type_redactions(
+        normalized, redactions, line=line
+    )
+    if nested_errors:
+        return nested_errors, nested_warnings
 
     try:
         parse_action(normalized)
@@ -632,10 +653,75 @@ def _is_safe_artifact_uri(uri: str) -> bool:
     if not uri.startswith("artifact://"):
         return False
     path = uri.removeprefix("artifact://")
-    if not path or path.startswith("/") or "\\" in path:
+    if not path:
         return False
-    parts = path.split("/")
-    return all(part not in {"", ".", ".."} for part in parts)
+    try:
+        normalize_artifact_path(path, public=True)
+    except ArtifactPathError:
+        return False
+    return True
+
+
+def _validate_nested_type_redactions(
+    value: Any, redactions: list[str], *, line: int, path: str = ""
+) -> tuple[list[TraceValidationIssue], list[TraceValidationIssue]]:
+    if isinstance(value, dict):
+        if value.get("type") == "type":
+            text = value.get("text")
+            text_path = f"{path}.text" if path else "text"
+            if isinstance(text, str):
+                return [
+                    TraceValidationIssue(
+                        code="unsafe_typed_text",
+                        message=f"{text_path} must be redacted",
+                        line=line,
+                    )
+                ], []
+            if not _is_redacted_text(text):
+                return [
+                    TraceValidationIssue(
+                        code="invalid_redacted_text",
+                        message=f"{text_path} must be redacted text metadata",
+                        line=line,
+                    )
+                ], []
+            if path and text_path not in redactions:
+                return [
+                    TraceValidationIssue(
+                        code="missing_text_redaction",
+                        message=f'redactions must include "{text_path}"',
+                        line=line,
+                    )
+                ], []
+            return [], []
+        for key, item in value.items():
+            item_path = f"{path}.{key}" if path else key
+            child_errors, child_warnings = _validate_nested_type_redactions(
+                item, redactions, line=line, path=item_path
+            )
+            if child_errors:
+                return child_errors, child_warnings
+        return [], []
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]" if path else f"[{index}]"
+            child_errors, child_warnings = _validate_nested_type_redactions(
+                item, redactions, line=line, path=item_path
+            )
+            if child_errors:
+                return child_errors, child_warnings
+        return [], []
+    return [], []
+
+
+def _contains_redacted_type_action(value: Any) -> bool:
+    if isinstance(value, dict):
+        if value.get("type") == "type" and _is_redacted_text(value.get("text")):
+            return True
+        return any(_contains_redacted_type_action(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_redacted_type_action(item) for item in value)
+    return False
 
 
 def _is_redacted_text(value: Any) -> bool:

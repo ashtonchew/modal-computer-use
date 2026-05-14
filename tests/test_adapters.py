@@ -37,8 +37,10 @@ class RecordingActions:
         self.applied: list[dict[str, Any]] = []
         self.runs: list[dict[str, Any]] = []
 
-    def apply(self, action: Any) -> ActionResult:
-        self.applied.append(action.model_dump(mode="json"))
+    def apply(self, action: Any, *, source: str = "sdk") -> ActionResult:
+        dumped = action.model_dump(mode="json")
+        dumped["source"] = source
+        self.applied.append(dumped)
         return ActionResult(ok=True, output={"type": action.type})
 
     def run(
@@ -138,6 +140,40 @@ def test_openai_adapter_fixture_matrix() -> None:
     assert run["actions"][6]["end_y"] == 4
     assert run["actions"][6]["modifiers"] == ["shift"]
     assert run["actions"][7]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+
+
+def test_provider_apply_many_forwards_batch_options() -> None:
+    openai_computer = RecordingComputer()
+    OpenAIAdapter(openai_computer).apply_many(
+        [{"type": "move", "x": 1, "y": 2}],
+        continue_on_error=True,
+        screenshot_after=True,
+    )
+
+    anthropic_computer = RecordingComputer()
+    AnthropicAdapter(anthropic_computer, tool_version="computer_20241022").apply_many(
+        [{"action": "mouse_move", "coordinate": [3, 4]}],
+        continue_on_error=True,
+        screenshot_after=True,
+    )
+
+    assert openai_computer.actions.runs[0]["continue_on_error"] is True
+    assert openai_computer.actions.runs[0]["screenshot_after"] is True
+    assert anthropic_computer.actions.runs[0]["continue_on_error"] is True
+    assert anthropic_computer.actions.runs[0]["screenshot_after"] is True
+
+
+def test_provider_apply_forwards_source_to_single_action_calls() -> None:
+    openai_computer = RecordingComputer()
+    OpenAIAdapter(openai_computer).apply({"type": "move", "x": 1, "y": 2})
+
+    anthropic_computer = RecordingComputer()
+    AnthropicAdapter(anthropic_computer, tool_version="computer_20241022").apply(
+        {"action": "mouse_move", "coordinate": [3, 4]}
+    )
+
+    assert openai_computer.actions.applied[0]["source"] == "openai-adapter"
+    assert anthropic_computer.actions.applied[0]["source"] == "anthropic-adapter"
 
 
 def test_openai_unknown_action_fails_closed() -> None:
@@ -416,6 +452,7 @@ def test_action_executor_applies_coordinate_space_to_all_point_shapes() -> None:
             {"type": "scroll", "x": 14, "y": 15, "direction": "down", "amount": 1},
             {"type": "drag", "start_x": 1, "start_y": 2, "end_x": 3, "end_y": 4},
             {"type": "drag", "path": [{"x": 5, "y": 6}, {"x": 7, "y": 8}]},
+            {"type": "zoom", "region": {"x": 10, "y": 10, "width": 20, "height": 20}},
         ]
     )
 
@@ -426,6 +463,39 @@ def test_action_executor_applies_coordinate_space_to_all_point_shapes() -> None:
     assert (actions[3]["start_x"], actions[3]["start_y"]) == (2, 4)
     assert (actions[3]["end_x"], actions[3]["end_y"]) == (6, 8)
     assert actions[4]["path"] == [{"x": 10, "y": 12}, {"x": 14, "y": 16}]
+    assert actions[5]["region"] == {"x": 20, "y": 20, "width": 40, "height": 40}
+
+
+def test_action_executor_applies_coordinate_space_to_nested_hold_actions() -> None:
+    computer = RecordingComputer()
+    executor = ActionExecutor(
+        computer,
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=200,
+            desktop_height=100,
+            image_width=100,
+            image_height=50,
+        ),
+    )
+
+    executor.apply_many(
+        [
+            {
+                "type": "hold_key",
+                "key": "shift",
+                "actions": [
+                    {"type": "move", "x": 10, "y": 11},
+                    {"type": "drag", "path": [{"x": 5, "y": 6}, {"x": 7, "y": 8}]},
+                    {"type": "zoom", "region": {"x": 10, "y": 10, "width": 20, "height": 20}},
+                ],
+            }
+        ]
+    )
+
+    nested = computer.actions.runs[0]["actions"][0]["actions"]
+    assert (nested[0]["x"], nested[0]["y"]) == (20, 22)
+    assert nested[1]["path"] == [{"x": 10, "y": 12}, {"x": 14, "y": 16}]
+    assert nested[2]["region"] == {"x": 20, "y": 20, "width": 40, "height": 40}
 
 
 def test_action_executor_policy_sees_transformed_action_and_denies_before_execution() -> None:
@@ -459,3 +529,30 @@ def test_action_executor_policy_sees_transformed_action_and_denies_before_execut
 
     assert seen[-1]["x"] == 20
     assert computer.actions.runs == []
+
+
+def test_action_executor_policy_sees_nested_hold_actions_before_execution() -> None:
+    computer = RecordingComputer()
+    seen: list[dict[str, Any]] = []
+
+    def deny_nested_move(action: Any, _: dict[str, Any]) -> ActionDecision:
+        seen.append(action.model_dump(mode="json"))
+        if action.type == "move":
+            return ActionDecision(decision="deny", reason="nested move denied")
+        return ActionDecision(decision="allow")
+
+    executor = ActionExecutor(computer, before_action=deny_nested_move)
+
+    with pytest.raises(UnsupportedActionError, match="nested move denied"):
+        executor.apply_many(
+            [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [{"type": "move", "x": 10, "y": 20}],
+                }
+            ]
+        )
+
+    assert computer.actions.runs == []
+    assert [action["type"] for action in seen] == ["hold_key", "move"]

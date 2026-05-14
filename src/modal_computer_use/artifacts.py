@@ -4,20 +4,21 @@ import hashlib
 import json
 import mimetypes
 import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
-from .errors import ArtifactPathError
+from .errors import ArtifactPathError, BudgetExceededError
 from .models import ArtifactInfo, ArtifactSyncResult
 
 CONTROL_PATHS = {
     "manifest.ndjson",
     "traces/actions.ndjson",
 }
-CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use"}
+CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets"}
 
 
 def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: bool = True) -> str:
@@ -45,7 +46,7 @@ def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: boo
         raise ArtifactPathError("artifact path traversal is not allowed")
     if public:
         lowered = "/".join(parts).lower()
-        if lowered in CONTROL_PATHS or any(part in CONTROL_SEGMENTS for part in parts):
+        if lowered in CONTROL_PATHS or any(part.lower() in CONTROL_SEGMENTS for part in parts):
             raise ArtifactPathError("artifact control paths are not public")
     return "/".join(parts)
 
@@ -56,10 +57,16 @@ class ArtifactStore:
         root: str | Path,
         *,
         persistent: bool = False,
+        persistent_verified: bool | None = None,
+        max_total_bytes: int | None = None,
         sync_runner: Callable[[str], subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self.root = Path(root)
         self.persistent = persistent
+        self.persistent_verified = (
+            persistent if persistent_verified is None else persistent_verified
+        )
+        self.max_total_bytes = max_total_bytes
         self._sync_runner = sync_runner or _run_mountpoint_sync
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -69,6 +76,7 @@ class ArtifactStore:
 
     def resolve(self, path: str, *, allow_empty: bool = False, public: bool = True) -> Path:
         relative = normalize_artifact_path(path, allow_empty=allow_empty, public=public)
+        self._reject_symlink_components(relative)
         candidate = (self.root / relative).resolve()
         root = self.root.resolve()
         try:
@@ -77,9 +85,18 @@ class ArtifactStore:
             raise ArtifactPathError("artifact path escapes root") from exc
         if common != str(root):
             raise ArtifactPathError("artifact path escapes root")
-        if candidate.exists() and candidate.is_symlink():
-            raise ArtifactPathError("artifact symlink escapes are not allowed")
         return candidate
+
+    def _reject_symlink_components(self, relative: str) -> None:
+        if not relative:
+            return
+        current = self.root
+        for part in Path(relative).parts:
+            current = current / part
+            if current.is_symlink():
+                raise ArtifactPathError("artifact symlinks are not public")
+            if not current.exists():
+                return
 
     def _info(
         self,
@@ -124,12 +141,45 @@ class ArtifactStore:
     ) -> ArtifactInfo:
         relative = normalize_artifact_path(path)
         target = self.resolve(relative)
+        self._enforce_write_budget(target, len(data))
         parent = target.parent.resolve()
         root = self.root.resolve()
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        info = self._info(
+            target,
+            public_path=relative,
+            created_by_call_id=created_by_call_id,
+            retention_class=retention_class,
+        )
+        if content_type:
+            info.content_type = content_type
+        if append_manifest:
+            self.append_manifest(info)
+        return info
+
+    def write_file(
+        self,
+        path: str,
+        source: str | Path,
+        *,
+        content_type: str | None = None,
+        created_by_call_id: str | None = None,
+        retention_class: str = "ephemeral",
+        append_manifest: bool = True,
+    ) -> ArtifactInfo:
+        relative = normalize_artifact_path(path)
+        target = self.resolve(relative)
+        source_path = Path(source)
+        self._enforce_write_budget(target, source_path.stat().st_size)
+        parent = target.parent.resolve()
+        root = self.root.resolve()
+        if os.path.commonpath([str(root), str(parent)]) != str(root):
+            raise ArtifactPathError("artifact parent escapes root")
+        parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, target)
         info = self._info(
             target,
             public_path=relative,
@@ -158,7 +208,7 @@ class ArtifactStore:
             target.unlink()
 
     def list(self, prefix: str = "") -> list[ArtifactInfo]:
-        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=False)
+        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=True)
         base = self.resolve(safe_prefix, allow_empty=True, public=False)
         if not base.exists():
             return []
@@ -166,11 +216,38 @@ class ArtifactStore:
         paths = [base] if base.is_file() else [item for item in base.rglob("*") if item.exists()]
         infos: list[ArtifactInfo] = []
         for item in sorted(paths):
-            if item.name == "manifest.ndjson":
+            if item.is_symlink():
+                raise ArtifactPathError("artifact symlinks are not public")
+            resolved = item.resolve()
+            common = os.path.commonpath([str(root), str(resolved)])
+            if common != str(root):
+                raise ArtifactPathError("artifact symlink escapes are not allowed")
+            relative = os.path.relpath(str(resolved), str(root)).replace(os.sep, "/")
+            try:
+                public_path = normalize_artifact_path(relative, public=True)
+            except ArtifactPathError:
                 continue
-            relative = item.resolve().relative_to(root).as_posix()
-            infos.append(self._info(item, public_path=relative))
+            infos.append(self._info(item, public_path=public_path))
         return infos
+
+    def _enforce_write_budget(self, target: Path, incoming_size: int) -> None:
+        if self.max_total_bytes is None:
+            return
+        root = self.root.resolve()
+        existing_total = 0
+        if self.root.exists():
+            for item in self.root.rglob("*"):
+                try:
+                    resolved = item.resolve()
+                    if os.path.commonpath([str(root), str(resolved)]) != str(root):
+                        continue
+                except (OSError, ValueError):
+                    continue
+                if item.is_file():
+                    existing_total += item.stat().st_size
+        existing_target_size = target.stat().st_size if target.is_file() else 0
+        if existing_total - existing_target_size + incoming_size > self.max_total_bytes:
+            raise BudgetExceededError("artifact byte budget exceeded")
 
     def append_manifest(self, info: ArtifactInfo) -> None:
         payload = {"ts": datetime.now(UTC).isoformat(), **info.model_dump(mode="json")}
@@ -196,6 +273,16 @@ class ArtifactStore:
 
     def sync(self) -> ArtifactSyncResult:
         if self.persistent:
+            if not self.persistent_verified:
+                return ArtifactSyncResult(
+                    ok=False,
+                    persistent=True,
+                    synced_paths=[],
+                    message=(
+                        "persistent artifact sync requested without a verified Modal Volume "
+                        "mount for the artifact root"
+                    ),
+                )
             result = self._sync_runner(str(self.root))
             if result.returncode != 0:
                 return ArtifactSyncResult(
@@ -207,7 +294,7 @@ class ArtifactStore:
             return ArtifactSyncResult(
                 ok=True,
                 persistent=True,
-                synced_paths=[self.root.as_posix()],
+                synced_paths=["artifact-root"],
                 message="Modal Volume v2 mountpoint synced",
             )
         return ArtifactSyncResult(

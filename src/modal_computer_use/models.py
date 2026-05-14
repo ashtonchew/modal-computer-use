@@ -379,14 +379,23 @@ class ScrollAction(BaseAction):
         return self
 
 
-class MouseDownAction(BaseAction):
-    type: Literal["mouse_down"] = "mouse_down"
+class MouseButtonAction(BaseAction):
     button: Button = "left"
     x: int | None = Field(default=None, ge=0)
     y: int | None = Field(default=None, ge=0)
 
+    @model_validator(mode="after")
+    def _coordinate_pair(self) -> MouseButtonAction:
+        if (self.x is None) != (self.y is None):
+            raise ValueError("x and y must be supplied together")
+        return self
 
-class MouseUpAction(MouseDownAction):
+
+class MouseDownAction(MouseButtonAction):
+    type: Literal["mouse_down"] = "mouse_down"
+
+
+class MouseUpAction(MouseButtonAction):
     type: Literal["mouse_up"] = "mouse_up"
 
 
@@ -479,7 +488,7 @@ def parse_action(action: ComputerAction | dict[str, Any]) -> ComputerAction:
     try:
         return ComputerActionAdapter.validate_python(action)
     except Exception as exc:  # pydantic exposes multiple validation exception paths.
-        raise ActionValidationError(str(exc)) from exc
+        raise ActionValidationError("invalid action payload") from exc
 
 
 class ActionItemResult(StrictBaseModel):
@@ -509,6 +518,7 @@ class ActionBatchRequest(StrictBaseModel):
     screenshot_after: bool = False
     screenshot_options: ScreenshotOptions | None = None
     continue_on_error: bool = False
+    idempotency_key: str | None = None
     source: str = "sdk"
     call_id: str | None = None
     run_id: str | None = None

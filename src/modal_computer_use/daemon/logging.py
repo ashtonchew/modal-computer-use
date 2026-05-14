@@ -7,7 +7,21 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-SENSITIVE_KEYS = {"token", "authorization", "text", "data_base64", "bytes", "clipboard", "vnc"}
+from modal_computer_use.redaction import safe_exception_payload, sanitize_text
+
+SENSITIVE_KEYS = {
+    "api_key",
+    "authorization",
+    "bytes",
+    "clipboard",
+    "credential",
+    "data_base64",
+    "password",
+    "secret",
+    "text",
+    "token",
+    "vnc",
+}
 
 
 def redact(value: Any) -> Any:
@@ -38,13 +52,15 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.now(UTC).isoformat(),
             "level": record.levelname.lower(),
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": (
+                "[redacted exception]" if record.exc_info else sanitize_text(record.getMessage())
+            ),
         }
         extra = getattr(record, "extra", None)
         if isinstance(extra, dict):
             payload.update(redact(extra))
         if record.exc_info:
-            payload["exc_info"] = self.formatException(record.exc_info)
+            payload["exc_info"] = safe_exception_payload(record.exc_info[1] or Exception())
         return json.dumps(payload, separators=(",", ":"))
 
 

@@ -34,10 +34,7 @@ class ArtifactsNamespace(Namespace):
         )
 
     def download(self, path: str, local_path: str | Path) -> Path:
-        target = Path(local_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(self.read_bytes(path))
-        return target
+        return self._client.download(_artifact_url(path), local_path)
 
     def upload(self, local_path: str | Path, path: str) -> ArtifactInfo:
         source = Path(local_path)

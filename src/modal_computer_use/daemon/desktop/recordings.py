@@ -41,7 +41,13 @@ class RecordingRegistry:
                 code="unsupported_format",
             )
         recording_id = f"rec_{uuid4().hex[:12]}"
-        path = self.settings.recordings_dir / f"{recording_id}.{format}"
+        public_path = f"recordings/{recording_id}.{format}"
+        path = (
+            self.artifact_store.resolve(public_path)
+            if self.artifact_store is not None
+            else self.settings.recordings_dir / f"{recording_id}.{format}"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
         stderr_path = self.settings.recordings_dir / f"{recording_id}.ffmpeg.stderr.log"
         ffmpeg_args = _ffmpeg_args(
             "ffmpeg",
@@ -58,7 +64,7 @@ class RecordingRegistry:
             format=format,
             fps=fps,
             path=str(path),
-            artifact_uri=f"artifact://recordings/{recording_id}.{format}",
+            artifact_uri=f"artifact://{public_path}",
             size_bytes=0,
             stderr_path=str(stderr_path),
             ffmpeg_args=ffmpeg_args,
@@ -98,7 +104,7 @@ class RecordingRegistry:
         self._recordings[recording_id] = rec
         return rec
 
-    def stop(self, recording_id: str) -> Recording:
+    def stop(self, recording_id: str, *, append_manifest: bool = True) -> Recording:
         rec = self.get(recording_id)
         if rec.status != "recording":
             return rec
@@ -158,9 +164,15 @@ class RecordingRegistry:
             }
         )
         self._recordings[recording_id] = stopped
-        if stopped.status == "stopped" and self.artifact_store is not None:
+        if stopped.status == "stopped" and self.artifact_store is not None and append_manifest:
             self.artifact_store.append_manifest(_recording_artifact(stopped, path))
         return stopped
+
+    def append_manifest(self, recording_id: str) -> None:
+        rec = self.get(recording_id)
+        if rec.status != "stopped" or self.artifact_store is None:
+            return
+        self.artifact_store.append_manifest(_recording_artifact(rec, Path(rec.path)))
 
     def list(self) -> list[Recording]:
         return list(self._recordings.values())
@@ -176,6 +188,12 @@ class RecordingRegistry:
         process = self._processes.pop(recording_id, None)
         if process is not None and process.poll() is None:
             process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                with suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
         Path(rec.path).unlink(missing_ok=True)
         if rec.stderr_path:
             Path(rec.stderr_path).unlink(missing_ok=True)
@@ -184,8 +202,19 @@ class RecordingRegistry:
 
     def total_size_bytes(self) -> int:
         total = 0
+        artifact_root = (
+            self.artifact_store.root.resolve() if self.artifact_store is not None else None
+        )
         for rec in self._recordings.values():
             path = Path(rec.path)
+            if artifact_root is not None:
+                try:
+                    if os.path.commonpath([str(artifact_root), str(path.resolve())]) == str(
+                        artifact_root
+                    ):
+                        continue
+                except ValueError:
+                    pass
             total += path.stat().st_size if path.exists() else rec.size_bytes
         return total
 

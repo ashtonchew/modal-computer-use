@@ -50,6 +50,23 @@ def normalize_key(key: str) -> str:
     return stripped
 
 
+def is_supported_key(key: str) -> bool:
+    stripped = key.strip()
+    if not stripped:
+        return False
+    lowered = stripped.lower().replace("-", "_")
+    if lowered in KEY_ALIASES:
+        return True
+    if stripped.lower() in {value.lower() for value in KEY_ALIASES.values()}:
+        return True
+    if len(stripped) == 1:
+        return True
+    if lowered.startswith("f") and lowered[1:].isdigit():
+        number = int(lowered[1:])
+        return 1 <= number <= 24
+    return False
+
+
 def normalize_key_combo(keys: str | Iterable[str]) -> list[str]:
     if isinstance(keys, str):
         parts = [part for part in keys.replace("+", " ").split() if part]

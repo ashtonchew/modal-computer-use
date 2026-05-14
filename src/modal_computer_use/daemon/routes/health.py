@@ -19,7 +19,11 @@ async def readyz(request: Request) -> dict[str, object]:
     ready, errors = await backend.ready()
     if request.app.state.settings.vnc_mode != "off":
         # noVNC health is process-supervisor based until a browser-accessible tunnel exists.
+        x11vnc = request.app.state.supervisor.status("x11vnc")
         novnc = request.app.state.supervisor.status("novnc")
+        if x11vnc.status not in ("running", "unknown"):
+            ready = False
+            errors.append("x11vnc is not running")
         if novnc.status not in ("running", "unknown"):
             ready = False
             errors.append("novnc is not running")
@@ -53,6 +57,11 @@ async def capabilities(request: Request) -> Capabilities:
             "browser",
             "apps",
             "commands",
+            "input",
+            "lifecycle",
+            "processes",
+            "session",
+            "debug",
         ],
         screenshot_formats=["png", "jpeg", "webp"],
         action_types=[

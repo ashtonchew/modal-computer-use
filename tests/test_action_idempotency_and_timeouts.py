@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -41,6 +42,38 @@ def test_idempotency_replay_does_not_reexecute_or_increment_budgets(tmp_path) ->
     assert second.json() == first.json()
     assert app.state.action_count == 1
     assert app.state.screenshot_count == 0
+
+
+def test_concurrent_idempotency_replay_does_not_reexecute(tmp_path) -> None:
+    app = _app(tmp_path)
+    calls = 0
+
+    async def slow_move(x: int, y: int):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return app.state.backend.cursor.model_copy(update={"x": x, "y": y})
+
+    app.state.backend.mouse_move = slow_move
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        futures = [
+            executor.submit(
+                client.post,
+                "/v1/actions/run",
+                headers={"Idempotency-Key": "idem-concurrent"},
+                json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+            )
+            for _ in range(2)
+        ]
+        responses = [future.result() for future in futures]
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert responses[0].json() == responses[1].json()
+    assert calls == 1
+    assert app.state.action_count == 1
 
 
 def test_idempotency_replay_preserves_failed_action_without_reexecution(tmp_path) -> None:
@@ -123,6 +156,62 @@ def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     assert app.state.action_count == 1
 
 
+def test_body_idempotency_key_replays_without_reexecution(tmp_path) -> None:
+    app = _app(tmp_path)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            json={
+                "idempotency_key": "body-idem",
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+            },
+        )
+        second = client.post(
+            "/v1/actions/run",
+            json={
+                "idempotency_key": "body-idem",
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert app.state.action_count == 1
+
+
+def test_header_and_body_idempotency_key_mismatch_is_rejected(tmp_path) -> None:
+    app = _app(tmp_path)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "header-idem"},
+            json={
+                "idempotency_key": "body-idem",
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "idempotency_key_conflict"
+    assert app.state.action_count == 0
+
+
+def test_post_action_delay_runs_before_screenshot_after(tmp_path) -> None:
+    app = _app(tmp_path, post_action_delay_ms=25)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["timing"]["daemon_ms"] >= 20
+
+
 def test_action_timeout_releases_input_and_stops_batch(tmp_path) -> None:
     app = _app(tmp_path, default_action_timeout_ms=10)
 
@@ -197,6 +286,30 @@ def test_action_timeout_rejects_values_above_configured_max(tmp_path) -> None:
     assert response.status_code == 422
     assert response.json()["code"] == "action_validation_failed"
     assert "timeout_ms 26 exceeds configured maximum 25" in response.json()["details"]["errors"][0]
+
+
+def test_nested_hold_timeout_rejects_values_above_configured_max(tmp_path) -> None:
+    app = _app(tmp_path, max_action_timeout_ms=25)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [{"type": "wait", "duration_ms": 1, "timeout_ms": 26}],
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert (
+        "actions[0].actions[0] timeout_ms 26 exceeds configured maximum 25"
+        in response.json()["details"]["errors"]
+    )
 
 
 def test_batch_duration_timeout_stops_later_actions_even_with_continue_on_error(

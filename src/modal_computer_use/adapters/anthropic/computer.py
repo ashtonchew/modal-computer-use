@@ -173,8 +173,20 @@ class AnthropicAdapter:
     def apply(self, action: dict[str, Any]) -> ActionResult:
         return self.executor.apply(self.normalize(action))
 
-    def apply_many(self, actions: Iterable[dict[str, Any]]) -> ActionBatchResult:
-        return self.executor.apply_many([self.normalize(action) for action in actions])
+    def apply_many(
+        self,
+        actions: Iterable[dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_after: bool = False,
+        max_action_timeout_ms: int | None = None,
+    ) -> ActionBatchResult:
+        return self.executor.apply_many(
+            [self.normalize(action) for action in actions],
+            continue_on_error=continue_on_error,
+            screenshot_after=screenshot_after,
+            max_action_timeout_ms=max_action_timeout_ms,
+        )
 
 
 def anthropic_screenshot_content(screenshot: Screenshot) -> dict[str, Any]:

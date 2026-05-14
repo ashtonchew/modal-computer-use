@@ -162,15 +162,13 @@ class DesktopBackend(ABC):
     async def release_all(self) -> ActionResult:
         raise NotImplementedError
 
+    @abstractmethod
     async def launch(self, command: str, args: Sequence[str] = ()) -> ActionResult:
-        return ActionResult(
-            ok=True, message=f"launch requested: {command}", output={"args": list(args)}
-        )
+        raise NotImplementedError
 
+    @abstractmethod
     async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
-        return ActionResult(
-            ok=True, message="url open requested", output={"url": url, "wait": wait_for_window}
-        )
+        raise NotImplementedError
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:
         return ActionResult(
@@ -307,15 +305,23 @@ class MockDesktopBackend(DesktopBackend):
         draw = ImageDraw.Draw(img)
         draw.rectangle([0, 0, image_width - 1, image_height - 1], outline=(68, 84, 106))
         if options.show_cursor:
-            rel = CoordinateSpace.from_dimensions(
-                desktop_width=self.width,
-                desktop_height=self.height,
-                image_width=image_width,
-                image_height=image_height,
-                source_region=source,
-            ).to_image(self.cursor)
-            draw.line([(rel.x - 6, rel.y), (rel.x + 6, rel.y)], fill=(220, 38, 38), width=2)
-            draw.line([(rel.x, rel.y - 6), (rel.x, rel.y + 6)], fill=(220, 38, 38), width=2)
+            cursor_in_source = (
+                source.x <= self.cursor.x < source.right
+                and source.y <= self.cursor.y < source.bottom
+            )
+            if cursor_in_source:
+                cursor_x = round((self.cursor.x - source.x) * image_width / source.width)
+                cursor_y = round((self.cursor.y - source.y) * image_height / source.height)
+                draw.line(
+                    [(cursor_x - 6, cursor_y), (cursor_x + 6, cursor_y)],
+                    fill=(220, 38, 38),
+                    width=2,
+                )
+                draw.line(
+                    [(cursor_x, cursor_y - 6), (cursor_x, cursor_y + 6)],
+                    fill=(220, 38, 38),
+                    width=2,
+                )
         data = _encode_image(img, options.format, options.quality)
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,
@@ -380,11 +386,28 @@ class MockDesktopBackend(DesktopBackend):
         self.held_buttons.clear()
         return ActionResult(ok=True, output=released)
 
+    async def launch(self, command: str, args: Sequence[str] = ()) -> ActionResult:
+        return ActionResult(
+            ok=True, message=f"launch requested: {command}", output={"args": list(args)}
+        )
+
+    async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
+        return ActionResult(
+            ok=True, message="url open requested", output={"url": url, "wait": wait_for_window}
+        )
+
 
 class X11DesktopBackend(MockDesktopBackend):
-    def __init__(self, width: int = 1440, height: int = 900, display: str = ":99") -> None:
+    def __init__(
+        self,
+        width: int = 1440,
+        height: int = 900,
+        display: str = ":99",
+        browser: str | None = None,
+    ) -> None:
         super().__init__(width=width, height=height)
         self.display = display
+        self.browser = browser
 
     async def ready(self) -> tuple[bool, list[str]]:
         missing = [
@@ -426,10 +449,18 @@ class X11DesktopBackend(MockDesktopBackend):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(input_text.encode() if input_text is not None else None),
-            timeout=timeout,
-        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(input_text.encode() if input_text is not None else None),
+                timeout=timeout,
+            )
+        except (TimeoutError, asyncio.CancelledError):
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                with contextlib.suppress(Exception):
+                    await process.wait()
+            raise
         completed = subprocess.CompletedProcess(
             args,
             process.returncode or 0,
@@ -439,6 +470,59 @@ class X11DesktopBackend(MockDesktopBackend):
         if check and completed.returncode != 0:
             raise RuntimeError(f"{args[0]} failed: {completed.stderr}")
         return completed
+
+    async def _spawn(self, *args: str) -> subprocess.Popen[str]:
+        env = dict(os.environ)
+        env["DISPLAY"] = self.display
+        return subprocess.Popen(  # noqa: S603 - daemon validates command shape before launch.
+            args,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+
+    async def launch(self, command: str, args: Sequence[str] = ()) -> ActionResult:
+        argv = (command, *args)
+        try:
+            process = await self._spawn(*argv)
+        except OSError as exc:
+            return ActionResult(
+                ok=False,
+                message="failed to launch application",
+                output={"command": command, "returncode": None, "error": str(exc)},
+            )
+        await asyncio.sleep(0.2)
+        returncode = process.poll()
+        return ActionResult(
+            ok=returncode in (None, 0),
+            message=None if returncode in (None, 0) else "application exited immediately",
+            output={
+                "command": command,
+                "args": list(args),
+                "pid": process.pid,
+                "returncode": returncode,
+            },
+        )
+
+    async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
+        before = len(await self.windows()) if wait_for_window else None
+        command = self.browser or "xdg-open"
+        result = await self.launch(command, [url])
+        if not result.ok or not wait_for_window:
+            return result
+        deadline = asyncio.get_running_loop().time() + 5
+        while asyncio.get_running_loop().time() < deadline:
+            windows = await self.windows()
+            if before is None or len(windows) > before:
+                result.output["windows"] = len(windows)
+                return result
+            await asyncio.sleep(0.2)
+        result.output["windows"] = before
+        result.output["wait_for_window_timed_out"] = True
+        return result
 
     async def mouse_move(self, x: int, y: int) -> Point:
         await self._run("xdotool", "mousemove", str(x), str(y))
@@ -456,7 +540,15 @@ class X11DesktopBackend(MockDesktopBackend):
         if x is not None and y is not None:
             await self.mouse_move(x, y)
         button_number = {"left": "1", "middle": "2", "right": "3"}[button]
-        await self._run("xdotool", "click", "--repeat", str(count), button_number)
+        modifier_keys = [normalize_key(modifier) for modifier in modifiers]
+        for modifier in modifier_keys:
+            await self.key_down(modifier)
+        try:
+            await self._run("xdotool", "click", "--repeat", str(count), button_number)
+        finally:
+            for modifier in reversed(modifier_keys):
+                with contextlib.suppress(Exception):
+                    await self.key_up(modifier)
         return await super().mouse_click(x, y, button=button, count=count, modifiers=modifiers)
 
     async def mouse_drag(
@@ -470,9 +562,16 @@ class X11DesktopBackend(MockDesktopBackend):
         modifiers: Sequence[str] = (),
     ) -> Point:
         points = list(path or [])
+        moved_to_path_start = False
+        if points and start is None:
+            start = points[0]
+            await self.mouse_move(start.x, start.y)
+            points = points[1:]
+            moved_to_path_start = True
         if not points:
             if start is not None:
-                await self.mouse_move(start.x, start.y)
+                if not moved_to_path_start:
+                    await self.mouse_move(start.x, start.y)
             elif end is None:
                 start = await self.mouse_position()
             if end is not None:
@@ -633,6 +732,8 @@ class X11DesktopBackend(MockDesktopBackend):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         command = ["maim"]
+        if not options.show_cursor:
+            command.append("-u")
         if region:
             command.extend(["-g", f"{region.width}x{region.height}+{region.x}+{region.y}"])
         command.append(str(temp_path))
@@ -655,7 +756,7 @@ class X11DesktopBackend(MockDesktopBackend):
         )
         artifact_uri = None
         data_base64 = base64.b64encode(data).decode("ascii")
-        if options.storage == "artifact":
+        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
             if artifact_store is None:
                 raise RuntimeError("artifact_store required for artifact screenshot storage")
             suffix = "jpg" if options.format == "jpeg" else options.format
@@ -703,11 +804,13 @@ def _encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
     return output.getvalue()
 
 
-def choose_backend(kind: str, *, width: int, height: int, display: str) -> DesktopBackend:
+def choose_backend(
+    kind: str, *, width: int, height: int, display: str, browser: str | None = None
+) -> DesktopBackend:
     if kind == "mock":
         return MockDesktopBackend(width=width, height=height)
     if kind == "x11":
-        return X11DesktopBackend(width=width, height=height, display=display)
-    if os.name != "posix" or shutil.which("xdotool") is None:
+        return X11DesktopBackend(width=width, height=height, display=display, browser=browser)
+    if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
-    return X11DesktopBackend(width=width, height=height, display=display)
+    return X11DesktopBackend(width=width, height=height, display=display, browser=browser)

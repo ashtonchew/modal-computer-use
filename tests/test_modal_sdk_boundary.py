@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
-from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager
+from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager, DaemonClient
 from modal_computer_use.config import BrowserConfig
 from modal_computer_use.errors import (
     ConfigConflictError,
@@ -173,6 +173,16 @@ def fake_modal() -> SimpleNamespace:
     return SimpleNamespace(App=FakeApp, Probe=FakeProbe, Sandbox=FakeSandbox)
 
 
+def test_computer_sandbox_context_manager_terminates_modal_sandbox() -> None:
+    sandbox = FakeSandboxObject()
+    computer = ComputerSandbox(DaemonClient(base_url="http://127.0.0.1:1"), sandbox=sandbox)
+
+    with computer as active:
+        assert active is computer
+
+    assert sandbox.terminated is True
+
+
 def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     readiness_calls: list[float] = []
@@ -198,7 +208,8 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     )
 
     assert computer.metadata() is not None
-    assert computer.metadata().vnc_url == "https://novnc.example"
+    assert computer.metadata().vnc_url is None
+    assert computer.debug_urls().vnc == "https://novnc.example"
     assert FakeProbe.calls == [8080]
     args, kwargs = FakeSandbox.create_calls[0]
     assert args == ("python", "-m", "modal_computer_use.daemon")
@@ -250,6 +261,34 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"] == ""
 
 
+def test_create_rejects_persistent_artifacts_without_volume_mount(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(storage={"persist_artifacts": True})
+
+    try:
+        ComputerSandbox.create(config=config, image=object(), wait=False)
+    except ConfigConflictError as exc:
+        assert "persist_artifacts=True requires a Volume" in str(exc)
+    else:
+        raise AssertionError("expected missing artifact volume mount to fail")
+
+
+def test_create_marks_persistent_artifact_volume_mount(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(storage={"persist_artifacts": True})
+
+    ComputerSandbox.create(
+        config=config,
+        image=object(),
+        volumes={"/home/desktop": object()},
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_ARTIFACTS_PERSISTENT"] == "true"
+    assert kwargs["env"]["COMPUTER_USE_ARTIFACTS_VOLUME_MOUNTED"] == "true"
+
+
 def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
 
@@ -269,6 +308,21 @@ def test_create_generates_vnc_password_without_exposing_it(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_VNC_MODE"] == "view_only"
     assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"]
     assert "COMPUTER_USE_VNC_PASSWORD" not in computer.metadata().tags
+
+
+def test_create_uses_configured_vnc_password(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    configured_value = "known-value"
+    config = ComputerConfig(
+        run_id="run-123",
+        expose_vnc="view_only",
+        vnc_password=configured_value,
+    )
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"] == configured_value
 
 
 def test_attach_by_name_uses_current_from_name_signature(monkeypatch) -> None:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from modal_computer_use.artifacts import ArtifactStore
@@ -16,8 +18,9 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
-from modal_computer_use.errors import ArtifactPathError
+from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 from modal_computer_use.observability import get_tracer
+from modal_computer_use.redaction import safe_exception_payload
 
 from .routes import (
     actions,
@@ -60,16 +63,20 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         width=settings.desktop_width,
         height=settings.desktop_height,
         display=settings.display,
+        browser=settings.browser,
     )
     app.state.input_lock = asyncio.Lock()
     app.state.artifacts = ArtifactStore(
         settings.artifacts_dir,
         persistent=settings.artifacts_persistent,
+        persistent_verified=settings.artifacts_volume_mounted,
+        max_total_bytes=settings.max_artifact_bytes,
     )
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
     app.state.idempotency_cache = OrderedDict()
     app.state.action_count = 0
     app.state.screenshot_count = 0
+    app.state.last_activity_at = time.monotonic()
     app.state.action_rate_window = deque()
     app.state.tracer = get_tracer(
         enabled=settings.otel_enabled,
@@ -111,11 +118,44 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
             content={"code": "unsafe_artifact_path", "message": str(exc), "details": {}},
         )
 
+    @app.exception_handler(BudgetExceededError)
+    async def budget_exceeded_error_handler(
+        _request: Request, exc: BudgetExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"code": "budget_exceeded", "message": str(exc), "details": {}},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": "request validation failed",
+                "details": {"errors": _validation_errors_without_inputs(exc)},
+            },
+        )
+
     @app.exception_handler(FileNotFoundError)
     async def not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
         return JSONResponse(
             status_code=404,
             content={"code": "not_found", "message": str(exc), "details": {}},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": "internal_error",
+                "message": "internal server error",
+                "details": safe_exception_payload(exc),
+            },
         )
 
     for router in (
@@ -141,3 +181,16 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     ):
         app.include_router(router)
     return app
+
+
+def _validation_errors_without_inputs(exc: RequestValidationError) -> list[dict[str, object]]:
+    errors: list[dict[str, object]] = []
+    for item in exc.errors():
+        errors.append(
+            {
+                "loc": item.get("loc", ()),
+                "msg": item.get("msg", "validation error"),
+                "type": item.get("type", "value_error"),
+            }
+        )
+    return errors

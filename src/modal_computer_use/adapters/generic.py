@@ -11,6 +11,7 @@ from modal_computer_use.models import (
     ComputerAction,
     CoordinateSpace,
     Point,
+    Region,
     parse_action,
 )
 
@@ -38,8 +39,8 @@ class ActionExecutor:
 
     def apply(self, action: ComputerAction | dict[str, Any]) -> ActionResult:
         normalized = self._transform(parse_action(action))
-        self._policy(normalized)
-        result = self.computer.actions.apply(normalized)
+        self._policy_tree(normalized)
+        result = self.computer.actions.apply(normalized, source=self.source)
         if self.after_action:
             self.after_action(normalized, result)
         return result
@@ -50,25 +51,42 @@ class ActionExecutor:
         *,
         continue_on_error: bool = False,
         screenshot_after: bool = False,
+        max_action_timeout_ms: int | None = None,
     ) -> ActionBatchResult:
         normalized = [self._transform(parse_action(action)) for action in actions]
         for action in normalized:
-            self._policy(action)
-        result = self.computer.actions.run(
-            normalized,
-            continue_on_error=continue_on_error,
-            screenshot_after=screenshot_after,
-            source=self.source,
-        )
+            self._policy_tree(action)
+        run_kwargs: dict[str, Any] = {
+            "continue_on_error": continue_on_error,
+            "screenshot_after": screenshot_after,
+            "source": self.source,
+        }
+        if max_action_timeout_ms is not None:
+            run_kwargs["max_action_timeout_ms"] = max_action_timeout_ms
+        result = self.computer.actions.run(normalized, **run_kwargs)
         if self.after_action:
             for action in normalized:
                 self.after_action(action, result)
         return result
 
+    def _policy_tree(self, action: ComputerAction) -> None:
+        self._policy(action)
+        if getattr(action, "type", None) != "hold_key":
+            return
+        for nested in getattr(action, "actions", None) or []:
+            self._policy_tree(parse_action(nested))
+
     def _policy(self, action: ComputerAction) -> None:
         if not self.before_action:
             return
-        decision = self.before_action(action, {})
+        decision = self.before_action(
+            action,
+            {
+                "source": self.source,
+                "coordinate_space": self.coordinate_space,
+                "coordinates_transformed": self.coordinate_space is not None,
+            },
+        )
         if decision and decision.decision != "allow":
             raise UnsupportedActionError(decision.reason or f"action denied: {action.type}")
 
@@ -94,6 +112,24 @@ class ActionExecutor:
         path = getattr(action, "path", None)
         if path:
             updates["path"] = [self.coordinate_space.to_desktop(point) for point in path]
+        region = getattr(action, "region", None)
+        if isinstance(region, Region):
+            top_left = self.coordinate_space.to_desktop(Point(x=region.x, y=region.y))
+            bottom_right = self.coordinate_space.to_desktop(
+                Point(x=region.right, y=region.bottom)
+            )
+            updates["region"] = Region(
+                x=top_left.x,
+                y=top_left.y,
+                width=max(1, bottom_right.x - top_left.x),
+                height=max(1, bottom_right.y - top_left.y),
+            )
+        nested_actions = getattr(action, "actions", None)
+        if getattr(action, "type", None) == "hold_key" and nested_actions:
+            updates["actions"] = [
+                self._transform(parse_action(item)).model_dump(mode="json")
+                for item in nested_actions
+            ]
         if not updates:
             return action
         return action.model_copy(update=updates)

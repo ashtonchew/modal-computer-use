@@ -11,7 +11,7 @@ from modal_computer_use.models import Region, Screenshot, ScreenshotOptions
 router = APIRouter(prefix="/v1/screenshots")
 
 
-def _enforce_pixels(request: Request, width: int, height: int) -> None:
+def enforce_screenshot_pixels(request: Request, width: int, height: int) -> None:
     if width * height > request.app.state.settings.screenshot_max_pixels:
         raise DaemonError(
             "screenshot exceeds max pixel budget",
@@ -21,16 +21,38 @@ def _enforce_pixels(request: Request, width: int, height: int) -> None:
         )
 
 
+def enforce_screenshot_options_pixels(
+    request: Request,
+    *,
+    source_width: int,
+    source_height: int,
+    scale: float,
+) -> None:
+    enforce_screenshot_pixels(
+        request,
+        round(source_width * scale),
+        round(source_height * scale),
+    )
+
+
 @router.post("/full")
 async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
-    _enforce_pixels(request, request.app.state.backend.width, request.app.state.backend.height)
     options = ScreenshotOptions.model_validate(payload.model_dump(exclude={"region"}))
+    enforce_screenshot_options_pixels(
+        request,
+        source_width=request.app.state.backend.width,
+        source_height=request.app.state.backend.height,
+        scale=options.scale,
+    )
     async with request.app.state.input_lock:
-        request.app.state.screenshot_count += 1
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await request.app.state.backend.screenshot(
             options,
             artifact_store=request.app.state.artifacts,
         )
+        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -40,15 +62,23 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
     if payload.region is None:
         raise DaemonError("region screenshot requires region", code="missing_region")
     validate_region(request, payload.region)
-    _enforce_pixels(request, payload.region.width, payload.region.height)
     options = ScreenshotOptions.model_validate(payload.model_dump(exclude={"region"}))
+    enforce_screenshot_options_pixels(
+        request,
+        source_width=payload.region.width,
+        source_height=payload.region.height,
+        scale=options.scale,
+    )
     async with request.app.state.input_lock:
-        request.app.state.screenshot_count += 1
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await request.app.state.backend.screenshot(
             options,
             region=payload.region,
             artifact_store=request.app.state.artifacts,
         )
+        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -57,7 +87,7 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
 async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
     region = Region.model_validate(payload.region)
     validate_region(request, region)
-    _enforce_pixels(
+    enforce_screenshot_pixels(
         request, round(region.width * payload.scale), round(region.height * payload.scale)
     )
     options = ScreenshotOptions(
@@ -68,11 +98,14 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         storage=payload.storage,  # type: ignore[arg-type]
     )
     async with request.app.state.input_lock:
-        request.app.state.screenshot_count += 1
+        error = budgets.screenshot_reservation_error(request)
+        if error is not None:
+            raise error
         shot = await request.app.state.backend.screenshot(
             options,
             region=region,
             artifact_store=request.app.state.artifacts,
         )
+        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
