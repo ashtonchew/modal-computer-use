@@ -227,6 +227,41 @@ def test_hold_key_nested_actions_count_against_action_budget(test_client, app) -
     assert app.state.action_count == 1
 
 
+def test_hold_key_nested_budget_rejection_happens_before_key_down(test_client, app) -> None:
+    app.state.settings = type(app.state.settings)(
+        backend="mock",
+        artifacts_dir=app.state.settings.artifacts_dir,
+        recordings_dir=app.state.settings.recordings_dir,
+        local_token="dev",
+        max_actions=1,
+    )
+    key_down_calls: list[str] = []
+    original_key_down = app.state.backend.key_down
+
+    async def record_key_down(key: str) -> None:
+        key_down_calls.append(key)
+        await original_key_down(key)
+
+    app.state.backend.key_down = record_key_down
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [{"type": "move", "x": 1, "y": 2}],
+                }
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert result["results"][0]["error_code"] == "budget_exceeded"
+    assert key_down_calls == []
+
+
 def test_hold_key_nested_actions_count_against_batch_limit(tmp_path) -> None:
     from fastapi.testclient import TestClient
 

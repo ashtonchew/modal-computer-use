@@ -244,6 +244,11 @@ class ArtifactStore:
                 except (OSError, ValueError):
                     continue
                 if item.is_file():
+                    relative = os.path.relpath(str(resolved), str(root)).replace(os.sep, "/")
+                    try:
+                        normalize_artifact_path(relative, public=True)
+                    except ArtifactPathError:
+                        continue
                     existing_total += item.stat().st_size
         existing_target_size = target.stat().st_size if target.is_file() else 0
         if existing_total - existing_target_size + incoming_size > self.max_total_bytes:

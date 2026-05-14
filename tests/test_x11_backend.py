@@ -188,6 +188,26 @@ def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
     assert "-u" not in maim_commands[1]
 
 
+def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:
+    backend = RecordingX11Backend()
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        if args[:2] == ("xdotool", "getmouselocation"):
+            return subprocess.CompletedProcess(args, 0, "X=0\nY=0\n", "")
+        Image.new("RGB", (1, 1), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+
+    screenshot = anyio.run(backend.screenshot, ScreenshotOptions(scale=0.01))
+
+    assert screenshot.width == 1
+    assert screenshot.height == 1
+    assert screenshot.coordinate_space.image_width == 1
+    assert screenshot.coordinate_space.image_height == 1
+
+
 def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
     backend = X11DesktopBackend(width=100, height=100)
     state = {"killed": False, "waited": False}

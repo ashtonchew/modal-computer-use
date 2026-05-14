@@ -605,3 +605,21 @@ def test_direct_keyboard_hold_executes_nested_actions(test_client, app) -> None:
     assert app.state.backend.cursor.x == 7
     assert app.state.backend.cursor.y == 8
     assert app.state.backend.held_keys == set()
+
+
+def test_direct_keyboard_hold_releases_nested_inputs_on_timeout(test_client, app) -> None:
+    response = test_client.post(
+        "/v1/keyboard/hold",
+        json={
+            "key": "shift",
+            "actions": [
+                {"type": "mouse_down", "button": "left"},
+                {"type": "wait", "duration_ms": 100, "timeout_ms": 1},
+            ],
+        },
+    )
+
+    assert response.status_code == 408
+    assert response.json()["code"] == "timeout"
+    assert app.state.backend.held_buttons == set()
+    assert app.state.backend.held_keys == set()

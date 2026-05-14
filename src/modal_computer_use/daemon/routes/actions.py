@@ -606,6 +606,35 @@ def _budget_kinds_for_action(action: Any) -> tuple[budgets.BudgetKind, ...]:
     return ()
 
 
+def _preflight_action_budget(request: Request, actions: list[Any]) -> None:
+    action_count, screenshot_count = _budget_counts(actions)
+    if action_count:
+        error = budgets.action_reservation_error(request, count=action_count)
+        if error is not None:
+            raise error
+    if screenshot_count:
+        error = budgets.screenshot_reservation_error(request, count=screenshot_count)
+        if error is not None:
+            raise error
+
+
+def _budget_counts(actions: list[Any]) -> tuple[int, int]:
+    action_count = 0
+    screenshot_count = 0
+    for action in actions:
+        if isinstance(action, ScreenshotAction | ZoomAction):
+            screenshot_count += 1
+        elif _counts_against_action_budget(action):
+            action_count += 1
+        if isinstance(action, HoldKeyAction) and action.actions:
+            nested_action_count, nested_screenshot_count = _budget_counts(
+                _nested_hold_actions(action)
+            )
+            action_count += nested_action_count
+            screenshot_count += nested_screenshot_count
+    return action_count, screenshot_count
+
+
 def _uses_post_action_delay(action: Any) -> bool:
     return not isinstance(action, WaitAction | ScreenshotAction | ZoomAction | CursorPositionAction)
 
@@ -813,10 +842,12 @@ async def _execute_action(
         result = await backend.keyboard_hotkey(action.keys, duration_ms=action.duration_ms)
         return result.output
     if isinstance(action, HoldKeyAction):
+        nested_actions = _nested_hold_actions(action)
+        _preflight_action_budget(request, nested_actions)
         await backend.key_down(action.key)
         try:
             nested_results: list[dict[str, Any]] = []
-            for nested_action in _nested_hold_actions(action):
+            for nested_action in nested_actions:
                 if _counts_against_action_budget(nested_action):
                     budgets.reserve_action(request)
                 nested_start = time.perf_counter()

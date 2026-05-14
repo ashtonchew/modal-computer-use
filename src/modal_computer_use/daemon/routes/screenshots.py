@@ -11,6 +11,10 @@ from modal_computer_use.models import Region, Screenshot, ScreenshotOptions
 router = APIRouter(prefix="/v1/screenshots")
 
 
+def scaled_dimension(value: int, scale: float) -> int:
+    return max(1, round(value * scale))
+
+
 def enforce_screenshot_pixels(request: Request, width: int, height: int) -> None:
     if width * height > request.app.state.settings.screenshot_max_pixels:
         raise DaemonError(
@@ -30,8 +34,8 @@ def enforce_screenshot_options_pixels(
 ) -> None:
     enforce_screenshot_pixels(
         request,
-        round(source_width * scale),
-        round(source_height * scale),
+        scaled_dimension(source_width, scale),
+        scaled_dimension(source_height, scale),
     )
 
 
@@ -91,7 +95,9 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
     region = Region.model_validate(payload.region)
     validate_region(request, region)
     enforce_screenshot_pixels(
-        request, round(region.width * payload.scale), round(region.height * payload.scale)
+        request,
+        scaled_dimension(region.width, payload.scale),
+        scaled_dimension(region.height, payload.scale),
     )
     options = ScreenshotOptions(
         format=payload.format,  # type: ignore[arg-type]

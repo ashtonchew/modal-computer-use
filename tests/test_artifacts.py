@@ -42,6 +42,16 @@ def test_artifact_store_roundtrip(tmp_path) -> None:
     assert store.manifest()[0].path == "downloads/a.txt"
 
 
+def test_artifact_byte_budget_ignores_control_manifest_bytes(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root", max_total_bytes=3)
+
+    store.write_bytes("a.txt", b"x")
+    store.write_bytes("b.txt", b"y")
+    store.write_bytes("c.txt", b"z")
+
+    assert sum((item.size_bytes or 0) for item in store.list()) == 3
+
+
 def test_artifact_symlink_escape(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "root")
     outside = tmp_path / "outside.txt"

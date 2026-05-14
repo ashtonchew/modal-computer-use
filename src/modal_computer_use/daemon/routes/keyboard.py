@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 
 from fastapi import APIRouter, Request
 
@@ -12,6 +13,7 @@ from modal_computer_use.daemon.routes.actions import (
     _counts_against_action_budget,
     _effective_action_timeout_ms,
     _execute_action,
+    _preflight_action_budget,
     _validate_action_timeouts,
     _validate_actions,
     _validate_screenshot_pixel_budget,
@@ -102,6 +104,8 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
+        _preflight_action_budget(request, nested_actions)
+        released_all = False
         await request.app.state.backend.key_down(payload.key)
         try:
             nested_results = []
@@ -125,8 +129,27 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
                 )
             if payload.duration_ms:
                 await asyncio.sleep(payload.duration_ms / 1000)
+        except TimeoutError as exc:
+            released_all = True
+            with suppress(Exception):
+                await request.app.state.backend.release_all()
+            raise DaemonError(
+                "keyboard hold timed out",
+                status_code=408,
+                code="timeout",
+                details={},
+            ) from exc
+        except Exception:
+            released_all = True
+            with suppress(Exception):
+                await request.app.state.backend.release_all()
+            raise
         finally:
-            await request.app.state.backend.key_up(payload.key)
+            if released_all:
+                with suppress(Exception):
+                    await request.app.state.backend.key_up(payload.key)
+            else:
+                await request.app.state.backend.key_up(payload.key)
     return ActionResult(ok=True, output={"actions": nested_results} if nested_results else {})
 
 

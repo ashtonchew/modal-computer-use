@@ -307,8 +307,8 @@ class MockDesktopBackend(DesktopBackend):
         retention_class: str = "ephemeral",
     ) -> Screenshot:
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
-        image_width = max(1, round(source.width * options.scale))
-        image_height = max(1, round(source.height * options.scale))
+        image_width = _scaled_dimension(source.width, options.scale)
+        image_height = _scaled_dimension(source.height, options.scale)
         img = Image.new("RGB", (image_width, image_height), (245, 246, 248))
         draw = ImageDraw.Draw(img)
         draw.rectangle([0, 0, image_width - 1, image_height - 1], outline=(68, 84, 106))
@@ -809,7 +809,10 @@ class X11DesktopBackend(MockDesktopBackend):
             image = Image.open(temp_path)
             if options.scale != 1.0:
                 image = image.resize(
-                    (round(image.width * options.scale), round(image.height * options.scale))
+                    (
+                        _scaled_dimension(image.width, options.scale),
+                        _scaled_dimension(image.height, options.scale),
+                    )
                 )
             data = _encode_image(image.convert("RGB"), options.format, options.quality)
         finally:
@@ -817,8 +820,10 @@ class X11DesktopBackend(MockDesktopBackend):
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,
             desktop_height=self.height,
-            image_width=round((region.width if region else self.width) * options.scale),
-            image_height=round((region.height if region else self.height) * options.scale),
+            image_width=_scaled_dimension(region.width if region else self.width, options.scale),
+            image_height=_scaled_dimension(
+                region.height if region else self.height, options.scale
+            ),
             source_region=region,
         )
         artifact_uri = None
@@ -869,6 +874,10 @@ def _encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
     fmt = "JPEG" if image_format == "jpeg" else image_format.upper()
     image.save(output, format=fmt, quality=quality)
     return output.getvalue()
+
+
+def _scaled_dimension(value: int, scale: float) -> int:
+    return max(1, round(value * scale))
 
 
 def choose_backend(
