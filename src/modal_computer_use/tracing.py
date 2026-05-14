@@ -11,6 +11,7 @@ from .artifacts import normalize_artifact_path
 from .errors import ArtifactPathError
 from .models import ActionBatchResult, CoordinateSpace, Point, Region, TraceEntry, parse_action
 from .observability import get_tracer
+from .redaction import sanitize_text
 
 if TYPE_CHECKING:
     from .sandbox import ComputerSandbox
@@ -330,7 +331,7 @@ class ComputerTrace:
                         status="failed",
                         error={
                             "code": "replay_action_failed",
-                            "message": str(exc),
+                            "message": sanitize_text(str(exc)),
                             "type": type(exc).__name__,
                         },
                     )
@@ -352,7 +353,7 @@ class ComputerTrace:
                         result=result_payload,
                         error={
                             "code": first.error_code or "replay_action_failed",
-                            "message": first.error or "trace replay action failed",
+                            "message": sanitize_text(first.error or "trace replay action failed"),
                         },
                     )
                 )

@@ -85,11 +85,34 @@ def test_require_connect_user_rejects_missing_verified_user_metadata(tmp_path) -
 
     with TestClient(app) as client:
         missing = client.get("/v1/version")
-        present = client.get("/v1/version", headers={"X-Verified-User-Data": "{}"})
+        spoofed = client.get("/v1/version", headers={"X-Verified-User-Data": "{}"})
+        invalid = client.get("/v1/version", headers={"X-Verified-User-Data": "not-json"})
+        present = client.get(
+            "/v1/version",
+            headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+        )
 
     assert missing.status_code == 401
     assert missing.json()["code"] == "connect_token_required"
+    assert spoofed.status_code == 401
+    assert spoofed.json()["code"] == "invalid_verified_user_data"
+    assert invalid.status_code == 401
+    assert invalid.json()["code"] == "invalid_verified_user_data"
     assert present.status_code == 200
+
+
+def test_require_connect_user_rejects_spoofed_public_clients(tmp_path) -> None:
+    app = _app(tmp_path, require_connect_user=True, reject_query_tokens=True)
+
+    with TestClient(
+        app,
+        client=("8.8.8.8", 50000),
+        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+    ) as client:
+        response = client.get("/v1/version")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "connect_token_required"
 
 
 def test_json_formatter_redacts_exception_messages() -> None:

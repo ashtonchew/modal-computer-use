@@ -29,6 +29,25 @@ def test_status_and_screenshot(test_client) -> None:
     assert shot.sha256
 
 
+def test_status_reflects_stopped_mock_lifecycle(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        assert client.post("/v1/computer/stop").json()["status"] == "stopped"
+        status = client.get("/v1/computer/status").json()
+
+    assert status["status"] == "stopped"
+    assert status["ready"] is False
+    assert {item["status"] for item in status["processes"].values()} == {"stopped"}
+
+
 def test_clipboard_and_release_all(test_client) -> None:
     assert test_client.put("/v1/clipboard/text", json={"text": "secret"}).json()["ok"] is True
     assert test_client.get("/v1/clipboard/text").json()["text"] == "secret"
@@ -87,3 +106,25 @@ def test_idle_budget_blocks_mutating_primitive_but_allows_status(tmp_path) -> No
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
     assert response.json()["message"] == "idle time budget exceeded"
+
+
+def test_idle_budget_blocks_browser_and_app_mutations(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    app.state.last_activity_at = time.monotonic() - 2
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        browser = client.post("/v1/browser/open-url", json={"url": "https://example.com"})
+        launch = client.post("/v1/apps/launch", json={"command": "firefox"})
+
+    assert browser.status_code == 429
+    assert browser.json()["code"] == "budget_exceeded"
+    assert launch.status_code == 429
+    assert launch.json()["code"] == "budget_exceeded"

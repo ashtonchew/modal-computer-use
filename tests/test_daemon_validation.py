@@ -133,12 +133,12 @@ def test_action_screenshot_enforces_output_pixel_budget(tmp_path) -> None:
             },
         )
 
-    assert screenshot.status_code == 200
-    assert screenshot.json()["ok"] is False
-    assert screenshot.json()["results"][0]["error_code"] == "screenshot_too_large"
-    assert zoom.status_code == 200
-    assert zoom.json()["ok"] is False
-    assert zoom.json()["results"][0]["error_code"] == "screenshot_too_large"
+    assert screenshot.status_code == 422
+    assert screenshot.json()["code"] == "action_validation_failed"
+    assert "screenshot output" in screenshot.text
+    assert zoom.status_code == 422
+    assert zoom.json()["code"] == "action_validation_failed"
+    assert "screenshot output" in zoom.text
 
 
 def test_screenshot_after_enforces_output_pixel_budget(tmp_path) -> None:
@@ -162,13 +162,66 @@ def test_screenshot_after_enforces_output_pixel_budget(tmp_path) -> None:
             },
         )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["ok"] is False
-    assert body["screenshot"] is None
-    assert body["results"][-1]["type"] == "screenshot_after"
-    assert body["results"][-1]["error_code"] == "screenshot_too_large"
+    position = client.get("/v1/mouse/position")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert "screenshot_after screenshot output" in response.text
+    assert position.json() == {"x": 0, "y": 0}
     assert app.state.screenshot_count == 0
+
+
+def test_action_validate_matches_run_timeout_and_screenshot_preflight(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_action_timeout_ms=1_000,
+            screenshot_max_pixels=1_000,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        timeout = client.post(
+            "/v1/actions/validate",
+            json={"actions": [{"type": "wait", "duration_ms": 0, "timeout_ms": 2_000}]},
+        )
+        screenshot = client.post(
+            "/v1/actions/validate",
+            json={"actions": [{"type": "screenshot"}]},
+        )
+
+    assert timeout.json()["ok"] is False
+    assert "timeout_ms 2000 exceeds" in timeout.text
+    assert screenshot.json()["ok"] is False
+    assert "screenshot output" in screenshot.text
+
+
+def test_keyboard_hold_rejects_nested_timeout_before_execution(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_action_timeout_ms=1_000,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/keyboard/hold",
+            json={
+                "key": "shift",
+                "actions": [{"type": "wait", "duration_ms": 0, "timeout_ms": 2_000}],
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert app.state.backend.held_keys == set()
 
 
 def test_validation_error_response_does_not_echo_typed_text(tmp_path) -> None:

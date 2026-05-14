@@ -59,16 +59,7 @@ logger = logging.getLogger("modal_computer_use.daemon.actions")
 
 @router.post("/validate")
 async def validate(payload: ActionBatchRequest, request: Request) -> ValidationResult:
-    errors = _validate_actions(
-        payload.actions,
-        width=request.app.state.backend.width,
-        height=request.app.state.backend.height,
-    )
-    if len(payload.actions) > request.app.state.settings.max_batch_actions:
-        errors.append(
-            "batch exceeds max_batch_actions "
-            f"{request.app.state.settings.max_batch_actions}"
-        )
+    errors = _validate_batch_request(payload, request)
     return ValidationResult(ok=not errors, errors=errors)
 
 
@@ -88,27 +79,13 @@ async def run(
             details={"max_batch_actions": request.app.state.settings.max_batch_actions},
         )
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
-    validation_errors = _validate_actions(
-        payload.actions,
-        width=request.app.state.backend.width,
-        height=request.app.state.backend.height,
-    )
+    validation_errors = _validate_batch_request(payload, request)
     if validation_errors:
         raise DaemonError(
             "action validation failed",
             status_code=422,
             code="action_validation_failed",
             details={"errors": validation_errors},
-        )
-    timeout_errors = _validate_action_timeouts(
-        payload, request.app.state.settings.max_action_timeout_ms
-    )
-    if timeout_errors:
-        raise DaemonError(
-            "action timeout validation failed",
-            status_code=422,
-            code="action_validation_failed",
-            details={"errors": timeout_errors},
         )
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
@@ -460,6 +437,84 @@ def _validate_action_timeouts(
                 f"{max_action_timeout_ms}"
             )
     return errors
+
+
+def _validate_batch_request(payload: ActionBatchRequest, request: Request) -> list[str]:
+    errors = _validate_actions(
+        payload.actions,
+        width=request.app.state.backend.width,
+        height=request.app.state.backend.height,
+    )
+    if len(payload.actions) > request.app.state.settings.max_batch_actions:
+        errors.append(
+            "batch exceeds max_batch_actions "
+            f"{request.app.state.settings.max_batch_actions}"
+        )
+    errors.extend(
+        _validate_action_timeouts(payload, request.app.state.settings.max_action_timeout_ms)
+    )
+    errors.extend(_validate_screenshot_pixel_budget(payload, request))
+    return errors
+
+
+def _validate_screenshot_pixel_budget(
+    payload: ActionBatchRequest, request: Request
+) -> list[str]:
+    errors: list[str] = []
+    backend = request.app.state.backend
+    for index, action in enumerate(payload.actions):
+        if isinstance(action, ScreenshotAction):
+            options = action.options or ScreenshotOptions()
+            errors.extend(
+                _screenshot_pixel_errors(
+                    request,
+                    source_width=backend.width,
+                    source_height=backend.height,
+                    scale=options.scale,
+                    label=f"actions[{index}]",
+                )
+            )
+        elif isinstance(action, ZoomAction):
+            options = action.options or ScreenshotOptions(scale=action.scale)
+            errors.extend(
+                _screenshot_pixel_errors(
+                    request,
+                    source_width=action.region.width,
+                    source_height=action.region.height,
+                    scale=options.scale,
+                    label=f"actions[{index}]",
+                )
+            )
+    if payload.screenshot_after:
+        options = payload.screenshot_options or ScreenshotOptions()
+        errors.extend(
+            _screenshot_pixel_errors(
+                request,
+                source_width=backend.width,
+                source_height=backend.height,
+                scale=options.scale,
+                label="screenshot_after",
+            )
+        )
+    return errors
+
+
+def _screenshot_pixel_errors(
+    request: Request,
+    *,
+    source_width: int,
+    source_height: int,
+    scale: float,
+    label: str,
+) -> list[str]:
+    output_pixels = round(source_width * scale) * round(source_height * scale)
+    max_pixels = request.app.state.settings.screenshot_max_pixels
+    if output_pixels <= max_pixels:
+        return []
+    return [
+        f"{label} screenshot output {output_pixels} pixels exceeds "
+        f"max screenshot pixels {max_pixels}"
+    ]
 
 
 def _iter_timeout_actions(actions: list[Any], *, path: str = "actions"):

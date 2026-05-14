@@ -221,6 +221,23 @@ def test_real_replay_sanitizes_screenshot_payloads(tmp_path) -> None:
     assert "artifact://screenshots/after.png" in serialized
 
 
+def test_real_replay_sanitizes_target_exceptions(tmp_path) -> None:
+    path = tmp_path / "actions.ndjson"
+    _write_entries(path, [_trace_entry(normalized_action={"type": "move", "x": 1, "y": 2})])
+    target = _FakeReplayTarget(
+        raises=RuntimeError("Bearer secret-token artifact://screenshots/private.png")
+    )
+
+    plan = ComputerTrace.load(path).replay(dry_run=False, target=target)
+
+    serialized = json.dumps(plan.to_dict())
+    assert plan.ok is False
+    assert "secret-token" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
+    assert "Bearer [redacted]" in serialized
+    assert "[redacted]" in serialized
+
+
 def test_replay_without_explicit_target_fails_closed(tmp_path) -> None:
     path = tmp_path / "actions.ndjson"
     _write_entries(path, [_trace_entry()])
@@ -429,14 +446,18 @@ class _FakeReplayActions:
         *,
         fail_on: int | None = None,
         output: dict[str, object] | None = None,
+        raises: Exception | None = None,
     ) -> None:
         self.seen: list[dict[str, object]] = []
         self.fail_on = fail_on
         self.output = output or {}
+        self.raises = raises
 
     def run(self, actions, *, source: str = "sdk"):
         action = dict(actions[0])
         self.seen.append(action)
+        if self.raises is not None:
+            raise self.raises
         ok = self.fail_on is None or len(self.seen) - 1 != self.fail_on
         return ActionBatchResult(
             ok=ok,
@@ -461,8 +482,9 @@ class _FakeReplayTarget:
         *,
         fail_on: int | None = None,
         output: dict[str, object] | None = None,
+        raises: Exception | None = None,
     ) -> None:
-        self.actions = _FakeReplayActions(fail_on=fail_on, output=output)
+        self.actions = _FakeReplayActions(fail_on=fail_on, output=output, raises=raises)
         self.detached = False
 
     def detach(self) -> None:

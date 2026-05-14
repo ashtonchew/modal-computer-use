@@ -9,12 +9,14 @@ from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.actions import (
     _counts_against_action_budget,
+    _effective_action_timeout_ms,
     _execute_action,
+    _validate_action_timeouts,
     _validate_actions,
 )
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.errors import ActionValidationError
-from modal_computer_use.models import ActionResult, parse_action
+from modal_computer_use.models import ActionBatchRequest, ActionResult, parse_action
 
 router = APIRouter(prefix="/v1/keyboard")
 
@@ -70,6 +72,12 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
         width=request.app.state.backend.width,
         height=request.app.state.backend.height,
     )
+    batch_payload = ActionBatchRequest(actions=nested_actions)
+    errors.extend(
+        _validate_action_timeouts(
+            batch_payload, request.app.state.settings.max_action_timeout_ms
+        )
+    )
     if errors:
         raise DaemonError(
             "nested hold action validation failed",
@@ -85,7 +93,18 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             for nested_action in nested_actions:
                 if _counts_against_action_budget(nested_action):
                     budgets.reserve_action(request)
-                output = await _execute_action(nested_action, request, call_id="keyboard_hold")
+                timeout_seconds = (
+                    _effective_action_timeout_ms(nested_action, batch_payload, request) / 1000
+                )
+                output = await asyncio.wait_for(
+                    _execute_action(
+                        nested_action,
+                        request,
+                        call_id="keyboard_hold",
+                        payload=batch_payload,
+                    ),
+                    timeout=timeout_seconds,
+                )
                 nested_results.append(
                     {"type": nested_action.type, "ok": True, "output": output or {}}
                 )
