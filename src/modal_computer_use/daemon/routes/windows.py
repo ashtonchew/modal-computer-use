@@ -7,7 +7,9 @@ import time
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.models import ActionResult, X11Window
 
 router = APIRouter(prefix="/v1/windows")
@@ -31,13 +33,19 @@ async def active(request: Request) -> X11Window | None:
 
 
 @router.post("/{window_id}/activate")
-async def activate(window_id: str) -> ActionResult:
-    return ActionResult(ok=True, output={"window_id": window_id})
+async def activate(window_id: str, request: Request) -> ActionResult:
+    await ensure_desktop_ready(request)
+    async with request.app.state.input_lock:
+        budgets.reserve_action(request)
+        return await request.app.state.backend.activate_window(window_id)
 
 
 @router.post("/{window_id}/close")
-async def close(window_id: str) -> ActionResult:
-    return ActionResult(ok=True, output={"window_id": window_id})
+async def close(window_id: str, request: Request) -> ActionResult:
+    await ensure_desktop_ready(request)
+    async with request.app.state.input_lock:
+        budgets.reserve_action(request)
+        return await request.app.state.backend.close_window(window_id)
 
 
 @router.post("/wait-for")
@@ -47,6 +55,8 @@ async def wait_for(payload: WaitForWindowRequest, request: Request) -> X11Window
     while True:
         for window in await request.app.state.backend.windows():
             if pattern and not pattern.search(window.title):
+                continue
+            if payload.class_name is not None and window.class_name != payload.class_name:
                 continue
             if payload.pid is not None and window.pid != payload.pid:
                 continue

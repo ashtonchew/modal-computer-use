@@ -228,6 +228,7 @@ class DisplayInfo(StrictBaseModel):
 class X11Window(StrictBaseModel):
     id: str
     title: str
+    class_name: str | None = None
     pid: int | None = None
     x: int
     y: int

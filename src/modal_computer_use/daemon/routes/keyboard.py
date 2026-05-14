@@ -8,12 +8,15 @@ from modal_computer_use.actions import KEY_ALIASES, is_supported_key
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.actions import (
+    _count_action_tree,
     _counts_against_action_budget,
     _effective_action_timeout_ms,
     _execute_action,
     _validate_action_timeouts,
     _validate_actions,
+    _validate_screenshot_pixel_budget,
 )
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.errors import ActionValidationError
 from modal_computer_use.models import ActionBatchRequest, ActionResult, parse_action
@@ -23,6 +26,7 @@ router = APIRouter(prefix="/v1/keyboard")
 
 @router.post("/type")
 async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
+    await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_type(
@@ -35,6 +39,7 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
 @router.post("/press")
 async def press(payload: KeyRequest, request: Request) -> ActionResult:
     _validate_keys(payload.key, *payload.modifiers)
+    await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_press(
@@ -47,6 +52,7 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
 @router.post("/hotkey")
 async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
     _validate_keys(*payload.keys)
+    await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_hotkey(
@@ -73,11 +79,19 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
         height=request.app.state.backend.height,
     )
     batch_payload = ActionBatchRequest(actions=nested_actions)
+    nested_count = _count_action_tree(nested_actions)
+    if nested_count > request.app.state.settings.max_batch_actions:
+        errors.append(
+            "batch exceeds max_batch_actions "
+            f"{request.app.state.settings.max_batch_actions} "
+            f"with {nested_count} total actions"
+        )
     errors.extend(
         _validate_action_timeouts(
             batch_payload, request.app.state.settings.max_action_timeout_ms
         )
     )
+    errors.extend(_validate_screenshot_pixel_budget(batch_payload, request))
     if errors:
         raise DaemonError(
             "nested hold action validation failed",
@@ -85,6 +99,7 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             code="action_validation_failed",
             details={"errors": errors},
         )
+    await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         await request.app.state.backend.key_down(payload.key)

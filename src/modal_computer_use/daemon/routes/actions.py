@@ -20,6 +20,7 @@ from modal_computer_use.adapters.provenance import (
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.screenshots import enforce_screenshot_options_pixels
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
     ActionBatchRequest,
@@ -71,12 +72,16 @@ async def run(
 ) -> ActionBatchResult:
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
-    if len(payload.actions) > request.app.state.settings.max_batch_actions:
+    action_count = _count_action_tree(payload.actions)
+    if action_count > request.app.state.settings.max_batch_actions:
         raise DaemonError(
             "batch exceeds max_batch_actions",
             status_code=413,
             code="batch_too_large",
-            details={"max_batch_actions": request.app.state.settings.max_batch_actions},
+            details={
+                "max_batch_actions": request.app.state.settings.max_batch_actions,
+                "action_count": action_count,
+            },
         )
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
     validation_errors = _validate_batch_request(payload, request)
@@ -87,6 +92,7 @@ async def run(
             code="action_validation_failed",
             details={"errors": validation_errors},
         )
+    await ensure_desktop_ready(request)
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
     screenshot = None
@@ -445,10 +451,12 @@ def _validate_batch_request(payload: ActionBatchRequest, request: Request) -> li
         width=request.app.state.backend.width,
         height=request.app.state.backend.height,
     )
-    if len(payload.actions) > request.app.state.settings.max_batch_actions:
+    action_count = _count_action_tree(payload.actions)
+    if action_count > request.app.state.settings.max_batch_actions:
         errors.append(
             "batch exceeds max_batch_actions "
-            f"{request.app.state.settings.max_batch_actions}"
+            f"{request.app.state.settings.max_batch_actions} "
+            f"with {action_count} total actions"
         )
     errors.extend(
         _validate_action_timeouts(payload, request.app.state.settings.max_action_timeout_ms)
@@ -531,6 +539,19 @@ def _iter_action_tree(actions: list[Any], *, path: str = "actions"):
                 with suppress(Exception):
                     nested.append(parse_action(nested_action))
             yield from _iter_action_tree(nested, path=f"{action_path}.actions")
+
+
+def _count_action_tree(actions: list[Any]) -> int:
+    count = 0
+    for action in actions:
+        count += 1
+        if isinstance(action, HoldKeyAction) and action.actions:
+            nested = []
+            for nested_action in action.actions:
+                with suppress(Exception):
+                    nested.append(parse_action(nested_action))
+            count += _count_action_tree(nested)
+    return count
 
 
 def _effective_action_timeout_ms(
@@ -627,9 +648,21 @@ def _exception_output(
 
 def _action_error_message(action: Any, exc: Exception) -> str:
     message = sanitize_text(str(exc))
-    if isinstance(action, TypeAction):
-        message = message.replace(action.text, "[redacted typed text]")
+    for text in _typed_texts_for_action(action):
+        message = message.replace(text, "[redacted typed text]")
     return message
+
+
+def _typed_texts_for_action(action: Any) -> list[str]:
+    if isinstance(action, TypeAction):
+        return [action.text]
+    if isinstance(action, HoldKeyAction) and action.actions:
+        texts: list[str] = []
+        for nested_action in action.actions:
+            with suppress(Exception):
+                texts.extend(_typed_texts_for_action(parse_action(nested_action)))
+        return texts
+    return []
 
 
 def _redact_type_payload(value: Any, action: TypeAction) -> Any:
@@ -959,6 +992,9 @@ def _append_trace(
     provider_action, provider_redactions = _provider_trace_metadata(normalized)
     redactions.extend(provider_redactions)
     redactions = list(dict.fromkeys(redactions))
+    trace_result, result_redactions = _trace_result(result)
+    redactions.extend(result_redactions)
+    redactions = list(dict.fromkeys(redactions))
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
@@ -968,7 +1004,7 @@ def _append_trace(
             source=payload.source,
             provider_action=provider_action,
             normalized_action=normalized,
-            result=result.model_dump(mode="json"),
+            result=trace_result,
             elapsed_ms=result.elapsed_ms,
             screenshot_after_uri=_screenshot_uri(result),
             coordinate_space=_coordinate_space(result),
@@ -976,6 +1012,52 @@ def _append_trace(
             error=_trace_error(result),
         )
     )
+
+
+def _trace_result(result: ActionItemResult) -> tuple[dict[str, Any], list[str]]:
+    payload = result.model_dump(mode="json")
+    redacted, redactions = _redact_trace_result_payload(payload, path="result")
+    return redacted if isinstance(redacted, dict) else payload, redactions
+
+
+_OMITTED_TRACE_RESULT_KEYS = {"bytes", "data_base64"}
+
+
+def _redact_trace_result_payload(value: Any, *, path: str = "") -> tuple[Any, list[str]]:
+    redactions: list[str] = []
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            item_path = f"{path}.{key}" if path else str(key)
+            normalized = str(key).lower().replace("-", "_")
+            if normalized in _OMITTED_TRACE_RESULT_KEYS:
+                redactions.append(item_path)
+                continue
+            if _is_sensitive_trace_key(str(key)):
+                redacted[key] = _redacted_sensitive_value(item)
+                redactions.append(item_path)
+                continue
+            redacted_item, child_redactions = _redact_trace_result_payload(
+                item, path=item_path
+            )
+            redacted[key] = redacted_item
+            redactions.extend(child_redactions)
+        return redacted, redactions
+    if isinstance(value, list):
+        redacted_items = []
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]" if path else f"[{index}]"
+            redacted_item, child_redactions = _redact_trace_result_payload(
+                item, path=item_path
+            )
+            redacted_items.append(redacted_item)
+            redactions.extend(child_redactions)
+        return redacted_items, redactions
+    if isinstance(value, str):
+        sanitized = sanitize_text(value)
+        if sanitized != value:
+            return sanitized, [path] if path else []
+    return value, []
 
 
 def _append_screenshot_after_trace(

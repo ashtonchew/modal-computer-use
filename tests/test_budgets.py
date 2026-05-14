@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
@@ -88,6 +90,28 @@ def test_direct_artifact_write_enforces_artifact_byte_budget(tmp_path) -> None:
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
     assert response.json()["details"]["budgets"]["artifact_bytes"] == 2
+
+
+def test_artifact_delete_enforces_idle_budget(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=artifacts_dir,
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    app.state.artifacts.write_bytes("delete-me.txt", b"ok")
+    app.state.last_activity_at = time.monotonic() - 2
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.delete("/v1/artifacts/delete-me.txt")
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert (artifacts_dir / "delete-me.txt").exists()
 
 
 def test_screenshot_artifact_write_is_rejected_before_file_persists(tmp_path) -> None:

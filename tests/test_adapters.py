@@ -312,6 +312,27 @@ def test_anthropic_20250124_enhanced_fixture_matrix() -> None:
     assert actions[4]["duration_ms"] == 100
 
 
+def test_anthropic_hold_key_normalizes_nested_actions() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20250124")
+
+    action = adapter.normalize(
+        {
+            "action": "hold_key",
+            "key": "shift",
+            "actions": [
+                {"action": "mouse_move", "coordinate": [10, 20]},
+                {"action": "left_click"},
+            ],
+        }
+    )
+
+    assert action["type"] == "hold_key"
+    assert action["key"] == "shift"
+    assert [nested["type"] for nested in action["actions"]] == ["move", "click"]
+    assert action["actions"][0]["x"] == 10
+    assert action["actions"][0]["y"] == 20
+
+
 def test_anthropic_20251124_zoom_fixture_matrix() -> None:
     computer = RecordingComputer()
     adapter = AnthropicAdapter(computer, tool_version="computer_20251124")

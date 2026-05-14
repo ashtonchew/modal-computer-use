@@ -91,5 +91,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
 
 @router.delete("/{path:path}")
 async def delete_artifact(path: str, request: Request) -> dict[str, bool]:
+    budgets.enforce_idle(request)
     request.app.state.artifacts.delete(path)
+    budgets.touch_activity(request)
     return {"ok": True}

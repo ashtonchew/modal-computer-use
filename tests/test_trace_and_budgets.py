@@ -248,6 +248,34 @@ def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_pat
     assert entries[0].coordinate_space.image_width == 200
 
 
+def test_action_trace_redacts_inline_screenshot_payload(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "screenshot"}]},
+        )
+
+    assert response.status_code == 200
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert '"data_base64":' not in raw_trace
+    assert '"bytes":' not in raw_trace
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].result is not None
+    output = entries[0].result["output"]
+    assert output["sha256"]
+    assert output["size_bytes"] > 0
+
+
 def test_action_trace_error_includes_code(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

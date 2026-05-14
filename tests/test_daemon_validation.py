@@ -245,6 +245,39 @@ def test_keyboard_hold_rejects_nested_timeout_before_execution(tmp_path) -> None
     assert app.state.backend.held_keys == set()
 
 
+def test_keyboard_hold_rejects_nested_screenshot_budget_before_execution(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            screenshot_max_pixels=1_000,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/keyboard/hold",
+            json={
+                "key": "shift",
+                "actions": [
+                    {
+                        "type": "zoom",
+                        "region": {"x": 0, "y": 0, "width": 100, "height": 100},
+                        "scale": 2,
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert "actions[0] screenshot output" in response.text
+    assert app.state.backend.held_keys == set()
+    assert app.state.screenshot_count == 0
+
+
 def test_validation_error_response_does_not_echo_typed_text(tmp_path) -> None:
     sentinel = "SECRET_TYPED_TEXT"
     app = create_app(
@@ -400,6 +433,36 @@ def test_action_batch_rejects_nested_hold_screenshot_budget_before_execution(tmp
     assert "actions[0].actions[0] screenshot output" in response.text
     assert app.state.backend.held_keys == set()
     assert app.state.screenshot_count == 0
+
+
+def test_input_routes_reject_unready_desktop_before_budget_or_action(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    app.state.backend.ready = not_ready
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        mouse = client.post("/v1/mouse/move", json={"x": 1, "y": 2})
+        action = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 3, "y": 4}]},
+        )
+
+    assert mouse.status_code == 503
+    assert mouse.json()["code"] == "desktop_not_ready"
+    assert action.status_code == 503
+    assert action.json()["code"] == "desktop_not_ready"
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
 
 
 def test_browser_open_url_rejects_non_http_urls(test_client) -> None:

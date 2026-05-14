@@ -6,6 +6,18 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import Point, Region
 
 
+async def ensure_desktop_ready(request: Request) -> None:
+    ready, errors = await request.app.state.backend.ready()
+    if ready:
+        return
+    raise DaemonError(
+        "desktop is not ready",
+        status_code=503,
+        code="desktop_not_ready",
+        details={"errors": errors},
+    )
+
+
 def validate_point(request: Request, point: Point, *, field: str = "coordinate") -> None:
     width = request.app.state.backend.width
     height = request.app.state.backend.height

@@ -3432,6 +3432,17 @@
       "X11Window": {
         "additionalProperties": false,
         "properties": {
+          "class_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name"
+          },
           "height": {
             "minimum": 0.0,
             "title": "Height",

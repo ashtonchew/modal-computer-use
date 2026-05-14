@@ -106,6 +106,33 @@ def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
     assert sentinel not in serialized
 
 
+def test_hold_key_nested_type_failure_redacts_typed_text(test_client, app) -> None:
+    sentinel = "_".join(["NESTED", "TYPED", "PAYLOAD", "NO", "LEAK"])
+
+    async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
+        raise RuntimeError(f"typing failed for {text}")
+
+    app.state.backend.keyboard_type = fail_type
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [{"type": "type", "text": sentinel}],
+                }
+            ],
+        },
+    ).json()
+
+    serialized = str(result)
+    assert result["ok"] is False
+    assert result["results"][0]["error"] == "typing failed for [redacted typed text]"
+    assert sentinel not in serialized
+    assert app.state.backend.held_keys == set()
+
+
 def test_hold_key_executes_nested_actions_and_releases_key(test_client, app) -> None:
     result = test_client.post(
         "/v1/actions/run",
@@ -198,6 +225,46 @@ def test_hold_key_nested_actions_count_against_action_budget(test_client, app) -
     assert app.state.backend.cursor.x == 0
     assert app.state.backend.cursor.y == 0
     assert app.state.action_count == 1
+
+
+def test_hold_key_nested_actions_count_against_batch_limit(tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from modal_computer_use.daemon.app import create_app
+    from modal_computer_use.daemon.settings import DaemonSettings
+
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_batch_actions=1,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [
+                            {"type": "move", "x": 1, "y": 2},
+                            {"type": "move", "x": 3, "y": 4},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json()["code"] == "batch_too_large"
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
+    assert app.state.action_count == 0
 
 
 def test_drag_action_passes_requested_button_to_backend(test_client, app) -> None:

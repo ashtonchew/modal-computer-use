@@ -137,12 +137,18 @@ class AnthropicAdapter:
             key = action.get("key") or action.get("text")
             if not key:
                 raise ActionValidationError("hold_key action requires key or text")
+            payload: dict[str, Any] = {
+                "type": "hold_key",
+                "key": key,
+                "duration_ms": action.get("duration_ms"),
+            }
+            if "actions" in action:
+                nested_actions = action["actions"]
+                if not isinstance(nested_actions, list):
+                    raise ActionValidationError("hold_key actions must be a list")
+                payload["actions"] = [self.normalize(item) for item in nested_actions]
             return _with_common(
-                {
-                    "type": "hold_key",
-                    "key": key,
-                    "duration_ms": action.get("duration_ms"),
-                },
+                payload,
                 action,
             )
         if name == "wait":
@@ -273,6 +279,7 @@ def _reject_unknown_fields(action: dict[str, Any]) -> None:
         "direction",
         "amount",
         "duration_ms",
+        "actions",
         "region",
         "scale",
         "metadata",
