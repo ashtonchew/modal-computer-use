@@ -988,7 +988,7 @@ def _append_trace(
     if not request.app.state.settings.trace_actions:
         return
     writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
-    normalized, redactions = _redacted_action_and_paths(action)
+    normalized, redactions = _redacted_action_and_paths(action, preserve_provider_action=True)
     provider_action, provider_redactions = _provider_trace_metadata(normalized)
     redactions.extend(provider_redactions)
     redactions = list(dict.fromkeys(redactions))
@@ -1071,6 +1071,25 @@ def _append_screenshot_after_trace(
     if not request.app.state.settings.trace_actions:
         return
     writer = TraceWriter(request.app.state.settings.trace_dir / "actions.ndjson")
+    if result is not None:
+        trace_result, redactions = _trace_result(result)
+    elif screenshot is not None:
+        trace_result, redactions = _redact_trace_result_payload(
+            {
+                "ok": True,
+                "format": screenshot.format,
+                "width": screenshot.width,
+                "height": screenshot.height,
+                "size_bytes": screenshot.size_bytes,
+                "artifact_uri": screenshot.artifact_uri,
+            },
+            path="result",
+        )
+        if not isinstance(trace_result, dict):
+            trace_result = {}
+    else:
+        trace_result = {}
+        redactions = []
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
@@ -1079,20 +1098,10 @@ def _append_screenshot_after_trace(
             sequence=payload.sequence,
             source=payload.source,
             normalized_action={"type": "screenshot_after"},
-            result=(
-                result.model_dump(mode="json")
-                if result is not None
-                else {
-                    "ok": True,
-                    "format": screenshot.format,
-                    "width": screenshot.width,
-                    "height": screenshot.height,
-                    "size_bytes": screenshot.size_bytes,
-                    "artifact_uri": screenshot.artifact_uri,
-                }
-            ),
+            result=trace_result,
             screenshot_after_uri=screenshot.artifact_uri if screenshot is not None else None,
             coordinate_space=screenshot.coordinate_space if screenshot is not None else None,
+            redactions=redactions,
             error=_trace_error(result) if result is not None else None,
         )
     )
@@ -1124,20 +1133,26 @@ def _redacted_action(action: Any) -> dict[str, Any]:
     return _redacted_action_and_paths(action)[0]
 
 
-def _redacted_action_and_paths(action: Any) -> tuple[dict[str, Any], list[str]]:
+def _redacted_action_and_paths(
+    action: Any, *, preserve_provider_action: bool = False
+) -> tuple[dict[str, Any], list[str]]:
     data = action.model_dump(mode="json")
-    redacted, redactions = _redact_action_payload(data)
+    redacted, redactions = _redact_action_payload(
+        data, preserve_provider_action=preserve_provider_action
+    )
     return redacted if isinstance(redacted, dict) else data, redactions
 
 
-def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str]]:
+def _redact_action_payload(
+    value: Any, *, path: str = "", preserve_provider_action: bool = False
+) -> tuple[Any, list[str]]:
     redactions: list[str] = []
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
         is_type_action = value.get("type") == "type" and isinstance(value.get("text"), str)
         for key, item in value.items():
             item_path = f"{path}.{key}" if path else key
-            if key == PROVIDER_ACTION_METADATA_KEY:
+            if preserve_provider_action and key == PROVIDER_ACTION_METADATA_KEY:
                 redacted[key] = item
                 continue
             if is_type_action and key == "text":
@@ -1148,7 +1163,11 @@ def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str
                 redacted[key] = _redacted_sensitive_value(item)
                 redactions.append(item_path)
                 continue
-            redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
+            redacted_item, child_redactions = _redact_action_payload(
+                item,
+                path=item_path,
+                preserve_provider_action=preserve_provider_action,
+            )
             redacted[key] = redacted_item
             redactions.extend(child_redactions)
         return redacted, redactions
@@ -1156,7 +1175,11 @@ def _redact_action_payload(value: Any, *, path: str = "") -> tuple[Any, list[str
         redacted_items = []
         for index, item in enumerate(value):
             item_path = f"{path}[{index}]" if path else f"[{index}]"
-            redacted_item, child_redactions = _redact_action_payload(item, path=item_path)
+            redacted_item, child_redactions = _redact_action_payload(
+                item,
+                path=item_path,
+                preserve_provider_action=preserve_provider_action,
+            )
             redacted_items.append(redacted_item)
             redactions.extend(child_redactions)
         return redacted_items, redactions

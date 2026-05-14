@@ -2218,6 +2218,27 @@
         "title": "ProcessStatus",
         "type": "object"
       },
+      "ReadyStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready"
+        ],
+        "title": "ReadyStatus",
+        "type": "object"
+      },
       "Recording": {
         "additionalProperties": false,
         "properties": {
@@ -3663,9 +3684,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Readyz Readyz Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReadyStatus"
                 }
               }
             },

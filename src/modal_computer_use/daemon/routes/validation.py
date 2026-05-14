@@ -6,8 +6,15 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import Point, Region
 
 
-async def ensure_desktop_ready(request: Request) -> None:
+async def desktop_readiness(request: Request) -> tuple[bool, list[str]]:
     ready, errors = await request.app.state.backend.ready()
+    if not request.app.state.supervisor.running:
+        return False, ["desktop supervisor is stopped", *errors]
+    return ready, errors
+
+
+async def ensure_desktop_ready(request: Request) -> None:
+    ready, errors = await desktop_readiness(request)
     if ready:
         return
     raise DaemonError(

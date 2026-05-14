@@ -62,10 +62,11 @@ def _redact_value(
     action_name: str,
 ) -> Any:
     if isinstance(value, dict):
+        local_action_name = str(value.get("type") or value.get("action") or action_name)
         output: dict[str, Any] = {}
         for key, item in value.items():
             key_path = f"{path}.{key}" if path else str(key)
-            if _is_sensitive_key(str(key), action_name=action_name):
+            if _is_sensitive_key(str(key), action_name=local_action_name):
                 redactions.append(key_path)
                 output[key] = _redaction_marker(item)
                 continue
@@ -73,7 +74,7 @@ def _redact_value(
                 item,
                 redactions,
                 path=key_path,
-                action_name=action_name,
+                action_name=local_action_name,
             )
         return output
     if isinstance(value, list):

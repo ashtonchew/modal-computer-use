@@ -333,6 +333,24 @@ def test_anthropic_hold_key_normalizes_nested_actions() -> None:
     assert action["actions"][0]["y"] == 20
 
 
+def test_anthropic_hold_key_provider_provenance_redacts_nested_typed_text() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20250124")
+
+    action = adapter.normalize(
+        {
+            "action": "hold_key",
+            "key": "shift",
+            "actions": [{"action": "type", "text": "nested secret"}],
+        }
+    )
+
+    provider_action = action["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["actions"][0]["text"] == {
+        "redacted": True,
+        "length": 13,
+    }
+
+
 def test_anthropic_20251124_zoom_fixture_matrix() -> None:
     computer = RecordingComputer()
     adapter = AnthropicAdapter(computer, tool_version="computer_20251124")

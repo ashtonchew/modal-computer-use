@@ -11,16 +11,32 @@ from modal_computer_use.redaction import safe_exception_payload, sanitize_text
 
 SENSITIVE_KEYS = {
     "api_key",
+    "artifact_bytes",
+    "artifact_uri",
     "authorization",
     "bytes",
     "clipboard",
+    "clipboard_text",
+    "connect_token",
     "credential",
+    "data",
     "data_base64",
+    "image",
+    "image_bytes",
+    "no_vnc_url",
+    "novnc_url",
     "password",
+    "raw_path",
+    "screenshot",
+    "screenshot_bytes",
     "secret",
+    "stderr",
+    "stdout",
     "text",
     "token",
+    "url",
     "vnc",
+    "vnc_url",
 }
 
 

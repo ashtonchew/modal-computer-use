@@ -190,3 +190,36 @@ def test_json_formatter_redacts_provider_credentials_in_extra() -> None:
     assert payload["password"]["redacted"] is True
     assert "sk-test-secret" not in serialized
     assert "pw-secret" not in serialized
+
+
+def test_json_formatter_redacts_secret_bearing_observability_fields() -> None:
+    formatter = JsonFormatter()
+    record = logging.getLogger("modal_computer_use.test").makeRecord(
+        "modal_computer_use.test",
+        logging.INFO,
+        __file__,
+        1,
+        "safe message",
+        (),
+        exc_info=None,
+        extra={
+            "extra": {
+                "artifact_uri": "artifact://screenshots/private.png",
+                "stdout": "Bearer stdout-secret",
+                "stderr": "stderr-secret",
+                "url": "https://novnc.example/?token=url-secret",
+            }
+        },
+    )
+
+    payload = json.loads(formatter.format(record))
+    serialized = json.dumps(payload)
+
+    assert payload["artifact_uri"]["redacted"] is True
+    assert payload["stdout"]["redacted"] is True
+    assert payload["stderr"]["redacted"] is True
+    assert payload["url"]["redacted"] is True
+    assert "artifact://screenshots/private.png" not in serialized
+    assert "stdout-secret" not in serialized
+    assert "stderr-secret" not in serialized
+    assert "url-secret" not in serialized

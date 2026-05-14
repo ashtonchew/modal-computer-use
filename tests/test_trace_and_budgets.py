@@ -10,6 +10,7 @@ from modal_computer_use.adapters.provenance import (
     PROVIDER_ACTION_REDACTIONS_METADATA_KEY,
 )
 from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.tracing import load_trace
 
@@ -129,6 +130,44 @@ def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) 
         "sha256": hashlib.sha256(b"secret value").hexdigest(),
     }
     assert entries[0].redactions == ["text", "provider_action.text"]
+
+
+def test_action_logs_redact_raw_provider_action_metadata(tmp_path, caplog) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with (
+        caplog.at_level("INFO", logger="modal_computer_use.daemon.actions"),
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+    ):
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "move",
+                        "x": 10,
+                        "y": 20,
+                        "metadata": {
+                            PROVIDER_ACTION_METADATA_KEY: {
+                                "type": "type",
+                                "text": "raw-provider-secret",
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    serialized_logs = "\n".join(str(record.__dict__) for record in caplog.records)
+    assert "raw-provider-secret" not in serialized_logs
 
 
 def test_action_trace_redacts_sensitive_metadata(tmp_path) -> None:
@@ -407,6 +446,51 @@ def test_screenshot_after_sanitizes_secret_bearing_exception_text(tmp_path) -> N
     trace_payload = entries[1].model_dump_json()
     assert "shot-secret" not in trace_payload
     assert "artifact://screenshots/private.png" not in trace_payload
+
+
+def test_screenshot_after_trace_redacts_secret_bearing_exception_details(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def fail_screenshot(*_args, **_kwargs):
+        raise DaemonError(
+            "screenshot failed",
+            details={
+                "stdout": "Bearer stdout-secret",
+                "stderr": "stderr-secret",
+                "artifact_uri": "artifact://screenshots/private.png",
+            },
+        )
+
+    app.state.backend.screenshot = fail_screenshot
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    trace_payload = entries[1].model_dump_json()
+    assert "stdout-secret" not in trace_payload
+    assert "stderr-secret" not in trace_payload
+    assert "artifact://screenshots/private.png" not in trace_payload
+    assert entries[1].result is not None
+    output = entries[1].result["output"]
+    assert output["stdout"]["redacted"] is True
+    assert output["stderr"]["redacted"] is True
+    assert output["artifact_uri"]["redacted"] is True
 
 
 def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:

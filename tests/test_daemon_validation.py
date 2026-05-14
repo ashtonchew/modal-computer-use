@@ -465,6 +465,62 @@ def test_input_routes_reject_unready_desktop_before_budget_or_action(tmp_path) -
     assert app.state.action_count == 0
 
 
+def test_readyz_and_actions_reject_after_mock_lifecycle_stop(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        stopped = client.post("/v1/computer/stop")
+        status = client.get("/v1/computer/status")
+        ready = client.get("/readyz")
+        action = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 3, "y": 4}]},
+        )
+
+    assert stopped.status_code == 200
+    assert status.json()["ready"] is False
+    assert ready.status_code == 503
+    assert ready.json()["ready"] is False
+    assert action.status_code == 503
+    assert action.json()["code"] == "desktop_not_ready"
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+
+
+def test_screenshot_and_clipboard_routes_reject_unready_desktop(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    app.state.backend.ready = not_ready
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        screenshot = client.post("/v1/screenshots/full", json={})
+        clipboard = client.put("/v1/clipboard/text", json={"text": "secret"})
+
+    assert screenshot.status_code == 503
+    assert screenshot.json()["code"] == "desktop_not_ready"
+    assert clipboard.status_code == 503
+    assert clipboard.json()["code"] == "desktop_not_ready"
+    assert app.state.screenshot_count == 0
+    assert app.state.backend.clipboard == ""
+
+
 def test_browser_open_url_rejects_non_http_urls(test_client) -> None:
     response = test_client.post("/v1/browser/open-url", json={"url": "file:///etc/passwd"})
 

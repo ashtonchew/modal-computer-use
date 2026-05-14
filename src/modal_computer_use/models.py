@@ -541,6 +541,11 @@ class VersionInfo(StrictBaseModel):
     modal_computer_use_package: str
 
 
+class ReadyStatus(StrictBaseModel):
+    ready: bool
+    errors: list[str] = Field(default_factory=list)
+
+
 class Capabilities(StrictBaseModel):
     primitives: list[str]
     screenshot_formats: list[ImageFormat]
