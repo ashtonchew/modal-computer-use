@@ -15,7 +15,8 @@ def main() -> None:
             if os.getenv("COMPUTER_USE_LOCAL_TOKEN")
             else "0.0.0.0"  # noqa: S104 - Modal connect-token mode must listen on port 8080.
         )
-    uvicorn.run(create_app(), host=host, port=8080, log_config=None)
+    port = int(os.getenv("COMPUTER_USE_DAEMON_PORT", "8080"))
+    uvicorn.run(create_app(), host=host, port=port, log_config=None)
 
 
 if __name__ == "__main__":

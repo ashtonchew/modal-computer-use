@@ -60,7 +60,10 @@ def _is_loopback_request(request: Request) -> bool:
 
 
 def _verified_user_data_error(request: Request) -> JSONResponse | None:
-    if not _is_trusted_connect_proxy_request(request):
+    if not _is_trusted_connect_proxy_request(
+        request,
+        trust_private=request.app.state.settings.trust_private_connect_proxy,
+    ):
         return JSONResponse(
             status_code=401,
             content={
@@ -98,7 +101,7 @@ def _verified_user_data_error(request: Request) -> JSONResponse | None:
     return None
 
 
-def _is_trusted_connect_proxy_request(request: Request) -> bool:
+def _is_trusted_connect_proxy_request(request: Request, *, trust_private: bool = False) -> bool:
     host = request.client.host if request.client else ""
     if host in {"localhost", "testclient"}:
         return True
@@ -106,4 +109,6 @@ def _is_trusted_connect_proxy_request(request: Request) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return address.is_loopback or address.is_private or address.is_link_local
+    if address.is_loopback:
+        return True
+    return trust_private and (address.is_private or address.is_link_local)

@@ -15,8 +15,13 @@ from .base import Namespace
 
 
 class ActionsNamespace(Namespace):
-    def apply(self, action: ComputerAction | dict[str, Any]) -> ActionResult:
-        result = self.run([action])
+    def apply(
+        self,
+        action: ComputerAction | dict[str, Any],
+        *,
+        source: str = "sdk",
+    ) -> ActionResult:
+        result = self.run([action], source=source)
         first = result.results[0]
         return ActionResult(
             ok=first.ok, message=first.error, elapsed_ms=first.elapsed_ms, output=first.output

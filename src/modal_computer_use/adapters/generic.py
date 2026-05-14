@@ -40,7 +40,7 @@ class ActionExecutor:
     def apply(self, action: ComputerAction | dict[str, Any]) -> ActionResult:
         normalized = self._transform(parse_action(action))
         self._policy_tree(normalized)
-        result = self.computer.actions.apply(normalized)
+        result = self.computer.actions.apply(normalized, source=self.source)
         if self.after_action:
             self.after_action(normalized, result)
         return result

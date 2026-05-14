@@ -8,7 +8,7 @@ from PIL import Image
 
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.desktop import x11 as x11_module
-from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend
+from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend, choose_backend
 from modal_computer_use.models import Point, ScreenshotOptions
 
 
@@ -217,3 +217,12 @@ def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
         anyio.run(run_command)
 
     assert state == {"killed": True, "waited": True}
+
+
+def test_auto_backend_fails_closed_to_x11_on_posix_without_xdotool(monkeypatch) -> None:
+    monkeypatch.setattr(x11_module.os, "name", "posix")
+    monkeypatch.setattr(x11_module.shutil, "which", lambda _tool: None)
+
+    backend = choose_backend("auto", width=100, height=100, display=":99")
+
+    assert isinstance(backend, X11DesktopBackend)

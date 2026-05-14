@@ -37,8 +37,10 @@ class RecordingActions:
         self.applied: list[dict[str, Any]] = []
         self.runs: list[dict[str, Any]] = []
 
-    def apply(self, action: Any) -> ActionResult:
-        self.applied.append(action.model_dump(mode="json"))
+    def apply(self, action: Any, *, source: str = "sdk") -> ActionResult:
+        dumped = action.model_dump(mode="json")
+        dumped["source"] = source
+        self.applied.append(dumped)
         return ActionResult(ok=True, output={"type": action.type})
 
     def run(
@@ -159,6 +161,19 @@ def test_provider_apply_many_forwards_batch_options() -> None:
     assert openai_computer.actions.runs[0]["screenshot_after"] is True
     assert anthropic_computer.actions.runs[0]["continue_on_error"] is True
     assert anthropic_computer.actions.runs[0]["screenshot_after"] is True
+
+
+def test_provider_apply_forwards_source_to_single_action_calls() -> None:
+    openai_computer = RecordingComputer()
+    OpenAIAdapter(openai_computer).apply({"type": "move", "x": 1, "y": 2})
+
+    anthropic_computer = RecordingComputer()
+    AnthropicAdapter(anthropic_computer, tool_version="computer_20241022").apply(
+        {"action": "mouse_move", "coordinate": [3, 4]}
+    )
+
+    assert openai_computer.actions.applied[0]["source"] == "openai-adapter"
+    assert anthropic_computer.actions.applied[0]["source"] == "anthropic-adapter"
 
 
 def test_openai_unknown_action_fails_closed() -> None:

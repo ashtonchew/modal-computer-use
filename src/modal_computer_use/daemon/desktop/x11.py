@@ -305,15 +305,23 @@ class MockDesktopBackend(DesktopBackend):
         draw = ImageDraw.Draw(img)
         draw.rectangle([0, 0, image_width - 1, image_height - 1], outline=(68, 84, 106))
         if options.show_cursor:
-            rel = CoordinateSpace.from_dimensions(
-                desktop_width=self.width,
-                desktop_height=self.height,
-                image_width=image_width,
-                image_height=image_height,
-                source_region=source,
-            ).to_image(self.cursor)
-            draw.line([(rel.x - 6, rel.y), (rel.x + 6, rel.y)], fill=(220, 38, 38), width=2)
-            draw.line([(rel.x, rel.y - 6), (rel.x, rel.y + 6)], fill=(220, 38, 38), width=2)
+            cursor_in_source = (
+                source.x <= self.cursor.x < source.right
+                and source.y <= self.cursor.y < source.bottom
+            )
+            if cursor_in_source:
+                cursor_x = round((self.cursor.x - source.x) * image_width / source.width)
+                cursor_y = round((self.cursor.y - source.y) * image_height / source.height)
+                draw.line(
+                    [(cursor_x - 6, cursor_y), (cursor_x + 6, cursor_y)],
+                    fill=(220, 38, 38),
+                    width=2,
+                )
+                draw.line(
+                    [(cursor_x, cursor_y - 6), (cursor_x, cursor_y + 6)],
+                    fill=(220, 38, 38),
+                    width=2,
+                )
         data = _encode_image(img, options.format, options.quality)
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,
@@ -803,6 +811,6 @@ def choose_backend(
         return MockDesktopBackend(width=width, height=height)
     if kind == "x11":
         return X11DesktopBackend(width=width, height=height, display=display, browser=browser)
-    if os.name != "posix" or shutil.which("xdotool") is None:
+    if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
     return X11DesktopBackend(width=width, height=height, display=display, browser=browser)

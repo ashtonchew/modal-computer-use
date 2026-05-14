@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from modal_computer_use.daemon import __main__ as daemon_main
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 
 
@@ -27,3 +28,37 @@ def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:
     settings = DaemonSettings(desktop_width=456)
 
     assert settings.desktop_width == 456
+
+
+def test_daemon_entrypoint_reads_host_and_port_environment(monkeypatch) -> None:
+    calls = []
+    app = object()
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_HOST", "127.0.0.2")
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_PORT", "9090")
+    monkeypatch.setattr(daemon_main, "create_app", lambda: app)
+    monkeypatch.setattr(
+        daemon_main.uvicorn,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    daemon_main.main()
+
+    assert calls == [((app,), {"host": "127.0.0.2", "port": 9090, "log_config": None})]
+
+
+def test_daemon_entrypoint_defaults_port_to_8080(monkeypatch) -> None:
+    calls = []
+    app = object()
+    monkeypatch.delenv("COMPUTER_USE_DAEMON_PORT", raising=False)
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_HOST", "127.0.0.2")
+    monkeypatch.setattr(daemon_main, "create_app", lambda: app)
+    monkeypatch.setattr(
+        daemon_main.uvicorn,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    daemon_main.main()
+
+    assert calls[0][1]["port"] == 8080

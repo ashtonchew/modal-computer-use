@@ -462,7 +462,7 @@ def _validate_screenshot_pixel_budget(
 ) -> list[str]:
     errors: list[str] = []
     backend = request.app.state.backend
-    for index, action in enumerate(payload.actions):
+    for action_path, action in _iter_action_tree(payload.actions):
         if isinstance(action, ScreenshotAction):
             options = action.options or ScreenshotOptions()
             errors.extend(
@@ -471,7 +471,7 @@ def _validate_screenshot_pixel_budget(
                     source_width=backend.width,
                     source_height=backend.height,
                     scale=options.scale,
-                    label=f"actions[{index}]",
+                    label=action_path,
                 )
             )
         elif isinstance(action, ZoomAction):
@@ -482,7 +482,7 @@ def _validate_screenshot_pixel_budget(
                     source_width=action.region.width,
                     source_height=action.region.height,
                     scale=options.scale,
-                    label=f"actions[{index}]",
+                    label=action_path,
                 )
             )
     if payload.screenshot_after:
@@ -518,6 +518,10 @@ def _screenshot_pixel_errors(
 
 
 def _iter_timeout_actions(actions: list[Any], *, path: str = "actions"):
+    yield from _iter_action_tree(actions, path=path)
+
+
+def _iter_action_tree(actions: list[Any], *, path: str = "actions"):
     for index, action in enumerate(actions):
         action_path = f"{path}[{index}]"
         yield action_path, action
@@ -526,7 +530,7 @@ def _iter_timeout_actions(actions: list[Any], *, path: str = "actions"):
             for nested_action in action.actions:
                 with suppress(Exception):
                     nested.append(parse_action(nested_action))
-            yield from _iter_timeout_actions(nested, path=f"{action_path}.actions")
+            yield from _iter_action_tree(nested, path=f"{action_path}.actions")
 
 
 def _effective_action_timeout_ms(
@@ -843,19 +847,26 @@ async def _execute_action(
     )
 
 
-def _validate_actions(actions: list[Any], *, width: int | None, height: int | None) -> list[str]:
+def _validate_actions(
+    actions: list[Any],
+    *,
+    width: int | None,
+    height: int | None,
+    path: str = "actions",
+) -> list[str]:
     errors: list[str] = []
     for index, action in enumerate(actions):
-        key_errors = _key_validation_errors(action, field=f"actions[{index}]")
+        action_path = f"{path}[{index}]"
+        key_errors = _key_validation_errors(action, field=action_path)
         errors.extend(key_errors)
         for point in _action_points(action):
             if width is not None and point.x >= width:
                 errors.append(
-                    f"actions[{index}] x coordinate {point.x} exceeds desktop width {width}"
+                    f"{action_path} x coordinate {point.x} exceeds desktop width {width}"
                 )
             if height is not None and point.y >= height:
                 errors.append(
-                    f"actions[{index}] y coordinate {point.y} exceeds desktop height {height}"
+                    f"{action_path} y coordinate {point.y} exceeds desktop height {height}"
                 )
         region = getattr(action, "region", None)
         if (
@@ -864,38 +875,26 @@ def _validate_actions(actions: list[Any], *, width: int | None, height: int | No
             and height is not None
             and (region.right > width or region.bottom > height)
         ):
-            errors.append(f"actions[{index}] region extends beyond desktop geometry")
+            errors.append(f"{action_path} region extends beyond desktop geometry")
         if isinstance(action, HoldKeyAction) and action.actions:
+            parsed_nested = []
             for nested_index, nested_action in enumerate(action.actions):
                 try:
                     parsed = parse_action(nested_action)
                 except Exception as exc:
                     errors.append(
-                        f"actions[{index}].actions[{nested_index}] is invalid: {exc}"
+                        f"{action_path}.actions[{nested_index}] is invalid: {exc}"
                     )
                     continue
-                for point in _action_points(parsed):
-                    if width is not None and point.x >= width:
-                        errors.append(
-                            f"actions[{index}].actions[{nested_index}] x coordinate "
-                            f"{point.x} exceeds desktop width {width}"
-                        )
-                    if height is not None and point.y >= height:
-                        errors.append(
-                            f"actions[{index}].actions[{nested_index}] y coordinate "
-                            f"{point.y} exceeds desktop height {height}"
-                        )
-                nested_region = getattr(parsed, "region", None)
-                if (
-                    isinstance(nested_region, Region)
-                    and width is not None
-                    and height is not None
-                    and (nested_region.right > width or nested_region.bottom > height)
-                ):
-                    errors.append(
-                        f"actions[{index}].actions[{nested_index}] region extends beyond "
-                        "desktop geometry"
-                    )
+                parsed_nested.append(parsed)
+            errors.extend(
+                _validate_actions(
+                    parsed_nested,
+                    width=width,
+                    height=height,
+                    path=f"{action_path}.actions",
+                )
+            )
     return errors
 
 

@@ -128,3 +128,22 @@ def test_idle_budget_blocks_browser_and_app_mutations(tmp_path) -> None:
     assert browser.json()["code"] == "budget_exceeded"
     assert launch.status_code == 429
     assert launch.json()["code"] == "budget_exceeded"
+
+
+def test_idle_budget_blocks_commands(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    app.state.last_activity_at = time.monotonic() - 2
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/commands/run", json={"command": ["echo", "secret"]})
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"

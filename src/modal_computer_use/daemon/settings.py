@@ -105,6 +105,9 @@ class DaemonSettings:
     require_connect_user: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_REQUIRE_CONNECT_USER", True)
     )
+    trust_private_connect_proxy: bool = field(
+        default_factory=lambda: _bool_env("COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY", False)
+    )
     reject_query_tokens: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_REJECT_QUERY_TOKENS", True)
     )
