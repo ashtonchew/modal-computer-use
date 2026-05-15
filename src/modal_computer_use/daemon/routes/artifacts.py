@@ -7,8 +7,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 
 from modal_computer_use.artifacts import normalize_artifact_path
-from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.execution import budget_policy
 from modal_computer_use.errors import ArtifactPathError
 from modal_computer_use.models import ArtifactInfo, ArtifactSyncResult
 
@@ -27,10 +27,10 @@ async def manifest(request: Request, prefix: str = "") -> list[ArtifactInfo]:
 
 @router.post("/sync")
 async def sync(request: Request) -> ArtifactSyncResult:
-    budgets.enforce_idle(request)
+    budget_policy(request).enforce_idle()
     with request.app.state.tracer.span("daemon.artifact.sync"):
         result = request.app.state.artifacts.sync()
-    budgets.touch_activity(request)
+    budget_policy(request).touch_activity()
     return result
 
 
@@ -47,7 +47,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
     try:
         public_path = normalize_artifact_path(path)
         content_length = request.headers.get("content-length")
-        budgets.enforce_artifact_write(request, public_path, 0)
+        budget_policy(request).enforce_artifact_write(public_path, 0)
         if content_length is not None:
             try:
                 incoming_size = int(content_length)
@@ -57,7 +57,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                     status_code=400,
                     code="invalid_content_length",
                 ) from exc
-            budgets.enforce_artifact_write(request, public_path, incoming_size)
+            budget_policy(request).enforce_artifact_write(public_path, incoming_size)
         store = request.app.state.artifacts
         target = store.resolve(public_path)
         _ensure_writable_artifact_target(target)
@@ -75,7 +75,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                         if not chunk:
                             continue
                         total += len(chunk)
-                        budgets.enforce_artifact_write(request, public_path, total)
+                        budget_policy(request).enforce_artifact_write(public_path, total)
                         handle.write(chunk)
                 except Exception:
                     temp_path.unlink(missing_ok=True)
@@ -90,8 +90,8 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
             if content_type:
                 info.content_type = content_type
             store.append_manifest(info)
-            budgets.enforce(request, "artifacts")
-            budgets.touch_activity(request)
+            budget_policy(request).enforce("artifacts")
+            budget_policy(request).touch_activity()
             return info
     except ArtifactPathError:
         raise
@@ -115,7 +115,7 @@ def _ensure_writable_artifact_target(target: Path) -> None:
 
 @router.delete("/{path:path}")
 async def delete_artifact(path: str, request: Request) -> dict[str, bool]:
-    budgets.enforce_idle(request)
+    budget_policy(request).enforce_idle()
     request.app.state.artifacts.delete(path)
-    budgets.touch_activity(request)
+    budget_policy(request).touch_activity()
     return {"ok": True}

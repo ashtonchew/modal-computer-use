@@ -5,6 +5,10 @@
 ## Authentication
 
 In Modal, authenticate the daemon with Sandbox Connect Tokens against port `8080`. Modal forwards verified user metadata in the `X-Verified-User-Data` header, which the daemon checks when `COMPUTER_USE_REQUIRE_CONNECT_USER` is on (the default).
+Modal-created sandboxes set `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY=true` so that verified
+metadata forwarded by Modal's private connect proxy is accepted. The daemon default remains
+fail-closed for arbitrary deployments; enable private proxy trust only when Modal Connect is the
+intended ingress path to the daemon.
 
 For local development, set `COMPUTER_USE_LOCAL_TOKEN` and have clients send `Authorization: Bearer <token>`. This is for local testing only. Do not set a weak token in production or expose `127.0.0.1:8080` to untrusted networks.
 

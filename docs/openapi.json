@@ -1300,14 +1300,6 @@
       "HoldRequest": {
         "additionalProperties": false,
         "properties": {
-          "actions": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Actions",
-            "type": "array"
-          },
           "duration_ms": {
             "anyOf": [
               {

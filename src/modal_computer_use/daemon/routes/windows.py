@@ -6,9 +6,9 @@ import time
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, ready_input_lock
+from modal_computer_use.daemon.routes.execution import run_input_action
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.daemon.schemas import WaitForWindowRequest
 from modal_computer_use.models import ActionResult, X11Window
 
@@ -29,24 +29,28 @@ async def active(request: Request) -> X11Window | None:
 
 @router.post("/{window_id}/activate")
 async def activate(window_id: str, request: Request) -> ActionResult:
-    await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budgets.reserve_action(request)
+    async def operation() -> ActionResult:
         return await request.app.state.backend.activate_window(window_id)
+
+    return await run_input_action(
+        request,
+        operation,
+        fallback_code="window_activate_failed",
+        fallback_message="window activate failed",
+    )
 
 
 @router.post("/{window_id}/close")
 async def close(window_id: str, request: Request) -> ActionResult:
-    await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budgets.reserve_action(request)
+    async def operation() -> ActionResult:
         return await request.app.state.backend.close_window(window_id)
+
+    return await run_input_action(
+        request,
+        operation,
+        fallback_code="window_close_failed",
+        fallback_message="window close failed",
+    )
 
 
 @router.post("/wait-for")

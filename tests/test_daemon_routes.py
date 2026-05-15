@@ -115,6 +115,20 @@ def test_rate_limit_blocks_direct_release_all_before_backend_call(tmp_path) -> N
     assert calls == 0
 
 
+def test_direct_action_result_failure_returns_http_error(test_client, app) -> None:
+    async def mouse_down(button: str = "left", x: int | None = None, y: int | None = None):
+        del button, x, y
+        return ActionResult(ok=False, message="mouse down refused", output={"code": "denied"})
+
+    app.state.backend.mouse_down = mouse_down
+
+    response = test_client.post("/v1/mouse/down", json={"button": "left"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "denied"
+    assert response.json()["message"] == "mouse down refused"
+
+
 def test_readyz_checks_x11vnc_when_vnc_enabled(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

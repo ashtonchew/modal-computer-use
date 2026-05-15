@@ -333,7 +333,7 @@ def test_action_validate_matches_run_timeout_and_screenshot_preflight(tmp_path) 
     assert "screenshot output" in screenshot.text
 
 
-def test_keyboard_hold_rejects_nested_timeout_before_execution(tmp_path) -> None:
+def test_keyboard_hold_rejects_nested_actions_before_execution(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -354,11 +354,11 @@ def test_keyboard_hold_rejects_nested_timeout_before_execution(tmp_path) -> None
         )
 
     assert response.status_code == 422
-    assert response.json()["code"] == "action_validation_failed"
+    assert response.json()["code"] == "validation_error"
     assert app.state.backend.held_keys == set()
 
 
-def test_keyboard_hold_rejects_nested_screenshot_budget_before_execution(tmp_path) -> None:
+def test_keyboard_hold_rejects_nested_screenshot_payload_before_execution(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -385,13 +385,12 @@ def test_keyboard_hold_rejects_nested_screenshot_budget_before_execution(tmp_pat
         )
 
     assert response.status_code == 422
-    assert response.json()["code"] == "action_validation_failed"
-    assert "actions[0] screenshot output" in response.text
+    assert response.json()["code"] == "validation_error"
     assert app.state.backend.held_keys == set()
     assert app.state.screenshot_count == 0
 
 
-def test_keyboard_hold_combined_budget_rejects_before_key_down(tmp_path) -> None:
+def test_keyboard_hold_nested_actions_reject_before_key_down(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -419,8 +418,8 @@ def test_keyboard_hold_combined_budget_rejects_before_key_down(tmp_path) -> None
             },
         )
 
-    assert response.status_code == 429
-    assert response.json()["code"] == "budget_exceeded"
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
     assert key_down_calls == []
     assert app.state.backend.held_keys == set()
     assert app.state.action_count == 0
@@ -991,19 +990,17 @@ def test_direct_keyboard_type_rejects_control_characters(test_client) -> None:
     assert response.status_code == 422
 
 
-def test_direct_keyboard_hold_executes_nested_actions(test_client, app) -> None:
+def test_direct_keyboard_hold_is_primitive_only(test_client, app) -> None:
     response = test_client.post(
         "/v1/keyboard/hold",
-        json={"key": "shift", "actions": [{"type": "move", "x": 7, "y": 8}]},
+        json={"key": "shift", "duration_ms": 1},
     )
 
     assert response.status_code == 200
-    assert app.state.backend.cursor.x == 7
-    assert app.state.backend.cursor.y == 8
     assert app.state.backend.held_keys == set()
 
 
-def test_direct_keyboard_hold_releases_nested_inputs_on_timeout(test_client, app) -> None:
+def test_direct_keyboard_hold_rejects_nested_actions(test_client, app) -> None:
     response = test_client.post(
         "/v1/keyboard/hold",
         json={
@@ -1015,7 +1012,7 @@ def test_direct_keyboard_hold_releases_nested_inputs_on_timeout(test_client, app
         },
     )
 
-    assert response.status_code == 408
-    assert response.json()["code"] == "timeout"
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
     assert app.state.backend.held_buttons == set()
     assert app.state.backend.held_keys == set()
