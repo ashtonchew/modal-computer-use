@@ -29,6 +29,9 @@ Namespaces on `ComputerSandbox`:
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verified with
 `uv run python scripts/export_openapi.py --check`.
+For Modal-created sandboxes, noVNC tunnel URLs are owned by Modal orchestration; use
+`ComputerSandbox.debug_urls()` rather than the daemon-only `computer.debug.urls()` helper when you
+need to know whether a Modal noVNC URL exists.
 
 ## Observability
 
@@ -47,9 +50,12 @@ action schema, optionally apply an explicit `CoordinateSpace`, run the `before_a
 then call the SDK action namespace. They do not instantiate provider clients, call provider APIs,
 hold prompts, or own confirmation policy.
 
-Unknown provider actions raise `UnsupportedActionError` by default. `allow_unknown=True` is an
-explicit compatibility escape hatch that normalizes unknown provider payloads to a zero-duration
-wait with redacted provider-action metadata.
+Unknown provider actions raise `UnsupportedActionError` by default, even when a future provider
+payload includes fields this SDK does not yet know about. `allow_unknown=True` is an explicit
+provider-adapter compatibility escape hatch that normalizes unknown provider payloads to a
+zero-duration wait with redacted provider-action metadata. It does not make the native
+`ActionExecutor` accept unknown `ComputerAction` types; the native daemon action schema remains
+closed so caller bugs fail before execution.
 
 Adapter-normalized actions carry redacted provider provenance in action metadata. When daemon
 action tracing is enabled, the trace writer promotes that metadata to `TraceEntry.provider_action`
@@ -165,6 +171,9 @@ hard deadline and stops the batch even when `continue_on_error` is true. Timeout
 `error_code="timeout"` and an output `scope` of `action` or `batch`. `Idempotency-Key` replays
 the original complete batch result without re-executing actions, incrementing budgets, or
 duplicating trace/artifact writes; reusing a key with a different request body returns `409`.
+`continue_on_error` applies between top-level batch items. A `hold_key` action is treated as one
+compound top-level item: nested actions run while the key is held, and the first nested failure
+releases the key and fails that `hold_key` item before later nested actions run.
 Action budgets count attempted executable desktop actions after validation, including failed
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
 instead, and cursor-position queries do not consume the action budget. Successful action-route
@@ -173,8 +182,18 @@ batch request. The timing object contains only elapsed milliseconds and no comma
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
 `actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a
 simple per-daemon rolling one-second action limit. The limit applies to `/v1/actions/run` and
-direct mouse/keyboard mutation routes; failures return `rate_limited` without executing the
+direct desktop-affecting mutation routes, including mouse, keyboard, clipboard writes/clears,
+windows, apps, browser, and commands; failures return `rate_limited` without executing the
 over-limit action.
+`screenshot_after` is an implicit trailing screenshot operation. Its screenshot and artifact
+budgets are reserved after earlier batch actions complete, immediately before capture, so a budget
+failure is returned as a trailing `screenshot_after` result rather than rolling back already
+executed actions. Pixel-budget validation is different: because output geometry is known up front,
+oversized `screenshot_after` requests fail validation before any batch action executes.
+`/v1/commands/run` is serialized under the daemon input lock because callers can run GUI-affecting
+tools such as `xdotool`. Command stdout/stderr and process log tails remain available to
+authenticated callers for debugging, but known secret-bearing substrings such as bearer tokens,
+noVNC URLs, and artifact URIs are sanitized before the daemon returns them.
 
 Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. Use
 `computer-use trace validate <path>` to validate trace NDJSON and
@@ -227,4 +246,4 @@ target for this package. Already-mounted reader containers must use `Volume.relo
 and concurrent writes to the same Volume paths are last-writer-wins, so production artifact paths
 should be run-scoped.
 
-For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v6.md](spec/modal_computer_use_spec_v6.md).
+For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v7.md](spec/modal_computer_use_spec_v7.md).

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 import subprocess
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -165,5 +166,6 @@ class Supervisor:
     def _tail(path: Path, tail: int) -> str:
         if not path.exists():
             return ""
-        lines = path.read_text(errors="replace").splitlines()
-        return "\n".join(lines[-tail:])
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            lines = deque(handle, maxlen=tail)
+        return "\n".join(line.rstrip("\n") for line in lines)

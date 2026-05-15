@@ -13,7 +13,7 @@ BudgetKind = Literal["actions", "screenshots", "artifacts", "recordings", "idle"
 
 def snapshot(request: Request) -> dict[str, int | float | None]:
     settings = request.app.state.settings
-    artifact_bytes = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
+    artifact_bytes = request.app.state.artifacts.total_public_bytes()
     recording_bytes = request.app.state.recordings.total_size_bytes()
     idle_seconds = time.monotonic() - request.app.state.last_activity_at
     return {
@@ -58,8 +58,7 @@ def enforce(request: Request, *kinds: BudgetKind) -> None:
     if (
         "recordings" in checks
         and settings.max_recording_seconds is not None
-        and request.app.state.recordings.total_duration_seconds()
-        > settings.max_recording_seconds
+        and request.app.state.recordings.total_duration_seconds() > settings.max_recording_seconds
     ):
         raise _budget_error("recording duration budget exceeded", state)
     if (
@@ -121,19 +120,22 @@ def reserve_action(request: Request) -> None:
     touch_activity(request)
 
 
-def action_reservation_error(request: Request) -> DaemonError | None:
+def action_reservation_error(request: Request, *, count: int = 1) -> DaemonError | None:
     settings = request.app.state.settings
     idle_error = idle_reservation_error(request)
     if idle_error is not None:
         return idle_error
-    if settings.max_actions is not None and request.app.state.action_count >= settings.max_actions:
+    if (
+        settings.max_actions is not None
+        and request.app.state.action_count + count > settings.max_actions
+    ):
         return _budget_error("action budget exceeded", snapshot(request))
     rate_limit = settings.input_rate_limit_per_sec
     if rate_limit > 0:
         now = time.monotonic()
         window = request.app.state.action_rate_window
         _prune_action_rate_window(window, now=now)
-        if len(window) >= rate_limit:
+        if len(window) + count > rate_limit:
             return DaemonError(
                 "action rate limit exceeded",
                 status_code=429,
@@ -147,14 +149,14 @@ def action_reservation_error(request: Request) -> DaemonError | None:
     return None
 
 
-def screenshot_reservation_error(request: Request) -> DaemonError | None:
+def screenshot_reservation_error(request: Request, *, count: int = 1) -> DaemonError | None:
     settings = request.app.state.settings
     idle_error = idle_reservation_error(request)
     if idle_error is not None:
         return idle_error
     if (
         settings.max_screenshots is not None
-        and request.app.state.screenshot_count >= settings.max_screenshots
+        and request.app.state.screenshot_count + count > settings.max_screenshots
     ):
         return _budget_error("screenshot budget exceeded", snapshot(request))
     return None

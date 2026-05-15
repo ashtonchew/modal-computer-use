@@ -228,6 +228,7 @@ class DisplayInfo(StrictBaseModel):
 class X11Window(StrictBaseModel):
     id: str
     title: str
+    class_name: str | None = None
     pid: int | None = None
     x: int
     y: int
@@ -517,7 +518,13 @@ class ActionBatchRequest(StrictBaseModel):
     actions: list[ComputerAction]
     screenshot_after: bool = False
     screenshot_options: ScreenshotOptions | None = None
-    continue_on_error: bool = False
+    continue_on_error: bool = Field(
+        default=False,
+        description=(
+            "Continue after failed top-level actions. Compound actions such as "
+            "hold_key remain atomic; their nested actions stop on the first failure."
+        ),
+    )
     idempotency_key: str | None = None
     source: str = "sdk"
     call_id: str | None = None
@@ -538,6 +545,11 @@ class VersionInfo(StrictBaseModel):
     sdk_max_version: str
     image_profile: str = "standard"
     modal_computer_use_package: str
+
+
+class ReadyStatus(StrictBaseModel):
+    ready: bool
+    errors: list[str] = Field(default_factory=list)
 
 
 class Capabilities(StrictBaseModel):

@@ -7,21 +7,13 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from modal_computer_use.redaction import safe_exception_payload, sanitize_text
+from modal_computer_use.redaction import (
+    SENSITIVE_PAYLOAD_KEYS,
+    safe_exception_payload,
+    sanitize_text,
+)
 
-SENSITIVE_KEYS = {
-    "api_key",
-    "authorization",
-    "bytes",
-    "clipboard",
-    "credential",
-    "data_base64",
-    "password",
-    "secret",
-    "text",
-    "token",
-    "vnc",
-}
+SENSITIVE_KEYS = SENSITIVE_PAYLOAD_KEYS
 
 
 def redact(value: Any) -> Any:
@@ -29,7 +21,7 @@ def redact(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, item in value.items():
             lowered = str(key).lower()
-            if any(sensitive in lowered for sensitive in SENSITIVE_KEYS):
+            if _is_sensitive_log_key(lowered):
                 if isinstance(item, str):
                     result[key] = {
                         "redacted": True,
@@ -43,7 +35,14 @@ def redact(value: Any) -> Any:
         return result
     if isinstance(value, list):
         return [redact(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_text(value)
     return value
+
+
+def _is_sensitive_log_key(key: str) -> bool:
+    normalized = key.replace("-", "_")
+    return normalized in SENSITIVE_KEYS or normalized.endswith("_token")
 
 
 class JsonFormatter(logging.Formatter):

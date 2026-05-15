@@ -180,6 +180,8 @@ def test_openai_unknown_action_fails_closed() -> None:
     adapter = OpenAIAdapter(RecordingComputer())
     with pytest.raises(UnsupportedActionError):
         adapter.normalize({"type": "future"})
+    with pytest.raises(UnsupportedActionError):
+        adapter.normalize({"type": "future", "new_provider_field": True})
 
 
 def test_openai_allow_unknown_is_explicit_safe_noop() -> None:
@@ -192,6 +194,12 @@ def test_openai_allow_unknown_is_explicit_safe_noop() -> None:
     }
 
 
+def test_openai_allow_unknown_does_not_bypass_known_action_validation() -> None:
+    adapter = OpenAIAdapter(RecordingComputer(), allow_unknown=True)
+    with pytest.raises(ActionValidationError):
+        adapter.normalize({"type": "click", "x": 1, "y": 2, "future_field": True})
+
+
 def test_openai_provider_provenance_redacts_sensitive_text() -> None:
     adapter = OpenAIAdapter(RecordingComputer())
     normalized = adapter.normalize({"type": "type", "text": "secret typed value"})
@@ -199,6 +207,39 @@ def test_openai_provider_provenance_redacts_sensitive_text() -> None:
         "type": "type",
         "text": {"redacted": True, "length": 18},
     }
+
+
+def test_openai_provider_provenance_redacts_sensitive_metadata() -> None:
+    adapter = OpenAIAdapter(RecordingComputer())
+    normalized = adapter.normalize(
+        {
+            "type": "click",
+            "x": 1,
+            "y": 2,
+            "metadata": {"secret": "provider-secret"},
+        }
+    )
+
+    provider_action = normalized["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["metadata"]["secret"] == {"redacted": True, "length": 15}
+    assert "provider-secret" not in json.dumps(normalized)
+
+
+def test_provider_provenance_redacts_secret_patterns_in_safe_named_fields() -> None:
+    adapter = OpenAIAdapter(RecordingComputer(), allow_unknown=True)
+
+    normalized = adapter.normalize(
+        {
+            "type": "future",
+            "note": "Bearer provider-secret artifact://screenshots/private.png",
+        }
+    )
+
+    serialized = json.dumps(normalized)
+    provider_action = normalized["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["note"] == "Bearer [redacted] [redacted]"
+    assert "provider-secret" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
 
 
 def test_openai_computer_call_output_uses_native_screenshot_without_metadata_loss() -> None:
@@ -312,6 +353,45 @@ def test_anthropic_20250124_enhanced_fixture_matrix() -> None:
     assert actions[4]["duration_ms"] == 100
 
 
+def test_anthropic_hold_key_normalizes_nested_actions() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20250124")
+
+    action = adapter.normalize(
+        {
+            "action": "hold_key",
+            "key": "shift",
+            "actions": [
+                {"action": "mouse_move", "coordinate": [10, 20]},
+                {"action": "left_click"},
+            ],
+        }
+    )
+
+    assert action["type"] == "hold_key"
+    assert action["key"] == "shift"
+    assert [nested["type"] for nested in action["actions"]] == ["move", "click"]
+    assert action["actions"][0]["x"] == 10
+    assert action["actions"][0]["y"] == 20
+
+
+def test_anthropic_hold_key_provider_provenance_redacts_nested_typed_text() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20250124")
+
+    action = adapter.normalize(
+        {
+            "action": "hold_key",
+            "key": "shift",
+            "actions": [{"action": "type", "text": "nested secret"}],
+        }
+    )
+
+    provider_action = action["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["actions"][0]["text"] == {
+        "redacted": True,
+        "length": 13,
+    }
+
+
 def test_anthropic_20251124_zoom_fixture_matrix() -> None:
     computer = RecordingComputer()
     adapter = AnthropicAdapter(computer, tool_version="computer_20251124")
@@ -341,10 +421,51 @@ def test_anthropic_zoom_requires_tool_support_even_if_enabled() -> None:
         adapter.normalize({"action": "zoom", "region": {"x": 0, "y": 0, "width": 1, "height": 1}})
 
 
+def test_anthropic_zoom_requires_region_as_structured_validation_error() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20251124")
+
+    with pytest.raises(ActionValidationError, match="zoom action requires region"):
+        adapter.normalize({"action": "zoom"})
+
+
 def test_anthropic_unknown_action_fails_closed() -> None:
     adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20251124")
     with pytest.raises(UnsupportedActionError):
         adapter.normalize({"action": "future_action"})
+    with pytest.raises(UnsupportedActionError):
+        adapter.normalize({"action": "future_action", "new_provider_field": True})
+
+
+def test_anthropic_allow_unknown_is_explicit_safe_noop() -> None:
+    adapter = AnthropicAdapter(
+        RecordingComputer(), tool_version="computer_20251124", allow_unknown=True
+    )
+
+    normalized = adapter.normalize(
+        {"action": "future_action", "stderr": "Bearer provider-secret"}
+    )
+
+    assert normalized == {
+        "type": "wait",
+        "duration_ms": 0,
+        "metadata": {
+            PROVIDER_ACTION_METADATA_KEY: {
+                "action": "future_action",
+                "stderr": {"redacted": True, "length": 22},
+            },
+            "provider_action_redactions": ["stderr"],
+        },
+    }
+
+
+def test_anthropic_allow_unknown_does_not_bypass_known_action_validation() -> None:
+    adapter = AnthropicAdapter(
+        RecordingComputer(), tool_version="computer_20241022", allow_unknown=True
+    )
+    with pytest.raises(ActionValidationError):
+        adapter.normalize(
+            {"action": "mouse_move", "coordinate": [1, 2], "future_field": True}
+        )
 
 
 def test_anthropic_preserves_native_metadata_and_rejects_unknown_fields() -> None:
@@ -381,6 +502,31 @@ def test_anthropic_provider_provenance_redacts_sensitive_text() -> None:
         "action": "key",
         "text": "ctrl+c",
     }
+
+
+def test_anthropic_provider_provenance_redacts_sensitive_metadata() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20241022")
+    normalized = adapter.normalize(
+        {
+            "action": "mouse_move",
+            "coordinate": [1, 2],
+            "metadata": {"stderr": "Bearer provider-secret"},
+        }
+    )
+
+    provider_action = normalized["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["metadata"]["stderr"] == {"redacted": True, "length": 22}
+    assert "provider-secret" not in json.dumps(normalized)
+
+
+def test_generic_executor_rejects_unknown_native_actions_even_when_compat_flag_is_set() -> None:
+    computer = RecordingComputer()
+    with pytest.raises(ActionValidationError):
+        ActionExecutor(computer, allow_unknown=True).apply(
+            {"type": "future_action", "payload": {"secret": "provider-secret"}}
+        )
+
+    assert computer.actions.applied == []
 
 
 def test_anthropic_tool_result_builds_image_block_and_safe_metadata() -> None:

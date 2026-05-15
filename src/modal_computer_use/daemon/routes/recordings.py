@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.daemon.schemas import RecordingStartRequest
 from modal_computer_use.models import Recording
 
@@ -17,6 +18,7 @@ dashboard_router = APIRouter()
 
 @router.post("")
 async def start(payload: RecordingStartRequest, request: Request) -> Recording:
+    await ensure_desktop_ready(request)
     budget_error = budgets.recording_start_error(request)
     if budget_error is not None:
         raise budget_error
@@ -34,6 +36,7 @@ async def start(payload: RecordingStartRequest, request: Request) -> Recording:
 
 @router.post("/{recording_id}/stop")
 async def stop(recording_id: str, request: Request) -> Recording:
+    budgets.enforce_idle(request)
     rec = request.app.state.recordings.stop(recording_id, append_manifest=False)
     try:
         budgets.enforce(request, "recordings", "artifacts")
@@ -70,7 +73,9 @@ async def download(recording_id: str, request: Request) -> FileResponse:
 
 @router.delete("/{recording_id}")
 async def delete(recording_id: str, request: Request) -> dict[str, bool]:
+    budgets.enforce_idle(request)
     request.app.state.recordings.delete(recording_id)
+    budgets.touch_activity(request)
     return {"ok": True}
 
 
@@ -99,7 +104,7 @@ def _recording_row(recording: Recording) -> str:
     stopped = escape(recording.stopped_at.isoformat() if recording.stopped_at else "")
     status = escape(recording.status)
     digest = escape(recording.sha256 or "")
-    artifact_uri = escape(recording.artifact_uri or "")
+    artifact_backed = "yes" if recording.artifact_uri else "no"
     return f"""
       <tr>
         <td>{name or recording_id}</td>
@@ -109,9 +114,8 @@ def _recording_row(recording: Recording) -> str:
         <td>{started}</td>
         <td>{stopped}</td>
         <td class="digest">{digest}</td>
-        <td class="artifact">{artifact_uri}</td>
+        <td class="artifact">{artifact_backed}</td>
         <td class="actions">
-          <a href="/v1/recordings/{recording_id}">metadata</a>
           <a href="/v1/recordings/{recording_id}/download">download</a>
           <a href="/v1/recordings/{recording_id}" data-method="DELETE">delete API</a>
         </td>

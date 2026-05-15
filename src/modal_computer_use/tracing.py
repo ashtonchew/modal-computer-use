@@ -11,7 +11,7 @@ from .artifacts import normalize_artifact_path
 from .errors import ArtifactPathError
 from .models import ActionBatchResult, CoordinateSpace, Point, Region, TraceEntry, parse_action
 from .observability import get_tracer
-from .redaction import sanitize_text
+from .redaction import sanitize_payload, sanitize_text
 
 if TYPE_CHECKING:
     from .sandbox import ComputerSandbox
@@ -745,7 +745,7 @@ def _redact_replay_payload(value: Any) -> Any:
             if key in {"data_base64", "bytes"} and item is not None:
                 redacted[key] = {"redacted": True, "reason": "screenshot bytes"}
             else:
-                redacted[key] = _redact_replay_payload(item)
+                redacted[key] = _redact_replay_payload(sanitize_payload({key: item})[key])
         return redacted
     if isinstance(value, list):
         return [_redact_replay_payload(item) for item in value]

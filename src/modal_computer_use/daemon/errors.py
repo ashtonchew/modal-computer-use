@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from modal_computer_use.redaction import sanitize_payload, sanitize_text
+
 
 class DaemonError(Exception):
     def __init__(
@@ -24,5 +26,9 @@ class DaemonError(Exception):
 def to_http_exception(error: DaemonError) -> HTTPException:
     return HTTPException(
         status_code=error.status_code,
-        detail={"code": error.code, "message": error.message, "details": error.details},
+        detail={
+            "code": error.code,
+            "message": sanitize_text(error.message),
+            "details": sanitize_payload(error.details),
+        },
     )

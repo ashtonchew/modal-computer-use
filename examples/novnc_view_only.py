@@ -11,7 +11,7 @@ def main() -> None:
     computer = ComputerSandbox.create(config=ComputerConfig(expose_vnc="view_only"))
     try:
         computer.wait_until_ready()
-        debug_urls = computer.debug.urls()
+        debug_urls = computer.debug_urls()
         print({"vnc_enabled": debug_urls.vnc is not None, "mode": "view_only"})
     finally:
         computer.terminate()

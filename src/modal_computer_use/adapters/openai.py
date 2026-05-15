@@ -11,6 +11,7 @@ from modal_computer_use.models import (
     Point,
     Screenshot,
 )
+from modal_computer_use.redaction import sanitize_payload
 
 from .generic import ActionExecutor, PolicyHook
 from .output import screenshot_data_url, screenshot_metadata
@@ -49,14 +50,16 @@ class OpenAIAdapter:
 
     def normalize(self, action: dict[str, Any]) -> dict[str, Any]:
         kind = action.get("type") or action.get("action")
-        if kind not in _OPENAI_ACTIONS and self.allow_unknown:
-            return with_provider_provenance(
-                {
-                    "type": "wait",
-                    "duration_ms": 0,
-                },
-                action,
-            )
+        if kind not in _OPENAI_ACTIONS:
+            if self.allow_unknown:
+                return with_provider_provenance(
+                    {
+                        "type": "wait",
+                        "duration_ms": 0,
+                    },
+                    action,
+                )
+            raise UnsupportedActionError(f"unsupported OpenAI computer action: {kind}")
         _reject_unknown_fields(action)
         if kind == "click":
             x, y = _required_xy(action)
@@ -212,7 +215,7 @@ def _required_xy(action: dict[str, Any]) -> tuple[int, int]:
 def _with_common(payload: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata", "call_id", "sequence", "timeout_ms"):
         if key in action:
-            payload[key] = action[key]
+            payload[key] = sanitize_payload(action[key]) if key == "metadata" else action[key]
     return with_provider_provenance(payload, action)
 
 

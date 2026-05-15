@@ -326,7 +326,7 @@ def test_modal_volume_artifact_sync_smoke() -> None:
         sync = computer.artifacts.sync()
         assert sync.ok is True
         assert sync.persistent is True
-        assert sync.synced_paths == ["/home/desktop/artifacts"]
+        assert sync.synced_paths == ["artifact-root"]
         assert "v2" in (sync.message or "")
         computer.terminate()
         computer.detach()

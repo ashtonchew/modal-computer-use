@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -140,6 +141,37 @@ class ZoomScreenshotRequest(Schema):
         return value
 
 
+class WaitForWindowRequest(Schema):
+    title_regex: str | None = None
+    class_name: str | None = None
+    pid: int | None = Field(default=None, gt=0)
+    timeout: float = Field(default=10.0, gt=0, le=300)
+
+    @field_validator("title_regex", "class_name")
+    @classmethod
+    def _non_empty_selector(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("window selector cannot be empty")
+        return value
+
+    @field_validator("title_regex")
+    @classmethod
+    def _valid_title_regex(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError("title_regex must be a valid regular expression") from exc
+        return value
+
+    @model_validator(mode="after")
+    def _has_selector(self) -> WaitForWindowRequest:
+        if self.title_regex is None and self.class_name is None and self.pid is None:
+            raise ValueError("wait-for requires title_regex, class_name, or pid")
+        return self
+
+
 class RecordingStartRequest(Schema):
     name: str | None = None
     fps: int = Field(default=12, ge=1, le=120)
@@ -197,3 +229,15 @@ class BrowserOpenUrlRequest(Schema):
 class CommandRunRequest(Schema):
     command: list[str] = Field(min_length=1)
     timeout: float = Field(default=30.0, gt=0, le=600)
+
+    @field_validator("command")
+    @classmethod
+    def _valid_command_vector(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("command must contain at least one argv element")
+        if value[0] == "":
+            raise ValueError("command executable must be non-empty")
+        for arg in value:
+            if "\x00" in arg:
+                raise ValueError("command arguments must not contain NUL bytes")
+        return value

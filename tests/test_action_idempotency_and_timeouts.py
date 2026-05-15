@@ -136,6 +136,55 @@ def test_idempotency_replay_does_not_duplicate_screenshot_after_or_trace(tmp_pat
     assert len(load_trace(tmp_path / "traces" / "actions.ndjson")) == 2
 
 
+def test_idempotency_replay_returns_cached_result_when_desktop_becomes_unready(tmp_path) -> None:
+    app = _app(tmp_path)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-ready"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+        async def not_ready():
+            return False, ["desktop stopped after original request"]
+
+        app.state.backend.ready = not_ready
+        second = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-ready"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert app.state.action_count == 1
+
+
+def test_idempotency_replay_returns_cached_result_when_geometry_changes(tmp_path) -> None:
+    app = _app(tmp_path)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-geometry"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+        app.state.backend.width = 5
+        second = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-geometry"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert app.state.action_count == 1
+
+
 def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     app = _app(tmp_path)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
@@ -154,6 +203,27 @@ def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     assert second.status_code == 409
     assert second.json()["code"] == "idempotency_key_conflict"
     assert app.state.action_count == 1
+
+
+def test_idempotency_cache_zero_entries_does_not_store_results(tmp_path) -> None:
+    app = _app(tmp_path, idempotency_cache_max_entries=0)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-disabled"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+        second = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-disabled"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["call_id"] != second.json()["call_id"]
+    assert app.state.action_count == 2
+    assert len(app.state.idempotency_cache) == 0
 
 
 def test_body_idempotency_key_replays_without_reexecution(tmp_path) -> None:
@@ -350,7 +420,7 @@ def test_batch_duration_timeout_stops_later_actions_even_with_continue_on_error(
     assert app.state.backend.cursor.y == 0
 
 
-def test_screenshot_after_timeout_returns_failed_result_without_incrementing_budget(
+def test_screenshot_after_timeout_returns_failed_result_and_counts_attempt(
     tmp_path,
 ) -> None:
     app = _app(tmp_path, default_action_timeout_ms=10, trace_actions=True)
@@ -384,9 +454,30 @@ def test_screenshot_after_timeout_returns_failed_result_without_incrementing_bud
     }
     assert calls == 1
     assert app.state.action_count == 1
-    assert app.state.screenshot_count == 0
+    assert app.state.screenshot_count == 1
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 2
     assert entries[1].normalized_action == {"type": "screenshot_after"}
     assert entries[1].error is not None
     assert entries[1].error["code"] == "timeout"
+
+
+def test_screenshot_after_timeout_releases_held_inputs(tmp_path) -> None:
+    app = _app(tmp_path, default_action_timeout_ms=10)
+
+    async def slow_screenshot(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    app.state.backend.screenshot = slow_screenshot
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "mouse_down", "button": "left"}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert app.state.backend.held_buttons == set()

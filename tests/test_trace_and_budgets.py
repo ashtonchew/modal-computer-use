@@ -10,7 +10,9 @@ from modal_computer_use.adapters.provenance import (
     PROVIDER_ACTION_REDACTIONS_METADATA_KEY,
 )
 from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.models import ActionResult
 from modal_computer_use.tracing import load_trace
 
 
@@ -41,6 +43,84 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
         "sha256": hashlib.sha256(b"secret value").hexdigest(),
     }
     assert entries[0].redactions == ["text"]
+
+
+def test_action_trace_sanitizes_secret_bearing_envelope_fields(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "source": "Bearer source-secret",
+                "call_id": "artifact://private/call",
+                "run_id": "https://novnc.example/?token=secret",
+                "actions": [{"type": "move", "x": 1, "y": 2}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert "source-secret" not in raw_trace
+    assert "artifact://private/call" not in raw_trace
+    assert "novnc.example" not in raw_trace
+    assert "token=secret" not in raw_trace
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 2
+    for entry in entries:
+        assert entry.source == "Bearer [redacted]"
+        assert entry.call_id == "[redacted]"
+        assert entry.run_id == "[redacted]"
+
+
+def test_action_run_sanitizes_reflected_typed_text_in_success_response_and_trace(
+    tmp_path,
+) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def keyboard_type(text, delay_ms=10, method="auto"):
+        return ActionResult(
+            ok=True,
+            message=f"typed {text}",
+            output={"echo": text, "text": text},
+        )
+
+    app.state.backend.keyboard_type = keyboard_type
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "type", "text": "secret value"}]},
+        )
+
+    assert response.status_code == 200
+    serialized = response.text
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert "secret value" not in serialized
+    assert "secret value" not in raw_trace
+    body = response.json()
+    assert body["results"][0]["output"]["text"]["redacted"] is True
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert "result.output.echo" in entries[0].redactions
 
 
 def test_action_trace_redacts_nested_hold_typed_text(tmp_path) -> None:
@@ -79,6 +159,53 @@ def test_action_trace_redacts_nested_hold_typed_text(tmp_path) -> None:
         "sha256": hashlib.sha256(b"nested secret").hexdigest(),
     }
     assert entries[0].redactions == ["actions[0].text"]
+
+
+def test_action_trace_records_nested_hold_failure_details(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    original = app.state.backend.mouse_move
+
+    async def fail_second_nested_move(x: int, y: int):
+        if x == 9:
+            raise RuntimeError("nested failure")
+        return await original(x, y)
+
+    app.state.backend.mouse_move = fail_second_nested_move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [
+                            {"type": "move", "x": 7, "y": 8},
+                            {"type": "move", "x": 9, "y": 10},
+                        ],
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    output = entries[0].result["output"]
+    assert output["failed_nested_action"] == {
+        "index": 1,
+        "type": "move",
+        "path": "actions[0].actions[1]",
+    }
+    assert [item["ok"] for item in output["actions"]] == [True, False]
 
 
 def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) -> None:
@@ -131,6 +258,44 @@ def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) 
     assert entries[0].redactions == ["text", "provider_action.text"]
 
 
+def test_action_logs_redact_raw_provider_action_metadata(tmp_path, caplog) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with (
+        caplog.at_level("INFO", logger="modal_computer_use.daemon.actions"),
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+    ):
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "move",
+                        "x": 10,
+                        "y": 20,
+                        "metadata": {
+                            PROVIDER_ACTION_METADATA_KEY: {
+                                "type": "type",
+                                "text": "raw-provider-secret",
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    serialized_logs = "\n".join(str(record.__dict__) for record in caplog.records)
+    assert "raw-provider-secret" not in serialized_logs
+
+
 def test_action_trace_redacts_sensitive_metadata(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
@@ -179,7 +344,7 @@ def test_action_trace_redacts_sensitive_metadata(tmp_path) -> None:
     ]
 
 
-def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
+def test_action_trace_keeps_artifact_screenshot_after_uri_out_of_top_level(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -204,12 +369,39 @@ def test_action_trace_records_artifact_screenshot_after_uri(tmp_path) -> None:
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 2
     assert entries[1].normalized_action == {"type": "screenshot_after"}
-    assert entries[1].screenshot_after_uri is not None
-    assert entries[1].screenshot_after_uri.startswith("artifact://screenshots/")
+    assert entries[0].sequence == 0
+    assert entries[1].sequence == 1
+    assert entries[1].screenshot_after_uri is None
     assert entries[1].coordinate_space is not None
 
 
-def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_path) -> None:
+def test_action_trace_does_not_write_raw_artifact_uris(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+                "screenshot_options": {"storage": "artifact"},
+            },
+        )
+
+    assert response.status_code == 200
+    trace_payload = (tmp_path / "traces" / "actions.ndjson").read_text(encoding="utf-8")
+    assert "artifact://screenshots/" not in trace_payload
+
+
+def test_action_trace_records_screenshot_action_coordinate_space_without_raw_uri(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -240,12 +432,39 @@ def test_action_trace_records_screenshot_action_coordinate_space_and_uri(tmp_pat
     assert len(entries) == 1
     assert entries[0].normalized_action is not None
     assert entries[0].normalized_action["type"] == "zoom"
-    assert entries[0].screenshot_after_uri is not None
-    assert entries[0].screenshot_after_uri.startswith("artifact://screenshots/")
+    assert entries[0].screenshot_after_uri is None
     assert entries[0].coordinate_space is not None
     assert entries[0].coordinate_space.source_region is not None
     assert entries[0].coordinate_space.source_region.x == 10
     assert entries[0].coordinate_space.image_width == 200
+
+
+def test_action_trace_redacts_inline_screenshot_payload(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "screenshot"}]},
+        )
+
+    assert response.status_code == 200
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert '"data_base64":' not in raw_trace
+    assert '"bytes":' not in raw_trace
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert entries[0].result is not None
+    output = entries[0].result["output"]
+    assert output["sha256"]
+    assert output["size_bytes"] > 0
 
 
 def test_action_trace_error_includes_code(tmp_path) -> None:
@@ -379,6 +598,51 @@ def test_screenshot_after_sanitizes_secret_bearing_exception_text(tmp_path) -> N
     trace_payload = entries[1].model_dump_json()
     assert "shot-secret" not in trace_payload
     assert "artifact://screenshots/private.png" not in trace_payload
+
+
+def test_screenshot_after_trace_redacts_secret_bearing_exception_details(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def fail_screenshot(*_args, **_kwargs):
+        raise DaemonError(
+            "screenshot failed",
+            details={
+                "stdout": "Bearer stdout-secret",
+                "stderr": "stderr-secret",
+                "artifact_uri": "artifact://screenshots/private.png",
+            },
+        )
+
+    app.state.backend.screenshot = fail_screenshot
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    trace_payload = entries[1].model_dump_json()
+    assert "stdout-secret" not in trace_payload
+    assert "stderr-secret" not in trace_payload
+    assert "artifact://screenshots/private.png" not in trace_payload
+    assert entries[1].result is not None
+    output = entries[1].result["output"]
+    assert output["stdout"]["redacted"] is True
+    assert output["stderr"]["redacted"] is True
+    assert output["artifact_uri"]["redacted"] is True
 
 
 def test_action_budget_exceeded_does_not_execute_action(tmp_path) -> None:
@@ -615,7 +879,7 @@ def test_screenshot_budget_exceeded(tmp_path) -> None:
     assert response.json()["code"] == "budget_exceeded"
 
 
-def test_direct_screenshot_failure_does_not_increment_budget(tmp_path) -> None:
+def test_direct_screenshot_failure_counts_attempted_budget(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -637,7 +901,7 @@ def test_direct_screenshot_failure_does_not_increment_budget(tmp_path) -> None:
         response = client.post("/v1/screenshots/full", json={})
 
     assert response.status_code == 500
-    assert app.state.screenshot_count == 0
+    assert app.state.screenshot_count == 1
 
 
 def test_artifact_byte_budget_exceeded_after_artifact_screenshot(tmp_path) -> None:

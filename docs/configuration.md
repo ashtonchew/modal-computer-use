@@ -31,7 +31,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `COMPUTER_USE_LOCAL_TOKEN` | string | unset | Bearer token clients must send as `Authorization: Bearer <token>`. Required for the local backend. Never set in production. |
-| `COMPUTER_USE_REQUIRE_CONNECT_USER` | bool | `true` | In Modal mode, require Modal's `X-Verified-User-Data` header on every request. |
+| `COMPUTER_USE_REQUIRE_CONNECT_USER` | bool | `true` | In Modal mode, require Modal's `X-Verified-User-Data` header on control requests. `/healthz` and `/readyz` are unauthenticated probes. |
 | `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | bool | `false` | Trust verified-user headers from private or link-local client IPs. Leave disabled unless a trusted Connect Token proxy is known to originate from that range. |
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | bool | `true` | Reject auth tokens passed in URL query strings. URLs leak into logs and browser history; leave this on. |
 
@@ -44,7 +44,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | int | `5000` | Per-action timeout when the request does not specify one. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | int | `300000` | Upper bound a request can ask for. |
 | `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `100` | Sleep inserted after every action to let the desktop settle. |
-| `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | int | `1000` | Idempotency-key cache size. |
+| `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | int | `1000` | Idempotency-key cache size. Set to `0` to disable caching instead of retaining an unbounded cache. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | int | `3600` | Idempotency-key cache TTL. |
 | `COMPUTER_USE_MAX_ACTIONS` | int | unset | Optional ceiling on attempted executable desktop actions per run. Failed and timed-out actions count; validation failures, idempotency replays, screenshots, zooms, and cursor-position queries do not. |
 | `COMPUTER_USE_MAX_SCREENSHOTS` | int | unset | Optional ceiling on total screenshots per run. |

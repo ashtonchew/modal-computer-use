@@ -24,6 +24,7 @@
           },
           "continue_on_error": {
             "default": false,
+            "description": "Continue after failed top-level actions. Compound actions such as hold_key remain atomic; their nested actions stop on the first failure.",
             "title": "Continue On Error",
             "type": "boolean"
           },
@@ -2218,6 +2219,27 @@
         "title": "ProcessStatus",
         "type": "object"
       },
+      "ReadyStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready"
+        ],
+        "title": "ReadyStatus",
+        "type": "object"
+      },
       "Recording": {
         "additionalProperties": false,
         "properties": {
@@ -3384,6 +3406,7 @@
         "type": "object"
       },
       "WaitForWindowRequest": {
+        "additionalProperties": false,
         "properties": {
           "class_name": {
             "anyOf": [
@@ -3399,6 +3422,7 @@
           "pid": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
                 "type": "integer"
               },
               {
@@ -3432,6 +3456,17 @@
       "X11Window": {
         "additionalProperties": false,
         "properties": {
+          "class_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name"
+          },
           "height": {
             "minimum": 0.0,
             "title": "Height",
@@ -3652,13 +3687,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Readyz Readyz Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReadyStatus"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyStatus"
+                }
+              }
+            },
+            "description": "Desktop backend or required process is not ready"
           }
         },
         "summary": "Readyz"
@@ -4826,6 +4869,8 @@
             "required": false,
             "schema": {
               "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Tail",
               "type": "integer"
             }
@@ -4873,6 +4918,8 @@
             "required": false,
             "schema": {
               "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Tail",
               "type": "integer"
             }
@@ -4925,6 +4972,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown process"
           },
           "422": {
             "content": {
@@ -4998,6 +5048,8 @@
             "required": false,
             "schema": {
               "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Tail",
               "type": "integer"
             }

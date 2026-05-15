@@ -1,41 +1,64 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.actions import KEY_ALIASES, is_supported_key
+from modal_computer_use.actions import KEY_ALIASES
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.actions import (
+    _budget_counts,
+    _count_action_tree,
     _counts_against_action_budget,
     _effective_action_timeout_ms,
     _execute_action,
     _validate_action_timeouts,
     _validate_actions,
+    _validate_screenshot_pixel_budget,
+)
+from modal_computer_use.daemon.routes.validation import (
+    ensure_desktop_ready,
+    ready_input_lock,
+    validate_keys,
 )
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.errors import ActionValidationError
 from modal_computer_use.models import ActionBatchRequest, ActionResult, parse_action
+from modal_computer_use.redaction import sanitize_payload_with_secrets
 
 router = APIRouter(prefix="/v1/keyboard")
 
 
 @router.post("/type")
 async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
-    async with request.app.state.input_lock:
+    await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
-        return await request.app.state.backend.keyboard_type(
+        result = await request.app.state.backend.keyboard_type(
             payload.text,
             delay_ms=payload.delay_ms,
             method=payload.method,
+        )
+        return _sanitize_action_result(
+            result,
+            secret=payload.text,
+            replacement="[redacted typed text]",
         )
 
 
 @router.post("/press")
 async def press(payload: KeyRequest, request: Request) -> ActionResult:
-    _validate_keys(payload.key, *payload.modifiers)
-    async with request.app.state.input_lock:
+    validate_keys(payload.key, *payload.modifiers)
+    await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_press(
             payload.key,
@@ -46,8 +69,12 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hotkey")
 async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
-    _validate_keys(*payload.keys)
-    async with request.app.state.input_lock:
+    validate_keys(*payload.keys)
+    await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_hotkey(
             payload.keys,
@@ -57,7 +84,7 @@ async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hold")
 async def hold(payload: HoldRequest, request: Request) -> ActionResult:
-    _validate_keys(payload.key)
+    validate_keys(payload.key)
     try:
         nested_actions = [parse_action(action) for action in payload.actions]
     except ActionValidationError as exc:
@@ -67,17 +94,26 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             code="action_validation_failed",
             details={"errors": ["invalid nested hold action"]},
         ) from exc
+    await ensure_desktop_ready(request)
     errors = _validate_actions(
         nested_actions,
         width=request.app.state.backend.width,
         height=request.app.state.backend.height,
     )
     batch_payload = ActionBatchRequest(actions=nested_actions)
+    nested_count = _count_action_tree(nested_actions)
+    if nested_count > request.app.state.settings.max_batch_actions:
+        errors.append(
+            "batch exceeds max_batch_actions "
+            f"{request.app.state.settings.max_batch_actions} "
+            f"with {nested_count} total actions"
+        )
     errors.extend(
         _validate_action_timeouts(
             batch_payload, request.app.state.settings.max_action_timeout_ms
         )
     )
+    errors.extend(_validate_screenshot_pixel_budget(batch_payload, request))
     if errors:
         raise DaemonError(
             "nested hold action validation failed",
@@ -85,8 +121,11 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             code="action_validation_failed",
             details={"errors": errors},
         )
-    async with request.app.state.input_lock:
+    _preflight_hold_budget(request, nested_actions)
+    async with ready_input_lock(request):
+        _preflight_hold_budget(request, nested_actions)
         budgets.reserve_action(request)
+        released_all = False
         await request.app.state.backend.key_down(payload.key)
         try:
             nested_results = []
@@ -110,8 +149,27 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
                 )
             if payload.duration_ms:
                 await asyncio.sleep(payload.duration_ms / 1000)
+        except TimeoutError as exc:
+            released_all = True
+            with suppress(Exception):
+                await request.app.state.backend.release_all()
+            raise DaemonError(
+                "keyboard hold timed out",
+                status_code=408,
+                code="timeout",
+                details={},
+            ) from exc
+        except Exception:
+            released_all = True
+            with suppress(Exception):
+                await request.app.state.backend.release_all()
+            raise
         finally:
-            await request.app.state.backend.key_up(payload.key)
+            if released_all:
+                with suppress(Exception):
+                    await request.app.state.backend.key_up(payload.key)
+            else:
+                await request.app.state.backend.key_up(payload.key)
     return ActionResult(ok=True, output={"actions": nested_results} if nested_results else {})
 
 
@@ -120,12 +178,21 @@ async def supported_keys() -> dict[str, str]:
     return KEY_ALIASES
 
 
-def _validate_keys(*keys: str) -> None:
-    invalid = [key for key in keys if not is_supported_key(key)]
-    if invalid:
-        raise DaemonError(
-            "unsupported key",
-            status_code=422,
-            code="unsupported_key",
-            details={"keys": invalid},
+def _sanitize_action_result(
+    result: ActionResult, *, secret: str, replacement: str
+) -> ActionResult:
+    payload = sanitize_payload_with_secrets(result.model_dump(mode="json"), [(secret, replacement)])
+    return ActionResult.model_validate(payload)
+
+
+def _preflight_hold_budget(request: Request, nested_actions: list[object]) -> None:
+    nested_action_count, nested_screenshot_count = _budget_counts(nested_actions)
+    action_error = budgets.action_reservation_error(request, count=1 + nested_action_count)
+    if action_error is not None:
+        raise action_error
+    if nested_screenshot_count:
+        screenshot_error = budgets.screenshot_reservation_error(
+            request, count=nested_screenshot_count
         )
+        if screenshot_error is not None:
+            raise screenshot_error

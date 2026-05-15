@@ -20,7 +20,7 @@ from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 from modal_computer_use.observability import get_tracer
-from modal_computer_use.redaction import safe_exception_payload
+from modal_computer_use.redaction import safe_exception_payload, sanitize_payload, sanitize_text
 
 from .routes import (
     actions,
@@ -86,71 +86,105 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def trace_route(request: Request, call_next):
-        path = request.scope.get("path") or ""
         with app.state.tracer.span(
             "daemon.route",
             {
                 "http.method": request.method,
-                "http.route": path,
             },
         ) as span:
             try:
                 response = await call_next(request)
             except Exception as exc:
+                span.set_attribute("http.route", _route_template(request))
                 span.record_exception(exc)
                 raise
+            span.set_attribute("http.route", _route_template(request))
             span.set_attribute("http.status_code", response.status_code)
+            error_code = response.headers.get("x-computer-use-error-code")
+            if error_code:
+                span.set_attribute("error.code", error_code)
             return response
 
     @app.exception_handler(DaemonError)
     async def daemon_error_handler(_request: Request, exc: DaemonError) -> JSONResponse:
-        return JSONResponse(
+        details = sanitize_payload(exc.details)
+        if isinstance(details, dict) and isinstance(exc.details.get("budgets"), dict):
+            details["budgets"] = exc.details["budgets"]
+        return _error_response(
             status_code=exc.status_code,
-            content={"code": exc.code, "message": exc.message, "details": exc.details},
+            code=exc.code,
+            content={
+                "code": exc.code,
+                "message": sanitize_text(exc.message),
+                "details": details,
+            },
         )
 
     @app.exception_handler(ArtifactPathError)
     async def artifact_path_error_handler(
         _request: Request, exc: ArtifactPathError
     ) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
             status_code=400,
-            content={"code": "unsafe_artifact_path", "message": str(exc), "details": {}},
+            code="unsafe_artifact_path",
+            content={
+                "code": "unsafe_artifact_path",
+                "message": sanitize_text(str(exc)),
+                "details": {},
+            },
         )
 
     @app.exception_handler(BudgetExceededError)
     async def budget_exceeded_error_handler(
         _request: Request, exc: BudgetExceededError
     ) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
             status_code=429,
-            content={"code": "budget_exceeded", "message": str(exc), "details": {}},
+            code="budget_exceeded",
+            content={
+                "code": "budget_exceeded",
+                "message": sanitize_text(str(exc)),
+                "details": {},
+            },
         )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
-        _request: Request, exc: RequestValidationError
+        request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        return JSONResponse(
+        code = (
+            "action_validation_failed"
+            if _is_action_payload_validation_error(request, exc)
+            else "validation_error"
+        )
+        message = (
+            "action validation failed"
+            if code == "action_validation_failed"
+            else "request validation failed"
+        )
+        return _error_response(
             status_code=422,
+            code=code,
             content={
-                "code": "validation_error",
-                "message": "request validation failed",
+                "code": code,
+                "message": message,
                 "details": {"errors": _validation_errors_without_inputs(exc)},
             },
         )
 
     @app.exception_handler(FileNotFoundError)
-    async def not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
-        return JSONResponse(
+    async def not_found_handler(_request: Request, _exc: FileNotFoundError) -> JSONResponse:
+        return _error_response(
             status_code=404,
-            content={"code": "not_found", "message": str(exc), "details": {}},
+            code="not_found",
+            content={"code": "not_found", "message": "resource not found", "details": {}},
         )
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
-        return JSONResponse(
+        return _error_response(
             status_code=500,
+            code="internal_error",
             content={
                 "code": "internal_error",
                 "message": "internal server error",
@@ -194,3 +228,27 @@ def _validation_errors_without_inputs(exc: RequestValidationError) -> list[dict[
             }
         )
     return errors
+
+
+def _is_action_payload_validation_error(request: Request, exc: RequestValidationError) -> bool:
+    if request.url.path not in {"/v1/actions/run", "/v1/actions/validate"}:
+        return False
+    for item in exc.errors():
+        loc = item.get("loc", ())
+        if len(loc) >= 2 and loc[0] == "body" and loc[1] == "actions":
+            return True
+    return False
+
+
+def _error_response(*, status_code: int, code: str, content: dict[str, object]) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers={"x-computer-use-error-code": code},
+    )
+
+
+def _route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    return str(path) if path else "unmatched"

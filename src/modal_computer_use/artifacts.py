@@ -6,8 +6,10 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
+from json import JSONDecodeError
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -18,7 +20,7 @@ CONTROL_PATHS = {
     "manifest.ndjson",
     "traces/actions.ndjson",
 }
-CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets"}
+CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets", "logs"}
 
 
 def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: bool = True) -> str:
@@ -39,7 +41,7 @@ def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: boo
         if allow_empty:
             return ""
         raise ArtifactPathError("artifact path must be relative and non-empty")
-    if "\x00" in decoded or any(ord(char) < 32 for char in decoded):
+    if any(ord(char) < 32 or ord(char) == 127 for char in decoded):
         raise ArtifactPathError("artifact path contains control characters")
     parts = [part for part in decoded.split("/") if part]
     if any(part in (".", "..") for part in parts):
@@ -147,7 +149,20 @@ class ArtifactStore:
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        self._reject_symlink_components(relative)
+        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as handle:
+            temp_path = Path(handle.name)
+            try:
+                handle.write(data)
+            except Exception:
+                temp_path.unlink(missing_ok=True)
+                raise
+        try:
+            self._reject_symlink_components(relative)
+            temp_path.replace(target)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         info = self._info(
             target,
             public_path=relative,
@@ -179,7 +194,16 @@ class ArtifactStore:
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source_path, target)
+        self._reject_symlink_components(relative)
+        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as handle:
+            temp_path = Path(handle.name)
+        try:
+            shutil.copyfile(source_path, temp_path)
+            self._reject_symlink_components(relative)
+            temp_path.replace(target)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         info = self._info(
             target,
             public_path=relative,
@@ -230,6 +254,30 @@ class ArtifactStore:
             infos.append(self._info(item, public_path=public_path))
         return infos
 
+    def total_public_bytes(self) -> int:
+        root = self.root.resolve()
+        total = 0
+        if not self.root.exists():
+            return total
+        for item in self.root.rglob("*"):
+            if item.is_symlink():
+                continue
+            try:
+                resolved = item.resolve()
+                if os.path.commonpath([str(root), str(resolved)]) != str(root):
+                    continue
+            except (OSError, ValueError):
+                continue
+            if not item.is_file():
+                continue
+            relative = os.path.relpath(str(resolved), str(root)).replace(os.sep, "/")
+            try:
+                normalize_artifact_path(relative, public=True)
+            except ArtifactPathError:
+                continue
+            total += item.stat().st_size
+        return total
+
     def _enforce_write_budget(self, target: Path, incoming_size: int) -> None:
         if self.max_total_bytes is None:
             return
@@ -244,6 +292,11 @@ class ArtifactStore:
                 except (OSError, ValueError):
                     continue
                 if item.is_file():
+                    relative = os.path.relpath(str(resolved), str(root)).replace(os.sep, "/")
+                    try:
+                        normalize_artifact_path(relative, public=True)
+                    except ArtifactPathError:
+                        continue
                     existing_total += item.stat().st_size
         existing_target_size = target.stat().st_size if target.is_file() else 0
         if existing_total - existing_target_size + incoming_size > self.max_total_bytes:
@@ -258,17 +311,35 @@ class ArtifactStore:
     def manifest(self, prefix: str = "") -> list[ArtifactInfo]:
         if not self.manifest_path.exists():
             return []
-        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=False)
+        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=True)
         entries: list[ArtifactInfo] = []
         for line in self.manifest_path.read_text(encoding="utf-8").splitlines():
             if not line:
                 continue
-            data = json.loads(line)
+            try:
+                data = json.loads(line)
+            except JSONDecodeError:
+                continue
             data.pop("ts", None)
             path = data.get("path", "")
-            if safe_prefix and not path.startswith(safe_prefix):
+            try:
+                public_path = normalize_artifact_path(path, public=True)
+            except ArtifactPathError:
                 continue
-            entries.append(ArtifactInfo.model_validate(data))
+            if data.get("uri") != f"artifact://{public_path}":
+                continue
+            data["path"] = public_path
+            data["uri"] = f"artifact://{public_path}"
+            if (
+                safe_prefix
+                and public_path != safe_prefix
+                and not public_path.startswith(f"{safe_prefix}/")
+            ):
+                continue
+            try:
+                entries.append(ArtifactInfo.model_validate(data))
+            except ValueError:
+                continue
         return entries
 
     def sync(self) -> ArtifactSyncResult:

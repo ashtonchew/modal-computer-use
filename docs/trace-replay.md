@@ -21,8 +21,7 @@ Each line is a `TraceEntry` (defined in `modal_computer_use.models`):
   "normalized_action": {"type": "click", "x": 300, "y": 240, "button": "left"},
   "result": {"ok": true, "elapsed_ms": 47},
   "elapsed_ms": 47,
-  "screenshot_before_uri": "artifact://screenshots/before_call_abc.png",
-  "screenshot_after_uri": "artifact://screenshots/after_call_abc.png",
+  "screenshot_after_uri": null,
   "coordinate_space": {"desktop_width": 1440, "desktop_height": 900, "image_width": 1440, "image_height": 900},
   "redactions": ["text"],
   "error": null
@@ -54,8 +53,8 @@ uses `redactions=["text"]` for typed text and stores `normalized_action.text` as
 When actions came through a provider adapter, `provider_action` is populated from the adapter's
 redacted provenance metadata. Provider typed text is reported as `provider_action.text` in
 `redactions`.
-Tokens and noVNC URLs are always redacted. Full plaintext capture is opt-in and intended only
-for local debugging.
+Tokens, noVNC URLs, artifact URIs, screenshot bytes, and base64 payloads are always redacted.
+Full plaintext capture is opt-in and intended only for local debugging.
 
 ## Replay CLI
 
@@ -74,5 +73,5 @@ as `screenshot_after` and redacted typed text are marked `skip` with a reason.
 Real replay requires an explicit target through `--base-url`, `--sandbox-id`, or `--target-run-id`.
 Replay validates the trace before contacting the target, executes supported normalized actions
 through `computer.actions`, skips redacted typed text, stops on the first failed action by default,
-and emits per-step status. Screenshot bytes and base64 payloads in replay results are redacted; safe
-metadata such as dimensions, hashes, and `artifact://` references remains available for debugging.
+and emits per-step status. Screenshot bytes, base64 payloads, and artifact URIs in replay results
+are redacted; safe metadata such as dimensions, hashes, and sizes remains available for debugging.

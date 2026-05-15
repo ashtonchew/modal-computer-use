@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -43,7 +44,7 @@ class HTTPTransport:
             "sdk.request",
             {
                 "http.method": method,
-                "http.route": path,
+                "http.route": _route_path(path),
             },
         ) as span:
             response = self._client.request(
@@ -55,6 +56,9 @@ class HTTPTransport:
                 headers=request_headers,
             )
             span.set_attribute("http.status_code", response.status_code)
+            error_code = _error_code(response)
+            if error_code:
+                span.set_attribute("error.code", error_code)
         self._raise_for_status(response)
         return response
 
@@ -66,7 +70,7 @@ class HTTPTransport:
                 "sdk.download",
                 {
                     "http.method": "GET",
-                    "http.route": path,
+                    "http.route": _route_path(path),
                 },
             ) as span,
             self._client.stream(
@@ -76,6 +80,9 @@ class HTTPTransport:
             ) as response,
         ):
             span.set_attribute("http.status_code", response.status_code)
+            error_code = _error_code(response)
+            if error_code:
+                span.set_attribute("error.code", error_code)
             self._raise_for_status(response)
             with output.open("wb") as handle:
                 for chunk in response.iter_bytes():
@@ -108,3 +115,26 @@ class HTTPTransport:
                 if isinstance(payload.get("details"), dict)
                 else None,
             )
+
+
+def _route_path(path: str) -> str:
+    route = urlsplit(path).path or "/"
+    if route.startswith("/v1/artifacts/") and route not in {
+        "/v1/artifacts/manifest",
+        "/v1/artifacts/sync",
+    }:
+        return "/v1/artifacts/{path:path}"
+    return route
+
+
+def _error_code(response: httpx.Response) -> str | None:
+    if response.status_code < 400:
+        return None
+    with suppress(Exception):
+        response.read()
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    code = payload.get("code")
+    return code if isinstance(code, str) else None

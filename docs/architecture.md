@@ -10,7 +10,7 @@ The design splits orchestration from execution. Orchestration (creating sandboxe
 
 ### Daemon layer
 
-`computer-use-daemon` is an HTTP server that runs inside the sandbox on port `8080`. It supervises desktop processes, validates incoming actions, executes them under an input lock, writes artifacts, and appends trace entries. In Modal mode, the daemon is reached through Sandbox Connect Tokens. See [security.md](security.md) for auth details.
+`computer-use-daemon` is an HTTP server that runs inside the sandbox on port `8080`. It supervises desktop processes, validates incoming actions, executes desktop-affecting primitives under an input lock, writes artifacts, and appends trace entries. In Modal mode, the daemon is reached through Sandbox Connect Tokens. See [security.md](security.md) for auth details.
 
 ### Desktop stack
 
@@ -38,4 +38,4 @@ The design borrows operational patterns from Daytona's computer-use primitives, 
 
 ## Formal spec
 
-See [spec/modal_computer_use_spec_v6.md](spec/modal_computer_use_spec_v6.md) for the full design, route schemas, and rationale.
+See [spec/modal_computer_use_spec_v7.md](spec/modal_computer_use_spec_v7.md) for the full design, route schemas, and rationale.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -20,6 +21,8 @@ from modal_computer_use.errors import ArtifactPathError
         "a/%2e%2e/x",
         "manifest.ndjson",
         "a/\x00b",
+        "a/\x7fb",
+        "a/%7Fb",
         ".Secrets/x",
         "a/.Control/x",
     ],
@@ -40,6 +43,58 @@ def test_artifact_store_roundtrip(tmp_path) -> None:
     assert info.uri == "artifact://downloads/a.txt"
     assert store.read_bytes("downloads/a.txt") == b"hello"
     assert store.manifest()[0].path == "downloads/a.txt"
+
+
+def test_artifact_manifest_prefix_matches_path_boundary(tmp_path) -> None:
+    store = ArtifactStore(tmp_path)
+    store.write_bytes("foo/a.txt", b"foo")
+    store.write_bytes("foobar/b.txt", b"foobar")
+
+    assert [item.path for item in store.manifest("foo")] == ["foo/a.txt"]
+
+
+def test_artifact_manifest_skips_corrupt_and_unsafe_entries(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root")
+    safe = store.write_bytes("safe/ok.txt", b"ok")
+    unsafe = {
+        "path": "../secret.txt",
+        "uri": "artifact://../secret.txt",
+        "kind": "file",
+    }
+    control = {
+        "path": "logs/xvfb.log",
+        "uri": "artifact://logs/xvfb.log",
+        "kind": "file",
+    }
+    mismatch = {
+        "path": "safe/mismatch.txt",
+        "uri": "artifact://safe/other.txt",
+        "kind": "file",
+    }
+    store.manifest_path.write_text(
+        "\n".join(
+            [
+                json.dumps(unsafe),
+                "{not-json",
+                safe.model_dump_json(),
+                json.dumps(control),
+                json.dumps(mismatch),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert [item.path for item in store.manifest()] == ["safe/ok.txt"]
+
+
+def test_artifact_byte_budget_ignores_control_manifest_bytes(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root", max_total_bytes=3)
+
+    store.write_bytes("a.txt", b"x")
+    store.write_bytes("b.txt", b"y")
+    store.write_bytes("c.txt", b"z")
+
+    assert sum((item.size_bytes or 0) for item in store.list()) == 3
 
 
 def test_artifact_symlink_escape(tmp_path) -> None:
@@ -122,6 +177,73 @@ def test_artifact_route_rejects_mixed_case_control_segment(tmp_path) -> None:
 
     assert response.status_code == 400
     assert response.json()["code"] == "unsafe_artifact_path"
+
+
+def test_artifact_route_rejects_raw_supervisor_logs(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    log_path = settings.artifacts_dir / "logs" / "xvfb.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("Bearer raw-log-secret\n", encoding="utf-8")
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        process_log = client.get("/v1/processes/xvfb/logs")
+        artifact_log = client.get("/v1/artifacts/logs/xvfb.log")
+
+    assert process_log.status_code == 200
+    assert process_log.text == "Bearer [redacted]"
+    assert artifact_log.status_code == 400
+    assert artifact_log.json()["code"] == "unsafe_artifact_path"
+    assert "raw-log-secret" not in artifact_log.text
+
+
+def test_artifact_route_reports_conflict_when_target_is_directory(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    (settings.artifacts_dir / "reports").mkdir(parents=True)
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.put("/v1/artifacts/reports", content=b"replacement")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "artifact_path_conflict"
+    assert not (settings.artifacts_dir / "manifest.ndjson").exists()
+
+
+def test_artifact_route_reports_conflict_when_parent_is_file(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (settings.artifacts_dir / "reports").write_bytes(b"file")
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.put("/v1/artifacts/reports/result.txt", content=b"replacement")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "artifact_path_conflict"
 
 
 def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:

@@ -2,36 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from modal_computer_use.redaction import is_sensitive_key, sanitize_text
+
 PROVIDER_ACTION_METADATA_KEY = "provider_action"
 PROVIDER_ACTION_REDACTIONS_METADATA_KEY = "provider_action_redactions"
-
-_SENSITIVE_KEYS = {
-    "api_key",
-    "artifact_bytes",
-    "artifact_uri",
-    "authorization",
-    "bearer",
-    "bytes",
-    "clipboard",
-    "clipboard_text",
-    "connect_token",
-    "content",
-    "data",
-    "data_base64",
-    "image",
-    "image_bytes",
-    "no_vnc_url",
-    "novnc_url",
-    "password",
-    "raw_path",
-    "screenshot",
-    "screenshot_bytes",
-    "text",
-    "token",
-    "typed_text",
-    "url",
-    "vnc_url",
-}
 
 
 def with_provider_provenance(
@@ -62,10 +36,11 @@ def _redact_value(
     action_name: str,
 ) -> Any:
     if isinstance(value, dict):
+        local_action_name = str(value.get("type") or value.get("action") or action_name)
         output: dict[str, Any] = {}
         for key, item in value.items():
             key_path = f"{path}.{key}" if path else str(key)
-            if _is_sensitive_key(str(key), action_name=action_name):
+            if _is_sensitive_key(str(key), action_name=local_action_name):
                 redactions.append(key_path)
                 output[key] = _redaction_marker(item)
                 continue
@@ -73,7 +48,7 @@ def _redact_value(
                 item,
                 redactions,
                 path=key_path,
-                action_name=action_name,
+                action_name=local_action_name,
             )
         return output
     if isinstance(value, list):
@@ -86,6 +61,11 @@ def _redact_value(
             )
             for index, item in enumerate(value)
         ]
+    if isinstance(value, str):
+        sanitized = sanitize_text(value)
+        if sanitized != value and path:
+            redactions.append(path)
+        return sanitized
     return value
 
 
@@ -93,7 +73,7 @@ def _is_sensitive_key(key: str, *, action_name: str) -> bool:
     normalized = key.lower().replace("-", "_")
     if normalized == "text" and action_name in {"key", "hold_key"}:
         return False
-    return normalized in _SENSITIVE_KEYS or normalized.endswith("_token")
+    return is_sensitive_key(normalized)
 
 
 def _redaction_marker(value: Any) -> dict[str, Any]:

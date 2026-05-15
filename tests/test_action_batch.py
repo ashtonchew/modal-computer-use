@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from modal_computer_use.models import ActionResult
+
 
 def test_action_batch_stop_on_error(test_client) -> None:
     response = test_client.post(
@@ -38,6 +40,24 @@ def test_action_batch_stop_on_runtime_error(test_client, app) -> None:
     assert result["results"][0]["ok"] is False
 
 
+def test_action_batch_stop_on_runtime_error_skips_screenshot_after(test_client, app) -> None:
+    async def fail_move(x: int, y: int):
+        raise RuntimeError("boom")
+
+    app.state.backend.mouse_move = fail_move
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "screenshot_after": True,
+            "actions": [{"type": "move", "x": 9, "y": 9}],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert [item["type"] for item in result["results"]] == ["move"]
+    assert result["screenshot"] is None
+
+
 def test_action_batch_continue_runtime_error(test_client, app) -> None:
     original = app.state.backend.mouse_move
 
@@ -60,6 +80,56 @@ def test_action_batch_continue_runtime_error(test_client, app) -> None:
     assert result["ok"] is False
     assert result["results"][0]["ok"] is False
     assert result["results"][1]["ok"] is True
+
+
+def test_action_batch_treats_backend_action_result_failure_as_failed_item(
+    test_client,
+    app,
+) -> None:
+    async def fail_scroll(direction, amount, x=None, y=None):
+        return ActionResult(ok=False, message="scroll failed", output={"code": "scroll_failed"})
+
+    app.state.backend.mouse_scroll = fail_scroll
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {"type": "scroll", "direction": "down", "amount": 1},
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False]
+    assert result["results"][0]["error"] == "scroll failed"
+    assert result["results"][0]["output"] == {"code": "scroll_failed"}
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
+
+
+def test_action_batch_continue_after_backend_action_result_failure(test_client, app) -> None:
+    async def fail_scroll(direction, amount, x=None, y=None):
+        return ActionResult(ok=False, message="scroll failed", output={"code": "scroll_failed"})
+
+    app.state.backend.mouse_scroll = fail_scroll
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "continue_on_error": True,
+            "actions": [
+                {"type": "scroll", "direction": "down", "amount": 1},
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False, True]
+    assert app.state.backend.cursor.x == 3
+    assert app.state.backend.cursor.y == 4
 
 
 def test_action_batch_idempotency(test_client) -> None:
@@ -106,6 +176,33 @@ def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
     assert sentinel not in serialized
 
 
+def test_hold_key_nested_type_failure_redacts_typed_text(test_client, app) -> None:
+    sentinel = "_".join(["NESTED", "TYPED", "PAYLOAD", "NO", "LEAK"])
+
+    async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
+        raise RuntimeError(f"typing failed for {text}")
+
+    app.state.backend.keyboard_type = fail_type
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [{"type": "type", "text": sentinel}],
+                }
+            ],
+        },
+    ).json()
+
+    serialized = str(result)
+    assert result["ok"] is False
+    assert result["results"][0]["error"] == "typing failed for [redacted typed text]"
+    assert sentinel not in serialized
+    assert app.state.backend.held_keys == set()
+
+
 def test_hold_key_executes_nested_actions_and_releases_key(test_client, app) -> None:
     result = test_client.post(
         "/v1/actions/run",
@@ -147,6 +244,156 @@ def test_hold_key_releases_key_when_nested_action_fails(test_client, app) -> Non
 
     assert result["ok"] is False
     assert result["results"][0]["error_code"] == "action_failed"
+    assert app.state.backend.held_keys == set()
+
+
+def test_hold_key_nested_failure_is_atomic_under_continue_on_error(test_client, app) -> None:
+    original = app.state.backend.mouse_move
+
+    async def fail_first_nested_move(x: int, y: int):
+        if x == 7:
+            raise RuntimeError("nested failure")
+        return await original(x, y)
+
+    app.state.backend.mouse_move = fail_first_nested_move
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "continue_on_error": True,
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "move", "x": 7, "y": 8},
+                        {"type": "move", "x": 9, "y": 10},
+                    ],
+                },
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False, True]
+    assert app.state.backend.cursor.x == 3
+    assert app.state.backend.cursor.y == 4
+    assert app.state.backend.held_keys == set()
+
+
+def test_hold_key_nested_failure_reports_failed_nested_action(test_client, app) -> None:
+    original = app.state.backend.mouse_move
+
+    async def fail_second_nested_move(x: int, y: int):
+        if x == 9:
+            raise RuntimeError("nested failure")
+        return await original(x, y)
+
+    app.state.backend.mouse_move = fail_second_nested_move
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "continue_on_error": True,
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "move", "x": 7, "y": 8},
+                        {"type": "move", "x": 9, "y": 10},
+                        {"type": "move", "x": 11, "y": 12},
+                    ],
+                },
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    hold = result["results"][0]
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False, True]
+    assert hold["type"] == "hold_key"
+    assert hold["output"]["failed_nested_action"] == {
+        "index": 1,
+        "type": "move",
+        "path": "actions[0].actions[1]",
+    }
+    assert [item["ok"] for item in hold["output"]["actions"]] == [True, False]
+    assert hold["output"]["actions"][1]["error"] == "nested failure"
+    assert app.state.backend.cursor.x == 3
+    assert app.state.backend.cursor.y == 4
+    assert app.state.backend.held_keys == set()
+
+
+def test_hold_key_nested_action_result_failure_is_atomic(test_client, app) -> None:
+    async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
+        return ActionResult(ok=False, message="nested type failed", output={"code": "type_failed"})
+
+    app.state.backend.keyboard_type = fail_type
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "continue_on_error": True,
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "type", "text": "nested-secret"},
+                        {"type": "move", "x": 9, "y": 10},
+                    ],
+                },
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    hold = result["results"][0]
+    serialized = str(result)
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False, True]
+    assert hold["error_code"] == "type_failed"
+    assert hold["output"]["failed_nested_action"] == {
+        "index": 0,
+        "type": "type",
+        "path": "actions[0].actions[0]",
+    }
+    assert [item["ok"] for item in hold["output"]["actions"]] == [False]
+    assert "nested-secret" not in serialized
+    assert app.state.backend.cursor.x == 3
+    assert app.state.backend.cursor.y == 4
+    assert app.state.backend.held_keys == set()
+
+
+def test_direct_keyboard_hold_propagates_nested_action_result_failure(test_client, app) -> None:
+    async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
+        return ActionResult(
+            ok=False,
+            message=f"nested type failed for {text}",
+            output={"code": "type_failed"},
+        )
+
+    app.state.backend.keyboard_type = fail_type
+
+    response = test_client.post(
+        "/v1/keyboard/hold",
+        json={
+            "key": "shift",
+            "actions": [
+                {"type": "type", "text": "nested-secret"},
+                {"type": "move", "x": 9, "y": 10},
+            ],
+        },
+    )
+
+    serialized = response.text
+    assert response.status_code == 400
+    assert response.json()["code"] == "type_failed"
+    assert "nested type failed" in serialized
+    assert "nested-secret" not in serialized
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
     assert app.state.backend.held_keys == set()
 
 
@@ -198,6 +445,81 @@ def test_hold_key_nested_actions_count_against_action_budget(test_client, app) -
     assert app.state.backend.cursor.x == 0
     assert app.state.backend.cursor.y == 0
     assert app.state.action_count == 1
+
+
+def test_hold_key_nested_budget_rejection_happens_before_key_down(test_client, app) -> None:
+    app.state.settings = type(app.state.settings)(
+        backend="mock",
+        artifacts_dir=app.state.settings.artifacts_dir,
+        recordings_dir=app.state.settings.recordings_dir,
+        local_token="dev",
+        max_actions=1,
+    )
+    key_down_calls: list[str] = []
+    original_key_down = app.state.backend.key_down
+
+    async def record_key_down(key: str) -> None:
+        key_down_calls.append(key)
+        await original_key_down(key)
+
+    app.state.backend.key_down = record_key_down
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [{"type": "move", "x": 1, "y": 2}],
+                }
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert result["results"][0]["error_code"] == "budget_exceeded"
+    assert key_down_calls == []
+
+
+def test_hold_key_nested_actions_count_against_batch_limit(tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from modal_computer_use.daemon.app import create_app
+    from modal_computer_use.daemon.settings import DaemonSettings
+
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_batch_actions=1,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [
+                            {"type": "move", "x": 1, "y": 2},
+                            {"type": "move", "x": 3, "y": 4},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json()["code"] == "batch_too_large"
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
+    assert app.state.action_count == 0
 
 
 def test_drag_action_passes_requested_button_to_backend(test_client, app) -> None:

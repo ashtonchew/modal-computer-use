@@ -159,6 +159,14 @@ class DesktopBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def activate_window(self, window_id: str) -> ActionResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def close_window(self, window_id: str) -> ActionResult:
+        raise NotImplementedError
+
+    @abstractmethod
     async def release_all(self) -> ActionResult:
         raise NotImplementedError
 
@@ -299,8 +307,8 @@ class MockDesktopBackend(DesktopBackend):
         retention_class: str = "ephemeral",
     ) -> Screenshot:
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
-        image_width = max(1, round(source.width * options.scale))
-        image_height = max(1, round(source.height * options.scale))
+        image_width = _scaled_dimension(source.width, options.scale)
+        image_height = _scaled_dimension(source.height, options.scale)
         img = Image.new("RGB", (image_width, image_height), (245, 246, 248))
         draw = ImageDraw.Draw(img)
         draw.rectangle([0, 0, image_width - 1, image_height - 1], outline=(68, 84, 106))
@@ -379,6 +387,12 @@ class MockDesktopBackend(DesktopBackend):
 
     async def active_window(self) -> X11Window | None:
         return (await self.windows())[0]
+
+    async def activate_window(self, window_id: str) -> ActionResult:
+        return ActionResult(ok=True, output={"window_id": window_id})
+
+    async def close_window(self, window_id: str) -> ActionResult:
+        return ActionResult(ok=True, output={"window_id": window_id})
 
     async def release_all(self) -> ActionResult:
         released = {"keys": sorted(self.held_keys), "buttons": sorted(self.held_buttons)}
@@ -524,6 +538,59 @@ class X11DesktopBackend(MockDesktopBackend):
         result.output["wait_for_window_timed_out"] = True
         return result
 
+    async def windows(self) -> list[X11Window]:
+        result = await self._run("wmctrl", "-lpGx", timeout=2, check=False)
+        if result.returncode != 0:
+            return await super().windows()
+        active = await self._run("xdotool", "getactivewindow", timeout=2, check=False)
+        active_id = _normalize_window_id(active.stdout)
+        windows: list[X11Window] = []
+        for line in result.stdout.splitlines():
+            parts = line.split(None, 8)
+            if len(parts) < 9:
+                continue
+            window_id, _desktop, pid, x, y, width, height, class_name, title = parts
+            try:
+                windows.append(
+                    X11Window(
+                        id=window_id,
+                        title=title,
+                        class_name=class_name,
+                        pid=int(pid) if pid != "0" else None,
+                        x=int(x),
+                        y=int(y),
+                        width=int(width),
+                        height=int(height),
+                        is_active=_normalize_window_id(window_id) == active_id,
+                    )
+                )
+            except ValueError:
+                continue
+        return windows
+
+    async def active_window(self) -> X11Window | None:
+        windows = await self.windows()
+        for window in windows:
+            if window.is_active:
+                return window
+        return windows[0] if windows else None
+
+    async def activate_window(self, window_id: str) -> ActionResult:
+        result = await self._run("wmctrl", "-ia", window_id, timeout=5, check=False)
+        return ActionResult(
+            ok=result.returncode == 0,
+            message=None if result.returncode == 0 else "failed to activate window",
+            output={"window_id": window_id},
+        )
+
+    async def close_window(self, window_id: str) -> ActionResult:
+        result = await self._run("wmctrl", "-ic", window_id, timeout=5, check=False)
+        return ActionResult(
+            ok=result.returncode == 0,
+            message=None if result.returncode == 0 else "failed to close window",
+            output={"window_id": window_id},
+        )
+
     async def mouse_move(self, x: int, y: int) -> Point:
         await self._run("xdotool", "mousemove", str(x), str(y))
         return await super().mouse_move(x, y)
@@ -650,9 +717,16 @@ class X11DesktopBackend(MockDesktopBackend):
     async def keyboard_type(
         self, text: str, delay_ms: int = 10, method: str = "auto"
     ) -> ActionResult:
-        if method in ("auto", "clipboard") and (len(text) > 80 or not text.isascii()):
-            await self.clipboard_set(text)
-            await self.keyboard_hotkey(["ctrl", "v"])
+        use_clipboard = method == "clipboard" or (
+            method == "auto" and (len(text) > 80 or not text.isascii())
+        )
+        if use_clipboard:
+            previous = await self.clipboard_get()
+            try:
+                await self.clipboard_set(text)
+                await self.keyboard_hotkey(["ctrl", "v"])
+            finally:
+                await self.clipboard_set(previous)
         else:
             await self._run("xdotool", "type", "--delay", str(delay_ms), text)
         return await super().keyboard_type(text, delay_ms=delay_ms, method=method)
@@ -742,7 +816,10 @@ class X11DesktopBackend(MockDesktopBackend):
             image = Image.open(temp_path)
             if options.scale != 1.0:
                 image = image.resize(
-                    (round(image.width * options.scale), round(image.height * options.scale))
+                    (
+                        _scaled_dimension(image.width, options.scale),
+                        _scaled_dimension(image.height, options.scale),
+                    )
                 )
             data = _encode_image(image.convert("RGB"), options.format, options.quality)
         finally:
@@ -750,8 +827,10 @@ class X11DesktopBackend(MockDesktopBackend):
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,
             desktop_height=self.height,
-            image_width=round((region.width if region else self.width) * options.scale),
-            image_height=round((region.height if region else self.height) * options.scale),
+            image_width=_scaled_dimension(region.width if region else self.width, options.scale),
+            image_height=_scaled_dimension(
+                region.height if region else self.height, options.scale
+            ),
             source_region=region,
         )
         artifact_uri = None
@@ -804,6 +883,10 @@ def _encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
     return output.getvalue()
 
 
+def _scaled_dimension(value: int, scale: float) -> int:
+    return max(1, round(value * scale))
+
+
 def choose_backend(
     kind: str, *, width: int, height: int, display: str, browser: str | None = None
 ) -> DesktopBackend:
@@ -814,3 +897,13 @@ def choose_backend(
     if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
     return X11DesktopBackend(width=width, height=height, display=display, browser=browser)
+
+
+def _normalize_window_id(value: str) -> str:
+    raw = value.strip().lower()
+    if not raw:
+        return ""
+    try:
+        return f"0x{int(raw, 0):08x}"
+    except ValueError:
+        return raw

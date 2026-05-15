@@ -1,9 +1,52 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import Request
 
+from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import Point, Region
+
+
+async def desktop_readiness(request: Request) -> tuple[bool, list[str]]:
+    ready, errors = await request.app.state.backend.ready()
+    if not request.app.state.supervisor.running:
+        return False, ["desktop supervisor is stopped", *errors]
+    return ready, errors
+
+
+async def daemon_readiness(request: Request) -> tuple[bool, list[str]]:
+    ready, errors = await desktop_readiness(request)
+    if request.app.state.settings.vnc_mode == "off":
+        return ready, errors
+    for name in ("x11vnc", "novnc"):
+        status = request.app.state.supervisor.status(name)
+        if status.status in ("running", "unknown"):
+            continue
+        ready = False
+        errors.append(f"{name} is not running")
+    return ready, errors
+
+
+async def ensure_desktop_ready(request: Request) -> None:
+    ready, errors = await desktop_readiness(request)
+    if ready:
+        return
+    raise DaemonError(
+        "desktop is not ready",
+        status_code=503,
+        code="desktop_not_ready",
+        details={"errors": errors},
+    )
+
+
+@asynccontextmanager
+async def ready_input_lock(request: Request) -> AsyncIterator[None]:
+    async with request.app.state.input_lock:
+        await ensure_desktop_ready(request)
+        yield
 
 
 def validate_point(request: Request, point: Point, *, field: str = "coordinate") -> None:
@@ -46,4 +89,15 @@ def validate_region(request: Request, region: Region, *, field: str = "region") 
             status_code=422,
             code="region_out_of_bounds",
             details={"field": field, "width": width, "height": height},
+        )
+
+
+def validate_keys(*keys: str) -> None:
+    invalid = [key for key in keys if not is_supported_key(key)]
+    if invalid:
+        raise DaemonError(
+            "unsupported key",
+            status_code=422,
+            code="unsupported_key",
+            details={"keys": invalid},
         )
