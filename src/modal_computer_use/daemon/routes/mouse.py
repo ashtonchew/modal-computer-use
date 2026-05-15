@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
+    ready_input_lock,
     validate_keys,
     validate_optional_point,
     validate_point,
@@ -28,7 +29,7 @@ async def move(payload: MouseMoveRequest, request: Request) -> Point:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_move(payload.x, payload.y)
 
@@ -41,7 +42,7 @@ async def click(payload: MouseClickRequest, request: Request) -> Point:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_click(
             payload.x,
@@ -69,7 +70,7 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_drag(
             start=start,
@@ -88,7 +89,7 @@ async def scroll(payload: MouseScrollRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_scroll(
             payload.direction,
@@ -105,7 +106,7 @@ async def down(payload: MouseButtonRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_down(payload.button, payload.x, payload.y)
 
@@ -117,7 +118,7 @@ async def up(payload: MouseButtonRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_up(payload.button, payload.x, payload.y)
 

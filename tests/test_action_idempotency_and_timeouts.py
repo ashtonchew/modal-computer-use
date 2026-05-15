@@ -205,6 +205,27 @@ def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     assert app.state.action_count == 1
 
 
+def test_idempotency_cache_zero_entries_does_not_store_results(tmp_path) -> None:
+    app = _app(tmp_path, idempotency_cache_max_entries=0)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-disabled"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+        second = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-disabled"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["call_id"] != second.json()["call_id"]
+    assert app.state.action_count == 2
+    assert len(app.state.idempotency_cache) == 0
+
+
 def test_body_idempotency_key_replays_without_reexecution(tmp_path) -> None:
     app = _app(tmp_path)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:

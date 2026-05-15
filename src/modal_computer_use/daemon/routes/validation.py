@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import Request
 
 from modal_computer_use.actions import is_supported_key
@@ -37,6 +40,13 @@ async def ensure_desktop_ready(request: Request) -> None:
         code="desktop_not_ready",
         details={"errors": errors},
     )
+
+
+@asynccontextmanager
+async def ready_input_lock(request: Request) -> AsyncIterator[None]:
+    async with request.app.state.input_lock:
+        await ensure_desktop_ready(request)
+        yield
 
 
 def validate_point(request: Request, point: Point, *, field: str = "coordinate") -> None:

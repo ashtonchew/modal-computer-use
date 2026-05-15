@@ -4,7 +4,11 @@ from fastapi import APIRouter, Request
 
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, validate_region
+from modal_computer_use.daemon.routes.validation import (
+    ensure_desktop_ready,
+    ready_input_lock,
+    validate_region,
+)
 from modal_computer_use.daemon.schemas import ScreenshotRequest, ZoomScreenshotRequest
 from modal_computer_use.models import Region, Screenshot, ScreenshotOptions
 
@@ -52,7 +56,7 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
     budget_error = budgets.screenshot_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
@@ -81,7 +85,7 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
     budget_error = budgets.screenshot_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
@@ -115,7 +119,7 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         show_cursor=payload.show_cursor,
         storage=payload.storage,  # type: ignore[arg-type]
     )
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error

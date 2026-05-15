@@ -160,3 +160,25 @@ def test_sdk_request_span_strips_inline_query_from_path(monkeypatch) -> None:
     sdk_span = tracer.spans[0]
     assert sdk_span.attributes["http.route"] == "/v1/version"
     assert "secret" not in str(sdk_span.attributes)
+
+
+def test_sdk_request_span_templates_artifact_paths(monkeypatch) -> None:
+    tracer = _CapturedTracer()
+    monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/artifacts/private/secret-name.png"
+        return httpx.Response(200, content=b"ok")
+
+    client = httpx.Client(
+        base_url="http://daemon.local",
+        transport=httpx.MockTransport(handler),
+    )
+    transport = HTTPTransport("http://daemon.local", client=client)
+
+    response = transport.request("GET", "/v1/artifacts/private/secret-name.png")
+
+    assert response.content == b"ok"
+    sdk_span = tracer.spans[0]
+    assert sdk_span.attributes["http.route"] == "/v1/artifacts/{path:path}"
+    assert "secret-name" not in str(sdk_span.attributes)

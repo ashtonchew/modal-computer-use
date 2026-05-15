@@ -247,6 +247,7 @@ Every variable below is read by `DaemonSettings` and is the source of truth for 
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `3_600` | `idempotency_cache_ttl_seconds` | TTL for cached idempotent results. |
 | `COMPUTER_USE_LOCAL_TOKEN` | `None` | `local_token` | Loopback-only bearer for dev. |
 | `COMPUTER_USE_REQUIRE_CONNECT_USER` | `true` | `require_connect_user` | Enforce verified-user header from trusted proxy. |
+| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | `false` | `trust_private_connect_proxy` | Opt-in trust for verified-user headers from private or link-local proxy addresses. |
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | `true` | `reject_query_tokens` | Reject `?_modal_connect_token=...`. |
 | `COMPUTER_USE_VNC_MODE` | `off` | `vnc_mode` | `off`, `view_only`, or `control`. |
 | `COMPUTER_USE_VNC_PASSWORD` | `None` | `vnc_password` | Generated if absent and VNC is enabled. |

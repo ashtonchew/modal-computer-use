@@ -18,7 +18,11 @@ from modal_computer_use.daemon.routes.actions import (
     _validate_actions,
     _validate_screenshot_pixel_budget,
 )
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, validate_keys
+from modal_computer_use.daemon.routes.validation import (
+    ensure_desktop_ready,
+    ready_input_lock,
+    validate_keys,
+)
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.errors import ActionValidationError
 from modal_computer_use.models import ActionBatchRequest, ActionResult, parse_action
@@ -33,7 +37,7 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         result = await request.app.state.backend.keyboard_type(
             payload.text,
@@ -54,7 +58,7 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_press(
             payload.key,
@@ -70,7 +74,7 @@ async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_hotkey(
             payload.keys,
@@ -90,6 +94,7 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             code="action_validation_failed",
             details={"errors": ["invalid nested hold action"]},
         ) from exc
+    await ensure_desktop_ready(request)
     errors = _validate_actions(
         nested_actions,
         width=request.app.state.backend.width,
@@ -116,9 +121,8 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             code="action_validation_failed",
             details={"errors": errors},
         )
-    await ensure_desktop_ready(request)
     _preflight_hold_budget(request, nested_actions)
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         _preflight_hold_budget(request, nested_actions)
         budgets.reserve_action(request)
         released_all = False

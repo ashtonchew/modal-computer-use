@@ -64,6 +64,7 @@ logger = logging.getLogger("modal_computer_use.daemon.actions")
 
 @router.post("/validate")
 async def validate(payload: ActionBatchRequest, request: Request) -> ValidationResult:
+    await ensure_desktop_ready(request)
     errors = _validate_batch_request(payload, request)
     return ValidationResult(ok=not errors, errors=errors)
 
@@ -92,6 +93,7 @@ async def run(
                 "action_count": action_count,
             },
         )
+    await ensure_desktop_ready(request)
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
     validation_errors = _validate_batch_request(payload, request)
     if validation_errors:
@@ -115,6 +117,7 @@ async def run(
         )
         if cached is not None:
             return cached
+        await ensure_desktop_ready(request)
 
         batch_timeout_ms = request.app.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
@@ -392,7 +395,8 @@ async def run(
             screenshot=screenshot,
             timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
         )
-        if effective_idempotency_key:
+        cache_enabled = request.app.state.settings.idempotency_cache_max_entries > 0
+        if effective_idempotency_key and cache_enabled:
             cache[effective_idempotency_key] = {
                 "fingerprint": request_fingerprint,
                 "created_at": time.monotonic(),
@@ -426,6 +430,9 @@ def _request_fingerprint(payload: ActionBatchRequest) -> str:
 def _cached_idempotency_result(
     request: Request, key: str | None, fingerprint: str
 ) -> ActionBatchResult | None:
+    if request.app.state.settings.idempotency_cache_max_entries <= 0:
+        request.app.state.idempotency_cache.clear()
+        return None
     _prune_idempotency_cache(request)
     if not key:
         return None

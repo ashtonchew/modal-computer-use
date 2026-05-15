@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from modal_computer_use.daemon import budgets
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, ready_input_lock
 from modal_computer_use.daemon.schemas import CommandRunRequest
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_text
@@ -19,7 +19,7 @@ async def run(payload: CommandRunRequest, request: Request) -> ActionResult:
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
-    async with request.app.state.input_lock:
+    async with ready_input_lock(request):
         budgets.reserve_action(request)
         result = await request.app.state.backend.run_command(
             payload.command,

@@ -112,4 +112,10 @@ class HTTPTransport:
 
 
 def _route_path(path: str) -> str:
-    return urlsplit(path).path or "/"
+    route = urlsplit(path).path or "/"
+    if route.startswith("/v1/artifacts/") and route not in {
+        "/v1/artifacts/manifest",
+        "/v1/artifacts/sync",
+    }:
+        return "/v1/artifacts/{path:path}"
+    return route

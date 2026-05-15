@@ -156,10 +156,10 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         )
 
     @app.exception_handler(FileNotFoundError)
-    async def not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
+    async def not_found_handler(_request: Request, _exc: FileNotFoundError) -> JSONResponse:
         return JSONResponse(
             status_code=404,
-            content={"code": "not_found", "message": sanitize_text(str(exc)), "details": {}},
+            content={"code": "not_found", "message": "resource not found", "details": {}},
         )
 
     @app.exception_handler(Exception)

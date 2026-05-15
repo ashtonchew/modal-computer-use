@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
@@ -102,6 +105,31 @@ def test_action_validate_uses_desktop_geometry(test_client) -> None:
     assert response.status_code == 200
     assert response.json()["ok"] is False
     assert "x coordinate 1440" in response.json()["errors"][0]
+
+
+def test_action_validate_rejects_unready_desktop_before_backend_geometry(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    app.state.backend.ready = not_ready
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/validate",
+            json={"actions": [{"type": "move", "x": 1, "y": 2}]},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "desktop_not_ready"
 
 
 def test_zoom_screenshot_rejects_out_of_bounds_region(test_client) -> None:
@@ -683,6 +711,81 @@ def test_readyz_and_actions_reject_after_mock_lifecycle_stop(tmp_path) -> None:
     assert action.json()["code"] == "desktop_not_ready"
     assert app.state.backend.cursor == Point(x=0, y=0)
     assert app.state.action_count == 0
+
+
+def test_action_rechecks_readiness_after_waiting_for_input_lock(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    app.state.supervisor.running = True
+
+    async def call_with_readiness_flipped_while_queued() -> int:
+        precheck_complete = asyncio.Event()
+        readiness_calls = 0
+
+        async def ready_then_not_ready():
+            nonlocal readiness_calls
+            readiness_calls += 1
+            if readiness_calls == 1:
+                precheck_complete.set()
+                return True, []
+            return False, ["display missing"]
+
+        app.state.backend.ready = ready_then_not_ready
+        body = json.dumps({"actions": [{"type": "move", "x": 7, "y": 8}]}).encode()
+        messages = [{"type": "http.request", "body": body, "more_body": False}]
+        sent: list[dict] = []
+
+        async def receive():
+            return messages.pop(0)
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/actions/run",
+            "raw_path": b"/v1/actions/run",
+            "query_string": b"",
+            "headers": [
+                (b"authorization", b"Bearer dev"),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+
+        await app.state.input_lock.acquire()
+        task = asyncio.create_task(app(scope, receive, send))
+        await asyncio.wait_for(precheck_complete.wait(), timeout=1)
+        app.state.input_lock.release()
+        await asyncio.wait_for(task, timeout=1)
+        return next(message for message in sent if message["type"] == "http.response.start")[
+            "status"
+        ]
+
+    assert asyncio.run(call_with_readiness_flipped_while_queued()) == 503
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+
+
+def test_missing_artifact_errors_do_not_echo_user_path(test_client) -> None:
+    response = test_client.get("/v1/artifacts/private/customer-secret.txt")
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "not_found"
+    assert "customer-secret" not in response.text
+    assert "private/" not in response.text
 
 
 def test_screenshot_and_clipboard_routes_reject_unready_desktop(tmp_path) -> None:
