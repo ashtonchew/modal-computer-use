@@ -225,6 +225,23 @@ def test_openai_provider_provenance_redacts_sensitive_metadata() -> None:
     assert "provider-secret" not in json.dumps(normalized)
 
 
+def test_provider_provenance_redacts_secret_patterns_in_safe_named_fields() -> None:
+    adapter = OpenAIAdapter(RecordingComputer(), allow_unknown=True)
+
+    normalized = adapter.normalize(
+        {
+            "type": "future",
+            "note": "Bearer provider-secret artifact://screenshots/private.png",
+        }
+    )
+
+    serialized = json.dumps(normalized)
+    provider_action = normalized["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["note"] == "Bearer [redacted] [redacted]"
+    assert "provider-secret" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
+
+
 def test_openai_computer_call_output_uses_native_screenshot_without_metadata_loss() -> None:
     screenshot = _tiny_screenshot()
 
@@ -402,6 +419,13 @@ def test_anthropic_zoom_requires_tool_support_even_if_enabled() -> None:
     )
     with pytest.raises(UnsupportedActionError):
         adapter.normalize({"action": "zoom", "region": {"x": 0, "y": 0, "width": 1, "height": 1}})
+
+
+def test_anthropic_zoom_requires_region_as_structured_validation_error() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20251124")
+
+    with pytest.raises(ActionValidationError, match="zoom action requires region"):
+        adapter.normalize({"action": "zoom"})
 
 
 def test_anthropic_unknown_action_fails_closed() -> None:

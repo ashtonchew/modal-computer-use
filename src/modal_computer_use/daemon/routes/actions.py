@@ -107,6 +107,7 @@ async def run(
     screenshot = None
     batch_timed_out = False
     screenshot_after_blocked = False
+    action_phase_failed = False
     async with request.app.state.input_lock:
         cache = request.app.state.idempotency_cache
         cached = _cached_idempotency_result(
@@ -260,6 +261,7 @@ async def run(
                     },
                 )
                 if batch_timed_out or not payload.continue_on_error:
+                    action_phase_failed = True
                     break
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start) * 1000
@@ -300,8 +302,15 @@ async def run(
                 ):
                     await _post_action_delay(request, batch_deadline)
                 if not payload.continue_on_error:
+                    action_phase_failed = True
                     break
-        if payload.screenshot_after and not batch_timed_out and not screenshot_after_blocked:
+        action_phase_allows_screenshot = payload.continue_on_error or not action_phase_failed
+        if (
+            payload.screenshot_after
+            and action_phase_allows_screenshot
+            and not batch_timed_out
+            and not screenshot_after_blocked
+        ):
             options = payload.screenshot_options or ScreenshotOptions()
             start = time.perf_counter()
             timeout_ms = _effective_screenshot_after_timeout_ms(payload, request)
@@ -1169,7 +1178,7 @@ def _append_screenshot_after_trace(
             ts=datetime.now(UTC),
             run_id=payload.run_id or request.app.state.settings.run_id,
             call_id=call_id,
-            sequence=payload.sequence,
+            sequence=payload.sequence if payload.sequence is not None else len(payload.actions),
             source=payload.source,
             normalized_action={"type": "screenshot_after"},
             result=trace_result,

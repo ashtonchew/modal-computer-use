@@ -165,6 +165,8 @@ class AnthropicAdapter:
         if name == "zoom":
             if not self.enable_zoom or not self.version.supports_zoom:
                 raise UnsupportedActionError("zoom is not enabled for this Anthropic tool version")
+            if "region" not in action:
+                raise ActionValidationError("zoom action requires region")
             return _with_common(
                 {"type": "zoom", "region": action["region"], "scale": action.get("scale", 2.0)},
                 action,

@@ -453,7 +453,7 @@ Supported types: `move`, `click`, `double_click`, `triple_click`, `drag`, `scrol
 Path safety (full details §15.5; implementation in `src/modal_computer_use/artifacts.py:24-100`):
 
 - Reject absolute paths, `~`, `..`, control characters, double-encoded traversal.
-- Reject `CONTROL_PATHS` (`manifest.ndjson`, `traces/actions.ndjson`) and `CONTROL_SEGMENTS` (`.control`, `_control`, `.modal-computer-use`, `.secrets`) on public reads/writes.
+- Reject `CONTROL_PATHS` (`manifest.ndjson`, `traces/actions.ndjson`) and `CONTROL_SEGMENTS` (`.control`, `_control`, `.modal-computer-use`, `.secrets`, `logs`) on public reads/writes.
 - Reject any path component that is a symlink, even if the final target is inside root.
 - Every write returns `ArtifactInfo` with SHA-256, content type, size, and `artifact://` URI.
 
@@ -474,9 +474,10 @@ Path safety (full details §15.5; implementation in `src/modal_computer_use/arti
 | `GET` | `/v1/session/metadata` | Session metadata (run_id, started_at, …). |
 | `POST` | `/v1/session/refresh` | Refresh internal session state. |
 
-### 9.13 Request envelope, sequencing, and idempotency
+### 9.13 Action batch envelope, sequencing, and idempotency
 
-Every mutating primitive accepts optional `call_id`, `sequence`, and `source` metadata:
+`/v1/actions/run` accepts optional `call_id`, `sequence`, and `source` metadata for
+audited/replayable action batches:
 
 ```json
 { "call_id": "call_...", "sequence": 42, "source": "openai-adapter" }
@@ -490,7 +491,7 @@ Idempotency cache (`daemon/routes/actions.py:96-107, 406-418`):
 - Body-key vs header-key conflict → 409 `idempotency_key_conflict`.
 - Fingerprint = SHA-256 of `model_dump(mode="json", exclude={"idempotency_key"}, sort_keys=True)`. Same key + different fingerprint → 409.
 
-Logs include `call_id`, route, duration, success/failure, `error_code`, and redaction metadata; they never include `text`, `clipboard_text`, `data_base64`, `image`, or tokens (see §15.3).
+Action batch logs include `call_id`, route, duration, success/failure, `error_code`, and redaction metadata; they never include `text`, `clipboard_text`, `data_base64`, `image`, or tokens (see §15.3). Direct primitive routes keep their narrower request models; callers that need replay/audit metadata should use `/v1/actions/run`.
 
 ### 9.14 Error code catalog (v7 addition)
 
@@ -670,7 +671,7 @@ Implementation `src/modal_computer_use/artifacts.py:17-100`. `normalize_artifact
 3. Reject if starts with `/` or `~`.
 4. Reject control characters (any byte < 0x20).
 5. Reject any segment equal to `.` or `..`.
-6. When `public=True`, reject if the normalized path equals any of `CONTROL_PATHS` (`manifest.ndjson`, `traces/actions.ndjson`) or contains any of `CONTROL_SEGMENTS` (`.control`, `_control`, `.modal-computer-use`, `.secrets`).
+6. When `public=True`, reject if the normalized path equals any of `CONTROL_PATHS` (`manifest.ndjson`, `traces/actions.ndjson`) or contains any of `CONTROL_SEGMENTS` (`.control`, `_control`, `.modal-computer-use`, `.secrets`, `logs`).
 7. `ArtifactStore.resolve()` realpaths the result and verifies `commonpath(root, candidate) == root`.
 8. `ArtifactStore._reject_symlink_components()` walks each path component to refuse symlinks anywhere along the path (not just at the leaf).
 

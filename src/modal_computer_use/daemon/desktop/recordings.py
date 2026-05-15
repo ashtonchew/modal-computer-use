@@ -16,6 +16,7 @@ from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ArtifactInfo, Recording
+from modal_computer_use.redaction import sanitize_text
 
 
 class RecordingRegistry:
@@ -153,7 +154,11 @@ class RecordingRegistry:
         stderr_path = (
             Path(rec.stderr_path) if rec.stderr_path else self._stderr_paths.get(recording_id)
         )
-        stderr_tail = _tail_file(stderr_path) if stderr_path is not None else []
+        stderr_tail = (
+            [sanitize_text(line) for line in _tail_file(stderr_path)]
+            if stderr_path is not None
+            else []
+        )
         stopped = rec.model_copy(
             update={
                 "status": status,

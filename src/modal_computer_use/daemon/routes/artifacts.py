@@ -80,7 +80,10 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                 except Exception:
                     temp_path.unlink(missing_ok=True)
                     raise
+            target = store.resolve(public_path)
+            _ensure_writable_artifact_target(target)
             target.parent.mkdir(parents=True, exist_ok=True)
+            store._reject_symlink_components(public_path)
             temp_path.replace(target)
             info = store._info(target, public_path=public_path)
             content_type = request.headers.get("content-type")

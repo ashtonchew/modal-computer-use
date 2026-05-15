@@ -5,6 +5,9 @@ import re
 from typing import Any
 
 _SENSITIVE_PATTERNS = [
+    re.compile(r"((?:OPENAI|ANTHROPIC|API)_API_KEY\s*=\s*)[^\s]+", re.IGNORECASE),
+    re.compile(r"((?:x-)?api-key\s*:\s*)[^\s]+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9._-]{6,}\b", re.IGNORECASE),
     re.compile(r"(_modal_connect_token=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(authorization:\s*bearer\s+)[^\s]+", re.IGNORECASE),
     re.compile(r"(bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
@@ -54,7 +57,9 @@ def sanitize_text(value: str) -> str:
     sanitized = value
     for pattern in _SENSITIVE_PATTERNS:
         sanitized = pattern.sub(
-            lambda match: f"{match.group(1)}[redacted]" if match.groups() else "[redacted]",
+            lambda match: f"{match.group(1)}[redacted]"
+            if match.groups()
+            else "[redacted]",
             sanitized,
         )
     return sanitized

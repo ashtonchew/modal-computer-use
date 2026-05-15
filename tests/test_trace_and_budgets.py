@@ -284,6 +284,8 @@ def test_action_trace_keeps_artifact_screenshot_after_uri_out_of_top_level(tmp_p
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 2
     assert entries[1].normalized_action == {"type": "screenshot_after"}
+    assert entries[0].sequence == 0
+    assert entries[1].sequence == 1
     assert entries[1].screenshot_after_uri is None
     assert entries[1].coordinate_space is not None
 

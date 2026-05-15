@@ -195,6 +195,24 @@ def test_json_formatter_redacts_provider_credentials_in_extra() -> None:
     assert "pw-secret" not in serialized
 
 
+def test_json_formatter_redacts_provider_credentials_in_message_text() -> None:
+    formatter = JsonFormatter()
+    record = logging.getLogger("modal_computer_use.test").makeRecord(
+        "modal_computer_use.test",
+        logging.INFO,
+        __file__,
+        1,
+        "provider key sk-test-secret appeared in message",
+        (),
+        exc_info=None,
+    )
+
+    payload = json.loads(formatter.format(record))
+
+    assert payload["message"] == "provider key [redacted] appeared in message"
+    assert "sk-test-secret" not in json.dumps(payload)
+
+
 def test_json_formatter_redacts_secret_bearing_observability_fields() -> None:
     formatter = JsonFormatter()
     record = logging.getLogger("modal_computer_use.test").makeRecord(
@@ -226,6 +244,35 @@ def test_json_formatter_redacts_secret_bearing_observability_fields() -> None:
     assert "stdout-secret" not in serialized
     assert "stderr-secret" not in serialized
     assert "url-secret" not in serialized
+
+
+def test_json_formatter_sanitizes_secret_patterns_in_neutral_extra_fields() -> None:
+    formatter = JsonFormatter()
+    record = logging.getLogger("modal_computer_use.test").makeRecord(
+        "modal_computer_use.test",
+        logging.INFO,
+        __file__,
+        1,
+        "safe message",
+        (),
+        exc_info=None,
+        extra={
+            "extra": {
+                "note": (
+                    "Bearer note-secret artifact://screenshots/private.png "
+                    "OPENAI_API_KEY=sk-test-secret"
+                )
+            }
+        },
+    )
+
+    payload = json.loads(formatter.format(record))
+    serialized = json.dumps(payload)
+
+    assert payload["note"] == "Bearer [redacted] [redacted] OPENAI_API_KEY=[redacted]"
+    assert "note-secret" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
+    assert "sk-test-secret" not in serialized
 
 
 def test_sanitize_payload_redacts_sensitive_numeric_values() -> None:

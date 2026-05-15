@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from modal_computer_use.redaction import is_sensitive_key
+from modal_computer_use.redaction import is_sensitive_key, sanitize_text
 
 PROVIDER_ACTION_METADATA_KEY = "provider_action"
 PROVIDER_ACTION_REDACTIONS_METADATA_KEY = "provider_action_redactions"
@@ -61,6 +61,11 @@ def _redact_value(
             )
             for index, item in enumerate(value)
         ]
+    if isinstance(value, str):
+        sanitized = sanitize_text(value)
+        if sanitized != value and path:
+            redactions.append(path)
+        return sanitized
     return value
 
 

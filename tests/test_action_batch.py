@@ -38,6 +38,26 @@ def test_action_batch_stop_on_runtime_error(test_client, app) -> None:
     assert result["results"][0]["ok"] is False
 
 
+def test_action_batch_stop_on_runtime_error_skips_screenshot_after(
+    test_client, app
+) -> None:
+    async def fail_move(x: int, y: int):
+        raise RuntimeError("boom")
+
+    app.state.backend.mouse_move = fail_move
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "screenshot_after": True,
+            "actions": [{"type": "move", "x": 9, "y": 9}],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert [item["type"] for item in result["results"]] == ["move"]
+    assert result["screenshot"] is None
+
+
 def test_action_batch_continue_runtime_error(test_client, app) -> None:
     original = app.state.backend.mouse_move
 

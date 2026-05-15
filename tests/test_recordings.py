@@ -162,6 +162,35 @@ def test_failed_recording_stop_reports_error_and_ffmpeg_tail(tmp_path, monkeypat
     assert process.killed is True
 
 
+def test_failed_recording_stop_sanitizes_secret_bearing_ffmpeg_tail(
+    tmp_path, monkeypatch
+) -> None:
+    process = _StubbornProcess()
+
+    def fake_popen(*args, **kwargs):
+        kwargs["stderr"].write(
+            b"Bearer recording-secret\nartifact://logs/recording-secret.txt\n"
+        )
+        return process
+
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _tool: "/usr/bin/ffmpeg")
+    registry = RecordingRegistry(
+        DaemonSettings(
+            backend="x11",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        ),
+        popen_factory=fake_popen,
+    )
+
+    started = registry.start(name="broken")
+    stopped = registry.stop(started.id)
+
+    assert stopped.stderr_tail == ["Bearer [redacted]", "[redacted]"]
+    assert "recording-secret" not in stopped.model_dump_json()
+
+
 def test_recording_start_failure_redacts_stderr_path(tmp_path, monkeypatch) -> None:
     def failing_popen(*args, **kwargs):
         raise OSError(f"cannot open {tmp_path}/recordings/raw-secret.stderr.log")

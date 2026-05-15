@@ -157,6 +157,7 @@ class ArtifactStore:
                 temp_path.unlink(missing_ok=True)
                 raise
         try:
+            self._reject_symlink_components(relative)
             temp_path.replace(target)
         except Exception:
             temp_path.unlink(missing_ok=True)
@@ -197,6 +198,7 @@ class ArtifactStore:
             temp_path = Path(handle.name)
         try:
             shutil.copyfile(source_path, temp_path)
+            self._reject_symlink_components(relative)
             temp_path.replace(target)
         except Exception:
             temp_path.unlink(missing_ok=True)

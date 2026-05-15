@@ -35,6 +35,8 @@ def redact(value: Any) -> Any:
         return result
     if isinstance(value, list):
         return [redact(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_text(value)
     return value
 
 
