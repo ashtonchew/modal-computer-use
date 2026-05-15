@@ -20,8 +20,8 @@ async def get_text(request: Request) -> dict[str, str]:
 @router.put("/text")
 async def set_text(payload: TextRequest, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budgets.reserve_action(request)
     async with request.app.state.input_lock:
-        budgets.enforce_idle(request)
         result = await request.app.state.backend.clipboard_set(payload.text)
         budgets.touch_activity(request)
         return result
@@ -30,8 +30,8 @@ async def set_text(payload: TextRequest, request: Request) -> ActionResult:
 @router.delete("/text")
 async def clear_text(request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budgets.reserve_action(request)
     async with request.app.state.input_lock:
-        budgets.enforce_idle(request)
         result = await request.app.state.backend.clipboard_clear()
         budgets.touch_activity(request)
         return result

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.daemon.schemas import RecordingStartRequest
 from modal_computer_use.models import Recording
 
@@ -17,6 +18,7 @@ dashboard_router = APIRouter()
 
 @router.post("")
 async def start(payload: RecordingStartRequest, request: Request) -> Recording:
+    await ensure_desktop_ready(request)
     budget_error = budgets.recording_start_error(request)
     if budget_error is not None:
         raise budget_error

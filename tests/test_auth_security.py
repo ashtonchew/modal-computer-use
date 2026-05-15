@@ -7,6 +7,7 @@ import sys
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.logging import JsonFormatter
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult
@@ -299,3 +300,52 @@ def test_process_log_routes_sanitize_secret_bearing_tails(tmp_path) -> None:
     assert "log-secret" not in logs.text
     assert "stderr-secret" not in stderr.text
     assert "stderr-secret" not in errors.text
+
+
+def test_browser_and_app_routes_sanitize_reflected_urls_and_args(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        browser = client.post(
+            "/v1/browser/open-url",
+            json={"url": "https://example.test/path?_modal_connect_token=url-secret"},
+        )
+        app_launch = client.post(
+            "/v1/apps/launch",
+            json={
+                "command": "browser",
+                "args": ["https://example.test/path?_modal_connect_token=arg-secret"],
+            },
+        )
+
+    serialized = json.dumps({"browser": browser.json(), "app": app_launch.json()})
+    assert browser.status_code == 200
+    assert app_launch.status_code == 200
+    assert "url-secret" not in serialized
+    assert "arg-secret" not in serialized
+
+
+def test_daemon_error_details_sanitize_secret_bearing_values(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    @app.get("/v1/test/unsafe-error")
+    async def unsafe_error():
+        raise DaemonError(
+            "failed with Bearer message-secret",
+            code="unsafe_test",
+            details={
+                "stdout": "Bearer stdout-secret",
+                "stderr": "artifact://logs/stderr-secret.txt",
+                "nested": {"url": "https://example.test/?token=url-secret"},
+            },
+        )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.get("/v1/test/unsafe-error")
+
+    serialized = json.dumps(response.json())
+    assert response.status_code == 400
+    assert "message-secret" not in serialized
+    assert "stdout-secret" not in serialized
+    assert "stderr-secret" not in serialized
+    assert "url-secret" not in serialized

@@ -11,6 +11,39 @@ _SENSITIVE_PATTERNS = [
     re.compile(r"artifact://[^\s]+", re.IGNORECASE),
 ]
 
+_SENSITIVE_KEYS = {
+    "api_key",
+    "artifact_bytes",
+    "artifact_uri",
+    "authorization",
+    "bearer",
+    "bytes",
+    "clipboard",
+    "clipboard_text",
+    "connect_token",
+    "content",
+    "credential",
+    "data",
+    "data_base64",
+    "image",
+    "image_bytes",
+    "no_vnc_url",
+    "novnc_url",
+    "password",
+    "raw_path",
+    "screenshot",
+    "screenshot_bytes",
+    "secret",
+    "stderr",
+    "stdout",
+    "text",
+    "token",
+    "typed_text",
+    "url",
+    "vnc",
+    "vnc_url",
+}
+
 
 def sanitize_text(value: str) -> str:
     sanitized = value
@@ -20,6 +53,44 @@ def sanitize_text(value: str) -> str:
             sanitized,
         )
     return sanitized
+
+
+def sanitize_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[Any, Any] = {}
+        for key, item in value.items():
+            if _is_sensitive_key(str(key)):
+                redacted[key] = _redacted_value(item)
+                continue
+            redacted[key] = sanitize_payload(item)
+        return redacted
+    if isinstance(value, list):
+        return [sanitize_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_payload(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_text(value)
+    return value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return normalized in _SENSITIVE_KEYS or normalized.endswith("_token")
+
+
+def _redacted_value(value: Any) -> Any:
+    if isinstance(value, dict) and value.get("redacted") is True:
+        return value
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    marker: dict[str, Any] = {"redacted": True}
+    if isinstance(value, str):
+        marker["length"] = len(value)
+    elif isinstance(value, bytes):
+        marker["size_bytes"] = len(value)
+    elif isinstance(value, list | tuple | dict):
+        marker["items"] = len(value)
+    return marker
 
 
 def safe_exception_payload(exc: BaseException) -> dict[str, Any]:

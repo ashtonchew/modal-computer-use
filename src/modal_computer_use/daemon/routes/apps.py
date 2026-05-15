@@ -6,6 +6,7 @@ from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.daemon.schemas import LaunchRequest, OpenArtifactRequest
 from modal_computer_use.models import ActionResult
+from modal_computer_use.redaction import sanitize_payload
 
 router = APIRouter(prefix="/v1/apps")
 
@@ -15,7 +16,8 @@ async def launch(payload: LaunchRequest, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
-        return await request.app.state.backend.launch(payload.command, payload.args)
+        result = await request.app.state.backend.launch(payload.command, payload.args)
+        return ActionResult.model_validate(sanitize_payload(result.model_dump(mode="json")))
 
 
 @router.post("/open-artifact")
@@ -26,4 +28,5 @@ async def open_artifact(payload: OpenArtifactRequest, request: Request) -> Actio
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
-        return await request.app.state.backend.launch("xdg-open", [str(path)])
+        result = await request.app.state.backend.launch("xdg-open", [str(path)])
+        return ActionResult.model_validate(sanitize_payload(result.model_dump(mode="json")))

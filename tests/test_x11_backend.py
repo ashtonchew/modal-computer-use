@@ -31,6 +31,8 @@ class RecordingX11Backend(X11DesktopBackend):
             if args[:2] == ("xdotool", "getmouselocation")
             else ""
         )
+        if args == ("xclip", "-selection", "clipboard", "-o"):
+            stdout = self.clipboard
         return subprocess.CompletedProcess(args, 0, stdout, "")
 
     async def _spawn(self, *args: str):
@@ -129,6 +131,18 @@ def test_x11_keyboard_press_hotkey_hold_and_release_all() -> None:
     assert ("xdotool", "keyup", "shift") in backend.commands
     assert ("xdotool", "mouseup", "1") in backend.commands
     assert released.output == {"keys": ["shift"], "buttons": ["left"]}
+
+
+def test_x11_keyboard_type_restores_clipboard_after_clipboard_paste() -> None:
+    backend = RecordingX11Backend()
+    backend.clipboard = "previous clipboard"
+
+    result = anyio.run(backend.keyboard_type, "x" * 81)
+
+    assert result.ok is True
+    assert ("xclip", "-selection", "clipboard") in backend.commands
+    assert ("xdotool", "key", "ctrl+v") in backend.commands
+    assert backend.clipboard == "previous clipboard"
 
 
 def test_x11_cursor_position_reads_xdotool_shell_output() -> None:

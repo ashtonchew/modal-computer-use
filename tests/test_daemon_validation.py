@@ -647,6 +647,74 @@ def test_screenshot_and_clipboard_routes_reject_unready_desktop(tmp_path) -> Non
     assert app.state.backend.clipboard == ""
 
 
+def test_backend_read_routes_reject_unready_desktop_before_backend_reads(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    backend_calls: list[str] = []
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    async def display_info():
+        backend_calls.append("display_info")
+        return await type(app.state.backend).display_info(app.state.backend)
+
+    async def windows():
+        backend_calls.append("windows")
+        return await type(app.state.backend).windows(app.state.backend)
+
+    async def active_window():
+        backend_calls.append("active_window")
+        return await type(app.state.backend).active_window(app.state.backend)
+
+    app.state.backend.ready = not_ready
+    app.state.backend.display_info = display_info
+    app.state.backend.windows = windows
+    app.state.backend.active_window = active_window
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        responses = [
+            client.get("/v1/display/info"),
+            client.get("/v1/windows"),
+            client.get("/v1/windows/active"),
+            client.post("/v1/windows/wait-for", json={"title_regex": "missing", "timeout": 0.01}),
+            client.get("/v1/browser/status"),
+        ]
+
+    assert [response.status_code for response in responses] == [503, 503, 503, 503, 503]
+    assert {response.json()["code"] for response in responses} == {"desktop_not_ready"}
+    assert backend_calls == []
+
+
+def test_recording_start_rejects_unready_desktop_before_state(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    app.state.backend.ready = not_ready
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/recordings", json={})
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "desktop_not_ready"
+    assert app.state.recordings.list() == []
+
+
 def test_mouse_position_rejects_unready_desktop(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

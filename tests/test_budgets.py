@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi.testclient import TestClient
@@ -90,6 +91,100 @@ def test_direct_artifact_write_enforces_artifact_byte_budget(tmp_path) -> None:
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
     assert response.json()["details"]["budgets"]["artifact_bytes"] == 2
+
+
+def test_clipboard_mutations_reserve_action_budget_before_mutating(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_actions=0,
+        )
+    )
+    app.state.backend.clipboard = "existing"
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        put = client.put("/v1/clipboard/text", json={"text": "secret"})
+        delete = client.delete("/v1/clipboard/text")
+
+    assert put.status_code == 429
+    assert put.json()["code"] == "budget_exceeded"
+    assert delete.status_code == 429
+    assert delete.json()["code"] == "budget_exceeded"
+    assert app.state.backend.clipboard == "existing"
+    assert app.state.action_count == 0
+
+
+def test_clipboard_mutations_respect_input_rate_limit(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            input_rate_limit_per_sec=1,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/mouse/move", json={"x": 1, "y": 1})
+        second = client.put("/v1/clipboard/text", json={"text": "secret"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["code"] == "rate_limited"
+    assert app.state.backend.clipboard == ""
+    assert app.state.action_count == 1
+
+
+def test_empty_artifact_write_without_content_length_enforces_idle_budget(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=artifacts_dir,
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    app.state.last_activity_at = time.monotonic() - 2
+    messages = [
+        {
+            "type": "http.request",
+            "body": b"",
+            "more_body": False,
+        }
+    ]
+    sent: list[dict] = []
+
+    async def receive():
+        return messages.pop(0)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "PUT",
+        "scheme": "http",
+        "path": "/v1/artifacts/empty.bin",
+        "raw_path": b"/v1/artifacts/empty.bin",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer dev")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+
+    asyncio.run(app(scope, receive, send))
+
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    assert start["status"] == 429
+    assert not (artifacts_dir / "empty.bin").exists()
 
 
 def test_artifact_delete_enforces_idle_budget(tmp_path) -> None:

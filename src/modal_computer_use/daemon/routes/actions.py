@@ -51,7 +51,7 @@ from modal_computer_use.models import (
     ZoomAction,
     parse_action,
 )
-from modal_computer_use.redaction import sanitize_text
+from modal_computer_use.redaction import sanitize_payload, sanitize_text
 from modal_computer_use.tracing import TraceWriter
 
 router = APIRouter(prefix="/v1/actions")
@@ -669,7 +669,7 @@ def _reserve_action_budget(
             elapsed_ms=0,
             error_code=error.code,
             error=error.message,
-            output={"code": error.code, **error.details},
+            output=sanitize_payload({"code": error.code, **error.details}),
         )
     budgets.reserve_action(request)
     return None
@@ -691,7 +691,8 @@ def _exception_output(
         output.update(exc.details)
         if isinstance(action, TypeAction):
             return _redact_type_payload(output, action)
-        return output
+        sanitized = sanitize_payload(output)
+        return sanitized if isinstance(sanitized, dict) else {"code": exc.code}
     if isinstance(exc, BudgetExceededError):
         output = {"code": "budget_exceeded"}
         if request is not None:

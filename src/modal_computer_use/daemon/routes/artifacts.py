@@ -47,6 +47,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
     try:
         public_path = normalize_artifact_path(path)
         content_length = request.headers.get("content-length")
+        budgets.enforce_artifact_write(request, public_path, 0)
         if content_length is not None:
             try:
                 incoming_size = int(content_length)

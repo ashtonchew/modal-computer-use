@@ -217,8 +217,9 @@ def test_real_replay_sanitizes_screenshot_payloads(tmp_path) -> None:
 
     serialized = json.dumps(plan.to_dict())
     assert "SECRET_SCREENSHOT_BASE64" not in serialized
+    assert "artifact://screenshots/after.png" not in serialized
     assert plan.steps[0].result["results"][0]["output"]["data_base64"]["redacted"] is True
-    assert "artifact://screenshots/after.png" in serialized
+    assert plan.steps[0].result["results"][0]["output"]["artifact_uri"]["redacted"] is True
 
 
 def test_real_replay_sanitizes_target_exceptions(tmp_path) -> None:

@@ -6,6 +6,7 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -147,7 +148,19 @@ class ArtifactStore:
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        self._reject_symlink_components(relative)
+        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as handle:
+            temp_path = Path(handle.name)
+            try:
+                handle.write(data)
+            except Exception:
+                temp_path.unlink(missing_ok=True)
+                raise
+        try:
+            temp_path.replace(target)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         info = self._info(
             target,
             public_path=relative,
@@ -179,7 +192,15 @@ class ArtifactStore:
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source_path, target)
+        self._reject_symlink_components(relative)
+        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as handle:
+            temp_path = Path(handle.name)
+        try:
+            shutil.copyfile(source_path, temp_path)
+            temp_path.replace(target)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         info = self._info(
             target,
             public_path=relative,

@@ -176,8 +176,9 @@ batch request. The timing object contains only elapsed milliseconds and no comma
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
 `actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a
 simple per-daemon rolling one-second action limit. The limit applies to `/v1/actions/run` and
-direct desktop-affecting mutation routes, including mouse, keyboard, windows, apps, browser, and
-commands; failures return `rate_limited` without executing the over-limit action.
+direct desktop-affecting mutation routes, including mouse, keyboard, clipboard writes/clears,
+windows, apps, browser, and commands; failures return `rate_limited` without executing the
+over-limit action.
 `/v1/commands/run` is serialized under the daemon input lock because callers can run GUI-affecting
 tools such as `xdotool`. Command stdout/stderr and process log tails remain available to
 authenticated callers for debugging, but known secret-bearing substrings such as bearer tokens,

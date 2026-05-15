@@ -20,7 +20,7 @@ from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 from modal_computer_use.observability import get_tracer
-from modal_computer_use.redaction import safe_exception_payload
+from modal_computer_use.redaction import safe_exception_payload, sanitize_payload, sanitize_text
 
 from .routes import (
     actions,
@@ -106,7 +106,11 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     async def daemon_error_handler(_request: Request, exc: DaemonError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
-            content={"code": exc.code, "message": exc.message, "details": exc.details},
+            content={
+                "code": exc.code,
+                "message": sanitize_text(exc.message),
+                "details": sanitize_payload(exc.details),
+            },
         )
 
     @app.exception_handler(ArtifactPathError)
@@ -115,7 +119,11 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=400,
-            content={"code": "unsafe_artifact_path", "message": str(exc), "details": {}},
+            content={
+                "code": "unsafe_artifact_path",
+                "message": sanitize_text(str(exc)),
+                "details": {},
+            },
         )
 
     @app.exception_handler(BudgetExceededError)
@@ -124,7 +132,11 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=429,
-            content={"code": "budget_exceeded", "message": str(exc), "details": {}},
+            content={
+                "code": "budget_exceeded",
+                "message": sanitize_text(str(exc)),
+                "details": {},
+            },
         )
 
     @app.exception_handler(RequestValidationError)
@@ -144,7 +156,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     async def not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
         return JSONResponse(
             status_code=404,
-            content={"code": "not_found", "message": str(exc), "details": {}},
+            content={"code": "not_found", "message": sanitize_text(str(exc)), "details": {}},
         )
 
     @app.exception_handler(Exception)

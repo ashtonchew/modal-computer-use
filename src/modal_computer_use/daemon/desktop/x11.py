@@ -717,9 +717,16 @@ class X11DesktopBackend(MockDesktopBackend):
     async def keyboard_type(
         self, text: str, delay_ms: int = 10, method: str = "auto"
     ) -> ActionResult:
-        if method in ("auto", "clipboard") and (len(text) > 80 or not text.isascii()):
-            await self.clipboard_set(text)
-            await self.keyboard_hotkey(["ctrl", "v"])
+        use_clipboard = method == "clipboard" or (
+            method == "auto" and (len(text) > 80 or not text.isascii())
+        )
+        if use_clipboard:
+            previous = await self.clipboard_get()
+            try:
+                await self.clipboard_set(text)
+                await self.keyboard_hotkey(["ctrl", "v"])
+            finally:
+                await self.clipboard_set(previous)
         else:
             await self._run("xdotool", "type", "--delay", str(delay_ms), text)
         return await super().keyboard_type(text, delay_ms=delay_ms, method=method)

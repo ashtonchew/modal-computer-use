@@ -24,11 +24,13 @@ class WaitForWindowRequest(BaseModel):
 
 @router.get("")
 async def list_windows(request: Request) -> list[X11Window]:
+    await ensure_desktop_ready(request)
     return await request.app.state.backend.windows()
 
 
 @router.get("/active")
 async def active(request: Request) -> X11Window | None:
+    await ensure_desktop_ready(request)
     return await request.app.state.backend.active_window()
 
 
@@ -50,6 +52,7 @@ async def close(window_id: str, request: Request) -> ActionResult:
 
 @router.post("/wait-for")
 async def wait_for(payload: WaitForWindowRequest, request: Request) -> X11Window:
+    await ensure_desktop_ready(request)
     deadline = time.monotonic() + payload.timeout
     pattern = re.compile(payload.title_regex) if payload.title_regex else None
     while True:
