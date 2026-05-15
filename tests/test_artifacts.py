@@ -42,6 +42,14 @@ def test_artifact_store_roundtrip(tmp_path) -> None:
     assert store.manifest()[0].path == "downloads/a.txt"
 
 
+def test_artifact_manifest_prefix_matches_path_boundary(tmp_path) -> None:
+    store = ArtifactStore(tmp_path)
+    store.write_bytes("foo/a.txt", b"foo")
+    store.write_bytes("foobar/b.txt", b"foobar")
+
+    assert [item.path for item in store.manifest("foo")] == ["foo/a.txt"]
+
+
 def test_artifact_byte_budget_ignores_control_manifest_bytes(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "root", max_total_bytes=3)
 

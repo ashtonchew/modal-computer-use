@@ -286,7 +286,7 @@ class ArtifactStore:
     def manifest(self, prefix: str = "") -> list[ArtifactInfo]:
         if not self.manifest_path.exists():
             return []
-        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=False)
+        safe_prefix = normalize_artifact_path(prefix, allow_empty=True, public=True)
         entries: list[ArtifactInfo] = []
         for line in self.manifest_path.read_text(encoding="utf-8").splitlines():
             if not line:
@@ -294,7 +294,7 @@ class ArtifactStore:
             data = json.loads(line)
             data.pop("ts", None)
             path = data.get("path", "")
-            if safe_prefix and not path.startswith(safe_prefix):
+            if safe_prefix and path != safe_prefix and not path.startswith(f"{safe_prefix}/"):
                 continue
             entries.append(ArtifactInfo.model_validate(data))
         return entries

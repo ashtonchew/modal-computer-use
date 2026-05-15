@@ -60,11 +60,36 @@ class ActionsNamespace(Namespace):
             self._client.post_json("/v1/actions/run", json=payload, headers=headers)
         )
 
-    def validate(self, actions: list[ComputerAction | dict[str, Any]]) -> ValidationResult:
+    def validate(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_after: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        call_id: str | None = None,
+        run_id: str | None = None,
+        sequence: int | None = None,
+        source: str = "sdk",
+    ) -> ValidationResult:
         normalized = [parse_action(action) for action in actions]
+        payload = {
+            "actions": [action.model_dump(mode="json") for action in normalized],
+            "continue_on_error": continue_on_error,
+            "screenshot_after": screenshot_after,
+            "screenshot_options": screenshot_options.model_dump(mode="json")
+            if screenshot_options
+            else None,
+            "max_action_timeout_ms": max_action_timeout_ms,
+            "call_id": call_id,
+            "run_id": run_id,
+            "sequence": sequence,
+            "source": source,
+        }
         return ValidationResult.model_validate(
             self._client.post_json(
                 "/v1/actions/validate",
-                json={"actions": [action.model_dump(mode="json") for action in normalized]},
+                json=payload,
             )
         )

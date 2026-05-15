@@ -14,6 +14,8 @@ class _FakeClient:
 
     def post_json(self, path: str, *, json: Any | None = None, headers=None):
         self.posts.append({"path": path, "json": json, "headers": headers})
+        if path == "/v1/actions/validate":
+            return {"ok": True, "errors": []}
         return {
             "ok": True,
             "call_id": json.get("call_id") if isinstance(json, dict) else None,
@@ -48,6 +50,22 @@ def test_actions_namespace_forwards_batch_timeout_and_trace_metadata() -> None:
     assert payload["run_id"] == "run_test"
     assert payload["sequence"] == 7
     assert client.posts[0]["headers"] == {"Idempotency-Key": "idem"}
+
+
+def test_actions_namespace_validate_accepts_full_batch_options() -> None:
+    client = _FakeClient()
+    namespace = ActionsNamespace(client)  # type: ignore[arg-type]
+
+    namespace.validate(
+        [{"type": "move", "x": 1, "y": 2}],
+        screenshot_after=True,
+        max_action_timeout_ms=123,
+    )
+
+    payload = client.posts[0]["json"]
+    assert client.posts[0]["path"] == "/v1/actions/validate"
+    assert payload["screenshot_after"] is True
+    assert payload["max_action_timeout_ms"] == 123
 
 
 def test_recordings_namespace_download_streams_to_target(tmp_path) -> None:

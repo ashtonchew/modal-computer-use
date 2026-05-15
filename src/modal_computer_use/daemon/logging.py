@@ -21,7 +21,7 @@ def redact(value: Any) -> Any:
         result: dict[str, Any] = {}
         for key, item in value.items():
             lowered = str(key).lower()
-            if any(sensitive in lowered for sensitive in SENSITIVE_KEYS):
+            if _is_sensitive_log_key(lowered):
                 if isinstance(item, str):
                     result[key] = {
                         "redacted": True,
@@ -38,6 +38,11 @@ def redact(value: Any) -> Any:
     if isinstance(value, str):
         return sanitize_text(value)
     return value
+
+
+def _is_sensitive_log_key(key: str) -> bool:
+    normalized = key.replace("-", "_")
+    return normalized in SENSITIVE_KEYS or normalized.endswith("_token")
 
 
 class JsonFormatter(logging.Formatter):

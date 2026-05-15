@@ -12,8 +12,10 @@ router = APIRouter(prefix="/v1/input")
 @router.post("/release-all")
 async def release_all(request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
-    budgets.enforce_idle(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
+        budgets.reserve_action(request)
         result = await request.app.state.backend.release_all()
-        budgets.touch_activity(request)
         return result

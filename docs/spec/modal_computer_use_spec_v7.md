@@ -329,7 +329,7 @@ The full error-code catalog the daemon can emit is in §9.13.
 
 ### 8.7 Screenshot/artifact fast paths
 
-The screenshot backend writes to the artifact store with a `retention_class` (`ephemeral`, `trace`, or `persistent`). When a screenshot is requested through the action batch route with `screenshot_after=True`, the result is recorded in the trace under `screenshot_after` (`routes/actions.py:982-1018`) so replay can locate the post-batch state.
+The screenshot backend writes to the artifact store with a `retention_class` (`ephemeral`, `trace`, or `persistent`). When a screenshot is requested through the action batch route with `screenshot_after=True`, daemon-written traces record a `screenshot_after` metadata pseudo-action with dimensions, coordinate-space data, timing, and redaction paths. Raw `artifact_uri` values remain redacted and `screenshot_after_uri` remains `null` in new daemon traces; replay can preserve ordering and post-batch metadata without receiving a reusable artifact reference.
 
 ---
 

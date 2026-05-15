@@ -150,6 +150,29 @@ def test_require_connect_user_can_opt_into_private_connect_proxy_trust(tmp_path)
     assert response.status_code == 200
 
 
+def test_json_formatter_preserves_neutral_metadata() -> None:
+    record = logging.LogRecord(
+        "modal_computer_use.test",
+        logging.INFO,
+        __file__,
+        1,
+        "action executed",
+        args=(),
+        exc_info=None,
+    )
+    record.extra = {
+        "metadata": {
+            "source": "openai-adapter",
+            "coordinate_space": {"desktop_width": 1440, "desktop_height": 900},
+        }
+    }
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["metadata"]["source"] == "openai-adapter"
+    assert payload["metadata"]["coordinate_space"]["desktop_width"] == 1440
+
+
 def test_json_formatter_redacts_exception_messages() -> None:
     formatter = JsonFormatter()
     try:

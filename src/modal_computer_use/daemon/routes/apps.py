@@ -25,13 +25,13 @@ async def launch(payload: LaunchRequest, request: Request) -> ActionResult:
 
 @router.post("/open-artifact")
 async def open_artifact(payload: OpenArtifactRequest, request: Request) -> ActionResult:
-    path = request.app.state.artifacts.resolve(payload.path)
-    if not path.exists():
-        raise FileNotFoundError(payload.path)
     await ensure_desktop_ready(request)
     budget_error = budgets.action_reservation_error(request)
     if budget_error is not None:
         raise budget_error
+    path = request.app.state.artifacts.resolve(payload.path)
+    if not path.exists():
+        raise FileNotFoundError(payload.path)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         result = await request.app.state.backend.launch("xdg-open", [str(path)])

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.models import ProcessStatus, Screenshot
+from modal_computer_use.models import ActionResult, ProcessStatus, Screenshot
 
 
 def test_health_version_capabilities(test_client) -> None:
@@ -56,6 +56,63 @@ def test_clipboard_and_release_all(test_client) -> None:
     released = test_client.post("/v1/input/release-all").json()
     assert released["ok"] is True
     assert "left" in released["output"]["buttons"]
+
+
+def test_action_budget_blocks_direct_release_all_before_backend_call(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_actions=0,
+        )
+    )
+    calls = 0
+
+    async def release_all() -> ActionResult:
+        nonlocal calls
+        calls += 1
+        return ActionResult(ok=True)
+
+    app.state.backend.release_all = release_all
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/input/release-all")
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert calls == 0
+    assert app.state.action_count == 0
+
+
+def test_rate_limit_blocks_direct_release_all_before_backend_call(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            input_rate_limit_per_sec=1,
+        )
+    )
+    calls = 0
+
+    async def release_all() -> ActionResult:
+        nonlocal calls
+        calls += 1
+        return ActionResult(ok=True)
+
+    app.state.backend.release_all = release_all
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/mouse/move", json={"x": 1, "y": 1})
+        second = client.post("/v1/input/release-all")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["code"] == "rate_limited"
+    assert calls == 0
 
 
 def test_readyz_checks_x11vnc_when_vnc_enabled(tmp_path) -> None:
@@ -159,6 +216,30 @@ def test_idle_budget_blocks_browser_and_app_mutations(tmp_path) -> None:
     assert browser.json()["code"] == "budget_exceeded"
     assert launch.status_code == 429
     assert launch.json()["code"] == "budget_exceeded"
+
+
+def test_idle_budget_blocks_open_artifact_before_path_lookup(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    app.state.last_activity_at = time.monotonic() - 2
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        missing = client.post(
+            "/v1/apps/open-artifact",
+            json={"path": "private/customer-secret.txt"},
+        )
+
+    assert missing.status_code == 429
+    assert missing.json()["code"] == "budget_exceeded"
+    assert missing.json()["message"] == "idle time budget exceeded"
+    assert "customer-secret" not in missing.text
 
 
 def test_idle_budget_blocks_commands(tmp_path) -> None:
