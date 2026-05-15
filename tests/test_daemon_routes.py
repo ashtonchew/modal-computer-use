@@ -281,3 +281,28 @@ def test_idle_budget_blocks_lifecycle_and_process_mutations(tmp_path) -> None:
     assert lifecycle.json()["code"] == "budget_exceeded"
     assert process.status_code == 429
     assert process.json()["code"] == "budget_exceeded"
+
+
+def test_unknown_process_restart_returns_structured_client_error(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.post("/v1/processes/not-a-process/restart")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "unknown_process",
+        "message": "unknown process",
+        "details": {"name": "not-a-process"},
+    }

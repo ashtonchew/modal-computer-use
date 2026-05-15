@@ -513,6 +513,7 @@ The daemon emits the following `code` values. Each is structured `{code, message
 | `action_validation_failed` | 422 | `routes/actions.py:83` | One or more actions failed pre-flight validation. |
 | `validation_error` | 422 | `app.py:130` | Pydantic body validation failure. |
 | `not_found` | 404 | `app.py:143` | Missing artifact or recording. |
+| `unknown_process` | 404 | `routes/processes.py:20` | Process restart requested a name outside the supervised process set. |
 | `unsupported_action` | 400 | `routes/actions.py:841` | Action type not handled by the runner. |
 | `timeout` | (in `output.code`) | `routes/actions.py:228, 670` | Per-action or per-batch deadline elapsed. |
 | `internal_error` | 500 | `app.py:150` | Catch-all; body is `{redacted: true, type: <class>}` only. |

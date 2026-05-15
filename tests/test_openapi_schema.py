@@ -27,3 +27,11 @@ def test_readyz_openapi_documents_unready_response() -> None:
     assert readyz_responses["503"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ReadyStatus"
     }
+
+
+def test_process_restart_openapi_documents_unknown_process() -> None:
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "docs" / "openapi.json").read_text(encoding="utf-8"))
+
+    responses = schema["paths"]["/v1/processes/{name}/restart"]["post"]["responses"]
+    assert responses["404"]["description"] == "Unknown process"

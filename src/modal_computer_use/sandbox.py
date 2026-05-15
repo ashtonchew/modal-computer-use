@@ -4,6 +4,7 @@ import secrets as _secrets
 import time
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from ._version import __version__
 from .client import DaemonClient
@@ -151,7 +152,7 @@ class ComputerSandbox:
             vnc_mode=vnc_mode,
             artifact_volume_mounted=artifact_volume_mounted,
         )
-        sandbox_tags = {**default_tags(config, owner=owner), **(tags or {})}
+        sandbox_tags = {**(tags or {}), **default_tags(config, owner=owner)}
         ports = [6080] if vnc_mode != "off" else []
         create_kwargs: dict[str, Any] = {
             "app": app,
@@ -492,6 +493,8 @@ def _normalize_mount_path(path: str) -> str:
 
 def _connect_token_parts(token_info: object) -> tuple[str, str | None]:
     if isinstance(token_info, str):
+        if token_info.startswith(("http://", "https://")):
+            return _connect_url_parts(token_info, token=None)
         return "https://connect.modal.run", token_info
     base_url = (
         getattr(token_info, "url", None)
@@ -503,7 +506,14 @@ def _connect_token_parts(token_info: object) -> tuple[str, str | None]:
         raise SandboxUnavailableError(
             "could not infer connect-token base URL from Modal SDK response"
         )
-    return str(base_url).rstrip("/"), str(token) if token else None
+    return _connect_url_parts(str(base_url), token=str(token) if token else None)
+
+
+def _connect_url_parts(base_url: str, *, token: str | None) -> tuple[str, str | None]:
+    parts = urlsplit(base_url)
+    query_token = parse_qs(parts.query).get("_modal_connect_token", [None])[0]
+    safe_url = urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
+    return safe_url, token or query_token
 
 
 def _normalize_reuse_policy(reuse: bool | ReusePolicy) -> ReusePolicy:

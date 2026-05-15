@@ -368,7 +368,11 @@ def test_hold_key_nested_action_result_failure_is_atomic(test_client, app) -> No
 
 def test_direct_keyboard_hold_propagates_nested_action_result_failure(test_client, app) -> None:
     async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
-        return ActionResult(ok=False, message="nested type failed", output={"code": "type_failed"})
+        return ActionResult(
+            ok=False,
+            message=f"nested type failed for {text}",
+            output={"code": "type_failed"},
+        )
 
     app.state.backend.keyboard_type = fail_type
 

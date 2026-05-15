@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.observability import get_tracer
+from modal_computer_use.observability import OptionalSpan, get_tracer
+from modal_computer_use.redaction import RedactedException
 from modal_computer_use.transports.http import HTTPTransport
 
 
@@ -36,6 +37,43 @@ def test_otel_enabled_without_package_is_noop(monkeypatch) -> None:
     assert tracer.available is False
     with tracer.span("missing.test") as span:
         span.set_attribute("safe", True)
+
+
+class _RawContextManager:
+    def __init__(self) -> None:
+        self.span = _CapturedSpan(name="raw", attributes={})
+        self.exit_args: tuple[object, object, object] | None = None
+
+    def __enter__(self) -> _CapturedSpan:
+        return self.span
+
+    def __exit__(self, *args: object) -> None:
+        self.exit_args = args
+        return None
+
+
+def test_optional_span_redacts_recorded_and_context_exceptions() -> None:
+    context = _RawContextManager()
+    span = OptionalSpan(context)
+
+    with span as active:
+        active.record_exception(RuntimeError("failed for Bearer secret-token"))
+
+    assert isinstance(context.span.error, RedactedException)
+    assert "secret-token" not in str(context.span.error)
+
+    context = _RawContextManager()
+    try:
+        with OptionalSpan(context):
+            raise RuntimeError("failed for Bearer secret-token")
+    except RuntimeError:
+        pass
+
+    assert context.exit_args is not None
+    _, exc, traceback = context.exit_args
+    assert isinstance(exc, RedactedException)
+    assert traceback is None
+    assert "secret-token" not in str(exc)
 
 
 @dataclass

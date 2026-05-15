@@ -4973,6 +4973,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "Unknown process"
+          },
           "422": {
             "content": {
               "application/json": {

@@ -765,6 +765,11 @@ def _checked_action_result(result: ActionResult, action: Any) -> dict[str, Any]:
         return output
     code = output.get("code") if isinstance(output.get("code"), str) else "action_failed"
     message = result.message or output.get("message") or f"{action.type} failed"
+    if isinstance(action, TypeAction):
+        message = sanitize_payload_with_secrets(
+            str(message),
+            [(action.text, "[redacted typed text]")],
+        )
     raise DaemonError(
         sanitize_text(str(message)),
         code=code,

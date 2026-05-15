@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
@@ -947,6 +948,29 @@ def test_app_launch_rejects_shell_command_shape(test_client) -> None:
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        [""],
+        ["echo", "bad\x00arg"],
+    ],
+)
+def test_command_run_rejects_invalid_argv_before_backend(test_client, app, command) -> None:
+    called = False
+
+    async def run_command(_command, timeout=30.0):
+        nonlocal called
+        called = True
+        raise AssertionError("backend should not run invalid command vectors")
+
+    app.state.backend.run_command = run_command
+
+    response = test_client.post("/v1/commands/run", json={"command": command})
+
+    assert response.status_code == 422
+    assert called is False
 
 
 def test_direct_keyboard_type_rejects_unknown_method(test_client) -> None:

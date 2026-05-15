@@ -13,7 +13,7 @@ from modal_computer_use.errors import (
     SandboxUnavailableError,
 )
 from modal_computer_use.registry import SandboxRegistry
-from modal_computer_use.sandbox import modal_sandbox_exec_runner_from_id
+from modal_computer_use.sandbox import _connect_token_parts, modal_sandbox_exec_runner_from_id
 from modal_computer_use.state import compute_config_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -240,6 +240,52 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     ]
     assert computer.metadata().owner == "alice"
     assert computer.metadata().created_at is not None
+
+
+def test_create_preserves_reserved_computer_use_tags(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123")
+
+    computer = ComputerSandbox.create(
+        config=config,
+        image=object(),
+        tags={
+            "computer-use.run_id": "wrong",
+            "computer-use.config_hash": "wrong",
+            "custom": "tag",
+        },
+        wait=False,
+    )
+
+    assert FakeSandbox.created is not None
+    applied_tags = FakeSandbox.created.set_tags_calls[0]
+    assert applied_tags["computer-use.run_id"] == "run-123"
+    assert applied_tags["computer-use.config_hash"] == compute_config_hash(config)
+    assert applied_tags["custom"] == "tag"
+    assert computer.metadata().tags["computer-use.run_id"] == "run-123"
+
+
+def test_connect_token_parts_extracts_query_token_from_url_only_response() -> None:
+    base_url, token = _connect_token_parts(
+        SimpleNamespace(
+            url="https://sandbox-connect.example/path?_modal_connect_token=query-value#frag"
+        )
+    )
+
+    assert base_url == "https://sandbox-connect.example/path"
+    assert token == "query-value"  # noqa: S105 - synthetic connect-token fixture.
+
+
+def test_connect_token_parts_prefers_explicit_token_and_strips_query() -> None:
+    base_url, token = _connect_token_parts(
+        SimpleNamespace(
+            url="https://sandbox-connect.example/path?_modal_connect_token=query-value",
+            token="explicit-value",
+        )
+    )
+
+    assert base_url == "https://sandbox-connect.example/path"
+    assert token == "explicit-value"  # noqa: S105 - synthetic connect-token fixture.
 
 
 def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:

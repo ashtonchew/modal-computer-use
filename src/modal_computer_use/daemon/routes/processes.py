@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, Response
 
 from modal_computer_use.daemon import budgets
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import ProcessStatus
 from modal_computer_use.redaction import sanitize_text
 
@@ -17,9 +18,16 @@ async def process_status(name: str, request: Request) -> ProcessStatus:
     return request.app.state.supervisor.status(name)
 
 
-@router.post("/{name}/restart")
+@router.post("/{name}/restart", responses={404: {"description": "Unknown process"}})
 async def process_restart(name: str, request: Request) -> ProcessStatus:
     budgets.enforce_idle(request)
+    if name not in request.app.state.supervisor.names:
+        raise DaemonError(
+            "unknown process",
+            status_code=404,
+            code="unknown_process",
+            details={"name": name},
+        )
     await request.app.state.supervisor.restart(name)
     budgets.touch_activity(request)
     return request.app.state.supervisor.status(name)

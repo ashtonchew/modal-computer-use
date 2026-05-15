@@ -229,3 +229,15 @@ class BrowserOpenUrlRequest(Schema):
 class CommandRunRequest(Schema):
     command: list[str] = Field(min_length=1)
     timeout: float = Field(default=30.0, gt=0, le=600)
+
+    @field_validator("command")
+    @classmethod
+    def _valid_command_vector(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("command must contain at least one argv element")
+        if value[0] == "":
+            raise ValueError("command executable must be non-empty")
+        for arg in value:
+            if "\x00" in arg:
+                raise ValueError("command arguments must not contain NUL bytes")
+        return value
