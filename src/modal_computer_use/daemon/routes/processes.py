@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Response
 
 from modal_computer_use.daemon import budgets
 from modal_computer_use.models import ProcessStatus
+from modal_computer_use.redaction import sanitize_text
 
 router = APIRouter(prefix="/v1/processes")
 
@@ -23,14 +24,23 @@ async def process_restart(name: str, request: Request) -> ProcessStatus:
 
 @router.get("/{name}/logs")
 async def process_logs(name: str, request: Request, tail: int = 200) -> Response:
-    return Response(request.app.state.supervisor.logs(name, tail=tail), media_type="text/plain")
+    return Response(
+        sanitize_text(request.app.state.supervisor.logs(name, tail=tail)),
+        media_type="text/plain",
+    )
 
 
 @router.get("/{name}/stderr")
 async def process_stderr(name: str, request: Request, tail: int = 200) -> Response:
-    return Response(request.app.state.supervisor.stderr(name, tail=tail), media_type="text/plain")
+    return Response(
+        sanitize_text(request.app.state.supervisor.stderr(name, tail=tail)),
+        media_type="text/plain",
+    )
 
 
 @router.get("/{name}/errors")
 async def process_errors(name: str, request: Request, tail: int = 200) -> Response:
-    return Response(request.app.state.supervisor.stderr(name, tail=tail), media_type="text/plain")
+    return Response(
+        sanitize_text(request.app.state.supervisor.stderr(name, tail=tail)),
+        media_type="text/plain",
+    )

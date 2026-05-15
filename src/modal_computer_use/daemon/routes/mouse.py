@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
+    validate_keys,
     validate_optional_point,
     validate_point,
 )
@@ -32,6 +33,7 @@ async def move(payload: MouseMoveRequest, request: Request) -> Point:
 @router.post("/click")
 async def click(payload: MouseClickRequest, request: Request) -> Point:
     validate_optional_point(request, x=payload.x, y=payload.y)
+    validate_keys(*payload.modifiers)
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
@@ -56,6 +58,7 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
         validate_point(request, end, field="end")
     for index, point in enumerate(payload.path or []):
         validate_point(request, point, field=f"path[{index}]")
+    validate_keys(*payload.modifiers)
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
@@ -103,4 +106,5 @@ async def up(payload: MouseButtonRequest, request: Request) -> ActionResult:
 
 @router.get("/position")
 async def position(request: Request) -> Point:
+    await ensure_desktop_ready(request)
     return await request.app.state.backend.mouse_position()

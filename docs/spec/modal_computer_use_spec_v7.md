@@ -356,9 +356,9 @@ The daemon's HTTP API is versioned under `/v1`. `GET /healthz` and `GET /readyz`
 |---|---|---|
 | `GET` | `/v1/processes/{name}/status` | `ProcessStatus`. |
 | `POST` | `/v1/processes/{name}/restart` | Restart one process. |
-| `GET` | `/v1/processes/{name}/logs?tail=200` | stdout tail. |
-| `GET` | `/v1/processes/{name}/stderr?tail=200` | stderr tail. |
-| `GET` | `/v1/processes/{name}/errors?tail=200` | Deprecated alias for stderr. |
+| `GET` | `/v1/processes/{name}/logs?tail=200` | Sanitized stdout tail. |
+| `GET` | `/v1/processes/{name}/stderr?tail=200` | Sanitized stderr tail. |
+| `GET` | `/v1/processes/{name}/errors?tail=200` | Deprecated sanitized alias for stderr. |
 
 ### 9.3 Mouse routes
 
@@ -370,7 +370,7 @@ The daemon's HTTP API is versioned under `/v1`. `GET /healthz` and `GET /readyz`
 | `POST` | `/v1/mouse/scroll` | Scroll by ticks. |
 | `POST` | `/v1/mouse/down` | Press button. |
 | `POST` | `/v1/mouse/up` | Release button. |
-| `GET` | `/v1/mouse/position` | Read cursor position. |
+| `GET` | `/v1/mouse/position` | Read cursor position after readiness preflight. |
 
 ### 9.4 Keyboard routes
 
@@ -416,6 +416,7 @@ Every screenshot route enforces `screenshot_max_pixels` *before* capture, both i
 A second mounted router serves `/recordings/ui` (the dashboard) — `recordings.dashboard_router` in `daemon/app.py:180`.
 
 Stop behavior: SIGINT → wait 5s → SIGTERM. Metadata is updated atomically.
+Recording stop and delete enforce the idle budget before mutating recording state.
 
 ### 9.8 Action batch routes
 
@@ -445,7 +446,7 @@ Supported types: `move`, `click`, `double_click`, `triple_click`, `drag`, `scrol
 | `GET` | `/v1/artifacts/{path:path}` | Download. |
 | `PUT` | `/v1/artifacts/{path:path}` | Write. |
 | `DELETE` | `/v1/artifacts/{path:path}` | Delete. |
-| `POST` | `/v1/artifacts/sync` | Volume v2 mountpoint sync; returns `ArtifactSyncResult`. |
+| `POST` | `/v1/artifacts/sync` | Idle-budget-gated Volume v2 mountpoint sync; returns `ArtifactSyncResult`. |
 | `GET` | `/v1/artifacts/manifest` | Stream manifest entries. |
 
 Path safety (full details §15.5; implementation in `src/modal_computer_use/artifacts.py:24-100`):
@@ -467,7 +468,7 @@ Path safety (full details §15.5; implementation in `src/modal_computer_use/arti
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/v1/commands/run` | Narrow, opt-in shell command for terminal-style debug. |
+| `POST` | `/v1/commands/run` | Input-lock-serialized command for terminal-style debug with sanitized output strings. |
 | `GET` | `/v1/debug/urls` | `DebugUrls` (noVNC/VNC URLs when enabled). |
 | `GET` | `/v1/session/metadata` | Session metadata (run_id, started_at, …). |
 | `POST` | `/v1/session/refresh` | Refresh internal session state. |
@@ -649,7 +650,7 @@ The redaction contract from §11.3 is the canonical statement. Operationally:
 
 Three layers, each defensible on its own:
 
-1. **Request-time** (`src/modal_computer_use/redaction.py:15-22`): `sanitize_text()` masks bearer tokens, query tokens, noVNC URLs, and `artifact://` URIs inside *any* string. Used by action-error messages (`routes/actions.py:624-628`).
+1. **Request-time** (`src/modal_computer_use/redaction.py:15-22`): `sanitize_text()` masks bearer tokens, query tokens, noVNC URLs, and `artifact://` URIs inside *any* string. Used by action-error messages, command output strings, and process log tails.
 2. **Log-time** (`src/modal_computer_use/daemon/logging.py:12-65`): the `JsonFormatter` sanitizes the record's rendered message and recursively redacts the `extra` dict via `redact()`. Sensitive keys (`api_key`, `authorization`, `bytes`, `clipboard`, `credential`, `data_base64`, `password`, `secret`, `text`, `token`, `vnc`) are stored as `{redacted, length, sha256}`. Exception info is replaced with `[redacted exception]` + `safe_exception_payload`.
 3. **Trace-time** (`src/modal_computer_use/daemon/routes/actions.py:1042-1171`): every batch trace entry is built by `_redacted_action_and_paths`, which (a) replaces `type.text` with `{redacted, length, sha256}`, (b) walks all nested dicts/lists and applies the sensitive-key list from §11.3, (c) records a `redactions[]` path list, (d) separates `provider_action` and redacts it independently.
 
@@ -678,9 +679,9 @@ This is pinned by `tests/test_artifacts.py` and `tests/test_daemon_validation.py
 
 The post-v6 fix train shipped four orthogonal safety contracts that the daemon now enforces inline:
 
-1. **Primitive safety.** Coordinates that exceed desktop geometry, regions that overflow, and unknown key names raise `action_validation_failed` *before* the lock is taken (`routes/actions.py:846-924`). `hold_key`'s nested actions are re-parsed through `parse_action()` and validated with the same checks.
-2. **Readiness preflight.** Every input-emitting route checks `app.state.backend.is_ready()` (via the trace middleware's span entry) before reserving budget. `/readyz` returns 503 when the supervisor reports any required process as stopped or failed.
-3. **Budget order.** Routes call `budgets.idle_reservation_error(request)` → `budgets.action_reservation_error(request)` (or screenshot equivalent) *before* the action runs. Failures return early with `budget_exceeded` or `rate_limited`. Successful actions call `budgets.touch_activity(request)`; budget snapshots include the projected state on rejection (`budgets.py:108-112`).
+1. **Primitive safety.** Coordinates that exceed desktop geometry, regions that overflow, and unknown key names raise `action_validation_failed` or `unsupported_key` *before* the lock is taken. Direct mouse modifiers and batch mouse modifiers use the same key support policy. `hold_key`'s nested actions are re-parsed through `parse_action()` and validated with the same checks.
+2. **Readiness preflight.** Every route that touches the desktop backend, including cursor position, checks backend readiness before reserving budget or reading backend state. `/readyz` returns 503 when the supervisor reports any required process as stopped or failed.
+3. **Budget order.** Routes call `budgets.idle_reservation_error(request)` → `budgets.action_reservation_error(request)` (or screenshot equivalent) *before* the action runs. Mutating artifact and recording routes enforce idle budget before sync/stop/delete side effects. Failures return early with `budget_exceeded` or `rate_limited`. Successful actions call `budgets.touch_activity(request)`; budget snapshots include the projected state on rejection (`budgets.py:108-112`).
 4. **Trace and batch guardrails.** Batch deadline is computed once at the start (`routes/actions.py:109-110`); each action's effective timeout is `min(action.timeout_ms or batch.max_action_timeout_ms or default, batch_remaining)`. On any exception, `backend.release_all()` runs inside `with suppress(Exception)` so a stuck-modifier or stuck-button bug cannot survive a single bad action.
 
 ### 15.7 Modal-specific security notes & browser/domain policy examples

@@ -27,8 +27,11 @@ async def manifest(request: Request, prefix: str = "") -> list[ArtifactInfo]:
 
 @router.post("/sync")
 async def sync(request: Request) -> ArtifactSyncResult:
+    budgets.enforce_idle(request)
     with request.app.state.tracer.span("daemon.artifact.sync"):
-        return request.app.state.artifacts.sync()
+        result = request.app.state.artifacts.sync()
+    budgets.touch_activity(request)
+    return result
 
 
 @router.get("/{path:path}")

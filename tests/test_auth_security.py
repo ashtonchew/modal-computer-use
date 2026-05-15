@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.logging import JsonFormatter
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.models import ActionResult
 
 
 def _app(tmp_path, **overrides):
@@ -223,3 +224,78 @@ def test_json_formatter_redacts_secret_bearing_observability_fields() -> None:
     assert "stdout-secret" not in serialized
     assert "stderr-secret" not in serialized
     assert "url-secret" not in serialized
+
+
+def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    async def run_command(command, timeout=30.0):
+        return ActionResult(
+            ok=False,
+            message="Bearer message-secret",
+            output={
+                "returncode": 1,
+                "stdout": "Bearer stdout-secret",
+                "stderr": "artifact://logs/stderr-secret.txt",
+            },
+        )
+
+    app.state.backend.run_command = run_command
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/commands/run", json={"command": ["echo", "secret"]})
+
+    body = response.json()
+    serialized = json.dumps(body)
+
+    assert response.status_code == 200
+    assert body["message"] == "Bearer [redacted]"
+    assert body["output"]["stdout"] == "Bearer [redacted]"
+    assert body["output"]["stderr"] == "[redacted]"
+    assert "message-secret" not in serialized
+    assert "stdout-secret" not in serialized
+    assert "stderr-secret" not in serialized
+
+
+def test_command_run_executes_under_input_lock(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+    observed_locked = False
+
+    async def run_command(command, timeout=30.0):
+        nonlocal observed_locked
+        observed_locked = app.state.input_lock.locked()
+        return ActionResult(ok=True, output={"command": list(command)})
+
+    app.state.backend.run_command = run_command
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/commands/run", json={"command": ["true"]})
+
+    assert response.status_code == 200
+    assert observed_locked is True
+
+
+def test_process_log_routes_sanitize_secret_bearing_tails(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+    app.state.supervisor.log_dir.mkdir(parents=True)
+    (app.state.supervisor.log_dir / "xvfb.log").write_text(
+        "safe\nBearer log-secret\n",
+    )
+    (app.state.supervisor.log_dir / "xvfb.stderr.log").write_text(
+        "artifact://logs/stderr-secret.txt\n",
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        logs = client.get("/v1/processes/xvfb/logs")
+        stderr = client.get("/v1/processes/xvfb/stderr")
+        errors = client.get("/v1/processes/xvfb/errors")
+
+    assert logs.status_code == 200
+    assert stderr.status_code == 200
+    assert errors.status_code == 200
+    assert logs.text == "safe\nBearer [redacted]"
+    assert stderr.text == "[redacted]"
+    assert errors.text == "[redacted]"
+    assert "log-secret" not in logs.text
+    assert "stderr-secret" not in stderr.text
+    assert "stderr-secret" not in errors.text

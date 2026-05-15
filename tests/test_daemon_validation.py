@@ -20,6 +20,39 @@ def test_direct_mouse_routes_reject_partial_coordinate_pairs(test_client) -> Non
     assert response.status_code == 422
 
 
+def test_direct_mouse_click_rejects_unsupported_modifiers_before_execution(
+    test_client,
+    app,
+) -> None:
+    response = test_client.post(
+        "/v1/mouse/click",
+        json={"x": 10, "y": 20, "modifiers": ["definitely-not-a-key"]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "unsupported_key"
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+
+
+def test_direct_mouse_drag_rejects_unsupported_modifiers_before_execution(test_client, app) -> None:
+    response = test_client.post(
+        "/v1/mouse/drag",
+        json={
+            "start_x": 1,
+            "start_y": 2,
+            "end_x": 3,
+            "end_y": 4,
+            "modifiers": ["definitely-not-a-key"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "unsupported_key"
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+
+
 def test_action_batch_rejects_partial_mouse_button_coordinate_pairs(test_client) -> None:
     down = test_client.post(
         "/v1/actions/run",
@@ -214,8 +247,7 @@ def test_screenshot_after_enforces_output_pixel_budget(tmp_path) -> None:
                 "screenshot_after": True,
             },
         )
-
-    position = client.get("/v1/mouse/position")
+        position = client.get("/v1/mouse/position")
 
     assert response.status_code == 422
     assert response.json()["code"] == "action_validation_failed"
@@ -494,6 +526,37 @@ def test_input_routes_reject_unready_desktop_before_budget_or_action(tmp_path) -
     assert action.status_code == 503
     assert action.json()["code"] == "desktop_not_ready"
     assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+
+
+def test_direct_mouse_position_rejects_unready_desktop_like_action_cursor_position(
+    tmp_path,
+) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    app.state.backend.ready = not_ready
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        direct = client.get("/v1/mouse/position")
+        batch = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "cursor_position"}]},
+        )
+
+    assert direct.status_code == 503
+    assert direct.json()["code"] == "desktop_not_ready"
+    assert batch.status_code == 503
+    assert batch.json()["code"] == "desktop_not_ready"
     assert app.state.action_count == 0
 
 

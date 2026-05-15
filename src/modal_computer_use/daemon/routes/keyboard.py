@@ -5,7 +5,7 @@ from contextlib import suppress
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.actions import KEY_ALIASES, is_supported_key
+from modal_computer_use.actions import KEY_ALIASES
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.actions import (
@@ -18,7 +18,7 @@ from modal_computer_use.daemon.routes.actions import (
     _validate_actions,
     _validate_screenshot_pixel_budget,
 )
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, validate_keys
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.errors import ActionValidationError
 from modal_computer_use.models import ActionBatchRequest, ActionResult, parse_action
@@ -40,7 +40,7 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
 
 @router.post("/press")
 async def press(payload: KeyRequest, request: Request) -> ActionResult:
-    _validate_keys(payload.key, *payload.modifiers)
+    validate_keys(payload.key, *payload.modifiers)
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
@@ -53,7 +53,7 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hotkey")
 async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
-    _validate_keys(*payload.keys)
+    validate_keys(*payload.keys)
     await ensure_desktop_ready(request)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
@@ -65,7 +65,7 @@ async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hold")
 async def hold(payload: HoldRequest, request: Request) -> ActionResult:
-    _validate_keys(payload.key)
+    validate_keys(payload.key)
     try:
         nested_actions = [parse_action(action) for action in payload.actions]
     except ActionValidationError as exc:
@@ -156,14 +156,3 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
 @router.get("/keys")
 async def supported_keys() -> dict[str, str]:
     return KEY_ALIASES
-
-
-def _validate_keys(*keys: str) -> None:
-    invalid = [key for key in keys if not is_supported_key(key)]
-    if invalid:
-        raise DaemonError(
-            "unsupported key",
-            status_code=422,
-            code="unsupported_key",
-            details={"keys": invalid},
-        )

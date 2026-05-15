@@ -114,6 +114,74 @@ def test_artifact_delete_enforces_idle_budget(tmp_path) -> None:
     assert (artifacts_dir / "delete-me.txt").exists()
 
 
+def test_artifact_sync_enforces_idle_budget_before_sync(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    called = False
+
+    def sync_spy():
+        nonlocal called
+        called = True
+        return {"ok": True, "persistent": False}
+
+    app.state.artifacts.sync = sync_spy
+    app.state.last_activity_at = time.monotonic() - 2
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/artifacts/sync")
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert called is False
+
+
+def test_recording_stop_enforces_idle_budget_before_stop(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        started = client.post("/v1/recordings", json={}).json()
+        app.state.last_activity_at = time.monotonic() - 2
+        response = client.post(f"/v1/recordings/{started['id']}/stop")
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert app.state.recordings.get(started["id"]).status == "recording"
+
+
+def test_recording_delete_enforces_idle_budget_before_delete(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_idle_seconds=1,
+        )
+    )
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        started = client.post("/v1/recordings", json={}).json()
+        app.state.last_activity_at = time.monotonic() - 2
+        response = client.delete(f"/v1/recordings/{started['id']}")
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert app.state.recordings.get(started["id"]).status == "recording"
+
+
 def test_screenshot_artifact_write_is_rejected_before_file_persists(tmp_path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     app = create_app(

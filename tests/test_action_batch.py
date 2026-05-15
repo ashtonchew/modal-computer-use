@@ -177,6 +177,40 @@ def test_hold_key_releases_key_when_nested_action_fails(test_client, app) -> Non
     assert app.state.backend.held_keys == set()
 
 
+def test_hold_key_nested_failure_is_atomic_under_continue_on_error(test_client, app) -> None:
+    original = app.state.backend.mouse_move
+
+    async def fail_first_nested_move(x: int, y: int):
+        if x == 7:
+            raise RuntimeError("nested failure")
+        return await original(x, y)
+
+    app.state.backend.mouse_move = fail_first_nested_move
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "continue_on_error": True,
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "move", "x": 7, "y": 8},
+                        {"type": "move", "x": 9, "y": 10},
+                    ],
+                },
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False, True]
+    assert app.state.backend.cursor.x == 3
+    assert app.state.backend.cursor.y == 4
+    assert app.state.backend.held_keys == set()
+
+
 def test_hold_key_nested_action_validation_uses_desktop_bounds(test_client) -> None:
     response = test_client.post(
         "/v1/actions/run",

@@ -165,6 +165,9 @@ hard deadline and stops the batch even when `continue_on_error` is true. Timeout
 `error_code="timeout"` and an output `scope` of `action` or `batch`. `Idempotency-Key` replays
 the original complete batch result without re-executing actions, incrementing budgets, or
 duplicating trace/artifact writes; reusing a key with a different request body returns `409`.
+`continue_on_error` applies between top-level batch items. A `hold_key` action is treated as one
+compound top-level item: nested actions run while the key is held, and the first nested failure
+releases the key and fails that `hold_key` item before later nested actions run.
 Action budgets count attempted executable desktop actions after validation, including failed
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
 instead, and cursor-position queries do not consume the action budget. Successful action-route
@@ -173,8 +176,12 @@ batch request. The timing object contains only elapsed milliseconds and no comma
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
 `actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a
 simple per-daemon rolling one-second action limit. The limit applies to `/v1/actions/run` and
-direct mouse/keyboard mutation routes; failures return `rate_limited` without executing the
-over-limit action.
+direct desktop-affecting mutation routes, including mouse, keyboard, windows, apps, browser, and
+commands; failures return `rate_limited` without executing the over-limit action.
+`/v1/commands/run` is serialized under the daemon input lock because callers can run GUI-affecting
+tools such as `xdotool`. Command stdout/stderr and process log tails remain available to
+authenticated callers for debugging, but known secret-bearing substrings such as bearer tokens,
+noVNC URLs, and artifact URIs are sanitized before the daemon returns them.
 
 Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. Use
 `computer-use trace validate <path>` to validate trace NDJSON and
@@ -227,4 +234,4 @@ target for this package. Already-mounted reader containers must use `Volume.relo
 and concurrent writes to the same Volume paths are last-writer-wins, so production artifact paths
 should be run-scoped.
 
-For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v6.md](spec/modal_computer_use_spec_v6.md).
+For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v7.md](spec/modal_computer_use_spec_v7.md).

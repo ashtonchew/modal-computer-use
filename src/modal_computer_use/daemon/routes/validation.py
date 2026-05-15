@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import Point, Region
 
@@ -65,4 +66,15 @@ def validate_region(request: Request, region: Region, *, field: str = "region") 
             status_code=422,
             code="region_out_of_bounds",
             details={"field": field, "width": width, "height": height},
+        )
+
+
+def validate_keys(*keys: str) -> None:
+    invalid = [key for key in keys if not is_supported_key(key)]
+    if invalid:
+        raise DaemonError(
+            "unsupported key",
+            status_code=422,
+            code="unsupported_key",
+            details={"keys": invalid},
         )

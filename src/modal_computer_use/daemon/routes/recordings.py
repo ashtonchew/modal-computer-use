@@ -34,6 +34,7 @@ async def start(payload: RecordingStartRequest, request: Request) -> Recording:
 
 @router.post("/{recording_id}/stop")
 async def stop(recording_id: str, request: Request) -> Recording:
+    budgets.enforce_idle(request)
     rec = request.app.state.recordings.stop(recording_id, append_manifest=False)
     try:
         budgets.enforce(request, "recordings", "artifacts")
@@ -70,7 +71,9 @@ async def download(recording_id: str, request: Request) -> FileResponse:
 
 @router.delete("/{recording_id}")
 async def delete(recording_id: str, request: Request) -> dict[str, bool]:
+    budgets.enforce_idle(request)
     request.app.state.recordings.delete(recording_id)
+    budgets.touch_activity(request)
     return {"ok": True}
 
 

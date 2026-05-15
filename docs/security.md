@@ -42,6 +42,9 @@ stderr.
 The daemon enforces action budgets and a simple per-sandbox rolling action rate limit. Over-limit
 requests fail with structured `budget_exceeded` or `rate_limited` errors and do not include typed
 text, clipboard text, raw command output, tokens, screenshot bytes, or artifact bytes.
+Authenticated debug routes that intentionally return command output or process log tails sanitize
+known secret-bearing substrings such as bearer tokens, noVNC URLs, and artifact URIs before sending
+the response.
 
 Trace validation treats raw plaintext in `type` actions as unsafe. New action traces use
 `redactions=["text"]` and replace typed text with redaction metadata before writing NDJSON.
