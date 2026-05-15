@@ -24,6 +24,7 @@
           },
           "continue_on_error": {
             "default": false,
+            "description": "Continue after failed top-level actions. Compound actions such as hold_key remain atomic; their nested actions stop on the first failure.",
             "title": "Continue On Error",
             "type": "boolean"
           },

@@ -436,6 +436,7 @@ Supported types: `move`, `click`, `double_click`, `triple_click`, `drag`, `scrol
 - Each action has a deadline = `min(action.timeout_ms or max_action_timeout_ms or default_action_timeout_ms, remaining batch budget)`. Timeout produces `error_code: "timeout"` with `output.scope = "action"` or `"batch"`.
 - Budget reservations occur per action via `budgets.reserve_action(request)` (`routes/actions.py:142-165`); screenshot actions reserve via `budgets.reserve_screenshot`.
 - Idempotency cache is keyed by `Idempotency-Key`; the cached entry's fingerprint is a SHA-256 over the request body excluding `idempotency_key`. Conflicting fingerprints reuse the key are rejected with 409.
+- `continue_on_error` applies between top-level batch actions. Compound actions such as `hold_key` are atomic: nested actions stop on the first failure, the held key is released, and the failed compound action may be followed by later top-level actions when `continue_on_error=true`.
 - On any timeout or backend exception, `await request.app.state.backend.release_all()` runs inside `with suppress(Exception)` before the result is recorded.
 
 ### 9.9 Artifact routes

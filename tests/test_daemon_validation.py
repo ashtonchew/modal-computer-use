@@ -461,6 +461,37 @@ def test_action_batch_rejects_nested_hold_unsupported_key_before_execution(tmp_p
     assert app.state.backend.held_keys == set()
 
 
+def test_direct_mouse_routes_reject_unsupported_modifiers_before_execution(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        click = client.post(
+            "/v1/mouse/click",
+            json={"x": 10, "y": 20, "modifiers": ["definitely-not-a-key"]},
+        )
+        drag = client.post(
+            "/v1/mouse/drag",
+            json={
+                "path": [{"x": 10, "y": 20}, {"x": 30, "y": 40}],
+                "modifiers": ["definitely-not-a-key"],
+            },
+        )
+
+    assert click.status_code == 422
+    assert click.json()["code"] == "unsupported_key"
+    assert drag.status_code == 422
+    assert drag.json()["code"] == "unsupported_key"
+    assert app.state.action_count == 0
+    assert app.state.backend.cursor == Point(x=0, y=0)
+
+
 def test_action_batch_rejects_nested_hold_screenshot_budget_before_execution(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
@@ -614,6 +645,28 @@ def test_screenshot_and_clipboard_routes_reject_unready_desktop(tmp_path) -> Non
     assert clipboard.json()["code"] == "desktop_not_ready"
     assert app.state.screenshot_count == 0
     assert app.state.backend.clipboard == ""
+
+
+def test_mouse_position_rejects_unready_desktop(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    app.state.backend.ready = not_ready
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.get("/v1/mouse/position")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "desktop_not_ready"
 
 
 def test_browser_open_url_rejects_non_http_urls(test_client) -> None:

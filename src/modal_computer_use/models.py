@@ -518,7 +518,13 @@ class ActionBatchRequest(StrictBaseModel):
     actions: list[ComputerAction]
     screenshot_after: bool = False
     screenshot_options: ScreenshotOptions | None = None
-    continue_on_error: bool = False
+    continue_on_error: bool = Field(
+        default=False,
+        description=(
+            "Continue after failed top-level actions. Compound actions such as "
+            "hold_key remain atomic; their nested actions stop on the first failure."
+        ),
+    )
     idempotency_key: str | None = None
     source: str = "sdk"
     call_id: str | None = None
