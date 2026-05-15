@@ -12,7 +12,7 @@ _SENSITIVE_PATTERNS = [
     re.compile(r"artifact://[^\s]+", re.IGNORECASE),
 ]
 
-_SENSITIVE_KEYS = {
+SENSITIVE_PAYLOAD_KEYS = {
     "api_key",
     "artifact_bytes",
     "artifact_uri",
@@ -26,8 +26,10 @@ _SENSITIVE_KEYS = {
     "credential",
     "data",
     "data_base64",
+    "diagnostic_path",
     "image",
     "image_bytes",
+    "log_path",
     "no_vnc_url",
     "novnc_url",
     "password",
@@ -36,7 +38,9 @@ _SENSITIVE_KEYS = {
     "screenshot_bytes",
     "secret",
     "stderr",
+    "stderr_path",
     "stdout",
+    "stdout_path",
     "text",
     "token",
     "typed_text",
@@ -60,7 +64,7 @@ def sanitize_payload(value: Any) -> Any:
     if isinstance(value, dict):
         redacted: dict[Any, Any] = {}
         for key, item in value.items():
-            if _is_sensitive_key(str(key)):
+            if is_sensitive_key(str(key)):
                 redacted[key] = _redacted_value(item)
                 continue
             redacted[key] = sanitize_payload(item)
@@ -85,9 +89,9 @@ def sanitize_payload_with_secrets(
     return _replace_known_secrets(sanitized, active)
 
 
-def _is_sensitive_key(key: str) -> bool:
+def is_sensitive_key(key: str) -> bool:
     normalized = key.lower().replace("-", "_")
-    return normalized in _SENSITIVE_KEYS or normalized.endswith("_token")
+    return normalized in SENSITIVE_PAYLOAD_KEYS or normalized.endswith("_token")
 
 
 def _redacted_value(value: Any) -> Any:

@@ -180,6 +180,8 @@ def test_openai_unknown_action_fails_closed() -> None:
     adapter = OpenAIAdapter(RecordingComputer())
     with pytest.raises(UnsupportedActionError):
         adapter.normalize({"type": "future"})
+    with pytest.raises(UnsupportedActionError):
+        adapter.normalize({"type": "future", "new_provider_field": True})
 
 
 def test_openai_allow_unknown_is_explicit_safe_noop() -> None:
@@ -192,6 +194,12 @@ def test_openai_allow_unknown_is_explicit_safe_noop() -> None:
     }
 
 
+def test_openai_allow_unknown_does_not_bypass_known_action_validation() -> None:
+    adapter = OpenAIAdapter(RecordingComputer(), allow_unknown=True)
+    with pytest.raises(ActionValidationError):
+        adapter.normalize({"type": "click", "x": 1, "y": 2, "future_field": True})
+
+
 def test_openai_provider_provenance_redacts_sensitive_text() -> None:
     adapter = OpenAIAdapter(RecordingComputer())
     normalized = adapter.normalize({"type": "type", "text": "secret typed value"})
@@ -199,6 +207,22 @@ def test_openai_provider_provenance_redacts_sensitive_text() -> None:
         "type": "type",
         "text": {"redacted": True, "length": 18},
     }
+
+
+def test_openai_provider_provenance_redacts_sensitive_metadata() -> None:
+    adapter = OpenAIAdapter(RecordingComputer())
+    normalized = adapter.normalize(
+        {
+            "type": "click",
+            "x": 1,
+            "y": 2,
+            "metadata": {"secret": "provider-secret"},
+        }
+    )
+
+    provider_action = normalized["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["metadata"]["secret"] == {"redacted": True, "length": 15}
+    assert "provider-secret" not in json.dumps(normalized)
 
 
 def test_openai_computer_call_output_uses_native_screenshot_without_metadata_loss() -> None:
@@ -384,6 +408,40 @@ def test_anthropic_unknown_action_fails_closed() -> None:
     adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20251124")
     with pytest.raises(UnsupportedActionError):
         adapter.normalize({"action": "future_action"})
+    with pytest.raises(UnsupportedActionError):
+        adapter.normalize({"action": "future_action", "new_provider_field": True})
+
+
+def test_anthropic_allow_unknown_is_explicit_safe_noop() -> None:
+    adapter = AnthropicAdapter(
+        RecordingComputer(), tool_version="computer_20251124", allow_unknown=True
+    )
+
+    normalized = adapter.normalize(
+        {"action": "future_action", "stderr": "Bearer provider-secret"}
+    )
+
+    assert normalized == {
+        "type": "wait",
+        "duration_ms": 0,
+        "metadata": {
+            PROVIDER_ACTION_METADATA_KEY: {
+                "action": "future_action",
+                "stderr": {"redacted": True, "length": 22},
+            },
+            "provider_action_redactions": ["stderr"],
+        },
+    }
+
+
+def test_anthropic_allow_unknown_does_not_bypass_known_action_validation() -> None:
+    adapter = AnthropicAdapter(
+        RecordingComputer(), tool_version="computer_20241022", allow_unknown=True
+    )
+    with pytest.raises(ActionValidationError):
+        adapter.normalize(
+            {"action": "mouse_move", "coordinate": [1, 2], "future_field": True}
+        )
 
 
 def test_anthropic_preserves_native_metadata_and_rejects_unknown_fields() -> None:
@@ -420,6 +478,31 @@ def test_anthropic_provider_provenance_redacts_sensitive_text() -> None:
         "action": "key",
         "text": "ctrl+c",
     }
+
+
+def test_anthropic_provider_provenance_redacts_sensitive_metadata() -> None:
+    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20241022")
+    normalized = adapter.normalize(
+        {
+            "action": "mouse_move",
+            "coordinate": [1, 2],
+            "metadata": {"stderr": "Bearer provider-secret"},
+        }
+    )
+
+    provider_action = normalized["metadata"][PROVIDER_ACTION_METADATA_KEY]
+    assert provider_action["metadata"]["stderr"] == {"redacted": True, "length": 22}
+    assert "provider-secret" not in json.dumps(normalized)
+
+
+def test_generic_executor_rejects_unknown_native_actions_even_when_compat_flag_is_set() -> None:
+    computer = RecordingComputer()
+    with pytest.raises(ActionValidationError):
+        ActionExecutor(computer, allow_unknown=True).apply(
+            {"type": "future_action", "payload": {"secret": "provider-secret"}}
+        )
+
+    assert computer.actions.applied == []
 
 
 def test_anthropic_tool_result_builds_image_block_and_safe_metadata() -> None:

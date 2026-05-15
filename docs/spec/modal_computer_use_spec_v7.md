@@ -586,7 +586,7 @@ Storage: NDJSON at `<trace_dir>/actions.ndjson` via `TraceWriter` (`src/modal_co
 
 ## 13. Anthropic and generic adapters
 
-(Unchanged from v6.) `AnthropicAdapter` (`adapters/anthropic/computer.py`) supports tool versions `computer_20241022`, `computer_20250124`, `computer_20251124` via the registry in `adapters/anthropic/versions.py`. The generic `ActionExecutor` (`adapters/generic.py`) is the path every adapter funnels through. Unknown actions raise `UnsupportedActionError` unless `allow_unknown=True`. Provider provenance is captured by `adapters/provenance.py` and surfaces as `provider_action` in the trace (see §11.3).
+(Updated post-v7 hardening.) `AnthropicAdapter` (`adapters/anthropic/computer.py`) supports tool versions `computer_20241022`, `computer_20250124`, `computer_20251124` via the registry in `adapters/anthropic/versions.py`. Provider adapters normalize provider-shaped payloads before they reach the generic `ActionExecutor` (`adapters/generic.py`). Unknown provider actions raise `UnsupportedActionError` by default, even if the future payload carries unknown fields; `allow_unknown=True` is only a provider-adapter compatibility escape hatch that maps unknown provider actions to a zero-duration wait with redacted provider provenance. The native `ActionExecutor` and daemon `ComputerAction` schema remain closed and reject unknown native action types as validation failures. Provider provenance is captured by `adapters/provenance.py` and surfaces as `provider_action` in the trace (see §11.3).
 
 ---
 

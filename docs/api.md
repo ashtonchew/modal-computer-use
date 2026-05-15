@@ -47,9 +47,12 @@ action schema, optionally apply an explicit `CoordinateSpace`, run the `before_a
 then call the SDK action namespace. They do not instantiate provider clients, call provider APIs,
 hold prompts, or own confirmation policy.
 
-Unknown provider actions raise `UnsupportedActionError` by default. `allow_unknown=True` is an
-explicit compatibility escape hatch that normalizes unknown provider payloads to a zero-duration
-wait with redacted provider-action metadata.
+Unknown provider actions raise `UnsupportedActionError` by default, even when a future provider
+payload includes fields this SDK does not yet know about. `allow_unknown=True` is an explicit
+provider-adapter compatibility escape hatch that normalizes unknown provider payloads to a
+zero-duration wait with redacted provider-action metadata. It does not make the native
+`ActionExecutor` accept unknown `ComputerAction` types; the native daemon action schema remains
+closed so caller bugs fail before execution.
 
 Adapter-normalized actions carry redacted provider provenance in action metadata. When daemon
 action tracing is enabled, the trace writer promotes that metadata to `TraceEntry.provider_action`
@@ -179,6 +182,11 @@ simple per-daemon rolling one-second action limit. The limit applies to `/v1/act
 direct desktop-affecting mutation routes, including mouse, keyboard, clipboard writes/clears,
 windows, apps, browser, and commands; failures return `rate_limited` without executing the
 over-limit action.
+`screenshot_after` is an implicit trailing screenshot operation. Its screenshot and artifact
+budgets are reserved after earlier batch actions complete, immediately before capture, so a budget
+failure is returned as a trailing `screenshot_after` result rather than rolling back already
+executed actions. Pixel-budget validation is different: because output geometry is known up front,
+oversized `screenshot_after` requests fail validation before any batch action executes.
 `/v1/commands/run` is serialized under the daemon input lock because callers can run GUI-affecting
 tools such as `xdotool`. Command stdout/stderr and process log tails remain available to
 authenticated callers for debugging, but known secret-bearing substrings such as bearer tokens,

@@ -162,6 +162,43 @@ def test_failed_recording_stop_reports_error_and_ffmpeg_tail(tmp_path, monkeypat
     assert process.killed is True
 
 
+def test_recording_start_failure_redacts_stderr_path(tmp_path, monkeypatch) -> None:
+    def failing_popen(*args, **kwargs):
+        raise OSError(f"cannot open {tmp_path}/recordings/raw-secret.stderr.log")
+
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _tool: "/usr/bin/ffmpeg")
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    app.state.recordings = RecordingRegistry(
+        DaemonSettings(
+            backend="x11",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        ),
+        artifact_store=app.state.artifacts,
+        popen_factory=failing_popen,
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/recordings", json={"name": "broken"})
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "recording_start_failed"
+    serialized = response.text
+    assert str(tmp_path) not in serialized
+    assert "raw-secret" not in serialized
+    assert body["details"]["error_type"] == "OSError"
+    assert body["details"]["stderr_path"]["redacted"] is True
+
+
 def test_recording_delete_removes_stderr_file(tmp_path, monkeypatch) -> None:
     class ExitedProcess:
         stdin = None

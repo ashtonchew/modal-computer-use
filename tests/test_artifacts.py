@@ -134,6 +134,29 @@ def test_artifact_route_rejects_mixed_case_control_segment(tmp_path) -> None:
     assert response.json()["code"] == "unsafe_artifact_path"
 
 
+def test_artifact_route_rejects_raw_supervisor_logs(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    log_path = settings.artifacts_dir / "logs" / "xvfb.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("Bearer raw-log-secret\n", encoding="utf-8")
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        process_log = client.get("/v1/processes/xvfb/logs")
+        artifact_log = client.get("/v1/artifacts/logs/xvfb.log")
+
+    assert process_log.status_code == 200
+    assert process_log.text == "Bearer [redacted]"
+    assert artifact_log.status_code == 400
+    assert artifact_log.json()["code"] == "unsafe_artifact_path"
+    assert "raw-log-secret" not in artifact_log.text
+
+
 def test_artifact_route_reports_conflict_when_target_is_directory(tmp_path) -> None:
     settings = DaemonSettings(
         backend="mock",

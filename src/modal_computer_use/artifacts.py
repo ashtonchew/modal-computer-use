@@ -19,7 +19,7 @@ CONTROL_PATHS = {
     "manifest.ndjson",
     "traces/actions.ndjson",
 }
-CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets"}
+CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets", "logs"}
 
 
 def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: bool = True) -> str:

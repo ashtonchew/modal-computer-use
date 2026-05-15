@@ -2,36 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from modal_computer_use.redaction import is_sensitive_key
+
 PROVIDER_ACTION_METADATA_KEY = "provider_action"
 PROVIDER_ACTION_REDACTIONS_METADATA_KEY = "provider_action_redactions"
-
-_SENSITIVE_KEYS = {
-    "api_key",
-    "artifact_bytes",
-    "artifact_uri",
-    "authorization",
-    "bearer",
-    "bytes",
-    "clipboard",
-    "clipboard_text",
-    "connect_token",
-    "content",
-    "data",
-    "data_base64",
-    "image",
-    "image_bytes",
-    "no_vnc_url",
-    "novnc_url",
-    "password",
-    "raw_path",
-    "screenshot",
-    "screenshot_bytes",
-    "text",
-    "token",
-    "typed_text",
-    "url",
-    "vnc_url",
-}
 
 
 def with_provider_provenance(
@@ -94,7 +68,7 @@ def _is_sensitive_key(key: str, *, action_name: str) -> bool:
     normalized = key.lower().replace("-", "_")
     if normalized == "text" and action_name in {"key", "hold_key"}:
         return False
-    return normalized in _SENSITIVE_KEYS or normalized.endswith("_token")
+    return is_sensitive_key(normalized)
 
 
 def _redaction_marker(value: Any) -> dict[str, Any]:

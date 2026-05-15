@@ -98,7 +98,11 @@ class RecordingRegistry:
                 raise DaemonError(
                     "failed to start ffmpeg recording",
                     code="recording_start_failed",
-                    details={"error": str(exc), "stderr_path": str(stderr_path)},
+                    details={
+                        "error": "ffmpeg process could not be started",
+                        "error_type": type(exc).__name__,
+                        "stderr_path": str(stderr_path),
+                    },
                 ) from exc
             self._stderr_paths[recording_id] = stderr_path
         self._recordings[recording_id] = rec

@@ -12,6 +12,7 @@ from modal_computer_use.models import (
     Point,
     Screenshot,
 )
+from modal_computer_use.redaction import sanitize_payload
 
 from ..generic import ActionExecutor, PolicyHook
 from ..output import action_result_summary, screenshot_media_type, screenshot_metadata
@@ -68,8 +69,10 @@ class AnthropicAdapter:
 
     def normalize(self, action: dict[str, Any]) -> dict[str, Any]:
         name = action.get("action") or action.get("type")
-        if name not in _ANTHROPIC_ACTIONS and self.allow_unknown:
-            return with_provider_provenance({"type": "wait", "duration_ms": 0}, action)
+        if name not in _ANTHROPIC_ACTIONS:
+            if self.allow_unknown:
+                return with_provider_provenance({"type": "wait", "duration_ms": 0}, action)
+            raise UnsupportedActionError(f"unsupported Anthropic computer action: {name}")
         _reject_unknown_fields(action)
         coord = _coord(action.get("coordinate"))
         if name == "mouse_move":
@@ -264,7 +267,7 @@ def _button(kind: str, coord: Point | None) -> dict[str, Any]:
 def _with_common(payload: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata", "call_id", "sequence", "timeout_ms"):
         if key in action:
-            payload[key] = action[key]
+            payload[key] = sanitize_payload(action[key]) if key == "metadata" else action[key]
     return with_provider_provenance(payload, action)
 
 
