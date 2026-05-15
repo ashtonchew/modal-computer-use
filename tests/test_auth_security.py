@@ -349,6 +349,43 @@ def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
     assert "stderr-secret" not in serialized
 
 
+def test_type_action_daemon_error_details_are_sanitized(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    async def keyboard_type(text, delay_ms=10, method="auto"):
+        raise DaemonError(
+            "failed",
+            code="backend_failed",
+            details={
+                "stdout": "Bearer stdout-secret",
+                "token": "raw-token",
+                "artifact_uri": "artifact://screenshots/private.png",
+                "text": text,
+            },
+        )
+
+    app.state.backend.keyboard_type = keyboard_type
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "type", "text": "typed-secret"}]},
+        )
+
+    serialized = response.text
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["results"][0]["error_code"] == "backend_failed"
+    assert body["results"][0]["output"]["stdout"]["redacted"] is True
+    assert body["results"][0]["output"]["token"]["redacted"] is True
+    assert body["results"][0]["output"]["artifact_uri"]["redacted"] is True
+    assert "stdout-secret" not in serialized
+    assert "raw-token" not in serialized
+    assert "artifact://screenshots/private.png" not in serialized
+    assert "typed-secret" not in serialized
+
+
 def test_direct_keyboard_and_clipboard_mutations_sanitize_reflected_text(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
 

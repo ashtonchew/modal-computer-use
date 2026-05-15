@@ -27,6 +27,7 @@ from modal_computer_use.models import (
     ActionBatchResult,
     ActionBatchTiming,
     ActionItemResult,
+    ActionResult,
     ClickAction,
     CursorPositionAction,
     DoubleClickAction,
@@ -694,9 +695,12 @@ def _exception_output(
     if isinstance(exc, DaemonError):
         output: dict[str, Any] = {"code": exc.code}
         output.update(exc.details)
-        if isinstance(action, TypeAction):
-            return _redact_type_payload(output, action)
         sanitized = sanitize_payload(output)
+        if isinstance(action, TypeAction):
+            sanitized = sanitize_payload_with_secrets(
+                sanitized,
+                [(action.text, "[redacted typed text]")],
+            )
         return sanitized if isinstance(sanitized, dict) else {"code": exc.code}
     if isinstance(exc, BudgetExceededError):
         output = {"code": "budget_exceeded"}
@@ -743,6 +747,29 @@ def _sanitize_secret_output(
 ) -> dict[str, Any]:
     sanitized = sanitize_payload_with_secrets(output, [(secret, replacement)])
     return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _checked_action_result(result: ActionResult, action: Any) -> dict[str, Any]:
+    output = (
+        _sanitize_secret_output(
+            result.output,
+            secret=action.text,
+            replacement="[redacted typed text]",
+        )
+        if isinstance(action, TypeAction)
+        else sanitize_payload(result.output)
+    )
+    if not isinstance(output, dict):
+        output = {}
+    if result.ok:
+        return output
+    code = output.get("code") if isinstance(output.get("code"), str) else "action_failed"
+    message = result.message or output.get("message") or f"{action.type} failed"
+    raise DaemonError(
+        sanitize_text(str(message)),
+        code=code,
+        details=output,
+    )
 
 
 def _batch_timeout_result(
@@ -835,30 +862,26 @@ async def _execute_action(
             x=action.x,
             y=action.y,
         )
-        return result.output
+        return _checked_action_result(result, action)
     if isinstance(action, MouseDownAction | MouseUpAction):
         if action.type == "mouse_down":
             result = await backend.mouse_down(action.button, action.x, action.y)
-            return result.output
+            return _checked_action_result(result, action)
         result = await backend.mouse_up(action.button, action.x, action.y)
-        return result.output
+        return _checked_action_result(result, action)
     if isinstance(action, TypeAction):
         result = await backend.keyboard_type(action.text, action.delay_ms, action.method)
-        return _sanitize_secret_output(
-            result.output,
-            secret=action.text,
-            replacement="[redacted typed text]",
-        )
+        return _checked_action_result(result, action)
     if isinstance(action, KeyPressAction):
         result = await backend.keyboard_press(
             action.key,
             modifiers=action.modifiers,
             duration_ms=action.duration_ms,
         )
-        return result.output
+        return _checked_action_result(result, action)
     if isinstance(action, HotkeyAction):
         result = await backend.keyboard_hotkey(action.keys, duration_ms=action.duration_ms)
-        return result.output
+        return _checked_action_result(result, action)
     if isinstance(action, HoldKeyAction):
         nested_actions = _nested_hold_actions(action)
         _preflight_action_budget(request, nested_actions)
@@ -1008,7 +1031,7 @@ async def _execute_action(
         return point.model_dump()
     if isinstance(action, ReleaseAllAction):
         result = await backend.release_all()
-        return result.output
+        return _checked_action_result(result, action)
     raise DaemonError(
         f"unsupported action type: {getattr(action, 'type', None)}", code="unsupported_action"
     )
@@ -1149,10 +1172,10 @@ def _append_trace(
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
-            run_id=payload.run_id or request.app.state.settings.run_id,
-            call_id=call_id,
+            run_id=_safe_trace_text(payload.run_id or request.app.state.settings.run_id),
+            call_id=_safe_trace_text(call_id) or call_id,
             sequence=payload.sequence if payload.sequence is not None else sequence,
-            source=payload.source,
+            source=_safe_trace_text(payload.source) or payload.source,
             provider_action=provider_action,
             normalized_action=normalized,
             result=trace_result,
@@ -1242,10 +1265,10 @@ def _append_screenshot_after_trace(
     writer.append(
         TraceEntry(
             ts=datetime.now(UTC),
-            run_id=payload.run_id or request.app.state.settings.run_id,
-            call_id=call_id,
+            run_id=_safe_trace_text(payload.run_id or request.app.state.settings.run_id),
+            call_id=_safe_trace_text(call_id) or call_id,
             sequence=payload.sequence if payload.sequence is not None else len(payload.actions),
-            source=payload.source,
+            source=_safe_trace_text(payload.source) or payload.source,
             normalized_action={"type": "screenshot_after"},
             result=trace_result,
             screenshot_after_uri=None,
@@ -1265,6 +1288,12 @@ def _trace_error(result: ActionItemResult) -> dict[str, Any] | None:
     if result.error is not None:
         error["message"] = result.error
     return error
+
+
+def _safe_trace_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return sanitize_text(value)
 
 
 def _screenshot_uri(result: ActionItemResult) -> str | None:

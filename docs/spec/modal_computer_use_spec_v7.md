@@ -471,7 +471,7 @@ Path safety (full details §15.5; implementation in `src/modal_computer_use/arti
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/v1/commands/run` | Input-lock-serialized command for terminal-style debug with sanitized output strings. |
-| `GET` | `/v1/debug/urls` | `DebugUrls` (noVNC/VNC URLs when enabled). |
+| `GET` | `/v1/debug/urls` | Daemon-owned `DebugUrls` metadata; Modal tunnel URLs are orchestration-owned and exposed through `ComputerSandbox.debug_urls()`. |
 | `GET` | `/v1/session/metadata` | Session metadata (run_id, started_at, …). |
 | `POST` | `/v1/session/refresh` | Refresh internal session state. |
 

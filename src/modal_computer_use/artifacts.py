@@ -41,7 +41,7 @@ def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: boo
         if allow_empty:
             return ""
         raise ArtifactPathError("artifact path must be relative and non-empty")
-    if "\x00" in decoded or any(ord(char) < 32 for char in decoded):
+    if any(ord(char) < 32 or ord(char) == 127 for char in decoded):
         raise ArtifactPathError("artifact path contains control characters")
     parts = [part for part in decoded.split("/") if part]
     if any(part in (".", "..") for part in parts):

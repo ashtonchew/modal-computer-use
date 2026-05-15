@@ -21,6 +21,8 @@ from modal_computer_use.errors import ArtifactPathError
         "a/%2e%2e/x",
         "manifest.ndjson",
         "a/\x00b",
+        "a/\x7fb",
+        "a/%7Fb",
         ".Secrets/x",
         "a/.Control/x",
     ],

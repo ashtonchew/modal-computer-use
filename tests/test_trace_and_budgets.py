@@ -45,6 +45,44 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
     assert entries[0].redactions == ["text"]
 
 
+def test_action_trace_sanitizes_secret_bearing_envelope_fields(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "source": "Bearer source-secret",
+                "call_id": "artifact://private/call",
+                "run_id": "https://novnc.example/?token=secret",
+                "actions": [{"type": "move", "x": 1, "y": 2}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert "source-secret" not in raw_trace
+    assert "artifact://private/call" not in raw_trace
+    assert "novnc.example" not in raw_trace
+    assert "token=secret" not in raw_trace
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert len(entries) == 2
+    for entry in entries:
+        assert entry.source == "Bearer [redacted]"
+        assert entry.call_id == "[redacted]"
+        assert entry.run_id == "[redacted]"
+
+
 def test_action_run_sanitizes_reflected_typed_text_in_success_response_and_trace(
     tmp_path,
 ) -> None:

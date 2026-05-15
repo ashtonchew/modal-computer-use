@@ -29,6 +29,9 @@ Namespaces on `ComputerSandbox`:
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verified with
 `uv run python scripts/export_openapi.py --check`.
+For Modal-created sandboxes, noVNC tunnel URLs are owned by Modal orchestration; use
+`ComputerSandbox.debug_urls()` rather than the daemon-only `computer.debug.urls()` helper when you
+need to know whether a Modal noVNC URL exists.
 
 ## Observability
 
