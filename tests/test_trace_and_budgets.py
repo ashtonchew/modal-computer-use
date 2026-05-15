@@ -792,7 +792,7 @@ def test_screenshot_budget_exceeded(tmp_path) -> None:
     assert response.json()["code"] == "budget_exceeded"
 
 
-def test_direct_screenshot_failure_does_not_increment_budget(tmp_path) -> None:
+def test_direct_screenshot_failure_counts_attempted_budget(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -814,7 +814,7 @@ def test_direct_screenshot_failure_does_not_increment_budget(tmp_path) -> None:
         response = client.post("/v1/screenshots/full", json={})
 
     assert response.status_code == 500
-    assert app.state.screenshot_count == 0
+    assert app.state.screenshot_count == 1
 
 
 def test_artifact_byte_budget_exceeded_after_artifact_screenshot(tmp_path) -> None:

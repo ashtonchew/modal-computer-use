@@ -80,10 +80,13 @@ def test_recording_dashboard_renders_bounded_metadata_only(test_client) -> None:
     assert "demo" in body
     assert str(stopped.size_bytes) in body
     assert stopped.sha256 in body
-    assert stopped.artifact_uri in body
+    assert "artifact://" not in body
+    assert stopped.artifact_uri not in body
     assert f"/v1/recordings/{started.id}/download" in body
+    assert f"/v1/recordings/{started.id}\">metadata" not in body
     assert f'href="/v1/recordings/{started.id}" data-method="DELETE"' in body
     assert stopped.path not in body
+    assert "ffmpeg_args" not in body
     assert "mock recording" not in body
     assert "stderr_tail" not in body
 

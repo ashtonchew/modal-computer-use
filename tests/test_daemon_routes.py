@@ -85,6 +85,37 @@ def test_readyz_checks_x11vnc_when_vnc_enabled(tmp_path) -> None:
     assert "x11vnc is not running" in response.json()["errors"]
 
 
+def test_status_uses_same_vnc_readiness_as_readyz(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            vnc_mode="view_only",
+        )
+    )
+    original_status = app.state.supervisor.status
+
+    def status(name: str) -> ProcessStatus:
+        if name == "novnc":
+            return ProcessStatus(name=name, status="failed")
+        return original_status(name)
+
+    app.state.supervisor.status = status
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        readyz = client.get("/readyz")
+        status_response = client.get("/v1/computer/status")
+
+    assert readyz.status_code == 503
+    assert readyz.json()["ready"] is False
+    assert "novnc is not running" in readyz.json()["errors"]
+    assert status_response.status_code == 200
+    assert status_response.json()["ready"] is False
+    assert status_response.json()["status"] == "degraded"
+
+
 def test_idle_budget_blocks_mutating_primitive_but_allows_status(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

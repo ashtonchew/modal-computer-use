@@ -328,6 +328,7 @@ async def run(
                     screenshot_budget_error = budgets.screenshot_reservation_error(request)
                     if screenshot_budget_error is not None:
                         raise screenshot_budget_error
+                    budgets.reserve_screenshot(request)
                     screenshot = await asyncio.wait_for(
                         request.app.state.backend.screenshot(
                             options,
@@ -337,7 +338,6 @@ async def run(
                         ),
                         timeout=timeout_seconds,
                     )
-                    budgets.reserve_screenshot(request)
                     budgets.enforce(request, "screenshots", "artifacts")
                     budgets.touch_activity(request)
                     _append_screenshot_after_trace(
@@ -915,10 +915,10 @@ async def _execute_action(
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
+        budgets.reserve_screenshot(request)
         shot = await backend.screenshot(
             options, artifact_store=request.app.state.artifacts, call_id=call_id
         )
-        budgets.reserve_screenshot(request)
         return shot.model_dump(mode="json")
     if isinstance(action, ZoomAction):
         options = action.options or ScreenshotOptions(scale=action.scale, show_cursor=True)
@@ -933,13 +933,13 @@ async def _execute_action(
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
+        budgets.reserve_screenshot(request)
         shot = await backend.screenshot(
             options,
             region=region,
             artifact_store=request.app.state.artifacts,
             call_id=call_id,
         )
-        budgets.reserve_screenshot(request)
         return shot.model_dump(mode="json")
     if isinstance(action, CursorPositionAction):
         point = await backend.mouse_position()

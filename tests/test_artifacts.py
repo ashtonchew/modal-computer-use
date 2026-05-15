@@ -134,6 +134,50 @@ def test_artifact_route_rejects_mixed_case_control_segment(tmp_path) -> None:
     assert response.json()["code"] == "unsafe_artifact_path"
 
 
+def test_artifact_route_reports_conflict_when_target_is_directory(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    (settings.artifacts_dir / "reports").mkdir(parents=True)
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.put("/v1/artifacts/reports", content=b"replacement")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "artifact_path_conflict"
+    assert not (settings.artifacts_dir / "manifest.ndjson").exists()
+
+
+def test_artifact_route_reports_conflict_when_parent_is_file(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (settings.artifacts_dir / "reports").write_bytes(b"file")
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.put("/v1/artifacts/reports/result.txt", content=b"replacement")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "artifact_path_conflict"
+
+
 def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "root")
 

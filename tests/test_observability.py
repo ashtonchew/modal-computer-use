@@ -88,6 +88,30 @@ def test_daemon_route_span_uses_path_not_query_or_token(tmp_path) -> None:
     assert route_span.attributes["http.status_code"] == 200
 
 
+def test_daemon_route_span_uses_template_for_artifact_path_params(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    tracer = _CapturedTracer()
+    app.state.tracer = tracer
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        write = client.put("/v1/artifacts/private/secret-name.png", content=b"ok")
+        tracer.spans.clear()
+        response = client.get("/v1/artifacts/private/secret-name.png")
+
+    assert write.status_code == 200
+    assert response.status_code == 200
+    route_span = next(span for span in tracer.spans if span.name == "daemon.route")
+    assert route_span.attributes["http.route"] == "/v1/artifacts/{path:path}"
+    assert "secret-name" not in str(route_span.attributes)
+
+
 def test_sdk_request_span_uses_route_not_query_or_authorization(monkeypatch) -> None:
     tracer = _CapturedTracer()
     monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)

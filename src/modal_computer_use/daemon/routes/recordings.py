@@ -104,7 +104,7 @@ def _recording_row(recording: Recording) -> str:
     stopped = escape(recording.stopped_at.isoformat() if recording.stopped_at else "")
     status = escape(recording.status)
     digest = escape(recording.sha256 or "")
-    artifact_uri = escape(recording.artifact_uri or "")
+    artifact_backed = "yes" if recording.artifact_uri else "no"
     return f"""
       <tr>
         <td>{name or recording_id}</td>
@@ -114,9 +114,8 @@ def _recording_row(recording: Recording) -> str:
         <td>{started}</td>
         <td>{stopped}</td>
         <td class="digest">{digest}</td>
-        <td class="artifact">{artifact_uri}</td>
+        <td class="artifact">{artifact_backed}</td>
         <td class="actions">
-          <a href="/v1/recordings/{recording_id}">metadata</a>
           <a href="/v1/recordings/{recording_id}/download">download</a>
           <a href="/v1/recordings/{recording_id}" data-method="DELETE">delete API</a>
         </td>

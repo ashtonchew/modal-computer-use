@@ -4857,6 +4857,8 @@
             "required": false,
             "schema": {
               "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Tail",
               "type": "integer"
             }
@@ -4904,6 +4906,8 @@
             "required": false,
             "schema": {
               "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Tail",
               "type": "integer"
             }
@@ -5029,6 +5033,8 @@
             "required": false,
             "schema": {
               "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Tail",
               "type": "integer"
             }

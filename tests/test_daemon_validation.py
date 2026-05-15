@@ -342,6 +342,41 @@ def test_keyboard_hold_rejects_nested_screenshot_budget_before_execution(tmp_pat
     assert app.state.screenshot_count == 0
 
 
+def test_keyboard_hold_combined_budget_rejects_before_key_down(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_actions=1,
+        )
+    )
+    key_down_calls: list[str] = []
+    original_key_down = app.state.backend.key_down
+
+    async def key_down(key: str) -> None:
+        key_down_calls.append(key)
+        await original_key_down(key)
+
+    app.state.backend.key_down = key_down
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/keyboard/hold",
+            json={
+                "key": "shift",
+                "actions": [{"type": "move", "x": 1, "y": 2}],
+            },
+        )
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "budget_exceeded"
+    assert key_down_calls == []
+    assert app.state.backend.held_keys == set()
+    assert app.state.action_count == 0
+
+
 def test_validation_error_response_does_not_echo_typed_text(tmp_path) -> None:
     sentinel = "SECRET_TYPED_TEXT"
     app = create_app(

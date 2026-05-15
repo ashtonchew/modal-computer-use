@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from modal_computer_use.daemon import budgets
+from modal_computer_use.daemon.routes.validation import daemon_readiness
 from modal_computer_use.models import ComputerStatus, LifecycleResult
 
 router = APIRouter(prefix="/v1/computer")
@@ -25,7 +26,7 @@ async def status(request: Request) -> ComputerStatus:
             resources={"profile": request.app.state.settings.image_profile},
             budgets=budgets.snapshot(request),
         )
-    ready, _ = await backend.ready()
+    ready, _ = await daemon_readiness(request)
     return ComputerStatus(
         status="running" if ready else "degraded",
         ready=ready,

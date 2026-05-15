@@ -9,11 +9,11 @@ from modal_computer_use.actions import KEY_ALIASES
 from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.actions import (
+    _budget_counts,
     _count_action_tree,
     _counts_against_action_budget,
     _effective_action_timeout_ms,
     _execute_action,
-    _preflight_action_budget,
     _validate_action_timeouts,
     _validate_actions,
     _validate_screenshot_pixel_budget,
@@ -117,11 +117,9 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             details={"errors": errors},
         )
     await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    _preflight_action_budget(request, nested_actions)
+    _preflight_hold_budget(request, nested_actions)
     async with request.app.state.input_lock:
+        _preflight_hold_budget(request, nested_actions)
         budgets.reserve_action(request)
         released_all = False
         await request.app.state.backend.key_down(payload.key)
@@ -181,3 +179,16 @@ def _sanitize_action_result(
 ) -> ActionResult:
     payload = sanitize_payload_with_secrets(result.model_dump(mode="json"), [(secret, replacement)])
     return ActionResult.model_validate(payload)
+
+
+def _preflight_hold_budget(request: Request, nested_actions: list[object]) -> None:
+    nested_action_count, nested_screenshot_count = _budget_counts(nested_actions)
+    action_error = budgets.action_reservation_error(request, count=1 + nested_action_count)
+    if action_error is not None:
+        raise action_error
+    if nested_screenshot_count:
+        screenshot_error = budgets.screenshot_reservation_error(
+            request, count=nested_screenshot_count
+        )
+        if screenshot_error is not None:
+            raise screenshot_error

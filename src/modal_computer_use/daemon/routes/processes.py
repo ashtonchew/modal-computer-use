@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request, Response
 
 from modal_computer_use.daemon import budgets
 from modal_computer_use.models import ProcessStatus
 from modal_computer_use.redaction import sanitize_text
 
 router = APIRouter(prefix="/v1/processes")
+LogTail = Annotated[int, Query(ge=1, le=1000)]
 
 
 @router.get("/{name}/status")
@@ -23,7 +26,7 @@ async def process_restart(name: str, request: Request) -> ProcessStatus:
 
 
 @router.get("/{name}/logs")
-async def process_logs(name: str, request: Request, tail: int = 200) -> Response:
+async def process_logs(name: str, request: Request, tail: LogTail = 200) -> Response:
     return Response(
         sanitize_text(request.app.state.supervisor.logs(name, tail=tail)),
         media_type="text/plain",
@@ -31,7 +34,7 @@ async def process_logs(name: str, request: Request, tail: int = 200) -> Response
 
 
 @router.get("/{name}/stderr")
-async def process_stderr(name: str, request: Request, tail: int = 200) -> Response:
+async def process_stderr(name: str, request: Request, tail: LogTail = 200) -> Response:
     return Response(
         sanitize_text(request.app.state.supervisor.stderr(name, tail=tail)),
         media_type="text/plain",
@@ -39,7 +42,7 @@ async def process_stderr(name: str, request: Request, tail: int = 200) -> Respon
 
 
 @router.get("/{name}/errors")
-async def process_errors(name: str, request: Request, tail: int = 200) -> Response:
+async def process_errors(name: str, request: Request, tail: LogTail = 200) -> Response:
     return Response(
         sanitize_text(request.app.state.supervisor.stderr(name, tail=tail)),
         media_type="text/plain",

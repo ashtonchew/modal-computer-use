@@ -11,6 +11,7 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.logging import JsonFormatter
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult
+from modal_computer_use.redaction import sanitize_payload
 
 
 def _app(tmp_path, **overrides):
@@ -227,6 +228,26 @@ def test_json_formatter_redacts_secret_bearing_observability_fields() -> None:
     assert "url-secret" not in serialized
 
 
+def test_sanitize_payload_redacts_sensitive_numeric_values() -> None:
+    payload = sanitize_payload(
+        {
+            "token": 12345,
+            "api_key": 3.14,
+            "password": False,
+            "nested": {"artifact_bytes": 9},
+            "safe_count": 7,
+            "empty_token": None,
+        }
+    )
+
+    assert payload["token"] == {"redacted": True}
+    assert payload["api_key"] == {"redacted": True}
+    assert payload["password"] == {"redacted": True}
+    assert payload["nested"]["artifact_bytes"] == {"redacted": True}
+    assert payload["safe_count"] == 7
+    assert payload["empty_token"] is None
+
+
 def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
 
@@ -337,6 +358,26 @@ def test_process_log_routes_sanitize_secret_bearing_tails(tmp_path) -> None:
     assert "stderr-secret" not in errors.text
 
 
+def test_process_log_tail_query_is_bounded(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+    app.state.supervisor.log_dir.mkdir(parents=True)
+    (app.state.supervisor.log_dir / "xvfb.log").write_text(
+        "\n".join(f"line-{index}" for index in range(5)),
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        valid = client.get("/v1/processes/xvfb/logs?tail=2")
+        zero = client.get("/v1/processes/xvfb/logs?tail=0")
+        negative = client.get("/v1/processes/xvfb/logs?tail=-1")
+        too_large = client.get("/v1/processes/xvfb/logs?tail=1001")
+
+    assert valid.status_code == 200
+    assert valid.text == "line-3\nline-4"
+    assert zero.status_code == 422
+    assert negative.status_code == 422
+    assert too_large.status_code == 422
+
+
 def test_browser_and_app_routes_sanitize_reflected_urls_and_args(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
 
@@ -358,6 +399,20 @@ def test_browser_and_app_routes_sanitize_reflected_urls_and_args(tmp_path) -> No
     assert app_launch.status_code == 200
     assert "url-secret" not in serialized
     assert "arg-secret" not in serialized
+
+
+def test_open_artifact_does_not_reflect_absolute_artifact_path(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        write = client.put("/v1/artifacts/reports/result.txt", content=b"ok")
+        response = client.post("/v1/apps/open-artifact", json={"path": "reports/result.txt"})
+
+    serialized = json.dumps(response.json())
+    assert write.status_code == 200
+    assert response.status_code == 200
+    assert str(app.state.settings.artifacts_dir) not in serialized
+    assert "reports/result.txt" not in serialized
 
 
 def test_daemon_error_details_sanitize_secret_bearing_values(tmp_path) -> None:

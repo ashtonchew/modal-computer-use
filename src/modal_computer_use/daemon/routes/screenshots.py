@@ -56,11 +56,11 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
+        budgets.reserve_screenshot(request)
         shot = await request.app.state.backend.screenshot(
             options,
             artifact_store=request.app.state.artifacts,
         )
-        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -85,12 +85,12 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
+        budgets.reserve_screenshot(request)
         shot = await request.app.state.backend.screenshot(
             options,
             region=payload.region,
             artifact_store=request.app.state.artifacts,
         )
-        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot
 
@@ -119,11 +119,11 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
             raise error
+        budgets.reserve_screenshot(request)
         shot = await request.app.state.backend.screenshot(
             options,
             region=region,
             artifact_store=request.app.state.artifacts,
         )
-        budgets.reserve_screenshot(request)
         budgets.enforce(request, "screenshots", "artifacts")
         return shot

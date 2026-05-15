@@ -14,6 +14,19 @@ async def desktop_readiness(request: Request) -> tuple[bool, list[str]]:
     return ready, errors
 
 
+async def daemon_readiness(request: Request) -> tuple[bool, list[str]]:
+    ready, errors = await desktop_readiness(request)
+    if request.app.state.settings.vnc_mode == "off":
+        return ready, errors
+    for name in ("x11vnc", "novnc"):
+        status = request.app.state.supervisor.status(name)
+        if status.status in ("running", "unknown"):
+            continue
+        ready = False
+        errors.append(f"{name} is not running")
+    return ready, errors
+
+
 async def ensure_desktop_ready(request: Request) -> None:
     ready, errors = await desktop_readiness(request)
     if ready:

@@ -60,6 +60,7 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
             budgets.enforce_artifact_write(request, public_path, incoming_size)
         store = request.app.state.artifacts
         target = store.resolve(public_path)
+        _ensure_writable_artifact_target(target)
         temp_dir = store.resolve(".control/uploads", allow_empty=False, public=False)
         temp_dir.mkdir(parents=True, exist_ok=True)
         total = 0
@@ -91,6 +92,22 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
             return info
     except ArtifactPathError:
         raise
+
+
+def _ensure_writable_artifact_target(target: Path) -> None:
+    if target.exists() and target.is_dir():
+        raise DaemonError(
+            "artifact path conflicts with an existing directory",
+            status_code=409,
+            code="artifact_path_conflict",
+        )
+    parent = target.parent
+    if parent.exists() and not parent.is_dir():
+        raise DaemonError(
+            "artifact parent path conflicts with an existing file",
+            status_code=409,
+            code="artifact_path_conflict",
+        )
 
 
 @router.delete("/{path:path}")

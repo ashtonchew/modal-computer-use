@@ -94,6 +94,33 @@ def test_direct_artifact_write_enforces_artifact_byte_budget(tmp_path) -> None:
     assert response.json()["details"]["budgets"]["artifact_bytes"] == 2
 
 
+def test_failed_direct_screenshot_counts_as_attempted_screenshot(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+
+    async def screenshot(*args, **kwargs):
+        raise RuntimeError("capture failed")
+
+    app.state.backend.screenshot = screenshot
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.post("/v1/screenshots/full", json={})
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    assert app.state.screenshot_count == 1
+
+
 def test_clipboard_mutations_reserve_action_budget_before_mutating(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

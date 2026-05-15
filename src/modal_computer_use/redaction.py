@@ -93,7 +93,7 @@ def _is_sensitive_key(key: str) -> bool:
 def _redacted_value(value: Any) -> Any:
     if isinstance(value, dict) and value.get("redacted") is True:
         return value
-    if value is None or isinstance(value, bool | int | float):
+    if value is None:
         return value
     marker: dict[str, Any] = {"redacted": True}
     if isinstance(value, str):

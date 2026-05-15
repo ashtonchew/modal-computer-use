@@ -86,30 +86,33 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def trace_route(request: Request, call_next):
-        path = request.scope.get("path") or ""
         with app.state.tracer.span(
             "daemon.route",
             {
                 "http.method": request.method,
-                "http.route": path,
             },
         ) as span:
             try:
                 response = await call_next(request)
             except Exception as exc:
+                span.set_attribute("http.route", _route_template(request))
                 span.record_exception(exc)
                 raise
+            span.set_attribute("http.route", _route_template(request))
             span.set_attribute("http.status_code", response.status_code)
             return response
 
     @app.exception_handler(DaemonError)
     async def daemon_error_handler(_request: Request, exc: DaemonError) -> JSONResponse:
+        details = sanitize_payload(exc.details)
+        if isinstance(details, dict) and isinstance(exc.details.get("budgets"), dict):
+            details["budgets"] = exc.details["budgets"]
         return JSONResponse(
             status_code=exc.status_code,
             content={
                 "code": exc.code,
                 "message": sanitize_text(exc.message),
-                "details": sanitize_payload(exc.details),
+                "details": details,
             },
         )
 
@@ -206,3 +209,9 @@ def _validation_errors_without_inputs(exc: RequestValidationError) -> list[dict[
             }
         )
     return errors
+
+
+def _route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    return str(path) if path else "unmatched"

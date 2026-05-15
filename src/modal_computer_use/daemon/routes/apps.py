@@ -35,4 +35,8 @@ async def open_artifact(payload: OpenArtifactRequest, request: Request) -> Actio
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         result = await request.app.state.backend.launch("xdg-open", [str(path)])
-        return ActionResult.model_validate(sanitize_payload(result.model_dump(mode="json")))
+        body = sanitize_payload(result.model_dump(mode="json"))
+        if isinstance(body, dict) and isinstance(body.get("output"), dict):
+            body["output"].pop("args", None)
+            body["output"]["artifact_opened"] = True
+        return ActionResult.model_validate(body)

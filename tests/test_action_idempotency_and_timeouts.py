@@ -399,7 +399,7 @@ def test_batch_duration_timeout_stops_later_actions_even_with_continue_on_error(
     assert app.state.backend.cursor.y == 0
 
 
-def test_screenshot_after_timeout_returns_failed_result_without_incrementing_budget(
+def test_screenshot_after_timeout_returns_failed_result_and_counts_attempt(
     tmp_path,
 ) -> None:
     app = _app(tmp_path, default_action_timeout_ms=10, trace_actions=True)
@@ -433,7 +433,7 @@ def test_screenshot_after_timeout_returns_failed_result_without_incrementing_bud
     }
     assert calls == 1
     assert app.state.action_count == 1
-    assert app.state.screenshot_count == 0
+    assert app.state.screenshot_count == 1
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert len(entries) == 2
     assert entries[1].normalized_action == {"type": "screenshot_after"}
