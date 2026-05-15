@@ -37,6 +37,9 @@ async def active(request: Request) -> X11Window | None:
 @router.post("/{window_id}/activate")
 async def activate(window_id: str, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.activate_window(window_id)
@@ -45,6 +48,9 @@ async def activate(window_id: str, request: Request) -> ActionResult:
 @router.post("/{window_id}/close")
 async def close(window_id: str, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.close_window(window_id)

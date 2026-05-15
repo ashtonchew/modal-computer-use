@@ -22,6 +22,7 @@ from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, va
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.errors import ActionValidationError
 from modal_computer_use.models import ActionBatchRequest, ActionResult, parse_action
+from modal_computer_use.redaction import sanitize_payload_with_secrets
 
 router = APIRouter(prefix="/v1/keyboard")
 
@@ -29,12 +30,20 @@ router = APIRouter(prefix="/v1/keyboard")
 @router.post("/type")
 async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
-        return await request.app.state.backend.keyboard_type(
+        result = await request.app.state.backend.keyboard_type(
             payload.text,
             delay_ms=payload.delay_ms,
             method=payload.method,
+        )
+        return _sanitize_action_result(
+            result,
+            secret=payload.text,
+            replacement="[redacted typed text]",
         )
 
 
@@ -42,6 +51,9 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
 async def press(payload: KeyRequest, request: Request) -> ActionResult:
     validate_keys(payload.key, *payload.modifiers)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_press(
@@ -55,6 +67,9 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
 async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
     validate_keys(*payload.keys)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.keyboard_hotkey(
@@ -102,9 +117,12 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
             details={"errors": errors},
         )
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
+    _preflight_action_budget(request, nested_actions)
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
-        _preflight_action_budget(request, nested_actions)
         released_all = False
         await request.app.state.backend.key_down(payload.key)
         try:
@@ -156,3 +174,10 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
 @router.get("/keys")
 async def supported_keys() -> dict[str, str]:
     return KEY_ALIASES
+
+
+def _sanitize_action_result(
+    result: ActionResult, *, secret: str, replacement: str
+) -> ActionResult:
+    payload = sanitize_payload_with_secrets(result.model_dump(mode="json"), [(secret, replacement)])
+    return ActionResult.model_validate(payload)

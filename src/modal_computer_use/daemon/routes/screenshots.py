@@ -49,6 +49,9 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
         source_height=request.app.state.backend.height,
         scale=options.scale,
     )
+    budget_error = budgets.screenshot_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
@@ -75,6 +78,9 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
         source_height=payload.region.height,
         scale=options.scale,
     )
+    budget_error = budgets.screenshot_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         error = budgets.screenshot_reservation_error(request)
         if error is not None:
@@ -99,6 +105,9 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         scaled_dimension(region.width, payload.scale),
         scaled_dimension(region.height, payload.scale),
     )
+    budget_error = budgets.screenshot_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     options = ScreenshotOptions(
         format=payload.format,  # type: ignore[arg-type]
         quality=payload.quality,

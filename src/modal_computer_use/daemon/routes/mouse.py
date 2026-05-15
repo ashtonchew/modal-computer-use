@@ -25,6 +25,9 @@ router = APIRouter(prefix="/v1/mouse")
 async def move(payload: MouseMoveRequest, request: Request) -> Point:
     validate_point(request, payload)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_move(payload.x, payload.y)
@@ -35,6 +38,9 @@ async def click(payload: MouseClickRequest, request: Request) -> Point:
     validate_optional_point(request, x=payload.x, y=payload.y)
     validate_keys(*payload.modifiers)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_click(
@@ -60,6 +66,9 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
         validate_point(request, point, field=f"path[{index}]")
     validate_keys(*payload.modifiers)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_drag(
@@ -76,6 +85,9 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
 async def scroll(payload: MouseScrollRequest, request: Request) -> ActionResult:
     validate_optional_point(request, x=payload.x, y=payload.y)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_scroll(
@@ -90,6 +102,9 @@ async def scroll(payload: MouseScrollRequest, request: Request) -> ActionResult:
 async def down(payload: MouseButtonRequest, request: Request) -> ActionResult:
     validate_optional_point(request, x=payload.x, y=payload.y)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_down(payload.button, payload.x, payload.y)
@@ -99,6 +114,9 @@ async def down(payload: MouseButtonRequest, request: Request) -> ActionResult:
 async def up(payload: MouseButtonRequest, request: Request) -> ActionResult:
     validate_optional_point(request, x=payload.x, y=payload.y)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         return await request.app.state.backend.mouse_up(payload.button, payload.x, payload.y)

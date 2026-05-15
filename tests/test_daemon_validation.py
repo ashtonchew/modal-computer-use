@@ -560,6 +560,36 @@ def test_input_routes_reject_unready_desktop_before_budget_or_action(tmp_path) -
     assert app.state.action_count == 0
 
 
+def test_release_all_rejects_unready_desktop_before_backend_action(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    called = False
+
+    async def not_ready():
+        return False, ["display missing"]
+
+    async def release_all():
+        nonlocal called
+        called = True
+        return await type(app.state.backend).release_all(app.state.backend)
+
+    app.state.backend.ready = not_ready
+    app.state.backend.release_all = release_all
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/input/release-all")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "desktop_not_ready"
+    assert called is False
+
+
 def test_direct_mouse_position_rejects_unready_desktop_like_action_cursor_position(
     tmp_path,
 ) -> None:

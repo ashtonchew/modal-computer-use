@@ -162,6 +162,29 @@ def test_idempotency_replay_returns_cached_result_when_desktop_becomes_unready(t
     assert app.state.action_count == 1
 
 
+def test_idempotency_replay_returns_cached_result_when_geometry_changes(tmp_path) -> None:
+    app = _app(tmp_path)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-geometry"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+        app.state.backend.width = 5
+        second = client.post(
+            "/v1/actions/run",
+            headers={"Idempotency-Key": "idem-geometry"},
+            json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert app.state.action_count == 1
+
+
 def test_idempotency_key_conflict_rejects_different_payload(tmp_path) -> None:
     app = _app(tmp_path)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:

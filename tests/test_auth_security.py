@@ -258,6 +258,41 @@ def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
     assert "stderr-secret" not in serialized
 
 
+def test_direct_keyboard_and_clipboard_mutations_sanitize_reflected_text(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    async def keyboard_type(text, delay_ms=10, method="auto"):
+        return ActionResult(
+            ok=True,
+            message=f"typed {text}",
+            output={"echo": text, "text": text},
+        )
+
+    async def clipboard_set(text):
+        return ActionResult(
+            ok=True,
+            message=f"copied {text}",
+            output={"echo": text, "clipboard_text": text},
+        )
+
+    app.state.backend.keyboard_type = keyboard_type
+    app.state.backend.clipboard_set = clipboard_set
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        typed = client.post("/v1/keyboard/type", json={"text": "typed-secret"})
+        copied = client.put("/v1/clipboard/text", json={"text": "clip-secret"})
+
+    assert typed.status_code == 200
+    assert copied.status_code == 200
+    serialized = json.dumps([typed.json(), copied.json()])
+    assert "typed-secret" not in serialized
+    assert "clip-secret" not in serialized
+    assert typed.json()["message"] == "typed [redacted typed text]"
+    assert typed.json()["output"]["text"]["redacted"] is True
+    assert copied.json()["message"] == "copied [redacted clipboard text]"
+    assert copied.json()["output"]["clipboard_text"]["redacted"] is True
+
+
 def test_command_run_executes_under_input_lock(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
     observed_locked = False

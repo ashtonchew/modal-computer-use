@@ -14,6 +14,9 @@ router = APIRouter(prefix="/v1/browser")
 @router.post("/open-url")
 async def open_url(payload: BrowserOpenUrlRequest, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         result = await request.app.state.backend.open_url(

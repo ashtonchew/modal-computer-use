@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -43,7 +44,7 @@ class HTTPTransport:
             "sdk.request",
             {
                 "http.method": method,
-                "http.route": path,
+                "http.route": _route_path(path),
             },
         ) as span:
             response = self._client.request(
@@ -66,7 +67,7 @@ class HTTPTransport:
                 "sdk.download",
                 {
                     "http.method": "GET",
-                    "http.route": path,
+                    "http.route": _route_path(path),
                 },
             ) as span,
             self._client.stream(
@@ -108,3 +109,7 @@ class HTTPTransport:
                 if isinstance(payload.get("details"), dict)
                 else None,
             )
+
+
+def _route_path(path: str) -> str:
+    return urlsplit(path).path or "/"

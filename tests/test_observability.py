@@ -113,3 +113,26 @@ def test_sdk_request_span_uses_route_not_query_or_authorization(monkeypatch) -> 
     assert sdk_span.name == "sdk.request"
     assert sdk_span.attributes["http.route"] == "/v1/version"
     assert "secret" not in str(sdk_span.attributes)
+
+
+def test_sdk_request_span_strips_inline_query_from_path(monkeypatch) -> None:
+    tracer = _CapturedTracer()
+    monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/version"
+        assert request.url.query == b"token=secret"
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(
+        base_url="http://daemon.local",
+        transport=httpx.MockTransport(handler),
+    )
+    transport = HTTPTransport("http://daemon.local", client=client)
+
+    response = transport.request("GET", "/v1/version?token=secret")
+
+    assert response.json() == {"ok": True}
+    sdk_span = tracer.spans[0]
+    assert sdk_span.attributes["http.route"] == "/v1/version"
+    assert "secret" not in str(sdk_span.attributes)

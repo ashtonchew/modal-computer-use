@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 from fastapi.testclient import TestClient
@@ -115,6 +116,122 @@ def test_clipboard_mutations_reserve_action_budget_before_mutating(tmp_path) -> 
     assert delete.json()["code"] == "budget_exceeded"
     assert app.state.backend.clipboard == "existing"
     assert app.state.action_count == 0
+
+
+def test_over_budget_direct_action_rejects_without_waiting_for_input_lock(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_actions=0,
+        )
+    )
+    app.state.supervisor.running = True
+
+    async def call_with_lock_held() -> int:
+        body = json.dumps({"x": 1, "y": 2}).encode()
+        messages = [{"type": "http.request", "body": body, "more_body": False}]
+        sent: list[dict] = []
+
+        async def receive():
+            return messages.pop(0)
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/mouse/move",
+            "raw_path": b"/v1/mouse/move",
+            "query_string": b"",
+            "headers": [
+                (b"authorization", b"Bearer dev"),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+
+        await app.state.input_lock.acquire()
+        try:
+            await asyncio.wait_for(app(scope, receive, send), timeout=0.1)
+        finally:
+            app.state.input_lock.release()
+        return next(message for message in sent if message["type"] == "http.response.start")[
+            "status"
+        ]
+
+    assert asyncio.run(call_with_lock_held()) == 429
+    assert app.state.backend.cursor.x == 0
+    assert app.state.backend.cursor.y == 0
+    assert app.state.action_count == 0
+
+
+def test_clipboard_mutation_does_not_consume_action_budget_while_waiting_for_lock(
+    tmp_path,
+) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    app.state.supervisor.running = True
+
+    async def call_with_lock_held() -> int:
+        body = json.dumps({"text": "queued-secret"}).encode()
+        messages = [{"type": "http.request", "body": body, "more_body": False}]
+        sent: list[dict] = []
+
+        async def receive():
+            return messages.pop(0)
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "PUT",
+            "scheme": "http",
+            "path": "/v1/clipboard/text",
+            "raw_path": b"/v1/clipboard/text",
+            "query_string": b"",
+            "headers": [
+                (b"authorization", b"Bearer dev"),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+
+        await app.state.input_lock.acquire()
+        task = asyncio.create_task(app(scope, receive, send))
+        try:
+            await asyncio.sleep(0.05)
+            assert app.state.action_count == 0
+            assert app.state.backend.clipboard == ""
+        finally:
+            app.state.input_lock.release()
+        await asyncio.wait_for(task, timeout=1)
+        return next(message for message in sent if message["type"] == "http.response.start")[
+            "status"
+        ]
+
+    assert asyncio.run(call_with_lock_held()) == 200
+    assert app.state.action_count == 1
+    assert app.state.backend.clipboard == "queued-secret"
 
 
 def test_clipboard_mutations_respect_input_rate_limit(tmp_path) -> None:

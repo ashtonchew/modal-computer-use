@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -73,6 +74,17 @@ def sanitize_payload(value: Any) -> Any:
     return value
 
 
+def sanitize_payload_with_secrets(
+    value: Any,
+    replacements: list[tuple[str, str]],
+) -> Any:
+    sanitized = sanitize_payload(value)
+    active = [(secret, replacement) for secret, replacement in replacements if secret]
+    if not active:
+        return sanitized
+    return _replace_known_secrets(sanitized, active)
+
+
 def _is_sensitive_key(key: str) -> bool:
     normalized = key.lower().replace("-", "_")
     return normalized in _SENSITIVE_KEYS or normalized.endswith("_token")
@@ -91,6 +103,28 @@ def _redacted_value(value: Any) -> Any:
     elif isinstance(value, list | tuple | dict):
         marker["items"] = len(value)
     return marker
+
+
+def _replace_known_secrets(value: Any, replacements: list[tuple[str, str]]) -> Any:
+    if isinstance(value, dict):
+        if value.get("redacted") is True:
+            return value
+        return {key: _replace_known_secrets(item, replacements) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_known_secrets(item, replacements) for item in value]
+    if isinstance(value, tuple):
+        return [_replace_known_secrets(item, replacements) for item in value]
+    if isinstance(value, str):
+        for secret, replacement in replacements:
+            if value == secret:
+                return {
+                    "redacted": True,
+                    "length": len(secret),
+                    "sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+                }
+            value = value.replace(secret, replacement)
+        return value
+    return value
 
 
 def safe_exception_payload(exc: BaseException) -> dict[str, Any]:

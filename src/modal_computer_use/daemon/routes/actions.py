@@ -51,7 +51,11 @@ from modal_computer_use.models import (
     ZoomAction,
     parse_action,
 )
-from modal_computer_use.redaction import sanitize_payload, sanitize_text
+from modal_computer_use.redaction import (
+    sanitize_payload,
+    sanitize_payload_with_secrets,
+    sanitize_text,
+)
 from modal_computer_use.tracing import TraceWriter
 
 router = APIRouter(prefix="/v1/actions")
@@ -72,6 +76,11 @@ async def run(
 ) -> ActionBatchResult:
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
+    cached = _cached_idempotency_result(
+        request, effective_idempotency_key, request_fingerprint
+    )
+    if cached is not None:
+        return cached
     action_count = _count_action_tree(payload.actions)
     if action_count > request.app.state.settings.max_batch_actions:
         raise DaemonError(
@@ -92,11 +101,6 @@ async def run(
             code="action_validation_failed",
             details={"errors": validation_errors},
         )
-    cached = _cached_idempotency_result(
-        request, effective_idempotency_key, request_fingerprint
-    )
-    if cached is not None:
-        return cached
     await ensure_desktop_ready(request)
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
@@ -733,6 +737,13 @@ def _redact_type_payload(value: Any, action: TypeAction) -> Any:
     return value
 
 
+def _sanitize_secret_output(
+    output: dict[str, Any], *, secret: str, replacement: str
+) -> dict[str, Any]:
+    sanitized = sanitize_payload_with_secrets(output, [(secret, replacement)])
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
 def _batch_timeout_result(
     *,
     index: int,
@@ -831,7 +842,11 @@ async def _execute_action(
         return result.output
     if isinstance(action, TypeAction):
         result = await backend.keyboard_type(action.text, action.delay_ms, action.method)
-        return result.output
+        return _sanitize_secret_output(
+            result.output,
+            secret=action.text,
+            replacement="[redacted typed text]",
+        )
     if isinstance(action, KeyPressAction):
         result = await backend.keyboard_press(
             action.key,
@@ -1083,6 +1098,8 @@ _OMITTED_TRACE_RESULT_KEYS = {"bytes", "data_base64"}
 def _redact_trace_result_payload(value: Any, *, path: str = "") -> tuple[Any, list[str]]:
     redactions: list[str] = []
     if isinstance(value, dict):
+        if _is_redaction_marker(value):
+            return value, [path] if path else []
         redacted: dict[str, Any] = {}
         for key, item in value.items():
             item_path = f"{path}.{key}" if path else str(key)

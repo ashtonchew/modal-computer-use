@@ -12,6 +12,7 @@ from modal_computer_use.adapters.provenance import (
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.models import ActionResult
 from modal_computer_use.tracing import load_trace
 
 
@@ -42,6 +43,46 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
         "sha256": hashlib.sha256(b"secret value").hexdigest(),
     }
     assert entries[0].redactions == ["text"]
+
+
+def test_action_run_sanitizes_reflected_typed_text_in_success_response_and_trace(
+    tmp_path,
+) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+
+    async def keyboard_type(text, delay_ms=10, method="auto"):
+        return ActionResult(
+            ok=True,
+            message=f"typed {text}",
+            output={"echo": text, "text": text},
+        )
+
+    app.state.backend.keyboard_type = keyboard_type
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "type", "text": "secret value"}]},
+        )
+
+    assert response.status_code == 200
+    serialized = response.text
+    raw_trace = (tmp_path / "traces" / "actions.ndjson").read_text()
+    assert "secret value" not in serialized
+    assert "secret value" not in raw_trace
+    body = response.json()
+    assert body["results"][0]["output"]["text"]["redacted"] is True
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    assert "result.output.echo" in entries[0].redactions
 
 
 def test_action_trace_redacts_nested_hold_typed_text(tmp_path) -> None:

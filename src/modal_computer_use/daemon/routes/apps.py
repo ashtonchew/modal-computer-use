@@ -14,6 +14,9 @@ router = APIRouter(prefix="/v1/apps")
 @router.post("/launch")
 async def launch(payload: LaunchRequest, request: Request) -> ActionResult:
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         result = await request.app.state.backend.launch(payload.command, payload.args)
@@ -26,6 +29,9 @@ async def open_artifact(payload: OpenArtifactRequest, request: Request) -> Actio
     if not path.exists():
         raise FileNotFoundError(payload.path)
     await ensure_desktop_ready(request)
+    budget_error = budgets.action_reservation_error(request)
+    if budget_error is not None:
+        raise budget_error
     async with request.app.state.input_lock:
         budgets.reserve_action(request)
         result = await request.app.state.backend.launch("xdg-open", [str(path)])
