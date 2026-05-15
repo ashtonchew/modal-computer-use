@@ -14,7 +14,15 @@ async def healthz() -> dict[str, bool]:
     return {"ok": True}
 
 
-@router.get("/readyz")
+@router.get(
+    "/readyz",
+    responses={
+        503: {
+            "model": ReadyStatus,
+            "description": "Desktop backend or required process is not ready",
+        }
+    },
+)
 async def readyz(request: Request, response: Response) -> ReadyStatus:
     ready, errors = await daemon_readiness(request)
     if not ready:

@@ -77,9 +77,7 @@ async def run(
 ) -> ActionBatchResult:
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
-    cached = _cached_idempotency_result(
-        request, effective_idempotency_key, request_fingerprint
-    )
+    cached = _cached_idempotency_result(request, effective_idempotency_key, request_fingerprint)
     if cached is not None:
         return cached
     action_count = _count_action_tree(payload.actions)
@@ -112,9 +110,7 @@ async def run(
     action_phase_failed = False
     async with request.app.state.input_lock:
         cache = request.app.state.idempotency_cache
-        cached = _cached_idempotency_result(
-            request, effective_idempotency_key, request_fingerprint
-        )
+        cached = _cached_idempotency_result(request, effective_idempotency_key, request_fingerprint)
         if cached is not None:
             return cached
         await ensure_desktop_ready(request)
@@ -192,6 +188,7 @@ async def run(
                             call_id=call_id,
                             payload=payload,
                             batch_deadline=batch_deadline,
+                            action_path=f"actions[{index}]",
                         ),
                         timeout=timeout_seconds,
                     )
@@ -230,9 +227,7 @@ async def run(
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 with suppress(Exception):
                     await request.app.state.backend.release_all()
-                effective_timeout_ms = (
-                    batch_timeout_ms if timeout_scope == "batch" else timeout_ms
-                )
+                effective_timeout_ms = batch_timeout_ms if timeout_scope == "batch" else timeout_ms
                 item = ActionItemResult(
                     index=index,
                     type=action.type,
@@ -406,9 +401,7 @@ async def run(
         return result
 
 
-def _effective_idempotency_key(
-    payload: ActionBatchRequest, header_key: str | None
-) -> str | None:
+def _effective_idempotency_key(payload: ActionBatchRequest, header_key: str | None) -> str | None:
     if header_key and payload.idempotency_key and header_key != payload.idempotency_key:
         raise DaemonError(
             "Idempotency-Key header and body idempotency_key differ",
@@ -465,9 +458,7 @@ def _prune_idempotency_cache(request: Request) -> None:
         cache.popitem(last=False)
 
 
-def _validate_action_timeouts(
-    payload: ActionBatchRequest, max_action_timeout_ms: int
-) -> list[str]:
+def _validate_action_timeouts(payload: ActionBatchRequest, max_action_timeout_ms: int) -> list[str]:
     errors: list[str] = []
     if payload.max_action_timeout_ms is not None and (
         payload.max_action_timeout_ms > max_action_timeout_ms
@@ -506,9 +497,7 @@ def _validate_batch_request(payload: ActionBatchRequest, request: Request) -> li
     return errors
 
 
-def _validate_screenshot_pixel_budget(
-    payload: ActionBatchRequest, request: Request
-) -> list[str]:
+def _validate_screenshot_pixel_budget(payload: ActionBatchRequest, request: Request) -> list[str]:
     errors: list[str] = []
     backend = request.app.state.backend
     for action_path, action in _iter_action_tree(payload.actions):
@@ -594,9 +583,7 @@ def _count_action_tree(actions: list[Any]) -> int:
     return count
 
 
-def _effective_action_timeout_ms(
-    action: Any, payload: ActionBatchRequest, request: Request
-) -> int:
+def _effective_action_timeout_ms(action: Any, payload: ActionBatchRequest, request: Request) -> int:
     if action.timeout_ms is not None:
         return action.timeout_ms
     if payload.max_action_timeout_ms is not None:
@@ -604,9 +591,7 @@ def _effective_action_timeout_ms(
     return request.app.state.settings.default_action_timeout_ms
 
 
-def _effective_screenshot_after_timeout_ms(
-    payload: ActionBatchRequest, request: Request
-) -> int:
+def _effective_screenshot_after_timeout_ms(payload: ActionBatchRequest, request: Request) -> int:
     if payload.max_action_timeout_ms is not None:
         return payload.max_action_timeout_ms
     return request.app.state.settings.default_action_timeout_ms
@@ -803,6 +788,7 @@ async def _execute_action(
     call_id: str,
     payload: ActionBatchRequest | None = None,
     batch_deadline: float | None = None,
+    action_path: str | None = None,
 ) -> dict[str, Any]:
     backend = request.app.state.backend
     if isinstance(action, MoveAction):
@@ -877,9 +863,9 @@ async def _execute_action(
         nested_actions = _nested_hold_actions(action)
         _preflight_action_budget(request, nested_actions)
         await backend.key_down(action.key)
+        nested_results: list[dict[str, Any]] = []
         try:
-            nested_results: list[dict[str, Any]] = []
-            for nested_action in nested_actions:
+            for nested_index, nested_action in enumerate(nested_actions):
                 if _counts_against_action_budget(nested_action):
                     budgets.reserve_action(request)
                 nested_start = time.perf_counter()
@@ -889,23 +875,83 @@ async def _execute_action(
                     call_id=call_id,
                     payload=payload,
                     batch_deadline=batch_deadline,
+                    action_path=f"{action_path or 'actions'}.actions[{nested_index}]",
                 )
-                if payload is not None:
-                    nested_timeout_seconds = (
-                        _effective_action_timeout_ms(nested_action, payload, request) / 1000
-                    )
-                    if batch_deadline is not None:
-                        nested_timeout_seconds = min(
-                            nested_timeout_seconds,
-                            _remaining_seconds(batch_deadline),
+                try:
+                    if payload is not None:
+                        nested_timeout_ms = _effective_action_timeout_ms(
+                            nested_action, payload, request
                         )
-                    nested_output = await asyncio.wait_for(
-                        nested_call, timeout=nested_timeout_seconds
+                        nested_timeout_seconds = nested_timeout_ms / 1000
+                        timeout_scope = "action"
+                        if batch_deadline is not None:
+                            remaining_seconds = _remaining_seconds(batch_deadline)
+                            if remaining_seconds < nested_timeout_seconds:
+                                timeout_scope = "batch"
+                            nested_timeout_seconds = min(
+                                nested_timeout_seconds,
+                                remaining_seconds,
+                            )
+                        nested_output = await asyncio.wait_for(
+                            nested_call, timeout=nested_timeout_seconds
+                        )
+                    else:
+                        nested_timeout_ms = None
+                        timeout_scope = "action"
+                        nested_output = await nested_call
+                except TimeoutError as exc:
+                    elapsed_ms = (time.perf_counter() - nested_start) * 1000
+                    effective_timeout_ms = (
+                        request.app.state.settings.max_batch_duration_ms
+                        if timeout_scope == "batch"
+                        else nested_timeout_ms
                     )
-                else:
-                    nested_output = await nested_call
+                    failed = {
+                        "index": nested_index,
+                        "type": nested_action.type,
+                        "ok": False,
+                        "elapsed_ms": elapsed_ms,
+                        "error_code": "timeout",
+                        "error": f"{timeout_scope} timed out after {effective_timeout_ms} ms",
+                        "output": {
+                            "code": "timeout",
+                            "timeout_ms": effective_timeout_ms,
+                            "scope": timeout_scope,
+                        },
+                    }
+                    nested_results.append(failed)
+                    raise _nested_hold_error(
+                        action_path=action_path,
+                        nested_index=nested_index,
+                        nested_action=nested_action,
+                        nested_results=nested_results,
+                        code="timeout",
+                        message=failed["error"],
+                    ) from exc
+                except Exception as exc:
+                    elapsed_ms = (time.perf_counter() - nested_start) * 1000
+                    error_code = _exception_code(exc)
+                    failed = {
+                        "index": nested_index,
+                        "type": nested_action.type,
+                        "ok": False,
+                        "elapsed_ms": elapsed_ms,
+                        "error_code": error_code,
+                        "error": _action_error_message(nested_action, exc),
+                        "output": _exception_output(exc, nested_action, request=request),
+                    }
+                    nested_results.append(failed)
+                    raise _nested_hold_error(
+                        action_path=action_path,
+                        nested_index=nested_index,
+                        nested_action=nested_action,
+                        nested_results=nested_results,
+                        code=error_code,
+                        message=failed["error"],
+                    ) from exc
                 nested_results.append(
                     {
+                        "index": nested_index,
                         "type": nested_action.type,
                         "ok": True,
                         "elapsed_ms": (time.perf_counter() - nested_start) * 1000,
@@ -968,6 +1014,31 @@ async def _execute_action(
     )
 
 
+def _nested_hold_error(
+    *,
+    action_path: str | None,
+    nested_index: int,
+    nested_action: Any,
+    nested_results: list[dict[str, Any]],
+    code: str,
+    message: str,
+) -> DaemonError:
+    path = f"{action_path or 'actions'}.actions[{nested_index}]"
+    return DaemonError(
+        message,
+        code=code,
+        details={
+            "actions": nested_results,
+            "failed_nested_action": {
+                "index": nested_index,
+                "type": nested_action.type,
+                "path": path,
+            },
+            "nested_error": message,
+        },
+    )
+
+
 def _validate_actions(
     actions: list[Any],
     *,
@@ -982,9 +1053,7 @@ def _validate_actions(
         errors.extend(key_errors)
         for point in _action_points(action):
             if width is not None and point.x >= width:
-                errors.append(
-                    f"{action_path} x coordinate {point.x} exceeds desktop width {width}"
-                )
+                errors.append(f"{action_path} x coordinate {point.x} exceeds desktop width {width}")
             if height is not None and point.y >= height:
                 errors.append(
                     f"{action_path} y coordinate {point.y} exceeds desktop height {height}"
@@ -1003,9 +1072,7 @@ def _validate_actions(
                 try:
                     parsed = parse_action(nested_action)
                 except Exception as exc:
-                    errors.append(
-                        f"{action_path}.actions[{nested_index}] is invalid: {exc}"
-                    )
+                    errors.append(f"{action_path}.actions[{nested_index}] is invalid: {exc}")
                     continue
                 parsed_nested.append(parsed)
             errors.extend(
@@ -1024,8 +1091,7 @@ def _key_validation_errors(action: Any, *, field: str) -> list[str]:
     if isinstance(action, KeyPressAction):
         keys.append((f"{field}.key", action.key))
         keys.extend(
-            (f"{field}.modifiers[{index}]", key)
-            for index, key in enumerate(action.modifiers)
+            (f"{field}.modifiers[{index}]", key) for index, key in enumerate(action.modifiers)
         )
     elif isinstance(action, HotkeyAction):
         keys.extend((f"{field}.keys[{index}]", key) for index, key in enumerate(action.keys))
@@ -1033,13 +1099,10 @@ def _key_validation_errors(action: Any, *, field: str) -> list[str]:
         keys.append((f"{field}.key", action.key))
     elif isinstance(action, ClickAction | DoubleClickAction | TripleClickAction | DragAction):
         keys.extend(
-            (f"{field}.modifiers[{index}]", key)
-            for index, key in enumerate(action.modifiers)
+            (f"{field}.modifiers[{index}]", key) for index, key in enumerate(action.modifiers)
         )
     return [
-        f"{path} is not a supported key: {key}"
-        for path, key in keys
-        if not is_supported_key(key)
+        f"{path} is not a supported key: {key}" for path, key in keys if not is_supported_key(key)
     ]
 
 
@@ -1127,9 +1190,7 @@ def _redact_trace_result_payload(value: Any, *, path: str = "") -> tuple[Any, li
                 redacted[key] = _redacted_sensitive_value(item)
                 redactions.append(item_path)
                 continue
-            redacted_item, child_redactions = _redact_trace_result_payload(
-                item, path=item_path
-            )
+            redacted_item, child_redactions = _redact_trace_result_payload(item, path=item_path)
             redacted[key] = redacted_item
             redactions.extend(child_redactions)
         return redacted, redactions
@@ -1137,9 +1198,7 @@ def _redact_trace_result_payload(value: Any, *, path: str = "") -> tuple[Any, li
         redacted_items = []
         for index, item in enumerate(value):
             item_path = f"{path}[{index}]" if path else f"[{index}]"
-            redacted_item, child_redactions = _redact_trace_result_payload(
-                item, path=item_path
-            )
+            redacted_item, child_redactions = _redact_trace_result_payload(item, path=item_path)
             redacted_items.append(redacted_item)
             redactions.extend(child_redactions)
         return redacted_items, redactions
@@ -1352,9 +1411,7 @@ def _provider_trace_metadata(
     if not metadata:
         normalized_action["metadata"] = {}
     redactions = [
-        f"provider_action.{item}"
-        for item in raw_redactions
-        if isinstance(item, str) and item
+        f"provider_action.{item}" for item in raw_redactions if isinstance(item, str) and item
     ]
     if isinstance(provider_action, dict):
         provider_action, inferred_redactions = _redact_action_payload(

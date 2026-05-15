@@ -1,6 +1,6 @@
 # Security
 
-**The daemon has full desktop control.** It can click, type, read clipboard contents, launch applications, and read or write artifacts. Never expose it as an unauthenticated public service.
+**The daemon has full desktop control.** It can click, type, read clipboard contents, launch applications, and read or write artifacts. Never expose its control routes as an unauthenticated public service. `/healthz` and `/readyz` are unauthenticated probe endpoints only; query-string tokens are still rejected there.
 
 ## Authentication
 

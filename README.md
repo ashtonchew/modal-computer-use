@@ -194,7 +194,8 @@ provider APIs or import provider SDKs.
 
 ## Security Defaults
 
-- No unauthenticated public daemon endpoint in Modal mode.
+- No unauthenticated public control endpoint in Modal mode; `/healthz` and `/readyz`
+  remain unauthenticated probe endpoints and still reject query-string tokens.
 - Local bearer auth via `COMPUTER_USE_LOCAL_TOKEN`.
 - Query-string connect tokens are rejected by default.
 - Artifacts are path-safe and relative to the artifact root.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 
 from fastapi.testclient import TestClient
@@ -34,6 +35,27 @@ def test_status_includes_budget_snapshot(tmp_path) -> None:
     assert status["budgets"]["artifact_bytes"] == 0
     assert status["budgets"]["max_artifact_bytes"] == 100_000
     assert status["budgets"]["max_recording_seconds"] == 60
+
+
+def test_status_budget_snapshot_tolerates_unsafe_artifact_symlink(tmp_path) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=artifacts_dir,
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    os.symlink(outside, artifacts_dir / "link")
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.get("/v1/computer/status")
+
+    assert response.status_code == 200
+    assert response.json()["budgets"]["artifact_bytes"] == 0
 
 
 def test_recording_stop_counts_recording_bytes_against_artifact_budget(tmp_path) -> None:

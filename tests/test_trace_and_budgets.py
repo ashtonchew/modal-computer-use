@@ -123,6 +123,53 @@ def test_action_trace_redacts_nested_hold_typed_text(tmp_path) -> None:
     assert entries[0].redactions == ["actions[0].text"]
 
 
+def test_action_trace_records_nested_hold_failure_details(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            trace_dir=tmp_path / "traces",
+            trace_actions=True,
+            local_token="dev",
+        )
+    )
+    original = app.state.backend.mouse_move
+
+    async def fail_second_nested_move(x: int, y: int):
+        if x == 9:
+            raise RuntimeError("nested failure")
+        return await original(x, y)
+
+    app.state.backend.mouse_move = fail_second_nested_move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [
+                            {"type": "move", "x": 7, "y": 8},
+                            {"type": "move", "x": 9, "y": 10},
+                        ],
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
+    output = entries[0].result["output"]
+    assert output["failed_nested_action"] == {
+        "index": 1,
+        "type": "move",
+        "path": "actions[0].actions[1]",
+    }
+    assert [item["ok"] for item in output["actions"]] == [True, False]
+
+
 def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

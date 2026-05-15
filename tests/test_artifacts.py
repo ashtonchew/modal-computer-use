@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -48,6 +49,40 @@ def test_artifact_manifest_prefix_matches_path_boundary(tmp_path) -> None:
     store.write_bytes("foobar/b.txt", b"foobar")
 
     assert [item.path for item in store.manifest("foo")] == ["foo/a.txt"]
+
+
+def test_artifact_manifest_skips_corrupt_and_unsafe_entries(tmp_path) -> None:
+    store = ArtifactStore(tmp_path / "root")
+    safe = store.write_bytes("safe/ok.txt", b"ok")
+    unsafe = {
+        "path": "../secret.txt",
+        "uri": "artifact://../secret.txt",
+        "kind": "file",
+    }
+    control = {
+        "path": "logs/xvfb.log",
+        "uri": "artifact://logs/xvfb.log",
+        "kind": "file",
+    }
+    mismatch = {
+        "path": "safe/mismatch.txt",
+        "uri": "artifact://safe/other.txt",
+        "kind": "file",
+    }
+    store.manifest_path.write_text(
+        "\n".join(
+            [
+                json.dumps(unsafe),
+                "{not-json",
+                safe.model_dump_json(),
+                json.dumps(control),
+                json.dumps(mismatch),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert [item.path for item in store.manifest()] == ["safe/ok.txt"]
 
 
 def test_artifact_byte_budget_ignores_control_manifest_bytes(tmp_path) -> None:

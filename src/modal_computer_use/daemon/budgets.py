@@ -13,7 +13,7 @@ BudgetKind = Literal["actions", "screenshots", "artifacts", "recordings", "idle"
 
 def snapshot(request: Request) -> dict[str, int | float | None]:
     settings = request.app.state.settings
-    artifact_bytes = sum((item.size_bytes or 0) for item in request.app.state.artifacts.list())
+    artifact_bytes = request.app.state.artifacts.total_public_bytes()
     recording_bytes = request.app.state.recordings.total_size_bytes()
     idle_seconds = time.monotonic() - request.app.state.last_activity_at
     return {
@@ -58,8 +58,7 @@ def enforce(request: Request, *kinds: BudgetKind) -> None:
     if (
         "recordings" in checks
         and settings.max_recording_seconds is not None
-        and request.app.state.recordings.total_duration_seconds()
-        > settings.max_recording_seconds
+        and request.app.state.recordings.total_duration_seconds() > settings.max_recording_seconds
     ):
         raise _budget_error("recording duration budget exceeded", state)
     if (

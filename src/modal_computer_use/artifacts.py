@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
+from json import JSONDecodeError
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -253,6 +254,30 @@ class ArtifactStore:
             infos.append(self._info(item, public_path=public_path))
         return infos
 
+    def total_public_bytes(self) -> int:
+        root = self.root.resolve()
+        total = 0
+        if not self.root.exists():
+            return total
+        for item in self.root.rglob("*"):
+            if item.is_symlink():
+                continue
+            try:
+                resolved = item.resolve()
+                if os.path.commonpath([str(root), str(resolved)]) != str(root):
+                    continue
+            except (OSError, ValueError):
+                continue
+            if not item.is_file():
+                continue
+            relative = os.path.relpath(str(resolved), str(root)).replace(os.sep, "/")
+            try:
+                normalize_artifact_path(relative, public=True)
+            except ArtifactPathError:
+                continue
+            total += item.stat().st_size
+        return total
+
     def _enforce_write_budget(self, target: Path, incoming_size: int) -> None:
         if self.max_total_bytes is None:
             return
@@ -291,12 +316,30 @@ class ArtifactStore:
         for line in self.manifest_path.read_text(encoding="utf-8").splitlines():
             if not line:
                 continue
-            data = json.loads(line)
+            try:
+                data = json.loads(line)
+            except JSONDecodeError:
+                continue
             data.pop("ts", None)
             path = data.get("path", "")
-            if safe_prefix and path != safe_prefix and not path.startswith(f"{safe_prefix}/"):
+            try:
+                public_path = normalize_artifact_path(path, public=True)
+            except ArtifactPathError:
                 continue
-            entries.append(ArtifactInfo.model_validate(data))
+            if data.get("uri") != f"artifact://{public_path}":
+                continue
+            data["path"] = public_path
+            data["uri"] = f"artifact://{public_path}"
+            if (
+                safe_prefix
+                and public_path != safe_prefix
+                and not public_path.startswith(f"{safe_prefix}/")
+            ):
+                continue
+            try:
+                entries.append(ArtifactInfo.model_validate(data))
+            except ValueError:
+                continue
         return entries
 
     def sync(self) -> ArtifactSyncResult:

@@ -70,6 +70,26 @@ def test_action_batch_rejects_partial_mouse_button_coordinate_pairs(test_client)
     assert up.status_code == 422
 
 
+def test_action_batch_unknown_action_type_uses_action_validation_error(test_client) -> None:
+    response = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "future_action"}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+
+
+def test_action_validate_extra_action_field_uses_action_validation_error(test_client) -> None:
+    response = test_client.post(
+        "/v1/actions/validate",
+        json={"actions": [{"type": "move", "x": 1, "y": 2, "unexpected": "value"}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+
+
 def test_action_batch_mouse_up_releases_button(test_client, app) -> None:
     response = test_client.post(
         "/v1/actions/run",
@@ -423,7 +443,7 @@ def test_validation_error_response_does_not_echo_typed_text(tmp_path) -> None:
         )
 
     assert response.status_code == 422
-    assert response.json()["code"] == "validation_error"
+    assert response.json()["code"] == "action_validation_failed"
     assert sentinel not in response.text
     assert "input" not in response.text
 

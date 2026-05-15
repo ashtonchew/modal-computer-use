@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -138,6 +139,37 @@ class ZoomScreenshotRequest(Schema):
         if value not in ("inline", "artifact", "auto"):
             raise ValueError("storage must be inline, artifact, or auto")
         return value
+
+
+class WaitForWindowRequest(Schema):
+    title_regex: str | None = None
+    class_name: str | None = None
+    pid: int | None = Field(default=None, gt=0)
+    timeout: float = Field(default=10.0, gt=0, le=300)
+
+    @field_validator("title_regex", "class_name")
+    @classmethod
+    def _non_empty_selector(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("window selector cannot be empty")
+        return value
+
+    @field_validator("title_regex")
+    @classmethod
+    def _valid_title_regex(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError("title_regex must be a valid regular expression") from exc
+        return value
+
+    @model_validator(mode="after")
+    def _has_selector(self) -> WaitForWindowRequest:
+        if self.title_regex is None and self.class_name is None and self.pid is None:
+            raise ValueError("wait-for requires title_regex, class_name, or pid")
+        return self
 
 
 class RecordingStartRequest(Schema):

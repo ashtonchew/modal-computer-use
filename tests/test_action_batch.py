@@ -38,9 +38,7 @@ def test_action_batch_stop_on_runtime_error(test_client, app) -> None:
     assert result["results"][0]["ok"] is False
 
 
-def test_action_batch_stop_on_runtime_error_skips_screenshot_after(
-    test_client, app
-) -> None:
+def test_action_batch_stop_on_runtime_error_skips_screenshot_after(test_client, app) -> None:
     async def fail_move(x: int, y: int):
         raise RuntimeError("boom")
 
@@ -226,6 +224,50 @@ def test_hold_key_nested_failure_is_atomic_under_continue_on_error(test_client, 
 
     assert result["ok"] is False
     assert [item["ok"] for item in result["results"]] == [False, True]
+    assert app.state.backend.cursor.x == 3
+    assert app.state.backend.cursor.y == 4
+    assert app.state.backend.held_keys == set()
+
+
+def test_hold_key_nested_failure_reports_failed_nested_action(test_client, app) -> None:
+    original = app.state.backend.mouse_move
+
+    async def fail_second_nested_move(x: int, y: int):
+        if x == 9:
+            raise RuntimeError("nested failure")
+        return await original(x, y)
+
+    app.state.backend.mouse_move = fail_second_nested_move
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "continue_on_error": True,
+            "actions": [
+                {
+                    "type": "hold_key",
+                    "key": "shift",
+                    "actions": [
+                        {"type": "move", "x": 7, "y": 8},
+                        {"type": "move", "x": 9, "y": 10},
+                        {"type": "move", "x": 11, "y": 12},
+                    ],
+                },
+                {"type": "move", "x": 3, "y": 4},
+            ],
+        },
+    ).json()
+
+    hold = result["results"][0]
+    assert result["ok"] is False
+    assert [item["ok"] for item in result["results"]] == [False, True]
+    assert hold["type"] == "hold_key"
+    assert hold["output"]["failed_nested_action"] == {
+        "index": 1,
+        "type": "move",
+        "path": "actions[0].actions[1]",
+    }
+    assert [item["ok"] for item in hold["output"]["actions"]] == [True, False]
+    assert hold["output"]["actions"][1]["error"] == "nested failure"
     assert app.state.backend.cursor.x == 3
     assert app.state.backend.cursor.y == 4
     assert app.state.backend.held_keys == set()

@@ -3406,6 +3406,7 @@
         "type": "object"
       },
       "WaitForWindowRequest": {
+        "additionalProperties": false,
         "properties": {
           "class_name": {
             "anyOf": [
@@ -3421,6 +3422,7 @@
           "pid": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
                 "type": "integer"
               },
               {
@@ -3690,6 +3692,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyStatus"
+                }
+              }
+            },
+            "description": "Desktop backend or required process is not ready"
           }
         },
         "summary": "Readyz"

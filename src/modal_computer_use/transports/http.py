@@ -56,6 +56,9 @@ class HTTPTransport:
                 headers=request_headers,
             )
             span.set_attribute("http.status_code", response.status_code)
+            error_code = _error_code(response)
+            if error_code:
+                span.set_attribute("error.code", error_code)
         self._raise_for_status(response)
         return response
 
@@ -77,6 +80,9 @@ class HTTPTransport:
             ) as response,
         ):
             span.set_attribute("http.status_code", response.status_code)
+            error_code = _error_code(response)
+            if error_code:
+                span.set_attribute("error.code", error_code)
             self._raise_for_status(response)
             with output.open("wb") as handle:
                 for chunk in response.iter_bytes():
@@ -119,3 +125,16 @@ def _route_path(path: str) -> str:
     }:
         return "/v1/artifacts/{path:path}"
     return route
+
+
+def _error_code(response: httpx.Response) -> str | None:
+    if response.status_code < 400:
+        return None
+    with suppress(Exception):
+        response.read()
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    code = payload.get("code")
+    return code if isinstance(code, str) else None

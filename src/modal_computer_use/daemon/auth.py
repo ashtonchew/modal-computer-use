@@ -20,6 +20,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if self.settings.reject_query_tokens and "_modal_connect_token" in request.query_params:
             return JSONResponse(
                 status_code=401,
+                headers={"x-computer-use-error-code": "query_token_rejected"},
                 content={
                     "code": "query_token_rejected",
                     "message": "query-string tokens are disabled; use Authorization header",
@@ -31,6 +32,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if not _is_loopback_request(request):
                 return JSONResponse(
                     status_code=401,
+                    headers={"x-computer-use-error-code": "local_token_requires_loopback"},
                     content={
                         "code": "local_token_requires_loopback",
                         "message": "local bearer token mode is restricted to loopback clients",
@@ -40,6 +42,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if request.headers.get("authorization") != expected:
                 return JSONResponse(
                     status_code=401,
+                    headers={"x-computer-use-error-code": "unauthorized"},
                     content={"code": "unauthorized", "message": "invalid bearer token"},
                 )
         elif self.settings.require_connect_user:
@@ -66,6 +69,7 @@ def _verified_user_data_error(request: Request) -> JSONResponse | None:
     ):
         return JSONResponse(
             status_code=401,
+            headers={"x-computer-use-error-code": "connect_token_required"},
             content={
                 "code": "connect_token_required",
                 "message": "Modal connect token required",
@@ -75,6 +79,7 @@ def _verified_user_data_error(request: Request) -> JSONResponse | None:
     if not raw:
         return JSONResponse(
             status_code=401,
+            headers={"x-computer-use-error-code": "connect_token_required"},
             content={
                 "code": "connect_token_required",
                 "message": "Modal connect token required",
@@ -85,6 +90,7 @@ def _verified_user_data_error(request: Request) -> JSONResponse | None:
     except json.JSONDecodeError:
         return JSONResponse(
             status_code=401,
+            headers={"x-computer-use-error-code": "invalid_verified_user_data"},
             content={
                 "code": "invalid_verified_user_data",
                 "message": "verified user metadata must be JSON",
@@ -93,6 +99,7 @@ def _verified_user_data_error(request: Request) -> JSONResponse | None:
     if not isinstance(metadata, dict) or metadata.get("sdk") != "modal-computer-use":
         return JSONResponse(
             status_code=401,
+            headers={"x-computer-use-error-code": "invalid_verified_user_data"},
             content={
                 "code": "invalid_verified_user_data",
                 "message": "verified user metadata is not recognized",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -112,6 +113,27 @@ def test_daemon_route_span_uses_template_for_artifact_path_params(tmp_path) -> N
     assert "secret-name" not in str(route_span.attributes)
 
 
+def test_daemon_route_span_records_safe_error_code_only(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    tracer = _CapturedTracer()
+    app.state.tracer = tracer
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.get("/v1/artifacts/private/secret-name.png")
+
+    assert response.status_code == 404
+    route_span = next(span for span in tracer.spans if span.name == "daemon.route")
+    assert route_span.attributes["error.code"] == "not_found"
+    assert "secret-name" not in str(route_span.attributes)
+
+
 def test_sdk_request_span_uses_route_not_query_or_authorization(monkeypatch) -> None:
     tracer = _CapturedTracer()
     monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)
@@ -181,4 +203,32 @@ def test_sdk_request_span_templates_artifact_paths(monkeypatch) -> None:
     assert response.content == b"ok"
     sdk_span = tracer.spans[0]
     assert sdk_span.attributes["http.route"] == "/v1/artifacts/{path:path}"
+    assert "secret-name" not in str(sdk_span.attributes)
+
+
+def test_sdk_request_span_records_safe_error_code(monkeypatch) -> None:
+    tracer = _CapturedTracer()
+    monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "code": "unsafe_artifact_path",
+                "message": "unsafe path private/secret-name.png",
+                "details": {},
+            },
+        )
+
+    client = httpx.Client(
+        base_url="http://daemon.local",
+        transport=httpx.MockTransport(handler),
+    )
+    transport = HTTPTransport("http://daemon.local", client=client)
+
+    with suppress(Exception):
+        transport.request("GET", "/v1/artifacts/private/secret-name.png")
+
+    sdk_span = tracer.spans[0]
+    assert sdk_span.attributes["error.code"] == "unsafe_artifact_path"
     assert "secret-name" not in str(sdk_span.attributes)
