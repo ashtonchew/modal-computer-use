@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import secrets as _secrets
 import time
 from datetime import UTC, datetime
@@ -311,8 +312,7 @@ class ComputerSandbox:
                     run_id=config.run_id,
                     app_name=app_name,
                     wait=wait,
-                    readiness_timeout=readiness_timeout
-                    or config.runtime.readiness_timeout_seconds,
+                    readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
                 )
                 _check_config_hash(
                     computer.metadata(),
@@ -332,8 +332,7 @@ class ComputerSandbox:
                     name=name,
                     app_name=app_name,
                     wait=wait,
-                    readiness_timeout=readiness_timeout
-                    or config.runtime.readiness_timeout_seconds,
+                    readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
                 )
                 _check_config_hash(
                     computer.metadata(),
@@ -470,6 +469,18 @@ def _daemon_environment(
         "COMPUTER_USE_BROWSER_PREWARM": str(
             config.browser.prewarm if config.browser else False
         ).lower(),
+        "COMPUTER_USE_BROWSER_PROFILE_DIR": config.browser.profile_dir
+        if config.browser and config.browser.profile_dir
+        else "",
+        "COMPUTER_USE_BROWSER_LAUNCH_ARGS": json.dumps(
+            config.browser.launch_args if config.browser else []
+        ),
+        "COMPUTER_USE_BROWSER_OPEN_URL_ON_START": (
+            config.browser.open_url_on_start
+            if config.browser and config.browser.open_url_on_start
+            else ""
+        ),
+        "COMPUTER_USE_BROWSER_GPU_MODE": _browser_gpu_mode(config),
         "COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION": (
             config.actions.screenshot_processing_location
         ),
@@ -516,6 +527,14 @@ def _has_artifact_volume_mount(volumes: dict[str, object], artifacts_dir: str) -
 def _normalize_mount_path(path: str) -> str:
     normalized = "/" + path.strip("/")
     return normalized.rstrip("/") or "/"
+
+
+def _browser_gpu_mode(config: ComputerConfig) -> str:
+    if not config.browser:
+        return "auto"
+    if config.browser.gpu_mode:
+        return config.browser.gpu_mode
+    return "auto"
 
 
 def _connect_token_parts(token_info: object) -> tuple[str, str | None]:

@@ -219,6 +219,11 @@ class BrowserOpenUrlRequest(Schema):
         return value
 
 
+class BrowserRenderMetricsRequest(BrowserOpenUrlRequest):
+    wait_for_window: bool = False
+    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+
 class CommandRunRequest(Schema):
     command: list[str] = Field(min_length=1)
     timeout: float = Field(default=30.0, gt=0, le=600)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,16 @@ def _path_env(name: str, default: str) -> Path:
     return Path(os.getenv(name, default))
 
 
+def _json_list_env(name: str) -> list[str]:
+    value = os.getenv(name)
+    if not value:
+        return []
+    parsed = json.loads(value)
+    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+        raise ValueError(f"{name} must be a JSON string list")
+    return parsed
+
+
 @dataclass(frozen=True)
 class DaemonSettings:
     run_id: str | None = field(default_factory=lambda: os.getenv("COMPUTER_USE_RUN_ID") or None)
@@ -50,6 +61,18 @@ class DaemonSettings:
     )
     browser_prewarm: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_BROWSER_PREWARM", False)
+    )
+    browser_profile_dir: str | None = field(
+        default_factory=lambda: os.getenv("COMPUTER_USE_BROWSER_PROFILE_DIR") or None
+    )
+    browser_launch_args: list[str] = field(
+        default_factory=lambda: _json_list_env("COMPUTER_USE_BROWSER_LAUNCH_ARGS")
+    )
+    browser_open_url_on_start: str | None = field(
+        default_factory=lambda: os.getenv("COMPUTER_USE_BROWSER_OPEN_URL_ON_START") or None
+    )
+    browser_gpu_mode: str = field(
+        default_factory=lambda: os.getenv("COMPUTER_USE_BROWSER_GPU_MODE", "auto")
     )
     artifacts_dir: Path = field(
         default_factory=lambda: _path_env("COMPUTER_USE_ARTIFACTS_DIR", "/home/desktop/artifacts")
@@ -146,6 +169,7 @@ class DaemonSettings:
     image_profile: str = field(
         default_factory=lambda: os.getenv("COMPUTER_USE_IMAGE_PROFILE", "standard")
     )
+
 
 
 def get_settings() -> DaemonSettings:

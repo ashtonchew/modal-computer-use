@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator
@@ -20,6 +21,7 @@ from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
+from modal_computer_use.models import ActionResult
 from modal_computer_use.observability import get_tracer
 from modal_computer_use.redaction import safe_exception_payload, sanitize_payload, sanitize_text
 
@@ -44,11 +46,38 @@ from .routes import (
     windows,
 )
 
+logger = logging.getLogger("modal_computer_use.daemon.app")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     supervisor: Supervisor = app.state.supervisor
     await supervisor.start()
+    app.state.browser_prewarm = None
+    startup_url = app.state.settings.browser_open_url_on_start
+    if startup_url:
+        try:
+            app.state.browser_prewarm = await app.state.backend.open_url(
+                startup_url,
+                wait_for_window=True,
+            )
+        except Exception as exc:
+            logger.warning("browser startup url failed", exc_info=True)
+            app.state.browser_prewarm = ActionResult(
+                ok=False,
+                message="browser startup url failed",
+                output={"error": type(exc).__name__},
+            )
+    elif app.state.settings.browser_prewarm:
+        try:
+            app.state.browser_prewarm = await app.state.backend.prewarm_browser()
+        except Exception as exc:
+            logger.warning("browser prewarm failed", exc_info=True)
+            app.state.browser_prewarm = ActionResult(
+                ok=False,
+                message="browser prewarm failed",
+                output={"error": type(exc).__name__},
+            )
     yield
     await supervisor.stop()
 
@@ -65,6 +94,9 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         height=settings.desktop_height,
         display=settings.display,
         browser=settings.browser,
+        browser_profile_dir=settings.browser_profile_dir,
+        browser_launch_args=settings.browser_launch_args,
+        browser_gpu_mode=settings.browser_gpu_mode,
     )
     app.state.input_lock = asyncio.Lock()
     app.state.artifacts = ArtifactStore(

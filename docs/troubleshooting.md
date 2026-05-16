@@ -73,6 +73,10 @@ Confirm the sandbox is using a browser profile and that `/v1/capabilities` repor
 `image_profile` as `browser` or `browser-gpu`. Prewarm only helps browser startup cost; it does not
 make slow pages, network calls, or login flows faster.
 
+If you are testing GPU rendering, also check `/v1/browser/status`. `gpu_mode` shows which launch
+mode the daemon resolved and `prewarm_result.output` shows the actual command args used. A Modal
+GPU allocation alone is not proof that X11 browser windows are hardware-rendered.
+
 ### Warm-pool sandbox expired before claim
 
 Keep an expiration timestamp with each sandbox ID and discard entries without enough TTL for the

@@ -15,7 +15,11 @@ from modal_computer_use.models import Point, ScreenshotOptions
 
 class RecordingX11Backend(X11DesktopBackend):
     def __init__(self) -> None:
-        super().__init__(width=100, height=100)
+        super().__init__(
+            width=100,
+            height=100,
+            browser_profile_dir="/tmp/mcu-browser-test",
+        )
         self.commands: list[tuple[str, ...]] = []
         self.spawned: list[tuple[str, ...]] = []
 
@@ -112,8 +116,61 @@ def test_x11_launch_and_open_url_spawn_desktop_process() -> None:
     assert opened.ok is True
     assert backend.spawned == [
         ("firefox", "--new-window"),
-        ("chromium", "https://example.com"),
+        (
+            "chromium",
+            "--user-data-dir=/tmp/mcu-browser-test",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--enable-gpu",
+            "https://example.com",
+        ),
     ]
+    assert opened.output["browser"] == "chromium"
+
+
+def test_x11_browser_open_url_applies_explicit_vulkan_gpu_mode_and_args() -> None:
+    backend = X11DesktopBackend(
+        width=100,
+        height=100,
+        browser="chromium",
+        browser_profile_dir="/tmp/mcu-browser-test",
+        browser_launch_args=["--force-device-scale-factor=1"],
+        browser_gpu_mode="chromium-vulkan",
+    )
+    spawned: list[tuple[str, ...]] = []
+
+    async def spawn(*args: str):
+        spawned.append(args)
+
+        class Process:
+            pid = 1234
+
+            def poll(self):
+                return None
+
+        return Process()
+
+    backend._spawn = spawn
+
+    result = anyio.run(backend.open_url, "https://example.com", False)
+
+    assert result.ok is True
+    assert spawned == [
+        (
+            "chromium",
+            "--user-data-dir=/tmp/mcu-browser-test",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--enable-gpu",
+            "--use-angle=vulkan",
+            "--enable-features=Vulkan",
+            "--disable-vulkan-surface",
+            "--force-device-scale-factor=1",
+            "https://example.com",
+        )
+    ]
+    assert result.output["gpu_mode"] == "chromium-vulkan"
+    assert result.output["launch_args"] == ["--force-device-scale-factor=1"]
 
 
 def test_x11_keyboard_press_hotkey_hold_and_release_all() -> None:

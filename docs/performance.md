@@ -149,6 +149,26 @@ uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
 uv run computer-use benchmark compare --providers daytona,e2b --env-file .env --iterations 5
 ```
 
+The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
+
+```bash
+uv run computer-use benchmark compare \
+  --create-modal-sandbox \
+  --providers modal-daemon \
+  --browser chromium \
+  --gpu T4 \
+  --iterations 5
+```
+
+This mode is intentionally explicit because it creates billable Modal resources. It builds a
+`ComputerConfig`, passes `ResourceConfig.gpu` through to `Sandbox.create(gpu=...)`, measures cold
+create-to-ready time, runs the warm daemon cases through the connect token, and terminates the
+sandbox in a `finally` block. If `--gpu` is set without `--resource-profile`, the created sandbox
+uses `browser-gpu`; otherwise `--resource-profile` controls the image/resource profile label.
+Supported GPU strings and counts follow Modal's `gpu` argument, such as `T4`, `L4`, `A10`,
+`L40S`, `A100`, `H100`, or `H100:2`. For GPU-specific benchmarking where Modal's H100-to-H200
+upgrade would pollute attribution, use Modal's strict `H100!` string.
+
 Daytona runs require `DAYTONA_API_KEY`; `DAYTONA_API_URL` and `DAYTONA_TARGET` are reported as
 safe metadata when present. E2B runs require `E2B_API_KEY`. Missing credentials produce
 `not_measured` provider entries rather than crashes. Missing optional SDK packages produce
@@ -257,6 +277,10 @@ If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. T
 Use `examples/browser_profile.py` for an SDK-level pattern. Prewarm is optional and can be disabled
 with `BrowserConfig(prewarm=False)` for deterministic tests.
 
+Use `BrowserConfig(open_url_on_start="https://...")` when a workload always starts on the same
+page and you want startup to pay both browser creation and first navigation. Use
+`BrowserConfig(launch_args=[...])` for browser-owned flags such as viewport/device-scale tuning.
+
 ## Image profile
 
 `COMPUTER_USE_IMAGE_PROFILE` is a label reported by `/v1/capabilities`. The image you build for a Modal Sandbox should match it:
@@ -269,6 +293,13 @@ Pick `browser-gpu` only when the agent is rendering 3D, video, or heavy WebGL; o
 
 GPU is never enabled implicitly. Set both `ResourceConfig(profile="browser-gpu")` and a concrete
 `gpu` value, such as `"T4"`, when you want Modal to request a GPU.
+Browser GPU launch stays in `auto` mode by default because forcing a graphics backend can regress or
+hang on some Linux/X11 stacks. Use `BrowserConfig(gpu_mode="chromium-vulkan")` only for measured
+Chromium Vulkan/ANGLE experiments, or `gpu_mode="off"` to force software rendering.
+
+`browser.render_metrics(url)` runs a Chromium-only synthetic page-load probe through the DevTools
+Protocol and returns Navigation Timing, paint timing, and WebGL renderer metadata. Use it before
+treating a GPU allocation as a browser-rendering improvement.
 
 ## Warm Pools
 

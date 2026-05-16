@@ -175,6 +175,7 @@ def _run_modal_daemon_provider(
             "modal-daemon",
             "modal-daemon comparison requires --mock-local or --base-url",
         )
+    browser_status = _safe_browser_status_metadata(client)
     action_batch = core.run_action_batch_benchmark(
         client=client,
         mode="mock-local" if mode == "mock-local" else "http",
@@ -227,12 +228,25 @@ def _run_modal_daemon_provider(
             "warm attach requires Modal orchestration metadata",
         ),
     }
+    if browser_status.get("configured_browser") == "chromium":
+        cases["browser_render_metrics"] = core.run_browser_render_metrics_benchmark(
+            client=client,
+            url="https://example.com",
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        )
+    else:
+        cases["browser_render_metrics"] = core._future_benchmark(
+            "not_measured",
+            "browser render metrics require configured chromium",
+        )
     metadata = {
         "transport": "daemon-http",
         "base_url": core._safe_base_url(base_url),
         "environment": {
             key: value for key, value in (environment_metadata or {}).items() if value is not None
         },
+        "browser": browser_status,
     }
     runtime_seconds = _modal_daemon_runtime_seconds(environment_metadata)
     return _provider_result(
@@ -243,6 +257,23 @@ def _run_modal_daemon_provider(
         verification=_run_modal_daemon_verification(client),
         billing_reconciliation=reconcile_modal_billing_from_metadata(environment_metadata),
     )
+
+
+def _safe_browser_status_metadata(client: DaemonClient) -> dict[str, Any]:
+    try:
+        status = client.get_json("/v1/browser/status")
+    except Exception as exc:
+        return {"status_error": type(exc).__name__}
+    return {
+        "configured_browser": status.get("configured_browser"),
+        "prewarm": status.get("prewarm"),
+        "profile_dir": status.get("profile_dir"),
+        "gpu_mode": status.get("gpu_mode"),
+        "launch_args": status.get("launch_args"),
+        "open_url_on_start": status.get("open_url_on_start"),
+        "prewarm_result": status.get("prewarm_result"),
+        "windows": status.get("windows"),
+    }
 
 
 def _run_adapter_provider(

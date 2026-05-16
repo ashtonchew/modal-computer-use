@@ -189,6 +189,22 @@ class DesktopBackend(ABC):
     async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
         raise NotImplementedError
 
+    async def browser_render_metrics(
+        self,
+        url: str,
+        *,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, object]:
+        return {
+            "ok": False,
+            "message": "browser render metrics are unavailable for this backend",
+            "url": url,
+            "timeout_seconds": timeout_seconds,
+        }
+
+    async def prewarm_browser(self) -> ActionResult:
+        return ActionResult(ok=True, message="browser prewarm not configured")
+
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:
         return ActionResult(
             ok=True,
@@ -429,6 +445,9 @@ class X11DesktopBackend(MockDesktopBackend):
         height: int = 900,
         display: str = ":99",
         browser: str | None = None,
+        browser_profile_dir: str | None = None,
+        browser_launch_args: Sequence[str] = (),
+        browser_gpu_mode: str = "auto",
     ) -> None:
         super().__init__(width=width, height=height)
         self.display = display
@@ -443,6 +462,9 @@ class X11DesktopBackend(MockDesktopBackend):
             browser=browser,
             launch=self._apps.launch,
             windows=self._windows.list,
+            profile_dir=browser_profile_dir,
+            launch_args=browser_launch_args,
+            gpu_mode=browser_gpu_mode,
         )
         self._clipboard = X11ClipboardController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
@@ -560,6 +582,21 @@ class X11DesktopBackend(MockDesktopBackend):
     async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
         self._browser.browser = self.browser
         return await self._browser.open_url(url, wait_for_window=wait_for_window)
+
+    async def browser_render_metrics(
+        self,
+        url: str,
+        *,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, object]:
+        return await self._browser.render_metrics(
+            url,
+            display=self.display,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def prewarm_browser(self) -> ActionResult:
+        return await self._browser.prewarm()
 
     async def windows(self) -> list[X11Window]:
         return await self._windows.list()
@@ -698,12 +735,36 @@ class X11DesktopBackend(MockDesktopBackend):
 
 
 def choose_backend(
-    kind: str, *, width: int, height: int, display: str, browser: str | None = None
+    kind: str,
+    *,
+    width: int,
+    height: int,
+    display: str,
+    browser: str | None = None,
+    browser_profile_dir: str | None = None,
+    browser_launch_args: Sequence[str] = (),
+    browser_gpu_mode: str = "auto",
 ) -> DesktopBackend:
     if kind == "mock":
         return MockDesktopBackend(width=width, height=height)
     if kind == "x11":
-        return X11DesktopBackend(width=width, height=height, display=display, browser=browser)
+        return X11DesktopBackend(
+            width=width,
+            height=height,
+            display=display,
+            browser=browser,
+            browser_profile_dir=browser_profile_dir,
+            browser_launch_args=browser_launch_args,
+            browser_gpu_mode=browser_gpu_mode,
+        )
     if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
-    return X11DesktopBackend(width=width, height=height, display=display, browser=browser)
+    return X11DesktopBackend(
+        width=width,
+        height=height,
+        display=display,
+        browser=browser,
+        browser_profile_dir=browser_profile_dir,
+        browser_launch_args=browser_launch_args,
+        browser_gpu_mode=browser_gpu_mode,
+    )

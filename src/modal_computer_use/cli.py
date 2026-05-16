@@ -19,8 +19,10 @@ from .benchmarks import (
     run_provider_comparison_mock_local,
 )
 from .client import DaemonClient
+from .config import BrowserConfig, ComputerConfig
 from .errors import ModalNotInstalledError, SandboxUnavailableError
 from .sandbox import ComputerSandbox, modal_sandbox_exec_runner_from_id
+from .state import new_run_id
 from .tracing import ComputerTrace
 
 
@@ -46,9 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     replay_parser.add_argument("--continue-on-error", action="store_true")
 
     benchmark_parser = subparsers.add_parser("benchmark")
-    benchmark_subparsers = benchmark_parser.add_subparsers(
-        dest="benchmark_command", required=True
-    )
+    benchmark_subparsers = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
     action_batch_parser = benchmark_subparsers.add_parser("action-batch")
     action_batch_mode = action_batch_parser.add_mutually_exclusive_group(required=True)
     action_batch_mode.add_argument("--base-url")
@@ -102,10 +102,19 @@ def main(argv: list[str] | None = None) -> int:
         help="comma-separated provider list; defaults to modal-daemon,openai,anthropic,generic",
     )
     compare_parser.add_argument("--sandbox-id")
+    compare_parser.add_argument(
+        "--create-modal-sandbox",
+        action="store_true",
+        help="create a fresh Modal-backed CUA sandbox, run the comparison, then terminate it",
+    )
+    compare_parser.add_argument("--app-name", default="modal-computer-use")
+    compare_parser.add_argument("--name")
     compare_parser.add_argument("--modal-region")
     compare_parser.add_argument("--resource-profile")
     compare_parser.add_argument("--browser")
     compare_parser.add_argument("--gpu")
+    compare_parser.add_argument("--modal-cpu", type=float)
+    compare_parser.add_argument("--modal-memory-mib", type=int)
     compare_parser.add_argument("--image-profile", dest="image_profile")
     compare_parser.add_argument("--image-variant", dest="image_profile")
     compare_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -163,8 +172,21 @@ def main(argv: list[str] | None = None) -> int:
             report_parser.error("--include-sandbox-exec requires --sandbox-id")
     if args.command == "benchmark" and args.benchmark_command == "compare":
         providers = _compare_providers(args, parser=compare_parser)
-        if "modal-daemon" in providers and not (args.mock_local or args.base_url):
-            compare_parser.error("modal-daemon comparison requires --mock-local or --base-url")
+        if "modal-daemon" in providers and not (
+            args.mock_local or args.base_url or args.create_modal_sandbox
+        ):
+            compare_parser.error(
+                "modal-daemon comparison requires --mock-local, --base-url, "
+                "or --create-modal-sandbox"
+            )
+        if args.create_modal_sandbox:
+            if args.mock_local or args.base_url:
+                compare_parser.error(
+                    "--create-modal-sandbox cannot be combined with --mock-local or --base-url"
+                )
+            if "modal-daemon" not in providers:
+                compare_parser.error("--create-modal-sandbox requires provider modal-daemon")
+            _validate_modal_create_args(args, parser=compare_parser)
         if "modal-exec" in providers and not args.sandbox_id:
             compare_parser.error("modal-exec comparison requires --sandbox-id")
         if args.modal_billing_reconcile:
@@ -184,9 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
         if not args.dry_run and not (args.base_url or args.sandbox_id or args.target_run_id):
-            replay_parser.error(
-                "real replay requires --base-url, --sandbox-id, or --target-run-id"
-            )
+            replay_parser.error("real replay requires --base-url, --sandbox-id, or --target-run-id")
         return _trace_replay(args)
     if args.benchmark_command == "action-batch":
         return _benchmark_action_batch(args)
@@ -320,6 +340,13 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
             )
         finally:
             client.close()
+    elif args.create_modal_sandbox:
+        result = _benchmark_compare_created_modal_sandbox(
+            args,
+            providers=providers,
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+        )
     else:
         result = run_provider_comparison(
             providers=providers,
@@ -335,6 +362,94 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
         args.output.write_text(f"{output}\n", encoding="utf-8")
     print(output)
     return 0 if result["ok"] else 1
+
+
+def _benchmark_compare_created_modal_sandbox(
+    args: argparse.Namespace,
+    *,
+    providers: list[ComparisonProvider],
+    sandbox_exec_runner: Any,
+    sandbox_exec_setup_failure: dict[str, Any] | None,
+) -> dict[str, Any]:
+    import time
+
+    run_id = new_run_id()
+    config = _modal_benchmark_config(args, run_id=run_id)
+    app_tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id}
+    tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id, "provider": "modal-daemon"}
+    started = time.perf_counter()
+    computer = ComputerSandbox.create(
+        config=config,
+        app_name=args.app_name,
+        name=args.name,
+        app_tags=app_tags,
+        tags=tags,
+        wait=True,
+    )
+    cold_create_to_ready_ms = (time.perf_counter() - started) * 1000
+    metadata = {
+        **_benchmark_environment_metadata(args),
+        "modal_cold_create_to_ready_ms": cold_create_to_ready_ms,
+        "modal_run_id": run_id,
+        "modal_app_name": args.app_name,
+        "modal_sandbox_id": computer.metadata().sandbox_id if computer.metadata() else None,
+        "modal_cpu_count": args.modal_cpu,
+        "modal_memory_gib": (
+            args.modal_memory_mib / 1024 if args.modal_memory_mib is not None else None
+        ),
+    }
+    try:
+        return run_provider_comparison(
+            providers=providers,
+            client=computer.client,
+            mode="http",
+            iterations=args.iterations,
+            base_url="https://connect.modal.run",
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+            environment_metadata=metadata,
+        )
+    finally:
+        computer.terminate()
+        computer.detach()
+
+
+def _modal_benchmark_config(args: argparse.Namespace, *, run_id: str) -> ComputerConfig:
+    config = ComputerConfig(run_id=run_id)
+    config.runtime.modal_region = args.modal_region
+    config.resources.profile = _modal_benchmark_resource_profile(args)
+    config.resources.gpu = args.gpu
+    config.resources.cpu = args.modal_cpu
+    config.resources.memory_mib = args.modal_memory_mib
+    if args.browser:
+        config.browser = BrowserConfig(kind=args.browser)
+    return config
+
+
+def _modal_benchmark_resource_profile(args: argparse.Namespace) -> str:
+    if args.resource_profile:
+        return args.resource_profile
+    if args.gpu:
+        return "browser-gpu"
+    if args.browser:
+        return "browser"
+    return "standard"
+
+
+def _validate_modal_create_args(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+) -> None:
+    profile = _modal_benchmark_resource_profile(args)
+    if profile not in {"standard", "browser", "browser-gpu", "custom"}:
+        parser.error("--resource-profile must be one of standard, browser, browser-gpu, custom")
+    if args.browser and args.browser not in {"firefox", "chromium"}:
+        parser.error("--browser must be firefox or chromium when creating a Modal sandbox")
+    if args.modal_cpu is not None and args.modal_cpu <= 0:
+        parser.error("--modal-cpu must be greater than 0")
+    if args.modal_memory_mib is not None and args.modal_memory_mib < 128:
+        parser.error("--modal-memory-mib must be at least 128")
 
 
 def _compare_providers(

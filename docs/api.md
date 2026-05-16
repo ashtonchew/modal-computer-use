@@ -17,7 +17,7 @@ Namespaces on `ComputerSandbox`:
 - `computer.windows`: `list`, `active`, `activate`, `close`, `wait_for`
 - `computer.actions`: `apply`, `run`, `validate`
 - `computer.artifacts`: `list`, `read_bytes`, `write_bytes`, `download`, `upload`, `delete`, `manifest`, `sync`
-- `computer.browser`: `open_url`, `status`
+- `computer.browser`: `open_url`, `status`, `render_metrics`
 - `computer.apps`: `launch`, `open_artifact`
 - `computer.commands`: `run`
 - `computer.input`: `release_all`
@@ -225,6 +225,12 @@ raw paths, artifact URIs, stdout, stderr tails, raw command strings, or ffmpeg a
 Action benchmark cases also include `daemon_samples_ms`, `daemon_summary_ms`,
 `overhead_samples_ms`, `overhead_summary_ms`, and `attribution`. Missing daemon timing is reported
 as unavailable for compatibility with old daemons; malformed timing is a structured failure.
+
+`computer-use benchmark compare --create-modal-sandbox --providers modal-daemon` is the explicit
+mode that creates a fresh Modal CUA sandbox for benchmarking. In that mode `--gpu`, `--browser`,
+`--resource-profile`, `--modal-region`, `--modal-cpu`, and `--modal-memory-mib` are applied to the
+created `ComputerConfig`; the run records cold create-to-ready metadata, executes the warm daemon
+cases, then terminates and detaches the sandbox.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an

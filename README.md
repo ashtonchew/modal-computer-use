@@ -95,6 +95,23 @@ uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
 uv run computer-use benchmark compare --providers daytona,e2b --env-file .env --iterations 5
 ```
 
+To create a fresh Modal-backed CUA sandbox for the Modal daemon benchmark, including an optional
+GPU request, use the explicit creation mode:
+
+```bash
+uv run computer-use benchmark compare \
+  --create-modal-sandbox \
+  --providers modal-daemon \
+  --browser chromium \
+  --gpu T4 \
+  --iterations 5
+```
+
+Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through a Modal
+connect token, tags the Modal app and sandbox with `benchmark=provider-compare` plus a generated
+`benchmark_run_id`, then terminates and detaches the sandbox. Passing `--gpu` defaults the created
+resource profile to `browser-gpu` unless `--resource-profile` is supplied.
+
 The default comparison runs the Modal daemon plus OpenAI, Anthropic, and generic adapter
 normalization/execution without calling provider APIs. Daytona and E2B live runs are credential
 gated and report `not_measured` when `DAYTONA_API_KEY` or `E2B_API_KEY` is absent. Install pinned
@@ -168,7 +185,9 @@ computer.detach()
 The Modal path uses Sandbox Connect Tokens for daemon access on port `8080`. noVNC is off by default and must be explicitly enabled.
 Browser-heavy workloads can opt into `ResourceConfig(profile="browser")` with
 `BrowserConfig(prewarm=True)`, or `profile="browser-gpu"` with an explicit `gpu` value after
-measurement shows rendering is the bottleneck. See `examples/browser_profile.py`.
+measurement shows rendering is the bottleneck. Browser GPU launch stays in autodetect mode by
+default; use `BrowserConfig(gpu_mode="chromium-vulkan" | "off")` only when benchmarking driver
+behavior. See `examples/browser_profile.py`.
 
 To reuse an existing run-scoped sandbox, use an explicit reuse policy:
 

@@ -578,6 +578,88 @@ def run_recording_start_stop_benchmark(
     }
 
 
+def run_browser_render_metrics_benchmark(
+    *,
+    client: DaemonClient,
+    url: str,
+    iterations: int,
+    warmup_iterations: int = 1,
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    samples, observations = _measure_observed_case(
+        name="browser_render_metrics",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=lambda: client.post_json(
+            "/v1/browser/render-metrics",
+            json={"url": url, "timeout_seconds": timeout_seconds},
+        ),
+        failures=failures,
+    )
+    successful = observations
+    for iteration, result in enumerate(successful):
+        if isinstance(result, dict) and result.get("ok") is False:
+            failures.append(
+                {
+                    "case": "browser_render_metrics",
+                    "phase": "measure",
+                    "iteration": iteration,
+                    "error": result.get("message") or "browser render metrics failed",
+                    "type": "BrowserRenderMetricsError",
+                }
+            )
+    return {
+        "status": "failed" if failures else "ok",
+        "url": url,
+        "iterations": iterations,
+        "samples_ms": samples,
+        "summary_ms": _summary(samples),
+        "successful_iterations": len(samples),
+        "last_result": _browser_render_last_result(successful[-1] if successful else None),
+        "failures": failures,
+    }
+
+
+def _browser_render_last_result(result: Any) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    metrics = result.get("metrics")
+    navigation = metrics.get("navigation") if isinstance(metrics, dict) else None
+    return {
+        "ok": result.get("ok"),
+        "wall_ms": result.get("wall_ms"),
+        "gpu_mode": result.get("gpu_mode"),
+        "profile_dir": result.get("profile_dir"),
+        "metrics": {
+            "url": metrics.get("url") if isinstance(metrics, dict) else None,
+            "readyState": metrics.get("readyState") if isinstance(metrics, dict) else None,
+            "title": metrics.get("title") if isinstance(metrics, dict) else None,
+            "bodyTextLength": metrics.get("bodyTextLength") if isinstance(metrics, dict) else None,
+            "webgl": metrics.get("webgl") if isinstance(metrics, dict) else None,
+            "navigation": {
+                "duration": navigation.get("duration") if isinstance(navigation, dict) else None,
+                "domContentLoadedEventEnd": navigation.get("domContentLoadedEventEnd")
+                if isinstance(navigation, dict)
+                else None,
+                "loadEventEnd": navigation.get("loadEventEnd")
+                if isinstance(navigation, dict)
+                else None,
+                "responseStart": navigation.get("responseStart")
+                if isinstance(navigation, dict)
+                else None,
+                "transferSize": navigation.get("transferSize")
+                if isinstance(navigation, dict)
+                else None,
+                "decodedBodySize": navigation.get("decodedBodySize")
+                if isinstance(navigation, dict)
+                else None,
+            },
+            "paint": metrics.get("paint") if isinstance(metrics, dict) else None,
+        },
+    }
+
+
 def run_sandbox_exec_benchmark(
     *,
     iterations: int,
@@ -1096,6 +1178,21 @@ def _collect_metadata(client: DaemonClient, failures: list[dict[str, Any]]) -> d
             "image_profile": capabilities.get("image_profile"),
             "vnc_enabled": capabilities.get("vnc_enabled"),
         }
+    try:
+        browser_status = client.get_json("/v1/browser/status")
+    except Exception as exc:
+        metadata["browser"] = {"status_error": type(exc).__name__}
+    else:
+        metadata["browser"] = {
+            "configured_browser": browser_status.get("configured_browser"),
+            "prewarm": browser_status.get("prewarm"),
+            "profile_dir": browser_status.get("profile_dir"),
+            "gpu_mode": browser_status.get("gpu_mode"),
+            "launch_args": browser_status.get("launch_args"),
+            "open_url_on_start": browser_status.get("open_url_on_start"),
+            "prewarm_result": browser_status.get("prewarm_result"),
+            "windows": browser_status.get("windows"),
+        }
     return metadata
 
 
@@ -1209,7 +1306,31 @@ def _ensure_ok_result(result: Any) -> None:
     if not isinstance(result, dict):
         raise RuntimeError("daemon returned a non-object action response")
     if result.get("ok") is not True:
-        raise RuntimeError("daemon action response was not ok")
+        detail = _failed_action_detail(result)
+        message = "daemon action response was not ok"
+        if detail:
+            message = f"{message}: {detail}"
+        raise RuntimeError(message)
+
+
+def _failed_action_detail(result: dict[str, Any]) -> str | None:
+    results = result.get("results")
+    if not isinstance(results, list):
+        return None
+    for item in results:
+        if not isinstance(item, dict) or item.get("ok") is not False:
+            continue
+        index = item.get("index")
+        prefix = f"result[{index}]" if isinstance(index, int) else "result"
+        error_code = item.get("error_code")
+        error = item.get("error")
+        if isinstance(error_code, str) and isinstance(error, str) and error:
+            return f"{prefix} {error_code}: {error}"
+        if isinstance(error_code, str):
+            return f"{prefix} {error_code}"
+        if isinstance(error, str) and error:
+            return f"{prefix}: {error}"
+    return None
 
 
 def _extract_daemon_ms(result: dict[str, Any]) -> float | None:

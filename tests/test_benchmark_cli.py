@@ -4,6 +4,7 @@ import json
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -441,9 +442,7 @@ def test_benchmark_compare_env_file_does_not_override_existing_env(
     assert "e2b-from-dotenv" not in serialized
 
 
-def test_benchmark_compare_env_file_loads_only_provider_keys(
-    monkeypatch, tmp_path, capsys
-) -> None:
+def test_benchmark_compare_env_file_loads_only_provider_keys(monkeypatch, tmp_path, capsys) -> None:
     env_file = tmp_path / "provider.env"
     env_file.write_text(
         "E2B_API_KEY=e2b-from-dotenv\nMODAL_CONFIG_PATH=/tmp/should-not-load\nE2B_TEMPLATE=\n",
@@ -625,7 +624,9 @@ def test_benchmark_compare_safe_provider_metadata_removes_url_credentials() -> N
 
 def test_benchmark_compare_provider_failure_redacts_url_paths(monkeypatch) -> None:
     def fail_provider(**kwargs):
-        raise RuntimeError("stream https://user:secret@example.com/sandbox/token/vnc?password=secret")
+        raise RuntimeError(
+            "stream https://user:secret@example.com/sandbox/token/vnc?password=secret"
+        )
 
     monkeypatch.setattr(benchmark_comparison, "_run_adapter_provider", fail_provider)
 
@@ -1078,7 +1079,9 @@ def test_benchmark_compare_requires_modal_daemon_target(capsys) -> None:
 
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
-    assert "modal-daemon comparison requires --mock-local or --base-url" in captured.err
+    assert (
+        "modal-daemon comparison requires --mock-local, --base-url, or --create-modal-sandbox"
+    ) in captured.err
 
 
 def test_benchmark_compare_structures_and_redacts_provider_failures(monkeypatch) -> None:
@@ -1416,6 +1419,38 @@ def test_type_1000_chars_failure_does_not_leak_typed_payload(monkeypatch) -> Non
     assert payload["failures"][0]["message"] == "backend echoed [redacted typed text]"
     assert sentinel not in serialized
     assert '"text"' not in serialized
+
+
+def test_type_1000_chars_failed_daemon_response_keeps_safe_error_detail() -> None:
+    class FailedDaemonClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            return {
+                "ok": False,
+                "results": [
+                    {
+                        "index": 0,
+                        "type": "type",
+                        "ok": False,
+                        "error_code": "timeout",
+                        "error": "action timed out after 30000 ms",
+                    }
+                ],
+                "timing": {"daemon_ms": 10100.0},
+            }
+
+    payload = run_type_1000_chars_benchmark(
+        client=FailedDaemonClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["failures"][0]["message"] == (
+        "daemon action response was not ok: result[0] timeout: action timed out after 30000 ms"
+    )
 
 
 def test_move_click_sequence_benchmark_uses_safe_metadata_and_attribution() -> None:
@@ -1972,3 +2007,109 @@ def test_benchmark_report_live_sandbox_exec_setup_failure_is_reported(monkeypatc
     assert "novnc" not in captured.out.lower()
     assert "stderr" not in captured.out.lower()
     assert "stdout" not in captured.out.lower()
+
+
+def test_benchmark_compare_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None:
+    created: dict[str, object] = {}
+    closed: list[str] = []
+
+    class CreatedComputer:
+        client = object()
+
+        def metadata(self):
+            return SimpleNamespace(sandbox_id="sb-gpu")
+
+        def terminate(self) -> None:
+            closed.append("terminate")
+
+        def detach(self) -> None:
+            closed.append("detach")
+
+    def fake_create(**kwargs):
+        created.update(kwargs)
+        return CreatedComputer()
+
+    def fake_run_provider_comparison(**kwargs):
+        environment = kwargs["environment_metadata"]
+        return {
+            "ok": True,
+            "benchmark": "provider-compare",
+            "mode": kwargs["mode"],
+            "providers": {
+                "modal-daemon": {
+                    "metadata": {"environment": environment},
+                    "status": "ok",
+                    "cases": {},
+                    "failures": [],
+                }
+            },
+            "failures": [],
+        }
+
+    monkeypatch.setattr(cli.ComputerSandbox, "create", staticmethod(fake_create))
+    monkeypatch.setattr(cli, "run_provider_comparison", fake_run_provider_comparison)
+    monkeypatch.setattr(cli, "new_run_id", lambda: "provider_compare_test")
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--create-modal-sandbox",
+            "--providers",
+            "modal-daemon",
+            "--gpu",
+            "T4",
+            "--browser",
+            "chromium",
+            "--modal-cpu",
+            "2",
+            "--modal-memory-mib",
+            "4096",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    config = created["config"]
+    assert exit_code == 0
+    assert created["app_tags"] == {
+        "benchmark": "provider-compare",
+        "benchmark_run_id": "provider_compare_test",
+    }
+    assert created["tags"] == {
+        "benchmark": "provider-compare",
+        "benchmark_run_id": "provider_compare_test",
+        "provider": "modal-daemon",
+    }
+    assert config.resources.profile == "browser-gpu"
+    assert config.resources.gpu == "T4"
+    assert config.resources.cpu == 2
+    assert config.resources.memory_mib == 4096
+    assert config.browser.kind == "chromium"
+    assert config.browser.gpu_mode is None
+    environment = payload["providers"]["modal-daemon"]["metadata"]["environment"]
+    assert environment["gpu"] == "T4"
+    assert environment["modal_cpu_count"] == 2
+    assert environment["modal_memory_gib"] == 4
+    assert environment["modal_sandbox_id"] == "sb-gpu"
+    assert environment["modal_cold_create_to_ready_ms"] > 0
+    assert closed == ["terminate", "detach"]
+
+
+def test_benchmark_compare_create_modal_sandbox_requires_modal_daemon(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "benchmark",
+                "compare",
+                "--create-modal-sandbox",
+                "--providers",
+                "openai",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "--create-modal-sandbox requires provider modal-daemon" in captured.err

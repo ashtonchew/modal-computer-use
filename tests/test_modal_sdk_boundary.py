@@ -293,7 +293,13 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(
         run_id="run-123",
-        browser=BrowserConfig(kind="chromium", prewarm=False),
+        browser=BrowserConfig(
+            kind="chromium",
+            prewarm=False,
+            profile_dir="/home/desktop/browser-profile",
+            launch_args=["--force-device-scale-factor=1"],
+            open_url_on_start="https://example.com",
+        ),
     )
     config.resources.profile = "browser-gpu"
     config.resources.gpu = "T4"
@@ -305,7 +311,30 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "browser-gpu"
     assert kwargs["env"]["COMPUTER_USE_BROWSER"] == "chromium"
     assert kwargs["env"]["COMPUTER_USE_BROWSER_PREWARM"] == "false"
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_PROFILE_DIR"] == (
+        "/home/desktop/browser-profile"
+    )
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_LAUNCH_ARGS"] == (
+        '["--force-device-scale-factor=1"]'
+    )
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_OPEN_URL_ON_START"] == "https://example.com"
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_GPU_MODE"] == "auto"
     assert kwargs["env"]["COMPUTER_USE_VNC_PASSWORD"] == ""
+
+
+def test_create_passes_explicit_browser_gpu_mode(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(
+        run_id="run-123",
+        browser=BrowserConfig(kind="chromium", gpu_mode="chromium-vulkan"),
+    )
+    config.resources.profile = "browser-gpu"
+    config.resources.gpu = "T4"
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_GPU_MODE"] == "chromium-vulkan"
 
 
 def test_create_rejects_persistent_artifacts_without_volume_mount(monkeypatch) -> None:

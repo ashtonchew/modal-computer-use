@@ -78,6 +78,15 @@ class BrowserConfig(StrictBaseModel):
     profile_dir: str | None = None
     launch_args: list[str] = Field(default_factory=list)
     open_url_on_start: str | None = None
+    gpu_mode: Literal["auto", "off", "chromium-vulkan"] | None = None
+
+    @field_validator("launch_args")
+    @classmethod
+    def _valid_launch_args(cls, value: list[str]) -> list[str]:
+        for arg in value:
+            if "\x00" in arg:
+                raise ValueError("launch_args must not contain NUL bytes")
+        return value
 
 
 class ActionConfig(StrictBaseModel):
