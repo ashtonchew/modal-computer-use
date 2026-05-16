@@ -10,13 +10,24 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
 from modal_computer_use.actions import normalize_key, normalize_key_combo
 from modal_computer_use.artifacts import ArtifactStore
+from modal_computer_use.daemon.desktop.apps import X11AppController
+from modal_computer_use.daemon.desktop.browser import X11BrowserController
+from modal_computer_use.daemon.desktop.clipboard import X11ClipboardController
+from modal_computer_use.daemon.desktop.display import StaticDisplayController
+from modal_computer_use.daemon.desktop.keyboard import X11KeyboardController
+from modal_computer_use.daemon.desktop.mouse import BUTTON_NUMBERS, X11MouseController
+from modal_computer_use.daemon.desktop.screenshots import (
+    X11ScreenshotController,
+    encode_image,
+    scaled_dimension,
+)
+from modal_computer_use.daemon.desktop.windows import X11WindowController
 from modal_computer_use.models import (
     ActionResult,
     CoordinateSpace,
@@ -307,8 +318,8 @@ class MockDesktopBackend(DesktopBackend):
         retention_class: str = "ephemeral",
     ) -> Screenshot:
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
-        image_width = _scaled_dimension(source.width, options.scale)
-        image_height = _scaled_dimension(source.height, options.scale)
+        image_width = scaled_dimension(source.width, options.scale)
+        image_height = scaled_dimension(source.height, options.scale)
         img = Image.new("RGB", (image_width, image_height), (245, 246, 248))
         draw = ImageDraw.Draw(img)
         draw.rectangle([0, 0, image_width - 1, image_height - 1], outline=(68, 84, 106))
@@ -330,7 +341,7 @@ class MockDesktopBackend(DesktopBackend):
                     fill=(220, 38, 38),
                     width=2,
                 )
-        data = _encode_image(img, options.format, options.quality)
+        data = encode_image(img, options.format, options.quality)
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,
             desktop_height=self.height,
@@ -422,6 +433,51 @@ class X11DesktopBackend(MockDesktopBackend):
         super().__init__(width=width, height=height)
         self.display = display
         self.browser = browser
+        self._display = StaticDisplayController(width=width, height=height, display=display)
+        self._apps = X11AppController(spawn=lambda *args: self._spawn(*args))
+        self._windows = X11WindowController(
+            run=lambda *args, **kwargs: self._run(*args, **kwargs),
+            fallback_windows=super().windows,
+        )
+        self._browser = X11BrowserController(
+            browser=browser,
+            launch=self._apps.launch,
+            windows=self._windows.list,
+        )
+        self._clipboard = X11ClipboardController(
+            run=lambda *args, **kwargs: self._run(*args, **kwargs),
+            get_state=super().clipboard_get,
+            set_state=super().clipboard_set,
+            clear_state=super().clipboard_clear,
+        )
+        self._keyboard = X11KeyboardController(
+            run=lambda *args, **kwargs: self._run(*args, **kwargs),
+            type_state=super().keyboard_type,
+            press_state=super().keyboard_press,
+            hotkey_state=super().keyboard_hotkey,
+            key_down_state=super().key_down,
+            key_up_state=super().key_up,
+            clipboard_get=self.clipboard_get,
+            clipboard_set=self.clipboard_set,
+        )
+        self._mouse = X11MouseController(
+            run=lambda *args, **kwargs: self._run(*args, **kwargs),
+            move_state=super().mouse_move,
+            position_state=super().mouse_position,
+            click_state=super().mouse_click,
+            drag_state=super().mouse_drag,
+            scroll_state=super().mouse_scroll,
+            button_down_state=super().mouse_down,
+            button_up_state=super().mouse_up,
+            key_down=self.key_down,
+            key_up=self.key_up,
+        )
+        self._screenshots = X11ScreenshotController(
+            run=lambda *args, **kwargs: self._run(*args, **kwargs),
+            width=width,
+            height=height,
+            cursor_position=self.mouse_position,
+        )
 
     async def ready(self) -> tuple[bool, list[str]]:
         missing = [
@@ -499,101 +555,29 @@ class X11DesktopBackend(MockDesktopBackend):
         )
 
     async def launch(self, command: str, args: Sequence[str] = ()) -> ActionResult:
-        argv = (command, *args)
-        try:
-            process = await self._spawn(*argv)
-        except OSError as exc:
-            return ActionResult(
-                ok=False,
-                message="failed to launch application",
-                output={"command": command, "returncode": None, "error": str(exc)},
-            )
-        await asyncio.sleep(0.2)
-        returncode = process.poll()
-        return ActionResult(
-            ok=returncode in (None, 0),
-            message=None if returncode in (None, 0) else "application exited immediately",
-            output={
-                "command": command,
-                "args": list(args),
-                "pid": process.pid,
-                "returncode": returncode,
-            },
-        )
+        return await self._apps.launch(command, args)
 
     async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
-        before = len(await self.windows()) if wait_for_window else None
-        command = self.browser or "xdg-open"
-        result = await self.launch(command, [url])
-        if not result.ok or not wait_for_window:
-            return result
-        deadline = asyncio.get_running_loop().time() + 5
-        while asyncio.get_running_loop().time() < deadline:
-            windows = await self.windows()
-            if before is None or len(windows) > before:
-                result.output["windows"] = len(windows)
-                return result
-            await asyncio.sleep(0.2)
-        result.output["windows"] = before
-        result.output["wait_for_window_timed_out"] = True
-        return result
+        self._browser.browser = self.browser
+        return await self._browser.open_url(url, wait_for_window=wait_for_window)
 
     async def windows(self) -> list[X11Window]:
-        result = await self._run("wmctrl", "-lpGx", timeout=2, check=False)
-        if result.returncode != 0:
-            return await super().windows()
-        active = await self._run("xdotool", "getactivewindow", timeout=2, check=False)
-        active_id = _normalize_window_id(active.stdout)
-        windows: list[X11Window] = []
-        for line in result.stdout.splitlines():
-            parts = line.split(None, 8)
-            if len(parts) < 9:
-                continue
-            window_id, _desktop, pid, x, y, width, height, class_name, title = parts
-            try:
-                windows.append(
-                    X11Window(
-                        id=window_id,
-                        title=title,
-                        class_name=class_name,
-                        pid=int(pid) if pid != "0" else None,
-                        x=int(x),
-                        y=int(y),
-                        width=int(width),
-                        height=int(height),
-                        is_active=_normalize_window_id(window_id) == active_id,
-                    )
-                )
-            except ValueError:
-                continue
-        return windows
+        return await self._windows.list()
 
     async def active_window(self) -> X11Window | None:
-        windows = await self.windows()
-        for window in windows:
-            if window.is_active:
-                return window
-        return windows[0] if windows else None
+        return await self._windows.active()
 
     async def activate_window(self, window_id: str) -> ActionResult:
-        result = await self._run("wmctrl", "-ia", window_id, timeout=5, check=False)
-        return ActionResult(
-            ok=result.returncode == 0,
-            message=None if result.returncode == 0 else "failed to activate window",
-            output={"window_id": window_id},
-        )
+        return await self._windows.activate(window_id)
 
     async def close_window(self, window_id: str) -> ActionResult:
-        result = await self._run("wmctrl", "-ic", window_id, timeout=5, check=False)
-        return ActionResult(
-            ok=result.returncode == 0,
-            message=None if result.returncode == 0 else "failed to close window",
-            output={"window_id": window_id},
-        )
+        return await self._windows.close(window_id)
+
+    async def display_info(self) -> DisplayInfo:
+        return await self._display.info()
 
     async def mouse_move(self, x: int, y: int) -> Point:
-        await self._run("xdotool", "mousemove", str(x), str(y))
-        return await super().mouse_move(x, y)
+        return await self._mouse.move(x, y)
 
     async def mouse_click(
         self,
@@ -604,19 +588,7 @@ class X11DesktopBackend(MockDesktopBackend):
         count: int = 1,
         modifiers: Sequence[str] = (),
     ) -> Point:
-        if x is not None and y is not None:
-            await self.mouse_move(x, y)
-        button_number = {"left": "1", "middle": "2", "right": "3"}[button]
-        modifier_keys = [normalize_key(modifier) for modifier in modifiers]
-        for modifier in modifier_keys:
-            await self.key_down(modifier)
-        try:
-            await self._run("xdotool", "click", "--repeat", str(count), button_number)
-        finally:
-            for modifier in reversed(modifier_keys):
-                with contextlib.suppress(Exception):
-                    await self.key_up(modifier)
-        return await super().mouse_click(x, y, button=button, count=count, modifiers=modifiers)
+        return await self._mouse.click(x, y, button=button, count=count, modifiers=modifiers)
 
     async def mouse_drag(
         self,
@@ -628,46 +600,7 @@ class X11DesktopBackend(MockDesktopBackend):
         duration_ms: int = 500,
         modifiers: Sequence[str] = (),
     ) -> Point:
-        points = list(path or [])
-        moved_to_path_start = False
-        if points and start is None:
-            start = points[0]
-            await self.mouse_move(start.x, start.y)
-            points = points[1:]
-            moved_to_path_start = True
-        if not points:
-            if start is not None:
-                if not moved_to_path_start:
-                    await self.mouse_move(start.x, start.y)
-            elif end is None:
-                start = await self.mouse_position()
-            if end is not None:
-                points = [end]
-
-        interval_ms = 0
-        if points:
-            interval_ms = duration_ms // max(len(points), 1)
-        modifier_keys = [normalize_key(modifier) for modifier in modifiers]
-        for modifier in modifier_keys:
-            await self.key_down(modifier)
-        try:
-            await self.mouse_down(button)
-            for point in points:
-                await self._run(
-                    "xdotool",
-                    "mousemove",
-                    str(point.x),
-                    str(point.y),
-                )
-                if interval_ms > 0:
-                    await asyncio.sleep(interval_ms / 1000)
-        finally:
-            with contextlib.suppress(Exception):
-                await self.mouse_up(button)
-            for modifier in reversed(modifier_keys):
-                with contextlib.suppress(Exception):
-                    await self.key_up(modifier)
-        return await super().mouse_drag(
+        return await self._mouse.drag(
             start=start,
             end=end,
             path=path,
@@ -679,107 +612,48 @@ class X11DesktopBackend(MockDesktopBackend):
     async def mouse_scroll(
         self, direction: str, amount: int = 1, x: int | None = None, y: int | None = None
     ) -> ActionResult:
-        if x is not None and y is not None:
-            await self.mouse_move(x, y)
-        button_number = {"up": "4", "down": "5", "left": "6", "right": "7"}[direction]
-        await self._run("xdotool", "click", "--repeat", str(amount), button_number)
-        return await super().mouse_scroll(direction, amount=amount, x=x, y=y)
+        return await self._mouse.scroll(direction, amount=amount, x=x, y=y)
 
     async def mouse_down(
         self, button: str = "left", x: int | None = None, y: int | None = None
     ) -> ActionResult:
-        if x is not None and y is not None:
-            await self.mouse_move(x, y)
-        button_number = {"left": "1", "middle": "2", "right": "3"}[button]
-        await self._run("xdotool", "mousedown", button_number)
-        return await super().mouse_down(button, x=x, y=y)
+        return await self._mouse.down(button, x=x, y=y)
 
     async def mouse_up(
         self, button: str = "left", x: int | None = None, y: int | None = None
     ) -> ActionResult:
-        if x is not None and y is not None:
-            await self.mouse_move(x, y)
-        button_number = {"left": "1", "middle": "2", "right": "3"}[button]
-        await self._run("xdotool", "mouseup", button_number)
-        return await super().mouse_up(button, x=x, y=y)
+        return await self._mouse.up(button, x=x, y=y)
 
     async def mouse_position(self) -> Point:
-        result = await self._run("xdotool", "getmouselocation", "--shell")
-        values: dict[str, int] = {}
-        for line in result.stdout.splitlines():
-            key, _, value = line.partition("=")
-            if key in {"X", "Y"} and value.isdigit():
-                values[key] = int(value)
-        if "X" not in values or "Y" not in values:
-            return await super().mouse_position()
-        return await super().mouse_move(values["X"], values["Y"])
+        return await self._mouse.position()
 
     async def keyboard_type(
         self, text: str, delay_ms: int = 10, method: str = "auto"
     ) -> ActionResult:
-        use_clipboard = method == "clipboard" or (
-            method == "auto" and (len(text) > 80 or not text.isascii())
-        )
-        if use_clipboard:
-            previous = await self.clipboard_get()
-            try:
-                await self.clipboard_set(text)
-                await self.keyboard_hotkey(["ctrl", "v"])
-            finally:
-                await self.clipboard_set(previous)
-        else:
-            await self._run("xdotool", "type", "--delay", str(delay_ms), text)
-        return await super().keyboard_type(text, delay_ms=delay_ms, method=method)
+        return await self._keyboard.type_text(text, delay_ms=delay_ms, method=method)
 
     async def keyboard_press(
         self, key: str, modifiers: Sequence[str] = (), duration_ms: int = 0
     ) -> ActionResult:
-        normalized_key = normalize_key(key)
-        modifier_keys = [normalize_key(modifier) for modifier in modifiers]
-        for modifier in modifier_keys:
-            await self.key_down(modifier)
-        try:
-            if duration_ms > 0:
-                await self.key_down(normalized_key)
-                await asyncio.sleep(duration_ms / 1000)
-                await self.key_up(normalized_key)
-            else:
-                await self._run("xdotool", "key", normalized_key)
-        finally:
-            for modifier in reversed(modifier_keys):
-                with contextlib.suppress(Exception):
-                    await self.key_up(modifier)
-        return await super().keyboard_press(
-            key,
-            modifiers=modifiers,
-            duration_ms=duration_ms,
-        )
+        return await self._keyboard.press(key, modifiers=modifiers, duration_ms=duration_ms)
 
     async def keyboard_hotkey(self, keys: Sequence[str], duration_ms: int = 0) -> ActionResult:
-        combo = "+".join(normalize_key_combo(keys))
-        await self._run("xdotool", "key", combo)
-        return await super().keyboard_hotkey(keys, duration_ms=duration_ms)
+        return await self._keyboard.hotkey(keys, duration_ms=duration_ms)
 
     async def key_down(self, key: str) -> None:
-        await self._run("xdotool", "keydown", normalize_key(key))
-        await super().key_down(key)
+        await self._keyboard.down(key)
 
     async def key_up(self, key: str) -> None:
-        await self._run("xdotool", "keyup", normalize_key(key))
-        await super().key_up(key)
+        await self._keyboard.up(key)
 
     async def clipboard_get(self) -> str:
-        result = await self._run("xclip", "-selection", "clipboard", "-o", check=False)
-        self.clipboard = result.stdout if result.returncode == 0 else ""
-        return self.clipboard
+        return await self._clipboard.get()
 
     async def clipboard_set(self, text: str) -> ActionResult:
-        await self._run("xclip", "-selection", "clipboard", input_text=text)
-        return await super().clipboard_set(text)
+        return await self._clipboard.set(text)
 
     async def clipboard_clear(self) -> ActionResult:
-        await self._run("xclip", "-selection", "clipboard", input_text="")
-        return await super().clipboard_clear()
+        return await self._clipboard.clear()
 
     async def release_all(self) -> ActionResult:
         released = {"keys": sorted(self.held_keys), "buttons": sorted(self.held_buttons)}
@@ -787,9 +661,8 @@ class X11DesktopBackend(MockDesktopBackend):
             with contextlib.suppress(Exception):
                 await self._run("xdotool", "keyup", key)
         for button in reversed(sorted(self.held_buttons)):
-            button_number = {"left": "1", "middle": "2", "right": "3"}[button]
             with contextlib.suppress(Exception):
-                await self._run("xdotool", "mouseup", button_number)
+                await self._run("xdotool", "mouseup", BUTTON_NUMBERS[button])
         self.held_keys.clear()
         self.held_buttons.clear()
         return ActionResult(ok=True, output=released)
@@ -803,64 +676,12 @@ class X11DesktopBackend(MockDesktopBackend):
         call_id: str | None = None,
         retention_class: str = "ephemeral",
     ) -> Screenshot:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-            temp_path = Path(handle.name)
-        command = ["maim"]
-        if not options.show_cursor:
-            command.append("-u")
-        if region:
-            command.extend(["-g", f"{region.width}x{region.height}+{region.x}+{region.y}"])
-        command.append(str(temp_path))
-        await self._run(*command)
-        try:
-            image = Image.open(temp_path)
-            if options.scale != 1.0:
-                image = image.resize(
-                    (
-                        _scaled_dimension(image.width, options.scale),
-                        _scaled_dimension(image.height, options.scale),
-                    )
-                )
-            data = _encode_image(image.convert("RGB"), options.format, options.quality)
-        finally:
-            temp_path.unlink(missing_ok=True)
-        coordinate_space = CoordinateSpace.from_dimensions(
-            desktop_width=self.width,
-            desktop_height=self.height,
-            image_width=_scaled_dimension(region.width if region else self.width, options.scale),
-            image_height=_scaled_dimension(
-                region.height if region else self.height, options.scale
-            ),
-            source_region=region,
-        )
-        artifact_uri = None
-        data_base64 = base64.b64encode(data).decode("ascii")
-        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
-            if artifact_store is None:
-                raise RuntimeError("artifact_store required for artifact screenshot storage")
-            suffix = "jpg" if options.format == "jpeg" else options.format
-            name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-            info = artifact_store.write_bytes(
-                f"screenshots/{name}_{call_id or 'shot'}.{suffix}",
-                data,
-                content_type=f"image/{options.format}",
-                created_by_call_id=call_id,
-                retention_class=retention_class,
-            )
-            artifact_uri = info.uri
-            data_base64 = None
-        return Screenshot(
-            format=options.format,
-            width=coordinate_space.image_width,
-            height=coordinate_space.image_height,
-            size_bytes=len(data),
-            data_base64=data_base64,
-            artifact_uri=artifact_uri,
-            sha256=sha256_bytes(data),
-            captured_at=datetime.now(UTC),
-            coordinate_space=coordinate_space,
-            cursor_visible=options.show_cursor,
-            cursor_position=await self.mouse_position(),
+        return await self._screenshots.capture(
+            options,
+            region=region,
+            artifact_store=artifact_store,
+            call_id=call_id,
+            retention_class=retention_class,
         )
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:
@@ -876,17 +697,6 @@ class X11DesktopBackend(MockDesktopBackend):
         )
 
 
-def _encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
-    output = BytesIO()
-    fmt = "JPEG" if image_format == "jpeg" else image_format.upper()
-    image.save(output, format=fmt, quality=quality)
-    return output.getvalue()
-
-
-def _scaled_dimension(value: int, scale: float) -> int:
-    return max(1, round(value * scale))
-
-
 def choose_backend(
     kind: str, *, width: int, height: int, display: str, browser: str | None = None
 ) -> DesktopBackend:
@@ -897,13 +707,3 @@ def choose_backend(
     if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
     return X11DesktopBackend(width=width, height=height, display=display, browser=browser)
-
-
-def _normalize_window_id(value: str) -> str:
-    raw = value.strip().lower()
-    if not raw:
-        return ""
-    try:
-        return f"0x{int(raw, 0):08x}"
-    except ValueError:
-        return raw

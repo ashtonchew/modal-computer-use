@@ -93,7 +93,8 @@ uv run python -m py_compile \
 
 - noVNC is off by default and any enabled noVNC URL is treated as a secret.
 - Examples and docs do not print bearer tokens, noVNC URLs, artifact URIs, raw artifact paths, recording bytes, screenshot bytes, typed text, clipboard text, raw command strings, stdout, or stderr.
-- Trace validation and replay dry-runs handle redacted typed text and provider provenance.
+- Trace validation and replay dry-runs handle redacted typed text, provider provenance,
+  `screenshot_after` pseudo-actions, artifact URI redaction, and stdout/stderr redaction.
 - Artifact traversal, encoded traversal, absolute paths, and symlink escapes are covered by tests.
 - Recording examples report bounded metadata only.
 
@@ -109,6 +110,15 @@ rg -n "noVNC|artifact_uri|data_base64|raw_path|token|secret|clipboard|typed text
 The first three scans should return no matches. The broad sensitivity scan is expected to match
 models, docs, tests, and security examples; inspect matches manually and fix any example or doc
 that prints secrets.
+
+Run the trace replay contract checks when changing the action writer, replay validator, adapters,
+or redaction rules:
+
+```bash
+uv run pytest tests/test_trace_and_budgets.py tests/test_trace_replay.py -q
+uv run computer-use trace validate /tmp/mcu-daemon-traces/actions.ndjson
+uv run computer-use trace replay /tmp/mcu-daemon-traces/actions.ndjson --dry-run
+```
 
 ## Compatibility
 

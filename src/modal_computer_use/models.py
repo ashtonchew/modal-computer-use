@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from ._invariants import require_coordinate_pair, require_drag_shape, require_safe_text
 from .errors import ActionValidationError
 
 Button = Literal["left", "middle", "right"]
@@ -327,8 +328,7 @@ class ClickAction(BaseAction):
 
     @model_validator(mode="after")
     def _coordinate_pair(self) -> ClickAction:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("x and y must be supplied together")
+        require_coordinate_pair(self.x, self.y)
         return self
 
 
@@ -353,16 +353,14 @@ class DragAction(BaseAction):
 
     @model_validator(mode="after")
     def _valid_drag_shape(self) -> DragAction:
-        has_path = self.path is not None
-        has_end = self.end_x is not None and self.end_y is not None
-        has_partial_start = (self.start_x is None) != (self.start_y is None)
-        has_partial_end = (self.end_x is None) != (self.end_y is None)
-        if has_partial_start or has_partial_end:
-            raise ValueError("drag coordinates must be supplied as x/y pairs")
-        if has_path and len(self.path or []) < 2:
-            raise ValueError("drag path must contain at least two points")
-        if not has_path and not has_end:
-            raise ValueError("drag requires path or end coordinates")
+        require_drag_shape(
+            start_x=self.start_x,
+            start_y=self.start_y,
+            end_x=self.end_x,
+            end_y=self.end_y,
+            path=self.path,
+            coordinate_message="drag coordinates must be supplied as x/y pairs",
+        )
         return self
 
 
@@ -375,8 +373,7 @@ class ScrollAction(BaseAction):
 
     @model_validator(mode="after")
     def _coordinate_pair(self) -> ScrollAction:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("x and y must be supplied together")
+        require_coordinate_pair(self.x, self.y)
         return self
 
 
@@ -387,8 +384,7 @@ class MouseButtonAction(BaseAction):
 
     @model_validator(mode="after")
     def _coordinate_pair(self) -> MouseButtonAction:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("x and y must be supplied together")
+        require_coordinate_pair(self.x, self.y)
         return self
 
 
@@ -409,11 +405,7 @@ class TypeAction(BaseAction):
     @field_validator("text")
     @classmethod
     def _safe_text(cls, value: str) -> str:
-        for char in value:
-            code = ord(char)
-            if code < 32 and char not in ("\n", "\r"):
-                raise ValueError("control characters are not allowed; use keypress/hotkey")
-        return value
+        return require_safe_text(value)
 
 
 class KeyPressAction(BaseAction):

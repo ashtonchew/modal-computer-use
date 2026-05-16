@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from modal_computer_use.artifacts import ArtifactStore
+from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
 from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend, choose_backend
 from modal_computer_use.models import Point, ScreenshotOptions
@@ -165,7 +166,9 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
         return subprocess.CompletedProcess(args, 0, "", "")
 
     backend._run = write_png
-    monkeypatch.setattr(x11_module, "_encode_image", lambda *_args, **_kwargs: b"x" * 1_000_001)
+    monkeypatch.setattr(
+        screenshots_module, "encode_image", lambda *_args, **_kwargs: b"x" * 1_000_001
+    )
 
     async def capture():
         return await backend.screenshot(

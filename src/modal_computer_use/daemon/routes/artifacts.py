@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from modal_computer_use.artifacts import normalize_artifact_path
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.execution import budget_policy
+from modal_computer_use.daemon.routes.execution import budget_policy, run_idle_only_mutation
 from modal_computer_use.errors import ArtifactPathError
 from modal_computer_use.models import ArtifactInfo, ArtifactSyncResult
 
@@ -27,11 +27,11 @@ async def manifest(request: Request, prefix: str = "") -> list[ArtifactInfo]:
 
 @router.post("/sync")
 async def sync(request: Request) -> ArtifactSyncResult:
-    budget_policy(request).enforce_idle()
-    with request.app.state.tracer.span("daemon.artifact.sync"):
-        result = request.app.state.artifacts.sync()
-    budget_policy(request).touch_activity()
-    return result
+    async def operation() -> ArtifactSyncResult:
+        with request.app.state.tracer.span("daemon.artifact.sync"):
+            return request.app.state.artifacts.sync()
+
+    return await run_idle_only_mutation(request, operation)
 
 
 @router.get("/{path:path}")
@@ -115,7 +115,8 @@ def _ensure_writable_artifact_target(target: Path) -> None:
 
 @router.delete("/{path:path}")
 async def delete_artifact(path: str, request: Request) -> dict[str, bool]:
-    budget_policy(request).enforce_idle()
-    request.app.state.artifacts.delete(path)
-    budget_policy(request).touch_activity()
-    return {"ok": True}
+    async def operation() -> dict[str, bool]:
+        request.app.state.artifacts.delete(path)
+        return {"ok": True}
+
+    return await run_idle_only_mutation(request, operation)
