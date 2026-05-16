@@ -214,6 +214,34 @@ Keep SDK benchmark surfaces fair:
   stderr, artifact URIs, or recording paths in saved reports.
 - Treat adapter timings as normalization/execution-path overhead, not provider API latency.
 
+### Mock-local baseline, 2026-05-16
+
+This baseline was captured from the repository root on `main` after PR #14 merged:
+
+```bash
+uv run computer-use benchmark sdk --mock-local --iterations 10 \
+  --output benchmark-sdk-mock-local-2026-05-16.json
+```
+
+The run used mock-local mode, created no Modal sandbox, requested no GPU, and made no provider API
+calls. Treat these numbers as a local regression baseline, not a Modal infrastructure benchmark.
+
+| Surface | Case | Mean ms | p95 ms | Notes |
+| --- | --- | ---: | ---: | --- |
+| `daemon-http` | `batch_5_actions` | 207.21 | 209.48 | Includes mock daemon execution and SDK round trip. |
+| `daemon-http` | `separate_5_actions` | 5.78 | 8.56 | Five separate daemon action requests. |
+| `daemon-http` | `move_click` | 105.74 | 107.69 | One move and one click. |
+| `daemon-http` | `move_click_sequence` | 716.90 | 721.49 | Four move/click pairs. |
+| `daemon-http` | `screenshot_full` | 6.30 | 6.62 | Inline 1440x900 mock PNG, 5,965 bytes. |
+| `daemon-http` | `command_echo` | 0.92 | 1.07 | Mock command route. |
+| `daemon-http` | `recording_start` | 2.01 | 2.39 | Mock recording start. |
+| `daemon-http` | `recording_stop` | 3.06 | 4.12 | Mock recording stop. |
+| `daemon-http` | `type_100_chars` | 2.61 | 3.67 | Redacted text payload; `xdotool` method metadata only. |
+| `daemon-http` | `type_1000_chars` | 1.58 | 2.34 | Redacted text payload; `xdotool` method metadata only. |
+| `openai-adapter` | `adapter_matrix` | 0.045 | 0.057 | Normalization/execution only; no OpenAI API call. |
+| `anthropic-adapter` | `adapter_matrix` | 0.046 | 0.050 | Normalization/execution only; no Anthropic API call. |
+| `action-executor` | `adapter_matrix` | 0.021 | 0.022 | Provider-neutral in-process execution. |
+
 ## Screenshot storage modes
 
 `screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
