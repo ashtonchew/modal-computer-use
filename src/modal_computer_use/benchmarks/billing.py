@@ -6,12 +6,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import uuid4
 
-from .errors import ModalNotInstalledError
+from ..errors import ModalNotInstalledError
 
 MODAL_BILLING_SOURCE = "modal.billing.workspace_billing_report"
 MODAL_BILLING_DOC_URL = "https://modal.com/docs/reference/modal.billing"
 MODAL_BILLING_DEFAULT_RESOLUTION = "h"
-MODAL_BILLING_TAG_NAMES = ("benchmark", "benchmark_run_id", "provider")
+MODAL_BILLING_TAG_NAMES = ("benchmark", "benchmark_run_id", "surface")
 
 BillingReportLoader = Callable[
     [datetime, datetime, str, list[str] | None],
@@ -20,14 +20,14 @@ BillingReportLoader = Callable[
 
 
 def new_benchmark_run_id() -> str:
-    return f"provider_compare_{uuid4().hex[:16]}"
+    return f"sdk_surface_{uuid4().hex[:16]}"
 
 
-def modal_provider_benchmark_tags(benchmark_run_id: str) -> dict[str, str]:
+def modal_surface_benchmark_tags(benchmark_run_id: str) -> dict[str, str]:
     return {
-        "benchmark": "provider-compare",
+        "benchmark": "sdk-surfaces",
         "benchmark_run_id": benchmark_run_id,
-        "provider": "modal-daemon",
+        "surface": "daemon-http",
     }
 
 
@@ -43,7 +43,7 @@ def modal_billing_reconciliation_request(
     safe_required_tags = _safe_tags(required_tags)
     safe_tag_names = _safe_tag_names(tag_names or list(MODAL_BILLING_TAG_NAMES))
     return {
-        "provider": "modal-daemon",
+        "surface": "daemon-http",
         "start": _utc_iso(start),
         "end": _utc_iso(end) if end is not None else None,
         "resolution": resolution,
@@ -159,7 +159,7 @@ def _load_modal_billing_report(
     resolution: str,
     tag_names: list[str] | None,
 ) -> Iterable[Any]:
-    from .sandbox import modal_workspace_billing_report
+    from ..sandbox import modal_workspace_billing_report
 
     return modal_workspace_billing_report(
         start=start,

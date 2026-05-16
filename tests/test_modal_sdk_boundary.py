@@ -203,7 +203,7 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
         name="desktop-1",
         owner="alice",
         tags={"custom": "tag"},
-        app_tags={"benchmark": "provider-compare"},
+        app_tags={"benchmark": "sdk-surfaces"},
         wait=True,
     )
 
@@ -237,7 +237,7 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert "computer-use.created_at" in FakeSandbox.created.set_tags_calls[0]
     assert FakeSandbox.created.set_tags_calls[0]["custom"] == "tag"
     assert FakeApp.objects[0].set_tags_calls == [
-        {"existing": "app-tag", "benchmark": "provider-compare"}
+        {"existing": "app-tag", "benchmark": "sdk-surfaces"}
     ]
     assert computer.metadata().owner == "alice"
     assert computer.metadata().created_at is not None

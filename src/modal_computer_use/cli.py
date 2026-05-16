@@ -2,21 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .benchmark_billing import modal_billing_reconciliation_request
 from .benchmarks import (
-    DEFAULT_COMPARE_PROVIDERS,
-    ComparisonProvider,
+    DEFAULT_SDK_BENCHMARK_SURFACES,
+    BenchmarkSurface,
     run_action_batch_benchmark,
     run_action_batch_benchmark_mock_local,
     run_benchmark_report,
     run_benchmark_report_mock_local,
-    run_provider_comparison,
-    run_provider_comparison_mock_local,
+)
+from .benchmarks.billing import modal_billing_reconciliation_request
+from .benchmarks.surfaces import (
+    run_sdk_surface_benchmark,
+    run_sdk_surface_benchmark_mock_local,
 )
 from .client import DaemonClient
 from .config import BrowserConfig, ComputerConfig
@@ -78,89 +79,85 @@ def main(argv: list[str] | None = None) -> int:
     report_parser.add_argument("--output", type=Path)
     report_parser.add_argument("--json", action="store_true", default=True)
 
-    compare_parser = benchmark_subparsers.add_parser("compare")
-    compare_mode = compare_parser.add_mutually_exclusive_group()
-    compare_mode.add_argument("--base-url")
-    compare_mode.add_argument("--mock-local", action="store_true")
-    compare_parser.add_argument("--token")
-    compare_parser.add_argument(
-        "--provider",
+    sdk_parser = benchmark_subparsers.add_parser("sdk")
+    sdk_mode = sdk_parser.add_mutually_exclusive_group()
+    sdk_mode.add_argument("--base-url")
+    sdk_mode.add_argument("--mock-local", action="store_true")
+    sdk_parser.add_argument("--token")
+    sdk_parser.add_argument(
+        "--surface",
         action="append",
         choices=[
-            "modal-daemon",
-            "modal-exec",
-            "openai",
-            "anthropic",
-            "generic",
-            "daytona",
-            "e2b",
+            "daemon-http",
+            "sandbox-exec",
+            "openai-adapter",
+            "anthropic-adapter",
+            "action-executor",
         ],
-        help="provider to benchmark; may be passed more than once",
+        help="SDK-owned benchmark surface to measure; may be passed more than once",
     )
-    compare_parser.add_argument(
-        "--providers",
-        help="comma-separated provider list; defaults to modal-daemon,openai,anthropic,generic",
+    sdk_parser.add_argument(
+        "--surfaces",
+        help=(
+            "comma-separated surface list; defaults to "
+            "daemon-http,openai-adapter,anthropic-adapter,action-executor"
+        ),
     )
-    compare_parser.add_argument("--sandbox-id")
-    compare_parser.add_argument(
+    sdk_parser.add_argument("--sandbox-id")
+    sdk_parser.add_argument(
         "--create-modal-sandbox",
         action="store_true",
-        help="create a fresh Modal-backed CUA sandbox, run the comparison, then terminate it",
+        help="create a fresh Modal-backed CUA sandbox, run daemon-http, then terminate it",
     )
-    compare_parser.add_argument("--app-name", default="modal-computer-use")
-    compare_parser.add_argument("--name")
-    compare_parser.add_argument("--modal-region")
-    compare_parser.add_argument("--resource-profile")
-    compare_parser.add_argument("--browser")
-    compare_parser.add_argument("--gpu")
-    compare_parser.add_argument("--modal-cpu", type=float)
-    compare_parser.add_argument("--modal-memory-mib", type=int)
-    compare_parser.add_argument("--image-profile", dest="image_profile")
-    compare_parser.add_argument("--image-variant", dest="image_profile")
-    compare_parser.add_argument("--iterations", type=_positive_int, default=5)
-    compare_parser.add_argument("--output", type=Path)
-    compare_parser.add_argument(
+    sdk_parser.add_argument("--app-name", default="modal-computer-use")
+    sdk_parser.add_argument("--name")
+    sdk_parser.add_argument("--modal-region")
+    sdk_parser.add_argument("--resource-profile")
+    sdk_parser.add_argument("--browser")
+    sdk_parser.add_argument("--gpu")
+    sdk_parser.add_argument("--modal-cpu", type=float)
+    sdk_parser.add_argument("--modal-memory-mib", type=int)
+    sdk_parser.add_argument("--image-profile", dest="image_profile")
+    sdk_parser.add_argument("--image-variant", dest="image_profile")
+    sdk_parser.add_argument("--iterations", type=_positive_int, default=5)
+    sdk_parser.add_argument("--output", type=Path)
+    sdk_parser.add_argument(
         "--modal-billing-reconcile",
         action="store_true",
-        help="query Modal billing report data for a tagged modal-daemon benchmark run",
+        help="query Modal billing report data for a tagged daemon-http benchmark run",
     )
-    compare_parser.add_argument(
+    sdk_parser.add_argument(
         "--modal-billing-start",
         help="UTC/ISO start timestamp for Modal billing reconciliation",
     )
-    compare_parser.add_argument(
+    sdk_parser.add_argument(
         "--modal-billing-end",
         help="UTC/ISO end timestamp for Modal billing reconciliation; defaults to now",
     )
-    compare_parser.add_argument(
+    sdk_parser.add_argument(
         "--modal-billing-resolution",
         default="h",
         help="Modal billing report resolution; defaults to h",
     )
-    compare_parser.add_argument(
+    sdk_parser.add_argument(
         "--modal-billing-buffer-seconds",
         type=int,
         default=0,
         help="subtract this many seconds from the reconciliation end time",
     )
-    compare_parser.add_argument(
+    sdk_parser.add_argument(
         "--modal-billing-tag",
         action="append",
         default=[],
         help="required billing tag as key=value; repeat for each attribution tag",
     )
-    compare_parser.add_argument(
+    sdk_parser.add_argument(
         "--modal-billing-tag-name",
         action="append",
         default=[],
         help="tag name to request from Modal billing reports; repeatable",
     )
-    compare_parser.add_argument(
-        "--env-file",
-        type=Path,
-        help="load provider benchmark credentials from a dotenv file; existing env vars win",
-    )
-    compare_parser.add_argument("--json", action="store_true", default=True)
+    sdk_parser.add_argument("--json", action="store_true", default=True)
 
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
@@ -170,38 +167,36 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.include_sandbox_exec and not args.sandbox_id:
             report_parser.error("--include-sandbox-exec requires --sandbox-id")
-    if args.command == "benchmark" and args.benchmark_command == "compare":
-        providers = _compare_providers(args, parser=compare_parser)
-        if "modal-daemon" in providers and not (
+    if args.command == "benchmark" and args.benchmark_command == "sdk":
+        surfaces = _sdk_surfaces(args, parser=sdk_parser)
+        if "daemon-http" in surfaces and not (
             args.mock_local or args.base_url or args.create_modal_sandbox
         ):
-            compare_parser.error(
-                "modal-daemon comparison requires --mock-local, --base-url, "
+            sdk_parser.error(
+                "daemon-http surface benchmark requires --mock-local, --base-url, "
                 "or --create-modal-sandbox"
             )
         if args.create_modal_sandbox:
             if args.mock_local or args.base_url:
-                compare_parser.error(
+                sdk_parser.error(
                     "--create-modal-sandbox cannot be combined with --mock-local or --base-url"
                 )
-            if "modal-daemon" not in providers:
-                compare_parser.error("--create-modal-sandbox requires provider modal-daemon")
-            _validate_modal_create_args(args, parser=compare_parser)
-        if "modal-exec" in providers and not args.sandbox_id:
-            compare_parser.error("modal-exec comparison requires --sandbox-id")
+            if "daemon-http" not in surfaces:
+                sdk_parser.error("--create-modal-sandbox requires surface daemon-http")
+            _validate_modal_create_args(args, parser=sdk_parser)
+        if "sandbox-exec" in surfaces and not args.sandbox_id:
+            sdk_parser.error("sandbox-exec surface benchmark requires --sandbox-id")
         if args.modal_billing_reconcile:
-            if "modal-daemon" not in providers:
-                compare_parser.error("--modal-billing-reconcile requires provider modal-daemon")
+            if "daemon-http" not in surfaces:
+                sdk_parser.error("--modal-billing-reconcile requires surface daemon-http")
             if not args.modal_billing_start:
-                compare_parser.error("--modal-billing-reconcile requires --modal-billing-start")
+                sdk_parser.error("--modal-billing-reconcile requires --modal-billing-start")
             if not args.modal_billing_tag:
-                compare_parser.error("--modal-billing-reconcile requires --modal-billing-tag")
-            _parse_cli_datetime(args.modal_billing_start, parser=compare_parser)
+                sdk_parser.error("--modal-billing-reconcile requires --modal-billing-tag")
+            _parse_cli_datetime(args.modal_billing_start, parser=sdk_parser)
             if args.modal_billing_end:
-                _parse_cli_datetime(args.modal_billing_end, parser=compare_parser)
-            _parse_key_value_pairs(args.modal_billing_tag, parser=compare_parser)
-        if args.env_file is not None and not args.env_file.is_file():
-            compare_parser.error("--env-file must point to an existing file")
+                _parse_cli_datetime(args.modal_billing_end, parser=sdk_parser)
+            _parse_key_value_pairs(args.modal_billing_tag, parser=sdk_parser)
     if args.command == "trace" and args.trace_command == "validate":
         return _trace_validate(args.path)
     if args.command == "trace" and args.trace_command == "replay":
@@ -210,8 +205,8 @@ def main(argv: list[str] | None = None) -> int:
         return _trace_replay(args)
     if args.benchmark_command == "action-batch":
         return _benchmark_action_batch(args)
-    if args.benchmark_command == "compare":
-        return _benchmark_compare(args)
+    if args.benchmark_command == "sdk":
+        return _benchmark_sdk(args)
     return _benchmark_report(args)
 
 
@@ -305,21 +300,19 @@ def _benchmark_report(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
-def _benchmark_compare(args: argparse.Namespace) -> int:
-    providers = _compare_providers(args)
-    if not args.mock_local and _has_live_external_provider(providers):
-        _load_benchmark_env_file(args.env_file)
+def _benchmark_sdk(args: argparse.Namespace) -> int:
+    surfaces = _sdk_surfaces(args)
     sandbox_exec_runner = None
     sandbox_exec_setup_failure = None
-    if "modal-exec" in providers:
+    if "sandbox-exec" in surfaces:
         try:
             sandbox_exec_runner = modal_sandbox_exec_runner_from_id(args.sandbox_id)
         except Exception as exc:
             sandbox_exec_setup_failure = _sandbox_exec_setup_failure(exc)
 
     if args.mock_local:
-        result = run_provider_comparison_mock_local(
-            providers=providers,
+        result = run_sdk_surface_benchmark_mock_local(
+            surfaces=surfaces,
             iterations=args.iterations,
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
@@ -328,8 +321,8 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
     elif args.base_url:
         client = DaemonClient(args.base_url, token=args.token)
         try:
-            result = run_provider_comparison(
-                providers=providers,
+            result = run_sdk_surface_benchmark(
+                surfaces=surfaces,
                 client=client,
                 mode="http",
                 iterations=args.iterations,
@@ -341,21 +334,14 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
         finally:
             client.close()
     elif args.create_modal_sandbox:
-        result = _benchmark_compare_created_modal_sandbox(
+        result = _benchmark_sdk_created_modal_sandbox(
             args,
-            providers=providers,
+            surfaces=surfaces,
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
         )
     else:
-        result = run_provider_comparison(
-            providers=providers,
-            mode="provider-live",
-            iterations=args.iterations,
-            sandbox_exec_runner=sandbox_exec_runner,
-            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
-            environment_metadata=_benchmark_environment_metadata(args),
-        )
+        raise RuntimeError("unreachable SDK benchmark mode")
     output = _json_string(result)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -364,10 +350,10 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
-def _benchmark_compare_created_modal_sandbox(
+def _benchmark_sdk_created_modal_sandbox(
     args: argparse.Namespace,
     *,
-    providers: list[ComparisonProvider],
+    surfaces: list[BenchmarkSurface],
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -375,8 +361,8 @@ def _benchmark_compare_created_modal_sandbox(
 
     run_id = new_run_id()
     config = _modal_benchmark_config(args, run_id=run_id)
-    app_tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id}
-    tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id, "provider": "modal-daemon"}
+    app_tags = {"benchmark": "sdk-surfaces", "benchmark_run_id": run_id}
+    tags = {"benchmark": "sdk-surfaces", "benchmark_run_id": run_id, "surface": "daemon-http"}
     started = time.perf_counter()
     computer = ComputerSandbox.create(
         config=config,
@@ -399,8 +385,8 @@ def _benchmark_compare_created_modal_sandbox(
         ),
     }
     try:
-        return run_provider_comparison(
-            providers=providers,
+        return run_sdk_surface_benchmark(
+            surfaces=surfaces,
             client=computer.client,
             mode="http",
             iterations=args.iterations,
@@ -452,52 +438,25 @@ def _validate_modal_create_args(
         parser.error("--modal-memory-mib must be at least 128")
 
 
-def _compare_providers(
+def _sdk_surfaces(
     args: argparse.Namespace,
     *,
     parser: argparse.ArgumentParser | None = None,
-) -> list[ComparisonProvider]:
+) -> list[BenchmarkSurface]:
     values: list[str] = []
-    if args.providers:
-        values.extend(provider.strip() for provider in args.providers.split(","))
-    if args.provider:
-        values.extend(args.provider)
+    if args.surfaces:
+        values.extend(surface.strip() for surface in args.surfaces.split(","))
+    if args.surface:
+        values.extend(args.surface)
     if not values:
-        return list(DEFAULT_COMPARE_PROVIDERS)
-    allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b"}
-    invalid = [provider for provider in values if provider not in allowed]
+        return list(DEFAULT_SDK_BENCHMARK_SURFACES)
+    allowed = set(DEFAULT_SDK_BENCHMARK_SURFACES) | {"sandbox-exec"}
+    invalid = [surface for surface in values if surface not in allowed]
     if invalid:
         if parser is not None:
-            parser.error(f"invalid provider: {', '.join(invalid)}")
-        raise SystemExit(f"invalid provider: {', '.join(invalid)}")
+            parser.error(f"invalid benchmark surface: {', '.join(invalid)}")
+        raise SystemExit(f"invalid benchmark surface: {', '.join(invalid)}")
     return values  # type: ignore[return-value]
-
-
-def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:
-    return any(provider in {"daytona", "e2b"} for provider in providers)
-
-
-def _load_benchmark_env_file(env_file: Path | None) -> None:
-    from dotenv import dotenv_values
-
-    path = env_file or Path.cwd() / ".env"
-    if not path.is_file():
-        return
-    for key, value in dotenv_values(path).items():
-        if key in _BENCHMARK_ENV_KEYS and value and key not in os.environ:
-            os.environ[key] = value
-
-
-_BENCHMARK_ENV_KEYS = frozenset(
-    {
-        "DAYTONA_API_KEY",
-        "DAYTONA_API_URL",
-        "DAYTONA_TARGET",
-        "DAYTONA_SNAPSHOT",
-        "E2B_API_KEY",
-        "E2B_TEMPLATE",
-    }
-)
 
 
 def _positive_int(value: str) -> int:

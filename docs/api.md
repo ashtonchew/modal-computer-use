@@ -226,7 +226,7 @@ Action benchmark cases also include `daemon_samples_ms`, `daemon_summary_ms`,
 `overhead_samples_ms`, `overhead_summary_ms`, and `attribution`. Missing daemon timing is reported
 as unavailable for compatibility with old daemons; malformed timing is a structured failure.
 
-`computer-use benchmark compare --create-modal-sandbox --providers modal-daemon` is the explicit
+`computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http` is the explicit
 mode that creates a fresh Modal CUA sandbox for benchmarking. In that mode `--gpu`, `--browser`,
 `--resource-profile`, `--modal-region`, `--modal-cpu`, and `--modal-memory-mib` are applied to the
 created `ComputerConfig`; the run records cold create-to-ready metadata, executes the warm daemon

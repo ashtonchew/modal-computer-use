@@ -14,7 +14,6 @@ dependencies = [
   "fastapi>=0.115",
   "httpx>=0.27",
   "pydantic>=2.7",
-  "python-dotenv>=1.0",
   "uvicorn[standard]>=0.30",
   "pillow>=10.0",
 ]
@@ -23,9 +22,6 @@ dependencies = [
 modal = ["modal>=1.1.0"]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.40"]
-bench-daytona = ["daytona==0.175.0"]
-bench-e2b = ["e2b-desktop==2.3.1"]
-bench-providers = ["daytona==0.175.0", "e2b-desktop==2.3.1"]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",

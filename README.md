@@ -87,63 +87,45 @@ uv run computer-use benchmark action-batch --base-url http://127.0.0.1:8080 --to
 
 The benchmark emits JSON with raw samples, summary timings, and the batch-vs-separate-call speedup.
 
-Compare benchmark surfaces across the Modal daemon, adapter matrix, and optional live providers:
+Measure SDK-owned benchmark surfaces across the daemon HTTP path and adapter matrix:
 
 ```bash
-uv run computer-use benchmark compare --mock-local --iterations 5
-uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
-uv run computer-use benchmark compare --providers daytona,e2b --env-file .env --iterations 5
+uv run computer-use benchmark sdk --mock-local --iterations 5
 ```
 
 To create a fresh Modal-backed CUA sandbox for the Modal daemon benchmark, including an optional
 GPU request, use the explicit creation mode:
 
 ```bash
-uv run computer-use benchmark compare \
+uv run computer-use benchmark sdk \
   --create-modal-sandbox \
-  --providers modal-daemon \
+  --surfaces daemon-http \
   --browser chromium \
   --gpu T4 \
   --iterations 5
 ```
 
 Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through a Modal
-connect token, tags the Modal app and sandbox with `benchmark=provider-compare` plus a generated
+connect token, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a generated
 `benchmark_run_id`, then terminates and detaches the sandbox. Passing `--gpu` defaults the created
 resource profile to `browser-gpu` unless `--resource-profile` is supplied.
 
-The default comparison runs the Modal daemon plus OpenAI, Anthropic, and generic adapter
-normalization/execution without calling provider APIs. Daytona and E2B live runs are credential
-gated and report `not_measured` when `DAYTONA_API_KEY` or `E2B_API_KEY` is absent. Install pinned
-provider extras with `uv sync --extra bench-daytona --extra bench-e2b` before live provider runs.
-Provider-live comparison loads a local `.env` from the current working directory when present, or
-an explicit dotenv file passed with `--env-file`. Already exported environment variables take
-precedence over `.env` values. Only the documented Daytona/E2B benchmark keys are imported from
-dotenv files; unrelated variables such as Modal auth/config are ignored. Keep real keys in
-untracked `.env` files; use `.env.example` for the non-secret key names.
-By default, Daytona uses `daytona.create()` with Daytona's default Computer Use-capable snapshot,
-and E2B uses the default `desktop` template. Set `DAYTONA_SNAPSHOT` or `E2B_TEMPLATE` only when
-you intentionally want to benchmark a custom prebuilt baseline.
-Live provider reports separate cold create-to-ready timing from warm screenshot, action, typing,
-and command cases that reuse a ready sandbox. The warm primitive set includes single move/click,
-deterministic multi-click sequence, 100-character typing, 1000-character typing, screenshot, and
-command echo cases. Provider reports also include `cost_estimate` metadata based on public pricing
-rates and measured sandbox wall-clock runtime; this is an approximation for comparison, not an
-actual billing statement.
-Default Daytona runs estimate cost from provider-returned resources or documented default sandbox
-resources. Modal default runs remain partial unless CPU and memory are explicitly configured.
-For Modal runs whose billed Modal object was created with attribution tags, `benchmark compare` can
+The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
+adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`
+surface is opt-in with `--surface sandbox-exec --sandbox-id <id>` because it attaches to a live
+sandbox and is a transport baseline, not the SDK's recommended hot path.
+For Modal runs whose billed Modal object was created with attribution tags, `benchmark sdk` can
 also attach delayed Modal billing report reconciliation without replacing `cost_estimate`:
 
 ```bash
-uv run computer-use benchmark compare --base-url "$COMPUTER_USE_DAEMON_URL" \
-  --providers modal-daemon \
+uv run computer-use benchmark sdk --base-url "$COMPUTER_USE_DAEMON_URL" \
+  --surfaces daemon-http \
   --modal-billing-reconcile \
   --modal-billing-start 2026-05-13T01:00:00Z \
   --modal-billing-end 2026-05-13T02:00:00Z \
-  --modal-billing-tag benchmark=provider-compare \
-  --modal-billing-tag benchmark_run_id=provider_compare_abc123 \
-  --modal-billing-tag provider=modal-daemon
+  --modal-billing-tag benchmark=sdk-surfaces \
+  --modal-billing-tag benchmark_run_id=sdk_surface_abc123 \
+  --modal-billing-tag surface=daemon-http
 ```
 
 Modal billing reports can lag and are bucketed by full reporting intervals, so short runs may report
@@ -155,8 +137,8 @@ adjustments. For strongest attribution, pass benchmark tags as `app_tags` to
 `ComputerSandbox.create(...)` and use an isolated benchmark `app_name`, because Modal billing reports
 surface tags from the billed Modal object. Sandbox tags are still useful for lookup/debugging, but
 should not be the only billing attribution mechanism.
-When supported, provider reports include readback proof metadata for final cursor position and typed
-keypress delivery. These proof probes use provider-native computer-use APIs for actuation and avoid
+When supported, daemon HTTP reports include readback proof metadata for final cursor position and
+typed keypress delivery. These proof probes use daemon computer-use APIs for actuation and avoid
 serializing typed text.
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,

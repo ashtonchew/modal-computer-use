@@ -121,40 +121,32 @@ The command emits JSON with metadata, raw millisecond samples, summary timings, 
 
 The benchmark performs one warmup iteration per case before measuring. Any daemon error or exception is included under `failures`, and the command exits nonzero. The built-in action set avoids text-entry and clipboard actions so benchmark output does not include typed or clipboard text.
 
-## Provider comparison
+## SDK benchmark surfaces
 
-Use the comparison benchmark when you want one JSON report across Modal daemon behavior,
-adapter compatibility, and optional live Daytona/E2B runs:
+Use the SDK benchmark when you want one JSON report across daemon behavior and adapter
+compatibility without calling model or external sandbox provider APIs:
 
 ```bash
-uv run computer-use benchmark compare --mock-local --iterations 5
+uv run computer-use benchmark sdk --mock-local --iterations 5
 ```
 
 By default this measures:
 
-- `modal-daemon`: daemon action batching, screenshots, move+click, move/click sequence,
+- `daemon-http`: daemon action batching, screenshots, move+click, move/click sequence,
   100-character typing, 1000-character typing, command echo, and recording start/stop.
-- `openai`: OpenAI computer-action adapter normalization and native action execution against an in-process recorder.
-- `anthropic`: Anthropic computer-action adapter normalization for `computer_20250124` and native action execution against an in-process recorder.
-- `generic`: provider-neutral `ActionExecutor` execution against an in-process recorder.
+- `openai-adapter`: OpenAI computer-action adapter normalization and native action execution against an in-process recorder.
+- `anthropic-adapter`: Anthropic computer-action adapter normalization for `computer_20250124` and native action execution against an in-process recorder.
+- `action-executor`: provider-neutral `ActionExecutor` execution against an in-process recorder.
 
 Adapter cases do not call OpenAI, Anthropic, or any model API. They measure translation and
 execution-path overhead only, which keeps the benchmark deterministic and credential-free.
 
-Live external providers are explicit:
-
-```bash
-uv sync --extra bench-daytona --extra bench-e2b
-uv run computer-use benchmark compare --providers daytona,e2b --iterations 5
-uv run computer-use benchmark compare --providers daytona,e2b --env-file .env --iterations 5
-```
-
 The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
 
 ```bash
-uv run computer-use benchmark compare \
+uv run computer-use benchmark sdk \
   --create-modal-sandbox \
-  --providers modal-daemon \
+  --surfaces daemon-http \
   --browser chromium \
   --gpu T4 \
   --iterations 5
@@ -169,87 +161,58 @@ Supported GPU strings and counts follow Modal's `gpu` argument, such as `T4`, `L
 `L40S`, `A100`, `H100`, or `H100:2`. For GPU-specific benchmarking where Modal's H100-to-H200
 upgrade would pollute attribution, use Modal's strict `H100!` string.
 
-Daytona runs require `DAYTONA_API_KEY`; `DAYTONA_API_URL` and `DAYTONA_TARGET` are reported as
-safe metadata when present. E2B runs require `E2B_API_KEY`. Missing credentials produce
-`not_measured` provider entries rather than crashes. Missing optional SDK packages produce
-`unavailable` entries.
+The raw Modal `Sandbox.exec` baseline is opt-in:
 
-For local development, provider-live comparison reads a current-working-directory `.env` file when
-one exists, or the file passed with `--env-file`. Dotenv values never override already exported
-environment variables, so shell and CI secrets remain authoritative. Only the documented Daytona
-and E2B benchmark keys are imported from dotenv files; unrelated variables such as Modal auth,
-proxy settings, or arbitrary application config are ignored. Modal SDK authentication stays
-separate; keep using `~/.modal.toml`, `MODAL_CONFIG_PATH`, or Modal token environment variables
-for Modal itself.
+```bash
+uv run computer-use benchmark sdk \
+  --base-url "$COMPUTER_USE_DAEMON_URL" \
+  --surfaces daemon-http,sandbox-exec \
+  --sandbox-id sb-... \
+  --iterations 5
+```
 
-The default live baselines use each provider's documented out-of-box desktop surface: Daytona calls
-`daytona.create()` with no create params so the default Computer Use-capable snapshot is used, and
-E2B creates the default `desktop` sandbox template at `1024x768`, DPI `96`, display `:0`. Set
-`DAYTONA_SNAPSHOT` or `E2B_TEMPLATE` only for a named custom prebuilt baseline, and compare those
-results separately from out-of-box provider results. Daytona custom images are not used by default
-because Daytona documents VNC and Computer Use as requiring the default image unless the custom
-image installs the required desktop/VNC/X11 packages.
+This baseline attaches to an existing sandbox and runs a small `xdotool` command through
+`Sandbox.exec`. It is useful as a transport comparison, but the daemon HTTP surface is the SDK's
+normal primitive path.
 
-Provider-live comparisons split lifecycle cost from warm primitive cost. `cold_create_to_ready`
-creates a fresh provider sandbox, starts or verifies the desktop computer-use surface where the
-SDK exposes one, records that cold readiness timing, and deletes the sandbox. Screenshot,
-move/click, deterministic move/click sequence, 100-character typing, 1000-character typing, and
-command cases then run on one separate ready sandbox per provider so their samples do not include
-sandbox creation. Cleanup is attempted once after the warm primitive cases.
+Daemon HTTP entries may also include `verification` readbacks. Cursor readback checks the final
+cursor position after the deterministic move/click sequence. Typing readback starts a controlled
+`xev` target as a detached process and verifies that keypress events reached that target without
+serializing the typed text.
 
-Provider entries may also include `verification` readbacks. Cursor readback checks the final cursor
-position after the deterministic move/click sequence, using provider-native cursor APIs where they
-exist and falling back to X11 command probes for daemon-compatible desktops. Typing readback starts
-a controlled `xev` target as a detached process and verifies that keypress events reached that target
-without serializing the typed text. The typing actuation step uses the same provider or daemon
-computer-use primitive being benchmarked. Providers without the required desktop readback tools
-report `unsupported` or `failed` verification while keeping the primitive timing cases separate.
+The daemon HTTP surface includes additive `cost_estimate` metadata when the benchmark has Modal
+resource metadata. Cost estimates use public Modal rates, measured sandbox wall-clock runtime
+including warmup, and safe resource assumptions when available. They are approximate metadata, not
+actual billing data. Unknown CPU or memory produces `partial`, `unknown`, or `not_measured` status
+instead of a fake zero-cost total. Adapter-only and `sandbox-exec` surfaces return
+`not_applicable` because they do not create resources in this benchmark.
 
-Each provider entry includes additive `cost_estimate` metadata when a provider can create billable
-resources. Cost estimates use public pricing rates, the measured cold and warm sandbox wall-clock
-runtime including warmup, and safe resource assumptions when available. They are approximate
-comparison metadata, not actual billing data. Unknown CPU, memory, storage, GPU, or leaked cleanup
-duration produces `partial`, `unknown`, or `not_measured` status instead of a fake zero-cost total.
-Daytona default live runs use documented default sandbox resources, or provider-returned resource
-fields when available, so their cost can be `estimated`; custom Daytona snapshots stay `partial`
-unless resource fields are exposed. Modal default live runs stay `partial` unless CPU and memory are
-explicitly configured, because Modal bills on the higher of requested resources or actual usage.
-Adapter-only providers return `not_applicable` because they do not create provider resources.
-
-Modal live runs can also attach a separate `billing_reconciliation` object when the billed Modal
+Modal runs can also attach a separate `billing_reconciliation` object when the billed Modal
 object is tagged and the caller provides a Modal billing report window. This uses
 `modal.billing.workspace_billing_report` with requested tag names, filters rows by required benchmark
 tags, and sums only matched row costs. It intentionally does not overwrite `cost_estimate`: the
-estimate is immediate public-rate comparison context, while reconciliation is delayed Modal-reported
+estimate is immediate public-rate context, while reconciliation is delayed Modal-reported
 billing telemetry for the tag/window. Reconciliation can return `matched`, `not_available_yet`,
 `no_matching_tags`, `not_measured`, `unavailable`, or `failed`. Short benchmark runs often need a
 later query because Modal billing report data is delayed and reported in full intervals. Modal rounds
 partial `start` values down to the interval boundary and excludes partial `end` intervals; requested
 tag keys can be absent when they were not in use, and tag changes apply to the whole reported
 interval. Saved reconciliation metadata omits raw billing rows, object ids, URLs, tokens,
-stdout/stderr, and provider payloads.
+stdout/stderr, and daemon payloads.
 For strongest attribution, run the benchmark in an isolated Modal App and pass the benchmark tags as
 `app_tags` to `ComputerSandbox.create(...)`, because Modal billing reports surface tags from the
 billed Modal object. Sandbox tags remain useful for operational lookup/debugging, but they should not
 be the only billing attribution mechanism.
 
-E2B's default desktop typing can be much slower than move/click or screenshot cases because its
-provider default GUI typing API may chunk text and add delay between chunks. The benchmark records
-that provider default path rather than tuning E2B-specific typing arguments, so compare tuned typing
-separately if you change provider defaults.
+Keep SDK benchmark surfaces fair:
 
-Keep comparisons fair:
-
-- Pin SDK versions through the benchmark extras instead of using floating latest packages.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
-- Treat public-rate `cost_estimate` values as approximate comparison context, not billing truth.
-- Treat screenshot byte summaries as provider-returned payload size; providers that return base64
-  screenshots report encoded transfer bytes rather than decoded image bytes.
-- Do not include noVNC stream URLs, provider API keys, typed text, screenshot bytes, stdout,
+- Treat public-rate `cost_estimate` values as approximate context, not billing truth.
+- Treat screenshot byte summaries as daemon-returned payload size.
+- Do not include noVNC stream URLs, bearer tokens, typed text, screenshot bytes, stdout,
   stderr, artifact URIs, or recording paths in saved reports.
-- Treat Daytona/E2B provider timing as total SDK/provider round-trip timing unless their SDKs
-  expose daemon-internal timing; only this package's daemon currently reports `timing.daemon_ms`.
+- Treat adapter timings as normalization/execution-path overhead, not provider API latency.
 
 ## Screenshot storage modes
 

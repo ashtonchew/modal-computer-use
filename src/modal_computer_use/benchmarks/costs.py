@@ -7,12 +7,10 @@ PricingRate = dict[str, Any]
 PRICING_RETRIEVED_DATE = "2026-05-12"
 PRICING_SOURCES = {
     "modal": "https://modal.com/products/sandboxes",
-    "e2b": "https://e2b.dev/pricing",
-    "daytona": "https://www.daytona.io/pricing",
 }
 
 PUBLIC_RATE_CATALOG: dict[str, dict[str, PricingRate]] = {
-    "modal-daemon": {
+    "daemon-http": {
         "cpu": {
             "rate": 0.00003942,
             "rate_unit": "USD_per_core_second",
@@ -24,62 +22,38 @@ PUBLIC_RATE_CATALOG: dict[str, dict[str, PricingRate]] = {
             "quantity_unit": "GiB_seconds",
         },
     },
-    "e2b": {
-        "cpu": {
-            "rate": 0.000014,
-            "rate_unit": "USD_per_vCPU_second",
-            "quantity_unit": "vCPU_seconds",
-        },
-        "memory": {
-            "rate": 0.0000045,
-            "rate_unit": "USD_per_GiB_second",
-            "quantity_unit": "GiB_seconds",
-        },
-    },
-    "daytona": {
-        "cpu": {
-            "rate": 0.000014,
-            "rate_unit": "USD_per_vCPU_second",
-            "quantity_unit": "vCPU_seconds",
-        },
-        "memory": {
-            "rate": 0.0000045,
-            "rate_unit": "USD_per_GiB_second",
-            "quantity_unit": "GiB_seconds",
-        },
-        "storage": {
-            "rate": 0.00000003,
-            "rate_unit": "USD_per_GiB_second",
-            "quantity_unit": "GiB_seconds",
-        },
-    },
 }
 
-NON_BILLING_PROVIDERS = {"openai", "anthropic", "generic", "modal-exec"}
+NON_BILLING_SURFACES = {
+    "openai-adapter",
+    "anthropic-adapter",
+    "action-executor",
+    "sandbox-exec",
+}
 
 
-def estimate_provider_cost(
-    provider: str,
+def estimate_surface_cost(
+    surface: str,
     *,
-    provider_status: str,
+    surface_status: str,
     runtime_seconds: float | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Estimate benchmark run cost from public rates and safe resource metadata."""
+    """Estimate SDK benchmark surface cost from Modal public rates and safe metadata."""
 
-    if provider in NON_BILLING_PROVIDERS:
-        return _not_applicable("provider comparison does not create billable provider resources")
-    if provider_status in {"not_measured", "unavailable"}:
-        return _not_measured(f"provider status was {provider_status}")
+    if surface in NON_BILLING_SURFACES:
+        return _not_applicable("benchmark surface does not create billable resources")
+    if surface_status in {"not_measured", "unavailable"}:
+        return _not_measured(f"surface status was {surface_status}")
     if runtime_seconds is None or runtime_seconds <= 0:
-        return _unknown("measured provider runtime was unavailable")
+        return _unknown("measured surface runtime was unavailable")
 
-    rates = PUBLIC_RATE_CATALOG.get(provider)
+    rates = PUBLIC_RATE_CATALOG.get(surface)
     if rates is None:
-        return _unknown("no public pricing catalog entry is configured for this provider")
+        return _unknown("no public pricing catalog entry is configured for this surface")
 
     safe_metadata = metadata or {}
-    resources = _resource_inputs(provider, safe_metadata)
+    resources = _resource_inputs(safe_metadata)
     components: list[dict[str, Any]] = []
     notes: list[str] = []
     extra_notes = safe_metadata.get("cost_notes")
@@ -125,33 +99,21 @@ def estimate_provider_cost(
         "notes": notes,
         "pricing": {
             "retrieved_date": PRICING_RETRIEVED_DATE,
-            "source_url": PRICING_SOURCES.get(_pricing_source_provider(provider)),
+            "source_url": PRICING_SOURCES.get("modal"),
         },
     }
 
 
-def _resource_inputs(provider: str, metadata: dict[str, Any]) -> dict[str, float | None]:
+def _resource_inputs(metadata: dict[str, Any]) -> dict[str, float | None]:
     environment = (
         metadata.get("environment") if isinstance(metadata.get("environment"), dict) else {}
     )
-    if provider == "e2b":
-        return {
-            "cpu_count": _float_or_none(metadata.get("cpu_count")) or 2.0,
-            "memory_gib": _float_or_none(metadata.get("memory_gib")),
-            "storage_gib": _float_or_none(metadata.get("storage_gib")),
-        }
-    if provider == "modal-daemon":
-        return {
-            "cpu_count": _float_or_none(environment.get("modal_cpu_count"))
-            or _float_or_none(metadata.get("cpu_count")),
-            "memory_gib": _float_or_none(environment.get("modal_memory_gib"))
-            or _float_or_none(metadata.get("memory_gib")),
-            "storage_gib": None,
-        }
     return {
-        "cpu_count": _float_or_none(metadata.get("cpu_count")),
-        "memory_gib": _float_or_none(metadata.get("memory_gib")),
-        "storage_gib": _float_or_none(metadata.get("storage_gib")),
+        "cpu_count": _float_or_none(environment.get("modal_cpu_count"))
+        or _float_or_none(metadata.get("cpu_count")),
+        "memory_gib": _float_or_none(environment.get("modal_memory_gib"))
+        or _float_or_none(metadata.get("memory_gib")),
+        "storage_gib": None,
     }
 
 
@@ -161,10 +123,6 @@ def _resource_quantity_key(resource: str) -> str:
     if resource == "memory":
         return "memory_gib"
     return "storage_gib"
-
-
-def _pricing_source_provider(provider: str) -> str:
-    return "modal" if provider == "modal-daemon" else provider
 
 
 def _float_or_none(value: Any) -> float | None:
