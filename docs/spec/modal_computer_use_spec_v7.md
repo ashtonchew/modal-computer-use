@@ -194,10 +194,15 @@ src/modal_computer_use/
     logging.py           — JSON formatter, redact()
     settings.py          — DaemonSettings (env-var contract)
     supervisor.py        — Xvfb/window-manager/x11vnc/noVNC supervisor
-    desktop/             — backend implementations
-      x11.py             — primary X11 backend
+    desktop/             — backend seam plus feature-local X11 controllers
+      x11.py             — DesktopBackend seam, MockDesktopBackend, X11DesktopBackend composition
+      mouse.py           — xdotool pointer/click/drag/scroll behavior
+      keyboard.py        — xdotool key behavior and clipboard-paste typing fallback
+      screenshots.py     — maim capture, scaling, encoding, coordinate metadata
+      clipboard.py       — xclip clipboard read/write/clear behavior
+      windows.py         — wmctrl parsing plus activate/close behavior
+      apps.py, browser.py, display.py, processes.py
       recordings.py      — RecordingRegistry, ffmpeg control
-      apps.py, browser.py, clipboard.py, displays.py, keyboard.py, mouse.py, processes.py, screenshots.py
     routes/              — 17 FastAPI routers
       actions.py, apps.py, artifacts.py, browser.py, clipboard.py, commands.py, debug.py,
       display.py, health.py, input.py, keyboard.py, lifecycle.py, mouse.py, processes.py,
@@ -907,7 +912,8 @@ The discipline that produced v7 — `fix(...)` commits that lock in invariants r
 | Loopback-only local token | `daemon/auth.py:30-44` | `tests/test_auth_security.py` |
 | Query-token rejection | `daemon/auth.py:20-27` | `tests/test_auth_security.py` |
 | Verified-user header | `daemon/auth.py:62-98` | `tests/test_auth_security.py` |
-| Mouse routes | `daemon/routes/mouse.py`; `daemon/desktop/x11.py` | `tests/test_daemon_routes.py`, `tests/test_x11_backend.py` |
+| Mouse routes | `daemon/routes/mouse.py`; `daemon/desktop/x11.py`; `daemon/desktop/mouse.py` | `tests/test_daemon_routes.py`, `tests/test_x11_backend.py` |
+| X11 feature-local desktop controllers | `daemon/desktop/{mouse,keyboard,screenshots,clipboard,windows,apps,browser,display}.py` | `tests/test_x11_backend.py` |
 | Keyboard routes and `hold_key` action | `daemon/routes/keyboard.py`; `daemon/actions/batch.py:846-924`, `753-794` | `tests/test_daemon_validation.py`, `tests/test_x11_backend.py` |
 | Clipboard routes | `daemon/routes/clipboard.py` | `tests/test_daemon_routes.py` |
 | Screenshot routes (full/region/zoom) + pixel budget | `daemon/routes/screenshots.py`; `daemon/actions/batch.py:460-517` | `tests/test_daemon_routes.py`, `tests/test_budgets.py` |
@@ -917,7 +923,7 @@ The discipline that produced v7 — `fix(...)` commits that lock in invariants r
 | Action batch `/v1/actions/validate` | `daemon/actions/batch.py:60-63` | `tests/test_action_batch.py` |
 | Idempotency cache (TTL + LRU + fingerprint) | `daemon/actions/batch.py:96-107, 406-418` | `tests/test_action_idempotency_and_timeouts.py` |
 | Per-action & per-batch deadlines | `daemon/actions/batch.py:109-184, 216-258` | `tests/test_action_idempotency_and_timeouts.py` |
-| `release_all` on every failure path | `daemon/actions/batch.py:218-219, 257-258`; `daemon/desktop/x11.py` | `tests/test_x11_backend.py` |
+| `release_all` on every failure path | `daemon/actions/batch.py`; `daemon/desktop/x11.py`; `daemon/desktop/{mouse,keyboard}.py` | `tests/test_x11_backend.py` |
 | Artifact routes (list/read/write/delete) | `daemon/routes/artifacts.py`; `artifacts.py:54-272` | `tests/test_artifacts.py`, `tests/test_daemon_validation.py` |
 | Artifact path safety (traversal, symlink, control) | `artifacts.py:17-100` | `tests/test_artifacts.py` |
 | Artifact manifest | `artifacts.py:252-272` | `tests/test_artifacts.py` |

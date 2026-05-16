@@ -6,7 +6,20 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from modal_computer_use.models import Button, Point, Region, ScreenshotOptions, ScrollDirection
+from modal_computer_use._invariants import (
+    require_coordinate_pair,
+    require_drag_shape,
+    require_safe_text,
+)
+from modal_computer_use.models import (
+    Button,
+    ImageFormat,
+    Point,
+    Region,
+    ScreenshotOptions,
+    ScreenshotStorage,
+    ScrollDirection,
+)
 
 
 class Schema(BaseModel):
@@ -24,11 +37,7 @@ class TypeRequest(TextRequest):
     @field_validator("text")
     @classmethod
     def _safe_text(cls, value: str) -> str:
-        for char in value:
-            code = ord(char)
-            if code < 32 and char not in ("\n", "\r"):
-                raise ValueError("control characters are not allowed; use keypress/hotkey")
-        return value
+        return require_safe_text(value)
 
 
 class KeyRequest(Schema):
@@ -60,8 +69,7 @@ class MouseClickRequest(Schema):
 
     @model_validator(mode="after")
     def _coordinate_pair(self) -> MouseClickRequest:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("x and y must be supplied together")
+        require_coordinate_pair(self.x, self.y)
         return self
 
 
@@ -77,14 +85,16 @@ class MouseDragRequest(Schema):
 
     @model_validator(mode="after")
     def _valid_drag_shape(self) -> MouseDragRequest:
-        if (self.start_x is None) != (self.start_y is None):
-            raise ValueError("start coordinates must be supplied as x/y pairs")
-        if (self.end_x is None) != (self.end_y is None):
-            raise ValueError("end coordinates must be supplied as x/y pairs")
-        if self.path is not None and len(self.path) < 2:
-            raise ValueError("drag path must contain at least two points")
-        if self.path is None and self.end_x is None and self.end_y is None:
-            raise ValueError("drag requires path or end coordinates")
+        require_drag_shape(
+            start_x=self.start_x,
+            start_y=self.start_y,
+            end_x=self.end_x,
+            end_y=self.end_y,
+            path=self.path,
+            coordinate_message="drag coordinates must be supplied as x/y pairs",
+            start_coordinate_message="start coordinates must be supplied as x/y pairs",
+            end_coordinate_message="end coordinates must be supplied as x/y pairs",
+        )
         return self
 
 
@@ -96,8 +106,7 @@ class MouseScrollRequest(Schema):
 
     @model_validator(mode="after")
     def _coordinate_pair(self) -> MouseScrollRequest:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("x and y must be supplied together")
+        require_coordinate_pair(self.x, self.y)
         return self
 
 
@@ -108,8 +117,7 @@ class MouseButtonRequest(Schema):
 
     @model_validator(mode="after")
     def _coordinate_pair(self) -> MouseButtonRequest:
-        if (self.x is None) != (self.y is None):
-            raise ValueError("x and y must be supplied together")
+        require_coordinate_pair(self.x, self.y)
         return self
 
 
@@ -120,24 +128,10 @@ class ScreenshotRequest(ScreenshotOptions):
 class ZoomScreenshotRequest(Schema):
     region: Region
     scale: float = Field(default=2.0, gt=0, le=8)
-    format: str = "png"
+    format: ImageFormat = "png"
     quality: int = Field(default=90, ge=1, le=100)
     show_cursor: bool = True
-    storage: str = "inline"
-
-    @field_validator("format")
-    @classmethod
-    def _valid_format(cls, value: str) -> str:
-        if value not in ("png", "jpeg", "webp"):
-            raise ValueError("format must be png, jpeg, or webp")
-        return value
-
-    @field_validator("storage")
-    @classmethod
-    def _valid_storage(cls, value: str) -> str:
-        if value not in ("inline", "artifact", "auto"):
-            raise ValueError("storage must be inline, artifact, or auto")
-        return value
+    storage: ScreenshotStorage = "inline"
 
 
 class WaitForWindowRequest(Schema):

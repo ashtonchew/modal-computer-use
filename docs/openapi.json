@@ -3604,6 +3604,11 @@
         "properties": {
           "format": {
             "default": "png",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
             "title": "Format",
             "type": "string"
           },
@@ -3631,6 +3636,11 @@
           },
           "storage": {
             "default": "inline",
+            "enum": [
+              "inline",
+              "artifact",
+              "auto"
+            ],
             "title": "Storage",
             "type": "string"
           }

@@ -20,7 +20,22 @@ The daemon supervises these processes:
 - A window manager (XFCE by default) handles window placement and focus.
 - `x11vnc` plus `noVNC` provide optional remote view, off by default.
 
-It also drives these CLI tools per request:
+It also drives these CLI tools per request through feature-local X11 controllers. The daemon-facing
+backend seam remains `DesktopBackend`/`X11DesktopBackend` in `daemon/desktop/x11.py`, while the
+behavior lives next to the feature that owns it:
+
+- `daemon/desktop/mouse.py` owns `xdotool` pointer, click, drag, scroll, and button state.
+- `daemon/desktop/keyboard.py` owns key normalization, xdotool key commands, clipboard-paste
+  typing fallback, and held-key state.
+- `daemon/desktop/screenshots.py` owns `maim` capture, scaling, encoding, coordinate-space
+  metadata, and screenshot artifact writes.
+- `daemon/desktop/clipboard.py` owns clipboard read/write/clear through `xclip`.
+- `daemon/desktop/windows.py` owns `wmctrl` parsing and window activation/close commands.
+- `daemon/desktop/apps.py` and `daemon/desktop/browser.py` own application spawn and browser URL
+  opening/wait behavior.
+- `daemon/desktop/display.py` owns display metadata exposed by the backend.
+
+Those controllers use these CLI tools:
 
 - `xdotool` for mouse and keyboard input.
 - `wmctrl` for window listing, activation, and close.

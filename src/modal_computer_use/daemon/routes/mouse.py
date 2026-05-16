@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon.routes.execution import budget_policy, run_input_action
+from modal_computer_use.daemon.routes.execution import run_input_action
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
-    ready_input_lock,
     validate_keys,
     validate_optional_point,
     validate_point,
@@ -25,25 +24,19 @@ router = APIRouter(prefix="/v1/mouse")
 @router.post("/move")
 async def move(payload: MouseMoveRequest, request: Request) -> Point:
     validate_point(request, payload)
-    await ensure_desktop_ready(request)
-    budget_error = budget_policy(request).action_reservation_error()
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budget_policy(request).reserve_action()
+
+    async def operation() -> Point:
         return await request.app.state.backend.mouse_move(payload.x, payload.y)
+
+    return await run_input_action(request, operation)
 
 
 @router.post("/click")
 async def click(payload: MouseClickRequest, request: Request) -> Point:
     validate_optional_point(request, x=payload.x, y=payload.y)
     validate_keys(*payload.modifiers)
-    await ensure_desktop_ready(request)
-    budget_error = budget_policy(request).action_reservation_error()
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budget_policy(request).reserve_action()
+
+    async def operation() -> Point:
         return await request.app.state.backend.mouse_click(
             payload.x,
             payload.y,
@@ -51,6 +44,8 @@ async def click(payload: MouseClickRequest, request: Request) -> Point:
             count=2 if payload.double else 1,
             modifiers=payload.modifiers,
         )
+
+    return await run_input_action(request, operation)
 
 
 @router.post("/drag")
@@ -66,12 +61,8 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
     for index, point in enumerate(payload.path or []):
         validate_point(request, point, field=f"path[{index}]")
     validate_keys(*payload.modifiers)
-    await ensure_desktop_ready(request)
-    budget_error = budget_policy(request).action_reservation_error()
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budget_policy(request).reserve_action()
+
+    async def operation() -> Point:
         return await request.app.state.backend.mouse_drag(
             start=start,
             end=end,
@@ -80,6 +71,8 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
             duration_ms=payload.duration_ms,
             modifiers=payload.modifiers,
         )
+
+    return await run_input_action(request, operation)
 
 
 @router.post("/scroll")

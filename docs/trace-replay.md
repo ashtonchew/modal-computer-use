@@ -53,7 +53,9 @@ uses `redactions=["text"]` for typed text and stores `normalized_action.text` as
 When actions came through a provider adapter, `provider_action` is populated from the adapter's
 redacted provenance metadata. Provider typed text is reported as `provider_action.text` in
 `redactions`.
-Tokens, noVNC URLs, artifact URIs, screenshot bytes, and base64 payloads are always redacted.
+Tokens, noVNC URLs, artifact URIs, screenshot bytes, base64 payloads, stdout, and stderr are
+always redacted in daemon-written trace result payloads. Non-sensitive metadata such as dimensions,
+hashes, sizes, elapsed time, and coordinate-space fields remains available.
 Full plaintext capture is opt-in and intended only for local debugging.
 
 ## Replay CLI
@@ -69,6 +71,11 @@ All commands emit JSON and return nonzero when validation or execution fails. Dr
 touches a daemon, Modal Sandbox, provider credentials, screenshots, or artifact contents. It only
 produces an ordered plan: executable normalized actions are marked `execute`; pseudo-actions such
 as `screenshot_after` and redacted typed text are marked `skip` with a reason.
+
+Daemon-written `screenshot_after` trace lines are metadata pseudo-actions:
+`normalized_action` is `{"type": "screenshot_after"}`, `coordinate_space` is populated when capture
+succeeds, and `screenshot_after_uri` remains `null` so replay never receives a reusable artifact
+reference from the original run.
 
 Real replay requires an explicit target through `--base-url`, `--sandbox-id`, or `--target-run-id`.
 Replay validates the trace before contacting the target, executes supported normalized actions

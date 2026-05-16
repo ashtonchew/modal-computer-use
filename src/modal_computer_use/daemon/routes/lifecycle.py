@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon.routes.execution import budget_policy
+from modal_computer_use.daemon.routes.execution import budget_policy, run_idle_only_mutation
 from modal_computer_use.daemon.routes.validation import daemon_readiness
 from modal_computer_use.models import ComputerStatus, LifecycleResult
 
@@ -41,23 +41,26 @@ async def status(request: Request) -> ComputerStatus:
 
 @router.post("/start")
 async def start(request: Request) -> LifecycleResult:
-    budget_policy(request).enforce_idle()
-    await request.app.state.supervisor.start()
-    budget_policy(request).touch_activity()
-    return LifecycleResult(ok=True, status="running")
+    async def operation() -> LifecycleResult:
+        await request.app.state.supervisor.start()
+        return LifecycleResult(ok=True, status="running")
+
+    return await run_idle_only_mutation(request, operation)
 
 
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
-    budget_policy(request).enforce_idle()
-    await request.app.state.supervisor.stop()
-    budget_policy(request).touch_activity()
-    return LifecycleResult(ok=True, status="stopped")
+    async def operation() -> LifecycleResult:
+        await request.app.state.supervisor.stop()
+        return LifecycleResult(ok=True, status="stopped")
+
+    return await run_idle_only_mutation(request, operation)
 
 
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
-    budget_policy(request).enforce_idle()
-    await request.app.state.supervisor.restart()
-    budget_policy(request).touch_activity()
-    return LifecycleResult(ok=True, status="running")
+    async def operation() -> LifecycleResult:
+        await request.app.state.supervisor.restart()
+        return LifecycleResult(ok=True, status="running")
+
+    return await run_idle_only_mutation(request, operation)
