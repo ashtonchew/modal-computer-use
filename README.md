@@ -87,6 +87,60 @@ uv run computer-use benchmark action-batch --base-url http://127.0.0.1:8080 --to
 
 The benchmark emits JSON with raw samples, summary timings, and the batch-vs-separate-call speedup.
 
+Measure SDK-owned benchmark surfaces across the daemon HTTP path and adapter matrix:
+
+```bash
+uv run computer-use benchmark sdk --mock-local --iterations 5
+```
+
+To create a fresh Modal-backed CUA sandbox for the Modal daemon benchmark, including an optional
+GPU request, use the explicit creation mode:
+
+```bash
+uv run computer-use benchmark sdk \
+  --create-modal-sandbox \
+  --surfaces daemon-http \
+  --browser chromium \
+  --gpu T4 \
+  --iterations 5
+```
+
+Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through a Modal
+connect token, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a generated
+`benchmark_run_id`, then terminates and detaches the sandbox. Passing `--gpu` defaults the created
+resource profile to `browser-gpu` unless `--resource-profile` is supplied.
+
+The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
+adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`
+surface is opt-in with `--surface sandbox-exec --sandbox-id <id>` because it attaches to a live
+sandbox and is a transport baseline, not the SDK's recommended hot path.
+For Modal runs whose billed Modal object was created with attribution tags, `benchmark sdk` can
+also attach delayed Modal billing report reconciliation without replacing `cost_estimate`:
+
+```bash
+uv run computer-use benchmark sdk --base-url "$COMPUTER_USE_DAEMON_URL" \
+  --surfaces daemon-http \
+  --modal-billing-reconcile \
+  --modal-billing-start 2026-05-13T01:00:00Z \
+  --modal-billing-end 2026-05-13T02:00:00Z \
+  --modal-billing-tag benchmark=sdk-surfaces \
+  --modal-billing-tag benchmark_run_id=sdk_surface_abc123 \
+  --modal-billing-tag surface=daemon-http
+```
+
+Modal billing reports can lag and are bucketed by full reporting intervals, so short runs may report
+`not_available_yet` until the relevant interval is closed and collected, or `no_matching_tags` when
+rows exist but the requested tags do not match. The reconciliation output is additive
+`billing_reconciliation` metadata from Modal's billing report API; it is useful telemetry for a
+tagged run, but still separate from invoices, credits, discounts, and account-level billing
+adjustments. For strongest attribution, pass benchmark tags as `app_tags` to
+`ComputerSandbox.create(...)` and use an isolated benchmark `app_name`, because Modal billing reports
+surface tags from the billed Modal object. Sandbox tags are still useful for lookup/debugging, but
+should not be the only billing attribution mechanism.
+When supported, daemon HTTP reports include readback proof metadata for final cursor position and
+typed keypress delivery. These proof probes use daemon computer-use APIs for actuation and avoid
+serializing typed text.
+
 See [docs/release-checklist.md](docs/release-checklist.md) for the release verification checklist,
 including benchmark regeneration and boundary scans.
 
@@ -113,7 +167,9 @@ computer.detach()
 The Modal path uses Sandbox Connect Tokens for daemon access on port `8080`. noVNC is off by default and must be explicitly enabled.
 Browser-heavy workloads can opt into `ResourceConfig(profile="browser")` with
 `BrowserConfig(prewarm=True)`, or `profile="browser-gpu"` with an explicit `gpu` value after
-measurement shows rendering is the bottleneck. See `examples/browser_profile.py`.
+measurement shows rendering is the bottleneck. Browser GPU launch stays in autodetect mode by
+default; use `BrowserConfig(gpu_mode="chromium-vulkan" | "off")` only when benchmarking driver
+behavior. See `examples/browser_profile.py`.
 
 To reuse an existing run-scoped sandbox, use an explicit reuse policy:
 

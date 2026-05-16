@@ -940,6 +940,33 @@ def test_browser_open_url_rejects_url_credentials(test_client) -> None:
     assert response.status_code == 422
 
 
+def test_browser_render_metrics_rejects_non_http_urls(test_client) -> None:
+    response = test_client.post("/v1/browser/render-metrics", json={"url": "file:///etc/passwd"})
+
+    assert response.status_code == 422
+
+
+def test_browser_render_metrics_mock_backend_reports_unavailable(test_client) -> None:
+    response = test_client.post(
+        "/v1/browser/render-metrics",
+        json={"url": "https://example.com", "timeout_seconds": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert "unavailable" in response.json()["message"]
+
+
+def test_browser_status_reports_default_profile_dir(test_client) -> None:
+    response = test_client.get("/v1/browser/status")
+
+    assert response.status_code == 200
+    assert response.json()["profile_dir"].endswith("/browser-profile")
+    assert response.json()["gpu_mode"] == "auto"
+    assert response.json()["launch_args"] == []
+    assert response.json()["open_url_on_start"] is None
+
+
 def test_app_launch_rejects_shell_command_shape(test_client) -> None:
     response = test_client.post(
         "/v1/apps/launch",

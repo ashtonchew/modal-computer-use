@@ -436,6 +436,32 @@
         "title": "BrowserOpenUrlRequest",
         "type": "object"
       },
+      "BrowserRenderMetricsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "timeout_seconds": {
+            "default": 30.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 120.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "wait_for_window": {
+            "default": false,
+            "title": "Wait For Window",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "BrowserRenderMetricsRequest",
+        "type": "object"
+      },
       "Capabilities": {
         "additionalProperties": false,
         "properties": {
@@ -4154,6 +4180,46 @@
           }
         },
         "summary": "Open Url"
+      }
+    },
+    "/v1/browser/render-metrics": {
+      "post": {
+        "operationId": "render_metrics_v1_browser_render_metrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserRenderMetricsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Render Metrics V1 Browser Render Metrics Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Render Metrics"
       }
     },
     "/v1/browser/status": {

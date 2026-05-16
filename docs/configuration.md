@@ -16,6 +16,10 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | `COMPUTER_USE_WINDOW_MANAGER` | string | `xfce` | Window manager to launch. |
 | `COMPUTER_USE_BROWSER` | string | unset | Browser command to use for `apps.launch("browser")` and `browser.open_url`. |
 | `COMPUTER_USE_BROWSER_PREWARM` | bool | `false` | Start the browser at daemon boot to cut first-action latency. |
+| `COMPUTER_USE_BROWSER_PROFILE_DIR` | path | `/home/desktop/.cache/modal-computer-use/browser-profile` | Shared browser profile directory used by prewarm and `browser.open_url`. |
+| `COMPUTER_USE_BROWSER_LAUNCH_ARGS` | JSON list | `[]` | Extra browser command-line args appended to prewarm and `browser.open_url` launches. |
+| `COMPUTER_USE_BROWSER_OPEN_URL_ON_START` | URL | unset | Optional startup URL. If set, daemon startup opens this URL instead of `about:blank` prewarm. |
+| `COMPUTER_USE_BROWSER_GPU_MODE` | string | `auto` | Browser GPU launch mode. One of `auto`, `off`, or `chromium-vulkan`. |
 | `COMPUTER_USE_RUN_ID` | string | unset | Caller-supplied run identifier echoed in traces and logs. |
 | `COMPUTER_USE_IMAGE_PROFILE` | string | `standard` | Image profile label reported by `/v1/capabilities`. Common values: `standard`, `browser`, `browser-gpu`. |
 

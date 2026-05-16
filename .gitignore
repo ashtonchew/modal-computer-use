@@ -1,4 +1,5 @@
 .venv/
+.env
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,3 +11,4 @@ build/
 .DS_Store
 htmlcov/
 .coverage
+benchmark-results/

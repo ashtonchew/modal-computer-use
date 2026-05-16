@@ -16,3 +16,11 @@ class BrowserNamespace(Namespace):
 
     def status(self) -> dict:
         return dict(self._client.get_json("/v1/browser/status"))
+
+    def render_metrics(self, url: str, timeout_seconds: float = 30.0) -> dict:
+        return dict(
+            self._client.post_json(
+                "/v1/browser/render-metrics",
+                json={"url": url, "timeout_seconds": timeout_seconds},
+            )
+        )

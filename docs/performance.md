@@ -75,10 +75,15 @@ daemon sample is the sum of daemon timings for the five calls in that measured i
 The current report includes:
 
 - `action_batch`: one five-action batch request compared with five separate action requests.
-- `screenshot_full`: full-screen PNG screenshot latency and encoded byte size.
+- `screenshot_full`: full-screen screenshot latency and provider-returned encoded payload byte
+  size.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
+- `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
+  moves in provider SDKs that synchronize cursor movement.
 - `type_100_chars`: one deterministic 100-character typing action with safe length/method
+  metadata only.
+- `type_1000_chars`: one deterministic 1000-character typing action with safe length/method
   metadata only.
 - `recording_start_stop`: recording start and stop call latency plus safe file metadata.
 - `sandbox_exec`: explicit live Modal `Sandbox.exec` comparison for the same move+click hot path,
@@ -89,6 +94,11 @@ typed text, clipboard text, recording bytes, raw recording paths, artifact URIs,
 strings, stdout, stderr, or ffmpeg argv. Any failed warmup or measured iteration is included under
 `failures`, partial successful samples remain in the report, and the command exits nonzero.
 Typing failures are redacted against the typed payload before they are included in benchmark JSON.
+
+For interpretation notes and one captured live run set, see:
+
+- [Provider benchmark results interpretation](benchmark-results-interpretation.md)
+- [Provider benchmark results, 2026-05-13](benchmark-results-2026-05-13.md)
 
 ## Benchmark action batching
 
@@ -110,6 +120,99 @@ uv run computer-use benchmark action-batch \
 The command emits JSON with metadata, raw millisecond samples, summary timings, and a batch-vs-separate-call comparison. It measures one request containing five safe actions against five separate action requests. The `Sandbox.exec` comparison is reported as `not_measured` in this version; no Modal Sandbox is created by the benchmark.
 
 The benchmark performs one warmup iteration per case before measuring. Any daemon error or exception is included under `failures`, and the command exits nonzero. The built-in action set avoids text-entry and clipboard actions so benchmark output does not include typed or clipboard text.
+
+## SDK benchmark surfaces
+
+Use the SDK benchmark when you want one JSON report across daemon behavior and adapter
+compatibility without calling model or external sandbox provider APIs:
+
+```bash
+uv run computer-use benchmark sdk --mock-local --iterations 5
+```
+
+By default this measures:
+
+- `daemon-http`: daemon action batching, screenshots, move+click, move/click sequence,
+  100-character typing, 1000-character typing, command echo, and recording start/stop.
+- `openai-adapter`: OpenAI computer-action adapter normalization and native action execution against an in-process recorder.
+- `anthropic-adapter`: Anthropic computer-action adapter normalization for `computer_20250124` and native action execution against an in-process recorder.
+- `action-executor`: provider-neutral `ActionExecutor` execution against an in-process recorder.
+
+Adapter cases do not call OpenAI, Anthropic, or any model API. They measure translation and
+execution-path overhead only, which keeps the benchmark deterministic and credential-free.
+
+The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
+
+```bash
+uv run computer-use benchmark sdk \
+  --create-modal-sandbox \
+  --surfaces daemon-http \
+  --browser chromium \
+  --gpu T4 \
+  --iterations 5
+```
+
+This mode is intentionally explicit because it creates billable Modal resources. It builds a
+`ComputerConfig`, passes `ResourceConfig.gpu` through to `Sandbox.create(gpu=...)`, measures cold
+create-to-ready time, runs the warm daemon cases through the connect token, and terminates the
+sandbox in a `finally` block. If `--gpu` is set without `--resource-profile`, the created sandbox
+uses `browser-gpu`; otherwise `--resource-profile` controls the image/resource profile label.
+Supported GPU strings and counts follow Modal's `gpu` argument, such as `T4`, `L4`, `A10`,
+`L40S`, `A100`, `H100`, or `H100:2`. For GPU-specific benchmarking where Modal's H100-to-H200
+upgrade would pollute attribution, use Modal's strict `H100!` string.
+
+The raw Modal `Sandbox.exec` baseline is opt-in:
+
+```bash
+uv run computer-use benchmark sdk \
+  --base-url "$COMPUTER_USE_DAEMON_URL" \
+  --surfaces daemon-http,sandbox-exec \
+  --sandbox-id sb-... \
+  --iterations 5
+```
+
+This baseline attaches to an existing sandbox and runs a small `xdotool` command through
+`Sandbox.exec`. It is useful as a transport comparison, but the daemon HTTP surface is the SDK's
+normal primitive path.
+
+Daemon HTTP entries may also include `verification` readbacks. Cursor readback checks the final
+cursor position after the deterministic move/click sequence. Typing readback starts a controlled
+`xev` target as a detached process and verifies that keypress events reached that target without
+serializing the typed text.
+
+The daemon HTTP surface includes additive `cost_estimate` metadata when the benchmark has Modal
+resource metadata. Cost estimates use public Modal rates, measured sandbox wall-clock runtime
+including warmup, and safe resource assumptions when available. They are approximate metadata, not
+actual billing data. Unknown CPU or memory produces `partial`, `unknown`, or `not_measured` status
+instead of a fake zero-cost total. Adapter-only and `sandbox-exec` surfaces return
+`not_applicable` because they do not create resources in this benchmark.
+
+Modal runs can also attach a separate `billing_reconciliation` object when the billed Modal
+object is tagged and the caller provides a Modal billing report window. This uses
+`modal.billing.workspace_billing_report` with requested tag names, filters rows by required benchmark
+tags, and sums only matched row costs. It intentionally does not overwrite `cost_estimate`: the
+estimate is immediate public-rate context, while reconciliation is delayed Modal-reported
+billing telemetry for the tag/window. Reconciliation can return `matched`, `not_available_yet`,
+`no_matching_tags`, `not_measured`, `unavailable`, or `failed`. Short benchmark runs often need a
+later query because Modal billing report data is delayed and reported in full intervals. Modal rounds
+partial `start` values down to the interval boundary and excludes partial `end` intervals; requested
+tag keys can be absent when they were not in use, and tag changes apply to the whole reported
+interval. Saved reconciliation metadata omits raw billing rows, object ids, URLs, tokens,
+stdout/stderr, and daemon payloads.
+For strongest attribution, run the benchmark in an isolated Modal App and pass the benchmark tags as
+`app_tags` to `ComputerSandbox.create(...)`, because Modal billing reports surface tags from the
+billed Modal object. Sandbox tags remain useful for operational lookup/debugging, but they should not
+be the only billing attribution mechanism.
+
+Keep SDK benchmark surfaces fair:
+
+- Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
+- Compare deterministic SDK primitives before comparing model-driven task completion.
+- Treat public-rate `cost_estimate` values as approximate context, not billing truth.
+- Treat screenshot byte summaries as daemon-returned payload size.
+- Do not include noVNC stream URLs, bearer tokens, typed text, screenshot bytes, stdout,
+  stderr, artifact URIs, or recording paths in saved reports.
+- Treat adapter timings as normalization/execution-path overhead, not provider API latency.
 
 ## Screenshot storage modes
 
@@ -137,6 +240,10 @@ If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. T
 Use `examples/browser_profile.py` for an SDK-level pattern. Prewarm is optional and can be disabled
 with `BrowserConfig(prewarm=False)` for deterministic tests.
 
+Use `BrowserConfig(open_url_on_start="https://...")` when a workload always starts on the same
+page and you want startup to pay both browser creation and first navigation. Use
+`BrowserConfig(launch_args=[...])` for browser-owned flags such as viewport/device-scale tuning.
+
 ## Image profile
 
 `COMPUTER_USE_IMAGE_PROFILE` is a label reported by `/v1/capabilities`. The image you build for a Modal Sandbox should match it:
@@ -149,6 +256,13 @@ Pick `browser-gpu` only when the agent is rendering 3D, video, or heavy WebGL; o
 
 GPU is never enabled implicitly. Set both `ResourceConfig(profile="browser-gpu")` and a concrete
 `gpu` value, such as `"T4"`, when you want Modal to request a GPU.
+Browser GPU launch stays in `auto` mode by default because forcing a graphics backend can regress or
+hang on some Linux/X11 stacks. Use `BrowserConfig(gpu_mode="chromium-vulkan")` only for measured
+Chromium Vulkan/ANGLE experiments, or `gpu_mode="off"` to force software rendering.
+
+`browser.render_metrics(url)` runs a Chromium-only synthetic page-load probe through the DevTools
+Protocol and returns Navigation Timing, paint timing, and WebGL renderer metadata. Use it before
+treating a GPU allocation as a browser-rendering improvement.
 
 ## Warm Pools
 
