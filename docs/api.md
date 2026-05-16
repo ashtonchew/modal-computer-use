@@ -174,6 +174,8 @@ duplicating trace/artifact writes; reusing a key with a different request body r
 `continue_on_error` applies between top-level batch items. A `hold_key` action is treated as one
 compound top-level item: nested actions run while the key is held, and the first nested failure
 releases the key and fails that `hold_key` item before later nested actions run.
+Nested `hold_key` action trees are canonical only through `/v1/actions/run`; the direct
+`/v1/keyboard/hold` route is primitive-only and accepts only `key` plus optional `duration_ms`.
 Action budgets count attempted executable desktop actions after validation, including failed
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
 instead, and cursor-position queries do not consume the action budget. Successful action-route

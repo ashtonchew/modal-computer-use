@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -45,7 +45,6 @@ class HotkeyRequest(Schema):
 class HoldRequest(Schema):
     key: str
     duration_ms: int | None = Field(default=None, ge=0, le=60_000)
-    actions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MouseMoveRequest(Point):

@@ -6,9 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from modal_computer_use.daemon import budgets
-from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
+from modal_computer_use.daemon.routes.execution import run_idle_only_mutation, run_recording_start
 from modal_computer_use.daemon.schemas import RecordingStartRequest
 from modal_computer_use.models import Recording
 
@@ -18,33 +16,30 @@ dashboard_router = APIRouter()
 
 @router.post("")
 async def start(payload: RecordingStartRequest, request: Request) -> Recording:
-    await ensure_desktop_ready(request)
-    budget_error = budgets.recording_start_error(request)
-    if budget_error is not None:
-        raise budget_error
-    rec = request.app.state.recordings.start(
-        name=payload.name, fps=payload.fps, format=payload.format
+    async def operation() -> Recording:
+        return request.app.state.recordings.start(
+            name=payload.name, fps=payload.fps, format=payload.format
+        )
+
+    return await run_recording_start(
+        request,
+        operation,
+        rollback=lambda rec: request.app.state.recordings.delete(rec.id),
     )
-    try:
-        budgets.enforce(request, "recordings")
-    except DaemonError:
-        request.app.state.recordings.delete(rec.id)
-        raise
-    budgets.touch_activity(request)
-    return rec
 
 
 @router.post("/{recording_id}/stop")
 async def stop(recording_id: str, request: Request) -> Recording:
-    budgets.enforce_idle(request)
-    rec = request.app.state.recordings.stop(recording_id, append_manifest=False)
-    try:
-        budgets.enforce(request, "recordings", "artifacts")
-    except DaemonError:
-        request.app.state.recordings.delete(recording_id)
-        raise
+    async def operation() -> Recording:
+        return request.app.state.recordings.stop(recording_id, append_manifest=False)
+
+    rec = await run_idle_only_mutation(
+        request,
+        operation,
+        enforce_after=("recordings", "artifacts"),
+        rollback=lambda _rec: request.app.state.recordings.delete(recording_id),
+    )
     request.app.state.recordings.append_manifest(recording_id)
-    budgets.touch_activity(request)
     return rec
 
 
@@ -73,10 +68,11 @@ async def download(recording_id: str, request: Request) -> FileResponse:
 
 @router.delete("/{recording_id}")
 async def delete(recording_id: str, request: Request) -> dict[str, bool]:
-    budgets.enforce_idle(request)
-    request.app.state.recordings.delete(recording_id)
-    budgets.touch_activity(request)
-    return {"ok": True}
+    async def operation() -> dict[str, bool]:
+        request.app.state.recordings.delete(recording_id)
+        return {"ok": True}
+
+    return await run_idle_only_mutation(request, operation)
 
 
 @dashboard_router.get("/recordings/ui", response_class=HTMLResponse)

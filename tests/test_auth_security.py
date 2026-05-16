@@ -340,10 +340,11 @@ def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
     body = response.json()
     serialized = json.dumps(body)
 
-    assert response.status_code == 200
+    assert response.status_code == 400
+    assert body["code"] == "command_failed"
     assert body["message"] == "Bearer [redacted]"
-    assert body["output"]["stdout"] == "Bearer [redacted]"
-    assert body["output"]["stderr"] == "[redacted]"
+    assert body["details"]["stdout"]["redacted"] is True
+    assert body["details"]["stderr"]["redacted"] is True
     assert "message-secret" not in serialized
     assert "stdout-secret" not in serialized
     assert "stderr-secret" not in serialized

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon import budgets
+from modal_computer_use.daemon.routes.execution import budget_policy
 from modal_computer_use.daemon.routes.validation import daemon_readiness
 from modal_computer_use.models import ComputerStatus, LifecycleResult
 
@@ -24,7 +24,7 @@ async def status(request: Request) -> ComputerStatus:
             height=backend.height,
             processes=process_statuses,
             resources={"profile": request.app.state.settings.image_profile},
-            budgets=budgets.snapshot(request),
+            budgets=budget_policy(request).snapshot(),
         )
     ready, _ = await daemon_readiness(request)
     return ComputerStatus(
@@ -35,29 +35,29 @@ async def status(request: Request) -> ComputerStatus:
         height=backend.height,
         processes=process_statuses,
         resources={"profile": request.app.state.settings.image_profile},
-        budgets=budgets.snapshot(request),
+        budgets=budget_policy(request).snapshot(),
     )
 
 
 @router.post("/start")
 async def start(request: Request) -> LifecycleResult:
-    budgets.enforce_idle(request)
+    budget_policy(request).enforce_idle()
     await request.app.state.supervisor.start()
-    budgets.touch_activity(request)
+    budget_policy(request).touch_activity()
     return LifecycleResult(ok=True, status="running")
 
 
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
-    budgets.enforce_idle(request)
+    budget_policy(request).enforce_idle()
     await request.app.state.supervisor.stop()
-    budgets.touch_activity(request)
+    budget_policy(request).touch_activity()
     return LifecycleResult(ok=True, status="stopped")
 
 
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
-    budgets.enforce_idle(request)
+    budget_policy(request).enforce_idle()
     await request.app.state.supervisor.restart()
-    budgets.touch_activity(request)
+    budget_policy(request).touch_activity()
     return LifecycleResult(ok=True, status="running")

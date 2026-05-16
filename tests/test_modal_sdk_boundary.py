@@ -221,6 +221,7 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_MAX_ACTION_TIMEOUT_MS"] == "300000"
     assert kwargs["env"]["COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC"] == "20"
     assert kwargs["env"]["COMPUTER_USE_MAX_BATCH_DURATION_MS"] == "30000"
+    assert kwargs["env"]["COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY"] == "true"
     assert kwargs["encrypted_ports"] == [6080]
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs

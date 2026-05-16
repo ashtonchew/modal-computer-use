@@ -531,7 +531,7 @@ def test_nested_hold_screenshot_artifact_budget_failure_releases_key(tmp_path) -
     assert not (artifacts_dir / "manifest.ndjson").exists()
 
 
-def test_direct_keyboard_hold_nested_screenshot_artifact_budget_failure_releases_key(
+def test_direct_keyboard_hold_rejects_nested_screenshot_without_budget_side_effects(
     tmp_path,
 ) -> None:
     artifacts_dir = tmp_path / "artifacts"
@@ -558,10 +558,10 @@ def test_direct_keyboard_hold_nested_screenshot_artifact_budget_failure_releases
             },
         )
 
-    assert response.status_code == 429
-    assert response.json()["code"] == "budget_exceeded"
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
     assert app.state.backend.held_keys == set()
-    assert app.state.screenshot_count == 1
+    assert app.state.screenshot_count == 0
     assert not list((artifacts_dir / "screenshots").glob("*.png"))
     assert not (artifacts_dir / "manifest.ndjson").exists()
 

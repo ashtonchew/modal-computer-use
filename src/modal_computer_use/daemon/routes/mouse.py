@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon import budgets
+from modal_computer_use.daemon.routes.execution import budget_policy, run_input_action
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
     ready_input_lock,
@@ -26,11 +26,11 @@ router = APIRouter(prefix="/v1/mouse")
 async def move(payload: MouseMoveRequest, request: Request) -> Point:
     validate_point(request, payload)
     await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
+    budget_error = budget_policy(request).action_reservation_error()
     if budget_error is not None:
         raise budget_error
     async with ready_input_lock(request):
-        budgets.reserve_action(request)
+        budget_policy(request).reserve_action()
         return await request.app.state.backend.mouse_move(payload.x, payload.y)
 
 
@@ -39,11 +39,11 @@ async def click(payload: MouseClickRequest, request: Request) -> Point:
     validate_optional_point(request, x=payload.x, y=payload.y)
     validate_keys(*payload.modifiers)
     await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
+    budget_error = budget_policy(request).action_reservation_error()
     if budget_error is not None:
         raise budget_error
     async with ready_input_lock(request):
-        budgets.reserve_action(request)
+        budget_policy(request).reserve_action()
         return await request.app.state.backend.mouse_click(
             payload.x,
             payload.y,
@@ -67,11 +67,11 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
         validate_point(request, point, field=f"path[{index}]")
     validate_keys(*payload.modifiers)
     await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
+    budget_error = budget_policy(request).action_reservation_error()
     if budget_error is not None:
         raise budget_error
     async with ready_input_lock(request):
-        budgets.reserve_action(request)
+        budget_policy(request).reserve_action()
         return await request.app.state.backend.mouse_drag(
             start=start,
             end=end,
@@ -85,12 +85,7 @@ async def drag(payload: MouseDragRequest, request: Request) -> Point:
 @router.post("/scroll")
 async def scroll(payload: MouseScrollRequest, request: Request) -> ActionResult:
     validate_optional_point(request, x=payload.x, y=payload.y)
-    await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budgets.reserve_action(request)
+    async def operation() -> ActionResult:
         return await request.app.state.backend.mouse_scroll(
             payload.direction,
             amount=payload.amount,
@@ -98,29 +93,40 @@ async def scroll(payload: MouseScrollRequest, request: Request) -> ActionResult:
             y=payload.y,
         )
 
+    return await run_input_action(
+        request,
+        operation,
+        fallback_code="mouse_scroll_failed",
+        fallback_message="mouse scroll failed",
+    )
+
 
 @router.post("/down")
 async def down(payload: MouseButtonRequest, request: Request) -> ActionResult:
     validate_optional_point(request, x=payload.x, y=payload.y)
-    await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budgets.reserve_action(request)
+    async def operation() -> ActionResult:
         return await request.app.state.backend.mouse_down(payload.button, payload.x, payload.y)
+
+    return await run_input_action(
+        request,
+        operation,
+        fallback_code="mouse_down_failed",
+        fallback_message="mouse down failed",
+    )
 
 
 @router.post("/up")
 async def up(payload: MouseButtonRequest, request: Request) -> ActionResult:
     validate_optional_point(request, x=payload.x, y=payload.y)
-    await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budgets.reserve_action(request)
+    async def operation() -> ActionResult:
         return await request.app.state.backend.mouse_up(payload.button, payload.x, payload.y)
+
+    return await run_input_action(
+        request,
+        operation,
+        fallback_code="mouse_up_failed",
+        fallback_message="mouse up failed",
+    )
 
 
 @router.get("/position")

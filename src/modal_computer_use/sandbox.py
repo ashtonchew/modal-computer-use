@@ -452,6 +452,7 @@ def _daemon_environment(
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
         "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
+        "COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY": "true",
         "COMPUTER_USE_VNC_MODE": vnc_mode,
         "COMPUTER_USE_VNC_PASSWORD": (
             config.vnc_password or _secrets.token_urlsafe(24) if vnc_mode != "off" else ""

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon import budgets
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.execution import run_screenshot_capture
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
-    ready_input_lock,
     validate_region,
 )
 from modal_computer_use.daemon.schemas import ScreenshotRequest, ZoomScreenshotRequest
@@ -53,20 +52,13 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
         source_height=request.app.state.backend.height,
         scale=options.scale,
     )
-    budget_error = budgets.screenshot_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        error = budgets.screenshot_reservation_error(request)
-        if error is not None:
-            raise error
-        budgets.reserve_screenshot(request)
-        shot = await request.app.state.backend.screenshot(
+    async def operation() -> Screenshot:
+        return await request.app.state.backend.screenshot(
             options,
             artifact_store=request.app.state.artifacts,
         )
-        budgets.enforce(request, "screenshots", "artifacts")
-        return shot
+
+    return await run_screenshot_capture(request, operation)
 
 
 @router.post("/region")
@@ -82,21 +74,14 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
         source_height=payload.region.height,
         scale=options.scale,
     )
-    budget_error = budgets.screenshot_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        error = budgets.screenshot_reservation_error(request)
-        if error is not None:
-            raise error
-        budgets.reserve_screenshot(request)
-        shot = await request.app.state.backend.screenshot(
+    async def operation() -> Screenshot:
+        return await request.app.state.backend.screenshot(
             options,
             region=payload.region,
             artifact_store=request.app.state.artifacts,
         )
-        budgets.enforce(request, "screenshots", "artifacts")
-        return shot
+
+    return await run_screenshot_capture(request, operation)
 
 
 @router.post("/zoom")
@@ -109,9 +94,6 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         scaled_dimension(region.width, payload.scale),
         scaled_dimension(region.height, payload.scale),
     )
-    budget_error = budgets.screenshot_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
     options = ScreenshotOptions(
         format=payload.format,  # type: ignore[arg-type]
         quality=payload.quality,
@@ -119,15 +101,11 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         show_cursor=payload.show_cursor,
         storage=payload.storage,  # type: ignore[arg-type]
     )
-    async with ready_input_lock(request):
-        error = budgets.screenshot_reservation_error(request)
-        if error is not None:
-            raise error
-        budgets.reserve_screenshot(request)
-        shot = await request.app.state.backend.screenshot(
+    async def operation() -> Screenshot:
+        return await request.app.state.backend.screenshot(
             options,
             region=region,
             artifact_store=request.app.state.artifacts,
         )
-        budgets.enforce(request, "screenshots", "artifacts")
-        return shot
+
+    return await run_screenshot_capture(request, operation)

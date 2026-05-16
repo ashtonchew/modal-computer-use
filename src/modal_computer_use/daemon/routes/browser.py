@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from modal_computer_use.daemon import budgets
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, ready_input_lock
+from modal_computer_use.daemon.routes.execution import run_input_action
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
 from modal_computer_use.daemon.schemas import BrowserOpenUrlRequest
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload
@@ -13,16 +13,18 @@ router = APIRouter(prefix="/v1/browser")
 
 @router.post("/open-url")
 async def open_url(payload: BrowserOpenUrlRequest, request: Request) -> ActionResult:
-    await ensure_desktop_ready(request)
-    budget_error = budgets.action_reservation_error(request)
-    if budget_error is not None:
-        raise budget_error
-    async with ready_input_lock(request):
-        budgets.reserve_action(request)
+    async def operation() -> ActionResult:
         result = await request.app.state.backend.open_url(
             payload.url, wait_for_window=payload.wait_for_window
         )
         return ActionResult.model_validate(sanitize_payload(result.model_dump(mode="json")))
+
+    return await run_input_action(
+        request,
+        operation,
+        fallback_code="browser_open_failed",
+        fallback_message="browser open failed",
+    )
 
 
 @router.get("/status")

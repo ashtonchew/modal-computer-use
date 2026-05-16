@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.auth import AuthMiddleware
+from modal_computer_use.daemon.budget_policy import BudgetPolicy
 from modal_computer_use.daemon.desktop import choose_backend
 from modal_computer_use.daemon.desktop.recordings import RecordingRegistry
 from modal_computer_use.daemon.errors import DaemonError
@@ -78,6 +79,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.state.screenshot_count = 0
     app.state.last_activity_at = time.monotonic()
     app.state.action_rate_window = deque()
+    app.state.budget_policy = BudgetPolicy(app.state)
     app.state.tracer = get_tracer(
         enabled=settings.otel_enabled,
         name="modal_computer_use.daemon",

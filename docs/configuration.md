@@ -32,7 +32,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 |---|---|---|---|
 | `COMPUTER_USE_LOCAL_TOKEN` | string | unset | Bearer token clients must send as `Authorization: Bearer <token>`. Required for the local backend. Never set in production. |
 | `COMPUTER_USE_REQUIRE_CONNECT_USER` | bool | `true` | In Modal mode, require Modal's `X-Verified-User-Data` header on control requests. `/healthz` and `/readyz` are unauthenticated probes. |
-| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | bool | `false` | Trust verified-user headers from private or link-local client IPs. Leave disabled unless a trusted Connect Token proxy is known to originate from that range. |
+| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | bool | `false` | Trust verified-user headers from private or link-local client IPs. Modal-created sandboxes set this to `true` because Modal Connect can reach the daemon from private network space; leave disabled for arbitrary deployments. |
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | bool | `true` | Reject auth tokens passed in URL query strings. URLs leak into logs and browser history; leave this on. |
 
 ## Limits and budgets

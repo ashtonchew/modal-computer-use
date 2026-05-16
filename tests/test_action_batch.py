@@ -366,7 +366,7 @@ def test_hold_key_nested_action_result_failure_is_atomic(test_client, app) -> No
     assert app.state.backend.held_keys == set()
 
 
-def test_direct_keyboard_hold_propagates_nested_action_result_failure(test_client, app) -> None:
+def test_direct_keyboard_hold_rejects_nested_actions_without_leaking_text(test_client, app) -> None:
     async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
         return ActionResult(
             ok=False,
@@ -388,9 +388,8 @@ def test_direct_keyboard_hold_propagates_nested_action_result_failure(test_clien
     )
 
     serialized = response.text
-    assert response.status_code == 400
-    assert response.json()["code"] == "type_failed"
-    assert "nested type failed" in serialized
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
     assert "nested-secret" not in serialized
     assert app.state.backend.cursor.x == 0
     assert app.state.backend.cursor.y == 0

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from modal_computer_use.actions import normalize_key_combo
-from modal_computer_use.models import ActionResult, ComputerAction
+from modal_computer_use.models import ActionResult
 
 from .base import Namespace
 
@@ -47,16 +47,11 @@ class KeyboardNamespace(Namespace):
         self,
         key: str,
         duration_ms: int | None = None,
-        actions: list[ComputerAction] | None = None,
     ) -> ActionResult:
-        payload_actions = [
-            action.model_dump(mode="json") if hasattr(action, "model_dump") else action
-            for action in (actions or [])
-        ]
         return ActionResult.model_validate(
             self._client.post_json(
                 "/v1/keyboard/hold",
-                json={"key": key, "duration_ms": duration_ms, "actions": payload_actions},
+                json={"key": key, "duration_ms": duration_ms},
             )
         )
 

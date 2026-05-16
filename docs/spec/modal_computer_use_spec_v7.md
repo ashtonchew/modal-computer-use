@@ -22,12 +22,12 @@ The table below maps each post-v6 commit to the contract it locked in. Section n
 
 | Commit | Area | What changed | Why | Evidence |
 |---|---|---|---|---|
-| `4187940` | Daemon auth / action preflight | AuthMiddleware now rejects query-string `_modal_connect_token`, requires loopback for local-token mode, and refuses non-trusted-proxy traffic when `require_connect_user` is set. Action validation rejects unknown keys and out-of-bounds coordinates before execution. | Query tokens leak through logs and URLs; verified-user headers from untrusted proxies cannot be trusted; running unvalidated actions ties up the input lock and may leave keys held. | §15.2, §15.6; `src/modal_computer_use/daemon/auth.py:14-109`; `src/modal_computer_use/daemon/routes/actions.py:442-499`; `tests/test_auth_security.py`. |
-| `96814a9` | Readiness and input contracts | `/readyz` and the action runner now refuse work when the desktop backend is not ready; nested `hold_key` actions are re-parsed and validated; key validation runs over modifiers and nested actions; the input lock is acquired before any input-emitting primitive. | Liveness ≠ usability. A live HTTP server with a half-started X server caused stuck-input and zero-byte screenshots in v0.1 dogfood. | §9.1, §8.4, §15.6; `src/modal_computer_use/daemon/routes/actions.py:846-924`; `tests/test_daemon_routes.py`, `tests/test_daemon_validation.py`. |
+| `4187940` | Daemon auth / action preflight | AuthMiddleware now rejects query-string `_modal_connect_token`, requires loopback for local-token mode, and refuses non-trusted-proxy traffic when `require_connect_user` is set. Action validation rejects unknown keys and out-of-bounds coordinates before execution. | Query tokens leak through logs and URLs; verified-user headers from untrusted proxies cannot be trusted; running unvalidated actions ties up the input lock and may leave keys held. | §15.2, §15.6; `src/modal_computer_use/daemon/auth.py:14-109`; `src/modal_computer_use/daemon/actions/batch.py:442-499`; `tests/test_auth_security.py`. |
+| `96814a9` | Readiness and input contracts | `/readyz` and the action runner now refuse work when the desktop backend is not ready; nested `hold_key` actions are re-parsed and validated; key validation runs over modifiers and nested actions; the input lock is acquired before any input-emitting primitive. | Liveness ≠ usability. A live HTTP server with a half-started X server caused stuck-input and zero-byte screenshots in v0.1 dogfood. | §9.1, §8.4, §15.6; `src/modal_computer_use/daemon/actions/batch.py:846-924`; `tests/test_daemon_routes.py`, `tests/test_daemon_validation.py`. |
 | `3532b1c` | Redaction of sync and credentials | `daemon/logging.py` JSON formatter sanitizes the record message and redacts sensitive keys in the `extra` dict (sha256 + length, never value); artifact sync errors no longer echo mountpoint paths verbatim. | Stack traces in panicked sync routines were leaking artifact roots and tokens to stdout. | §15.3; `src/modal_computer_use/daemon/logging.py:12-72`; `src/modal_computer_use/artifacts.py:274-315`; `tests/test_artifacts.py`, `tests/test_auth_security.py`. |
-| `8721d7e` | Secret and budget boundaries | The budget module is now route-aware: `reserve_action`, `reserve_screenshot`, `enforce`, and `idle_reservation_error` are called inline by every mutating route before the lock is taken. Schemas hide `text`, `clipboard_text`, `data_base64`, `bytes`, `image`, `password`, `token`, and `*_token` keys. | Budgets enforced only at batch end let runaway loops accrue cost; trace and log records included clipboard text and screenshot bytes. | §15.2, §15.5, §17.5; `src/modal_computer_use/daemon/budgets.py:11-202`; `src/modal_computer_use/daemon/routes/actions.py:142-188`; `tests/test_budgets.py`, `tests/test_trace_and_budgets.py`. |
-| `90bbab7` | Trace redaction & batch guardrails | The action batch route serializes `TypeAction.text` to `{redacted: true, length, sha256}`; the redactor walks the whole action payload and emits a `redactions[]` list of JSON paths; provider actions land under `provider_action` with their own redaction pass; batch-too-large is a 413, idempotency conflicts are 409, action validation failures are 422. | A single redaction pass at the call site was missing nested actions and provider metadata; ambiguous status codes prevented retry clients from making safe decisions. | §11.3, §14.2, §14.3, §9.8; `src/modal_computer_use/daemon/routes/actions.py:1042-1171`; `tests/test_adapters.py`, `tests/test_trace_replay.py`. |
-| `2f91cbf` | Screenshot budgets & X11 cleanup | Screenshot pixel budgets are pre-validated for both `screenshot`/`zoom` actions in a batch and for the optional `screenshot_after`. X11 backend now releases buttons/keys on every failure path; `release_all()` runs inside the timeout handler. | A 5000×5000 zoom at scale 4 could OOM the daemon; held buttons after a backend exception bricked the desktop. | §9.6, §15.6, §17.5; `src/modal_computer_use/daemon/routes/actions.py:216-258, 460-517`; `src/modal_computer_use/daemon/desktop/x11.py`; `tests/test_x11_backend.py`. |
+| `8721d7e` | Secret and budget boundaries | The budget module is now route-aware: `reserve_action`, `reserve_screenshot`, `enforce`, and `idle_reservation_error` are called inline by every mutating route before the lock is taken. Schemas hide `text`, `clipboard_text`, `data_base64`, `bytes`, `image`, `password`, `token`, and `*_token` keys. | Budgets enforced only at batch end let runaway loops accrue cost; trace and log records included clipboard text and screenshot bytes. | §15.2, §15.5, §17.5; `src/modal_computer_use/daemon/budget_policy.py:11-202`; `src/modal_computer_use/daemon/actions/batch.py:142-188`; `tests/test_budgets.py`, `tests/test_trace_and_budgets.py`. |
+| `90bbab7` | Trace redaction & batch guardrails | The action batch route serializes `TypeAction.text` to `{redacted: true, length, sha256}`; the redactor walks the whole action payload and emits a `redactions[]` list of JSON paths; provider actions land under `provider_action` with their own redaction pass; batch-too-large is a 413, idempotency conflicts are 409, action validation failures are 422. | A single redaction pass at the call site was missing nested actions and provider metadata; ambiguous status codes prevented retry clients from making safe decisions. | §11.3, §14.2, §14.3, §9.8; `src/modal_computer_use/daemon/actions/traces.py`; `tests/test_adapters.py`, `tests/test_trace_replay.py`. |
+| `2f91cbf` | Screenshot budgets & X11 cleanup | Screenshot pixel budgets are pre-validated for both `screenshot`/`zoom` actions in a batch and for the optional `screenshot_after`. X11 backend now releases buttons/keys on every failure path; `release_all()` runs inside the timeout handler. | A 5000×5000 zoom at scale 4 could OOM the daemon; held buttons after a backend exception bricked the desktop. | §9.6, §15.6, §17.5; `src/modal_computer_use/daemon/actions/batch.py:216-258, 460-517`; `src/modal_computer_use/daemon/desktop/x11.py`; `tests/test_x11_backend.py`. |
 | `1e3cd3c` | Desktop action primitives | Settings module reorganized; `redaction.py` extracted as a public module (`sanitize_text`, `safe_exception_payload`, `RedactedException`); keyboard validation rejects unsupported key names with `is_supported_key`; recording start gates on the recording-duration budget. | The redaction code was duplicated in three places, drifting out of sync; unknown key names were silently passed to `xdotool`, producing flaky tests. | §15.3, §11.1; `src/modal_computer_use/redaction.py:6-37`; `src/modal_computer_use/actions.py`; `src/modal_computer_use/daemon/settings.py:31-149`; `tests/test_recordings.py`, `tests/test_settings.py`. |
 | `d5ff798` | Artifact controls | `normalize_artifact_path` decodes percent-encoding up to three times to defeat double-encoded traversal; rejects absolute paths, `..`, control characters, and `CONTROL_PATHS`/`CONTROL_SEGMENTS`; `ArtifactStore._reject_symlink_components` walks each path component for symlinks. Manifest and trace paths are non-public. | A relative path like `..%2F..%2Fetc%2Fpasswd` decoded once still escaped the root; symlinks in user-writable directories could escalate to anywhere on the sandbox filesystem. | §9.9, §16.6, §15.5; `src/modal_computer_use/artifacts.py:17-100`; `tests/test_artifacts.py`, `tests/test_daemon_validation.py`. |
 | `7f24ccf` | Primitive safety contracts | Auth, action, apps, browser, keyboard, lifecycle, supervisor, tracing, and the trace-replay path all now fail closed on missing readiness, missing tokens, and unsupported actions. Trace validation refuses entries whose `normalized_action.text` is not a redaction marker. | A trace whose typed text was *not* redacted before serialization was indistinguishable from a benign trace; the replayer could re-type the secret. | §14.2, §14.3, §15.6, §17.5; `src/modal_computer_use/daemon/auth.py`; `src/modal_computer_use/tracing.py:20-770`; `tests/test_trace_replay.py`, `tests/test_auth_security.py`. |
@@ -189,7 +189,7 @@ src/modal_computer_use/
   daemon/
     app.py               — create_app(); registers 17 routers and AuthMiddleware
     auth.py              — AuthMiddleware (three modes)
-    budgets.py           — BudgetKind, reserve_action, reserve_screenshot, enforce, rate-limit window
+    budget_policy.py           — BudgetKind, reserve_action, reserve_screenshot, enforce, rate-limit window
     errors.py            — DaemonError
     logging.py           — JSON formatter, redact()
     settings.py          — DaemonSettings (env-var contract)
@@ -247,7 +247,7 @@ Every variable below is read by `DaemonSettings` and is the source of truth for 
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `3_600` | `idempotency_cache_ttl_seconds` | TTL for cached idempotent results. |
 | `COMPUTER_USE_LOCAL_TOKEN` | `None` | `local_token` | Loopback-only bearer for dev. |
 | `COMPUTER_USE_REQUIRE_CONNECT_USER` | `true` | `require_connect_user` | Enforce verified-user header from trusted proxy. |
-| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | `false` | `trust_private_connect_proxy` | Opt-in trust for verified-user headers from private or link-local proxy addresses. |
+| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | `false` | `trust_private_connect_proxy` | Opt-in trust for verified-user headers from private or link-local proxy addresses. Modal-created sandboxes set this to `true` for Sandbox Connect Token ingress. |
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | `true` | `reject_query_tokens` | Reject `?_modal_connect_token=...`. |
 | `COMPUTER_USE_VNC_MODE` | `off` | `vnc_mode` | `off`, `view_only`, or `control`. |
 | `COMPUTER_USE_VNC_PASSWORD` | `None` | `vnc_password` | Generated if absent and VNC is enabled. |
@@ -303,11 +303,11 @@ The daemon owns: process supervision, input serialization, screenshots, recordin
 
 ### 8.3 Startup sequence
 
-`asynccontextmanager lifespan(app)` calls `supervisor.start()` before the app accepts traffic and `supervisor.stop()` at shutdown. `/healthz` returns 200 as soon as the FastAPI process is alive; `/readyz` returns 200 only when the backend reports the desktop is usable. Routes that take the input lock check readiness before acquiring the lock (`src/modal_computer_use/daemon/routes/actions.py:60-90`).
+`asynccontextmanager lifespan(app)` calls `supervisor.start()` before the app accepts traffic and `supervisor.stop()` at shutdown. `/healthz` returns 200 as soon as the FastAPI process is alive; `/readyz` returns 200 only when the backend reports the desktop is usable. Routes that take the input lock check readiness before acquiring the lock (`src/modal_computer_use/daemon/actions/batch.py:60-90`).
 
 ### 8.4 Input serialization
 
-A single `asyncio.Lock` (`app.state.input_lock`) guards every input-emitting route — mouse, keyboard, clipboard, action batch. The lock is taken *after* validation and *after* idempotency-cache lookup so cache hits never queue behind real work. `release_all()` is called inside the `TimeoutError` and exception paths of the action runner (`routes/actions.py:218-219, 257-258`) to guarantee modifiers and buttons are released even when an action fails.
+A single `asyncio.Lock` (`app.state.input_lock`) guards every input-emitting route — mouse, keyboard, clipboard, action batch. The lock is taken *after* validation and *after* idempotency-cache lookup so cache hits never queue behind real work. `release_all()` is called inside the `TimeoutError` and exception paths of the action runner (`daemon/actions/batch.py:218-219, 257-258`) to guarantee modifiers and buttons are released even when an action fails.
 
 ### 8.5 Stuck-input recovery
 
@@ -380,7 +380,7 @@ The daemon's HTTP API is versioned under `/v1`. `GET /healthz` and `GET /readyz`
 | `POST` | `/v1/keyboard/type` | Type text. Validates Unicode and translates newlines into Enter; rejects control characters. |
 | `POST` | `/v1/keyboard/press` | Single key with optional modifiers. |
 | `POST` | `/v1/keyboard/hotkey` | Key sequence. |
-| `POST` | `/v1/keyboard/hold` | Hold key while executing nested actions; nested actions are re-parsed and validated. |
+| `POST` | `/v1/keyboard/hold` | Primitive key hold with `key` and optional `duration_ms`; nested actions are rejected. |
 | `GET` | `/v1/keyboard/keys` | Supported key names and aliases (`src/modal_computer_use/actions.py`). |
 
 ### 9.5 Clipboard routes
@@ -401,7 +401,7 @@ Clipboard contents are sensitive: logs record length/hash, never the text itself
 | `POST` | `/v1/screenshots/region` | Region screenshot. |
 | `POST` | `/v1/screenshots/zoom` | Crop and scale region. |
 
-Every screenshot route enforces `screenshot_max_pixels` *before* capture, both in the action runner (`routes/actions.py:460-517`) and at the route layer (`enforce_screenshot_options_pixels` in `routes/screenshots.py`). Output is `png`/`jpeg`/`webp`. The response is `Screenshot` (data inline or `artifact://` URI).
+Every screenshot route enforces `screenshot_max_pixels` *before* capture, both in the action runner (`daemon/actions/batch.py:460-517`) and at the route layer (`enforce_screenshot_options_pixels` in `routes/screenshots.py`). Output is `png`/`jpeg`/`webp`. The response is `Screenshot` (data inline or `artifact://` URI).
 
 ### 9.7 Recordings routes
 
@@ -428,14 +428,14 @@ Recording stop and delete enforce the idle budget before mutating recording stat
 
 Supported types: `move`, `click`, `double_click`, `triple_click`, `drag`, `scroll`, `mouse_down`, `mouse_up`, `type`, `keypress`, `hotkey`, `hold_key`, `wait`, `screenshot`, `zoom`, `cursor_position`, `release_all`.
 
-**v7 batch contract (`src/modal_computer_use/daemon/routes/actions.py:66-382`):**
+**v7 batch contract (`src/modal_computer_use/daemon/actions/batch.py:66-382`):**
 
 - Batch size > `max_batch_actions` → 413 `batch_too_large`.
 - Body `idempotency_key` and `Idempotency-Key` header that disagree → 409 `idempotency_key_conflict`.
 - Validation failure → 422 `action_validation_failed` with `details.errors[]` listing each issue.
 - The whole batch runs under one input-lock acquisition.
 - Each action has a deadline = `min(action.timeout_ms or max_action_timeout_ms or default_action_timeout_ms, remaining batch budget)`. Timeout produces `error_code: "timeout"` with `output.scope = "action"` or `"batch"`.
-- Budget reservations occur per action via `budgets.reserve_action(request)` (`routes/actions.py:142-165`); screenshot actions reserve via `budgets.reserve_screenshot`.
+- Budget reservations occur per action through `BudgetPolicy.reserve_action()` in `daemon/actions/batch.py`; screenshot actions reserve through `BudgetPolicy.reserve_screenshot()`.
 - Idempotency cache is keyed by `Idempotency-Key`; the cached entry's fingerprint is a SHA-256 over the request body excluding `idempotency_key`. Conflicting fingerprints reuse the key are rejected with 409.
 - `continue_on_error` applies between top-level batch actions. Compound actions such as `hold_key` are atomic: nested actions stop on the first failure, the held key is released, and the failed compound action may be followed by later top-level actions when `continue_on_error=true`.
 - On any timeout or backend exception, `await request.app.state.backend.release_all()` runs inside `with suppress(Exception)` before the result is recorded.
@@ -484,7 +484,7 @@ audited/replayable action batches:
 { "call_id": "call_...", "sequence": 42, "source": "openai-adapter" }
 ```
 
-Idempotency cache (`daemon/routes/actions.py:96-107, 406-418`):
+Idempotency cache (`daemon/actions/batch.py:96-107, 406-418`):
 
 - Stored as `OrderedDict` on `app.state.idempotency_cache`.
 - TTL: `idempotency_cache_ttl_seconds` (default 3600).
@@ -506,16 +506,16 @@ The daemon emits the following `code` values. Each is structured `{code, message
 | `connect_token_required` | 401 | `auth.py:65, 73` | `require_connect_user` mode missing a verified-user header from a trusted proxy. |
 | `invalid_verified_user_data` | 401 | `auth.py:85, 91` | Verified-user header is malformed or unrecognized. |
 | `unsafe_artifact_path` | 400 | `app.py:113` (`ArtifactPathError`) | Path validation failed. |
-| `budget_exceeded` | 429 | `budgets.py:181`; `app.py:122` | Run-scoped budget hit. |
-| `rate_limited` | 429 | `budgets.py:137` | Action rate-limit window full. `details.retry_after_seconds = 1`. |
-| `batch_too_large` | 413 | `routes/actions.py:74` | Batch size > `max_batch_actions`. |
-| `idempotency_key_conflict` | 409 | `routes/actions.py:101, 389` | Header/body key mismatch or fingerprint mismatch. |
-| `action_validation_failed` | 422 | `routes/actions.py:83` | One or more actions failed pre-flight validation. |
+| `budget_exceeded` | 429 | `budget_policy.py:181`; `app.py:122` | Run-scoped budget hit. |
+| `rate_limited` | 429 | `budget_policy.py:137` | Action rate-limit window full. `details.retry_after_seconds = 1`. |
+| `batch_too_large` | 413 | `daemon/actions/batch.py:74` | Batch size > `max_batch_actions`. |
+| `idempotency_key_conflict` | 409 | `daemon/actions/batch.py:101, 389` | Header/body key mismatch or fingerprint mismatch. |
+| `action_validation_failed` | 422 | `daemon/actions/batch.py:83` | One or more actions failed pre-flight validation. |
 | `validation_error` | 422 | `app.py:130` | Pydantic body validation failure. |
 | `not_found` | 404 | `app.py:143` | Missing artifact or recording. |
 | `unknown_process` | 404 | `routes/processes.py:20` | Process restart requested a name outside the supervised process set. |
-| `unsupported_action` | 400 | `routes/actions.py:841` | Action type not handled by the runner. |
-| `timeout` | (in `output.code`) | `routes/actions.py:228, 670` | Per-action or per-batch deadline elapsed. |
+| `unsupported_action` | 400 | `daemon/actions/batch.py:841` | Action type not handled by the runner. |
+| `timeout` | (in `output.code`) | `daemon/actions/batch.py:228, 670` | Per-action or per-batch deadline elapsed. |
 | `internal_error` | 500 | `app.py:150` | Catch-all; body is `{redacted: true, type: <class>}` only. |
 
 ---
@@ -566,7 +566,7 @@ class TraceEntry(BaseModel):
 
 Storage: NDJSON at `<trace_dir>/actions.ndjson` via `TraceWriter` (`src/modal_computer_use/tracing.py:20`).
 
-**v7 redaction contract** (implementation `routes/actions.py:1042-1171`):
+**v7 redaction contract** (implementation `daemon/actions/traces.py`):
 
 - `TypeAction.text` is **not** stored as plaintext. It is serialized as `{"redacted": true, "length": <int>, "sha256": <hex>}` and the JSON path is appended to `redactions[]`.
 - Any dict key in `_SENSITIVE_TRACE_KEYS` (`api_key`, `artifact_bytes`, `artifact_uri`, `authorization`, `bearer`, `bytes`, `clipboard`, `clipboard_text`, `connect_token`, `content`, `data`, `data_base64`, `image`, `image_bytes`, `no_vnc_url`, `novnc_url`, `password`, `raw_path`, `screenshot`, `screenshot_bytes`, `stderr`, `stdout`, `text`, `token`, `typed_text`, `url`, `vnc_url`) or ending in `_token` is replaced with `{"redacted": true, "length"|"size_bytes"|"items": <int>}` and its path is added to `redactions[]`.
@@ -642,13 +642,13 @@ The redaction contract from §11.3 is the canonical statement. Operationally:
 | View-only mode. | Yes | `supervisor.py:67-68`; `x11vnc -viewonly`. |
 | No model API keys in core. | Yes | `tests/test_imports.py` pins absence of `openai`/`anthropic` imports in core. |
 | Network controls (`block_network`, `cidr_allowlist`). | Yes (config surface) | `ComputerConfig.network`. |
-| Input validation. | Yes | `routes/actions.py:846-924`: coordinate, region, key, holdkey-nested, modifier validation. |
-| Action rate limiting. | Yes (new in v7) | `budgets.py:131-147`; sliding window keyed on `input_rate_limit_per_sec`. |
-| Budget limits. | Yes (new in v7) | `budgets.py:11-202`; action, screenshot, artifact-byte, recording-duration, idle. |
+| Input validation. | Yes | `daemon/actions/batch.py:846-924`: coordinate, region, key, holdkey-nested, modifier validation. |
+| Action rate limiting. | Yes (new in v7) | `budget_policy.py:131-147`; sliding window keyed on `input_rate_limit_per_sec`. |
+| Budget limits. | Yes (new in v7) | `budget_policy.py:11-202`; action, screenshot, artifact-byte, recording-duration, idle. |
 | Recording retention. | Yes | Recordings never auto-uploaded; explicit start/stop/delete/sync. |
-| Call IDs and audit trail. | Yes | `routes/actions.py:81-211` log structured records with `call_id`, route, duration, redactions. |
+| Call IDs and audit trail. | Yes | `daemon/actions/batch.py:81-211` log structured records with `call_id`, route, duration, redactions. |
 | Human confirmation hooks. | Yes | `adapters/generic.py`; `before_action`/`after_action` callbacks. |
-| URL and token redaction. | Yes (new in v7) | `redaction.py:6-22`; `daemon/logging.py:12-65`; trace redaction in `routes/actions.py:1042-1171`. |
+| URL and token redaction. | Yes (new in v7) | `redaction.py:6-22`; `daemon/logging.py:12-65`; trace redaction in `daemon/actions/traces.py`. |
 
 ### 15.3 Redaction layers
 
@@ -656,7 +656,7 @@ Three layers, each defensible on its own:
 
 1. **Request-time** (`src/modal_computer_use/redaction.py:15-22`): `sanitize_text()` masks bearer tokens, query tokens, noVNC URLs, and `artifact://` URIs inside *any* string. Used by action-error messages, command output strings, and process log tails.
 2. **Log-time** (`src/modal_computer_use/daemon/logging.py:12-65`): the `JsonFormatter` sanitizes the record's rendered message and recursively redacts the `extra` dict via `redact()`. Sensitive keys (`api_key`, `authorization`, `bytes`, `clipboard`, `credential`, `data_base64`, `password`, `secret`, `text`, `token`, `vnc`) are stored as `{redacted, length, sha256}`. Exception info is replaced with `[redacted exception]` + `safe_exception_payload`.
-3. **Trace-time** (`src/modal_computer_use/daemon/routes/actions.py:1042-1171`): every batch trace entry is built by `_redacted_action_and_paths`, which (a) replaces `type.text` with `{redacted, length, sha256}`, (b) walks all nested dicts/lists and applies the sensitive-key list from §11.3, (c) records a `redactions[]` path list, (d) separates `provider_action` and redacts it independently.
+3. **Trace-time** (`src/modal_computer_use/daemon/actions/traces.py`): every batch trace entry is built by `_redacted_action_and_paths`, which (a) replaces `type.text` with `{redacted, length, sha256}`, (b) walks all nested dicts/lists and applies the sensitive-key list from §11.3, (c) records a `redactions[]` path list, (d) separates `provider_action` and redacts it independently.
 
 If any layer is bypassed, the others still hold. `ComputerTrace.validate()` is the final gate — a non-redaction-marker `text` in a trace fails validation.
 
@@ -683,10 +683,10 @@ This is pinned by `tests/test_artifacts.py` and `tests/test_daemon_validation.py
 
 The post-v6 fix train shipped four orthogonal safety contracts that the daemon now enforces inline:
 
-1. **Primitive safety.** Coordinates that exceed desktop geometry, regions that overflow, and unknown key names raise `action_validation_failed` or `unsupported_key` *before* the lock is taken. Direct mouse modifiers and batch mouse modifiers use the same key support policy. `hold_key`'s nested actions are re-parsed through `parse_action()` and validated with the same checks.
+1. **Primitive safety.** Coordinates that exceed desktop geometry, regions that overflow, and unknown key names raise `action_validation_failed` or `unsupported_key` *before* the lock is taken. Direct mouse modifiers and batch mouse modifiers use the same key support policy. Compound `hold_key` nested actions are re-parsed through `parse_action()` and validated in `/v1/actions/run`; direct `/v1/keyboard/hold` rejects nested actions.
 2. **Readiness preflight.** Every route that touches the desktop backend, including cursor position, checks backend readiness before reserving budget or reading backend state. `/readyz` returns 503 when the supervisor reports any required process as stopped or failed.
-3. **Budget order.** Routes call `budgets.idle_reservation_error(request)` → `budgets.action_reservation_error(request)` (or screenshot equivalent) *before* the action runs. Mutating artifact and recording routes enforce idle budget before sync/stop/delete side effects. Failures return early with `budget_exceeded` or `rate_limited`. Successful actions call `budgets.touch_activity(request)`; budget snapshots include the projected state on rejection (`budgets.py:108-112`).
-4. **Trace and batch guardrails.** Batch deadline is computed once at the start (`routes/actions.py:109-110`); each action's effective timeout is `min(action.timeout_ms or batch.max_action_timeout_ms or default, batch_remaining)`. On any exception, `backend.release_all()` runs inside `with suppress(Exception)` so a stuck-modifier or stuck-button bug cannot survive a single bad action.
+3. **Budget order.** Routes call category-aware route execution helpers backed by `BudgetPolicy` reservations *before* the action runs. Mutating artifact and recording routes enforce idle budget before sync/stop/delete side effects. Failures return early with `budget_exceeded` or `rate_limited`. Successful actions call `BudgetPolicy.touch_activity()`; budget snapshots include the projected state on rejection (`budget_policy.py:108-112`).
+4. **Trace and batch guardrails.** Batch deadline is computed once at the start (`daemon/actions/batch.py:109-110`); each action's effective timeout is `min(action.timeout_ms or batch.max_action_timeout_ms or default, batch_remaining)`. On any exception, `backend.release_all()` runs inside `with suppress(Exception)` so a stuck-modifier or stuck-button bug cannot survive a single bad action.
 
 ### 15.7 Modal-specific security notes & browser/domain policy examples
 
@@ -816,14 +816,14 @@ Outstanding for v0.2:
 | Sandbox lifetime capped/idle timeout. | Surface timeout config; document snapshots/volumes for longer workflows. | Mitigated. `DaemonSettings.max_idle_seconds`; idle budget. |
 | Prompt injection from screen content. | Policy above core; examples/hooks that treat screen content as untrusted. | Mitigated. `examples/adapter_policy_hook.py`. |
 | Action batching hides partial failure. | Per-action results, stop on first error by default, explicit `continue_on_error`. | Mitigated. `tests/test_action_batch.py`. |
-| Down/up/hold actions leave input stuck. | try/finally release; manual recovery endpoint. | Mitigated. `routes/actions.py:218-219, 257-258, 793`; `tests/test_x11_backend.py`. |
+| Down/up/hold actions leave input stuck. | try/finally release; manual recovery endpoint. | Mitigated. `daemon/actions/batch.py:218-219, 257-258, 793`; `tests/test_x11_backend.py`. |
 | Artifact API becomes a filesystem escape hatch. | Relative paths; reject traversal/symlink/control paths; stream large files. | Mitigated. `artifacts.py:17-100`; `tests/test_artifacts.py`. |
 | Volumes appear stale. | `artifacts.sync()` and document Volume v2 semantics. | Mitigated. `artifacts.py:274-315`. |
 | Provider schemas drift. | Version adapters; fixtures; fail closed on unknown actions. | Mitigated. `adapters/anthropic/versions.py`; `tests/test_adapters.py`. |
 | Trace files leak secrets. | Redact typed/clipboard text and tokens; store hashes and lengths. | Mitigated. §11.3, §15.3; `tests/test_trace_replay.py`. |
 | GPU/browser profiles raise cost unexpectedly. | Opt-in; resolved resources/cost-affecting settings in status. | Mitigated. `DaemonSettings.image_profile`. |
-| Idempotency replay safety. | Header/body conflict detection; fingerprint comparison. | Mitigated (new in v7). `routes/actions.py:96-107, 385-394`. |
-| Screenshot output OOMs daemon. | Pre-validate output pixels for all screenshot/zoom paths. | Mitigated (new in v7). `routes/actions.py:460-517`. |
+| Idempotency replay safety. | Header/body conflict detection; fingerprint comparison. | Mitigated (new in v7). `daemon/actions/batch.py:96-107, 385-394`. |
+| Screenshot output OOMs daemon. | Pre-validate output pixels for all screenshot/zoom paths. | Mitigated (new in v7). `daemon/actions/batch.py:460-517`. |
 | Logs leak typed text or tokens. | Sanitize render message; redact sensitive keys in `extra`. | Mitigated (new in v7). `daemon/logging.py:12-65`. |
 
 ---
@@ -908,16 +908,16 @@ The discipline that produced v7 — `fix(...)` commits that lock in invariants r
 | Query-token rejection | `daemon/auth.py:20-27` | `tests/test_auth_security.py` |
 | Verified-user header | `daemon/auth.py:62-98` | `tests/test_auth_security.py` |
 | Mouse routes | `daemon/routes/mouse.py`; `daemon/desktop/x11.py` | `tests/test_daemon_routes.py`, `tests/test_x11_backend.py` |
-| Keyboard routes incl. `hold_key` nested | `daemon/routes/keyboard.py`; `daemon/routes/actions.py:846-924`, `753-794` | `tests/test_daemon_validation.py`, `tests/test_x11_backend.py` |
+| Keyboard routes and `hold_key` action | `daemon/routes/keyboard.py`; `daemon/actions/batch.py:846-924`, `753-794` | `tests/test_daemon_validation.py`, `tests/test_x11_backend.py` |
 | Clipboard routes | `daemon/routes/clipboard.py` | `tests/test_daemon_routes.py` |
-| Screenshot routes (full/region/zoom) + pixel budget | `daemon/routes/screenshots.py`; `daemon/routes/actions.py:460-517` | `tests/test_daemon_routes.py`, `tests/test_budgets.py` |
+| Screenshot routes (full/region/zoom) + pixel budget | `daemon/routes/screenshots.py`; `daemon/actions/batch.py:460-517` | `tests/test_daemon_routes.py`, `tests/test_budgets.py` |
 | Recordings lifecycle | `daemon/routes/recordings.py`; `daemon/desktop/recordings.py` | `tests/test_recordings.py` |
 | Recording dashboard `/recordings/ui` | `daemon/routes/recordings.py:dashboard_router` (registered in `daemon/app.py:180`) | `tests/test_recordings.py` |
-| Action batch `/v1/actions/run` | `daemon/routes/actions.py:66-382` | `tests/test_action_batch.py`, `tests/test_action_idempotency_and_timeouts.py` |
-| Action batch `/v1/actions/validate` | `daemon/routes/actions.py:60-63` | `tests/test_action_batch.py` |
-| Idempotency cache (TTL + LRU + fingerprint) | `daemon/routes/actions.py:96-107, 406-418` | `tests/test_action_idempotency_and_timeouts.py` |
-| Per-action & per-batch deadlines | `daemon/routes/actions.py:109-184, 216-258` | `tests/test_action_idempotency_and_timeouts.py` |
-| `release_all` on every failure path | `daemon/routes/actions.py:218-219, 257-258`; `daemon/desktop/x11.py` | `tests/test_x11_backend.py` |
+| Action batch `/v1/actions/run` | `daemon/actions/batch.py:66-382` | `tests/test_action_batch.py`, `tests/test_action_idempotency_and_timeouts.py` |
+| Action batch `/v1/actions/validate` | `daemon/actions/batch.py:60-63` | `tests/test_action_batch.py` |
+| Idempotency cache (TTL + LRU + fingerprint) | `daemon/actions/batch.py:96-107, 406-418` | `tests/test_action_idempotency_and_timeouts.py` |
+| Per-action & per-batch deadlines | `daemon/actions/batch.py:109-184, 216-258` | `tests/test_action_idempotency_and_timeouts.py` |
+| `release_all` on every failure path | `daemon/actions/batch.py:218-219, 257-258`; `daemon/desktop/x11.py` | `tests/test_x11_backend.py` |
 | Artifact routes (list/read/write/delete) | `daemon/routes/artifacts.py`; `artifacts.py:54-272` | `tests/test_artifacts.py`, `tests/test_daemon_validation.py` |
 | Artifact path safety (traversal, symlink, control) | `artifacts.py:17-100` | `tests/test_artifacts.py` |
 | Artifact manifest | `artifacts.py:252-272` | `tests/test_artifacts.py` |
@@ -925,19 +925,19 @@ The discipline that produced v7 — `fix(...)` commits that lock in invariants r
 | Display/windows/apps/browser routes | `daemon/routes/{display,windows,apps,browser}.py` | `tests/test_daemon_routes.py` |
 | `input.release_all` | `daemon/routes/input.py` | `tests/test_x11_backend.py` |
 | Process supervisor & restart counts | `daemon/supervisor.py:13-169` | `tests/test_supervisor.py` |
-| Budget kinds (actions/screenshots/artifacts/recordings/idle) | `daemon/budgets.py:11-202` | `tests/test_budgets.py`, `tests/test_trace_and_budgets.py` |
-| Action rate-limit window | `daemon/budgets.py:131-147, 190-202` | `tests/test_budgets.py` |
+| Budget kinds (actions/screenshots/artifacts/recordings/idle) | `daemon/budget_policy.py:11-202` | `tests/test_budgets.py`, `tests/test_trace_and_budgets.py` |
+| Action rate-limit window | `daemon/budget_policy.py:131-147, 190-202` | `tests/test_budgets.py` |
 | OpenAI adapter | `adapters/openai.py` | `tests/test_adapters.py` |
 | Anthropic adapter + versions | `adapters/anthropic/computer.py`, `adapters/anthropic/versions.py` | `tests/test_adapters.py` |
 | Generic `ActionExecutor` & hooks | `adapters/generic.py` | `tests/test_adapters.py` |
-| Provider provenance redaction | `adapters/provenance.py`; `daemon/routes/actions.py:1150-1171` | `tests/test_adapters.py`, `tests/test_trace_replay.py` |
-| Trace writer | `tracing.py:20-28` | `tests/test_trace_and_budgets.py`, `tests/test_trace_replay.py` |
+| Provider provenance redaction | `adapters/provenance.py`; `daemon/actions/batch.py:1150-1171` | `tests/test_adapters.py`, `tests/test_trace_replay.py` |
+| Trace writer | `daemon/actions/traces.py`; `tracing.py:20-28` | `tests/test_trace_and_budgets.py`, `tests/test_trace_replay.py` |
 | Trace validator (redaction-marker enforcement) | `tracing.py:195-431` | `tests/test_trace_replay.py` |
 | Trace replay (skip-redacted) | `tracing.py:65-119` | `tests/test_trace_replay.py` |
-| Trace redaction (sensitive keys, sha256 typed text, paths) | `daemon/routes/actions.py:1042-1171` | `tests/test_trace_replay.py`, `tests/test_adapters.py` |
+| Trace redaction (sensitive keys, sha256 typed text, paths) | `daemon/actions/traces.py` | `tests/test_trace_replay.py`, `tests/test_adapters.py` |
 | Structured JSON logs + redaction | `daemon/logging.py:12-65` | `tests/test_auth_security.py`, `tests/test_observability.py` |
 | OpenTelemetry shim | `observability.py:57-83`; `daemon/app.py:81-104` | `tests/test_observability.py` |
-| Error code catalog (§9.14) | `daemon/app.py:105-159`; `daemon/errors.py`; `daemon/auth.py`; `daemon/routes/actions.py` | `tests/test_auth_security.py`, `tests/test_daemon_validation.py`, `tests/test_action_batch.py` |
+| Error code catalog (§9.14) | `daemon/app.py:105-159`; `daemon/errors.py`; `daemon/auth.py`; `daemon/actions/batch.py` | `tests/test_auth_security.py`, `tests/test_daemon_validation.py`, `tests/test_action_batch.py` |
 | `DaemonSettings` env-var contract | `daemon/settings.py:31-149` | `tests/test_settings.py` |
 | `ComputerSandbox.create/attach/local` | `sandbox.py` | `tests/test_modal_integration.py`, `tests/test_modal_sdk_boundary.py`, `tests/test_sdk_local.py` |
 | SDK namespace surface | `namespaces/*.py` | `tests/test_namespaces.py` |

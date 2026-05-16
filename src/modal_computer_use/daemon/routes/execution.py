@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+
+from fastapi import Request
+
+from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
+from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, ready_input_lock
+from modal_computer_use.models import ActionResult
+from modal_computer_use.redaction import sanitize_payload
+
+
+def budget_policy(request: Request) -> BudgetPolicy:
+    return request.app.state.budget_policy
+
+
+async def run_input_action[T](
+    request: Request,
+    operation: Callable[[], Awaitable[T]],
+    *,
+    fallback_code: str = "action_failed",
+    fallback_message: str = "input action failed",
+) -> T:
+    await ensure_desktop_ready(request)
+    policy = budget_policy(request)
+    error = policy.action_reservation_error()
+    if error is not None:
+        raise error
+    async with ready_input_lock(request):
+        policy.reserve_action()
+        result = await operation()
+    return raise_for_failed_action_result(
+        result,
+        fallback_code=fallback_code,
+        fallback_message=fallback_message,
+    )
+
+
+async def run_screenshot_capture[T](
+    request: Request,
+    operation: Callable[[], Awaitable[T]],
+) -> T:
+    await ensure_desktop_ready(request)
+    policy = budget_policy(request)
+    error = policy.screenshot_reservation_error()
+    if error is not None:
+        raise error
+    async with ready_input_lock(request):
+        error = policy.screenshot_reservation_error()
+        if error is not None:
+            raise error
+        policy.reserve_screenshot()
+        result = await operation()
+        policy.enforce("screenshots", "artifacts")
+        return result
+
+
+async def run_recording_start[T](
+    request: Request,
+    operation: Callable[[], Awaitable[T]],
+    *,
+    rollback: Callable[[T], None] | None = None,
+) -> T:
+    await ensure_desktop_ready(request)
+    policy = budget_policy(request)
+    error = policy.recording_start_error()
+    if error is not None:
+        raise error
+    result = await operation()
+    try:
+        policy.enforce("recordings")
+    except DaemonError:
+        if rollback is not None:
+            rollback(result)
+        raise
+    policy.touch_activity()
+    return result
+
+
+async def run_idle_only_mutation[T](
+    request: Request,
+    operation: Callable[[], Awaitable[T]],
+    *,
+    enforce_after: tuple[BudgetKind, ...] = (),
+    rollback: Callable[[T], None] | None = None,
+) -> T:
+    policy = budget_policy(request)
+    policy.enforce_idle()
+    result = await operation()
+    try:
+        if enforce_after:
+            policy.enforce(*enforce_after)
+    except DaemonError:
+        if rollback is not None:
+            rollback(result)
+        raise
+    policy.touch_activity()
+    return result
+
+
+def raise_for_failed_action_result[T](
+    result: T,
+    *,
+    fallback_code: str,
+    fallback_message: str,
+) -> T:
+    if not isinstance(result, ActionResult) or result.ok:
+        return result
+    output = sanitize_payload(result.output)
+    details = output if isinstance(output, dict) else {}
+    code = details.get("code") if isinstance(details.get("code"), str) else fallback_code
+    message = result.message or details.get("message") or fallback_message
+    raise DaemonError(str(message), status_code=400, code=code, details=details)
