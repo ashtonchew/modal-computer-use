@@ -254,37 +254,36 @@ uv run computer-use benchmark sdk \
   --browser chromium \
   --resource-profile browser \
   --iterations 10 \
-  --output benchmark-sdk-modal-nogpu-2026-05-17.json
+  --output benchmark-sdk-modal-nogpu-2026-05-17-rerun.json
 ```
 
 The run created one `browser` resource-profile sandbox, prewarmed Chromium, and measured the
-`daemon-http` surface through `https://connect.modal.run`. It exited with `ok=false` because
-`batch_5_actions` iteration 9 hit a 30-second HTTP read timeout. The other cases completed, and
-the sandbox cleanup path returned with no live Modal tasks left in the app list. Treat this as a
-partial real-infrastructure baseline and rerun before using it as a release gate.
+`daemon-http` surface through `https://connect.modal.run`. It exited with `ok=true`; the earlier
+same-day no-GPU run hit one 30-second HTTP read timeout and should be treated as a transient partial
+sample rather than the baseline.
 
 Environment metadata:
 
-- `modal_cold_create_to_ready_ms`: `15769.75`
+- `modal_cold_create_to_ready_ms`: `10042.95`
 - `resource_profile`: `browser`
 - `browser`: `chromium`
-- `modal_run_id`: `run_9c5dad38a1d442d3`
-- `modal_sandbox_id`: `sb-Y76o5yQP3nET0IzoByhlc6`
+- `modal_run_id`: `run_d414387310d04d82`
+- `modal_sandbox_id`: `sb-lRBMLiEuXSwlbXnkWJIZzG`
 
 | Surface | Case | Status | Mean ms | p95 ms | Notes |
 | --- | --- | --- | ---: | ---: | --- |
-| `daemon-http` | `cold_create_to_ready` | `ok` | 15769.75 | 15769.75 | Live sandbox create through daemon readiness. |
-| `daemon-http` | `batch_5_actions` | `failed` | 2026.08 | 7084.26 | 9 successful samples; iteration 9 timed out at 30s. |
-| `daemon-http` | `separate_5_actions` | `ok` | 2810.64 | 2964.97 | Five separate daemon action requests. |
-| `daemon-http` | `move_click` | `ok` | 817.18 | 875.63 | One move and one click. |
-| `daemon-http` | `move_click_sequence` | `ok` | 2227.39 | 2303.02 | Four move/click pairs. |
-| `daemon-http` | `screenshot_full` | `ok` | 769.24 | 811.59 | Inline 1440x900 PNG, 76,129 bytes. |
-| `daemon-http` | `command_echo` | `ok` | 646.34 | 770.36 | Shell command through daemon route. |
-| `daemon-http` | `browser_render_metrics` | `ok` | 2099.81 | 2736.63 | Chromium loads `https://example.com`. |
-| `daemon-http` | `recording_start` | `ok` | 430.83 | 621.96 | Live recording start. |
-| `daemon-http` | `recording_stop` | `ok` | 369.91 | 583.72 | Live recording stop. |
-| `daemon-http` | `type_100_chars` | `ok` | 1555.58 | 1595.92 | Redacted text payload; `xdotool` method metadata only. |
-| `daemon-http` | `type_1000_chars` | `ok` | 7259.96 | 7388.14 | Redacted text payload; `xdotool` method metadata only. |
+| `daemon-http` | `cold_create_to_ready` | `ok` | 10042.95 | 10042.95 | Live sandbox create through daemon readiness. |
+| `daemon-http` | `batch_5_actions` | `ok` | 1045.23 | 1051.08 | One five-action daemon request. |
+| `daemon-http` | `separate_5_actions` | `ok` | 3633.46 | 3884.08 | Five separate daemon action requests. |
+| `daemon-http` | `move_click` | `ok` | 1007.74 | 1065.80 | One move and one click. |
+| `daemon-http` | `move_click_sequence` | `ok` | 2473.91 | 2592.68 | Four move/click pairs. |
+| `daemon-http` | `screenshot_full` | `ok` | 909.97 | 964.66 | Inline 1440x900 PNG, 76,477 bytes. |
+| `daemon-http` | `command_echo` | `ok` | 786.35 | 822.37 | Shell command through daemon route. |
+| `daemon-http` | `browser_render_metrics` | `ok` | 2085.74 | 2190.63 | Chromium loads `https://example.com`. |
+| `daemon-http` | `recording_start` | `ok` | 490.60 | 560.11 | Live recording start. |
+| `daemon-http` | `recording_stop` | `ok` | 390.60 | 464.69 | Live recording stop. |
+| `daemon-http` | `type_100_chars` | `ok` | 1715.85 | 1906.02 | Redacted text payload; `xdotool` method metadata only. |
+| `daemon-http` | `type_1000_chars` | `ok` | 7465.19 | 7560.72 | Redacted text payload; `xdotool` method metadata only. |
 
 ## Screenshot storage modes
 
