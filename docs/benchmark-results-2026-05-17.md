@@ -13,6 +13,8 @@ These results capture the current provider comparison after normalizing the Moda
   `benchmark-results/provider-compare-e2b-10x-timeout900-20260517.json`
 - Daytona display probe:
   `benchmark-results/daytona-display-probe-20260517.json`
+- Daytona display DPI probe:
+  `benchmark-results/daytona-display-dpi-probe-20260517.json`
 
 The first combined Daytona/E2B run is authoritative for Daytona. It is not authoritative for E2B
 because the E2B sandbox used the documented 300 second lifetime and expired during the 10x
@@ -22,17 +24,35 @@ because the E2B sandbox used the documented 300 second lifetime and expired duri
 ## Display and DPI
 
 Daytona docs expose `sandbox.computer_use.display.get_info()` for display introspection and document
-width, height, origin, primary display, and total display count. The docs do not document a DPI field
-or default DPI for Computer Use:
+width, height, origin, primary display, and total display count. The VNC docs also document that
+Computer Use/VNC starts an X11 desktop stack with Xvfb, xfce4, x11vnc, and noVNC, and that the
+default image includes the packages needed for VNC and Computer Use:
 
 - https://www.daytona.io/docs/en/computer-use/#get-info
 - https://www.daytona.io/docs/en/python-sdk/sync/computer-use/#displayget_info
+- https://www.daytona.io/docs/en/vnc-access/
 
-The live Daytona probe observed one display:
+Because Daytona does not expose DPI directly through `display.get_info()`, DPI was measured from the
+running X server in a temporary Daytona sandbox using:
+
+```sh
+DISPLAY=${DISPLAY:-:0} xdpyinfo | sed -n -e "/dimensions:/p" -e "/resolution:/p"
+DISPLAY=${DISPLAY:-:0} xrdb -query | grep -i "Xft.dpi"
+```
+
+The live probe returned:
+
+```text
+dimensions:    1024x768 pixels (271x204 millimeters)
+resolution:    96x96 dots per inch
+Xft.dpi:       96
+```
+
+So the Daytona default observed for this benchmark is `1024x768 @ 96 DPI`.
 
 | Provider | Resolution | DPI | Source |
 |---|---:|---:|---|
-| Daytona | 1024x768 | unknown | Live `display.get_info()` probe; docs do not expose DPI |
+| Daytona | 1024x768 | 96 | Live `display.get_info()` plus X11 `xdpyinfo`/`xrdb` probe |
 | E2B | 1024x768 | 96 | E2B desktop Python docs and benchmark metadata |
 | Modal daemon | 1024x768 | 96 | Benchmark config after default normalization |
 
@@ -88,8 +108,7 @@ daemon still executes the primitive actions serially.
 This is now a closer provider-default comparison for desktop size and post-action delay:
 
 - Modal daemon, E2B, and observed Daytona resolution are all `1024x768`.
-- Modal daemon and E2B are `96 DPI`.
-- Daytona DPI remains unknown because the public Computer Use display API/docs do not expose it.
+- Modal daemon, E2B, and observed Daytona are all `96 DPI`.
 - Modal daemon timings include Modal Connect ingress overhead for each SDK call.
 - Daytona and E2B timings are provider-native SDK calls.
 
