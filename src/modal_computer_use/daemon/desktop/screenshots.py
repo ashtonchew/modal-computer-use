@@ -57,22 +57,22 @@ class X11ScreenshotController:
         await self._run(*command)
         try:
             image = Image.open(temp_path)
+            image.load()
+            image_width = scaled_dimension(image.width, options.scale)
+            image_height = scaled_dimension(image.height, options.scale)
+            native_png = temp_path.read_bytes() if _can_preserve_native_png(options) else None
             if options.scale != 1.0:
-                image = image.resize(
-                    (
-                        scaled_dimension(image.width, options.scale),
-                        scaled_dimension(image.height, options.scale),
-                    )
-                )
-            data = encode_image(image.convert("RGB"), options.format, options.quality)
+                image = image.resize((image_width, image_height))
+            encoded = encode_image(image.convert("RGB"), options.format, options.quality)
+            data = _smallest_png(native_png, encoded) if native_png is not None else encoded
         finally:
             temp_path.unlink(missing_ok=True)
 
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,
             desktop_height=self.height,
-            image_width=scaled_dimension(region.width if region else self.width, options.scale),
-            image_height=scaled_dimension(region.height if region else self.height, options.scale),
+            image_width=image_width,
+            image_height=image_height,
             source_region=region,
         )
         artifact_uri = None
@@ -111,6 +111,14 @@ def encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
     fmt = "JPEG" if image_format == "jpeg" else image_format.upper()
     image.save(output, format=fmt, quality=quality)
     return output.getvalue()
+
+
+def _smallest_png(native_png: bytes, encoded_png: bytes) -> bytes:
+    return native_png if len(native_png) < len(encoded_png) else encoded_png
+
+
+def _can_preserve_native_png(options: ScreenshotOptions) -> bool:
+    return options.format == "png" and options.scale == 1.0
 
 
 def scaled_dimension(value: int, scale: float) -> int:

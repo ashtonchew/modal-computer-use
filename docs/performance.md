@@ -343,6 +343,10 @@ Use batched actions for model turns, and use `modal-daemon-local` or a future
 
 For agent loops that call screenshot every few actions, `auto` is usually the right answer.
 
+For PNG screenshots at native scale, the daemon compares the native `maim` PNG with its Pillow
+RGB re-encode and returns the smaller valid payload. This keeps simple/paletted desktops compact
+without regressing desktops where the RGB re-encode compresses better than the native capture.
+
 ## Screenshot processing location
 
 `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` controls where resize and re-encode happen:

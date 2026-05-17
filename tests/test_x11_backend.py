@@ -229,7 +229,7 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
 
     async def capture():
         return await backend.screenshot(
-            ScreenshotOptions(storage="auto"),
+            ScreenshotOptions(format="jpeg", storage="auto"),
             artifact_store=ArtifactStore(tmp_path / "artifacts"),
         )
 
@@ -237,6 +237,55 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
 
     assert screenshot.artifact_uri is not None
     assert screenshot.data_base64 is None
+
+
+def test_x11_screenshot_uses_native_png_when_smaller(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    native_png = _png_bytes("P", (10, 10), 0)
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        if args[:2] == ("xdotool", "getmouselocation"):
+            return subprocess.CompletedProcess(args, 0, "X=0\nY=0\n", "")
+        with open(args[-1], "wb") as handle:
+            handle.write(native_png)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+    monkeypatch.setattr(
+        screenshots_module,
+        "encode_image",
+        lambda *_args, **_kwargs: native_png + (b"x" * 10),
+    )
+
+    screenshot = anyio.run(backend.screenshot, ScreenshotOptions(format="png", scale=1.0))
+
+    assert screenshot.size_bytes == len(native_png)
+    assert screenshot.as_bytes() == native_png
+    assert screenshot.width == 10
+    assert screenshot.height == 10
+
+
+def test_x11_screenshot_uses_reencoded_png_when_smaller(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    native_png = b"native-png" * 10
+    encoded_png = b"small-png"
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        if args[:2] == ("xdotool", "getmouselocation"):
+            return subprocess.CompletedProcess(args, 0, "X=0\nY=0\n", "")
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+    monkeypatch.setattr(screenshots_module.Path, "read_bytes", lambda _path: native_png)
+    monkeypatch.setattr(screenshots_module, "encode_image", lambda *_args, **_kwargs: encoded_png)
+
+    screenshot = anyio.run(backend.screenshot, ScreenshotOptions(format="png", scale=1.0))
+
+    assert screenshot.size_bytes == len(encoded_png)
+    assert screenshot.as_bytes() == encoded_png
 
 
 def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
@@ -280,6 +329,14 @@ def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None
     assert screenshot.height == 1
     assert screenshot.coordinate_space.image_width == 1
     assert screenshot.coordinate_space.image_height == 1
+
+
+def _png_bytes(mode: str, size: tuple[int, int], color: int | str) -> bytes:
+    from io import BytesIO
+
+    output = BytesIO()
+    Image.new(mode, size, color).save(output, format="PNG", optimize=True)
+    return output.getvalue()
 
 
 def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
