@@ -242,6 +242,50 @@ calls. Treat these numbers as a local regression baseline, not a Modal infrastru
 | `anthropic-adapter` | `adapter_matrix` | 0.046 | 0.050 | Normalization/execution only; no Anthropic API call. |
 | `action-executor` | `adapter_matrix` | 0.021 | 0.022 | Provider-neutral in-process execution. |
 
+### Modal no-GPU baseline, 2026-05-17
+
+This baseline was captured from the repository root on `main` against a real Modal-backed browser
+sandbox without requesting a Modal GPU:
+
+```bash
+uv run computer-use benchmark sdk \
+  --create-modal-sandbox \
+  --surfaces daemon-http \
+  --browser chromium \
+  --resource-profile browser \
+  --iterations 10 \
+  --output benchmark-sdk-modal-nogpu-2026-05-17.json
+```
+
+The run created one `browser` resource-profile sandbox, prewarmed Chromium, and measured the
+`daemon-http` surface through `https://connect.modal.run`. It exited with `ok=false` because
+`batch_5_actions` iteration 9 hit a 30-second HTTP read timeout. The other cases completed, and
+the sandbox cleanup path returned with no live Modal tasks left in the app list. Treat this as a
+partial real-infrastructure baseline and rerun before using it as a release gate.
+
+Environment metadata:
+
+- `modal_cold_create_to_ready_ms`: `15769.75`
+- `resource_profile`: `browser`
+- `browser`: `chromium`
+- `modal_run_id`: `run_9c5dad38a1d442d3`
+- `modal_sandbox_id`: `sb-Y76o5yQP3nET0IzoByhlc6`
+
+| Surface | Case | Status | Mean ms | p95 ms | Notes |
+| --- | --- | --- | ---: | ---: | --- |
+| `daemon-http` | `cold_create_to_ready` | `ok` | 15769.75 | 15769.75 | Live sandbox create through daemon readiness. |
+| `daemon-http` | `batch_5_actions` | `failed` | 2026.08 | 7084.26 | 9 successful samples; iteration 9 timed out at 30s. |
+| `daemon-http` | `separate_5_actions` | `ok` | 2810.64 | 2964.97 | Five separate daemon action requests. |
+| `daemon-http` | `move_click` | `ok` | 817.18 | 875.63 | One move and one click. |
+| `daemon-http` | `move_click_sequence` | `ok` | 2227.39 | 2303.02 | Four move/click pairs. |
+| `daemon-http` | `screenshot_full` | `ok` | 769.24 | 811.59 | Inline 1440x900 PNG, 76,129 bytes. |
+| `daemon-http` | `command_echo` | `ok` | 646.34 | 770.36 | Shell command through daemon route. |
+| `daemon-http` | `browser_render_metrics` | `ok` | 2099.81 | 2736.63 | Chromium loads `https://example.com`. |
+| `daemon-http` | `recording_start` | `ok` | 430.83 | 621.96 | Live recording start. |
+| `daemon-http` | `recording_stop` | `ok` | 369.91 | 583.72 | Live recording stop. |
+| `daemon-http` | `type_100_chars` | `ok` | 1555.58 | 1595.92 | Redacted text payload; `xdotool` method metadata only. |
+| `daemon-http` | `type_1000_chars` | `ok` | 7259.96 | 7388.14 | Redacted text payload; `xdotool` method metadata only. |
+
 ## Screenshot storage modes
 
 `screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
