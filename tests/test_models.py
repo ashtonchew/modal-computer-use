@@ -17,6 +17,9 @@ def test_config_aliases_and_vnc_normalization() -> None:
     config = ComputerConfig(resources={"memory_mb": 1024}, expose_vnc=True)
     assert config.resources.memory_mib == 1024
     assert config.expose_vnc == "control"
+    assert config.desktop.resolution == (1024, 768)
+    assert config.desktop.dpi == 96
+    assert config.actions.post_action_delay_ms == 0
 
 
 def test_region_validation() -> None:

@@ -924,7 +924,7 @@ def test_artifact_byte_budget_exceeded_after_artifact_screenshot(tmp_path) -> No
 def test_action_geometry_validation_rejects_out_of_bounds(test_client) -> None:
     response = test_client.post(
         "/v1/actions/run",
-        json={"actions": [{"type": "move", "x": 1440, "y": 1}]},
+        json={"actions": [{"type": "move", "x": 1024, "y": 1}]},
     )
 
     assert response.status_code == 422

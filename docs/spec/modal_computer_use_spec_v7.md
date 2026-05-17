@@ -115,7 +115,7 @@ The daemon-first decision is in production. `Sandbox.exec` is available for boot
 
 ### 4.2 Desktop stack
 
-Default stack: `Xvfb :99 -screen 0 {WIDTH}x{HEIGHT}x24 -nolisten tcp`, XFCE (default) or Openbox (light), `x11vnc` bound to localhost, noVNC/websockify on `6080`, `computer-use-daemon` on `8080`. Default resolution `1440x900`; `1280x720` and `1600x900` supported. Process startup is centralized in `src/modal_computer_use/daemon/supervisor.py:30-73`.
+Default stack: `Xvfb :99 -screen 0 {WIDTH}x{HEIGHT}x24 -nolisten tcp`, XFCE (default) or Openbox (light), `x11vnc` bound to localhost, noVNC/websockify on `6080`, `computer-use-daemon` on `8080`. Default resolution `1024x768`; larger model-observation profiles such as `1440x900` are opt-in. Process startup is centralized in `src/modal_computer_use/daemon/supervisor.py:30-73`.
 
 ### 4.3 Transport model
 
@@ -229,8 +229,8 @@ Every variable below is read by `DaemonSettings` and is the source of truth for 
 |---|---:|---|---|
 | `COMPUTER_USE_RUN_ID` | `None` | `run_id` | Stable run identifier in traces/logs. |
 | `DISPLAY` | `:99` | `display` | X11 display. |
-| `COMPUTER_USE_DESKTOP_WIDTH` | `1440` | `desktop_width` | Desktop width. |
-| `COMPUTER_USE_DESKTOP_HEIGHT` | `900` | `desktop_height` | Desktop height. |
+| `COMPUTER_USE_DESKTOP_WIDTH` | `1024` | `desktop_width` | Desktop width. |
+| `COMPUTER_USE_DESKTOP_HEIGHT` | `768` | `desktop_height` | Desktop height. |
 | `COMPUTER_USE_DESKTOP_DPI` | `96` | `desktop_dpi` | Desktop DPI. |
 | `COMPUTER_USE_DISPLAY_DEPTH` | `24` | `display_depth` | Xvfb color depth. |
 | `COMPUTER_USE_WINDOW_MANAGER` | `xfce` | `window_manager` | `xfce` or `openbox`. |
@@ -245,7 +245,7 @@ Every variable below is read by `DaemonSettings` and is the source of truth for 
 | `COMPUTER_USE_TRACE_ACTIONS` | `false` | `trace_actions` | Append redaction-aware action traces. |
 | `COMPUTER_USE_SCREENSHOT_MAX_PIXELS` | `8_294_400` | `screenshot_max_pixels` | Per-screenshot output pixel cap (3840×2160 = 8.29 MP). |
 | `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` | `auto` | `screenshot_processing_location` | `daemon`, `client`, or `auto`. |
-| `COMPUTER_USE_POST_ACTION_DELAY_MS` | `100` | `post_action_delay_ms` | Delay between batched actions and before `screenshot_after`. |
+| `COMPUTER_USE_POST_ACTION_DELAY_MS` | `0` | `post_action_delay_ms` | Optional delay between UI-mutating batched actions and before `screenshot_after`. |
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | `5_000` | `default_action_timeout_ms` | Default per-action timeout. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | `300_000` | `max_action_timeout_ms` | Hard cap on per-action timeout. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | `1_000` | `idempotency_cache_max_entries` | LRU cap for the in-process idempotency cache. |

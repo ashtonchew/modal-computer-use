@@ -18,10 +18,11 @@ def _run_daemon_http_surface(
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    ingress = _daemon_ingress_metadata(mode=mode, base_url=base_url)
     if client is None:
         return _surface_not_measured(
-            "daemon-http",
-            "daemon-http benchmark surface requires --mock-local or --base-url",
+            ingress["canonical_name"],
+            "daemon HTTP benchmark surface requires --mock-local or --base-url",
         )
     browser_status = _safe_browser_status_metadata(client)
     action_batch = core.run_action_batch_benchmark(
@@ -90,6 +91,8 @@ def _run_daemon_http_surface(
         )
     metadata = {
         "transport": "daemon-http",
+        "canonical_name": ingress["canonical_name"],
+        "ingress": ingress,
         "base_url": core._safe_base_url(base_url),
         "environment": {
             key: value for key, value in (environment_metadata or {}).items() if value is not None
@@ -104,6 +107,37 @@ def _run_daemon_http_surface(
         verification=_run_daemon_http_verification(client),
         billing_reconciliation=reconcile_modal_billing_from_metadata(environment_metadata),
     )
+
+
+def _daemon_ingress_metadata(*, mode: str, base_url: str | None) -> dict[str, Any]:
+    safe_base_url = core._safe_base_url(base_url)
+    if mode == "mock-local":
+        return {
+            "canonical_name": "modal-daemon-local",
+            "kind": "local",
+            "auth": "testclient",
+            "description": "in-process local daemon benchmark path",
+        }
+    if safe_base_url == "https://connect.modal.run":
+        return {
+            "canonical_name": "modal-daemon-connect",
+            "kind": "modal-connect-token",
+            "auth": "Modal Sandbox Connect Token",
+            "description": "authenticated Modal connect-token ingress to the daemon",
+        }
+    if safe_base_url:
+        return {
+            "canonical_name": "modal-daemon-http",
+            "kind": "http",
+            "auth": "caller-provided",
+            "description": "caller-provided daemon HTTP ingress",
+        }
+    return {
+        "canonical_name": "modal-daemon-http",
+        "kind": "unknown",
+        "auth": "unknown",
+        "description": "daemon HTTP ingress could not be inferred",
+    }
 
 def _safe_browser_status_metadata(client: DaemonClient) -> dict[str, Any]:
     try:

@@ -282,6 +282,25 @@ def test_post_action_delay_runs_before_screenshot_after(tmp_path) -> None:
     assert response.json()["timing"]["daemon_ms"] >= 20
 
 
+def test_post_action_delay_defaults_to_zero(tmp_path) -> None:
+    app = _app(tmp_path)
+
+    async def unexpected_sleep(_duration: float) -> None:
+        raise AssertionError("post-action delay should be opt-in")
+
+    app.state.sleep = unexpected_sleep
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "screenshot_after": True,
+            },
+        )
+
+    assert response.status_code == 200
+
+
 def test_action_timeout_releases_input_and_stops_batch(tmp_path) -> None:
     app = _app(tmp_path, default_action_timeout_ms=10)
 

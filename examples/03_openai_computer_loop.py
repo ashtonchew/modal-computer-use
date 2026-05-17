@@ -1,7 +1,8 @@
-from modal_computer_use import ComputerSandbox
+from modal_computer_use import ComputerConfig, ComputerSandbox
 from modal_computer_use.adapters.openai import OpenAIAdapter
 
-computer = ComputerSandbox.local(token="dev")
+# OpenAI's computer-use guidance observes strong performance around 1440x900/1600x900.
+computer = ComputerSandbox.create(config=ComputerConfig(desktop={"resolution": (1440, 900)}))
 adapter = OpenAIAdapter(computer)
 
 # Model calls are intentionally owned by user code. This is only the action side.

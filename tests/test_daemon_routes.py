@@ -24,8 +24,8 @@ def test_status_and_screenshot(test_client) -> None:
     assert status["ready"] is True
     response = test_client.post("/v1/screenshots/full", json={"format": "png", "show_cursor": True})
     shot = Screenshot.model_validate(response.json())
-    assert shot.width == 1440
-    assert shot.coordinate_space.desktop_width == 1440
+    assert shot.width == 1024
+    assert shot.coordinate_space.desktop_width == 1024
     assert shot.sha256
 
 

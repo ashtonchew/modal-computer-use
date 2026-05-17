@@ -12,7 +12,7 @@ from modal_computer_use.models import Point
 
 
 def test_direct_mouse_routes_reject_out_of_bounds_coordinates(test_client) -> None:
-    response = test_client.post("/v1/mouse/move", json={"x": 1440, "y": 1})
+    response = test_client.post("/v1/mouse/move", json={"x": 1024, "y": 1})
 
     assert response.status_code == 422
     assert response.json()["code"] == "coordinate_out_of_bounds"
@@ -110,7 +110,7 @@ def test_action_batch_mouse_up_releases_button(test_client, app) -> None:
 def test_region_screenshot_rejects_out_of_bounds_region(test_client) -> None:
     response = test_client.post(
         "/v1/screenshots/region",
-        json={"region": {"x": 1400, "y": 0, "width": 80, "height": 100}},
+        json={"region": {"x": 1000, "y": 0, "width": 80, "height": 100}},
     )
 
     assert response.status_code == 422
@@ -120,12 +120,12 @@ def test_region_screenshot_rejects_out_of_bounds_region(test_client) -> None:
 def test_action_validate_uses_desktop_geometry(test_client) -> None:
     response = test_client.post(
         "/v1/actions/validate",
-        json={"actions": [{"type": "move", "x": 1440, "y": 0}]},
+        json={"actions": [{"type": "move", "x": 1024, "y": 0}]},
     )
 
     assert response.status_code == 200
     assert response.json()["ok"] is False
-    assert "x coordinate 1440" in response.json()["errors"][0]
+    assert "x coordinate 1024" in response.json()["errors"][0]
 
 
 def test_action_validate_rejects_unready_desktop_before_backend_geometry(tmp_path) -> None:
@@ -156,7 +156,7 @@ def test_action_validate_rejects_unready_desktop_before_backend_geometry(tmp_pat
 def test_zoom_screenshot_rejects_out_of_bounds_region(test_client) -> None:
     response = test_client.post(
         "/v1/screenshots/zoom",
-        json={"region": {"x": 0, "y": 880, "width": 100, "height": 40}},
+        json={"region": {"x": 0, "y": 760, "width": 100, "height": 40}},
     )
 
     assert response.status_code == 422

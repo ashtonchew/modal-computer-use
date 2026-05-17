@@ -27,6 +27,10 @@ def test_benchmark_sdk_mock_local_outputs_json(capsys) -> None:
     assert payload["benchmark"] == "sdk-surfaces"
     assert payload["mode"] == "mock-local"
     assert payload["surfaces"]["daemon-http"]["status"] == "ok"
+    assert (
+        payload["surfaces"]["daemon-http"]["metadata"]["ingress"]["canonical_name"]
+        == "modal-daemon-local"
+    )
     assert payload["surfaces"]["daemon-http"]["cases"]["command_echo"]["status"] == "ok"
     assert payload["surfaces"]["daemon-http"]["cases"]["move_click_sequence"]["status"] == "ok"
     assert payload["surfaces"]["daemon-http"]["cases"]["type_1000_chars"]["status"] == "ok"
@@ -214,7 +218,13 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
             "mode": kwargs["mode"],
             "surfaces": {
                 "daemon-http": {
-                    "metadata": {"environment": environment},
+                    "metadata": {
+                        "environment": environment,
+                        "ingress": {
+                            "canonical_name": "modal-daemon-connect",
+                            "kind": "modal-connect-token",
+                        },
+                    },
                     "status": "ok",
                     "cases": {},
                     "failures": [],
@@ -267,6 +277,9 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert config.browser.kind == "chromium"
     assert config.browser.gpu_mode is None
     environment = payload["surfaces"]["daemon-http"]["metadata"]["environment"]
+    ingress = payload["surfaces"]["daemon-http"]["metadata"]["ingress"]
+    assert ingress["canonical_name"] == "modal-daemon-connect"
+    assert ingress["kind"] == "modal-connect-token"
     assert environment["gpu"] == "T4"
     assert environment["modal_cpu_count"] == 2
     assert environment["modal_memory_gib"] == 4

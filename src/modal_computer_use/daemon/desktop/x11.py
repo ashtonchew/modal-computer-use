@@ -214,7 +214,7 @@ class DesktopBackend(ABC):
 
 
 class MockDesktopBackend(DesktopBackend):
-    def __init__(self, width: int = 1440, height: int = 900) -> None:
+    def __init__(self, width: int = 1024, height: int = 768) -> None:
         self.width = width
         self.height = height
         self.cursor = Point(x=0, y=0)
@@ -441,8 +441,8 @@ class MockDesktopBackend(DesktopBackend):
 class X11DesktopBackend(MockDesktopBackend):
     def __init__(
         self,
-        width: int = 1440,
-        height: int = 900,
+        width: int = 1024,
+        height: int = 768,
         display: str = ":99",
         browser: str | None = None,
         browser_profile_dir: str | None = None,

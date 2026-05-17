@@ -13,7 +13,7 @@ class StrictBaseModel(BaseModel):
 
 
 class DesktopConfig(StrictBaseModel):
-    resolution: tuple[int, int] = (1440, 900)
+    resolution: tuple[int, int] = (1024, 768)
     dpi: int = Field(default=96, ge=48, le=240)
     window_manager: Literal["xfce", "openbox"] = "xfce"
     display_depth: int = Field(default=24, ge=8, le=32)
@@ -90,7 +90,7 @@ class BrowserConfig(StrictBaseModel):
 
 
 class ActionConfig(StrictBaseModel):
-    post_action_delay_ms: int = Field(default=100, ge=0, le=10_000)
+    post_action_delay_ms: int = Field(default=0, ge=0, le=10_000)
     screenshot_after: bool = False
     trace_actions: bool = Field(
         default=False,

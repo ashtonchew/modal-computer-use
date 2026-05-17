@@ -107,7 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     sdk_parser.add_argument(
         "--create-modal-sandbox",
         action="store_true",
-        help="create a fresh Modal-backed CUA sandbox, run daemon-http, then terminate it",
+        help=(
+            "create a fresh Modal-backed CUA sandbox, run daemon-http through "
+            "modal-daemon-connect ingress, then terminate it"
+        ),
     )
     sdk_parser.add_argument("--app-name", default="modal-computer-use")
     sdk_parser.add_argument("--name")

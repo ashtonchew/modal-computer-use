@@ -44,10 +44,10 @@ class DaemonSettings:
     run_id: str | None = field(default_factory=lambda: os.getenv("COMPUTER_USE_RUN_ID") or None)
     display: str = field(default_factory=lambda: os.getenv("DISPLAY", ":99"))
     desktop_width: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_WIDTH", 1440)
+        default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_WIDTH", 1024)
     )
     desktop_height: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_HEIGHT", 900)
+        default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_HEIGHT", 768)
     )
     desktop_dpi: int = field(default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_DPI", 96))
     display_depth: int = field(
@@ -108,7 +108,7 @@ class DaemonSettings:
         default_factory=lambda: os.getenv("COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION", "auto")
     )
     post_action_delay_ms: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_POST_ACTION_DELAY_MS", 100)
+        default_factory=lambda: _int_env("COMPUTER_USE_POST_ACTION_DELAY_MS", 0)
     )
     default_action_timeout_ms: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS", 5_000)

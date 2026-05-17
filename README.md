@@ -107,8 +107,9 @@ uv run computer-use benchmark sdk \
 
 Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through a Modal
 connect token, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a generated
-`benchmark_run_id`, then terminates and detaches the sandbox. Passing `--gpu` defaults the created
-resource profile to `browser-gpu` unless `--resource-profile` is supplied.
+`benchmark_run_id`, then terminates and detaches the sandbox. The report records the canonical
+ingress label as `modal-daemon-connect` in metadata. Passing `--gpu` defaults the created resource
+profile to `browser-gpu` unless `--resource-profile` is supplied.
 
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`

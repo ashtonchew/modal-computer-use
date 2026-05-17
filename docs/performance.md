@@ -155,8 +155,12 @@ uv run computer-use benchmark sdk \
 This mode is intentionally explicit because it creates billable Modal resources. It builds a
 `ComputerConfig`, passes `ResourceConfig.gpu` through to `Sandbox.create(gpu=...)`, measures cold
 create-to-ready time, runs the warm daemon cases through the connect token, and terminates the
-sandbox in a `finally` block. If `--gpu` is set without `--resource-profile`, the created sandbox
-uses `browser-gpu`; otherwise `--resource-profile` controls the image/resource profile label.
+sandbox in a `finally` block. The JSON keeps the backward-compatible `daemon-http` surface key, and
+records the canonical ingress label in `metadata.ingress.canonical_name`. A Modal-created sandbox
+reports `modal-daemon-connect`; mock-local reports `modal-daemon-local`; caller-provided daemon
+URLs report `modal-daemon-http` unless the caller labels them separately. If `--gpu` is set without
+`--resource-profile`, the created sandbox uses `browser-gpu`; otherwise `--resource-profile`
+controls the image/resource profile label.
 Supported GPU strings and counts follow Modal's `gpu` argument, such as `T4`, `L4`, `A10`,
 `L40S`, `A100`, `H100`, or `H100:2`. For GPU-specific benchmarking where Modal's H100-to-H200
 upgrade would pollute attribution, use Modal's strict `H100!` string.
@@ -206,6 +210,8 @@ be the only billing attribution mechanism.
 
 Keep SDK benchmark surfaces fair:
 
+- Name the ingress explicitly: `modal-daemon-local`, `modal-daemon-connect`,
+  `modal-daemon-tunnel`, `daytona-toolbox-http`, or `e2b-desktop-sdk`.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
 - Treat public-rate `cost_estimate` values as approximate context, not billing truth.
@@ -285,6 +291,48 @@ Environment metadata:
 | `daemon-http` | `type_100_chars` | `ok` | 1715.85 | 1906.02 | Redacted text payload; `xdotool` method metadata only. |
 | `daemon-http` | `type_1000_chars` | `ok` | 7465.19 | 7560.72 | Redacted text payload; `xdotool` method metadata only. |
 
+### Normalized SDK defaults, 2026-05-17
+
+These runs were captured after the SDK defaults changed to `1024x768 @ 96 DPI` and
+`COMPUTER_USE_POST_ACTION_DELAY_MS=0`. Both commands used 10 measured iterations and one warmup
+iteration:
+
+```bash
+uv run computer-use benchmark sdk --mock-local --surfaces daemon-http --iterations 10 \
+  --output benchmark-sdk-mock-local-2026-05-17-defaults.json
+
+uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http --iterations 10 \
+  --output benchmark-sdk-modal-connect-1024x768-2026-05-17.json
+```
+
+The `daemon-http` key remains for CLI compatibility, but the recorded canonical labels are
+`modal-daemon-local` and `modal-daemon-connect`.
+
+| Canonical label | Case | Mean ms | Notes |
+| --- | --- | ---: | --- |
+| `modal-daemon-local` | `batch_5_actions` | 1.23 | In-process daemon HTTP path. |
+| `modal-daemon-local` | `separate_5_actions` | 5.50 | Five daemon requests; no Modal transport. |
+| `modal-daemon-local` | `move_click` | 1.16 | One move and click. |
+| `modal-daemon-local` | `move_click_sequence` | 1.60 | Four move/click pairs. |
+| `modal-daemon-local` | `screenshot_full` | 4.60 | Inline 1024x768 PNG, 4,051 bytes. |
+| `modal-daemon-local` | `command_echo` | 0.80 | Mock command route. |
+| `modal-daemon-local` | `type_100_chars` | 1.14 | Mock typing path. |
+| `modal-daemon-local` | `type_1000_chars` | 1.16 | Mock typing path. |
+| `modal-daemon-connect` | `cold_create_to_ready` | 12192.81 | Live sandbox create through daemon readiness. |
+| `modal-daemon-connect` | `batch_5_actions` | 961.06 | One five-action daemon request through Modal Connect. |
+| `modal-daemon-connect` | `separate_5_actions` | 3900.72 | Five daemon requests through Modal Connect. |
+| `modal-daemon-connect` | `move_click` | 968.44 | One move and click through Modal Connect. |
+| `modal-daemon-connect` | `move_click_sequence` | 1661.29 | Four move/click pairs through Modal Connect. |
+| `modal-daemon-connect` | `screenshot_full` | 1176.07 | Inline 1024x768 PNG, 257,992 bytes. |
+| `modal-daemon-connect` | `command_echo` | 552.56 | Shell command through daemon route. |
+| `modal-daemon-connect` | `type_100_chars` | 1558.96 | Redacted text payload; `xdotool` method metadata only. |
+| `modal-daemon-connect` | `type_1000_chars` | 7512.75 | Redacted text payload; `xdotool` method metadata only. |
+
+The normalized live run still shows large per-request Modal Connect overhead. One batched
+five-action request averaged `961.06ms`, while five separate action requests averaged `3900.72ms`.
+Use batched actions for model turns, and use `modal-daemon-local` or a future
+`modal-daemon-tunnel` run when isolating daemon implementation cost from hosted ingress cost.
+
 ## Screenshot storage modes
 
 `screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
@@ -352,7 +400,11 @@ or use, so use Volumes or external storage for durable artifacts. See `examples/
 
 ## Post-action delay
 
-`COMPUTER_USE_POST_ACTION_DELAY_MS` (default `100`) inserts a sleep after every action so the desktop has time to settle. Lower it for headless workflows where you do not screenshot between actions; raise it if the next action consistently runs against a half-rendered UI.
+`COMPUTER_USE_POST_ACTION_DELAY_MS` defaults to `0`. The SDK primitive layer should execute the
+requested action and return immediately; observation-loop settle policy belongs in the caller,
+example, or benchmark profile. Set a nonzero delay only for screenshot-driven agent loops that need
+a short settle period before the next screenshot, or use explicit `wait` actions when the caller
+knows the condition it is waiting for.
 
 ## When in doubt
 

@@ -22,6 +22,23 @@ def test_daemon_settings_read_environment_when_instantiated(monkeypatch, tmp_pat
     assert settings.browser_prewarm is True
 
 
+def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
+    for key in (
+        "COMPUTER_USE_DESKTOP_WIDTH",
+        "COMPUTER_USE_DESKTOP_HEIGHT",
+        "COMPUTER_USE_DESKTOP_DPI",
+        "COMPUTER_USE_POST_ACTION_DELAY_MS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = DaemonSettings()
+
+    assert settings.desktop_width == 1024
+    assert settings.desktop_height == 768
+    assert settings.desktop_dpi == 96
+    assert settings.post_action_delay_ms == 0
+
+
 def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:
     monkeypatch.setenv("COMPUTER_USE_DESKTOP_WIDTH", "123")
 

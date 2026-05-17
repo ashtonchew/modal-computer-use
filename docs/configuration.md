@@ -9,8 +9,8 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `DISPLAY` | string | `:99` | X display address the daemon and tools attach to. |
-| `COMPUTER_USE_DESKTOP_WIDTH` | int | `1440` | Xvfb width in pixels. |
-| `COMPUTER_USE_DESKTOP_HEIGHT` | int | `900` | Xvfb height in pixels. |
+| `COMPUTER_USE_DESKTOP_WIDTH` | int | `1024` | Xvfb width in pixels. |
+| `COMPUTER_USE_DESKTOP_HEIGHT` | int | `768` | Xvfb height in pixels. |
 | `COMPUTER_USE_DESKTOP_DPI` | int | `96` | DPI passed to Xvfb. |
 | `COMPUTER_USE_DISPLAY_DEPTH` | int | `24` | Display color depth. |
 | `COMPUTER_USE_WINDOW_MANAGER` | string | `xfce` | Window manager to launch. |
@@ -47,7 +47,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | int | `20` | Rolling one-second per-sandbox limit for executable input actions. Set `0` to disable in trusted benchmark or local test harnesses. |
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | int | `5000` | Per-action timeout when the request does not specify one. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | int | `300000` | Upper bound a request can ask for. |
-| `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `100` | Sleep inserted after every action to let the desktop settle. |
+| `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `0` | Optional sleep inserted after UI-mutating actions before a following action or `screenshot_after`. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | int | `1000` | Idempotency-key cache size. Set to `0` to disable caching instead of retaining an unbounded cache. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | int | `3600` | Idempotency-key cache TTL. |
 | `COMPUTER_USE_MAX_ACTIONS` | int | unset | Optional ceiling on attempted executable desktop actions per run. Failed and timed-out actions count; validation failures, idempotency replays, screenshots, zooms, and cursor-position queries do not. |
