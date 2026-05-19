@@ -157,6 +157,7 @@ This mode is intentionally explicit because it creates billable Modal resources.
 create-to-ready time, runs the warm daemon cases through the connect token, and terminates the
 sandbox in a `finally` block. The JSON keeps the backward-compatible `daemon-http` surface key, and
 records the canonical ingress label in `metadata.ingress.canonical_name`. A Modal-created sandbox
+defaults to attested tunnel ingress and reports `modal-daemon-tunnel`; `--modal-ingress connect`
 reports `modal-daemon-connect`; mock-local reports `modal-daemon-local`; caller-provided daemon
 URLs report `modal-daemon-http` unless the caller labels them separately. If `--gpu` is set without
 `--resource-profile`, the created sandbox uses `browser-gpu`; otherwise `--resource-profile`
@@ -164,6 +165,16 @@ controls the image/resource profile label.
 Supported GPU strings and counts follow Modal's `gpu` argument, such as `T4`, `L4`, `A10`,
 `L40S`, `A100`, `H100`, or `H100:2`. For GPU-specific benchmarking where Modal's H100-to-H200
 upgrade would pollute attribution, use Modal's strict `H100!` string.
+
+Modal-created sandboxes support three ingress modes:
+
+- `attested-tunnel` (default): bootstrap through a Modal Connect Token, mint a short-lived daemon
+  bearer token with `/v1/session/tunnel-authorize`, then send hot primitive calls through the
+  encrypted Modal tunnel on port `8080`.
+- `connect`: keep every daemon request on `https://connect.modal.run`; use this when Modal
+  verified-user metadata on every request matters more than primitive latency.
+- `tunnel`: expose daemon port `8080` and use a static per-sandbox daemon bearer token. This is the
+  lowest-level mode and should be reserved for trusted benchmark harnesses.
 
 The raw Modal `Sandbox.exec` baseline is opt-in:
 

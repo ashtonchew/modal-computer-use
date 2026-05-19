@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 VncMode = Literal["off", "view_only", "control"]
+ModalIngress = Literal["attested-tunnel", "connect", "tunnel"]
 
 
 class StrictBaseModel(BaseModel):
@@ -132,6 +133,7 @@ class ComputerConfig(StrictBaseModel):
     budgets: BudgetConfig = Field(default_factory=BudgetConfig)
     run_id: str | None = None
     request_id: str | None = Field(default=None, exclude=True)
+    ingress: ModalIngress = "attested-tunnel"
     expose_vnc: VncMode | bool = "off"
     vnc_password: str | None = None
 

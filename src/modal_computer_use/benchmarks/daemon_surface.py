@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from ..client import DaemonClient
 from . import core
@@ -124,6 +125,13 @@ def _daemon_ingress_metadata(*, mode: str, base_url: str | None) -> dict[str, An
             "kind": "modal-connect-token",
             "auth": "Modal Sandbox Connect Token",
             "description": "authenticated Modal connect-token ingress to the daemon",
+        }
+    if safe_base_url and urlsplit(safe_base_url).netloc.endswith(".modal.host"):
+        return {
+            "canonical_name": "modal-daemon-tunnel",
+            "kind": "modal-encrypted-tunnel",
+            "auth": "daemon bearer token",
+            "description": "Modal encrypted tunnel ingress to the daemon",
         }
     if safe_base_url:
         return {

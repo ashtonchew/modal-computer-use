@@ -125,6 +125,12 @@ class DaemonSettings:
     local_token: str | None = field(
         default_factory=lambda: os.getenv("COMPUTER_USE_LOCAL_TOKEN") or None
     )
+    tunnel_token: str | None = field(
+        default_factory=lambda: os.getenv("COMPUTER_USE_TUNNEL_TOKEN") or None
+    )
+    tunnel_token_ttl_seconds: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS", 3_600)
+    )
     require_connect_user: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_REQUIRE_CONNECT_USER", True)
     )

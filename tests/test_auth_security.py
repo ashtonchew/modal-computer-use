@@ -150,6 +150,45 @@ def test_require_connect_user_can_opt_into_private_connect_proxy_trust(tmp_path)
     assert response.status_code == 200
 
 
+def test_attested_tunnel_token_allows_public_tunnel_request(tmp_path) -> None:
+    app = _app(tmp_path, require_connect_user=True, reject_query_tokens=True)
+
+    with TestClient(
+        app,
+        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+    ) as client:
+        minted = client.post("/v1/session/tunnel-authorize")
+
+    token = minted.json()["token"]
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"Authorization": f"Bearer {token}"},
+    ) as client:
+        response = client.get("/v1/version")
+
+    assert minted.status_code == 200
+    assert response.status_code == 200
+
+
+def test_static_tunnel_token_allows_public_tunnel_request(tmp_path) -> None:
+    app = _app(
+        tmp_path,
+        require_connect_user=True,
+        reject_query_tokens=True,
+        tunnel_token="daemon-tunnel-token",
+    )
+
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"Authorization": "Bearer daemon-tunnel-token"},
+    ) as client:
+        response = client.get("/v1/version")
+
+    assert response.status_code == 200
+
+
 def test_json_formatter_preserves_neutral_metadata() -> None:
     record = logging.LogRecord(
         "modal_computer_use.test",

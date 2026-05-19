@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import time
+from contextlib import suppress
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -27,6 +29,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 },
             )
         if request.url.path in {"/healthz", "/readyz"}:
+            return await call_next(request)
+        if _has_valid_tunnel_token(request):
             return await call_next(request)
         if self.settings.local_token:
             if not _is_loopback_request(request):
@@ -106,6 +110,33 @@ def _verified_user_data_error(request: Request) -> JSONResponse | None:
             },
         )
     return None
+
+
+def _has_valid_tunnel_token(request: Request) -> bool:
+    token = _bearer_token(request)
+    if not token:
+        return False
+    settings = request.app.state.settings
+    if settings.tunnel_token and token == settings.tunnel_token:
+        return True
+    sessions = getattr(request.app.state, "tunnel_sessions", {})
+    expires_at = sessions.get(token) if isinstance(sessions, dict) else None
+    if not isinstance(expires_at, int | float):
+        return False
+    if expires_at <= time.time():
+        with suppress(Exception):
+            sessions.pop(token, None)
+        return False
+    return True
+
+
+def _bearer_token(request: Request) -> str | None:
+    value = request.headers.get("authorization", "")
+    prefix = "Bearer "
+    if not value.startswith(prefix):
+        return None
+    token = value[len(prefix) :].strip()
+    return token or None
 
 
 def _is_trusted_connect_proxy_request(request: Request, *, trust_private: bool = False) -> bool:

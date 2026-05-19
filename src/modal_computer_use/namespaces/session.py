@@ -11,3 +11,6 @@ class SessionNamespace(Namespace):
 
     def refresh(self) -> SandboxRef:
         return SandboxRef.model_validate(self._client.post_json("/v1/session/refresh"))
+
+    def tunnel_authorize(self) -> dict[str, object]:
+        return self._client.post_json("/v1/session/tunnel-authorize")

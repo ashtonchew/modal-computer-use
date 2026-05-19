@@ -5510,6 +5510,26 @@
         "summary": "Refresh"
       }
     },
+    "/v1/session/tunnel-authorize": {
+      "post": {
+        "operationId": "tunnel_authorize_v1_session_tunnel_authorize_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Tunnel Authorize V1 Session Tunnel Authorize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tunnel Authorize"
+      }
+    },
     "/v1/version": {
       "get": {
         "operationId": "version_v1_version_get",

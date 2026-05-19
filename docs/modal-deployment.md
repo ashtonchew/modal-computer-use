@@ -18,6 +18,10 @@ Per current Modal docs, configure the Sandbox with:
 
 - **Connect Tokens** authenticate HTTP and WebSocket requests to the daemon on port `8080`. See [security.md](security.md).
 - **Network restrictions** use `block_network` and `cidr_allowlist` to limit outbound traffic.
+- **Daemon ingress** defaults to an attested encrypted tunnel: Modal Connect authenticates the
+  bootstrap request, then the daemon mints a short-lived bearer token for low-latency tunnel calls
+  on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
+  Connect, or `ingress="tunnel"` for a static daemon bearer token in trusted benchmark harnesses.
 - **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
 - **Tags** are applied after creation with `Sandbox.set_tags()` and used for `Sandbox.list(tags=...)` attach and recovery flows.
 

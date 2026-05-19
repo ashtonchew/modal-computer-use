@@ -107,6 +107,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     )
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
     app.state.idempotency_cache = OrderedDict()
+    app.state.tunnel_sessions = {}
     app.state.action_count = 0
     app.state.screenshot_count = 0
     app.state.last_activity_at = time.monotonic()

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import secrets
+import time
+
 from fastapi import APIRouter, Request
 
 from modal_computer_use.models import SandboxRef
@@ -28,3 +31,17 @@ async def metadata(request: Request) -> SandboxRef:
 @router.post("/refresh")
 async def refresh(request: Request) -> SandboxRef:
     return _metadata(request)
+
+
+@router.post("/tunnel-authorize")
+async def tunnel_authorize(request: Request) -> dict[str, object]:
+    token = secrets.token_urlsafe(32)
+    ttl_seconds = request.app.state.settings.tunnel_token_ttl_seconds
+    expires_at = time.time() + ttl_seconds
+    request.app.state.tunnel_sessions[token] = expires_at
+    return {
+        "token": token,
+        "token_type": "Bearer",
+        "expires_in": ttl_seconds,
+        "expires_at": expires_at,
+    }

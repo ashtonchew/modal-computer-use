@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from ._version import __version__
 from .client import DaemonClient
-from .config import ComputerConfig, normalize_vnc_mode
+from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
 from .errors import (
     ConfigConflictError,
     ModalNotInstalledError,
@@ -180,7 +180,10 @@ class ComputerSandbox:
             artifact_volume_mounted=artifact_volume_mounted,
         )
         sandbox_tags = {**(tags or {}), **default_tags(config, owner=owner)}
-        ports = [6080] if vnc_mode != "off" else []
+        ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode)
+        tunnel_token = _secrets.token_urlsafe(32) if config.ingress == "tunnel" else None
+        if tunnel_token:
+            env["COMPUTER_USE_TUNNEL_TOKEN"] = tunnel_token
         create_kwargs: dict[str, Any] = {
             "app": app,
             "image": image,
@@ -211,7 +214,14 @@ class ComputerSandbox:
         token_info = sandbox.create_connect_token(
             user_metadata={"sdk": "modal-computer-use", "version": __version__}
         )
-        base_url, token = _connect_token_parts(token_info)
+        connect_base_url, connect_token = _connect_token_parts(token_info)
+        base_url, token = _client_ingress_parts(
+            sandbox,
+            ingress=config.ingress,
+            connect_base_url=connect_base_url,
+            connect_token=connect_token,
+            tunnel_token=tunnel_token,
+        )
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
             app_name=app_name,
@@ -232,6 +242,19 @@ class ComputerSandbox:
         )
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+        if wait and config.ingress == "attested-tunnel":
+            computer.client.close()
+            base_url, token = _attested_tunnel_parts(
+                sandbox,
+                connect_base_url=connect_base_url,
+                connect_token=connect_token,
+            )
+            computer = cls(
+                DaemonClient(base_url=base_url, token=token),
+                sandbox=sandbox,
+                metadata=metadata,
+            )
+            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         return computer
 
     @classmethod
@@ -244,6 +267,7 @@ class ComputerSandbox:
         app_name: str = "modal-computer-use",
         base_url: str | None = None,
         token: str | None = None,
+        ingress: ModalIngress = "attested-tunnel",
         wait: bool = False,
         readiness_timeout: float = 120.0,
     ) -> ComputerSandbox:
@@ -282,6 +306,19 @@ class ComputerSandbox:
         )
         if wait:
             computer.wait_until_ready(timeout=readiness_timeout)
+            if ingress == "attested-tunnel":
+                computer.client.close()
+                connect_base_url, connect_token = _attested_tunnel_parts(
+                    sandbox,
+                    connect_base_url=connect_base_url,
+                    connect_token=connect_token,
+                )
+                computer = cls(
+                    DaemonClient(base_url=connect_base_url, token=connect_token),
+                    sandbox=sandbox,
+                    metadata=metadata,
+                )
+                computer.wait_until_ready(timeout=readiness_timeout)
         return computer
 
     @classmethod
@@ -562,6 +599,49 @@ def _connect_url_parts(base_url: str, *, token: str | None) -> tuple[str, str | 
     return safe_url, token or query_token
 
 
+def _encrypted_ports_for_ingress(ingress: ModalIngress, *, vnc_mode: str) -> list[int]:
+    ports: list[int] = []
+    if ingress in {"attested-tunnel", "tunnel"}:
+        ports.append(8080)
+    if vnc_mode != "off":
+        ports.append(6080)
+    return ports
+
+
+def _client_ingress_parts(
+    sandbox: object,
+    *,
+    ingress: ModalIngress,
+    connect_base_url: str,
+    connect_token: str | None,
+    tunnel_token: str | None,
+) -> tuple[str, str | None]:
+    if ingress == "connect" or ingress == "attested-tunnel":
+        return connect_base_url, connect_token
+    if ingress == "tunnel":
+        if not tunnel_token:
+            raise SandboxUnavailableError("tunnel ingress requires a daemon bearer token")
+        return _tunnel_url(sandbox, 8080), tunnel_token
+    raise ValueError("ingress must be attested-tunnel, connect, or tunnel")
+
+
+def _attested_tunnel_parts(
+    sandbox: object,
+    *,
+    connect_base_url: str,
+    connect_token: str | None,
+) -> tuple[str, str]:
+    connect_client = DaemonClient(base_url=connect_base_url, token=connect_token)
+    try:
+        payload = connect_client.post_json("/v1/session/tunnel-authorize")
+    finally:
+        connect_client.close()
+    token = payload.get("token")
+    if not isinstance(token, str) or not token:
+        raise SandboxUnavailableError("daemon did not return an attested tunnel token")
+    return _tunnel_url(sandbox, 8080), token
+
+
 def _normalize_reuse_policy(reuse: bool | ReusePolicy) -> ReusePolicy:
     if reuse is True:
         return "by_run_id"
@@ -624,6 +704,18 @@ def _vnc_url(sandbox: object) -> str | None:
     if tunnel is None:
         return None
     return str(getattr(tunnel, "url", None) or getattr(tunnel, "tcp_socket", None) or "")
+
+
+def _tunnel_url(sandbox: object, port: int) -> str:
+    try:
+        tunnels = sandbox.tunnels()
+    except Exception as exc:
+        raise SandboxUnavailableError(f"could not retrieve Modal tunnel for port {port}") from exc
+    tunnel = tunnels.get(port) if isinstance(tunnels, dict) else None
+    value = None if tunnel is None else getattr(tunnel, "url", None)
+    if not value:
+        raise SandboxUnavailableError(f"Modal tunnel for port {port} is not available")
+    return str(value).rstrip("/")
 
 
 def _readiness_timeout_detail(payload: object | None, error: Exception | None) -> str:

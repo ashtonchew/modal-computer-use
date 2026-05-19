@@ -109,12 +109,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "create a fresh Modal-backed CUA sandbox, run daemon-http through "
-            "modal-daemon-connect ingress, then terminate it"
+            "the selected Modal daemon ingress, then terminate it"
         ),
     )
     sdk_parser.add_argument("--app-name", default="modal-computer-use")
     sdk_parser.add_argument("--name")
     sdk_parser.add_argument("--modal-region")
+    sdk_parser.add_argument(
+        "--modal-ingress",
+        choices=["attested-tunnel", "connect", "tunnel"],
+        default="attested-tunnel",
+        help="Modal daemon ingress for created sandboxes; defaults to attested-tunnel",
+    )
     sdk_parser.add_argument("--resource-profile")
     sdk_parser.add_argument("--browser")
     sdk_parser.add_argument("--gpu")
@@ -393,7 +399,7 @@ def _benchmark_sdk_created_modal_sandbox(
             client=computer.client,
             mode="http",
             iterations=args.iterations,
-            base_url="https://connect.modal.run",
+            base_url=computer.client.base_url,
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
@@ -405,6 +411,7 @@ def _benchmark_sdk_created_modal_sandbox(
 
 def _modal_benchmark_config(args: argparse.Namespace, *, run_id: str) -> ComputerConfig:
     config = ComputerConfig(run_id=run_id)
+    config.ingress = args.modal_ingress
     config.runtime.modal_region = args.modal_region
     config.resources.profile = _modal_benchmark_resource_profile(args)
     config.resources.gpu = args.gpu
@@ -502,6 +509,7 @@ def _sandbox_exec_setup_failure(exc: Exception) -> dict[str, Any]:
 def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "modal_region": args.modal_region,
+        "modal_ingress": getattr(args, "modal_ingress", None),
         "resource_profile": args.resource_profile,
         "browser": args.browser,
         "gpu": args.gpu,

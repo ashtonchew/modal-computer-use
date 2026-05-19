@@ -45,6 +45,17 @@ def test_benchmark_sdk_mock_local_outputs_json(capsys) -> None:
     assert '"text"' not in captured.out
     assert "Bearer" not in captured.out
 
+
+def test_daemon_ingress_metadata_identifies_modal_tunnel() -> None:
+    ingress = benchmark_daemon_surface._daemon_ingress_metadata(
+        mode="http",
+        base_url="https://example.r5.modal.host",
+    )
+
+    assert ingress["canonical_name"] == "modal-daemon-tunnel"
+    assert ingress["kind"] == "modal-encrypted-tunnel"
+
+
 def test_benchmark_sdk_modal_billing_tag_must_be_key_value(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(
@@ -195,7 +206,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     closed: list[str] = []
 
     class CreatedComputer:
-        client = object()
+        client = SimpleNamespace(base_url="https://daemon.example.modal.host")
 
         def metadata(self):
             return SimpleNamespace(sandbox_id="sb-gpu")
@@ -212,6 +223,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
 
     def fake_run_sdk_surface_benchmark(**kwargs):
         environment = kwargs["environment_metadata"]
+        assert kwargs["base_url"] == "https://daemon.example.modal.host"
         return {
             "ok": True,
             "benchmark": "sdk-surfaces",
@@ -221,8 +233,8 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
                     "metadata": {
                         "environment": environment,
                         "ingress": {
-                            "canonical_name": "modal-daemon-connect",
-                            "kind": "modal-connect-token",
+                            "canonical_name": "modal-daemon-tunnel",
+                            "kind": "modal-encrypted-tunnel",
                         },
                     },
                     "status": "ok",
@@ -274,13 +286,15 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert config.resources.gpu == "T4"
     assert config.resources.cpu == 2
     assert config.resources.memory_mib == 4096
+    assert config.ingress == "attested-tunnel"
     assert config.browser.kind == "chromium"
     assert config.browser.gpu_mode is None
     environment = payload["surfaces"]["daemon-http"]["metadata"]["environment"]
     ingress = payload["surfaces"]["daemon-http"]["metadata"]["ingress"]
-    assert ingress["canonical_name"] == "modal-daemon-connect"
-    assert ingress["kind"] == "modal-connect-token"
+    assert ingress["canonical_name"] == "modal-daemon-tunnel"
+    assert ingress["kind"] == "modal-encrypted-tunnel"
     assert environment["gpu"] == "T4"
+    assert environment["modal_ingress"] == "attested-tunnel"
     assert environment["modal_cpu_count"] == 2
     assert environment["modal_memory_gib"] == 4
     assert environment["modal_sandbox_id"] == "sb-gpu"

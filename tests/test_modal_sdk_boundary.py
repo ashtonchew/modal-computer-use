@@ -105,7 +105,10 @@ class FakeSandboxObject:
         self.terminated = True
 
     def tunnels(self) -> dict[int, object]:
-        return {6080: SimpleNamespace(url="https://novnc.example")}
+        return {
+            6080: SimpleNamespace(url="https://novnc.example"),
+            8080: SimpleNamespace(url="https://daemon.example.modal.host"),
+        }
 
     def snapshot_filesystem(self) -> object:
         return SimpleNamespace(object_id="im-snapshot")
@@ -191,6 +194,13 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
         "wait_until_ready",
         lambda self, timeout=120.0, interval=1.0: readiness_calls.append(timeout),
     )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._attested_tunnel_parts",
+        lambda sandbox, *, connect_base_url, connect_token: (
+            "https://daemon.example.modal.host",
+            "attested-token",
+        ),
+    )
     config = ComputerConfig(
         run_id="run-123",
         browser=BrowserConfig(kind="firefox"),
@@ -226,13 +236,14 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC"] == "20"
     assert kwargs["env"]["COMPUTER_USE_MAX_BATCH_DURATION_MS"] == "30000"
     assert kwargs["env"]["COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY"] == "true"
-    assert kwargs["encrypted_ports"] == [6080]
+    assert kwargs["encrypted_ports"] == [8080, 6080]
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs
     assert "tags" not in kwargs
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.wait_until_ready_calls == [120]
-    assert readiness_calls == [120]
+    assert readiness_calls == [120, 120]
+    assert computer.client.base_url == "https://daemon.example.modal.host"
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.run_id"] == "run-123"
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.owner"] == "alice"
     assert FakeSandbox.created.set_tags_calls[0]["computer-use.artifacts_dir"] == (
@@ -375,7 +386,35 @@ def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
     ComputerSandbox.create(config=ComputerConfig(run_id="run-123"), image=object(), wait=False)
 
     _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["encrypted_ports"] == [8080]
+
+
+def test_create_connect_ingress_keeps_daemon_tunnel_closed(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123", ingress="connect"),
+        image=object(),
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
     assert kwargs["encrypted_ports"] == []
+
+
+def test_create_tunnel_ingress_uses_static_daemon_token(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123", ingress="tunnel"),
+        image=object(),
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["encrypted_ports"] == [8080]
+    assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
+    assert computer.client.base_url == "https://daemon.example.modal.host"
 
 
 def test_create_generates_vnc_password_without_exposing_it(monkeypatch) -> None:
@@ -426,6 +465,7 @@ def test_attach_wait_polls_daemon_when_requested(monkeypatch) -> None:
     ComputerSandbox.attach(
         app_name="computer-app",
         name="desktop-1",
+        ingress="connect",
         wait=True,
         readiness_timeout=7,
     )
