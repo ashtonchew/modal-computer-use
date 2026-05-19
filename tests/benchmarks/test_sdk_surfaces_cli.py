@@ -312,6 +312,105 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert environment["modal_cold_create_to_ready_ms"] > 0
     assert closed == ["terminate", "detach"]
 
+def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:
+    created: dict[str, object] = {}
+    closed: list[str] = []
+    benchmark_calls: list[dict[str, object]] = []
+
+    class RawClient:
+        base_url = "https://daemon.example.modal.host"
+
+    class FakeSandbox:
+        def create_connect_token(self, *, user_metadata: dict[str, str]):
+            assert user_metadata["benchmark"] == "modal-ingress-ab"
+            return SimpleNamespace(url="https://connect.example", token="connect-token")
+
+    class CreatedComputer:
+        client = RawClient()
+        _sandbox = FakeSandbox()
+
+        def metadata(self):
+            return SimpleNamespace(sandbox_id="sb-ab")
+
+        def terminate(self) -> None:
+            closed.append("terminate")
+
+        def detach(self) -> None:
+            closed.append("detach")
+
+    class FakeDaemonClient:
+        def __init__(self, base_url: str, *, token: str | None = None) -> None:
+            self.base_url = base_url
+            self.token = token
+
+        def post_json(self, path: str):
+            assert path == "/v1/session/tunnel-authorize"
+            assert self.base_url == "https://connect.example"
+            assert self.token == "connect-token"  # noqa: S105
+            return {"token": "minted-token"}
+
+        def close(self) -> None:
+            closed.append(f"close:{self.token}")
+
+    def fake_create(**kwargs):
+        created.update(kwargs)
+        return CreatedComputer()
+
+    def fake_run_sdk_surface_benchmark(**kwargs):
+        benchmark_calls.append(kwargs)
+        role = kwargs["environment_metadata"]["modal_ingress_ab_role"]
+        mean = 100.0 if role == "raw-static-token" else 110.0
+        return {
+            "ok": True,
+            "surfaces": {
+                "daemon-http": {
+                    "cases": {
+                        "move_click": {
+                            "summary_ms": {"mean": mean},
+                            "daemon_summary_ms": {"mean": 40.0},
+                            "overhead_summary_ms": {"mean": mean - 40.0},
+                        }
+                    },
+                    "failures": [],
+                }
+            },
+            "failures": [],
+        }
+
+    monkeypatch.setattr(cli.ComputerSandbox, "create", staticmethod(fake_create))
+    monkeypatch.setattr(cli, "DaemonClient", FakeDaemonClient)
+    monkeypatch.setattr(cli, "run_sdk_surface_benchmark", fake_run_sdk_surface_benchmark)
+    monkeypatch.setattr(cli, "new_run_id", lambda: "modal_ingress_ab_test")
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "modal-ingress-ab",
+            "--iterations",
+            "1",
+            "--modal-cpu",
+            "2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    config = created["config"]
+    assert exit_code == 0
+    assert config.ingress == "tunnel"
+    assert config.resources.cpu == 2
+    assert len(benchmark_calls) == 2
+    assert benchmark_calls[0]["base_url"] == benchmark_calls[1]["base_url"]
+    assert benchmark_calls[0]["environment_metadata"]["modal_ingress_ab_role"] == (
+        "raw-static-token"
+    )
+    assert benchmark_calls[1]["environment_metadata"]["modal_ingress_ab_role"] == (
+        "attested-minted-token"
+    )
+    assert payload["benchmark"] == "modal-ingress-ab"
+    assert payload["comparison"]["move_click"]["delta_ms"] == 10.0
+    assert closed == ["close:connect-token", "close:minted-token", "terminate", "detach"]
+
 def test_benchmark_sdk_create_modal_sandbox_requires_daemon_http(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(

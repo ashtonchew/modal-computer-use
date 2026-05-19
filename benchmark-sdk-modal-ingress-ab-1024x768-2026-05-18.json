@@ -1,0 +1,1645 @@
+{
+  "benchmark": "modal-ingress-ab",
+  "comparison": {
+    "batch_5_actions": {
+      "attested_daemon_mean_ms": 469.4044320999865,
+      "attested_minted_token_mean_ms": 1098.910104099923,
+      "attested_overhead_mean_ms": 629.5056719999366,
+      "delta_ms": -145.53405020033097,
+      "delta_percent": -11.69470318916514,
+      "raw_daemon_mean_ms": 569.3235332999999,
+      "raw_overhead_mean_ms": 675.1206210002541,
+      "raw_static_token_mean_ms": 1244.444154300254
+    },
+    "command_echo": {
+      "attested_daemon_mean_ms": null,
+      "attested_minted_token_mean_ms": 724.722812300206,
+      "attested_overhead_mean_ms": null,
+      "delta_ms": 37.4243665000904,
+      "delta_percent": 5.445140568668533,
+      "raw_daemon_mean_ms": null,
+      "raw_overhead_mean_ms": null,
+      "raw_static_token_mean_ms": 687.2984458001156
+    },
+    "move_click": {
+      "attested_daemon_mean_ms": 498.51460320001587,
+      "attested_minted_token_mean_ms": 1100.1038376001816,
+      "attested_overhead_mean_ms": 601.5892344001657,
+      "delta_ms": -8.191133100444858,
+      "delta_percent": -0.7390751845843623,
+      "raw_daemon_mean_ms": 499.68187890000024,
+      "raw_overhead_mean_ms": 608.6130918006262,
+      "raw_static_token_mean_ms": 1108.2949707006264
+    },
+    "move_click_sequence": {
+      "attested_daemon_mean_ms": 1262.5067141999807,
+      "attested_minted_token_mean_ms": 1900.9913375995893,
+      "attested_overhead_mean_ms": 638.4846233996086,
+      "delta_ms": -0.555120700119005,
+      "delta_percent": -0.029193117932831004,
+      "raw_daemon_mean_ms": 1272.7899087000026,
+      "raw_overhead_mean_ms": 628.7565495997057,
+      "raw_static_token_mean_ms": 1901.5464582997083
+    },
+    "screenshot_full": {
+      "attested_daemon_mean_ms": null,
+      "attested_minted_token_mean_ms": 1325.1317332998951,
+      "attested_overhead_mean_ms": null,
+      "delta_ms": 23.912820699661097,
+      "delta_percent": 1.837724649411678,
+      "raw_daemon_mean_ms": null,
+      "raw_overhead_mean_ms": null,
+      "raw_static_token_mean_ms": 1301.218912600234
+    },
+    "separate_5_actions": {
+      "attested_daemon_mean_ms": 1615.315364800017,
+      "attested_minted_token_mean_ms": 4871.459891599807,
+      "attested_overhead_mean_ms": 3256.1445267997897,
+      "delta_ms": 187.05617889991117,
+      "delta_percent": 3.993169469846991,
+      "raw_daemon_mean_ms": 1513.7863229999987,
+      "raw_overhead_mean_ms": 3170.6173896998966,
+      "raw_static_token_mean_ms": 4684.403712699896
+    },
+    "type_1000_chars": {
+      "attested_daemon_mean_ms": 6956.312045600009,
+      "attested_minted_token_mean_ms": 7637.62070000048,
+      "attested_overhead_mean_ms": 681.3086544004705,
+      "delta_ms": 83.32533329994476,
+      "delta_percent": 1.1030192659297422,
+      "raw_daemon_mean_ms": 6935.7189478000055,
+      "raw_overhead_mean_ms": 618.5764189005284,
+      "raw_static_token_mean_ms": 7554.295366700535
+    },
+    "type_100_chars": {
+      "attested_daemon_mean_ms": 982.685503900018,
+      "attested_minted_token_mean_ms": 1624.3789958003617,
+      "attested_overhead_mean_ms": 641.6934919003438,
+      "delta_ms": -37.30876659974456,
+      "delta_percent": -2.245233276909771,
+      "raw_daemon_mean_ms": 1016.3135524000027,
+      "raw_overhead_mean_ms": 645.3742100001036,
+      "raw_static_token_mean_ms": 1661.6877624001063
+    }
+  },
+  "failures": [],
+  "generated_at": "2026-05-19T04:38:58.906160+00:00",
+  "iterations": 10,
+  "metadata": {
+    "base_url": "https://ta-01krz80ec3fxwsh8a3szq7ex36-8080-6yec68j33y4vg2mpqk7xy1yz8.w.modal.host",
+    "comparison": "same sandbox, same encrypted tunnel URL, different bearer tokens",
+    "environment": {
+      "modal_app_name": "modal-computer-use",
+      "modal_cold_create_to_ready_ms": 8972.637165999913,
+      "modal_run_id": "run_4e117fe081674968",
+      "modal_sandbox_id": "sb-facQYNnjphEq7YCvvXfSj4"
+    }
+  },
+  "ok": true,
+  "runs": {
+    "attested_minted_token": {
+      "base_url": "https://ta-01krz80ec3fxwsh8a3szq7ex36-8080-6yec68j33y4vg2mpqk7xy1yz8.w.modal.host",
+      "benchmark": "sdk-surfaces",
+      "failures": [],
+      "generated_at": "2026-05-19T04:38:58.906120+00:00",
+      "iterations": 10,
+      "metadata": {
+        "environment": {
+          "modal_app_name": "modal-computer-use",
+          "modal_cold_create_to_ready_ms": 8972.637165999913,
+          "modal_ingress": "attested-tunnel",
+          "modal_ingress_ab_role": "attested-minted-token",
+          "modal_run_id": "run_4e117fe081674968",
+          "modal_sandbox_id": "sb-facQYNnjphEq7YCvvXfSj4"
+        },
+        "surfaces": [
+          "daemon-http"
+        ]
+      },
+      "mode": "http",
+      "ok": true,
+      "package_version": "1.0.0",
+      "surfaces": {
+        "daemon-http": {
+          "cases": {
+            "action_batch": {
+              "action_count": 5,
+              "actions": [
+                {
+                  "type": "move"
+                },
+                {
+                  "type": "cursor_position"
+                },
+                {
+                  "type": "wait"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "type": "cursor_position"
+                }
+              ],
+              "cases": {
+                "batch_5_actions": {
+                  "attribution": {
+                    "reason": null,
+                    "status": "measured"
+                  },
+                  "daemon_samples_ms": [
+                    473.40117899997836,
+                    487.7305100000058,
+                    472.17635399999835,
+                    466.0735779999925,
+                    462.3321259999784,
+                    480.93944999999394,
+                    456.205725000018,
+                    464.7218949999683,
+                    455.80764299995735,
+                    474.6558609999738
+                  ],
+                  "daemon_summary_ms": {
+                    "max": 487.7305100000058,
+                    "mean": 469.4044320999865,
+                    "min": 455.80764299995735,
+                    "p50": 469.1249659999954,
+                    "p95": 484.67453300000045
+                  },
+                  "failures": [],
+                  "iterations": 10,
+                  "overhead_samples_ms": [
+                    625.9241960002839,
+                    641.4906560002009,
+                    632.815520999543,
+                    660.3188389998138,
+                    608.6074990004136,
+                    610.1592170005574,
+                    667.6774829998067,
+                    609.5256459988718,
+                    610.653106998484,
+                    627.8845560013906
+                  ],
+                  "overhead_summary_ms": {
+                    "max": 667.6774829998067,
+                    "mean": 629.5056719999366,
+                    "min": 608.6074990004136,
+                    "p50": 626.9043760008373,
+                    "p95": 664.3660931998098
+                  },
+                  "samples_ms": [
+                    1099.3253750002623,
+                    1129.2211660002067,
+                    1104.9918749995413,
+                    1126.3924169998063,
+                    1070.939625000392,
+                    1091.0986670005514,
+                    1123.8832079998247,
+                    1074.2475409988401,
+                    1066.4607499984413,
+                    1102.5404170013644
+                  ],
+                  "status": "ok",
+                  "successful_iterations": 10,
+                  "summary_ms": {
+                    "max": 1129.2211660002067,
+                    "mean": 1098.910104099923,
+                    "min": 1066.4607499984413,
+                    "p50": 1100.9328960008133,
+                    "p95": 1127.9482289500265
+                  }
+                },
+                "sandbox_exec": {
+                  "reason": "Sandbox.exec comparison is unsupported in this benchmark pass",
+                  "status": "not_measured"
+                },
+                "separate_5_actions": {
+                  "attribution": {
+                    "reason": null,
+                    "status": "measured"
+                  },
+                  "daemon_samples_ms": [
+                    1614.3067979999728,
+                    1560.2062739999951,
+                    1530.661430000066,
+                    1502.1621719999985,
+                    1537.0844509999984,
+                    1584.6478170000182,
+                    1854.5621030000916,
+                    1671.0135869999476,
+                    1672.5004589999912,
+                    1626.008557000091
+                  ],
+                  "daemon_summary_ms": {
+                    "max": 1854.5621030000916,
+                    "mean": 1615.315364800017,
+                    "min": 1502.1621719999985,
+                    "p50": 1599.4773074999955,
+                    "p95": 1772.6343632000462
+                  },
+                  "failures": [],
+                  "iterations": 10,
+                  "overhead_samples_ms": [
+                    3267.4810769996725,
+                    3261.3454339988834,
+                    3098.5321539998836,
+                    3026.4207030002126,
+                    3183.1482989999245,
+                    3124.387349999438,
+                    3396.9009389990674,
+                    3572.425829000963,
+                    3370.5754989994716,
+                    3260.2279840003803
+                  ],
+                  "overhead_summary_ms": {
+                    "max": 3572.425829000963,
+                    "mean": 3256.1445267997897,
+                    "min": 3026.4207030002126,
+                    "p50": 3260.7867089996316,
+                    "p95": 3493.4396285001094
+                  },
+                  "samples_ms": [
+                    4881.787874999645,
+                    4821.551707998879,
+                    4629.19358399995,
+                    4528.582875000211,
+                    4720.232749999923,
+                    4709.035166999456,
+                    5251.463041999159,
+                    5243.439416000911,
+                    5043.075957999463,
+                    4886.236541000471
+                  ],
+                  "status": "ok",
+                  "successful_iterations": 10,
+                  "summary_ms": {
+                    "max": 5251.463041999159,
+                    "mean": 4871.459891599807,
+                    "min": 4528.582875000211,
+                    "p50": 4851.669791499262,
+                    "p95": 5247.852410299947
+                  }
+                }
+              },
+              "comparison": {
+                "batch_faster": true,
+                "batch_vs_separate_speedup": 4.432992174177742,
+                "mean_delta_ms": 3772.5497874998837,
+                "status": "measured"
+              },
+              "failures": [],
+              "status": "ok"
+            },
+            "browser_render_metrics": {
+              "reason": "browser render metrics require configured chromium",
+              "status": "not_measured"
+            },
+            "cold_create_to_ready": {
+              "failures": [],
+              "iterations": 1,
+              "samples_ms": [
+                8972.637165999913
+              ],
+              "source": "live_orchestration_metadata",
+              "status": "ok",
+              "successful_iterations": 1,
+              "summary_ms": {
+                "max": 8972.637165999913,
+                "mean": 8972.637165999913,
+                "min": 8972.637165999913,
+                "p50": 8972.637165999913,
+                "p95": 8972.637165999913
+              }
+            },
+            "command_echo": {
+              "command": {
+                "argv": [
+                  "sh",
+                  "-lc",
+                  "printf 42"
+                ],
+                "timeout_seconds": 30
+              },
+              "failures": [],
+              "iterations": 10,
+              "last_result": {
+                "exit_code": 0
+              },
+              "samples_ms": [
+                706.1563750012283,
+                824.2953330009186,
+                720.4693749990838,
+                695.921291000559,
+                721.1742500003311,
+                687.228791999587,
+                706.1818330003007,
+                688.5491249995539,
+                798.5305830006837,
+                698.7211659998138
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 824.2953330009186,
+                "mean": 724.722812300206,
+                "min": 687.228791999587,
+                "p50": 706.1691040007645,
+                "p95": 812.7011955008129
+              }
+            },
+            "move_click": {
+              "action_count": 2,
+              "actions": [
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                }
+              ],
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                509.06342399997584,
+                489.8726450000481,
+                497.7868799999783,
+                496.95408500002713,
+                511.1610510000446,
+                491.92833900002597,
+                510.5759379999881,
+                486.6498320000119,
+                494.47400600001856,
+                496.67983200004073
+              ],
+              "daemon_summary_ms": {
+                "max": 511.1610510000446,
+                "mean": 498.51460320001587,
+                "min": 486.6498320000119,
+                "p50": 496.81695850003393,
+                "p95": 510.8977501500192
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                622.2091180011944,
+                589.1678130001878,
+                593.4397449997846,
+                620.3948320014092,
+                618.7544899996738,
+                588.1558279988326,
+                611.9267699999682,
+                601.3762520003638,
+                586.0918690013932,
+                584.3756269988489
+              ],
+              "overhead_summary_ms": {
+                "max": 622.2091180011944,
+                "mean": 601.5892344001657,
+                "min": 584.3756269988489,
+                "p50": 597.4079985000742,
+                "p95": 621.392689301291
+              },
+              "samples_ms": [
+                1131.2725420011702,
+                1079.040458000236,
+                1091.2266249997629,
+                1117.3489170014363,
+                1129.9155409997184,
+                1080.0841669988586,
+                1122.5027079999563,
+                1088.0260840003757,
+                1080.5658750014118,
+                1081.0554589988897
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 1131.2725420011702,
+                "mean": 1100.1038376001816,
+                "min": 1079.040458000236,
+                "p50": 1089.6263545000693,
+                "p95": 1130.6618915505169
+              }
+            },
+            "move_click_sequence": {
+              "action_count": 8,
+              "actions": [
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                }
+              ],
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                1264.7080419999952,
+                1239.282634999995,
+                1287.6707419999889,
+                1265.3745629999662,
+                1230.223538999951,
+                1272.2660590000032,
+                1226.5285819999576,
+                1243.7871180000002,
+                1289.3540239999766,
+                1305.8718379999732
+              ],
+              "daemon_summary_ms": {
+                "max": 1305.8718379999732,
+                "mean": 1262.5067141999807,
+                "min": 1226.5285819999576,
+                "p50": 1265.0413024999807,
+                "p95": 1298.4388216999746
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                613.6398739992615,
+                615.8784900004548,
+                624.8555920010972,
+                690.3332699999396,
+                621.3468779986329,
+                639.4751079994876,
+                613.4037930000318,
+                623.610715999348,
+                643.9280179986326,
+                698.3744949992001
+              ],
+              "overhead_summary_ms": {
+                "max": 698.3744949992001,
+                "mean": 638.4846233996086,
+                "min": 613.4037930000318,
+                "p50": 624.2331540002226,
+                "p95": 694.7559437495329
+              },
+              "samples_ms": [
+                1878.3479159992567,
+                1855.1611250004498,
+                1912.526334001086,
+                1955.7078329999058,
+                1851.5704169985838,
+                1911.7411669994908,
+                1839.9323749999894,
+                1867.3978339993482,
+                1933.2820419986092,
+                2004.2463329991733
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 2004.2463329991733,
+                "mean": 1900.9913375995893,
+                "min": 1839.9323749999894,
+                "p50": 1895.0445414993737,
+                "p95": 1982.404007999503
+              }
+            },
+            "recording_start_stop": {
+              "failures": [],
+              "iterations": 10,
+              "last_result": {
+                "artifact_backed": true,
+                "duration_seconds": 0.662974,
+                "format": "mp4",
+                "fps": 5,
+                "return_code": 0,
+                "size_bytes": 262,
+                "status": "stopped",
+                "stop_method": "stdin_q"
+              },
+              "request": {
+                "format": "mp4",
+                "fps": 5
+              },
+              "start_samples_ms": [
+                358.17374999896856,
+                357.2035830002278,
+                370.5420000005688,
+                369.0394999994169,
+                357.10029199981363,
+                354.51812500105007,
+                363.7738340003125,
+                380.4362080009014,
+                379.2657499998313,
+                358.75633300020127
+              ],
+              "start_summary_ms": {
+                "max": 380.4362080009014,
+                "mean": 364.8809375001292,
+                "min": 354.51812500105007,
+                "p50": 361.2650835002569,
+                "p95": 379.90950190041985
+              },
+              "status": "ok",
+              "stop_samples_ms": [
+                656.1997499993595,
+                662.339582999266,
+                656.0713329999999,
+                657.3704589991394,
+                655.0677909999649,
+                660.960208000688,
+                658.0641670007026,
+                659.9874170005933,
+                658.5167079992971,
+                659.3782499985537
+              ],
+              "stop_summary_ms": {
+                "max": 662.339582999266,
+                "mean": 658.3955665997564,
+                "min": 655.0677909999649,
+                "p50": 658.2904374999998,
+                "p95": 661.7188642499059
+              },
+              "successful_iterations": 10
+            },
+            "screenshot_full": {
+              "failures": [],
+              "iterations": 10,
+              "last_result": {
+                "artifact_backed": false,
+                "cursor_visible": false,
+                "format": "png",
+                "height": 768,
+                "size_bytes": 258398,
+                "storage": "inline",
+                "width": 1024
+              },
+              "request": {
+                "format": "png",
+                "show_cursor": false,
+                "storage": "inline"
+              },
+              "samples_bytes": [
+                258398,
+                258398,
+                258398,
+                258398,
+                258398,
+                258398,
+                258398,
+                258398,
+                258398,
+                258398
+              ],
+              "samples_ms": [
+                1363.4151250007562,
+                1274.2011669997737,
+                1256.7557499987743,
+                1277.5178749998304,
+                1280.9022910005297,
+                1344.2926250008895,
+                1358.7625000000116,
+                1372.8476669984957,
+                1343.2492499996442,
+                1379.373083000246
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_bytes": {
+                "max": 258398.0,
+                "mean": 258398.0,
+                "min": 258398.0,
+                "p50": 258398.0,
+                "p95": 258398.0
+              },
+              "summary_ms": {
+                "max": 1379.373083000246,
+                "mean": 1325.1317332998951,
+                "min": 1256.7557499987743,
+                "p50": 1343.7709375002669,
+                "p95": 1376.4366457994583
+              }
+            },
+            "type_1000_chars": {
+              "action_count": 1,
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                6953.559299999995,
+                6954.743587999985,
+                7003.211291000014,
+                6935.989520000021,
+                7005.706394000015,
+                6904.533989000015,
+                6920.732158000021,
+                6920.232927000029,
+                7027.627286999973,
+                6936.784002000024
+              ],
+              "daemon_summary_ms": {
+                "max": 7027.627286999973,
+                "mean": 6956.312045600009,
+                "min": 6904.533989000015,
+                "p50": 6945.17165100001,
+                "p95": 7017.762885149992
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                688.7065329993329,
+                660.6445370011334,
+                665.5214590003307,
+                669.2379390001406,
+                661.7348969996892,
+                621.7438860002176,
+                639.1216340013561,
+                707.289239001625,
+                754.640172000677,
+                744.4462480002021
+              ],
+              "overhead_summary_ms": {
+                "max": 754.640172000677,
+                "mean": 681.3086544004705,
+                "min": 621.7438860002176,
+                "p50": 667.3796990002356,
+                "p95": 750.0529062004633
+              },
+              "request": {
+                "character_count": 1000,
+                "method": "xdotool",
+                "timeout_ms": 30000
+              },
+              "samples_ms": [
+                7642.265832999328,
+                7615.388125001118,
+                7668.732750000345,
+                7605.227459000162,
+                7667.4412909997045,
+                7526.277875000233,
+                7559.853792001377,
+                7627.522166001654,
+                7782.26745900065,
+                7681.230250000226
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 7782.26745900065,
+                "mean": 7637.62070000048,
+                "min": 7526.277875000233,
+                "p50": 7634.893999500491,
+                "p95": 7736.800714950459
+              }
+            },
+            "type_100_chars": {
+              "action_count": 1,
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                995.0509050000278,
+                976.0634699999855,
+                977.5025480000181,
+                990.5378790000441,
+                976.1428780000188,
+                964.5185070000366,
+                990.7434050000461,
+                997.0368790000066,
+                972.3814309999739,
+                986.8771370000218
+              ],
+              "daemon_summary_ms": {
+                "max": 997.0368790000066,
+                "mean": 982.685503900018,
+                "min": 964.5185070000366,
+                "p50": 982.18984250002,
+                "p95": 996.1431907000162
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                645.911929000647,
+                658.3603209998046,
+                624.3479100006084,
+                619.7310790001893,
+                625.2017469998918,
+                673.6234089988216,
+                628.0478870012871,
+                636.7987880003056,
+                646.6961940005262,
+                658.2156550013565
+              ],
+              "overhead_summary_ms": {
+                "max": 673.6234089988216,
+                "mean": 641.6934919003438,
+                "min": 619.7310790001893,
+                "p50": 641.3553585004763,
+                "p95": 666.7550193992638
+              },
+              "request": {
+                "character_count": 100,
+                "method": "xdotool"
+              },
+              "samples_ms": [
+                1640.9628340006748,
+                1634.42379099979,
+                1601.8504580006265,
+                1610.2689580002334,
+                1601.3446249999106,
+                1638.1419159988582,
+                1618.7912920013332,
+                1633.8356670003122,
+                1619.0776250005001,
+                1645.0927920013783
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 1645.0927920013783,
+                "mean": 1624.3789958003617,
+                "min": 1601.3446249999106,
+                "p50": 1626.4566460004062,
+                "p95": 1643.2343109010617
+              }
+            },
+            "warm_attach_to_health": {
+              "reason": "warm attach requires Modal orchestration metadata",
+              "status": "not_measured"
+            }
+          },
+          "cost_estimate": {
+            "components": [],
+            "confidence": "partial",
+            "currency": "USD",
+            "duration_policy": "measured_wall_time_including_warmup",
+            "inputs": {
+              "cpu_count": null,
+              "duration_seconds": 8.972637165999913,
+              "memory_gib": null,
+              "storage_gib": null
+            },
+            "notes": [
+              "cpu allocation was unavailable",
+              "memory allocation was unavailable"
+            ],
+            "pricing": {
+              "retrieved_date": "2026-05-12",
+              "source_url": "https://modal.com/products/sandboxes"
+            },
+            "status": "partial",
+            "total": null
+          },
+          "failures": [],
+          "metadata": {
+            "base_url": "https://ta-01krz80ec3fxwsh8a3szq7ex36-8080-6yec68j33y4vg2mpqk7xy1yz8.w.modal.host",
+            "browser": {
+              "configured_browser": null,
+              "gpu_mode": "auto",
+              "launch_args": [],
+              "open_url_on_start": null,
+              "prewarm": false,
+              "prewarm_result": null,
+              "profile_dir": "/home/desktop/.cache/modal-computer-use/browser-profile",
+              "windows": 4
+            },
+            "canonical_name": "modal-daemon-attested-tunnel",
+            "environment": {
+              "modal_app_name": "modal-computer-use",
+              "modal_cold_create_to_ready_ms": 8972.637165999913,
+              "modal_ingress": "attested-tunnel",
+              "modal_ingress_ab_role": "attested-minted-token",
+              "modal_run_id": "run_4e117fe081674968",
+              "modal_sandbox_id": "sb-facQYNnjphEq7YCvvXfSj4"
+            },
+            "ingress": {
+              "auth": "Modal Connect Token attestation plus short-lived daemon bearer token",
+              "canonical_name": "modal-daemon-attested-tunnel",
+              "description": "Modal Connect-authenticated token exchange followed by encrypted tunnel ingress",
+              "kind": "modal-attested-encrypted-tunnel"
+            },
+            "transport": "daemon-http"
+          },
+          "status": "ok",
+          "surface": "daemon-http",
+          "verification": {
+            "cursor_position": {
+              "expected": {
+                "x": 16,
+                "y": 128
+              },
+              "observed": {
+                "x": 16,
+                "y": 128
+              },
+              "status": "ok"
+            },
+            "type_text": {
+              "expected": {
+                "minimum_keypress_count": 23
+              },
+              "method": "daemon_action_type",
+              "observed": {
+                "keypress_count": 23
+              },
+              "status": "ok"
+            }
+          }
+        }
+      },
+      "warmup_iterations": 1
+    },
+    "raw_static_token": {
+      "base_url": "https://ta-01krz80ec3fxwsh8a3szq7ex36-8080-6yec68j33y4vg2mpqk7xy1yz8.w.modal.host",
+      "benchmark": "sdk-surfaces",
+      "failures": [],
+      "generated_at": "2026-05-19T04:34:57.972507+00:00",
+      "iterations": 10,
+      "metadata": {
+        "environment": {
+          "modal_app_name": "modal-computer-use",
+          "modal_cold_create_to_ready_ms": 8972.637165999913,
+          "modal_ingress": "tunnel",
+          "modal_ingress_ab_role": "raw-static-token",
+          "modal_run_id": "run_4e117fe081674968",
+          "modal_sandbox_id": "sb-facQYNnjphEq7YCvvXfSj4"
+        },
+        "surfaces": [
+          "daemon-http"
+        ]
+      },
+      "mode": "http",
+      "ok": true,
+      "package_version": "1.0.0",
+      "surfaces": {
+        "daemon-http": {
+          "cases": {
+            "action_batch": {
+              "action_count": 5,
+              "actions": [
+                {
+                  "type": "move"
+                },
+                {
+                  "type": "cursor_position"
+                },
+                {
+                  "type": "wait"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "type": "cursor_position"
+                }
+              ],
+              "cases": {
+                "batch_5_actions": {
+                  "attribution": {
+                    "reason": null,
+                    "status": "measured"
+                  },
+                  "daemon_samples_ms": [
+                    509.6053559999998,
+                    1240.434552,
+                    573.1532910000005,
+                    484.5531560000005,
+                    472.8384119999998,
+                    497.0328189999993,
+                    454.34030899999914,
+                    516.6083840000013,
+                    472.8836510000001,
+                    471.7854029999984
+                  ],
+                  "daemon_summary_ms": {
+                    "max": 1240.434552,
+                    "mean": 569.3235332999999,
+                    "min": 454.34030899999914,
+                    "p50": 490.79298749999987,
+                    "p95": 940.1579845499996
+                  },
+                  "failures": [],
+                  "iterations": 10,
+                  "overhead_samples_ms": [
+                    537.9817269995985,
+                    783.4490310004974,
+                    777.9038340008065,
+                    726.111094000263,
+                    601.4434630004519,
+                    680.5385150011869,
+                    610.0764829999754,
+                    658.7347830003907,
+                    741.3229739998606,
+                    633.6443059995105
+                  ],
+                  "overhead_summary_ms": {
+                    "max": 783.4490310004974,
+                    "mean": 675.1206210002541,
+                    "min": 537.9817269995985,
+                    "p50": 669.6366490007888,
+                    "p95": 780.9536923506364
+                  },
+                  "samples_ms": [
+                    1047.5870829995984,
+                    2023.8835830004973,
+                    1351.057125000807,
+                    1210.6642500002636,
+                    1074.2818750004517,
+                    1177.5713340011862,
+                    1064.4167919999745,
+                    1175.343167000392,
+                    1214.2066249998607,
+                    1105.4297089995089
+                  ],
+                  "status": "ok",
+                  "successful_iterations": 10,
+                  "summary_ms": {
+                    "max": 2023.8835830004973,
+                    "mean": 1244.444154300254,
+                    "min": 1047.5870829995984,
+                    "p50": 1176.457250500789,
+                    "p95": 1721.1116769006362
+                  }
+                },
+                "sandbox_exec": {
+                  "reason": "Sandbox.exec comparison is unsupported in this benchmark pass",
+                  "status": "not_measured"
+                },
+                "separate_5_actions": {
+                  "attribution": {
+                    "reason": null,
+                    "status": "measured"
+                  },
+                  "daemon_samples_ms": [
+                    1510.5706140000023,
+                    1505.7296139999962,
+                    1498.816172000005,
+                    1489.88223100001,
+                    1465.6284860000071,
+                    1477.5685249999951,
+                    1504.7748249999984,
+                    1573.3986569999984,
+                    1544.5919570000015,
+                    1566.9021489999723
+                  ],
+                  "daemon_summary_ms": {
+                    "max": 1573.3986569999984,
+                    "mean": 1513.7863229999987,
+                    "min": 1465.6284860000071,
+                    "p50": 1505.2522194999974,
+                    "p95": 1570.4752283999865
+                  },
+                  "failures": [],
+                  "iterations": 10,
+                  "overhead_samples_ms": [
+                    3090.878220000619,
+                    3081.5990109989216,
+                    3006.6144109999013,
+                    3246.8971860004244,
+                    3200.1398889999637,
+                    3212.0548919998982,
+                    3096.960884000424,
+                    3266.063550999533,
+                    3305.440376999478,
+                    3199.525475999806
+                  ],
+                  "overhead_summary_ms": {
+                    "max": 3305.440376999478,
+                    "mean": 3170.6173896998966,
+                    "min": 3006.6144109999013,
+                    "p50": 3199.832682499885,
+                    "p95": 3287.720805299503
+                  },
+                  "samples_ms": [
+                    4601.448834000621,
+                    4587.328624998918,
+                    4505.430582999907,
+                    4736.7794170004345,
+                    4665.768374999971,
+                    4689.623416999893,
+                    4601.7357090004225,
+                    4839.4622079995315,
+                    4850.032333999479,
+                    4766.427624999778
+                  ],
+                  "status": "ok",
+                  "successful_iterations": 10,
+                  "summary_ms": {
+                    "max": 4850.032333999479,
+                    "mean": 4684.403712699896,
+                    "min": 4505.430582999907,
+                    "p50": 4677.695895999932,
+                    "p95": 4845.275777299503
+                  }
+                }
+              },
+              "comparison": {
+                "batch_faster": true,
+                "batch_vs_separate_speedup": 3.7642538610613,
+                "mean_delta_ms": 3439.9595583996415,
+                "status": "measured"
+              },
+              "failures": [],
+              "status": "ok"
+            },
+            "browser_render_metrics": {
+              "reason": "browser render metrics require configured chromium",
+              "status": "not_measured"
+            },
+            "cold_create_to_ready": {
+              "failures": [],
+              "iterations": 1,
+              "samples_ms": [
+                8972.637165999913
+              ],
+              "source": "live_orchestration_metadata",
+              "status": "ok",
+              "successful_iterations": 1,
+              "summary_ms": {
+                "max": 8972.637165999913,
+                "mean": 8972.637165999913,
+                "min": 8972.637165999913,
+                "p50": 8972.637165999913,
+                "p95": 8972.637165999913
+              }
+            },
+            "command_echo": {
+              "command": {
+                "argv": [
+                  "sh",
+                  "-lc",
+                  "printf 42"
+                ],
+                "timeout_seconds": 30
+              },
+              "failures": [],
+              "iterations": 10,
+              "last_result": {
+                "exit_code": 0
+              },
+              "samples_ms": [
+                669.3075830007729,
+                701.8044999986159,
+                719.5340830003261,
+                668.4833340004843,
+                673.3212500002992,
+                655.845582999973,
+                686.6937080012576,
+                694.387249999636,
+                725.0947089996771,
+                678.5124580001138
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 725.0947089996771,
+                "mean": 687.2984458001156,
+                "min": 655.845582999973,
+                "p50": 682.6030830006857,
+                "p95": 722.5924272999691
+              }
+            },
+            "move_click": {
+              "action_count": 2,
+              "actions": [
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                }
+              ],
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                498.1422500000008,
+                524.9522240000033,
+                500.754079999993,
+                510.94585100000245,
+                502.0824119999929,
+                490.75313900000594,
+                485.2141829999965,
+                486.6119160000011,
+                494.3083990000048,
+                503.05433500000163
+              ],
+              "daemon_summary_ms": {
+                "max": 524.9522240000033,
+                "mean": 499.68187890000024,
+                "min": 485.2141829999965,
+                "p50": 499.4481649999969,
+                "p95": 518.6493561500029
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                588.4882080013085,
+                609.0104010010009,
+                606.9250029993185,
+                609.9005240008353,
+                707.6469630011957,
+                619.4523190005583,
+                580.6416090014608,
+                577.6494590005683,
+                590.8056419995376,
+                595.6107900004781
+              ],
+              "overhead_summary_ms": {
+                "max": 707.6469630011957,
+                "mean": 608.6130918006262,
+                "min": 577.6494590005683,
+                "p50": 601.2678964998984,
+                "p95": 667.9593732009088
+              },
+              "samples_ms": [
+                1086.6304580013093,
+                1133.9626250010042,
+                1107.6790829993115,
+                1120.8463750008377,
+                1209.7293750011886,
+                1110.2054580005642,
+                1065.8557920014573,
+                1064.2613750005694,
+                1085.1140409995423,
+                1098.6651250004797
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 1209.7293750011886,
+                "mean": 1108.2949707006264,
+                "min": 1064.2613750005694,
+                "p50": 1103.1721039998956,
+                "p95": 1175.6343375011056
+              }
+            },
+            "move_click_sequence": {
+              "action_count": 8,
+              "actions": [
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                },
+                {
+                  "type": "move"
+                },
+                {
+                  "button": "left",
+                  "type": "click"
+                }
+              ],
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                1239.8513730000077,
+                1254.6305360000076,
+                1265.9546980000016,
+                1269.7190769999906,
+                1282.8222209999894,
+                1246.9376440000133,
+                1247.184696000005,
+                1279.8730060000025,
+                1256.8650960000127,
+                1384.0607399999953
+              ],
+              "daemon_summary_ms": {
+                "max": 1384.0607399999953,
+                "mean": 1272.7899087000026,
+                "min": 1239.8513730000077,
+                "p50": 1261.4098970000073,
+                "p95": 1338.5034064499926
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                613.0853769995638,
+                616.1113800000351,
+                614.2022179986668,
+                608.2942560001356,
+                627.6381959988412,
+                603.3524810012523,
+                655.0473459990087,
+                613.0478279995941,
+                633.5062790005281,
+                703.2801349994315
+              ],
+              "overhead_summary_ms": {
+                "max": 703.2801349994315,
+                "mean": 628.7565495997057,
+                "min": 603.3524810012523,
+                "p50": 615.1567989993509,
+                "p95": 681.5753799492412
+              },
+              "samples_ms": [
+                1852.9367499995715,
+                1870.7419160000427,
+                1880.1569159986684,
+                1878.0133330001263,
+                1910.4604169988306,
+                1850.2901250012656,
+                1902.2320419990137,
+                1892.9208339995967,
+                1890.3713750005409,
+                2087.340874999427
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 2087.340874999427,
+                "mean": 1901.5464582997083,
+                "min": 1850.2901250012656,
+                "p50": 1885.2641454996046,
+                "p95": 2007.7446688991583
+              }
+            },
+            "recording_start_stop": {
+              "failures": [],
+              "iterations": 10,
+              "last_result": {
+                "artifact_backed": true,
+                "duration_seconds": 0.656058,
+                "format": "mp4",
+                "fps": 5,
+                "return_code": 0,
+                "size_bytes": 262,
+                "status": "stopped",
+                "stop_method": "stdin_q"
+              },
+              "request": {
+                "format": "mp4",
+                "fps": 5
+              },
+              "start_samples_ms": [
+                376.698458001556,
+                367.43291699895053,
+                370.8399580009427,
+                372.3078750008426,
+                359.43200000110664,
+                352.02154199942015,
+                353.9050830004271,
+                365.74841600122454,
+                379.3124580006406,
+                356.80424999918614
+              ],
+              "start_summary_ms": {
+                "max": 379.3124580006406,
+                "mean": 365.4502957004297,
+                "min": 352.02154199942015,
+                "p50": 366.59066650008754,
+                "p95": 378.13615800105254
+              },
+              "status": "ok",
+              "stop_samples_ms": [
+                658.528624999235,
+                651.9824580009299,
+                655.9743329999037,
+                652.9307500004506,
+                745.2355410005111,
+                653.6391249992448,
+                690.6693750006525,
+                653.7751249998109,
+                752.5299579992861,
+                654.6376249989407
+              ],
+              "stop_summary_ms": {
+                "max": 752.5299579992861,
+                "mean": 676.9902914998966,
+                "min": 651.9824580009299,
+                "p50": 655.3059789994222,
+                "p95": 749.2474703498374
+              },
+              "successful_iterations": 10
+            },
+            "screenshot_full": {
+              "failures": [],
+              "iterations": 10,
+              "last_result": {
+                "artifact_backed": false,
+                "cursor_visible": false,
+                "format": "png",
+                "height": 768,
+                "size_bytes": 258387,
+                "storage": "inline",
+                "width": 1024
+              },
+              "request": {
+                "format": "png",
+                "show_cursor": false,
+                "storage": "inline"
+              },
+              "samples_bytes": [
+                258387,
+                258387,
+                258387,
+                258387,
+                258387,
+                258387,
+                258387,
+                258387,
+                258387,
+                258387
+              ],
+              "samples_ms": [
+                1274.9382090005383,
+                1322.277875000509,
+                1295.776291999573,
+                1250.8237080000981,
+                1278.1578750000335,
+                1303.750917000798,
+                1350.0886250003532,
+                1347.6715409997269,
+                1286.629083999287,
+                1302.0750000014232
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_bytes": {
+                "max": 258387.0,
+                "mean": 258387.0,
+                "min": 258387.0,
+                "p50": 258387.0,
+                "p95": 258387.0
+              },
+              "summary_ms": {
+                "max": 1350.0886250003532,
+                "mean": 1301.218912600234,
+                "min": 1250.8237080000981,
+                "p50": 1298.925646000498,
+                "p95": 1349.0009372000713
+              }
+            },
+            "type_1000_chars": {
+              "action_count": 1,
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                6932.468698999997,
+                7073.064560000006,
+                6877.296260999998,
+                6896.109822000028,
+                6896.484249000025,
+                6915.941903000004,
+                6916.291148999989,
+                6903.883993000022,
+                7018.812378000007,
+                6926.83646399999
+              ],
+              "daemon_summary_ms": {
+                "max": 7073.064560000006,
+                "mean": 6935.7189478000055,
+                "min": 6877.296260999998,
+                "p50": 6916.116525999996,
+                "p95": 7048.651078100007
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                607.7668009987465,
+                631.0961070008998,
+                626.1390730015537,
+                618.1532200013753,
+                588.5654590005634,
+                644.0605560003123,
+                626.0908920014854,
+                601.0347570007752,
+                617.1504969996704,
+                625.7068269999027
+              ],
+              "overhead_summary_ms": {
+                "max": 644.0605560003123,
+                "mean": 618.5764189005284,
+                "min": 588.5654590005634,
+                "p50": 621.930023500639,
+                "p95": 638.2265539505767
+              },
+              "request": {
+                "character_count": 1000,
+                "method": "xdotool",
+                "timeout_ms": 30000
+              },
+              "samples_ms": [
+                7540.235499998744,
+                7704.160667000906,
+                7503.435334001551,
+                7514.263042001403,
+                7485.049708000588,
+                7560.002459000316,
+                7542.382041001474,
+                7504.918750000797,
+                7635.962874999677,
+                7552.543290999893
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 7704.160667000906,
+                "mean": 7554.295366700535,
+                "min": 7485.049708000588,
+                "p50": 7541.308770500109,
+                "p95": 7673.471660600353
+              }
+            },
+            "type_100_chars": {
+              "action_count": 1,
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                1021.3489120000077,
+                1022.6033269999988,
+                1090.0781010000032,
+                1006.1341490000046,
+                1036.5120280000042,
+                1002.578337999978,
+                999.3128840000054,
+                970.417464999997,
+                1000.3452780000259,
+                1013.8050420000013
+              ],
+              "daemon_summary_ms": {
+                "max": 1090.0781010000032,
+                "mean": 1016.3135524000027,
+                "min": 970.417464999997,
+                "p50": 1009.9695955000029,
+                "p95": 1065.9733681500036
+              },
+              "failures": [],
+              "iterations": 10,
+              "overhead_samples_ms": [
+                703.2775880012423,
+                678.6800059990838,
+                634.5265240002077,
+                654.0886010006801,
+                615.6125969994832,
+                642.2406200005639,
+                638.0748659991013,
+                612.3458680009151,
+                625.7360139990453,
+                649.1594160007139
+              ],
+              "overhead_summary_ms": {
+                "max": 703.2775880012423,
+                "mean": 645.3742100001036,
+                "min": 612.3458680009151,
+                "p50": 640.1577429998326,
+                "p95": 692.208676100271
+              },
+              "request": {
+                "character_count": 100,
+                "method": "xdotool"
+              },
+              "samples_ms": [
+                1724.62650000125,
+                1701.2833329990826,
+                1724.604625000211,
+                1660.2227500006848,
+                1652.1246249994874,
+                1644.818958000542,
+                1637.3877499991067,
+                1582.763333000912,
+                1626.0812919990713,
+                1662.9644580007152
+              ],
+              "status": "ok",
+              "successful_iterations": 10,
+              "summary_ms": {
+                "max": 1724.62650000125,
+                "mean": 1661.6877624001063,
+                "min": 1582.763333000912,
+                "p50": 1656.173687500086,
+                "p95": 1724.6166562507824
+              }
+            },
+            "warm_attach_to_health": {
+              "reason": "warm attach requires Modal orchestration metadata",
+              "status": "not_measured"
+            }
+          },
+          "cost_estimate": {
+            "components": [],
+            "confidence": "partial",
+            "currency": "USD",
+            "duration_policy": "measured_wall_time_including_warmup",
+            "inputs": {
+              "cpu_count": null,
+              "duration_seconds": 8.972637165999913,
+              "memory_gib": null,
+              "storage_gib": null
+            },
+            "notes": [
+              "cpu allocation was unavailable",
+              "memory allocation was unavailable"
+            ],
+            "pricing": {
+              "retrieved_date": "2026-05-12",
+              "source_url": "https://modal.com/products/sandboxes"
+            },
+            "status": "partial",
+            "total": null
+          },
+          "failures": [],
+          "metadata": {
+            "base_url": "https://ta-01krz80ec3fxwsh8a3szq7ex36-8080-6yec68j33y4vg2mpqk7xy1yz8.w.modal.host",
+            "browser": {
+              "configured_browser": null,
+              "gpu_mode": "auto",
+              "launch_args": [],
+              "open_url_on_start": null,
+              "prewarm": false,
+              "prewarm_result": null,
+              "profile_dir": "/home/desktop/.cache/modal-computer-use/browser-profile",
+              "windows": 3
+            },
+            "canonical_name": "modal-daemon-tunnel",
+            "environment": {
+              "modal_app_name": "modal-computer-use",
+              "modal_cold_create_to_ready_ms": 8972.637165999913,
+              "modal_ingress": "tunnel",
+              "modal_ingress_ab_role": "raw-static-token",
+              "modal_run_id": "run_4e117fe081674968",
+              "modal_sandbox_id": "sb-facQYNnjphEq7YCvvXfSj4"
+            },
+            "ingress": {
+              "auth": "static daemon bearer token",
+              "canonical_name": "modal-daemon-tunnel",
+              "description": "Modal encrypted tunnel ingress to the daemon",
+              "kind": "modal-encrypted-tunnel"
+            },
+            "transport": "daemon-http"
+          },
+          "status": "ok",
+          "surface": "daemon-http",
+          "verification": {
+            "cursor_position": {
+              "expected": {
+                "x": 16,
+                "y": 128
+              },
+              "observed": {
+                "x": 16,
+                "y": 128
+              },
+              "status": "ok"
+            },
+            "type_text": {
+              "expected": {
+                "minimum_keypress_count": 23
+              },
+              "method": "daemon_action_type",
+              "observed": {
+                "keypress_count": 23
+              },
+              "status": "ok"
+            }
+          }
+        }
+      },
+      "warmup_iterations": 1
+    }
+  }
+}

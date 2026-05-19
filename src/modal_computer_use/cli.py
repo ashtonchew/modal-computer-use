@@ -20,9 +20,9 @@ from .benchmarks.surfaces import (
     run_sdk_surface_benchmark_mock_local,
 )
 from .client import DaemonClient
-from .config import BrowserConfig, ComputerConfig
+from .config import BrowserConfig, ComputerConfig, ModalIngress
 from .errors import ModalNotInstalledError, SandboxUnavailableError
-from .sandbox import ComputerSandbox, modal_sandbox_exec_runner_from_id
+from .sandbox import ComputerSandbox, _connect_token_parts, modal_sandbox_exec_runner_from_id
 from .state import new_run_id
 from .tracing import ComputerTrace
 
@@ -168,6 +168,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     sdk_parser.add_argument("--json", action="store_true", default=True)
 
+    ingress_ab_parser = benchmark_subparsers.add_parser("modal-ingress-ab")
+    ingress_ab_parser.add_argument("--app-name", default="modal-computer-use")
+    ingress_ab_parser.add_argument("--name")
+    ingress_ab_parser.add_argument("--modal-region")
+    ingress_ab_parser.add_argument("--resource-profile")
+    ingress_ab_parser.add_argument("--browser")
+    ingress_ab_parser.add_argument("--gpu")
+    ingress_ab_parser.add_argument("--modal-cpu", type=float)
+    ingress_ab_parser.add_argument("--modal-memory-mib", type=int)
+    ingress_ab_parser.add_argument("--image-profile", dest="image_profile")
+    ingress_ab_parser.add_argument("--image-variant", dest="image_profile")
+    ingress_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
+    ingress_ab_parser.add_argument("--output", type=Path)
+    ingress_ab_parser.add_argument("--json", action="store_true", default=True)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -216,6 +231,9 @@ def main(argv: list[str] | None = None) -> int:
         return _benchmark_action_batch(args)
     if args.benchmark_command == "sdk":
         return _benchmark_sdk(args)
+    if args.benchmark_command == "modal-ingress-ab":
+        _validate_modal_create_args(args, parser=ingress_ab_parser)
+        return _benchmark_modal_ingress_ab(args)
     return _benchmark_report(args)
 
 
@@ -409,9 +427,188 @@ def _benchmark_sdk_created_modal_sandbox(
         computer.detach()
 
 
-def _modal_benchmark_config(args: argparse.Namespace, *, run_id: str) -> ComputerConfig:
+def _benchmark_modal_ingress_ab(args: argparse.Namespace) -> int:
+    import time
+
+    run_id = new_run_id()
+    config = _modal_benchmark_config(args, run_id=run_id, ingress="tunnel")
+    app_tags = {"benchmark": "modal-ingress-ab", "benchmark_run_id": run_id}
+    tags = {"benchmark": "modal-ingress-ab", "benchmark_run_id": run_id, "surface": "daemon-http"}
+    started = time.perf_counter()
+    computer = ComputerSandbox.create(
+        config=config,
+        app_name=args.app_name,
+        name=args.name,
+        app_tags=app_tags,
+        tags=tags,
+        wait=True,
+    )
+    cold_create_to_ready_ms = (time.perf_counter() - started) * 1000
+    attested_client: DaemonClient | None = None
+    try:
+        base_metadata = {
+            **_benchmark_environment_metadata(args),
+            "modal_cold_create_to_ready_ms": cold_create_to_ready_ms,
+            "modal_run_id": run_id,
+            "modal_app_name": args.app_name,
+            "modal_sandbox_id": computer.metadata().sandbox_id if computer.metadata() else None,
+            "modal_cpu_count": args.modal_cpu,
+            "modal_memory_gib": (
+                args.modal_memory_mib / 1024 if args.modal_memory_mib is not None else None
+            ),
+        }
+        raw_result = run_sdk_surface_benchmark(
+            surfaces=["daemon-http"],
+            client=computer.client,
+            mode="http",
+            iterations=args.iterations,
+            base_url=computer.client.base_url,
+            environment_metadata={
+                **base_metadata,
+                "modal_ingress": "tunnel",
+                "modal_ingress_ab_role": "raw-static-token",
+            },
+        )
+        attested_token = _mint_tunnel_token_for_sandbox(computer)
+        attested_client = DaemonClient(base_url=computer.client.base_url, token=attested_token)
+        attested_result = run_sdk_surface_benchmark(
+            surfaces=["daemon-http"],
+            client=attested_client,
+            mode="http",
+            iterations=args.iterations,
+            base_url=computer.client.base_url,
+            environment_metadata={
+                **base_metadata,
+                "modal_ingress": "attested-tunnel",
+                "modal_ingress_ab_role": "attested-minted-token",
+            },
+        )
+        result = {
+            "ok": raw_result["ok"] and attested_result["ok"],
+            "benchmark": "modal-ingress-ab",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "iterations": args.iterations,
+            "metadata": {
+                "environment": {
+                    key: value for key, value in base_metadata.items() if value is not None
+                },
+                "base_url": computer.client.base_url,
+                "comparison": "same sandbox, same encrypted tunnel URL, different bearer tokens",
+            },
+            "runs": {
+                "raw_static_token": raw_result,
+                "attested_minted_token": attested_result,
+            },
+            "comparison": _modal_ingress_ab_comparison(raw_result, attested_result),
+            "failures": [
+                *raw_result.get("failures", []),
+                *attested_result.get("failures", []),
+            ],
+        }
+    finally:
+        if attested_client is not None:
+            attested_client.close()
+        computer.terminate()
+        computer.detach()
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result["ok"] else 1
+
+
+def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:
+    sandbox = computer._sandbox
+    if sandbox is None:
+        raise SandboxUnavailableError("modal ingress A/B benchmark requires a Modal sandbox")
+    token_info = sandbox.create_connect_token(
+        user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-ingress-ab"}
+    )
+    connect_base_url, connect_token = _connect_token_parts(token_info)
+    connect_client = DaemonClient(base_url=connect_base_url, token=connect_token)
+    try:
+        payload = connect_client.post_json("/v1/session/tunnel-authorize")
+    finally:
+        connect_client.close()
+    token = payload.get("token") if isinstance(payload, dict) else None
+    if not isinstance(token, str) or not token:
+        raise SandboxUnavailableError("daemon did not return an attested tunnel token")
+    return token
+
+
+def _modal_ingress_ab_comparison(
+    raw_result: dict[str, Any],
+    attested_result: dict[str, Any],
+) -> dict[str, Any]:
+    cases = [
+        ("batch_5_actions", ("action_batch", "cases", "batch_5_actions")),
+        ("separate_5_actions", ("action_batch", "cases", "separate_5_actions")),
+        ("move_click", ("move_click",)),
+        ("move_click_sequence", ("move_click_sequence",)),
+        ("screenshot_full", ("screenshot_full",)),
+        ("command_echo", ("command_echo",)),
+        ("type_100_chars", ("type_100_chars",)),
+        ("type_1000_chars", ("type_1000_chars",)),
+    ]
+    rows: dict[str, Any] = {}
+    for name, path in cases:
+        raw_case = _daemon_case(raw_result, path)
+        attested_case = _daemon_case(attested_result, path)
+        raw_mean = _case_mean(raw_case)
+        attested_mean = _case_mean(attested_case)
+        delta_ms = None if raw_mean is None or attested_mean is None else attested_mean - raw_mean
+        delta_percent = (
+            None
+            if delta_ms is None or raw_mean is None or raw_mean == 0
+            else (delta_ms / raw_mean) * 100
+        )
+        rows[name] = {
+            "raw_static_token_mean_ms": raw_mean,
+            "attested_minted_token_mean_ms": attested_mean,
+            "delta_ms": delta_ms,
+            "delta_percent": delta_percent,
+            "raw_daemon_mean_ms": _case_daemon_mean(raw_case),
+            "attested_daemon_mean_ms": _case_daemon_mean(attested_case),
+            "raw_overhead_mean_ms": _case_overhead_mean(raw_case),
+            "attested_overhead_mean_ms": _case_overhead_mean(attested_case),
+        }
+    return rows
+
+
+def _daemon_case(result: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
+    value: Any = result.get("surfaces", {}).get("daemon-http", {}).get("cases", {})
+    for key in path:
+        value = value.get(key, {}) if isinstance(value, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _case_mean(case: dict[str, Any]) -> float | None:
+    summary = case.get("summary_ms")
+    value = summary.get("mean") if isinstance(summary, dict) else None
+    return float(value) if isinstance(value, int | float) else None
+
+
+def _case_daemon_mean(case: dict[str, Any]) -> float | None:
+    summary = case.get("daemon_summary_ms")
+    value = summary.get("mean") if isinstance(summary, dict) else None
+    return float(value) if isinstance(value, int | float) else None
+
+
+def _case_overhead_mean(case: dict[str, Any]) -> float | None:
+    summary = case.get("overhead_summary_ms")
+    value = summary.get("mean") if isinstance(summary, dict) else None
+    return float(value) if isinstance(value, int | float) else None
+
+
+def _modal_benchmark_config(
+    args: argparse.Namespace,
+    *,
+    run_id: str,
+    ingress: ModalIngress | None = None,
+) -> ComputerConfig:
     config = ComputerConfig(run_id=run_id)
-    config.ingress = args.modal_ingress
+    config.ingress = ingress or args.modal_ingress
     config.runtime.modal_region = args.modal_region
     config.resources.profile = _modal_benchmark_resource_profile(args)
     config.resources.gpu = args.gpu

@@ -379,6 +379,32 @@ encrypted tunnel after the daemon issues a short-lived bearer token. Use raw `tu
 benchmark harnesses; use `connect` when every daemon request must carry Modal verified-user
 metadata.
 
+To isolate token/auth overhead from fresh-sandbox variance, run the same-sandbox A/B benchmark:
+
+```bash
+uv run computer-use benchmark modal-ingress-ab --iterations 10 \
+  --output benchmark-sdk-modal-ingress-ab-1024x768-2026-05-18.json
+```
+
+That command creates one raw-tunnel sandbox, runs the daemon surface with the static tunnel token,
+mints a short-lived token through Modal Connect, and reruns the same daemon surface against the
+same encrypted tunnel URL. The 2026-05-18 run exited with `ok=true`:
+
+| Case | Raw static token ms | Attested minted token ms | Delta ms | Delta % |
+| --- | ---: | ---: | ---: | ---: |
+| `batch_5_actions` | 1244.44 | 1098.91 | -145.53 | -11.69 |
+| `separate_5_actions` | 4684.40 | 4871.46 | 187.06 | 3.99 |
+| `move_click` | 1108.29 | 1100.10 | -8.19 | -0.74 |
+| `move_click_sequence` | 1901.55 | 1900.99 | -0.56 | -0.03 |
+| `screenshot_full` | 1301.22 | 1325.13 | 23.91 | 1.84 |
+| `command_echo` | 687.30 | 724.72 | 37.42 | 5.45 |
+| `type_100_chars` | 1661.69 | 1624.38 | -37.31 | -2.25 |
+| `type_1000_chars` | 7554.30 | 7637.62 | 83.33 | 1.10 |
+
+The same-sandbox A/B result shows no meaningful attested-token penalty on hot tunnel requests.
+The larger gaps in the three-fresh-sandbox table above should be treated as Modal placement/run
+variance plus per-request tunnel and payload costs, not as Connect-token exchange overhead.
+
 ## Screenshot storage modes
 
 `screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
