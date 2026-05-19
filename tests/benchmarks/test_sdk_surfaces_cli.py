@@ -56,6 +56,17 @@ def test_daemon_ingress_metadata_identifies_modal_tunnel() -> None:
     assert ingress["kind"] == "modal-encrypted-tunnel"
 
 
+def test_daemon_ingress_metadata_prefers_explicit_modal_ingress() -> None:
+    ingress = benchmark_daemon_surface._daemon_ingress_metadata(
+        mode="http",
+        base_url="https://example.r5.modal.host",
+        environment_metadata={"modal_ingress": "connect"},
+    )
+
+    assert ingress["canonical_name"] == "modal-daemon-connect"
+    assert ingress["kind"] == "modal-connect-token"
+
+
 def test_benchmark_sdk_modal_billing_tag_must_be_key_value(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(
@@ -233,8 +244,8 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
                     "metadata": {
                         "environment": environment,
                         "ingress": {
-                            "canonical_name": "modal-daemon-tunnel",
-                            "kind": "modal-encrypted-tunnel",
+                            "canonical_name": "modal-daemon-attested-tunnel",
+                            "kind": "modal-attested-encrypted-tunnel",
                         },
                     },
                     "status": "ok",
@@ -291,8 +302,8 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert config.browser.gpu_mode is None
     environment = payload["surfaces"]["daemon-http"]["metadata"]["environment"]
     ingress = payload["surfaces"]["daemon-http"]["metadata"]["ingress"]
-    assert ingress["canonical_name"] == "modal-daemon-tunnel"
-    assert ingress["kind"] == "modal-encrypted-tunnel"
+    assert ingress["canonical_name"] == "modal-daemon-attested-tunnel"
+    assert ingress["kind"] == "modal-attested-encrypted-tunnel"
     assert environment["gpu"] == "T4"
     assert environment["modal_ingress"] == "attested-tunnel"
     assert environment["modal_cpu_count"] == 2

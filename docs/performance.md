@@ -154,14 +154,17 @@ uv run computer-use benchmark sdk \
 
 This mode is intentionally explicit because it creates billable Modal resources. It builds a
 `ComputerConfig`, passes `ResourceConfig.gpu` through to `Sandbox.create(gpu=...)`, measures cold
-create-to-ready time, runs the warm daemon cases through the connect token, and terminates the
+create-to-ready time, runs the warm daemon cases through the selected ingress, and terminates the
 sandbox in a `finally` block. The JSON keeps the backward-compatible `daemon-http` surface key, and
 records the canonical ingress label in `metadata.ingress.canonical_name`. A Modal-created sandbox
-defaults to attested tunnel ingress and reports `modal-daemon-tunnel`; `--modal-ingress connect`
-reports `modal-daemon-connect`; mock-local reports `modal-daemon-local`; caller-provided daemon
-URLs report `modal-daemon-http` unless the caller labels them separately. If `--gpu` is set without
+defaults to attested tunnel ingress and reports `modal-daemon-attested-tunnel`;
+`--modal-ingress connect` reports `modal-daemon-connect`; `--modal-ingress tunnel` reports
+`modal-daemon-tunnel`; mock-local reports `modal-daemon-local`; caller-provided daemon URLs report
+`modal-daemon-http` unless the caller labels them separately. If `--gpu` is set without
 `--resource-profile`, the created sandbox uses `browser-gpu`; otherwise `--resource-profile`
-controls the image/resource profile label.
+controls the image/resource profile label. Modal Connect token URLs may also be hosted on
+`*.modal.host`, so live Modal-created benchmark metadata uses the explicit `modal_ingress` field
+instead of inferring Connect-vs-tunnel solely from URL shape.
 Supported GPU strings and counts follow Modal's `gpu` argument, such as `T4`, `L4`, `A10`,
 `L40S`, `A100`, `H100`, or `H100:2`. For GPU-specific benchmarking where Modal's H100-to-H200
 upgrade would pollute attribution, use Modal's strict `H100!` string.
@@ -171,7 +174,7 @@ Modal-created sandboxes support three ingress modes:
 - `attested-tunnel` (default): bootstrap through a Modal Connect Token, mint a short-lived daemon
   bearer token with `/v1/session/tunnel-authorize`, then send hot primitive calls through the
   encrypted Modal tunnel on port `8080`.
-- `connect`: keep every daemon request on `https://connect.modal.run`; use this when Modal
+- `connect`: keep every daemon request on the Modal Connect-token URL; use this when Modal
   verified-user metadata on every request matters more than primitive latency.
 - `tunnel`: expose daemon port `8080` and use a static per-sandbox daemon bearer token. This is the
   lowest-level mode and should be reserved for trusted benchmark harnesses.
@@ -341,8 +344,40 @@ The `daemon-http` key remains for CLI compatibility, but the recorded canonical 
 
 The normalized live run still shows large per-request Modal Connect overhead. One batched
 five-action request averaged `961.06ms`, while five separate action requests averaged `3900.72ms`.
-Use batched actions for model turns, and use `modal-daemon-local` or a future
-`modal-daemon-tunnel` run when isolating daemon implementation cost from hosted ingress cost.
+Use batched actions for model turns, and use `modal-daemon-local` or a tunnel ingress run when
+isolating daemon implementation cost from hosted ingress cost.
+
+### Modal ingress comparison, 2026-05-18
+
+These runs used the same SDK defaults (`1024x768 @ 96 DPI`, `post_action_delay_ms=0`), 10 measured
+iterations, and one warmup iteration per case. All three runs exited with `ok=true`.
+
+```bash
+uv run computer-use benchmark sdk --create-modal-sandbox --modal-ingress attested-tunnel \
+  --surfaces daemon-http --iterations 10 \
+  --output benchmark-sdk-modal-attested-tunnel-1024x768-2026-05-18.json
+
+uv run computer-use benchmark sdk --create-modal-sandbox --modal-ingress tunnel \
+  --surfaces daemon-http --iterations 10 \
+  --output benchmark-sdk-modal-tunnel-1024x768-2026-05-18.json
+
+uv run computer-use benchmark sdk --create-modal-sandbox --modal-ingress connect \
+  --surfaces daemon-http --iterations 10 \
+  --output benchmark-sdk-modal-connect-1024x768-2026-05-18.json
+```
+
+| Canonical label | Auth path | Cold create ms | Batch 5 actions ms | Separate 5 actions ms | Move+click ms | 4x move/click ms | Screenshot ms | Type 100 chars ms | Type 1000 chars ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `modal-daemon-attested-tunnel` | Connect-token attestation, then short-lived daemon token over encrypted tunnel | 7369.71 | 693.26 | 3142.52 | 750.85 | 1263.14 | 917.75 | 1305.66 | 7201.52 |
+| `modal-daemon-tunnel` | Static daemon bearer token over encrypted tunnel | 6752.85 | 542.15 | 2488.93 | 592.76 | 1111.99 | 708.28 | 1143.80 | 6900.53 |
+| `modal-daemon-connect` | Modal Connect Token on every request | 11113.76 | 2015.86 | 8278.20 | 1707.00 | 3220.88 | 2027.81 | 2417.86 | 10574.46 |
+
+Screenshot payloads were `258,319` bytes for the two tunnel runs and `258,295` bytes for the
+Connect run. The raw tunnel is fastest, but `attested-tunnel` is the recommended default because it
+keeps Modal Connect as the authorization bootstrap and only moves hot primitive calls onto the
+encrypted tunnel after the daemon issues a short-lived bearer token. Use raw `tunnel` for trusted
+benchmark harnesses; use `connect` when every daemon request must carry Modal verified-user
+metadata.
 
 ## Screenshot storage modes
 

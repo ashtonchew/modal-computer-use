@@ -19,7 +19,11 @@ def _run_daemon_http_surface(
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    ingress = _daemon_ingress_metadata(mode=mode, base_url=base_url)
+    ingress = _daemon_ingress_metadata(
+        mode=mode,
+        base_url=base_url,
+        environment_metadata=environment_metadata,
+    )
     if client is None:
         return _surface_not_measured(
             ingress["canonical_name"],
@@ -110,7 +114,12 @@ def _run_daemon_http_surface(
     )
 
 
-def _daemon_ingress_metadata(*, mode: str, base_url: str | None) -> dict[str, Any]:
+def _daemon_ingress_metadata(
+    *,
+    mode: str,
+    base_url: str | None,
+    environment_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     safe_base_url = core._safe_base_url(base_url)
     if mode == "mock-local":
         return {
@@ -118,6 +127,32 @@ def _daemon_ingress_metadata(*, mode: str, base_url: str | None) -> dict[str, An
             "kind": "local",
             "auth": "testclient",
             "description": "in-process local daemon benchmark path",
+        }
+    modal_ingress = (
+        None if environment_metadata is None else environment_metadata.get("modal_ingress")
+    )
+    if modal_ingress == "attested-tunnel":
+        return {
+            "canonical_name": "modal-daemon-attested-tunnel",
+            "kind": "modal-attested-encrypted-tunnel",
+            "auth": "Modal Connect Token attestation plus short-lived daemon bearer token",
+            "description": (
+                "Modal Connect-authenticated token exchange followed by encrypted tunnel ingress"
+            ),
+        }
+    if modal_ingress == "connect":
+        return {
+            "canonical_name": "modal-daemon-connect",
+            "kind": "modal-connect-token",
+            "auth": "Modal Sandbox Connect Token",
+            "description": "authenticated Modal connect-token ingress to the daemon",
+        }
+    if modal_ingress == "tunnel":
+        return {
+            "canonical_name": "modal-daemon-tunnel",
+            "kind": "modal-encrypted-tunnel",
+            "auth": "static daemon bearer token",
+            "description": "Modal encrypted tunnel ingress to the daemon",
         }
     if safe_base_url == "https://connect.modal.run":
         return {
