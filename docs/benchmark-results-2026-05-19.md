@@ -47,3 +47,38 @@ not because of base64 accounting.
 
 Modal and E2B are now both being compared as decoded PNG bytes. Daytona must be compared using
 `payload.decoded_size_bytes`, not the base64 `transport_size_bytes`.
+
+## Fair Visual Workload Plan
+
+Provider-default idle screenshots are useful diagnostics, but they are not a fair cross-provider
+screenshot comparison:
+
+- E2B's observed idle screenshot is an `Xvfb -retro` two-color root screen.
+- Daytona's observed idle screenshot is XFCE with a lower-entropy desktop-base wallpaper.
+- Modal's observed XFCE idle screenshot uses a higher-entropy Debian desktop-base wallpaper.
+
+The benchmark now includes `browser_page_screenshot` as the canonical fair visual workload. It
+writes the same embedded HTML fixture into `/tmp`, launches Chromium/Chrome/Firefox with a clean
+temporary profile, requests a `1024x768` app window, optionally positions it at `(0, 0)` when
+`xdotool` is available, waits for the browser process to stay alive long enough to render, then
+captures a full-screen PNG with `show_cursor=false`.
+
+The original `screenshot_full` case remains provider-default idle. Use it to understand provider
+startup state, not to claim screenshot-path superiority.
+
+## Focused Browser-Page 10x Result
+
+After fixing the setup command so `xdotool` is optional, the focused live run measured only the new
+`browser_page_screenshot` case for Daytona and E2B:
+
+`benchmark-results/provider-browser-page-focused-daytona-e2b-10x-20260519.json`
+
+| Provider | Status | Mean latency | Decoded PNG bytes | Transport bytes | Unique colors | Entropy |
+|---|---|---:|---:|---:|---:|---:|
+| Daytona | ok | 248.3 ms | 81144 | 108192 | 2401 | 4.676 |
+| E2B | ok | 227.7 ms | 150247.2 | 150247.2 | 2382 | 4.725 |
+
+This is the apples-to-apples screenshot result. It renders the same local browser page before the
+capture, so it is not dominated by idle wallpaper differences. The providers are close on latency;
+payload size still differs because the browser/window-manager raster output and PNG encoder path are
+not byte-identical even for the same HTML fixture.
