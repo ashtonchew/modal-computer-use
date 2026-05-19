@@ -79,6 +79,25 @@ Screenshot payload sizes:
 | Daytona | 154404 |
 | E2B | 10521 |
 
+These 2026-05-17 screenshot byte values should be treated as provider-observed payload sizes, not
+as a normalized PNG-to-PNG comparison. The provider benchmark at that point recorded only a generic
+`size_bytes` value for Daytona and E2B. It did not record whether the provider returned decoded
+image bytes, a base64 string, a provider-reported `size_bytes` field, JPEG/PNG/WebP format, or image
+dimensions. Modal daemon `size_bytes` is decoded PNG bytes from the daemon response.
+
+As of the screenshot-debug instrumentation, future provider runs record:
+
+- `payload.source`: raw bytes, base64 string, provider object attribute path, or provider-reported
+  field.
+- `payload.provider_reported_size_bytes`: the provider SDK object's own size field, when present.
+- `payload.transport_size_bytes`: bytes in the SDK-returned string/bytes payload.
+- `payload.decoded_size_bytes`: decoded bytes when the payload is raw bytes or valid base64.
+- `payload.format`, `payload.width`, and `payload.height` when inferable from image bytes or SDK
+  attributes.
+
+Use those fields to decide whether the size gap is real image compression/content difference or an
+encoding/accounting difference.
+
 Estimated run costs:
 
 | Provider | Cost |
