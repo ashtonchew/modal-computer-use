@@ -59,9 +59,8 @@ screenshot comparison:
 
 The benchmark now includes `browser_page_screenshot` as the canonical fair visual workload. It
 writes the same embedded HTML fixture into `/tmp`, launches Chromium/Chrome/Firefox with a clean
-temporary profile, requests a `1024x768` app window, optionally positions it at `(0, 0)` when
-`xdotool` is available, waits for the browser process to stay alive long enough to render, then
-captures a full-screen PNG with `show_cursor=false`.
+temporary profile, requests a `1024x768` app window, waits for the browser process to stay alive
+long enough to render, then captures a full-screen PNG with `show_cursor=false`.
 
 The original `screenshot_full` case remains provider-default idle. Use it to understand provider
 startup state, not to claim screenshot-path superiority.
@@ -82,3 +81,24 @@ This is the apples-to-apples screenshot result. It renders the same local browse
 capture, so it is not dominated by idle wallpaper differences. The providers are close on latency;
 payload size still differs because the browser/window-manager raster output and PNG encoder path are
 not byte-identical even for the same HTML fixture.
+
+## Visual-Only Browser-Page 10x Result
+
+After changing the SDK and daemon defaults to `1024x768 @ 96 DPI` with
+`post_action_delay_ms=0`, the visual-only benchmark measured the canonical browser-page screenshot
+and a two-action `move + click + screenshot` sequence.
+
+Artifacts:
+
+- `benchmark-results/provider-browser-page-visual-only-modal-10x-1024x768-20260520.json`
+- `benchmark-results/provider-browser-page-visual-only-modal-daytona-e2b-10x-20260520-rerun.json`
+
+| Provider | Status | Screenshot mean | Sequence mean | Decoded screenshot bytes | Decoded sequence bytes | Observed screenshot size |
+|---|---|---:|---:|---:|---:|---|
+| Modal daemon | ok | 911.6 ms | 1811.7 ms | 90606 | 90619 | 1024x768 |
+| Daytona | ok | 498.1 ms | 1056.1 ms | 80863 | 80863 | 1024x768 |
+| E2B | ok | 218.3 ms | 15629.3 ms | 149128 | 149221.2 | 1024x768 |
+
+Modal now uses the daemon app-launch route for this setup instead of launching a long-running
+browser through `/v1/commands/run`; the command route is only used to write the deterministic HTML
+fixture. That avoids treating a GUI process lifetime as a command lifetime.
