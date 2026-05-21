@@ -904,6 +904,26 @@ This baseline attaches to an existing sandbox and runs a small `xdotool` command
 `Sandbox.exec`. It is useful as a transport comparison, but the daemon HTTP surface is the SDK's
 normal primitive path.
 
+Visual screenshot comparisons are split into three tiers. `screenshot_full` is a provider-default
+idle diagnostic and is not a fair screenshot-path ranking because each provider starts with different
+desktop content. `synthetic_canvas_screenshot` and `synthetic_canvas_sequence` are the canonical
+visual cases: the benchmark writes a deterministic 1024x768 canvas fixture, launches a browser with a
+clean temporary profile, excludes that setup from warm timings, and then measures screenshot or
+coordinate-click-plus-screenshot latency. `browser_page_screenshot` and `browser_page_sequence` keep
+a secondary realistic browser-rendered page workload for text/CSS/window-manager behavior.
+
+Benchmark-created Modal sandboxes disable browser prewarm even when `--browser` is set, so measured
+visual setup is explicit and comparable to Daytona/E2B fixture setup. Production SDK users can still
+enable `BrowserConfig(prewarm=True)` when first-browser latency matters.
+
+Provider entries may also include `verification` readbacks. Cursor readback checks the final cursor
+position after the deterministic move/click sequence, using provider-native cursor APIs where they
+exist and falling back to X11 command probes for daemon-compatible desktops. Typing readback starts
+a controlled `xev` target as a detached process and verifies that keypress events reached that target
+without serializing the typed text. The typing actuation step uses the same provider or daemon
+computer-use primitive being benchmarked. Providers without the required desktop readback tools
+report `unsupported` or `failed` verification while keeping the primitive timing cases separate.
+
 Daemon HTTP entries may also include `verification` readbacks. Cursor readback checks the final
 cursor position after the deterministic move/click sequence. Typing readback starts a controlled
 `xev` target as a detached process and verifies that keypress events reached that target without

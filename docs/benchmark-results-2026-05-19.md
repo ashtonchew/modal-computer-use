@@ -57,13 +57,43 @@ screenshot comparison:
 - Daytona's observed idle screenshot is XFCE with a lower-entropy desktop-base wallpaper.
 - Modal's observed XFCE idle screenshot uses a higher-entropy Debian desktop-base wallpaper.
 
-The benchmark now includes `browser_page_screenshot` as the canonical fair visual workload. It
-writes the same embedded HTML fixture into `/tmp`, launches Chromium/Chrome/Firefox with a clean
-temporary profile, requests a `1024x768` app window, waits for the browser process to stay alive
-long enough to render, then captures a full-screen PNG with `show_cursor=false`.
+The canonical visual workload is now `synthetic_canvas_screenshot`. It writes the same embedded
+HTML fixture into `/tmp`, launches Chromium/Chrome/Firefox with a clean temporary profile, requests a
+`1024x768` app window, and renders a deterministic full-viewport `<canvas>`. The fixture avoids web
+fonts, text rendering, network resources, and provider-default wallpaper, so the PNG entropy and
+screenshot latency are driven by the same synthetic raster content.
+
+`browser_page_screenshot` remains a secondary realistic workload. It is useful because browser text,
+CSS layout, and the window manager are closer to many real computer-use tasks, but those same
+features make it a less controlled cross-provider comparison.
 
 The original `screenshot_full` case remains provider-default idle. Use it to understand provider
 startup state, not to claim screenshot-path superiority.
+
+Setup is excluded from warm visual timings. The setup phase writes the fixture, launches the browser,
+and waits for the window to render once per provider sandbox. Measured iterations then time only the
+provider's public screenshot or action-plus-screenshot path.
+
+Fairness tiers:
+
+| Tier | Cases | Purpose | Setup Included? |
+|---|---|---|---|
+| Canonical visual | `synthetic_canvas_screenshot`, `synthetic_canvas_sequence` | Same 1024x768 deterministic raster; compare warm screenshot and click-observation paths | No |
+| Secondary visual | `browser_page_screenshot`, `browser_page_sequence` | More realistic browser-rendered UI; compare sensitivity to browser/window-manager differences | No |
+| Provider diagnostic | `screenshot_full` | Show provider out-of-box desktop state and PNG entropy | No warm setup |
+| Lifecycle | `cold_create_to_ready` | Measure sandbox create/start/readiness cost | Yes, by definition |
+| Primitive actuation | `move_click`, `move_click_sequence`, `type_*`, `command_echo` | Provider public API behavior without the visual fixture | No cold create |
+
+For visual sequence cases, each provider uses its documented coordinate-click surface where one is
+available:
+
+- Modal daemon: `/v1/actions/run` with one `click` action at the target coordinate.
+- Daytona: `computer_use.mouse.click(x, y)`.
+- E2B: `left_click(x, y)`.
+
+This intentionally measures the provider's public coordinate-action path. It does not substitute a
+non-coordinate click just because it is faster, because that would stop testing the same semantic
+operation.
 
 ## Focused Browser-Page 10x Result
 
@@ -102,3 +132,91 @@ Artifacts:
 Modal now uses the daemon app-launch route for this setup instead of launching a long-running
 browser through `/v1/commands/run`; the command route is only used to write the deterministic HTML
 fixture. That avoids treating a GUI process lifetime as a command lifetime.
+
+These browser-page results are superseded for canonical comparison by the synthetic-canvas workload.
+They remain useful as the secondary realistic browser workload.
+
+## E2B Coordinate-Click Probe, 2026-05-21
+
+Artifact:
+
+- `benchmark-results/e2b-click-path-probe-10x-20260521.json`
+
+The probe created an E2B desktop sandbox with `resolution=(1024, 768)`, `dpi=96`, `display=":0"`,
+and a 300-second sandbox timeout. Before installing the fixture, the process probe showed `Xvfb`,
+`xfce4-session`, and `dbus-launch`; it did not show a browser process. That is evidence that this
+benchmark setup is not inheriting a browser-prewarmed E2B sandbox.
+
+| E2B path | Status | Mean | p50 | p95 | Notes |
+|---|---|---:|---:|---:|---|
+| `screenshot()` | ok | 218.5 ms | 211.7 ms | 237.6 ms | Screenshot path itself is not the 15s bottleneck |
+| `left_click()` | ok | 159.9 ms | 159.4 ms | 163.3 ms | Fast but only clicks the current cursor position |
+| `move_mouse(x, y)` | ok | 13743.1 ms | 15231.4 ms | 15385.5 ms | First sample was 59.4 ms; later samples were ~15.2s |
+| `left_click(x, y)` | failed after 9 samples | 15393.7 ms | 15390.5 ms | 15429.8 ms | Documented coordinate-click path; final sample hit a stream reset |
+
+Interpretation: the E2B anomaly is on coordinate-targeted mouse actions, not on screenshots and not
+on the visual fixture. A no-argument `left_click()` is much faster, but it is not semantically
+equivalent unless the cursor is already at the target. The benchmark therefore keeps
+`left_click(x, y)` for visual sequence cases and labels the result as E2B's public coordinate-click
+behavior.
+
+## Focused Visual 10x Result, 2026-05-21
+
+Artifact:
+
+- `benchmark-results/provider-focused-visual-modal-daytona-e2b-10x-20260521.json`
+
+This focused run excludes typing, command echo, and legacy move/click cases. It measures only:
+
+- provider idle screenshot diagnostic;
+- canonical synthetic canvas screenshot and click-observation sequence;
+- secondary browser-page screenshot and click-observation sequence.
+
+The visual fixture setup is excluded from warm timings. Modal uses the current connect-token path
+with browser prewarm disabled. Daytona and E2B use their documented provider SDK computer-use paths.
+
+| Provider | Case | Mean | p50 | p95 | Mean decoded PNG bytes | Action path |
+|---|---|---:|---:|---:|---:|---|
+| Daytona | `synthetic_canvas_screenshot` | 206.8 ms | 171.5 ms | 329.6 ms | 27372 |  |
+| E2B | `synthetic_canvas_screenshot` | 210.3 ms | 208.0 ms | 216.4 ms | 38880 |  |
+| Modal daemon | `synthetic_canvas_screenshot` | 666.9 ms | 616.5 ms | 906.5 ms | 27573 |  |
+| Daytona | `synthetic_canvas_sequence` | 439.0 ms | 437.1 ms | 548.4 ms | 27372 | `computer_use.mouse.click(x, y)` |
+| E2B | `synthetic_canvas_sequence` | 15613.2 ms | 15592.1 ms | 15672.7 ms | 38887 | `left_click(x, y)` |
+| Modal daemon | `synthetic_canvas_sequence` | 1261.1 ms | 1239.6 ms | 1347.5 ms | 27607 | daemon click action |
+| Daytona | `browser_page_screenshot` | 286.2 ms | 266.6 ms | 437.4 ms | 80240 |  |
+| E2B | `browser_page_screenshot` | 227.2 ms | 224.3 ms | 243.0 ms | 148294 |  |
+| Modal daemon | `browser_page_screenshot` | 713.5 ms | 707.6 ms | 752.9 ms | 90817 |  |
+| Daytona | `browser_page_sequence` | 512.9 ms | 536.2 ms | 628.2 ms | 80308 | `computer_use.mouse.click(x, y)` |
+| E2B | `browser_page_sequence` | 15665.2 ms | 15651.7 ms | 15745.4 ms | 148338 | `left_click(x, y)` |
+| Modal daemon | `browser_page_sequence` | 1441.5 ms | 1437.7 ms | 1529.6 ms | 90758 | daemon click action |
+| Daytona | `screenshot_full` | 254.6 ms | 223.1 ms | 351.5 ms | 115730 | diagnostic only |
+| E2B | `screenshot_full` | 203.0 ms | 197.4 ms | 226.3 ms | 13872 | diagnostic only |
+| Modal daemon | `screenshot_full` | 1039.6 ms | 1018.4 ms | 1115.0 ms | 257328 | diagnostic only |
+
+Interpretation:
+
+- The canonical screenshot case is now fairer than idle screenshots and less browser-dependent than
+  the browser-page case.
+- Daytona and E2B are close on canonical screenshot latency. Modal's connect-token path remains
+  materially slower for screenshots.
+- Modal's sequence is much faster than E2B's documented coordinate-click sequence but slower than
+  Daytona's.
+- E2B's sequence result is not a screenshot issue; it reproduces the coordinate-click probe.
+
+## Modal Connect Token vs Encrypted Tunnel
+
+Modal docs recommend Sandbox Connect Tokens for HTTP/WebSocket requests to sandboxes. Modal also
+supports `encrypted_ports` tunnels for raw public TCP/TLS access; the tunnel docs describe them as
+cryptographically random public URLs over Modal's relay network and say the application must handle
+its own authentication.
+
+That means the benchmark modes are not interchangeable:
+
+| Modal path | Authentication model | Benchmark role |
+|---|---|---|
+| Connect token | Modal-issued token and connect proxy headers | Current SDK-safe default; comparable to provider SDK proxy calls |
+| Encrypted tunnel | Public TLS tunnel; app must authenticate requests | Candidate low-latency SDK transport, but needs an explicit daemon auth mode before it is safe as a default |
+| Local daemon | Loopback token or local-only access | Developer diagnostic; not comparable to remote providers |
+
+The next fair Modal tunnel benchmark should add a purpose-built tunnel auth mode before exposing the
+daemon over `encrypted_ports`. It should not bypass auth just to get lower latency numbers.

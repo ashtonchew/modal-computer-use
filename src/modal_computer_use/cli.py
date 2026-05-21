@@ -1136,7 +1136,7 @@ def _modal_benchmark_config(
     config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
     config.actions.input_backend = args.input_backend
     if args.browser:
-        config.browser = BrowserConfig(kind=args.browser)
+        config.browser = BrowserConfig(kind=args.browser, prewarm=False)
     return config
 
 
