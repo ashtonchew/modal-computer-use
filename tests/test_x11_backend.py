@@ -330,6 +330,36 @@ def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None
     assert shot.cursor_position is None
 
 
+def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    native_png = _png_bytes("RGB", (10, 10), "white")
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        with open(args[-1], "wb") as handle:
+            handle.write(native_png)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+    monkeypatch.setattr(
+        screenshots_module.Image,
+        "open",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Pillow not expected")),
+    )
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="png", scale=1.0),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.data == native_png
+    assert shot.width == backend.width
+    assert shot.height == backend.height
+
+
 def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:
     backend = RecordingX11Backend()
 

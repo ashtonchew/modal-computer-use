@@ -95,7 +95,7 @@ async def full_raw(payload: ScreenshotRequest, request: Request) -> Response:
     )
 
     async def operation():
-        return await request.app.state.backend.screenshot_bytes(options)
+        return await request.app.state.backend.screenshot_bytes(options, prefer_native_png=True)
 
     shot = await run_screenshot_capture(request, operation)
     return Response(
@@ -144,7 +144,11 @@ async def region_raw(payload: ScreenshotRequest, request: Request) -> Response:
     )
 
     async def operation():
-        return await request.app.state.backend.screenshot_bytes(options, region=payload.region)
+        return await request.app.state.backend.screenshot_bytes(
+            options,
+            region=payload.region,
+            prefer_native_png=True,
+        )
 
     shot = await run_screenshot_capture(request, operation)
     return Response(
@@ -208,7 +212,11 @@ async def zoom_raw(payload: ZoomScreenshotRequest, request: Request) -> Response
     )
 
     async def operation():
-        return await request.app.state.backend.screenshot_bytes(options, region=region)
+        return await request.app.state.backend.screenshot_bytes(
+            options,
+            region=region,
+            prefer_native_png=True,
+        )
 
     shot = await run_screenshot_capture(request, operation)
     return Response(

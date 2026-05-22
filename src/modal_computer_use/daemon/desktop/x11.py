@@ -164,6 +164,7 @@ class DesktopBackend(ABC):
         *,
         region: Region | None = None,
         include_cursor_position: bool = False,
+        prefer_native_png: bool = False,
     ) -> CapturedScreenshot:
         screenshot = await self.screenshot(options, region=region)
         return CapturedScreenshot(
@@ -396,6 +397,7 @@ class MockDesktopBackend(DesktopBackend):
         *,
         region: Region | None = None,
         include_cursor_position: bool = False,
+        prefer_native_png: bool = False,
     ) -> CapturedScreenshot:
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
         image_width = scaled_dimension(source.width, options.scale)
@@ -773,11 +775,13 @@ class X11DesktopBackend(MockDesktopBackend):
         *,
         region: Region | None = None,
         include_cursor_position: bool = False,
+        prefer_native_png: bool = False,
     ) -> CapturedScreenshot:
         return await self._screenshots.capture_bytes(
             options,
             region=region,
             include_cursor_position=include_cursor_position,
+            prefer_native_png=prefer_native_png,
         )
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:

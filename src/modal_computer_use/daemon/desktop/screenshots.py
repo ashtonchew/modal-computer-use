@@ -102,6 +102,7 @@ class X11ScreenshotController:
         *,
         region: Region | None = None,
         include_cursor_position: bool = False,
+        prefer_native_png: bool = False,
     ) -> CapturedScreenshot:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
@@ -113,15 +114,21 @@ class X11ScreenshotController:
         command.append(str(temp_path))
         await self._run(*command)
         try:
-            image = Image.open(temp_path)
-            image.load()
-            image_width = scaled_dimension(image.width, options.scale)
-            image_height = scaled_dimension(image.height, options.scale)
-            native_png = temp_path.read_bytes() if _can_preserve_native_png(options) else None
-            if options.scale != 1.0:
-                image = image.resize((image_width, image_height))
-            encoded = encode_image(image.convert("RGB"), options.format, options.quality)
-            data = _smallest_png(native_png, encoded) if native_png is not None else encoded
+            if prefer_native_png and _can_preserve_native_png(options):
+                data = temp_path.read_bytes()
+                source = region or Region(x=0, y=0, width=self.width, height=self.height)
+                image_width = source.width
+                image_height = source.height
+            else:
+                image = Image.open(temp_path)
+                image.load()
+                image_width = scaled_dimension(image.width, options.scale)
+                image_height = scaled_dimension(image.height, options.scale)
+                native_png = temp_path.read_bytes() if _can_preserve_native_png(options) else None
+                if options.scale != 1.0:
+                    image = image.resize((image_width, image_height))
+                encoded = encode_image(image.convert("RGB"), options.format, options.quality)
+                data = _smallest_png(native_png, encoded) if native_png is not None else encoded
         finally:
             temp_path.unlink(missing_ok=True)
 
