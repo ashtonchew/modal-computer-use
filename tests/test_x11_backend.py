@@ -80,10 +80,29 @@ def test_x11_scroll_and_button_hold_are_real_xdotool_commands() -> None:
     anyio.run(backend.mouse_down, "right")
     anyio.run(backend.mouse_up, "right")
 
-    assert ("xdotool", "mousemove", "4", "5") in backend.commands
-    assert ("xdotool", "click", "--repeat", "3", "5") in backend.commands
+    assert (
+        "xdotool",
+        "mousemove",
+        "4",
+        "5",
+        "click",
+        "--repeat",
+        "3",
+        "5",
+    ) in backend.commands
     assert ("xdotool", "mousedown", "3") in backend.commands
     assert ("xdotool", "mouseup", "3") in backend.commands
+
+
+def test_x11_mouse_click_batches_move_and_click_without_modifiers() -> None:
+    backend = RecordingX11Backend()
+
+    point = anyio.run(backend.mouse_click, 4, 5)
+
+    assert point == Point(x=4, y=5)
+    assert backend.commands == [
+        ("xdotool", "mousemove", "4", "5", "click", "--repeat", "1", "1")
+    ]
 
 
 def test_x11_mouse_click_applies_and_releases_modifiers() -> None:
