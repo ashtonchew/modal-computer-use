@@ -16,6 +16,7 @@ def test_health_version_capabilities(test_client) -> None:
     assert test_client.get("/v1/version").json()["api_version"] == "v1"
     caps = test_client.get("/v1/capabilities").json()
     assert "mouse" in caps["primitives"]
+    assert caps["input_backend"] == "mock"
     for primitive in ("input", "lifecycle", "processes", "session", "debug"):
         assert primitive in caps["primitives"]
 

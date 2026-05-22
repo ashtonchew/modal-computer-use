@@ -12,6 +12,7 @@ from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
 from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend, choose_backend
+from modal_computer_use.daemon.desktop.xtest import XTestUnavailableError
 from modal_computer_use.models import Point, Region, ScreenshotOptions
 
 
@@ -52,6 +53,85 @@ class RecordingX11Backend(X11DesktopBackend):
                 return None
 
         return Process()
+
+
+class FakeXTestPointer:
+    def __init__(self, *, available: bool = True, fail: bool = False) -> None:
+        self._available = available
+        self._fail = fail
+        self.calls: list[tuple[str, object]] = []
+
+    def available(self) -> bool:
+        return self._available
+
+    def move(self, x: int, y: int) -> None:
+        self._record("move", {"x": x, "y": y})
+
+    def click(
+        self,
+        *,
+        button: int,
+        count: int = 1,
+        x: int | None = None,
+        y: int | None = None,
+    ) -> None:
+        self._record("click", {"button": button, "count": count, "x": x, "y": y})
+
+    def down(self, *, button: int, x: int | None = None, y: int | None = None) -> None:
+        self._record("down", {"button": button, "x": x, "y": y})
+
+    def up(self, *, button: int, x: int | None = None, y: int | None = None) -> None:
+        self._record("up", {"button": button, "x": x, "y": y})
+
+    def scroll(
+        self,
+        *,
+        button: int,
+        amount: int = 1,
+        x: int | None = None,
+        y: int | None = None,
+    ) -> None:
+        self._record("scroll", {"button": button, "amount": amount, "x": x, "y": y})
+
+    def _record(self, name: str, payload: object) -> None:
+        if self._fail:
+            raise XTestUnavailableError("boom")
+        self.calls.append((name, payload))
+
+
+def test_x11_mouse_uses_xtest_pointer_backend_when_available() -> None:
+    backend = RecordingX11Backend()
+    xtest = FakeXTestPointer()
+    backend._mouse._xtest = xtest
+
+    anyio.run(backend.mouse_move, 1, 2)
+    anyio.run(backend.mouse_click, 3, 4)
+    anyio.run(backend.mouse_scroll, "down", 2, 5, 6)
+    anyio.run(backend.mouse_down, "right", 7, 8)
+    anyio.run(backend.mouse_up, "right", 9, 10)
+
+    assert backend.commands == []
+    assert backend.input_backend == "xtest"
+    assert xtest.calls == [
+        ("move", {"x": 1, "y": 2}),
+        ("click", {"button": 1, "count": 1, "x": 3, "y": 4}),
+        ("scroll", {"button": 5, "amount": 2, "x": 5, "y": 6}),
+        ("down", {"button": 3, "x": 7, "y": 8}),
+        ("up", {"button": 3, "x": 9, "y": 10}),
+    ]
+
+
+def test_x11_mouse_falls_back_to_xdotool_when_auto_xtest_fails() -> None:
+    backend = RecordingX11Backend()
+    backend._mouse._xtest = FakeXTestPointer(fail=True)
+
+    point = anyio.run(backend.mouse_click, 4, 5)
+
+    assert point == Point(x=4, y=5)
+    assert backend.input_backend == "xdotool"
+    assert backend.commands == [
+        ("xdotool", "mousemove", "4", "5", "click", "--delay", "0", "--repeat", "1", "1")
+    ]
 
 
 def test_x11_mouse_drag_uses_xdotool_down_move_up() -> None:

@@ -551,6 +551,7 @@ class Capabilities(StrictBaseModel):
     adapter_versions: dict[str, list[str]]
     image_profile: str
     vnc_enabled: bool
+    input_backend: str | None = None
 
 
 class TraceEntry(StrictBaseModel):

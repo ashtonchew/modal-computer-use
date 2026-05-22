@@ -12,6 +12,7 @@ def test_daemon_settings_read_environment_when_instantiated(monkeypatch, tmp_pat
     monkeypatch.setenv("COMPUTER_USE_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setenv("COMPUTER_USE_MAX_ACTIONS", "7")
     monkeypatch.setenv("COMPUTER_USE_BROWSER_PREWARM", "true")
+    monkeypatch.setenv("COMPUTER_USE_INPUT_BACKEND", "xtest")
 
     settings = get_settings()
 
@@ -20,6 +21,7 @@ def test_daemon_settings_read_environment_when_instantiated(monkeypatch, tmp_pat
     assert settings.artifacts_dir == Path(tmp_path / "artifacts")
     assert settings.max_actions == 7
     assert settings.browser_prewarm is True
+    assert settings.input_backend == "xtest"
 
 
 def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:

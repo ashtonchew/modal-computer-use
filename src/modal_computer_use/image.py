@@ -12,6 +12,8 @@ DESKTOP_APT_PACKAGES = [
     "novnc",
     "websockify",
     "xdotool",
+    "libx11-6",
+    "libxtst6",
     "wmctrl",
     "maim",
     "scrot",

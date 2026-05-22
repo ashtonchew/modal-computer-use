@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal, cast
 
 from PIL import Image, ImageDraw
 
@@ -29,6 +30,7 @@ from modal_computer_use.daemon.desktop.screenshots import (
     scaled_dimension,
 )
 from modal_computer_use.daemon.desktop.windows import X11WindowController
+from modal_computer_use.daemon.desktop.xtest import XTestPointerController
 from modal_computer_use.models import (
     ActionResult,
     CoordinateSpace,
@@ -47,6 +49,10 @@ from modal_computer_use.models import (
 class DesktopBackend(ABC):
     width: int
     height: int
+
+    @property
+    def input_backend(self) -> str:
+        return "unknown"
 
     @abstractmethod
     async def ready(self) -> tuple[bool, list[str]]:
@@ -245,6 +251,10 @@ class MockDesktopBackend(DesktopBackend):
         self.held_keys: set[str] = set()
         self.held_buttons: set[str] = set()
         self.recordings: dict[str, Recording] = {}
+
+    @property
+    def input_backend(self) -> str:
+        return "mock"
 
     async def ready(self) -> tuple[bool, list[str]]:
         return True, []
@@ -498,6 +508,7 @@ class X11DesktopBackend(MockDesktopBackend):
         browser_profile_dir: str | None = None,
         browser_launch_args: Sequence[str] = (),
         browser_gpu_mode: str = "auto",
+        input_backend: str = "auto",
     ) -> None:
         super().__init__(width=width, height=height)
         self.display = display
@@ -543,6 +554,8 @@ class X11DesktopBackend(MockDesktopBackend):
             button_up_state=super().mouse_up,
             key_down=self.key_down,
             key_up=self.key_up,
+            input_backend=_normalize_input_backend(input_backend),
+            xtest=XTestPointerController(display=display),
         )
         self._screenshots = X11ScreenshotController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
@@ -551,6 +564,10 @@ class X11DesktopBackend(MockDesktopBackend):
             display=display,
             cursor_position=self.mouse_position,
         )
+
+    @property
+    def input_backend(self) -> str:
+        return self._mouse.backend_name
 
     async def ready(self) -> tuple[bool, list[str]]:
         missing = [
@@ -566,6 +583,9 @@ class X11DesktopBackend(MockDesktopBackend):
         wm = await self._run("wmctrl", "-m", timeout=2, check=False)
         if wm.returncode != 0:
             return False, ["window manager is not responding"]
+        input_ready, input_error = self._mouse.probe_backend()
+        if not input_ready:
+            return False, [input_error or "input backend is not ready"]
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         try:
@@ -810,6 +830,7 @@ def choose_backend(
     browser_profile_dir: str | None = None,
     browser_launch_args: Sequence[str] = (),
     browser_gpu_mode: str = "auto",
+    input_backend: str = "auto",
 ) -> DesktopBackend:
     if kind == "mock":
         return MockDesktopBackend(width=width, height=height)
@@ -822,6 +843,7 @@ def choose_backend(
             browser_profile_dir=browser_profile_dir,
             browser_launch_args=browser_launch_args,
             browser_gpu_mode=browser_gpu_mode,
+            input_backend=input_backend,
         )
     if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
@@ -833,4 +855,11 @@ def choose_backend(
         browser_profile_dir=browser_profile_dir,
         browser_launch_args=browser_launch_args,
         browser_gpu_mode=browser_gpu_mode,
+        input_backend=input_backend,
     )
+
+
+def _normalize_input_backend(value: str) -> Literal["auto", "xtest", "xdotool"]:
+    if value in {"auto", "xtest", "xdotool"}:
+        return cast("Literal['auto', 'xtest', 'xdotool']", value)
+    return "auto"

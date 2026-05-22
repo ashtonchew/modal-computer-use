@@ -259,7 +259,7 @@ async def _run(
                     type=action.type,
                     ok=True,
                     elapsed_ms=elapsed_ms,
-                    output=output or {},
+                    output=_with_input_backend(output or {}, action, context),
                 )
                 results.append(item)
                 if item.ok:
@@ -1132,6 +1132,35 @@ async def _execute_action(
         return _checked_action_result(result, action)
     raise DaemonError(
         f"unsupported action type: {getattr(action, 'type', None)}", code="unsupported_action"
+    )
+
+
+def _with_input_backend(
+    output: dict[str, Any],
+    action: Any,
+    context: ActionBatchContext,
+) -> dict[str, Any]:
+    if not _is_input_backend_action(action):
+        return output
+    backend = getattr(context.state.backend, "input_backend", None)
+    if not isinstance(backend, str) or not backend:
+        return output
+    return {**output, "input_backend": backend}
+
+
+def _is_input_backend_action(action: Any) -> bool:
+    return isinstance(
+        action,
+        (
+            MoveAction,
+            ClickAction,
+            DoubleClickAction,
+            TripleClickAction,
+            DragAction,
+            ScrollAction,
+            MouseDownAction,
+            MouseUpAction,
+        ),
     )
 
 
