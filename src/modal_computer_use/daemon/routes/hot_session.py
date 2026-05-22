@@ -20,6 +20,7 @@ from modal_computer_use.daemon.routes.screenshots import (
 )
 from modal_computer_use.daemon.schemas import ScreenshotRequest
 from modal_computer_use.models import ActionBatchRequest
+from modal_computer_use.redaction import sanitize_payload, sanitize_text
 
 router = APIRouter(prefix="/v1/session")
 
@@ -79,8 +80,8 @@ async def _handle_hot_session_message(websocket: WebSocket, message: Any) -> Non
             websocket,
             request_id,
             exc.code,
-            exc.message,
-            details=exc.details,
+            sanitize_text(exc.message),
+            details=sanitize_payload(exc.details),
         )
     except Exception as exc:
         await _send_hot_error(
@@ -190,8 +191,8 @@ async def _send_hot_error(
             "ok": False,
             "error": {
                 "code": code,
-                "message": message,
-                "details": details or {},
+                "message": sanitize_text(message),
+                "details": sanitize_payload(details or {}),
             },
         }
     )

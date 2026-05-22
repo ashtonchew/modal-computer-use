@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -34,7 +35,9 @@ class HotSessionTransport:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.timeout = timeout
         self._ids = itertools.count(1)
+        self._lock = threading.RLock()
         self._websocket = websocket or self._connect(timeout=timeout)
         try:
             ready = self._websocket.recv(timeout=timeout)
@@ -55,7 +58,8 @@ class HotSessionTransport:
         return self.request("ping", {})
 
     def request(self, op: str, payload: dict[str, Any]) -> dict[str, Any]:
-        message = self._send(op, payload)
+        with self._lock:
+            message = self._send(op, payload)
         if message.get("type") == "error":
             self._raise_hot_error(message)
         if message.get("type") != "result":
@@ -67,15 +71,16 @@ class HotSessionTransport:
         return result if isinstance(result, dict) else {}
 
     def request_binary(self, op: str, payload: dict[str, Any]) -> HotSessionBinaryResult:
-        message = self._send(op, payload)
-        if message.get("type") == "error":
-            self._raise_hot_error(message)
-        if message.get("type") != "binary":
-            raise DaemonHTTPError(
-                "unexpected hot session response",
-                code="hot_session_protocol_error",
-            )
-        frame = self._websocket.recv()
+        with self._lock:
+            message = self._send(op, payload)
+            if message.get("type") == "error":
+                self._raise_hot_error(message)
+            if message.get("type") != "binary":
+                raise DaemonHTTPError(
+                    "unexpected hot session response",
+                    code="hot_session_protocol_error",
+                )
+            frame = self._websocket.recv(timeout=self.timeout)
         if not isinstance(frame, bytes):
             raise DaemonHTTPError(
                 "hot session binary payload missing",
@@ -110,7 +115,7 @@ class HotSessionTransport:
     def _send(self, op: str, payload: dict[str, Any]) -> dict[str, Any]:
         request_id = str(next(self._ids))
         self._websocket.send(json.dumps({"id": request_id, "op": op, "payload": payload}))
-        message = self._websocket.recv()
+        message = self._websocket.recv(timeout=self.timeout)
         if not isinstance(message, str):
             raise DaemonHTTPError("unexpected hot session frame", code="hot_session_protocol_error")
         data = json.loads(message)
