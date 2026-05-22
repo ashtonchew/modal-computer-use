@@ -101,7 +101,7 @@ def test_x11_mouse_click_batches_move_and_click_without_modifiers() -> None:
 
     assert point == Point(x=4, y=5)
     assert backend.commands == [
-        ("xdotool", "mousemove", "4", "5", "click", "--repeat", "1", "1")
+        ("xdotool", "mousemove", "4", "5", "click", "--delay", "0", "--repeat", "1", "1")
     ]
 
 

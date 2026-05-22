@@ -57,15 +57,15 @@ class X11MouseController:
         button_number = BUTTON_NUMBERS[button]
         modifier_keys = [normalize_key(modifier) for modifier in modifiers]
         if x is not None and y is not None and not modifier_keys:
+            click_args = ["click", "--repeat", str(count), button_number]
+            if count == 1:
+                click_args = ["click", "--delay", "0", "--repeat", "1", button_number]
             await self._run(
                 "xdotool",
                 "mousemove",
                 str(x),
                 str(y),
-                "click",
-                "--repeat",
-                str(count),
-                button_number,
+                *click_args,
             )
             return await self._click_state(x, y, button=button, count=count, modifiers=modifiers)
         if x is not None and y is not None:
