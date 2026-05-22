@@ -24,6 +24,7 @@ class HTTPTransport:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.last_http_version: str | None = None
         self._client = client or httpx.Client(
             base_url=self.base_url,
             timeout=timeout,
@@ -60,6 +61,7 @@ class HTTPTransport:
                 content=content,
                 headers=request_headers,
             )
+            self.last_http_version = response.http_version
             span.set_attribute("http.status_code", response.status_code)
             error_code = _error_code(response)
             if error_code:
@@ -84,6 +86,7 @@ class HTTPTransport:
                 headers=self._request_headers(None),
             ) as response,
         ):
+            self.last_http_version = response.http_version
             span.set_attribute("http.status_code", response.status_code)
             error_code = _error_code(response)
             if error_code:

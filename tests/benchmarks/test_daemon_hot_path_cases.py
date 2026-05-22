@@ -248,8 +248,12 @@ def test_move_click_sequence_benchmark_uses_safe_metadata_and_attribution() -> N
 
 
 def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
+    class Transport:
+        last_http_version = "HTTP/2"
+
     class TimedClient:
         base_url = "http://testserver"
+        transport = Transport()
 
         def post_bytes_with_headers(self, path: str, *, json=None, headers=None):
             assert path == "/v1/actions/run/raw-screenshot"
@@ -282,6 +286,8 @@ def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
     assert payload["samples_bytes"] == [9]
     assert payload["last_result"]["screenshot_daemon_timing_ms"] == {"total_ms": 8.5}
     assert payload["last_result"]["capture_backend"] == "mss"
+    assert payload["last_result"]["transport_http_version"] == "HTTP/2"
+    assert payload["transport_http_versions"] == ["HTTP/2"]
     assert payload["action_count"] == 2
 
 

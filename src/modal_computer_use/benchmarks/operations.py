@@ -28,15 +28,18 @@ class _ActionBatchBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run_batch(self) -> dict[str, float | None]:
+    def run_batch(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": ACTION_BATCH_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
-    def run_separate(self) -> dict[str, float | None]:
+    def run_separate(self) -> dict[str, Any]:
         daemon_samples: list[float | None] = []
         for action in ACTION_BATCH_ACTIONS:
             result = self._client.post_json(
@@ -47,31 +50,40 @@ class _ActionBatchBenchmark:
             daemon_samples.append(_extract_daemon_ms(result))
         if any(sample is None for sample in daemon_samples):
             return {"daemon_ms": None}
-        return {"daemon_ms": sum(sample for sample in daemon_samples if sample is not None)}
+        return {
+            "daemon_ms": sum(sample for sample in daemon_samples if sample is not None),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _MoveClickBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run(self) -> dict[str, float | None]:
+    def run(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": MOVE_CLICK_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _MoveClickSequenceBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run(self) -> dict[str, float | None]:
+    def run(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": MOVE_CLICK_SEQUENCE_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _ClickScreenshotRawBenchmark:
     def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
@@ -101,6 +113,7 @@ class _ClickScreenshotRawBenchmark:
             "cursor_visible": self._request.get("show_cursor", False),
             "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
             "daemon_ms": _extract_daemon_ms(action_result),
+            "transport_http_version": _transport_http_version(self._client),
             "action_result": _safe_action_result_metadata(action_result),
             "screenshot_daemon_timing_ms": screenshot_timing,
         }
@@ -119,7 +132,7 @@ class _TypeCharsBenchmark:
         self._method = method
         self._timeout_ms = timeout_ms
 
-    def run(self) -> dict[str, float | None]:
+    def run(self) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "type",
             "text": self._text,
@@ -135,7 +148,10 @@ class _TypeCharsBenchmark:
             },
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _CommandEchoBenchmark:
     def __init__(self, client: DaemonClient) -> None:
@@ -173,6 +189,7 @@ class _ScreenshotBenchmark:
                 "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
                 "daemon_ms": daemon_timing.get("total_ms"),
                 "daemon_timing_ms": daemon_timing,
+                "transport_http_version": _transport_http_version(self._client),
             }
         result = self._client.post_json("/v1/screenshots/full", json=self._request)
         return _safe_screenshot_result(result)
@@ -187,6 +204,12 @@ def _int_header(headers: Any, name: str) -> int | None:
 
 def _str_header(headers: Any, name: str) -> str | None:
     value = headers.get(name) if hasattr(headers, "get") else None
+    return value if isinstance(value, str) and value else None
+
+
+def _transport_http_version(client: DaemonClient) -> str | None:
+    transport = getattr(client, "transport", None)
+    value = getattr(transport, "last_http_version", None)
     return value if isinstance(value, str) and value else None
 
 

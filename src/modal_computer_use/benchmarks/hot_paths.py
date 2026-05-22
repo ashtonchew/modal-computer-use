@@ -68,6 +68,14 @@ def run_screenshot_benchmark(
                 ]
             ),
             "last_result": observations[-1] if observations else None,
+            "transport_http_versions": sorted(
+                {
+                    item["transport_http_version"]
+                    for item in observations
+                    if isinstance(item.get("transport_http_version"), str)
+                    and item.get("transport_http_version")
+                }
+            ),
         }
     )
     daemon_samples = [
