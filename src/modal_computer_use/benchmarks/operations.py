@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -26,15 +28,18 @@ class _ActionBatchBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run_batch(self) -> dict[str, float | None]:
+    def run_batch(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": ACTION_BATCH_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
-    def run_separate(self) -> dict[str, float | None]:
+    def run_separate(self) -> dict[str, Any]:
         daemon_samples: list[float | None] = []
         for action in ACTION_BATCH_ACTIONS:
             result = self._client.post_json(
@@ -45,31 +50,73 @@ class _ActionBatchBenchmark:
             daemon_samples.append(_extract_daemon_ms(result))
         if any(sample is None for sample in daemon_samples):
             return {"daemon_ms": None}
-        return {"daemon_ms": sum(sample for sample in daemon_samples if sample is not None)}
+        return {
+            "daemon_ms": sum(sample for sample in daemon_samples if sample is not None),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _MoveClickBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run(self) -> dict[str, float | None]:
+    def run(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": MOVE_CLICK_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _MoveClickSequenceBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
 
-    def run(self) -> dict[str, float | None]:
+    def run(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/actions/run",
             json={"actions": MOVE_CLICK_SEQUENCE_ACTIONS, "source": "benchmark"},
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
+
+class _ClickScreenshotRawBenchmark:
+    def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
+        self._client = client
+        self._request = request
+
+    def run(self) -> dict[str, Any]:
+        payload, headers = self._client.post_bytes_with_headers(
+            "/v1/actions/run/raw-screenshot",
+            json={
+                "actions": MOVE_CLICK_ACTIONS,
+                "screenshot_after": True,
+                "screenshot_options": self._request,
+                "source": "benchmark",
+            },
+        )
+        action_result = _action_result_header(headers)
+        _ensure_ok_result(action_result)
+        screenshot_timing = _timing_header(headers)
+        return {
+            "format": self._request.get("format", "png"),
+            "width": _int_header(headers, "x-computer-use-width"),
+            "height": _int_header(headers, "x-computer-use-height"),
+            "size_bytes": len(payload),
+            "storage": "inline",
+            "artifact_backed": False,
+            "cursor_visible": self._request.get("show_cursor", False),
+            "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
+            "daemon_ms": _extract_daemon_ms(action_result),
+            "transport_http_version": _transport_http_version(self._client),
+            "action_result": _safe_action_result_metadata(action_result),
+            "screenshot_daemon_timing_ms": screenshot_timing,
+        }
 
 class _TypeCharsBenchmark:
     def __init__(
@@ -85,7 +132,7 @@ class _TypeCharsBenchmark:
         self._method = method
         self._timeout_ms = timeout_ms
 
-    def run(self) -> dict[str, float | None]:
+    def run(self) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "type",
             "text": self._text,
@@ -101,7 +148,10 @@ class _TypeCharsBenchmark:
             },
         )
         _ensure_ok_result(result)
-        return {"daemon_ms": _extract_daemon_ms(result)}
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
 
 class _CommandEchoBenchmark:
     def __init__(self, client: DaemonClient) -> None:
@@ -117,13 +167,88 @@ class _CommandEchoBenchmark:
         return {"exit_code": output.get("returncode") if isinstance(output, dict) else None}
 
 class _ScreenshotBenchmark:
-    def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
+    def __init__(self, client: DaemonClient, request: dict[str, Any], *, raw: bool = False) -> None:
         self._client = client
         self._request = request
+        self._raw = raw
 
     def run(self) -> dict[str, Any]:
+        if self._raw:
+            payload, headers = self._client.post_bytes_with_headers(
+                "/v1/screenshots/full/raw", json=self._request
+            )
+            daemon_timing = _timing_header(headers)
+            return {
+                "format": self._request.get("format", "png"),
+                "width": _int_header(headers, "x-computer-use-width"),
+                "height": _int_header(headers, "x-computer-use-height"),
+                "size_bytes": len(payload),
+                "storage": "inline",
+                "artifact_backed": False,
+                "cursor_visible": self._request.get("show_cursor", False),
+                "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
+                "daemon_ms": daemon_timing.get("total_ms"),
+                "daemon_timing_ms": daemon_timing,
+                "transport_http_version": _transport_http_version(self._client),
+            }
         result = self._client.post_json("/v1/screenshots/full", json=self._request)
         return _safe_screenshot_result(result)
+
+
+def _int_header(headers: Any, name: str) -> int | None:
+    value = headers.get(name) if hasattr(headers, "get") else None
+    if not isinstance(value, str) or not value.isdigit():
+        return None
+    return int(value)
+
+
+def _str_header(headers: Any, name: str) -> str | None:
+    value = headers.get(name) if hasattr(headers, "get") else None
+    return value if isinstance(value, str) and value else None
+
+
+def _transport_http_version(client: DaemonClient) -> str | None:
+    transport = getattr(client, "transport", None)
+    value = getattr(transport, "last_http_version", None)
+    return value if isinstance(value, str) and value else None
+
+
+def _timing_header(headers: Any) -> dict[str, float]:
+    value = headers.get("x-computer-use-timing-ms") if hasattr(headers, "get") else None
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(value)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key): float(item)
+        for key, item in data.items()
+        if not isinstance(item, bool) and isinstance(item, int | float)
+    }
+
+
+def _action_result_header(headers: Any) -> dict[str, Any]:
+    value = headers.get("x-computer-use-action-result") if hasattr(headers, "get") else None
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(base64.b64decode(value).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _safe_action_result_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    results = result.get("results")
+    return {
+        "ok": result.get("ok"),
+        "call_id": result.get("call_id"),
+        "result_count": len(results) if isinstance(results, list) else 0,
+        "timing": result.get("timing") if isinstance(result.get("timing"), dict) else None,
+    }
 
 class _RecordingStartStopBenchmark:
     def __init__(self, client: DaemonClient) -> None:

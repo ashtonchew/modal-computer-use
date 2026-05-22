@@ -86,11 +86,50 @@ async def run(
     context: ActionBatchContext,
     idempotency_key: str | None = None,
 ) -> ActionBatchResult:
+    result, _ = await _run(
+        payload,
+        context,
+        idempotency_key=idempotency_key,
+        raw_screenshot_after=False,
+    )
+    return result
+
+
+async def run_with_screenshot_bytes(
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+    idempotency_key: str | None = None,
+):
+    if not payload.screenshot_after:
+        raise DaemonError(
+            "raw action observation requires screenshot_after",
+            status_code=422,
+            code="missing_screenshot_after",
+        )
+    return await _run(
+        payload,
+        context,
+        idempotency_key=idempotency_key,
+        raw_screenshot_after=True,
+    )
+
+
+async def _run(
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+    *,
+    idempotency_key: str | None,
+    raw_screenshot_after: bool,
+):
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
-    cached = _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
+    cached = (
+        None
+        if raw_screenshot_after
+        else _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
+    )
     if cached is not None:
-        return cached
+        return cached, None
     action_count = _count_action_tree(payload.actions)
     if action_count > context.state.settings.max_batch_actions:
         raise DaemonError(
@@ -115,15 +154,22 @@ async def run(
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
     screenshot = None
+    screenshot_bytes = None
     batch_timed_out = False
     screenshot_after_blocked = False
     action_phase_failed = False
     lock_was_contended = context.state.input_lock.locked()
     async with context.state.input_lock:
         cache = context.state.idempotency_cache
-        cached = _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
+        cached = (
+            None
+            if raw_screenshot_after
+            else _cached_idempotency_result(
+                context, effective_idempotency_key, request_fingerprint
+            )
+        )
         if cached is not None:
-            return cached
+            return cached, None
         if lock_was_contended:
             await _ensure_desktop_ready(context, force=True)
 
@@ -348,19 +394,31 @@ async def run(
                     if screenshot_budget_error is not None:
                         raise screenshot_budget_error
                     context.budget_policy.reserve_screenshot()
-                    screenshot = await asyncio.wait_for(
-                        context.state.backend.screenshot(
-                            options,
-                            artifact_store=context.state.artifacts,
-                            call_id=call_id,
-                            retention_class="trace",
-                        ),
-                        timeout=timeout_seconds,
-                    )
+                    if raw_screenshot_after:
+                        screenshot_bytes = await asyncio.wait_for(
+                            context.state.backend.screenshot_bytes(
+                                options,
+                                prefer_native_png=True,
+                            ),
+                            timeout=timeout_seconds,
+                        )
+                    else:
+                        screenshot = await asyncio.wait_for(
+                            context.state.backend.screenshot(
+                                options,
+                                artifact_store=context.state.artifacts,
+                                call_id=call_id,
+                                retention_class="trace",
+                            ),
+                            timeout=timeout_seconds,
+                        )
                     context.budget_policy.enforce("screenshots", "artifacts")
                     context.budget_policy.touch_activity()
                     context.traces.append_screenshot_after(
-                        payload, screenshot, None, call_id=call_id
+                        payload,
+                        screenshot,
+                        None,
+                        call_id=call_id,
                     )
                 except TimeoutError:
                     elapsed_ms = (time.perf_counter() - start) * 1000
@@ -403,14 +461,14 @@ async def run(
             timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
         )
         cache_enabled = context.state.settings.idempotency_cache_max_entries > 0
-        if effective_idempotency_key and cache_enabled:
+        if effective_idempotency_key and cache_enabled and not raw_screenshot_after:
             cache[effective_idempotency_key] = {
                 "fingerprint": request_fingerprint,
                 "created_at": time.monotonic(),
                 "result": result.model_dump(mode="json"),
             }
             _prune_idempotency_cache(context)
-        return result
+        return result, screenshot_bytes
 
 
 def _effective_idempotency_key(payload: ActionBatchRequest, header_key: str | None) -> str | None:

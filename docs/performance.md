@@ -13,6 +13,41 @@ Benchmark reports use it to split total SDK round-trip latency from daemon execu
 derive client/network/transport overhead. Older daemons that do not return timing are reported as
 `attribution.status="unavailable"` rather than failed.
 
+## Screenshot hot paths
+
+Use the raw binary screenshot routes for latency-sensitive observation loops:
+
+```bash
+POST /v1/screenshots/full/raw
+POST /v1/actions/run/raw-screenshot
+```
+
+The fused action route is the canonical model-loop path because it executes the requested actions
+and returns the post-action screenshot in one HTTP request. That avoids the extra network round
+trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`.
+
+For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
+screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
+plus in-memory Pillow encoding, avoiding the slower subprocess/temp-file/decode path. Cursor-visible
+screenshots still use the desktop screenshot tool fallback because the MSS path does not compose the
+cursor into the image.
+
+The JSON screenshot routes remain compatibility routes:
+
+```bash
+POST /v1/screenshots/full
+POST /v1/actions/run
+```
+
+They return structured JSON and base64 image payloads, which is convenient but materially slower
+and larger on the wire than the raw binary routes. Benchmarks should label these separately from
+raw primitive latency.
+
+Screenshot responses include `x-computer-use-capture-backend` and
+`x-computer-use-timing-ms` headers on raw routes. Benchmark results also record the client-observed
+HTTP protocol version when available, so HTTP/2 runs can be verified from the artifact instead of
+inferred from configuration.
+
 ## Benchmark report
 
 Use the release report command to measure current daemon hot paths without model credentials:
@@ -77,6 +112,9 @@ The current report includes:
 - `action_batch`: one five-action batch request compared with five separate action requests.
 - `screenshot_full`: full-screen screenshot latency and provider-returned encoded payload byte
   size.
+- `screenshot_full_raw`: full-screen screenshot latency through the binary image response path.
+  This avoids JSON/base64 transport overhead and is the fairer comparison to provider SDKs that
+  already return screenshot bytes.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
 - `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
@@ -179,6 +217,19 @@ Modal-created sandboxes support three ingress modes:
 - `tunnel`: expose daemon port `8080` and use a static per-sandbox daemon bearer token. This is the
   lowest-level mode and should be reserved for trusted benchmark harnesses.
 
+Modal tunnel ingress can also opt into HTTP/2 transport with
+`ComputerConfig(network={"daemon_http_version": "2"})`. This keeps the same security semantics as
+the selected ingress but creates the daemon port through Modal `h2_ports`, starts the daemon under
+Hypercorn, and uses an `httpx` HTTP/2 client. HTTP/1.1 remains the SDK default because it is the
+lowest-dependency compatibility path and matches non-h2 local daemon clients. Use the HTTP/2 mode
+when benchmarking or operating a hot primitive loop that benefits from request multiplexing and
+lower connection overhead.
+
+Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
+product default remains `20`, but primitive latency benchmarks should not measure intentional
+throttling. Pass `--input-rate-limit-per-sec` when the benchmark target is rate-limit behavior
+instead of transport and daemon hot-path latency.
+
 The raw Modal `Sandbox.exec` baseline is opt-in:
 
 ```bash
@@ -225,9 +276,15 @@ be the only billing attribution mechanism.
 Keep SDK benchmark surfaces fair:
 
 - Name the ingress explicitly: `modal-daemon-local`, `modal-daemon-connect`,
-  `modal-daemon-tunnel`, `daytona-toolbox-http`, or `e2b-desktop-sdk`.
+  `modal-daemon-tunnel`, `modal-daemon-attested-h2-tunnel`, `modal-daemon-h2-tunnel`,
+  `daytona-toolbox-http`, or `e2b-desktop-sdk`.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
+- Use the binary screenshot path for raw primitive latency comparisons; keep JSON/base64 screenshot
+  numbers as backwards-compatible SDK payload overhead.
+- Report `click_screenshot_raw` for the model-loop hot path. It uses one daemon request to run the
+  action batch and return the observation as image bytes, so it avoids both a second tunnel round trip
+  and JSON/base64 screenshot payload overhead.
 - Treat public-rate `cost_estimate` values as approximate context, not billing truth.
 - Treat screenshot byte summaries as daemon-returned payload size.
 - Do not include noVNC stream URLs, bearer tokens, typed text, screenshot bytes, stdout,
@@ -415,9 +472,22 @@ variance plus per-request tunnel and payload costs, not as Connect-token exchang
 
 For agent loops that call screenshot every few actions, `auto` is usually the right answer.
 
-For PNG screenshots at native scale, the daemon compares the native `maim` PNG with its Pillow
-RGB re-encode and returns the smaller valid payload. This keeps simple/paletted desktops compact
-without regressing desktops where the RGB re-encode compresses better than the native capture.
+For low-latency model turns, prefer `actions.run_and_screenshot_bytes(...)` or
+`POST /v1/actions/run/raw-screenshot`. This keeps action execution and observation capture in a
+single daemon request while returning the screenshot as binary image bytes. The legacy
+`actions.run(..., screenshot_after=True)` path remains useful when callers need a structured JSON
+`Screenshot` object, but it pays base64 response overhead.
+
+For raw PNG screenshots at native scale without the cursor, the daemon first tries an in-process
+MSS/XShm capture and falls back to `scrot`, then `maim`, if the fast capture is unavailable.
+MSS avoids a screenshot subprocess and uses the X11 shared-memory path, which is fastest for the
+raw observation hot path. `scrot` remains a portable native PNG fallback, while `maim` remains the
+compatibility path for cursor-visible, scaled, re-encoded, and JSON screenshots. For JSON PNG
+screenshots at native scale, the daemon still compares the native `maim` PNG with its Pillow RGB
+re-encode and returns the smaller valid payload.
+Raw screenshot responses include `x-computer-use-capture-backend` (`mss`, `scrot`, `maim`, or
+`unknown`) so benchmark artifacts can attribute the capture path directly instead of inferring it
+from timing.
 
 ## Screenshot processing location
 

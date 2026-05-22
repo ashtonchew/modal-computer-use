@@ -54,10 +54,22 @@ class X11MouseController:
         count: int = 1,
         modifiers: Sequence[str] = (),
     ) -> Point:
-        if x is not None and y is not None:
-            await self.move(x, y)
         button_number = BUTTON_NUMBERS[button]
         modifier_keys = [normalize_key(modifier) for modifier in modifiers]
+        if x is not None and y is not None and not modifier_keys:
+            click_args = ["click", "--repeat", str(count), button_number]
+            if count == 1:
+                click_args = ["click", "--delay", "0", "--repeat", "1", button_number]
+            await self._run(
+                "xdotool",
+                "mousemove",
+                str(x),
+                str(y),
+                *click_args,
+            )
+            return await self._click_state(x, y, button=button, count=count, modifiers=modifiers)
+        if x is not None and y is not None:
+            await self.move(x, y)
         for modifier in modifier_keys:
             await self._key_down(modifier)
         try:
@@ -127,24 +139,50 @@ class X11MouseController:
         y: int | None = None,
     ) -> ActionResult:
         if x is not None and y is not None:
-            await self.move(x, y)
-        await self._run("xdotool", "click", "--repeat", str(amount), SCROLL_BUTTONS[direction])
+            await self._run(
+                "xdotool",
+                "mousemove",
+                str(x),
+                str(y),
+                "click",
+                "--repeat",
+                str(amount),
+                SCROLL_BUTTONS[direction],
+            )
+        else:
+            await self._run("xdotool", "click", "--repeat", str(amount), SCROLL_BUTTONS[direction])
         return await self._scroll_state(direction, amount=amount, x=x, y=y)
 
     async def down(
         self, button: str = "left", x: int | None = None, y: int | None = None
     ) -> ActionResult:
         if x is not None and y is not None:
-            await self.move(x, y)
-        await self._run("xdotool", "mousedown", BUTTON_NUMBERS[button])
+            await self._run(
+                "xdotool",
+                "mousemove",
+                str(x),
+                str(y),
+                "mousedown",
+                BUTTON_NUMBERS[button],
+            )
+        else:
+            await self._run("xdotool", "mousedown", BUTTON_NUMBERS[button])
         return await self._button_down_state(button, x=x, y=y)
 
     async def up(
         self, button: str = "left", x: int | None = None, y: int | None = None
     ) -> ActionResult:
         if x is not None and y is not None:
-            await self.move(x, y)
-        await self._run("xdotool", "mouseup", BUTTON_NUMBERS[button])
+            await self._run(
+                "xdotool",
+                "mousemove",
+                str(x),
+                str(y),
+                "mouseup",
+                BUTTON_NUMBERS[button],
+            )
+        else:
+            await self._run("xdotool", "mouseup", BUTTON_NUMBERS[button])
         return await self._button_up_state(button, x=x, y=y)
 
     async def position(self) -> Point:

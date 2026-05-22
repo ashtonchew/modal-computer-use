@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 
 from fastapi.testclient import TestClient
@@ -27,6 +28,31 @@ def test_status_and_screenshot(test_client) -> None:
     assert shot.width == 1024
     assert shot.coordinate_space.desktop_width == 1024
     assert shot.sha256
+
+
+def test_raw_screenshot_returns_image_bytes(test_client) -> None:
+    response = test_client.post("/v1/screenshots/full/raw", json={"format": "png"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert response.headers["x-computer-use-width"] == "1024"
+    assert response.headers["x-computer-use-height"] == "768"
+    assert response.headers["x-computer-use-size-bytes"] == str(len(response.content))
+    assert response.headers["x-computer-use-sha256"]
+    assert response.headers["x-computer-use-capture-backend"]
+    timing = json.loads(response.headers["x-computer-use-timing-ms"])
+    assert isinstance(timing, dict)
+
+
+def test_raw_screenshot_rejects_artifact_storage(test_client) -> None:
+    response = test_client.post(
+        "/v1/screenshots/full/raw",
+        json={"format": "png", "storage": "artifact"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_screenshot_storage"
 
 
 def test_status_reflects_stopped_mock_lifecycle(tmp_path) -> None:

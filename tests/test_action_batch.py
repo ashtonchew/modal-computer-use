@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import json
+
 from modal_computer_use.models import ActionResult
 
 
@@ -156,6 +159,38 @@ def test_action_batch_includes_safe_daemon_timing(test_client) -> None:
     assert "xdotool" not in serialized
     assert "stdout" not in serialized.lower()
     assert "stderr" not in serialized.lower()
+
+
+def test_action_batch_raw_screenshot_after_returns_image_bytes(test_client) -> None:
+    response = test_client.post(
+        "/v1/actions/run/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "screenshot_after": True,
+            "screenshot_options": {"format": "png"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert response.headers["x-computer-use-width"] == "1024"
+    action_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-action-result"]).decode("utf-8")
+    )
+    assert action_result["ok"] is True
+    assert "screenshot" not in action_result
+    assert action_result["results"][0]["type"] == "move"
+
+
+def test_action_batch_raw_screenshot_after_requires_screenshot_after(test_client) -> None:
+    response = test_client.post(
+        "/v1/actions/run/raw-screenshot",
+        json={"actions": [{"type": "move", "x": 10, "y": 20}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "missing_screenshot_after"
 
 
 def test_type_action_failure_redacts_typed_text(test_client, app) -> None:

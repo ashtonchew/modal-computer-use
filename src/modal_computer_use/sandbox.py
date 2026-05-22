@@ -180,7 +180,9 @@ class ComputerSandbox:
             artifact_volume_mounted=artifact_volume_mounted,
         )
         sandbox_tags = {**(tags or {}), **default_tags(config, owner=owner)}
-        ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode)
+        http2 = config.network.daemon_http_version == "2"
+        ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
+        h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
         tunnel_token = _secrets.token_urlsafe(32) if config.ingress == "tunnel" else None
         if tunnel_token:
             env["COMPUTER_USE_TUNNEL_TOKEN"] = tunnel_token
@@ -201,6 +203,8 @@ class ComputerSandbox:
             "name": name,
             **sandbox_kwargs,
         }
+        if h2_ports:
+            create_kwargs["h2_ports"] = h2_ports
         if config.runtime.modal_region:
             create_kwargs["region"] = config.runtime.modal_region
         readiness_probe = _readiness_probe(modal)
@@ -236,7 +240,7 @@ class ComputerSandbox:
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = cls(
-            DaemonClient(base_url=base_url, token=token),
+            DaemonClient(base_url=base_url, token=token, http2=http2),
             sandbox=sandbox,
             metadata=metadata,
         )
@@ -250,7 +254,7 @@ class ComputerSandbox:
                 connect_token=connect_token,
             )
             computer = cls(
-                DaemonClient(base_url=base_url, token=token),
+                DaemonClient(base_url=base_url, token=token, http2=http2),
                 sandbox=sandbox,
                 metadata=metadata,
             )
@@ -268,11 +272,12 @@ class ComputerSandbox:
         base_url: str | None = None,
         token: str | None = None,
         ingress: ModalIngress = "attested-tunnel",
+        http2: bool = False,
         wait: bool = False,
         readiness_timeout: float = 120.0,
     ) -> ComputerSandbox:
         if base_url:
-            computer = cls(DaemonClient(base_url=base_url, token=token))
+            computer = cls(DaemonClient(base_url=base_url, token=token, http2=http2))
             if wait:
                 computer.wait_until_ready(timeout=readiness_timeout)
             return computer
@@ -300,7 +305,7 @@ class ComputerSandbox:
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
         computer = cls(
-            DaemonClient(base_url=connect_base_url, token=connect_token),
+            DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
             sandbox=sandbox,
             metadata=metadata,
         )
@@ -314,7 +319,7 @@ class ComputerSandbox:
                     connect_token=connect_token,
                 )
                 computer = cls(
-                    DaemonClient(base_url=connect_base_url, token=connect_token),
+                    DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
                     sandbox=sandbox,
                     metadata=metadata,
                 )
@@ -525,6 +530,7 @@ def _daemon_environment(
         "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS": str(config.actions.default_action_timeout_ms),
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
         "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
+        "COMPUTER_USE_DAEMON_HTTP_VERSION": config.network.daemon_http_version,
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY": "true",
         "COMPUTER_USE_VNC_MODE": vnc_mode,
@@ -599,13 +605,24 @@ def _connect_url_parts(base_url: str, *, token: str | None) -> tuple[str, str | 
     return safe_url, token or query_token
 
 
-def _encrypted_ports_for_ingress(ingress: ModalIngress, *, vnc_mode: str) -> list[int]:
+def _encrypted_ports_for_ingress(
+    ingress: ModalIngress,
+    *,
+    vnc_mode: str,
+    http2: bool = False,
+) -> list[int]:
     ports: list[int] = []
-    if ingress in {"attested-tunnel", "tunnel"}:
+    if ingress in {"attested-tunnel", "tunnel"} and not http2:
         ports.append(8080)
     if vnc_mode != "off":
         ports.append(6080)
     return ports
+
+
+def _h2_ports_for_ingress(ingress: ModalIngress, *, http2: bool = False) -> list[int]:
+    if ingress in {"attested-tunnel", "tunnel"} and http2:
+        return [8080]
+    return []
 
 
 def _client_ingress_parts(

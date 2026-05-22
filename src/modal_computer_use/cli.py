@@ -121,11 +121,26 @@ def main(argv: list[str] | None = None) -> int:
         default="attested-tunnel",
         help="Modal daemon ingress for created sandboxes; defaults to attested-tunnel",
     )
+    sdk_parser.add_argument(
+        "--daemon-http-version",
+        choices=["1.1", "2"],
+        default="1.1",
+        help="daemon transport HTTP version for created Modal sandboxes; defaults to 1.1",
+    )
     sdk_parser.add_argument("--resource-profile")
     sdk_parser.add_argument("--browser")
     sdk_parser.add_argument("--gpu")
     sdk_parser.add_argument("--modal-cpu", type=float)
     sdk_parser.add_argument("--modal-memory-mib", type=int)
+    sdk_parser.add_argument(
+        "--input-rate-limit-per-sec",
+        type=int,
+        default=0,
+        help=(
+            "daemon input action rate limit for created benchmark sandboxes; "
+            "defaults to 0 so primitive latency runs do not measure throttling"
+        ),
+    )
     sdk_parser.add_argument("--image-profile", dest="image_profile")
     sdk_parser.add_argument("--image-variant", dest="image_profile")
     sdk_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -172,11 +187,26 @@ def main(argv: list[str] | None = None) -> int:
     ingress_ab_parser.add_argument("--app-name", default="modal-computer-use")
     ingress_ab_parser.add_argument("--name")
     ingress_ab_parser.add_argument("--modal-region")
+    ingress_ab_parser.add_argument(
+        "--daemon-http-version",
+        choices=["1.1", "2"],
+        default="1.1",
+        help="daemon transport HTTP version for the created Modal sandbox; defaults to 1.1",
+    )
     ingress_ab_parser.add_argument("--resource-profile")
     ingress_ab_parser.add_argument("--browser")
     ingress_ab_parser.add_argument("--gpu")
     ingress_ab_parser.add_argument("--modal-cpu", type=float)
     ingress_ab_parser.add_argument("--modal-memory-mib", type=int)
+    ingress_ab_parser.add_argument(
+        "--input-rate-limit-per-sec",
+        type=int,
+        default=0,
+        help=(
+            "daemon input action rate limit for the created benchmark sandbox; "
+            "defaults to 0 so primitive latency runs do not measure throttling"
+        ),
+    )
     ingress_ab_parser.add_argument("--image-profile", dest="image_profile")
     ingress_ab_parser.add_argument("--image-variant", dest="image_profile")
     ingress_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -609,11 +639,13 @@ def _modal_benchmark_config(
 ) -> ComputerConfig:
     config = ComputerConfig(run_id=run_id)
     config.ingress = ingress or args.modal_ingress
+    config.network.daemon_http_version = getattr(args, "daemon_http_version", "1.1")
     config.runtime.modal_region = args.modal_region
     config.resources.profile = _modal_benchmark_resource_profile(args)
     config.resources.gpu = args.gpu
     config.resources.cpu = args.modal_cpu
     config.resources.memory_mib = args.modal_memory_mib
+    config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
     if args.browser:
         config.browser = BrowserConfig(kind=args.browser)
     return config
@@ -643,6 +675,8 @@ def _validate_modal_create_args(
         parser.error("--modal-cpu must be greater than 0")
     if args.modal_memory_mib is not None and args.modal_memory_mib < 128:
         parser.error("--modal-memory-mib must be at least 128")
+    if args.input_rate_limit_per_sec < 0:
+        parser.error("--input-rate-limit-per-sec must be non-negative")
 
 
 def _sdk_surfaces(
@@ -707,9 +741,11 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "modal_region": args.modal_region,
         "modal_ingress": getattr(args, "modal_ingress", None),
+        "daemon_http_version": getattr(args, "daemon_http_version", None),
         "resource_profile": args.resource_profile,
         "browser": args.browser,
         "gpu": args.gpu,
+        "input_rate_limit_per_sec": getattr(args, "input_rate_limit_per_sec", None),
         "image_profile": args.image_profile,
     }
     if getattr(args, "modal_billing_reconcile", False):

@@ -20,6 +20,7 @@ from .measurement import (
     _summary,
 )
 from .operations import (
+    _ClickScreenshotRawBenchmark,
     _CommandEchoBenchmark,
     _MoveClickBenchmark,
     _MoveClickSequenceBenchmark,
@@ -37,12 +38,13 @@ def run_screenshot_benchmark(
     request: dict[str, Any],
     iterations: int,
     warmup_iterations: int = 1,
+    raw: bool = False,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
 
     failures: list[dict[str, Any]] = []
-    benchmark = _ScreenshotBenchmark(client, request)
+    benchmark = _ScreenshotBenchmark(client, request, raw=raw)
     samples, observations = _measure_observed_case(
         name=name,
         iterations=iterations,
@@ -54,6 +56,7 @@ def run_screenshot_benchmark(
     result.update(
         {
             "request": _safe_screenshot_request(request),
+            "transport_encoding": "binary" if raw else "json_base64",
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],
@@ -65,8 +68,29 @@ def run_screenshot_benchmark(
                 ]
             ),
             "last_result": observations[-1] if observations else None,
+            "transport_http_versions": sorted(
+                {
+                    item["transport_http_version"]
+                    for item in observations
+                    if isinstance(item.get("transport_http_version"), str)
+                    and item.get("transport_http_version")
+                }
+            ),
         }
     )
+    daemon_samples = [
+        float(item["daemon_ms"])
+        for item in observations
+        if item.get("daemon_ms") is not None
+    ]
+    if daemon_samples:
+        result["daemon_samples_ms"] = daemon_samples
+        result["daemon_summary_ms"] = _summary(daemon_samples)
+        result["overhead_samples_ms"] = [
+            sample - daemon_sample
+            for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
+        ]
+        result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
     return result
 
 def run_move_click_benchmark(
@@ -121,6 +145,53 @@ def run_move_click_sequence_benchmark(
         {
             "action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS),
             "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_SEQUENCE_ACTIONS],
+        }
+    )
+    return result
+
+def run_click_screenshot_raw_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    request = {"format": "png", "show_cursor": False}
+    benchmark = _ClickScreenshotRawBenchmark(client, request)
+    samples, observations = _measure_observed_case(
+        name="click_screenshot_raw",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _attributed_case_result(
+        "click_screenshot_raw",
+        iterations,
+        samples,
+        observations,
+        failures,
+    )
+    result.update(
+        {
+            "request": _safe_screenshot_request(request),
+            "transport_encoding": "binary",
+            "action_count": len(MOVE_CLICK_ACTIONS),
+            "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_ACTIONS],
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
         }
     )
     return result

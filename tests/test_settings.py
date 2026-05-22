@@ -81,3 +81,19 @@ def test_daemon_entrypoint_defaults_port_to_8080(monkeypatch) -> None:
     daemon_main.main()
 
     assert calls[0][1]["port"] == 8080
+
+
+def test_daemon_entrypoint_uses_h2_runner_when_configured(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_HOST", "127.0.0.2")
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_PORT", "9090")
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_HTTP_VERSION", "2")
+    monkeypatch.setattr(
+        daemon_main,
+        "_run_hypercorn_h2",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    daemon_main.main()
+
+    assert calls == [{"host": "127.0.0.2", "port": 9090}]

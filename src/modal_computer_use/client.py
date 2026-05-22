@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -19,9 +20,15 @@ class DaemonClient:
         *,
         token: str | None = None,
         timeout: float = 30.0,
+        http2: bool = False,
         transport: HTTPTransport | None = None,
     ) -> None:
-        self.transport = transport or HTTPTransport(base_url, token=token, timeout=timeout)
+        self.transport = transport or HTTPTransport(
+            base_url,
+            token=token,
+            timeout=timeout,
+            http2=http2,
+        )
 
     @property
     def base_url(self) -> str:
@@ -66,6 +73,25 @@ class DaemonClient:
 
     def get_bytes(self, path: str, *, params: dict[str, Any] | None = None) -> bytes:
         return self.transport.request("GET", path, params=params).content
+
+    def post_bytes(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> bytes:
+        return self.transport.request("POST", path, json=json, headers=headers).content
+
+    def post_bytes_with_headers(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[bytes, Mapping[str, str]]:
+        response = self.transport.request("POST", path, json=json, headers=headers)
+        return response.content, response.headers
 
     def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:
         payload = self.transport.request(method, path, **kwargs).json()
