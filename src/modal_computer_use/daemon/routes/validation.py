@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import Request
 
@@ -10,15 +11,22 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.models import Point, Region
 
 
-async def desktop_readiness(request: Request) -> tuple[bool, list[str]]:
-    ready, errors = await request.app.state.backend.ready()
+async def backend_readiness(state: Any, *, force: bool = False) -> tuple[bool, list[str]]:
+    cache = getattr(state, "readiness_cache", None)
+    if cache is None:
+        return await state.backend.ready()
+    return await cache.backend_ready(state.backend, force=force)
+
+
+async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
+    ready, errors = await backend_readiness(request.app.state, force=force)
     if not request.app.state.supervisor.running:
         return False, ["desktop supervisor is stopped", *errors]
     return ready, errors
 
 
 async def daemon_readiness(request: Request) -> tuple[bool, list[str]]:
-    ready, errors = await desktop_readiness(request)
+    ready, errors = await desktop_readiness(request, force=True)
     if request.app.state.settings.vnc_mode == "off":
         return ready, errors
     for name in ("x11vnc", "novnc"):
@@ -30,8 +38,8 @@ async def daemon_readiness(request: Request) -> tuple[bool, list[str]]:
     return ready, errors
 
 
-async def ensure_desktop_ready(request: Request) -> None:
-    ready, errors = await desktop_readiness(request)
+async def ensure_desktop_ready(request: Request, *, force: bool = False) -> None:
+    ready, errors = await desktop_readiness(request, force=force)
     if ready:
         return
     raise DaemonError(
@@ -44,8 +52,10 @@ async def ensure_desktop_ready(request: Request) -> None:
 
 @asynccontextmanager
 async def ready_input_lock(request: Request) -> AsyncIterator[None]:
+    lock_was_contended = request.app.state.input_lock.locked()
     async with request.app.state.input_lock:
-        await ensure_desktop_ready(request)
+        if lock_was_contended:
+            await ensure_desktop_ready(request, force=True)
         yield
 
 

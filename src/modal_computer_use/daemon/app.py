@@ -18,6 +18,7 @@ from modal_computer_use.daemon.desktop import choose_backend
 from modal_computer_use.daemon.desktop.recordings import RecordingRegistry
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.logging import configure_logging
+from modal_computer_use.daemon.readiness import ReadinessCache
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
@@ -99,6 +100,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         browser_gpu_mode=settings.browser_gpu_mode,
     )
     app.state.input_lock = asyncio.Lock()
+    app.state.readiness_cache = ReadinessCache(settings.readiness_cache_ttl_ms)
     app.state.artifacts = ArtifactStore(
         settings.artifacts_dir,
         persistent=settings.artifacts_persistent,

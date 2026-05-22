@@ -58,7 +58,7 @@ async def wait_for(payload: WaitForWindowRequest, request: Request) -> X11Window
     deadline = time.monotonic() + payload.timeout
     pattern = re.compile(payload.title_regex) if payload.title_regex else None
     while True:
-        await ensure_desktop_ready(request)
+        await ensure_desktop_ready(request, force=True)
         for window in await request.app.state.backend.windows():
             if pattern and not pattern.search(window.title):
                 continue

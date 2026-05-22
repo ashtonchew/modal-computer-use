@@ -28,6 +28,7 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
         "COMPUTER_USE_DESKTOP_HEIGHT",
         "COMPUTER_USE_DESKTOP_DPI",
         "COMPUTER_USE_POST_ACTION_DELAY_MS",
+        "COMPUTER_USE_READINESS_CACHE_TTL_MS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -37,6 +38,7 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     assert settings.desktop_height == 768
     assert settings.desktop_dpi == 96
     assert settings.post_action_delay_ms == 0
+    assert settings.readiness_cache_ttl_ms == 1_000
 
 
 def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:

@@ -799,6 +799,87 @@ def test_action_rechecks_readiness_after_waiting_for_input_lock(tmp_path) -> Non
     assert app.state.action_count == 0
 
 
+def test_screenshot_hot_path_reuses_successful_readiness_probe(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    app.state.backend.ready = counted_ready
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/screenshots/full", json={"format": "png"})
+        second = client.post("/v1/screenshots/full", json={"format": "png"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert readiness_calls == 1
+
+
+def test_action_hot_path_reuses_successful_readiness_probe(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    app.state.backend.ready = counted_ready
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/actions/run", json={"actions": [{"type": "move", "x": 1, "y": 2}]})
+        second = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "click", "x": 3, "y": 4}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert readiness_calls == 1
+
+
+def test_readyz_forces_fresh_readiness_probe(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    app.state.backend.ready = counted_ready
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.get("/readyz")
+        second = client.get("/readyz")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert readiness_calls == 2
+
+
 def test_missing_artifact_errors_do_not_echo_user_path(test_client) -> None:
     response = test_client.get("/v1/artifacts/private/customer-secret.txt")
 

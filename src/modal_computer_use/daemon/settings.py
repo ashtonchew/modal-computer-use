@@ -110,6 +110,9 @@ class DaemonSettings:
     post_action_delay_ms: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_POST_ACTION_DELAY_MS", 0)
     )
+    readiness_cache_ttl_ms: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_READINESS_CACHE_TTL_MS", 1_000)
+    )
     default_action_timeout_ms: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS", 5_000)
     )

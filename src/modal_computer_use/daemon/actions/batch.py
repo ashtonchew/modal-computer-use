@@ -13,6 +13,7 @@ from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacted_action
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.validation import backend_readiness
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
     ActionBatchRequest,
@@ -59,8 +60,8 @@ class ActionBatchContext:
         self.traces = ActionTraceWriter(self)
 
 
-async def _ensure_desktop_ready(context: ActionBatchContext) -> None:
-    ready, errors = await context.state.backend.ready()
+async def _ensure_desktop_ready(context: ActionBatchContext, *, force: bool = False) -> None:
+    ready, errors = await backend_readiness(context.state, force=force)
     if not context.state.supervisor.running:
         ready = False
         errors = ["desktop supervisor is stopped", *errors]
@@ -111,19 +112,20 @@ async def run(
             code="action_validation_failed",
             details={"errors": validation_errors},
         )
-    await _ensure_desktop_ready(context)
     batch_start = time.perf_counter()
     results: list[ActionItemResult] = []
     screenshot = None
     batch_timed_out = False
     screenshot_after_blocked = False
     action_phase_failed = False
+    lock_was_contended = context.state.input_lock.locked()
     async with context.state.input_lock:
         cache = context.state.idempotency_cache
         cached = _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
         if cached is not None:
             return cached
-        await _ensure_desktop_ready(context)
+        if lock_was_contended:
+            await _ensure_desktop_ready(context, force=True)
 
         batch_timeout_ms = context.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
