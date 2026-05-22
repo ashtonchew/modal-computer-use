@@ -23,6 +23,7 @@ from modal_computer_use.daemon.desktop.display import StaticDisplayController
 from modal_computer_use.daemon.desktop.keyboard import X11KeyboardController
 from modal_computer_use.daemon.desktop.mouse import BUTTON_NUMBERS, X11MouseController
 from modal_computer_use.daemon.desktop.screenshots import (
+    CapturedScreenshot,
     X11ScreenshotController,
     encode_image,
     scaled_dimension,
@@ -156,6 +157,26 @@ class DesktopBackend(ABC):
         retention_class: str = "ephemeral",
     ) -> Screenshot:
         raise NotImplementedError
+
+    async def screenshot_bytes(
+        self,
+        options: ScreenshotOptions,
+        *,
+        region: Region | None = None,
+        include_cursor_position: bool = False,
+    ) -> CapturedScreenshot:
+        screenshot = await self.screenshot(options, region=region)
+        return CapturedScreenshot(
+            format=screenshot.format,
+            width=screenshot.width,
+            height=screenshot.height,
+            data=screenshot.as_bytes(),
+            sha256=screenshot.sha256 or sha256_bytes(screenshot.as_bytes()),
+            captured_at=screenshot.captured_at,
+            coordinate_space=screenshot.coordinate_space,
+            cursor_visible=screenshot.cursor_visible,
+            cursor_position=screenshot.cursor_position if include_cursor_position else None,
+        )
 
     @abstractmethod
     async def display_info(self) -> DisplayInfo:
@@ -333,6 +354,49 @@ class MockDesktopBackend(DesktopBackend):
         call_id: str | None = None,
         retention_class: str = "ephemeral",
     ) -> Screenshot:
+        captured = await self.screenshot_bytes(
+            options,
+            region=region,
+            include_cursor_position=True,
+        )
+        data = captured.data
+        artifact_uri = None
+        data_base64 = base64.b64encode(data).decode("ascii")
+        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
+            if artifact_store is None:
+                raise RuntimeError("artifact_store required for artifact screenshot storage")
+            suffix = "jpg" if options.format == "jpeg" else options.format
+            name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+            info = artifact_store.write_bytes(
+                f"screenshots/{name}_{call_id or 'shot'}.{suffix}",
+                data,
+                content_type=f"image/{options.format}",
+                created_by_call_id=call_id,
+                retention_class=retention_class,
+            )
+            artifact_uri = info.uri
+            data_base64 = None
+        return Screenshot(
+            format=options.format,
+            width=captured.width,
+            height=captured.height,
+            size_bytes=len(data),
+            data_base64=data_base64,
+            artifact_uri=artifact_uri,
+            sha256=captured.sha256,
+            captured_at=captured.captured_at,
+            coordinate_space=captured.coordinate_space,
+            cursor_visible=captured.cursor_visible,
+            cursor_position=captured.cursor_position,
+        )
+
+    async def screenshot_bytes(
+        self,
+        options: ScreenshotOptions,
+        *,
+        region: Region | None = None,
+        include_cursor_position: bool = False,
+    ) -> CapturedScreenshot:
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
         image_width = scaled_dimension(source.width, options.scale)
         image_height = scaled_dimension(source.height, options.scale)
@@ -365,34 +429,16 @@ class MockDesktopBackend(DesktopBackend):
             image_height=image_height,
             source_region=region,
         )
-        artifact_uri = None
-        data_base64 = base64.b64encode(data).decode("ascii")
-        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
-            if artifact_store is None:
-                raise RuntimeError("artifact_store required for artifact screenshot storage")
-            suffix = "jpg" if options.format == "jpeg" else options.format
-            name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-            info = artifact_store.write_bytes(
-                f"screenshots/{name}_{call_id or 'shot'}.{suffix}",
-                data,
-                content_type=f"image/{options.format}",
-                created_by_call_id=call_id,
-                retention_class=retention_class,
-            )
-            artifact_uri = info.uri
-            data_base64 = None
-        return Screenshot(
+        return CapturedScreenshot(
             format=options.format,
             width=image_width,
             height=image_height,
-            size_bytes=len(data),
-            data_base64=data_base64,
-            artifact_uri=artifact_uri,
+            data=data,
             sha256=sha256_bytes(data),
             captured_at=datetime.now(UTC),
             coordinate_space=coordinate_space,
             cursor_visible=options.show_cursor,
-            cursor_position=self.cursor,
+            cursor_position=self.cursor if include_cursor_position else None,
         )
 
     async def display_info(self) -> DisplayInfo:
@@ -719,6 +765,19 @@ class X11DesktopBackend(MockDesktopBackend):
             artifact_store=artifact_store,
             call_id=call_id,
             retention_class=retention_class,
+        )
+
+    async def screenshot_bytes(
+        self,
+        options: ScreenshotOptions,
+        *,
+        region: Region | None = None,
+        include_cursor_position: bool = False,
+    ) -> CapturedScreenshot:
+        return await self._screenshots.capture_bytes(
+            options,
+            region=region,
+            include_cursor_position=include_cursor_position,
         )
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:

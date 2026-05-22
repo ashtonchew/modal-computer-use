@@ -5398,6 +5398,45 @@
         "summary": "Full"
       }
     },
+    "/v1/screenshots/full/raw": {
+      "post": {
+        "operationId": "full_raw_v1_screenshots_full_raw_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Full Raw"
+      }
+    },
     "/v1/screenshots/region": {
       "post": {
         "operationId": "region_v1_screenshots_region_post",
@@ -5436,6 +5475,45 @@
         "summary": "Region"
       }
     },
+    "/v1/screenshots/region/raw": {
+      "post": {
+        "operationId": "region_raw_v1_screenshots_region_raw_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Region Raw"
+      }
+    },
     "/v1/screenshots/zoom": {
       "post": {
         "operationId": "zoom_v1_screenshots_zoom_post",
@@ -5472,6 +5550,45 @@
           }
         },
         "summary": "Zoom"
+      }
+    },
+    "/v1/screenshots/zoom/raw": {
+      "post": {
+        "operationId": "zoom_raw_v1_screenshots_zoom_raw_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZoomScreenshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Zoom Raw"
       }
     },
     "/v1/session/metadata": {

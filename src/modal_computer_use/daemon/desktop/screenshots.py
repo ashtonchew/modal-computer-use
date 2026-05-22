@@ -4,6 +4,7 @@ import base64
 import subprocess
 import tempfile
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -21,6 +22,19 @@ from modal_computer_use.models import (
 )
 
 RunCommand = Callable[..., Awaitable[subprocess.CompletedProcess[str]]]
+
+
+@dataclass(frozen=True)
+class CapturedScreenshot:
+    format: str
+    width: int
+    height: int
+    data: bytes
+    sha256: str
+    captured_at: datetime
+    coordinate_space: CoordinateSpace
+    cursor_visible: bool
+    cursor_position: Point | None = None
 
 
 class X11ScreenshotController:
@@ -46,6 +60,49 @@ class X11ScreenshotController:
         call_id: str | None = None,
         retention_class: str = "ephemeral",
     ) -> Screenshot:
+        captured = await self.capture_bytes(
+            options,
+            region=region,
+            include_cursor_position=True,
+        )
+        data = captured.data
+        artifact_uri = None
+        data_base64 = base64.b64encode(data).decode("ascii")
+        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
+            if artifact_store is None:
+                raise RuntimeError("artifact_store required for artifact screenshot storage")
+            suffix = "jpg" if options.format == "jpeg" else options.format
+            name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+            info = artifact_store.write_bytes(
+                f"screenshots/{name}_{call_id or 'shot'}.{suffix}",
+                data,
+                content_type=f"image/{options.format}",
+                created_by_call_id=call_id,
+                retention_class=retention_class,
+            )
+            artifact_uri = info.uri
+            data_base64 = None
+        return Screenshot(
+            format=options.format,
+            width=captured.width,
+            height=captured.height,
+            size_bytes=len(data),
+            data_base64=data_base64,
+            artifact_uri=artifact_uri,
+            sha256=captured.sha256,
+            captured_at=captured.captured_at,
+            coordinate_space=captured.coordinate_space,
+            cursor_visible=captured.cursor_visible,
+            cursor_position=captured.cursor_position,
+        )
+
+    async def capture_bytes(
+        self,
+        options: ScreenshotOptions,
+        *,
+        region: Region | None = None,
+        include_cursor_position: bool = False,
+    ) -> CapturedScreenshot:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         command = ["maim"]
@@ -75,34 +132,17 @@ class X11ScreenshotController:
             image_height=image_height,
             source_region=region,
         )
-        artifact_uri = None
-        data_base64 = base64.b64encode(data).decode("ascii")
-        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
-            if artifact_store is None:
-                raise RuntimeError("artifact_store required for artifact screenshot storage")
-            suffix = "jpg" if options.format == "jpeg" else options.format
-            name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-            info = artifact_store.write_bytes(
-                f"screenshots/{name}_{call_id or 'shot'}.{suffix}",
-                data,
-                content_type=f"image/{options.format}",
-                created_by_call_id=call_id,
-                retention_class=retention_class,
-            )
-            artifact_uri = info.uri
-            data_base64 = None
-        return Screenshot(
+        cursor_position = await self._cursor_position() if include_cursor_position else None
+        return CapturedScreenshot(
             format=options.format,
             width=coordinate_space.image_width,
             height=coordinate_space.image_height,
-            size_bytes=len(data),
-            data_base64=data_base64,
-            artifact_uri=artifact_uri,
+            data=data,
             sha256=sha256_bytes(data),
             captured_at=datetime.now(UTC),
             coordinate_space=coordinate_space,
             cursor_visible=options.show_cursor,
-            cursor_position=await self._cursor_position(),
+            cursor_position=cursor_position,
         )
 
 

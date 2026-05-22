@@ -311,6 +311,25 @@ def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
     assert "-u" not in maim_commands[1]
 
 
+def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None:
+    backend = RecordingX11Backend()
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        if args[:2] == ("xdotool", "getmouselocation"):
+            raise AssertionError("raw screenshot path should not query cursor position by default")
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+
+    shot = anyio.run(backend.screenshot_bytes, ScreenshotOptions(format="png"))
+
+    assert shot.width == 10
+    assert shot.height == 10
+    assert shot.cursor_position is None
+
+
 def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:
     backend = RecordingX11Backend()
 

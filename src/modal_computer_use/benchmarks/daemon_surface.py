@@ -46,6 +46,14 @@ def _run_daemon_http_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "screenshot_full_raw": core.run_screenshot_benchmark(
+            client=client,
+            name="screenshot_full_raw",
+            request={"format": "png", "show_cursor": False},
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            raw=True,
+        ),
         "move_click": core.run_move_click_benchmark(
             client=client,
             iterations=iterations,

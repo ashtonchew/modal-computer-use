@@ -37,12 +37,13 @@ def run_screenshot_benchmark(
     request: dict[str, Any],
     iterations: int,
     warmup_iterations: int = 1,
+    raw: bool = False,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
 
     failures: list[dict[str, Any]] = []
-    benchmark = _ScreenshotBenchmark(client, request)
+    benchmark = _ScreenshotBenchmark(client, request, raw=raw)
     samples, observations = _measure_observed_case(
         name=name,
         iterations=iterations,
@@ -54,6 +55,7 @@ def run_screenshot_benchmark(
     result.update(
         {
             "request": _safe_screenshot_request(request),
+            "transport_encoding": "binary" if raw else "json_base64",
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],

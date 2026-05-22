@@ -5,6 +5,7 @@ from typing import Any
 
 from modal_computer_use.namespaces.actions import ActionsNamespace
 from modal_computer_use.namespaces.recordings import RecordingsNamespace
+from modal_computer_use.namespaces.screenshots import ScreenshotsNamespace
 
 
 class _FakeClient:
@@ -29,6 +30,10 @@ class _FakeClient:
 
     def get_bytes(self, *_args, **_kwargs):
         raise AssertionError("recording downloads must stream instead of buffering")
+
+    def post_bytes(self, path: str, *, json: Any | None = None, headers=None):
+        self.posts.append({"path": path, "json": json, "headers": headers})
+        return b"image-bytes"
 
 
 def test_actions_namespace_forwards_batch_timeout_and_trace_metadata() -> None:
@@ -77,3 +82,26 @@ def test_recordings_namespace_download_streams_to_target(tmp_path) -> None:
 
     assert result == target
     assert client.downloads == [("/v1/recordings/rec_123/download", target)]
+
+
+def test_screenshots_namespace_full_bytes_uses_raw_endpoint() -> None:
+    client = _FakeClient()
+    namespace = ScreenshotsNamespace(client)  # type: ignore[arg-type]
+
+    result = namespace.full_bytes(format="jpeg", quality=80, scale=0.5)
+
+    assert result == b"image-bytes"
+    assert client.posts == [
+        {
+            "path": "/v1/screenshots/full/raw",
+            "json": {
+                "format": "jpeg",
+                "quality": 80,
+                "scale": 0.5,
+                "show_cursor": False,
+                "processing": "auto",
+                "storage": "inline",
+            },
+            "headers": None,
+        }
+    ]

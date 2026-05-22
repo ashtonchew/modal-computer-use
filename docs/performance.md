@@ -77,6 +77,9 @@ The current report includes:
 - `action_batch`: one five-action batch request compared with five separate action requests.
 - `screenshot_full`: full-screen screenshot latency and provider-returned encoded payload byte
   size.
+- `screenshot_full_raw`: full-screen screenshot latency through the binary image response path.
+  This avoids JSON/base64 transport overhead and is the fairer comparison to provider SDKs that
+  already return screenshot bytes.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
 - `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
@@ -228,6 +231,8 @@ Keep SDK benchmark surfaces fair:
   `modal-daemon-tunnel`, `daytona-toolbox-http`, or `e2b-desktop-sdk`.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
+- Use the binary screenshot path for raw primitive latency comparisons; keep JSON/base64 screenshot
+  numbers as backwards-compatible SDK payload overhead.
 - Treat public-rate `cost_estimate` values as approximate context, not billing truth.
 - Treat screenshot byte summaries as daemon-returned payload size.
 - Do not include noVNC stream URLs, bearer tokens, typed text, screenshot bytes, stdout,

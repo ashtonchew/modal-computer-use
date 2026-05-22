@@ -117,13 +117,34 @@ class _CommandEchoBenchmark:
         return {"exit_code": output.get("returncode") if isinstance(output, dict) else None}
 
 class _ScreenshotBenchmark:
-    def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
+    def __init__(self, client: DaemonClient, request: dict[str, Any], *, raw: bool = False) -> None:
         self._client = client
         self._request = request
+        self._raw = raw
 
     def run(self) -> dict[str, Any]:
+        if self._raw:
+            payload, headers = self._client.post_bytes_with_headers(
+                "/v1/screenshots/full/raw", json=self._request
+            )
+            return {
+                "format": self._request.get("format", "png"),
+                "width": _int_header(headers, "x-computer-use-width"),
+                "height": _int_header(headers, "x-computer-use-height"),
+                "size_bytes": len(payload),
+                "storage": "inline",
+                "artifact_backed": False,
+                "cursor_visible": self._request.get("show_cursor", False),
+            }
         result = self._client.post_json("/v1/screenshots/full", json=self._request)
         return _safe_screenshot_result(result)
+
+
+def _int_header(headers: Any, name: str) -> int | None:
+    value = headers.get(name) if hasattr(headers, "get") else None
+    if not isinstance(value, str) or not value.isdigit():
+        return None
+    return int(value)
 
 class _RecordingStartStopBenchmark:
     def __init__(self, client: DaemonClient) -> None:
