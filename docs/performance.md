@@ -233,6 +233,9 @@ Keep SDK benchmark surfaces fair:
 - Compare deterministic SDK primitives before comparing model-driven task completion.
 - Use the binary screenshot path for raw primitive latency comparisons; keep JSON/base64 screenshot
   numbers as backwards-compatible SDK payload overhead.
+- Report `click_screenshot_raw` for the model-loop hot path. It uses one daemon request to run the
+  action batch and return the observation as image bytes, so it avoids both a second tunnel round trip
+  and JSON/base64 screenshot payload overhead.
 - Treat public-rate `cost_estimate` values as approximate context, not billing truth.
 - Treat screenshot byte summaries as daemon-returned payload size.
 - Do not include noVNC stream URLs, bearer tokens, typed text, screenshot bytes, stdout,
@@ -419,6 +422,12 @@ variance plus per-request tunnel and payload costs, not as Connect-token exchang
 - `auto` (default) picks based on size.
 
 For agent loops that call screenshot every few actions, `auto` is usually the right answer.
+
+For low-latency model turns, prefer `actions.run_and_screenshot_bytes(...)` or
+`POST /v1/actions/run/raw-screenshot`. This keeps action execution and observation capture in a
+single daemon request while returning the screenshot as binary image bytes. The legacy
+`actions.run(..., screenshot_after=True)` path remains useful when callers need a structured JSON
+`Screenshot` object, but it pays base64 response overhead.
 
 For PNG screenshots at native scale, the daemon compares the native `maim` PNG with its Pillow
 RGB re-encode and returns the smaller valid payload. This keeps simple/paletted desktops compact

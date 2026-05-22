@@ -20,6 +20,7 @@ from .measurement import (
     _summary,
 )
 from .operations import (
+    _ClickScreenshotRawBenchmark,
     _CommandEchoBenchmark,
     _MoveClickBenchmark,
     _MoveClickSequenceBenchmark,
@@ -136,6 +137,53 @@ def run_move_click_sequence_benchmark(
         {
             "action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS),
             "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_SEQUENCE_ACTIONS],
+        }
+    )
+    return result
+
+def run_click_screenshot_raw_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    request = {"format": "png", "show_cursor": False}
+    benchmark = _ClickScreenshotRawBenchmark(client, request)
+    samples, observations = _measure_observed_case(
+        name="click_screenshot_raw",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _attributed_case_result(
+        "click_screenshot_raw",
+        iterations,
+        samples,
+        observations,
+        failures,
+    )
+    result.update(
+        {
+            "request": _safe_screenshot_request(request),
+            "transport_encoding": "binary",
+            "action_count": len(MOVE_CLICK_ACTIONS),
+            "actions": [_safe_action_metadata(action) for action in MOVE_CLICK_ACTIONS],
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
         }
     )
     return result

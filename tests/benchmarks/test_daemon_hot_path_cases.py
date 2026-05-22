@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 import json
 
 from modal_computer_use.benchmarks import (
     TYPE_1000_CHARS_TEXT,
     TYPE_1000_CHARS_TIMEOUT_MS,
     TYPING_BENCHMARK_TEXT,
+    run_click_screenshot_raw_benchmark,
     run_move_click_sequence_benchmark,
     run_type_100_chars_benchmark,
     run_type_1000_chars_benchmark,
@@ -243,3 +245,43 @@ def test_move_click_sequence_benchmark_uses_safe_metadata_and_attribution() -> N
         "move",
         "click",
     ]
+
+
+def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_bytes_with_headers(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run/raw-screenshot"
+            assert headers is None
+            assert json["screenshot_after"] is True
+            assert json["screenshot_options"] == {"format": "png", "show_cursor": False}
+            action_result = {
+                "ok": True,
+                "results": [{"ok": True}, {"ok": True}],
+                "timing": {"daemon_ms": 20.0},
+            }
+            return b"png-bytes", {
+                "x-computer-use-width": "1024",
+                "x-computer-use-height": "768",
+                "x-computer-use-action-result": base64.b64encode(
+                    json_module_dumps(action_result).encode("utf-8")
+                ).decode("ascii"),
+                "x-computer-use-timing-ms": '{"total_ms":8.5}',
+            }
+
+    payload = run_click_screenshot_raw_benchmark(
+        client=TimedClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["daemon_samples_ms"] == [20.0]
+    assert payload["samples_bytes"] == [9]
+    assert payload["last_result"]["screenshot_daemon_timing_ms"] == {"total_ms": 8.5}
+    assert payload["action_count"] == 2
+
+
+def json_module_dumps(value) -> str:
+    return json.dumps(value, separators=(",", ":"))

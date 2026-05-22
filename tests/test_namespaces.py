@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,22 @@ class _FakeClient:
     def post_bytes(self, path: str, *, json: Any | None = None, headers=None):
         self.posts.append({"path": path, "json": json, "headers": headers})
         return b"image-bytes"
+
+    def post_bytes_with_headers(self, path: str, *, json: Any | None = None, headers=None):
+        self.posts.append({"path": path, "json": json, "headers": headers})
+        action_result = {
+            "ok": True,
+            "call_id": json.get("call_id") if isinstance(json, dict) else None,
+            "results": [{"index": 0, "type": "move", "ok": True, "output": {}}],
+        }
+        return b"image-bytes", {
+            "content-type": "image/png",
+            "x-computer-use-width": "1024",
+            "x-computer-use-height": "768",
+            "x-computer-use-action-result": base64.b64encode(
+                json_module_dumps(action_result).encode("utf-8")
+            ).decode("ascii"),
+        }
 
 
 def test_actions_namespace_forwards_batch_timeout_and_trace_metadata() -> None:
@@ -73,6 +91,25 @@ def test_actions_namespace_validate_accepts_full_batch_options() -> None:
     assert payload["max_action_timeout_ms"] == 123
 
 
+def test_actions_namespace_run_and_screenshot_bytes_uses_raw_endpoint() -> None:
+    client = _FakeClient()
+    namespace = ActionsNamespace(client)  # type: ignore[arg-type]
+
+    result = namespace.run_and_screenshot_bytes(
+        [{"type": "move", "x": 1, "y": 2}],
+        idempotency_key="idem",
+        call_id="call_test",
+    )
+
+    assert result.data == b"image-bytes"
+    assert result.width == 1024
+    assert result.height == 768
+    assert result.result.call_id == "call_test"
+    assert client.posts[0]["path"] == "/v1/actions/run/raw-screenshot"
+    assert client.posts[0]["headers"] == {"Idempotency-Key": "idem"}
+    assert client.posts[0]["json"]["screenshot_after"] is True
+
+
 def test_recordings_namespace_download_streams_to_target(tmp_path) -> None:
     client = _FakeClient()
     namespace = RecordingsNamespace(client)  # type: ignore[arg-type]
@@ -105,3 +142,7 @@ def test_screenshots_namespace_full_bytes_uses_raw_endpoint() -> None:
             "headers": None,
         }
     ]
+
+
+def json_module_dumps(value: Any) -> str:
+    return json.dumps(value, separators=(",", ":"))

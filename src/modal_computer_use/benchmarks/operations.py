@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Callable
 from typing import Any
@@ -71,6 +72,37 @@ class _MoveClickSequenceBenchmark:
         )
         _ensure_ok_result(result)
         return {"daemon_ms": _extract_daemon_ms(result)}
+
+class _ClickScreenshotRawBenchmark:
+    def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
+        self._client = client
+        self._request = request
+
+    def run(self) -> dict[str, Any]:
+        payload, headers = self._client.post_bytes_with_headers(
+            "/v1/actions/run/raw-screenshot",
+            json={
+                "actions": MOVE_CLICK_ACTIONS,
+                "screenshot_after": True,
+                "screenshot_options": self._request,
+                "source": "benchmark",
+            },
+        )
+        action_result = _action_result_header(headers)
+        _ensure_ok_result(action_result)
+        screenshot_timing = _timing_header(headers)
+        return {
+            "format": self._request.get("format", "png"),
+            "width": _int_header(headers, "x-computer-use-width"),
+            "height": _int_header(headers, "x-computer-use-height"),
+            "size_bytes": len(payload),
+            "storage": "inline",
+            "artifact_backed": False,
+            "cursor_visible": self._request.get("show_cursor", False),
+            "daemon_ms": _extract_daemon_ms(action_result),
+            "action_result": _safe_action_result_metadata(action_result),
+            "screenshot_daemon_timing_ms": screenshot_timing,
+        }
 
 class _TypeCharsBenchmark:
     def __init__(
@@ -165,6 +197,27 @@ def _timing_header(headers: Any) -> dict[str, float]:
         str(key): float(item)
         for key, item in data.items()
         if not isinstance(item, bool) and isinstance(item, int | float)
+    }
+
+
+def _action_result_header(headers: Any) -> dict[str, Any]:
+    value = headers.get("x-computer-use-action-result") if hasattr(headers, "get") else None
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(base64.b64decode(value).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _safe_action_result_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    results = result.get("results")
+    return {
+        "ok": result.get("ok"),
+        "call_id": result.get("call_id"),
+        "result_count": len(results) if isinstance(results, list) else 0,
+        "timing": result.get("timing") if isinstance(result.get("timing"), dict) else None,
     }
 
 class _RecordingStartStopBenchmark:

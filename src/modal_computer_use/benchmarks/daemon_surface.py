@@ -59,6 +59,11 @@ def _run_daemon_http_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "click_screenshot_raw": core.run_click_screenshot_raw_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
         "move_click_sequence": core.run_move_click_sequence_benchmark(
             client=client,
             iterations=iterations,

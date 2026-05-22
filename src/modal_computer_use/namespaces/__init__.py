@@ -1,4 +1,4 @@
-from .actions import ActionsNamespace
+from .actions import ActionScreenshotBytesResult, ActionsNamespace
 from .apps import AppsNamespace
 from .artifacts import ArtifactsNamespace
 from .browser import BrowserNamespace
@@ -17,6 +17,7 @@ from .session import SessionNamespace
 from .windows import WindowsNamespace
 
 __all__ = [
+    "ActionScreenshotBytesResult",
     "ActionsNamespace",
     "AppsNamespace",
     "ArtifactsNamespace",
