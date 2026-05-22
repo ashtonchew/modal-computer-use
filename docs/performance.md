@@ -13,6 +13,41 @@ Benchmark reports use it to split total SDK round-trip latency from daemon execu
 derive client/network/transport overhead. Older daemons that do not return timing are reported as
 `attribution.status="unavailable"` rather than failed.
 
+## Screenshot hot paths
+
+Use the raw binary screenshot routes for latency-sensitive observation loops:
+
+```bash
+POST /v1/screenshots/full/raw
+POST /v1/actions/run/raw-screenshot
+```
+
+The fused action route is the canonical model-loop path because it executes the requested actions
+and returns the post-action screenshot in one HTTP request. That avoids the extra network round
+trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`.
+
+For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
+screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
+plus in-memory Pillow encoding, avoiding the slower subprocess/temp-file/decode path. Cursor-visible
+screenshots still use the desktop screenshot tool fallback because the MSS path does not compose the
+cursor into the image.
+
+The JSON screenshot routes remain compatibility routes:
+
+```bash
+POST /v1/screenshots/full
+POST /v1/actions/run
+```
+
+They return structured JSON and base64 image payloads, which is convenient but materially slower
+and larger on the wire than the raw binary routes. Benchmarks should label these separately from
+raw primitive latency.
+
+Screenshot responses include `x-computer-use-capture-backend` and
+`x-computer-use-timing-ms` headers on raw routes. Benchmark results also record the client-observed
+HTTP protocol version when available, so HTTP/2 runs can be verified from the artifact instead of
+inferred from configuration.
+
 ## Benchmark report
 
 Use the release report command to measure current daemon hot paths without model credentials:
