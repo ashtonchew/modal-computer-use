@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -233,6 +235,7 @@ def test_x11_cursor_position_reads_xdotool_shell_output() -> None:
 
 def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, monkeypatch) -> None:
     backend = RecordingX11Backend()
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -261,6 +264,7 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
 def test_x11_screenshot_uses_native_png_when_smaller(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("P", (10, 10), 0)
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -289,6 +293,7 @@ def test_x11_screenshot_uses_reencoded_png_when_smaller(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = b"native-png" * 10
     encoded_png = b"small-png"
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -318,6 +323,7 @@ def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
         return subprocess.CompletedProcess(args, 0, "", "")
 
     backend._run = write_png
+    backend._screenshots._mss.grab = lambda _source: None
 
     async def capture() -> None:
         await backend.screenshot(ScreenshotOptions(show_cursor=False))
@@ -341,6 +347,7 @@ def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None
         return subprocess.CompletedProcess(args, 0, "", "")
 
     backend._run = write_png
+    backend._screenshots._mss.grab = lambda _source: None
 
     shot = anyio.run(backend.screenshot_bytes, ScreenshotOptions(format="png"))
 
@@ -352,7 +359,7 @@ def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None
 def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("RGB", (10, 10), "white")
-    monkeypatch.setattr(screenshots_module, "_capture_mss_png", lambda _source, **_kwargs: None)
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -385,7 +392,7 @@ def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> 
 def test_x11_screenshot_bytes_scrot_fast_path_supports_regions(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("RGB", (10, 10), "white")
-    monkeypatch.setattr(screenshots_module, "_capture_mss_png", lambda _source, **_kwargs: None)
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -414,7 +421,7 @@ def test_x11_screenshot_bytes_scrot_fast_path_supports_regions(monkeypatch) -> N
 def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("RGB", (10, 10), "white")
-    monkeypatch.setattr(screenshots_module, "_capture_mss_png", lambda _source, **_kwargs: None)
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -447,12 +454,12 @@ def test_x11_screenshot_bytes_prefers_mss_for_raw_native_png(monkeypatch) -> Non
     native_png = _png_bytes("RGB", (10, 10), "white")
     sources: list[Region] = []
 
-    def capture_mss(source: Region, **kwargs) -> bytes:
+    def capture_mss(_session, source: Region) -> object:
         sources.append(source)
-        assert kwargs == {"display": ":99"}
-        return native_png
+        return _fake_mss_capture((source.width, source.height))
 
-    monkeypatch.setattr(screenshots_module, "_capture_mss_png", capture_mss)
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", capture_mss)
+    monkeypatch.setattr(screenshots_module, "_encode_mss_png", lambda _capture: native_png)
 
     async def capture():
         return await backend.screenshot_bytes(
@@ -470,8 +477,142 @@ def test_x11_screenshot_bytes_prefers_mss_for_raw_native_png(monkeypatch) -> Non
     assert backend.commands == []
 
 
+def test_x11_screenshot_bytes_uses_mss_for_raw_jpeg_without_file_capture(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    sources: list[Region] = []
+
+    def capture_mss(_session, source: Region) -> object:
+        sources.append(source)
+        return _fake_mss_capture((10, 10), color=(255, 0, 0))
+
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", capture_mss)
+
+    async def fail_file_capture(*_args, **_kwargs):
+        raise AssertionError("file screenshot fallback should not run")
+
+    backend._run = fail_file_capture
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="jpeg", quality=80),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.format == "jpeg"
+    assert shot.width == 10
+    assert shot.height == 10
+    assert shot.capture_backend == "mss"
+    assert shot.data.startswith(b"\xff\xd8")
+    assert sources == [Region(x=0, y=0, width=backend.width, height=backend.height)]
+    assert backend.commands == []
+
+
+def test_x11_screenshot_bytes_uses_mss_for_scaled_webp(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+
+    monkeypatch.setattr(
+        screenshots_module._MSSCaptureSession,
+        "grab",
+        lambda _session, _source: _fake_mss_capture((10, 10), color=(0, 255, 0)),
+    )
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="webp", quality=80, scale=0.5),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.format == "webp"
+    assert shot.width == 5
+    assert shot.height == 5
+    assert shot.capture_backend == "mss"
+    assert shot.data.startswith(b"RIFF")
+    assert backend.commands == []
+
+
+def test_x11_screenshot_show_cursor_uses_file_capture_when_mss_available(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    monkeypatch.setattr(
+        screenshots_module._MSSCaptureSession,
+        "grab",
+        lambda _session, _source: _fake_mss_capture((10, 10)),
+    )
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="png", show_cursor=True),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.capture_backend == "maim"
+    assert backend.commands == [("maim", backend.commands[0][-1])]
+
+
+def test_mss_capture_session_reuses_screenshotter(monkeypatch) -> None:
+    instances = []
+
+    class FakeMSS:
+        def __init__(self, **_kwargs):
+            self.grabs = 0
+            instances.append(self)
+
+        def grab(self, _monitor):
+            self.grabs += 1
+            return _fake_mss_capture((10, 10)).shot
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(MSS=FakeMSS))
+
+    session = screenshots_module._MSSCaptureSession(display=":99")
+
+    assert session.grab(Region(x=0, y=0, width=10, height=10)) is not None
+    assert session.grab(Region(x=0, y=0, width=10, height=10)) is not None
+    assert len(instances) == 1
+    assert instances[0].grabs == 2
+
+
+def test_mss_capture_session_falls_back_when_xshm_open_fails(monkeypatch) -> None:
+    backends = []
+
+    class FakeMSS:
+        def __init__(self, **kwargs):
+            backend = kwargs.get("backend")
+            backends.append(backend)
+            if backend == "xshmgetimage":
+                raise RuntimeError("xshm unavailable")
+
+        def grab(self, _monitor):
+            return _fake_mss_capture((10, 10)).shot
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(MSS=FakeMSS))
+
+    session = screenshots_module._MSSCaptureSession(display=":99")
+
+    assert session.grab(Region(x=0, y=0, width=10, height=10)) is not None
+    assert backends == ["xshmgetimage", None]
+
+
 def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:
     backend = RecordingX11Backend()
+    backend._screenshots._mss.grab = lambda _source: None
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -496,6 +637,21 @@ def _png_bytes(mode: str, size: tuple[int, int], color: int | str) -> bytes:
     output = BytesIO()
     Image.new(mode, size, color).save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _fake_mss_capture(
+    size: tuple[int, int],
+    *,
+    color: tuple[int, int, int] = (255, 255, 255),
+) -> screenshots_module._MSSCapture:
+    width, height = size
+    red, green, blue = color
+
+    class Shot:
+        rgb = bytes((red, green, blue)) * width * height
+        bgra = bytes((blue, green, red, 255)) * width * height
+
+    return screenshots_module._MSSCapture(shot=Shot(), width=width, height=height)
 
 
 def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:

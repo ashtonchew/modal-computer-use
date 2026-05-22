@@ -4,11 +4,13 @@ import base64
 import subprocess
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 from PIL import Image
 
@@ -23,6 +25,17 @@ from modal_computer_use.models import (
 )
 
 RunCommand = Callable[..., Awaitable[subprocess.CompletedProcess[str]]]
+
+
+@dataclass(frozen=True)
+class _MSSCapture:
+    shot: Any
+    width: int
+    height: int
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return (self.width, self.height)
 
 
 @dataclass(frozen=True)
@@ -55,6 +68,7 @@ class X11ScreenshotController:
         self.height = height
         self.display = display
         self._cursor_position = cursor_position
+        self._mss = _MSSCaptureSession(display=display)
 
     async def capture(
         self,
@@ -112,19 +126,22 @@ class X11ScreenshotController:
         started_total = perf_counter()
         timings_ms: dict[str, float] = {}
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
-        mss_capture = None
+        data = None
         capture_backend = None
-        if prefer_native_png and _can_use_mss_fast_path(options):
+        if _can_use_mss_fast_path(options):
             started = perf_counter()
-            mss_capture = _capture_mss_png(source, display=self.display)
+            mss_capture = self._mss.grab(source)
             if mss_capture is not None:
                 timings_ms["capture_ms"] = _elapsed_ms(started)
                 capture_backend = "mss"
-                data = mss_capture
-                image_width = source.width
-                image_height = source.height
+                data, image_width, image_height = _encode_mss_capture(
+                    mss_capture,
+                    options,
+                    timings_ms=timings_ms,
+                    prefer_native_png=prefer_native_png,
+                )
 
-        if mss_capture is None:
+        if data is None:
             data, image_width, image_height, capture_backend = await self._capture_via_file(
                 options,
                 region=region,
@@ -240,7 +257,10 @@ class X11ScreenshotController:
 def encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
     output = BytesIO()
     fmt = "JPEG" if image_format == "jpeg" else image_format.upper()
-    image.save(output, format=fmt, quality=quality)
+    save_kwargs: dict[str, Any] = {"quality": quality}
+    if fmt == "WEBP":
+        save_kwargs["method"] = 0
+    image.save(output, format=fmt, **save_kwargs)
     return output.getvalue()
 
 
@@ -252,23 +272,104 @@ def _can_preserve_native_png(options: ScreenshotOptions) -> bool:
     return options.format == "png" and options.scale == 1.0
 
 
+def _encode_mss_capture(
+    capture: _MSSCapture,
+    options: ScreenshotOptions,
+    *,
+    timings_ms: dict[str, float],
+    prefer_native_png: bool,
+) -> tuple[bytes, int, int]:
+    if prefer_native_png and _can_preserve_native_png(options):
+        started = perf_counter()
+        data = _encode_mss_png(capture)
+        timings_ms["encode_ms"] = _elapsed_ms(started)
+        return data, capture.width, capture.height
+
+    started = perf_counter()
+    image = _mss_capture_to_image(capture)
+    timings_ms["pixel_convert_ms"] = _elapsed_ms(started)
+
+    image_width = scaled_dimension(capture.width, options.scale)
+    image_height = scaled_dimension(capture.height, options.scale)
+    if options.scale != 1.0:
+        started = perf_counter()
+        image = image.resize((image_width, image_height))
+        timings_ms["resize_ms"] = _elapsed_ms(started)
+
+    started = perf_counter()
+    data = encode_image(image, options.format, options.quality)
+    timings_ms["encode_ms"] = _elapsed_ms(started)
+    return data, image_width, image_height
+
+
+def _encode_mss_png(capture: _MSSCapture) -> bytes:
+    from mss import tools
+
+    data = tools.to_png(capture.shot.rgb, capture.size, level=1)
+    if not isinstance(data, bytes):
+        raise RuntimeError("mss png encoder returned non-bytes")
+    return data
+
+
+def _mss_capture_to_image(capture: _MSSCapture) -> Image.Image:
+    return Image.frombytes("RGB", capture.size, capture.shot.bgra, "raw", "BGRX")
+
+
+class _MSSCaptureSession:
+    def __init__(self, *, display: str) -> None:
+        self._display = display
+        self._screenshotter: Any | None = None
+        self._prefer_xshm = True
+
+    def grab(self, source: Region) -> _MSSCapture | None:
+        monitor = {
+            "left": source.x,
+            "top": source.y,
+            "width": source.width,
+            "height": source.height,
+        }
+        for attempt in range(2):
+            try:
+                screenshotter = self._screenshotter or self._open(prefer_xshm=self._prefer_xshm)
+                self._screenshotter = screenshotter
+                shot = screenshotter.grab(monitor)
+                return _MSSCapture(shot=shot, width=source.width, height=source.height)
+            except Exception:
+                self._reset()
+                if attempt == 0 and self._prefer_xshm:
+                    self._prefer_xshm = False
+                    continue
+                return None
+        return None
+
+    def _open(self, *, prefer_xshm: bool) -> Any:
+        import mss
+
+        if prefer_xshm:
+            try:
+                return mss.MSS(display=self._display, backend="xshmgetimage")
+            except TypeError:
+                return mss.MSS(display=self._display)
+            except Exception:
+                return mss.MSS(display=self._display)
+        return mss.MSS(display=self._display)
+
+    def _reset(self) -> None:
+        if self._screenshotter is not None:
+            with suppress(Exception):
+                self._screenshotter.close()
+        self._screenshotter = None
+
+
 def _capture_mss_png(source: Region, *, display: str) -> bytes | None:
     try:
-        import mss
-        from mss import tools
+        capture = _MSSCaptureSession(display=display).grab(source)
     except ImportError:
         return None
-    monitor = {
-        "left": source.x,
-        "top": source.y,
-        "width": source.width,
-        "height": source.height,
-    }
+    if capture is None:
+        return None
     try:
-        with mss.MSS(display=display) as screenshotter:
-            shot = screenshotter.grab(monitor)
-            data = tools.to_png(shot.rgb, shot.size, level=1)
-            return data if isinstance(data, bytes) else None
+        return _encode_mss_png(capture)
     except Exception:
         return None
 
@@ -300,7 +401,7 @@ def _can_use_scrot_fast_path(options: ScreenshotOptions) -> bool:
 
 
 def _can_use_mss_fast_path(options: ScreenshotOptions) -> bool:
-    return not options.show_cursor and _can_preserve_native_png(options)
+    return not options.show_cursor
 
 
 def scaled_dimension(value: int, scale: float) -> int:
