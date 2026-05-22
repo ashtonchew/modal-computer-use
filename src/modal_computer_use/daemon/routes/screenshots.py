@@ -5,7 +5,6 @@ from fastapi import APIRouter, Request
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_screenshot_capture
 from modal_computer_use.daemon.routes.validation import (
-    ensure_desktop_ready,
     validate_region,
 )
 from modal_computer_use.daemon.schemas import ScreenshotRequest, ZoomScreenshotRequest
@@ -44,7 +43,6 @@ def enforce_screenshot_options_pixels(
 
 @router.post("/full")
 async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
-    await ensure_desktop_ready(request)
     options = ScreenshotOptions.model_validate(payload.model_dump(exclude={"region"}))
     enforce_screenshot_options_pixels(
         request,
@@ -63,7 +61,6 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
 
 @router.post("/region")
 async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
-    await ensure_desktop_ready(request)
     if payload.region is None:
         raise DaemonError("region screenshot requires region", code="missing_region")
     validate_region(request, payload.region)
@@ -86,7 +83,6 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
 
 @router.post("/zoom")
 async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
-    await ensure_desktop_ready(request)
     region = Region.model_validate(payload.region)
     validate_region(request, region)
     enforce_screenshot_pixels(
