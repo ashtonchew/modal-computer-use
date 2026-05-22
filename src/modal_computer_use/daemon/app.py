@@ -36,6 +36,7 @@ from .routes import (
     debug,
     display,
     health,
+    hot_session,
     input,
     keyboard,
     lifecycle,
@@ -249,6 +250,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         commands.router,
         debug.router,
         session.router,
+        hot_session.router,
         recordings.dashboard_router,
     ):
         app.include_router(router)

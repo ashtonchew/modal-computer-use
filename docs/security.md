@@ -14,6 +14,10 @@ For local development, set `COMPUTER_USE_LOCAL_TOKEN` and have clients send `Aut
 
 Tokens passed in URL query strings are rejected by default, because URLs leak into logs and browser history. If you have a specific reason to allow them, set `COMPUTER_USE_REJECT_QUERY_TOKENS=false` and accept the leakage risk.
 
+The hot-session WebSocket at `/v1/session/hot` uses the same bearer-token and Modal verified-user
+rules as daemon HTTP routes. It rejects query-string connect tokens by default and returns raw
+screenshot bytes only as WebSocket binary frames, never in logs or JSON error payloads.
+
 See [configuration.md](configuration.md) for the full list of auth-related variables.
 
 ## noVNC

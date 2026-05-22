@@ -204,6 +204,19 @@ def test_benchmark_sdk_requires_daemon_http_target(capsys) -> None:
         "or --create-modal-sandbox"
     ) in captured.err
 
+
+def test_benchmark_sdk_requires_daemon_hot_session_target(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "sdk", "--surface", "daemon-hot-session"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert (
+        "daemon-hot-session surface benchmark requires --base-url "
+        "or --create-modal-sandbox"
+    ) in captured.err
+
+
 def test_benchmark_sdk_structures_and_redacts_surface_failures(monkeypatch) -> None:
     def fail_surface(**kwargs):
         raise RuntimeError(

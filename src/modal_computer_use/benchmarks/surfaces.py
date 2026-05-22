@@ -4,10 +4,13 @@ from typing import Any, Literal
 
 from .._version import __version__
 from ..client import DaemonClient
+from ..hot_session import HotSessionClient
+from ..transports import HotSessionTransport
 from . import core
 from .adapter_surface import _run_adapter_surface
 from .constants import DEFAULT_SDK_BENCHMARK_SURFACES, BenchmarkSurface
 from .daemon_surface import _run_daemon_http_surface
+from .hot_session_surface import _run_daemon_hot_session_surface
 from .surface_result import _surface_not_measured, _surface_result
 
 SurfaceBenchmarkMode = Literal["mock-local", "http"]
@@ -130,6 +133,27 @@ def _run_surface(
             warmup_iterations=warmup_iterations,
             environment_metadata=environment_metadata,
         )
+    if surface == "daemon-hot-session":
+        if client is None or mode == "mock-local":
+            return _surface_not_measured(
+                "modal-daemon-hot-session",
+                "daemon hot-session benchmark requires a reachable daemon websocket URL",
+            )
+        hot_session = HotSessionClient(
+            HotSessionTransport(
+                client.base_url,
+                token=client.transport.token,
+            )
+        )
+        try:
+            return _run_daemon_hot_session_surface(
+                hot_session=hot_session,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                environment_metadata=environment_metadata,
+            )
+        finally:
+            hot_session.close()
     if surface == "sandbox-exec":
         return _surface_result(
             surface,

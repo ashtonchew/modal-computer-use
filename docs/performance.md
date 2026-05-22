@@ -41,6 +41,23 @@ The fused action route is the canonical model-loop path because it executes the 
 and returns the post-action screenshot in one HTTP request. That avoids the extra network round
 trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`.
 
+For tighter interactive loops, use the hot-session WebSocket:
+
+```text
+GET /v1/session/hot
+```
+
+The hot session keeps one authenticated daemon connection open and accepts ordered JSON control
+frames for `run_actions`, `run_raw_screenshot`, and `screenshot_raw`. Raw observations are returned
+as a JSON metadata frame followed by one binary image frame. This is the SDK's lowest-overhead
+control path because it avoids opening a fresh request for every primitive while reusing the same
+daemon batch and screenshot execution code as the REST routes.
+
+Use the hot session when the caller owns a tight loop and can keep a connection open. Keep the REST
+routes for broad compatibility, simple one-shot calls, idempotency-key workflows, and environments
+where WebSocket egress is unavailable. On Modal, WebSockets are RFC 6455 and are not WebSockets over
+HTTP/2, so the hot-session win comes from persistent session reuse rather than HTTP/2 multiplexing.
+
 For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
 screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
 plus in-memory Pillow encoding, avoiding the slower subprocess/temp-file/decode path. Cursor-visible
@@ -194,6 +211,21 @@ By default this measures:
 Adapter cases do not call OpenAI, Anthropic, or any model API. They measure translation and
 execution-path overhead only, which keeps the benchmark deterministic and credential-free.
 
+Add `daemon-hot-session` when measuring a reachable daemon WebSocket:
+
+```bash
+uv run computer-use benchmark sdk \
+  --base-url http://127.0.0.1:8080 \
+  --token dev \
+  --surfaces daemon-hot-session \
+  --iterations 10
+```
+
+The hot-session surface reports `screenshot_full_raw`, `move_click`, `click_screenshot_raw`, and
+`move_click_sequence` over the persistent session. It intentionally does not run in `--mock-local`
+mode because FastAPI's in-process test client is not the SDK's network/WebSocket stack. Use a local
+daemon or a Modal-created sandbox for real transport attribution.
+
 The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
 
 ```bash
@@ -292,7 +324,8 @@ Keep SDK benchmark surfaces fair:
 
 - Name the ingress explicitly: `modal-daemon-local`, `modal-daemon-connect`,
   `modal-daemon-tunnel`, `modal-daemon-attested-h2-tunnel`, `modal-daemon-h2-tunnel`,
-  `daytona-toolbox-http`, or `e2b-desktop-sdk`.
+  `modal-daemon-attested-hot-session`, `modal-daemon-hot-session`,
+  `modal-daemon-connect-hot-session`, `daytona-toolbox-http`, or `e2b-desktop-sdk`.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
 - Use the binary screenshot path for raw primitive latency comparisons; keep JSON/base64 screenshot

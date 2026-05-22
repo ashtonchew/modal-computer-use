@@ -5,6 +5,7 @@ from typing import Any, Literal
 BenchmarkMode = Literal["mock-local", "http"]
 BenchmarkSurface = Literal[
     "daemon-http",
+    "daemon-hot-session",
     "sandbox-exec",
     "openai-adapter",
     "anthropic-adapter",

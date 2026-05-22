@@ -16,6 +16,7 @@ from .errors import (
     SandboxAmbiguousError,
     SandboxUnavailableError,
 )
+from .hot_session import HotSessionClient
 from .image import default_image
 from .models import ComputerStatus, DebugUrls, SandboxRef
 from .namespaces import (
@@ -38,6 +39,7 @@ from .namespaces import (
     WindowsNamespace,
 )
 from .state import compute_config_hash, default_tags, new_run_id
+from .transports import HotSessionTransport
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
@@ -450,6 +452,15 @@ class ComputerSandbox:
         if self._sandbox is not None:
             return DebugUrls(vnc=_vnc_url(self._sandbox), daemon=None, recording_dashboard=None)
         return self.debug.urls()
+
+    def hot_session(self, *, timeout: float = 30.0) -> HotSessionClient:
+        return HotSessionClient(
+            HotSessionTransport(
+                self.client.base_url,
+                token=self.client.transport.token,
+                timeout=timeout,
+            )
+        )
 
     def snapshot_filesystem(self) -> object:
         """Create a Modal filesystem snapshot image for this sandbox.

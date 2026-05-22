@@ -18,6 +18,7 @@ dependencies = [
   "mss>=10.0",
   "pydantic>=2.7",
   "uvicorn[standard]>=0.30",
+  "websockets>=13.0",
   "pillow>=10.0",
 ]
 
