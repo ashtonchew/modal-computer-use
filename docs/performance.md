@@ -13,6 +13,21 @@ Benchmark reports use it to split total SDK round-trip latency from daemon execu
 derive client/network/transport overhead. Older daemons that do not return timing are reported as
 `attribution.status="unavailable"` rather than failed.
 
+## Pointer input hot path
+
+The X11 daemon supports `COMPUTER_USE_INPUT_BACKEND=auto|xtest|xdotool`.
+
+- `auto` is the default. It probes the XTest extension and uses a persistent X connection for
+  pointer actions when available, otherwise it falls back to `xdotool`.
+- `xtest` requires XTest and fails readiness if the extension cannot be opened. Use it for
+  benchmark runs that must prove the persistent backend is active.
+- `xdotool` preserves the older subprocess-backed behavior and remains the compatibility fallback.
+
+The XTest backend currently covers mouse movement, click, button down/up, scroll, and drag movement.
+Keyboard input still uses the existing keyboard path because text, layouts, modifiers, and clipboard
+restore semantics need separate treatment. Action benchmark observations include `input_backend`
+when a measured action used a pointer backend, and summarized cases include `input_backends`.
+
 ## Screenshot hot paths
 
 Use the raw binary screenshot routes for latency-sensitive observation loops:
