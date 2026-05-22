@@ -378,6 +378,7 @@ def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> 
     assert shot.data == native_png
     assert shot.width == backend.width
     assert shot.height == backend.height
+    assert shot.capture_backend == "scrot"
     assert backend.commands == [("scrot", "-z", "-o", backend.commands[0][-1])]
 
 
@@ -434,6 +435,7 @@ def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails(monkeypatch) -
     shot = anyio.run(capture)
 
     assert shot.data == native_png
+    assert shot.capture_backend == "maim"
     assert backend.commands == [
         ("scrot", "-z", "-o", backend.commands[0][-1]),
         ("maim", "-u", backend.commands[1][-1]),
@@ -463,6 +465,7 @@ def test_x11_screenshot_bytes_prefers_mss_for_raw_native_png(monkeypatch) -> Non
     assert shot.data == native_png
     assert shot.width == backend.width
     assert shot.height == backend.height
+    assert shot.capture_backend == "mss"
     assert sources == [Region(x=0, y=0, width=backend.width, height=backend.height)]
     assert backend.commands == []
 

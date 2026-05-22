@@ -40,6 +40,7 @@ def test_raw_screenshot_returns_image_bytes(test_client) -> None:
     assert response.headers["x-computer-use-height"] == "768"
     assert response.headers["x-computer-use-size-bytes"] == str(len(response.content))
     assert response.headers["x-computer-use-sha256"]
+    assert response.headers["x-computer-use-capture-backend"]
     timing = json.loads(response.headers["x-computer-use-timing-ms"])
     assert isinstance(timing, dict)
 

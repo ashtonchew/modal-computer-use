@@ -99,6 +99,7 @@ class _ClickScreenshotRawBenchmark:
             "storage": "inline",
             "artifact_backed": False,
             "cursor_visible": self._request.get("show_cursor", False),
+            "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
             "daemon_ms": _extract_daemon_ms(action_result),
             "action_result": _safe_action_result_metadata(action_result),
             "screenshot_daemon_timing_ms": screenshot_timing,
@@ -169,6 +170,7 @@ class _ScreenshotBenchmark:
                 "storage": "inline",
                 "artifact_backed": False,
                 "cursor_visible": self._request.get("show_cursor", False),
+                "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
                 "daemon_ms": daemon_timing.get("total_ms"),
                 "daemon_timing_ms": daemon_timing,
             }
@@ -181,6 +183,11 @@ def _int_header(headers: Any, name: str) -> int | None:
     if not isinstance(value, str) or not value.isdigit():
         return None
     return int(value)
+
+
+def _str_header(headers: Any, name: str) -> str | None:
+    value = headers.get(name) if hasattr(headers, "get") else None
+    return value if isinstance(value, str) and value else None
 
 
 def _timing_header(headers: Any) -> dict[str, float]:

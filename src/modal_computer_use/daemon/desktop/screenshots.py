@@ -35,6 +35,7 @@ class CapturedScreenshot:
     captured_at: datetime
     coordinate_space: CoordinateSpace
     cursor_visible: bool
+    capture_backend: str | None = None
     cursor_position: Point | None = None
     timings_ms: Mapping[str, float] = field(default_factory=dict)
 
@@ -112,17 +113,19 @@ class X11ScreenshotController:
         timings_ms: dict[str, float] = {}
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
         mss_capture = None
+        capture_backend = None
         if prefer_native_png and _can_use_mss_fast_path(options):
             started = perf_counter()
             mss_capture = _capture_mss_png(source, display=self.display)
             if mss_capture is not None:
                 timings_ms["capture_ms"] = _elapsed_ms(started)
+                capture_backend = "mss"
                 data = mss_capture
                 image_width = source.width
                 image_height = source.height
 
         if mss_capture is None:
-            data, image_width, image_height = await self._capture_via_file(
+            data, image_width, image_height, capture_backend = await self._capture_via_file(
                 options,
                 region=region,
                 prefer_native_png=prefer_native_png,
@@ -152,6 +155,7 @@ class X11ScreenshotController:
             captured_at=datetime.now(UTC),
             coordinate_space=coordinate_space,
             cursor_visible=options.show_cursor,
+            capture_backend=capture_backend,
             cursor_position=cursor_position,
             timings_ms=timings_ms,
         )
@@ -163,11 +167,11 @@ class X11ScreenshotController:
         region: Region | None,
         prefer_native_png: bool,
         timings_ms: dict[str, float],
-    ) -> tuple[bytes, int, int]:
+    ) -> tuple[bytes, int, int, str]:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         started = perf_counter()
-        await self._capture_native_png(
+        capture_backend = await self._capture_native_png(
             temp_path,
             options=options,
             region=region,
@@ -203,7 +207,7 @@ class X11ScreenshotController:
                 data = _smallest_png(native_png, encoded) if native_png is not None else encoded
         finally:
             temp_path.unlink(missing_ok=True)
-        return data, image_width, image_height
+        return data, image_width, image_height, capture_backend
 
     async def _capture_native_png(
         self,
@@ -212,7 +216,7 @@ class X11ScreenshotController:
         options: ScreenshotOptions,
         region: Region | None,
         prefer_scrot: bool,
-    ) -> None:
+    ) -> str:
         primary = _capture_command(
             path,
             options=options,
@@ -223,13 +227,14 @@ class X11ScreenshotController:
         try:
             await self._run(*primary)
             if path.exists() and path.stat().st_size > 0:
-                return
+                return primary[0]
         except Exception:
             if primary == fallback:
                 raise
         await self._run(*fallback)
         if not path.exists() or path.stat().st_size <= 0:
             raise RuntimeError("screenshot capture produced an empty file")
+        return fallback[0]
 
 
 def encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:

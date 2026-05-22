@@ -268,6 +268,7 @@ def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
                     json_module_dumps(action_result).encode("utf-8")
                 ).decode("ascii"),
                 "x-computer-use-timing-ms": '{"total_ms":8.5}',
+                "x-computer-use-capture-backend": "mss",
             }
 
     payload = run_click_screenshot_raw_benchmark(
@@ -280,6 +281,7 @@ def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
     assert payload["daemon_samples_ms"] == [20.0]
     assert payload["samples_bytes"] == [9]
     assert payload["last_result"]["screenshot_daemon_timing_ms"] == {"total_ms": 8.5}
+    assert payload["last_result"]["capture_backend"] == "mss"
     assert payload["action_count"] == 2
 
 

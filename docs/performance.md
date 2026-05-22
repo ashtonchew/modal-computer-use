@@ -450,6 +450,9 @@ raw observation hot path. `scrot` remains a portable native PNG fallback, while 
 compatibility path for cursor-visible, scaled, re-encoded, and JSON screenshots. For JSON PNG
 screenshots at native scale, the daemon still compares the native `maim` PNG with its Pillow RGB
 re-encode and returns the smaller valid payload.
+Raw screenshot responses include `x-computer-use-capture-backend` (`mss`, `scrot`, `maim`, or
+`unknown`) so benchmark artifacts can attribute the capture path directly instead of inferring it
+from timing.
 
 ## Screenshot processing location
 
