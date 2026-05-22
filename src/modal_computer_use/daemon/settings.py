@@ -157,6 +157,9 @@ class DaemonSettings:
     input_rate_limit_per_sec: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 20)
     )
+    input_backend: str = field(
+        default_factory=lambda: os.getenv("COMPUTER_USE_INPUT_BACKEND", "auto")
+    )
     otel_enabled: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_OTEL_ENABLED", False)
     )

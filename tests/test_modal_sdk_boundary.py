@@ -431,6 +431,16 @@ def test_create_h2_tunnel_uses_modal_h2_port(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_DAEMON_HTTP_VERSION"] == "2"
 
 
+def test_create_passes_input_backend_to_daemon(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123", actions={"input_backend": "xtest"})
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_INPUT_BACKEND"] == "xtest"
+
+
 def test_create_h2_with_vnc_keeps_novnc_on_encrypted_port(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(

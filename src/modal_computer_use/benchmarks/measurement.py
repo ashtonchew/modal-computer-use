@@ -170,12 +170,16 @@ def _attributed_case_result(
     daemon_samples: list[float] = []
     overhead_samples: list[float] = []
     transport_http_versions: list[str] = []
+    input_backends: list[str] = []
     for sample_ms, observation in zip(samples, observations, strict=False):
         if not isinstance(observation, dict):
             continue
         http_version = observation.get("transport_http_version")
         if isinstance(http_version, str) and http_version:
             transport_http_versions.append(http_version)
+        input_backend = observation.get("input_backend")
+        if isinstance(input_backend, str) and input_backend:
+            input_backends.append(input_backend)
         daemon_ms = observation.get("daemon_ms")
         if daemon_ms is None:
             continue
@@ -193,6 +197,7 @@ def _attributed_case_result(
             "overhead_summary_ms": _summary(overhead_samples),
             "attribution": attribution,
             "transport_http_versions": sorted(set(transport_http_versions)),
+            "input_backends": sorted(set(input_backends)),
         }
     )
     return result

@@ -89,4 +89,5 @@ async def capabilities(request: Request) -> Capabilities:
         },
         image_profile=request.app.state.settings.image_profile,
         vnc_enabled=request.app.state.settings.vnc_mode != "off",
+        input_backend=getattr(request.app.state.backend, "input_backend", None),
     )

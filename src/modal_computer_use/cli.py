@@ -141,6 +141,12 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    sdk_parser.add_argument(
+        "--input-backend",
+        choices=["auto", "xtest", "xdotool"],
+        default="auto",
+        help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
+    )
     sdk_parser.add_argument("--image-profile", dest="image_profile")
     sdk_parser.add_argument("--image-variant", dest="image_profile")
     sdk_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -206,6 +212,12 @@ def main(argv: list[str] | None = None) -> int:
             "daemon input action rate limit for the created benchmark sandbox; "
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
+    )
+    ingress_ab_parser.add_argument(
+        "--input-backend",
+        choices=["auto", "xtest", "xdotool"],
+        default="auto",
+        help="daemon pointer input backend for the created benchmark sandbox; defaults to auto",
     )
     ingress_ab_parser.add_argument("--image-profile", dest="image_profile")
     ingress_ab_parser.add_argument("--image-variant", dest="image_profile")
@@ -646,6 +658,7 @@ def _modal_benchmark_config(
     config.resources.cpu = args.modal_cpu
     config.resources.memory_mib = args.modal_memory_mib
     config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
+    config.actions.input_backend = args.input_backend
     if args.browser:
         config.browser = BrowserConfig(kind=args.browser)
     return config

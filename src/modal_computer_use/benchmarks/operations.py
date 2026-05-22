@@ -37,6 +37,7 @@ class _ActionBatchBenchmark:
         return {
             "daemon_ms": _extract_daemon_ms(result),
             "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _input_backend_result(result),
         }
 
     def run_separate(self) -> dict[str, Any]:
@@ -68,6 +69,7 @@ class _MoveClickBenchmark:
         return {
             "daemon_ms": _extract_daemon_ms(result),
             "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _input_backend_result(result),
         }
 
 class _MoveClickSequenceBenchmark:
@@ -83,6 +85,7 @@ class _MoveClickSequenceBenchmark:
         return {
             "daemon_ms": _extract_daemon_ms(result),
             "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _input_backend_result(result),
         }
 
 class _ClickScreenshotRawBenchmark:
@@ -116,6 +119,7 @@ class _ClickScreenshotRawBenchmark:
             "transport_http_version": _transport_http_version(self._client),
             "action_result": _safe_action_result_metadata(action_result),
             "screenshot_daemon_timing_ms": screenshot_timing,
+            "input_backend": _input_backend_result(action_result),
         }
 
 class _TypeCharsBenchmark:
@@ -211,6 +215,22 @@ def _transport_http_version(client: DaemonClient) -> str | None:
     transport = getattr(client, "transport", None)
     value = getattr(transport, "last_http_version", None)
     return value if isinstance(value, str) and value else None
+
+
+def _input_backend_result(result: dict[str, Any]) -> str | None:
+    results = result.get("results")
+    if not isinstance(results, list):
+        return None
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        output = item.get("output")
+        if not isinstance(output, dict):
+            continue
+        value = output.get("input_backend")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _timing_header(headers: Any) -> dict[str, float]:

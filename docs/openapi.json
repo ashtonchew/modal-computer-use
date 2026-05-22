@@ -486,6 +486,17 @@
             "title": "Image Profile",
             "type": "string"
           },
+          "input_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Backend"
+          },
           "primitives": {
             "items": {
               "type": "string"
