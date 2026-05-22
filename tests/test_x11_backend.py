@@ -352,6 +352,7 @@ def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None
 def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("RGB", (10, 10), "white")
+    monkeypatch.setattr(screenshots_module, "_capture_mss_png", lambda _source, **_kwargs: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -380,9 +381,10 @@ def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> 
     assert backend.commands == [("scrot", "-z", "-o", backend.commands[0][-1])]
 
 
-def test_x11_screenshot_bytes_scrot_fast_path_supports_regions() -> None:
+def test_x11_screenshot_bytes_scrot_fast_path_supports_regions(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("RGB", (10, 10), "white")
+    monkeypatch.setattr(screenshots_module, "_capture_mss_png", lambda _source, **_kwargs: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -408,9 +410,10 @@ def test_x11_screenshot_bytes_scrot_fast_path_supports_regions() -> None:
     ]
 
 
-def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails() -> None:
+def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = _png_bytes("RGB", (10, 10), "white")
+    monkeypatch.setattr(screenshots_module, "_capture_mss_png", lambda _source, **_kwargs: None)
 
     async def write_png(*args: str, **_kwargs):
         backend.commands.append(args)
@@ -435,6 +438,33 @@ def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails() -> None:
         ("scrot", "-z", "-o", backend.commands[0][-1]),
         ("maim", "-u", backend.commands[1][-1]),
     ]
+
+
+def test_x11_screenshot_bytes_prefers_mss_for_raw_native_png(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    native_png = _png_bytes("RGB", (10, 10), "white")
+    sources: list[Region] = []
+
+    def capture_mss(source: Region, **kwargs) -> bytes:
+        sources.append(source)
+        assert kwargs == {"display": ":99"}
+        return native_png
+
+    monkeypatch.setattr(screenshots_module, "_capture_mss_png", capture_mss)
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="png", scale=1.0),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.data == native_png
+    assert shot.width == backend.width
+    assert shot.height == backend.height
+    assert sources == [Region(x=0, y=0, width=backend.width, height=backend.height)]
+    assert backend.commands == []
 
 
 def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:

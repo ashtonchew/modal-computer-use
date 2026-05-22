@@ -548,6 +548,7 @@ class X11DesktopBackend(MockDesktopBackend):
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
             width=width,
             height=height,
+            display=display,
             cursor_position=self.mouse_position,
         )
 

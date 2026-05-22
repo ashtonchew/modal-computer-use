@@ -46,11 +46,13 @@ class X11ScreenshotController:
         run: RunCommand,
         width: int,
         height: int,
+        display: str,
         cursor_position: Callable[[], Awaitable[Point]],
     ) -> None:
         self._run = run
         self.width = width
         self.height = height
+        self.display = display
         self._cursor_position = cursor_position
 
     async def capture(
@@ -108,6 +110,60 @@ class X11ScreenshotController:
     ) -> CapturedScreenshot:
         started_total = perf_counter()
         timings_ms: dict[str, float] = {}
+        source = region or Region(x=0, y=0, width=self.width, height=self.height)
+        mss_capture = None
+        if prefer_native_png and _can_use_mss_fast_path(options):
+            started = perf_counter()
+            mss_capture = _capture_mss_png(source, display=self.display)
+            if mss_capture is not None:
+                timings_ms["capture_ms"] = _elapsed_ms(started)
+                data = mss_capture
+                image_width = source.width
+                image_height = source.height
+
+        if mss_capture is None:
+            data, image_width, image_height = await self._capture_via_file(
+                options,
+                region=region,
+                prefer_native_png=prefer_native_png,
+                timings_ms=timings_ms,
+            )
+
+        coordinate_space = CoordinateSpace.from_dimensions(
+            desktop_width=self.width,
+            desktop_height=self.height,
+            image_width=image_width,
+            image_height=image_height,
+            source_region=region,
+        )
+        if include_cursor_position:
+            started = perf_counter()
+            cursor_position = await self._cursor_position()
+            timings_ms["cursor_position_ms"] = _elapsed_ms(started)
+        else:
+            cursor_position = None
+        timings_ms["total_ms"] = _elapsed_ms(started_total)
+        return CapturedScreenshot(
+            format=options.format,
+            width=coordinate_space.image_width,
+            height=coordinate_space.image_height,
+            data=data,
+            sha256=sha256_bytes(data),
+            captured_at=datetime.now(UTC),
+            coordinate_space=coordinate_space,
+            cursor_visible=options.show_cursor,
+            cursor_position=cursor_position,
+            timings_ms=timings_ms,
+        )
+
+    async def _capture_via_file(
+        self,
+        options: ScreenshotOptions,
+        *,
+        region: Region | None,
+        prefer_native_png: bool,
+        timings_ms: dict[str, float],
+    ) -> tuple[bytes, int, int]:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         started = perf_counter()
@@ -147,33 +203,7 @@ class X11ScreenshotController:
                 data = _smallest_png(native_png, encoded) if native_png is not None else encoded
         finally:
             temp_path.unlink(missing_ok=True)
-
-        coordinate_space = CoordinateSpace.from_dimensions(
-            desktop_width=self.width,
-            desktop_height=self.height,
-            image_width=image_width,
-            image_height=image_height,
-            source_region=region,
-        )
-        if include_cursor_position:
-            started = perf_counter()
-            cursor_position = await self._cursor_position()
-            timings_ms["cursor_position_ms"] = _elapsed_ms(started)
-        else:
-            cursor_position = None
-        timings_ms["total_ms"] = _elapsed_ms(started_total)
-        return CapturedScreenshot(
-            format=options.format,
-            width=coordinate_space.image_width,
-            height=coordinate_space.image_height,
-            data=data,
-            sha256=sha256_bytes(data),
-            captured_at=datetime.now(UTC),
-            coordinate_space=coordinate_space,
-            cursor_visible=options.show_cursor,
-            cursor_position=cursor_position,
-            timings_ms=timings_ms,
-        )
+        return data, image_width, image_height
 
     async def _capture_native_png(
         self,
@@ -217,6 +247,27 @@ def _can_preserve_native_png(options: ScreenshotOptions) -> bool:
     return options.format == "png" and options.scale == 1.0
 
 
+def _capture_mss_png(source: Region, *, display: str) -> bytes | None:
+    try:
+        import mss
+        from mss import tools
+    except ImportError:
+        return None
+    monitor = {
+        "left": source.x,
+        "top": source.y,
+        "width": source.width,
+        "height": source.height,
+    }
+    try:
+        with mss.MSS(display=display) as screenshotter:
+            shot = screenshotter.grab(monitor)
+            data = tools.to_png(shot.rgb, shot.size, level=1)
+            return data if isinstance(data, bytes) else None
+    except Exception:
+        return None
+
+
 def _capture_command(
     path: Path,
     *,
@@ -240,6 +291,10 @@ def _capture_command(
 
 
 def _can_use_scrot_fast_path(options: ScreenshotOptions) -> bool:
+    return not options.show_cursor and _can_preserve_native_png(options)
+
+
+def _can_use_mss_fast_path(options: ScreenshotOptions) -> bool:
     return not options.show_cursor and _can_preserve_native_png(options)
 
 
