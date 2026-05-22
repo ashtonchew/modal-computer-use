@@ -12,6 +12,7 @@ from .config import (
     StorageConfig,
 )
 from .errors import ConfigConflictError, SandboxAmbiguousError, SandboxUnavailableError
+from .hot_session import HotSessionClient
 from .manager import ComputerSandboxManager, SandboxManager
 from .models import (
     ActionBatchResult,
@@ -64,6 +65,7 @@ __all__ = [
     "DesktopConfig",
     "DisplayGeometry",
     "DisplayInfo",
+    "HotSessionClient",
     "NetworkConfig",
     "Point",
     "ProcessStatus",
