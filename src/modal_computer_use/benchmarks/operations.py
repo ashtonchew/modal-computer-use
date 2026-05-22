@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -127,6 +128,7 @@ class _ScreenshotBenchmark:
             payload, headers = self._client.post_bytes_with_headers(
                 "/v1/screenshots/full/raw", json=self._request
             )
+            daemon_timing = _timing_header(headers)
             return {
                 "format": self._request.get("format", "png"),
                 "width": _int_header(headers, "x-computer-use-width"),
@@ -135,6 +137,8 @@ class _ScreenshotBenchmark:
                 "storage": "inline",
                 "artifact_backed": False,
                 "cursor_visible": self._request.get("show_cursor", False),
+                "daemon_ms": daemon_timing.get("total_ms"),
+                "daemon_timing_ms": daemon_timing,
             }
         result = self._client.post_json("/v1/screenshots/full", json=self._request)
         return _safe_screenshot_result(result)
@@ -145,6 +149,23 @@ def _int_header(headers: Any, name: str) -> int | None:
     if not isinstance(value, str) or not value.isdigit():
         return None
     return int(value)
+
+
+def _timing_header(headers: Any) -> dict[str, float]:
+    value = headers.get("x-computer-use-timing-ms") if hasattr(headers, "get") else None
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(value)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key): float(item)
+        for key, item in data.items()
+        if not isinstance(item, bool) and isinstance(item, int | float)
+    }
 
 class _RecordingStartStopBenchmark:
     def __init__(self, client: DaemonClient) -> None:

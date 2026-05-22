@@ -3,11 +3,12 @@ from __future__ import annotations
 import base64
 import subprocess
 import tempfile
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+from time import perf_counter
 
 from PIL import Image
 
@@ -35,6 +36,7 @@ class CapturedScreenshot:
     coordinate_space: CoordinateSpace
     cursor_visible: bool
     cursor_position: Point | None = None
+    timings_ms: Mapping[str, float] = field(default_factory=dict)
 
 
 class X11ScreenshotController:
@@ -104,6 +106,8 @@ class X11ScreenshotController:
         include_cursor_position: bool = False,
         prefer_native_png: bool = False,
     ) -> CapturedScreenshot:
+        started_total = perf_counter()
+        timings_ms: dict[str, float] = {}
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         command = ["maim"]
@@ -112,22 +116,35 @@ class X11ScreenshotController:
         if region:
             command.extend(["-g", f"{region.width}x{region.height}+{region.x}+{region.y}"])
         command.append(str(temp_path))
+        started = perf_counter()
         await self._run(*command)
+        timings_ms["capture_ms"] = _elapsed_ms(started)
         try:
             if prefer_native_png and _can_preserve_native_png(options):
+                started = perf_counter()
                 data = temp_path.read_bytes()
+                timings_ms["read_ms"] = _elapsed_ms(started)
                 source = region or Region(x=0, y=0, width=self.width, height=self.height)
                 image_width = source.width
                 image_height = source.height
             else:
+                started = perf_counter()
                 image = Image.open(temp_path)
                 image.load()
+                timings_ms["decode_ms"] = _elapsed_ms(started)
                 image_width = scaled_dimension(image.width, options.scale)
                 image_height = scaled_dimension(image.height, options.scale)
+                started = perf_counter()
                 native_png = temp_path.read_bytes() if _can_preserve_native_png(options) else None
+                if native_png is not None:
+                    timings_ms["read_ms"] = _elapsed_ms(started)
                 if options.scale != 1.0:
+                    started = perf_counter()
                     image = image.resize((image_width, image_height))
+                    timings_ms["resize_ms"] = _elapsed_ms(started)
+                started = perf_counter()
                 encoded = encode_image(image.convert("RGB"), options.format, options.quality)
+                timings_ms["encode_ms"] = _elapsed_ms(started)
                 data = _smallest_png(native_png, encoded) if native_png is not None else encoded
         finally:
             temp_path.unlink(missing_ok=True)
@@ -139,7 +156,13 @@ class X11ScreenshotController:
             image_height=image_height,
             source_region=region,
         )
-        cursor_position = await self._cursor_position() if include_cursor_position else None
+        if include_cursor_position:
+            started = perf_counter()
+            cursor_position = await self._cursor_position()
+            timings_ms["cursor_position_ms"] = _elapsed_ms(started)
+        else:
+            cursor_position = None
+        timings_ms["total_ms"] = _elapsed_ms(started_total)
         return CapturedScreenshot(
             format=options.format,
             width=coordinate_space.image_width,
@@ -150,6 +173,7 @@ class X11ScreenshotController:
             coordinate_space=coordinate_space,
             cursor_visible=options.show_cursor,
             cursor_position=cursor_position,
+            timings_ms=timings_ms,
         )
 
 
@@ -170,3 +194,7 @@ def _can_preserve_native_png(options: ScreenshotOptions) -> bool:
 
 def scaled_dimension(value: int, scale: float) -> int:
     return max(1, round(value * scale))
+
+
+def _elapsed_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000

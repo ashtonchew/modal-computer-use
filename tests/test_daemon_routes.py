@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 
 from fastapi.testclient import TestClient
@@ -39,6 +40,8 @@ def test_raw_screenshot_returns_image_bytes(test_client) -> None:
     assert response.headers["x-computer-use-height"] == "768"
     assert response.headers["x-computer-use-size-bytes"] == str(len(response.content))
     assert response.headers["x-computer-use-sha256"]
+    timing = json.loads(response.headers["x-computer-use-timing-ms"])
+    assert isinstance(timing, dict)
 
 
 def test_raw_screenshot_rejects_artifact_storage(test_client) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Request, Response
 
 from modal_computer_use.daemon.errors import DaemonError
@@ -49,6 +51,7 @@ def _screenshot_headers(shot) -> dict[str, str]:
         "x-computer-use-sha256": shot.sha256,
         "x-computer-use-captured-at": shot.captured_at.isoformat(),
         "x-computer-use-coordinate-space": shot.coordinate_space.model_dump_json(),
+        "x-computer-use-timing-ms": json.dumps(shot.timings_ms, separators=(",", ":")),
     }
 
 

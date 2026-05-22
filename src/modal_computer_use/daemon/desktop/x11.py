@@ -177,6 +177,7 @@ class DesktopBackend(ABC):
             coordinate_space=screenshot.coordinate_space,
             cursor_visible=screenshot.cursor_visible,
             cursor_position=screenshot.cursor_position if include_cursor_position else None,
+            timings_ms={},
         )
 
     @abstractmethod
@@ -441,6 +442,7 @@ class MockDesktopBackend(DesktopBackend):
             coordinate_space=coordinate_space,
             cursor_visible=options.show_cursor,
             cursor_position=self.cursor if include_cursor_position else None,
+            timings_ms={},
         )
 
     async def display_info(self) -> DisplayInfo:

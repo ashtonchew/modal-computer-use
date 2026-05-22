@@ -69,6 +69,19 @@ def run_screenshot_benchmark(
             "last_result": observations[-1] if observations else None,
         }
     )
+    daemon_samples = [
+        float(item["daemon_ms"])
+        for item in observations
+        if item.get("daemon_ms") is not None
+    ]
+    if daemon_samples:
+        result["daemon_samples_ms"] = daemon_samples
+        result["daemon_summary_ms"] = _summary(daemon_samples)
+        result["overhead_samples_ms"] = [
+            sample - daemon_sample
+            for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
+        ]
+        result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
     return result
 
 def run_move_click_benchmark(
