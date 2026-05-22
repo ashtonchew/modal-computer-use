@@ -182,6 +182,19 @@ Modal-created sandboxes support three ingress modes:
 - `tunnel`: expose daemon port `8080` and use a static per-sandbox daemon bearer token. This is the
   lowest-level mode and should be reserved for trusted benchmark harnesses.
 
+Modal tunnel ingress can also opt into HTTP/2 transport with
+`ComputerConfig(network={"daemon_http_version": "2"})`. This keeps the same security semantics as
+the selected ingress but creates the daemon port through Modal `h2_ports`, starts the daemon under
+Hypercorn, and uses an `httpx` HTTP/2 client. HTTP/1.1 remains the SDK default because it is the
+lowest-dependency compatibility path and matches non-h2 local daemon clients. Use the HTTP/2 mode
+when benchmarking or operating a hot primitive loop that benefits from request multiplexing and
+lower connection overhead.
+
+Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
+product default remains `20`, but primitive latency benchmarks should not measure intentional
+throttling. Pass `--input-rate-limit-per-sec` when the benchmark target is rate-limit behavior
+instead of transport and daemon hot-path latency.
+
 The raw Modal `Sandbox.exec` baseline is opt-in:
 
 ```bash
@@ -228,7 +241,8 @@ be the only billing attribution mechanism.
 Keep SDK benchmark surfaces fair:
 
 - Name the ingress explicitly: `modal-daemon-local`, `modal-daemon-connect`,
-  `modal-daemon-tunnel`, `daytona-toolbox-http`, or `e2b-desktop-sdk`.
+  `modal-daemon-tunnel`, `modal-daemon-attested-h2-tunnel`, `modal-daemon-h2-tunnel`,
+  `daytona-toolbox-http`, or `e2b-desktop-sdk`.
 - Separate cold create, readiness, action, screenshot, stream, command, and cleanup costs.
 - Compare deterministic SDK primitives before comparing model-driven task completion.
 - Use the binary screenshot path for raw primitive latency comparisons; keep JSON/base64 screenshot

@@ -199,6 +199,30 @@ def test_sdk_request_span_uses_route_not_query_or_authorization(monkeypatch) -> 
     assert "secret" not in str(sdk_span.attributes)
 
 
+def test_http_transport_passes_http2_to_default_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("modal_computer_use.transports.http.httpx.Client", FakeClient)
+
+    transport = HTTPTransport("https://daemon.example", http2=True)
+    transport.close()
+
+    assert calls == [
+        {
+            "base_url": "https://daemon.example",
+            "timeout": 30.0,
+            "http2": True,
+        }
+    ]
+
+
 def test_sdk_request_span_strips_inline_query_from_path(monkeypatch) -> None:
     tracer = _CapturedTracer()
     monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)

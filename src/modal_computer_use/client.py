@@ -20,9 +20,15 @@ class DaemonClient:
         *,
         token: str | None = None,
         timeout: float = 30.0,
+        http2: bool = False,
         transport: HTTPTransport | None = None,
     ) -> None:
-        self.transport = transport or HTTPTransport(base_url, token=token, timeout=timeout)
+        self.transport = transport or HTTPTransport(
+            base_url,
+            token=token,
+            timeout=timeout,
+            http2=http2,
+        )
 
     @property
     def base_url(self) -> str:

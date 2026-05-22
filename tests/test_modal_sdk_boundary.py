@@ -233,10 +233,12 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_DESKTOP_HEIGHT"] == "768"
     assert kwargs["env"]["COMPUTER_USE_DESKTOP_DPI"] == "96"
     assert kwargs["env"]["COMPUTER_USE_POST_ACTION_DELAY_MS"] == "0"
+    assert kwargs["env"]["COMPUTER_USE_DAEMON_HTTP_VERSION"] == "1.1"
     assert kwargs["env"]["COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC"] == "20"
     assert kwargs["env"]["COMPUTER_USE_MAX_BATCH_DURATION_MS"] == "30000"
     assert kwargs["env"]["COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY"] == "true"
     assert kwargs["encrypted_ports"] == [8080, 6080]
+    assert "h2_ports" not in kwargs
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs
     assert "tags" not in kwargs
@@ -415,6 +417,33 @@ def test_create_tunnel_ingress_uses_static_daemon_token(monkeypatch) -> None:
     assert kwargs["encrypted_ports"] == [8080]
     assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
     assert computer.client.base_url == "https://daemon.example.modal.host"
+
+
+def test_create_h2_tunnel_uses_modal_h2_port(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123", network={"daemon_http_version": "2"})
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["encrypted_ports"] == []
+    assert kwargs["h2_ports"] == [8080]
+    assert kwargs["env"]["COMPUTER_USE_DAEMON_HTTP_VERSION"] == "2"
+
+
+def test_create_h2_with_vnc_keeps_novnc_on_encrypted_port(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(
+        run_id="run-123",
+        network={"daemon_http_version": "2"},
+        expose_vnc="control",
+    )
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["encrypted_ports"] == [6080]
+    assert kwargs["h2_ports"] == [8080]
 
 
 def test_create_generates_vnc_password_without_exposing_it(monkeypatch) -> None:

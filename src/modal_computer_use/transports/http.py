@@ -19,11 +19,16 @@ class HTTPTransport:
         *,
         token: str | None = None,
         timeout: float = 30.0,
+        http2: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self._client = client or httpx.Client(base_url=self.base_url, timeout=timeout)
+        self._client = client or httpx.Client(
+            base_url=self.base_url,
+            timeout=timeout,
+            http2=http2,
+        )
         self._tracer = get_tracer(name="modal_computer_use.sdk")
 
     def close(self) -> None:

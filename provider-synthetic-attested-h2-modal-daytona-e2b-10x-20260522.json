@@ -1,0 +1,334 @@
+{
+  "benchmark": "provider-synthetic-canvas-attested-modal",
+  "generated_at": "2026-05-22T04:13:57.999090+00:00",
+  "iterations": 10,
+  "ok": true,
+  "policy": {
+    "canonical_workload": "synthetic_canvas",
+    "modal_http_version": "2",
+    "modal_ingress": "attested-tunnel",
+    "modal_primary_case": "synthetic_canvas_screenshot_raw",
+    "setup_excluded_from_warm_timings": true
+  },
+  "providers": {
+    "daytona": {
+      "cases": {
+        "synthetic_canvas_screenshot": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "height": 768,
+            "size_bytes": 27234,
+            "width": 1024
+          },
+          "samples_ms": [
+            118.57020900060888,
+            126.78945799416397,
+            116.43329200160224,
+            117.51862500386778,
+            136.45575000555255,
+            135.68445800046902,
+            111.21929199725855,
+            113.16562499268912,
+            115.95608299830928,
+            112.81337500258815
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 136.45575000555255,
+            "mean": 120.46061669971095,
+            "min": 111.21929199725855,
+            "p50": 116.97595850273501,
+            "p95": 136.45575000555255
+          }
+        },
+        "synthetic_canvas_sequence": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "height": 768,
+            "size_bytes": 27234,
+            "width": 1024
+          },
+          "samples_ms": [
+            322.28920799389016,
+            302.202082995791,
+            318.7970840081107,
+            332.4022079905262,
+            343.2680830010213,
+            298.91875000612345,
+            312.1843330009142,
+            298.0361670051934,
+            322.6829170016572,
+            568.1275419919984
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 568.1275419919984,
+            "mean": 341.8908374995226,
+            "min": 298.0361670051934,
+            "p50": 320.5431460010004,
+            "p95": 568.1275419919984
+          }
+        }
+      },
+      "metadata": {
+        "sdk_package": "daytona",
+        "transport": "daytona computer_use"
+      },
+      "provider": "daytona"
+    },
+    "e2b": {
+      "cases": {
+        "synthetic_canvas_screenshot": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "height": 768,
+            "size_bytes": 38931,
+            "width": 1024
+          },
+          "samples_ms": [
+            194.67912500840612,
+            222.759791999124,
+            200.19891700940207,
+            194.31529100984335,
+            233.4189169923775,
+            194.38929099123925,
+            208.6154999997234,
+            194.07383300131187,
+            195.93175000045449,
+            192.54208300844766
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 233.4189169923775,
+            "mean": 203.09244990203297,
+            "min": 192.54208300844766,
+            "p50": 195.3054375044303,
+            "p95": 233.4189169923775
+          }
+        },
+        "synthetic_canvas_sequence": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "height": 768,
+            "size_bytes": 38977,
+            "width": 1024
+          },
+          "samples_ms": [
+            15624.212499998976,
+            15681.997082996531,
+            15650.941750005586,
+            15606.80599999614,
+            15694.067167001776,
+            15597.720500009018,
+            15730.934333012556,
+            15585.211249999702,
+            15586.921833993983,
+            15673.640417007846
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 15730.934333012556,
+            "mean": 15643.245283402211,
+            "min": 15585.211249999702,
+            "p50": 15637.57712500228,
+            "p95": 15730.934333012556
+          }
+        }
+      },
+      "metadata": {
+        "dpi": 96,
+        "resolution": "1024x768",
+        "sdk_package": "e2b-desktop",
+        "transport": "e2b desktop sdk"
+      },
+      "provider": "e2b"
+    },
+    "modal-daemon-attested-h2-tunnel": {
+      "cases": {
+        "synthetic_canvas_screenshot": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "height": 768,
+            "size_bytes": 27373,
+            "width": 1024
+          },
+          "samples_ms": [
+            185.9631670085946,
+            339.1345419950085,
+            324.4386250007665,
+            566.3722079916624,
+            207.8847500088159,
+            183.0130000016652,
+            182.3605000099633,
+            305.6510000023991,
+            183.03212500177324,
+            185.3452500072308
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 566.3722079916624,
+            "mean": 266.31951670278795,
+            "min": 182.3605000099633,
+            "p50": 196.92395850870525,
+            "p95": 566.3722079916624
+          }
+        },
+        "synthetic_canvas_screenshot_raw": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "daemon_ms": 20.457857000000246,
+            "daemon_timing_ms": {
+              "capture_ms": 20.414646999999064,
+              "total_ms": 20.457857000000246
+            },
+            "height": 768,
+            "size_bytes": 69335,
+            "width": 1024
+          },
+          "samples_ms": [
+            103.04120900400449,
+            154.63220899982844,
+            197.03233399195597,
+            104.722791002132,
+            104.47316699719522,
+            118.09424999228213,
+            103.06737500650343,
+            187.47133399301674,
+            104.39029200642835,
+            132.87650000711437
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 197.03233399195597,
+            "mean": 130.9801461000461,
+            "min": 103.04120900400449,
+            "p50": 111.40852049720706,
+            "p95": 197.03233399195597
+          }
+        },
+        "synthetic_canvas_sequence": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "height": 768,
+            "size_bytes": 27373,
+            "width": 1024
+          },
+          "samples_ms": [
+            274.2347500025062,
+            288.82275000796653,
+            343.946833992959,
+            350.6467499973951,
+            354.96095899725333,
+            342.9516250034794,
+            341.2483330030227,
+            267.6544170099078,
+            269.6108749951236,
+            354.38333300407976
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 354.96095899725333,
+            "mean": 318.84606260136934,
+            "min": 267.6544170099078,
+            "p50": 342.09997900325106,
+            "p95": 354.96095899725333
+          }
+        },
+        "synthetic_canvas_sequence_fused_raw": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "action_daemon_ms": 28.71474199999824,
+            "daemon_timing_ms": {
+              "capture_ms": 20.764806999999053,
+              "total_ms": 20.821276999999583
+            },
+            "height": 768,
+            "size_bytes": 69335,
+            "width": 1024
+          },
+          "samples_ms": [
+            109.39833300653845,
+            110.34612500225194,
+            110.00845799571835,
+            111.32370799896307,
+            109.4705419964157,
+            111.36858300596941,
+            111.59062499064021,
+            187.0128750015283,
+            112.94500000076368,
+            113.67233299824875
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 187.0128750015283,
+            "mean": 118.71365819970379,
+            "min": 109.39833300653845,
+            "p50": 111.34614550246624,
+            "p95": 187.0128750015283
+          }
+        },
+        "synthetic_canvas_sequence_raw": {
+          "failures": [],
+          "iterations": 10,
+          "last_result": {
+            "daemon_ms": 20.178045999998062,
+            "daemon_timing_ms": {
+              "capture_ms": 20.145396000000204,
+              "total_ms": 20.178045999998062
+            },
+            "height": 768,
+            "size_bytes": 69335,
+            "width": 1024
+          },
+          "samples_ms": [
+            191.85591700079385,
+            236.39683399233036,
+            191.24716699298006,
+            232.87633300060406,
+            263.8972920103697,
+            259.6957920031855,
+            189.0023750020191,
+            188.0976670072414,
+            248.0051669990644,
+            267.0985419972567
+          ],
+          "status": "ok",
+          "successful_iterations": 10,
+          "summary_ms": {
+            "max": 267.0985419972567,
+            "mean": 226.8173086005845,
+            "min": 188.0976670072414,
+            "p50": 234.6365834964672,
+            "p95": 267.0985419972567
+          }
+        }
+      },
+      "metadata": {
+        "base_url": "<redacted>",
+        "browser_prewarm": false,
+        "cold_create_to_ready_ms": 8504.464458994335,
+        "daemon_http_version": "2",
+        "ingress": "attested-tunnel",
+        "input_rate_limit_per_sec": 0,
+        "transport": "modal encrypted h2 tunnel"
+      },
+      "provider": "modal-daemon"
+    }
+  }
+}

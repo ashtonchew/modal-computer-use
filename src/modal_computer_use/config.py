@@ -50,6 +50,7 @@ class ResourceConfig(StrictBaseModel):
 
 class NetworkConfig(StrictBaseModel):
     block_all: bool = Field(default=False, validation_alias=AliasChoices("block_all", "blocked"))
+    daemon_http_version: Literal["1.1", "2"] = "1.1"
     cidr_allowlist: list[str] | None = Field(
         default=None,
         validation_alias=AliasChoices("cidr_allowlist", "allowlist"),

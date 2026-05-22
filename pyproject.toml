@@ -12,7 +12,9 @@ license = { text = "MIT" }
 authors = [{ name = "modal-computer-use contributors" }]
 dependencies = [
   "fastapi>=0.115",
-  "httpx>=0.27",
+  "h2>=4.1",
+  "httpx[http2]>=0.27",
+  "hypercorn>=0.17",
   "mss>=10.0",
   "pydantic>=2.7",
   "uvicorn[standard]>=0.30",

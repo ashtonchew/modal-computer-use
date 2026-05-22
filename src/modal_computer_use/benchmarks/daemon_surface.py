@@ -144,7 +144,20 @@ def _daemon_ingress_metadata(
     modal_ingress = (
         None if environment_metadata is None else environment_metadata.get("modal_ingress")
     )
+    daemon_http_version = (
+        None if environment_metadata is None else environment_metadata.get("daemon_http_version")
+    )
     if modal_ingress == "attested-tunnel":
+        if daemon_http_version == "2":
+            return {
+                "canonical_name": "modal-daemon-attested-h2-tunnel",
+                "kind": "modal-attested-encrypted-h2-tunnel",
+                "auth": "Modal Connect Token attestation plus short-lived daemon bearer token",
+                "description": (
+                    "Modal Connect-authenticated token exchange followed by encrypted HTTP/2 "
+                    "tunnel ingress"
+                ),
+            }
         return {
             "canonical_name": "modal-daemon-attested-tunnel",
             "kind": "modal-attested-encrypted-tunnel",
@@ -161,6 +174,13 @@ def _daemon_ingress_metadata(
             "description": "authenticated Modal connect-token ingress to the daemon",
         }
     if modal_ingress == "tunnel":
+        if daemon_http_version == "2":
+            return {
+                "canonical_name": "modal-daemon-h2-tunnel",
+                "kind": "modal-encrypted-h2-tunnel",
+                "auth": "static daemon bearer token",
+                "description": "Modal encrypted HTTP/2 tunnel ingress to the daemon",
+            }
         return {
             "canonical_name": "modal-daemon-tunnel",
             "kind": "modal-encrypted-tunnel",
