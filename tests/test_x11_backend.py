@@ -10,7 +10,7 @@ from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
 from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend, choose_backend
-from modal_computer_use.models import Point, ScreenshotOptions
+from modal_computer_use.models import Point, Region, ScreenshotOptions
 
 
 class RecordingX11Backend(X11DesktopBackend):
@@ -377,6 +377,64 @@ def test_x11_screenshot_bytes_native_png_fast_path_skips_pillow(monkeypatch) -> 
     assert shot.data == native_png
     assert shot.width == backend.width
     assert shot.height == backend.height
+    assert backend.commands == [("scrot", "-z", "-o", backend.commands[0][-1])]
+
+
+def test_x11_screenshot_bytes_scrot_fast_path_supports_regions() -> None:
+    backend = RecordingX11Backend()
+    native_png = _png_bytes("RGB", (10, 10), "white")
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        with open(args[-1], "wb") as handle:
+            handle.write(native_png)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="png", scale=1.0),
+            region=Region(x=3, y=4, width=10, height=11),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.width == 10
+    assert shot.height == 11
+    assert backend.commands == [
+        ("scrot", "-z", "-o", "-a", "3,4,10,11", backend.commands[0][-1])
+    ]
+
+
+def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails() -> None:
+    backend = RecordingX11Backend()
+    native_png = _png_bytes("RGB", (10, 10), "white")
+
+    async def write_png(*args: str, **_kwargs):
+        backend.commands.append(args)
+        if args[0] == "scrot":
+            raise RuntimeError("scrot unavailable")
+        with open(args[-1], "wb") as handle:
+            handle.write(native_png)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+
+    async def capture():
+        return await backend.screenshot_bytes(
+            ScreenshotOptions(format="png", scale=1.0),
+            prefer_native_png=True,
+        )
+
+    shot = anyio.run(capture)
+
+    assert shot.data == native_png
+    assert backend.commands == [
+        ("scrot", "-z", "-o", backend.commands[0][-1]),
+        ("maim", "-u", backend.commands[1][-1]),
+    ]
 
 
 def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:

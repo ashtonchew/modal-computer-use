@@ -429,9 +429,11 @@ single daemon request while returning the screenshot as binary image bytes. The 
 `actions.run(..., screenshot_after=True)` path remains useful when callers need a structured JSON
 `Screenshot` object, but it pays base64 response overhead.
 
-For PNG screenshots at native scale, the daemon compares the native `maim` PNG with its Pillow
-RGB re-encode and returns the smaller valid payload. This keeps simple/paletted desktops compact
-without regressing desktops where the RGB re-encode compresses better than the native capture.
+For raw PNG screenshots at native scale without the cursor, the daemon prefers `scrot` and falls
+back to `maim` if the fast capture fails. `scrot` is measurably faster on the raw observation hot
+path, while `maim` remains the compatibility path for cursor-visible, scaled, re-encoded, and JSON
+screenshots. For JSON PNG screenshots at native scale, the daemon still compares the native `maim`
+PNG with its Pillow RGB re-encode and returns the smaller valid payload.
 
 ## Screenshot processing location
 

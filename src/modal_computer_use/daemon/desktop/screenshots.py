@@ -110,14 +110,13 @@ class X11ScreenshotController:
         timings_ms: dict[str, float] = {}
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
-        command = ["maim"]
-        if not options.show_cursor:
-            command.append("-u")
-        if region:
-            command.extend(["-g", f"{region.width}x{region.height}+{region.x}+{region.y}"])
-        command.append(str(temp_path))
         started = perf_counter()
-        await self._run(*command)
+        await self._capture_native_png(
+            temp_path,
+            options=options,
+            region=region,
+            prefer_scrot=prefer_native_png,
+        )
         timings_ms["capture_ms"] = _elapsed_ms(started)
         try:
             if prefer_native_png and _can_preserve_native_png(options):
@@ -176,6 +175,32 @@ class X11ScreenshotController:
             timings_ms=timings_ms,
         )
 
+    async def _capture_native_png(
+        self,
+        path: Path,
+        *,
+        options: ScreenshotOptions,
+        region: Region | None,
+        prefer_scrot: bool,
+    ) -> None:
+        primary = _capture_command(
+            path,
+            options=options,
+            region=region,
+            prefer_scrot=prefer_scrot,
+        )
+        fallback = _capture_command(path, options=options, region=region, prefer_scrot=False)
+        try:
+            await self._run(*primary)
+            if path.exists() and path.stat().st_size > 0:
+                return
+        except Exception:
+            if primary == fallback:
+                raise
+        await self._run(*fallback)
+        if not path.exists() or path.stat().st_size <= 0:
+            raise RuntimeError("screenshot capture produced an empty file")
+
 
 def encode_image(image: Image.Image, image_format: str, quality: int) -> bytes:
     output = BytesIO()
@@ -190,6 +215,32 @@ def _smallest_png(native_png: bytes, encoded_png: bytes) -> bytes:
 
 def _can_preserve_native_png(options: ScreenshotOptions) -> bool:
     return options.format == "png" and options.scale == 1.0
+
+
+def _capture_command(
+    path: Path,
+    *,
+    options: ScreenshotOptions,
+    region: Region | None,
+    prefer_scrot: bool,
+) -> list[str]:
+    if prefer_scrot and _can_use_scrot_fast_path(options):
+        command = ["scrot", "-z", "-o"]
+        if region:
+            command.extend(["-a", f"{region.x},{region.y},{region.width},{region.height}"])
+        command.append(str(path))
+        return command
+    command = ["maim"]
+    if not options.show_cursor:
+        command.append("-u")
+    if region:
+        command.extend(["-g", f"{region.width}x{region.height}+{region.x}+{region.y}"])
+    command.append(str(path))
+    return command
+
+
+def _can_use_scrot_fast_path(options: ScreenshotOptions) -> bool:
+    return not options.show_cursor and _can_preserve_native_png(options)
 
 
 def scaled_dimension(value: int, scale: float) -> int:
