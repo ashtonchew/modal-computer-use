@@ -92,6 +92,22 @@ The SDK defaults observation streams to lossless PNG with the cursor hidden. Adv
 tune `tile_size`, `delta_max_ratio`, `delta_mode`, and `keyframe_interval`; keep the default
 64-pixel tiles unless measurements show a workload benefits from finer patch locality.
 
+For action-causal observation loops, keep the stream open and request a frame immediately after the
+action:
+
+```python
+with computer.observation_stream(fps=0.01) as stream:
+    frames = stream.frames()
+    first = next(frames)
+    computer.actions.run([{"type": "click", "x": 100, "y": 100}])
+    stream.request_frame()
+    observed = next(frames)
+```
+
+`request_frame()` sends a `capture_now` stream op. It bypasses the passive FPS tick, so benchmarks
+can attribute action-to-frame latency without accidentally measuring scheduler sleep. The passive
+FPS loop remains useful for background visual monitoring.
+
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
 does not require stream setup. Observation stream frames count against the screenshot budget. Patch
@@ -278,13 +294,15 @@ uv run computer-use benchmark sdk \
 ```
 
 This surface reports `observation_first_frame`, `observation_steady_no_change`,
-`observation_small_patch`, and `observation_large_change`. It records frame payload bytes, full-frame
-bytes, daemon capture/diff/encode timing, dirty-region metadata, metadata-only unchanged frames, and
-WebSocket transport labeling. It is intentionally separate from `screenshot_full_raw` because it
-measures stream startup and sustained observation behavior rather than a single request/response
-screenshot. The benchmark uses the SDK-default PNG screenshot format. Official stream benchmark
-wall times include stream setup, frame pacing, and visual mutation settling; use same-sandbox A/B
-runs when attributing raw continuous-observation latency against HTTP polling.
+`observation_small_patch`, `observation_large_change`, `observation_capture_now_no_change`, and
+`observation_capture_now_small_patch`. It records frame payload bytes, full-frame bytes, daemon
+capture/diff/encode timing, dirty-region metadata, metadata-only unchanged frames, action-to-frame
+timing for `capture_now` cases, and WebSocket transport labeling. It is intentionally separate from
+`screenshot_full_raw` because it measures stream startup, sustained observation behavior, and
+action-causal capture behavior rather than a single request/response screenshot. The benchmark uses
+the SDK-default PNG screenshot format. Passive stream benchmark wall times include stream setup,
+frame pacing, and visual mutation settling; use `capture_now` cases when attributing hot
+action-to-observation latency.
 
 The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
 

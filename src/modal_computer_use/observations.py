@@ -55,6 +55,9 @@ class ObservationClient:
     def resume(self) -> None:
         self.transport.resume()
 
+    def request_frame(self) -> None:
+        self.transport.request_frame()
+
     def configure(self, **payload: Any) -> None:
         self.transport.configure(payload)
 
