@@ -53,6 +53,19 @@ class CapturedScreenshot:
     timings_ms: Mapping[str, float] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class CapturedRawScreenshot:
+    width: int
+    height: int
+    rgb: bytes
+    sha256: str
+    captured_at: datetime
+    coordinate_space: CoordinateSpace
+    cursor_visible: bool
+    capture_backend: str | None = None
+    timings_ms: Mapping[str, float] = field(default_factory=dict)
+
+
 class X11ScreenshotController:
     def __init__(
         self,
@@ -174,6 +187,45 @@ class X11ScreenshotController:
             cursor_visible=options.show_cursor,
             capture_backend=capture_backend,
             cursor_position=cursor_position,
+            timings_ms=timings_ms,
+        )
+
+    async def capture_raw_pixels(
+        self,
+        *,
+        region: Region | None = None,
+    ) -> CapturedRawScreenshot | None:
+        started_total = perf_counter()
+        timings_ms: dict[str, float] = {}
+        source = region or Region(x=0, y=0, width=self.width, height=self.height)
+        started = perf_counter()
+        mss_capture = self._mss.grab(source)
+        if mss_capture is None:
+            return None
+        timings_ms["capture_ms"] = _elapsed_ms(started)
+        started = perf_counter()
+        rgb = bytes(mss_capture.shot.rgb)
+        timings_ms["pixel_copy_ms"] = _elapsed_ms(started)
+        coordinate_space = CoordinateSpace.from_dimensions(
+            desktop_width=self.width,
+            desktop_height=self.height,
+            image_width=mss_capture.width,
+            image_height=mss_capture.height,
+            source_region=region,
+        )
+        started = perf_counter()
+        source_sha256 = sha256_bytes(rgb)
+        timings_ms["source_hash_ms"] = _elapsed_ms(started)
+        timings_ms["total_ms"] = _elapsed_ms(started_total)
+        return CapturedRawScreenshot(
+            width=coordinate_space.image_width,
+            height=coordinate_space.image_height,
+            rgb=rgb,
+            sha256=source_sha256,
+            captured_at=datetime.now(UTC),
+            coordinate_space=coordinate_space,
+            cursor_visible=False,
+            capture_backend="mss-raw",
             timings_ms=timings_ms,
         )
 
@@ -303,9 +355,13 @@ def _encode_mss_capture(
 
 
 def _encode_mss_png(capture: _MSSCapture) -> bytes:
+    return encode_rgb_png(capture.shot.rgb, capture.size)
+
+
+def encode_rgb_png(rgb: bytes, size: tuple[int, int]) -> bytes:
     from mss import tools
 
-    data = tools.to_png(capture.shot.rgb, capture.size, level=1)
+    data = tools.to_png(rgb, size, level=1)
     if not isinstance(data, bytes):
         raise RuntimeError("mss png encoder returned non-bytes")
     return data

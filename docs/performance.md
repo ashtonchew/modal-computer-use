@@ -58,6 +58,47 @@ routes for broad compatibility, simple one-shot calls, idempotency-key workflows
 where WebSocket egress is unavailable. On Modal, WebSockets are RFC 6455 and are not WebSockets over
 HTTP/2, so the hot-session win comes from persistent session reuse rather than HTTP/2 multiplexing.
 
+For continuous observation, use the observation stream instead of polling screenshots:
+
+```text
+GET /v1/observations/stream
+```
+
+The observation stream is a passive, server-pushed WebSocket that sends one JSON metadata frame
+followed by one binary image frame for changed observations. It sends periodic keyframes, can send
+small dirty-region patch frames, and can suppress unchanged observations to metadata-only frames.
+That keeps idle observation loops from repeatedly transferring the same screenshot bytes while still
+letting clients recover by requesting or waiting for a keyframe. Actions still run on the REST or
+hot-session control paths; separating observation bytes from control messages prevents large frames
+from blocking input, cancellation, or health checks.
+
+For default PNG, cursor-hidden observations, the daemon uses a raw MSS capture path before PNG
+encoding. It hashes raw RGB bytes to suppress unchanged frames without encoding a PNG, and uses
+64x64 tile hashes to choose a dirty rectangle for changed frames. When the native `xxhash` wheel is
+available, tile hashes use XXH3; otherwise the daemon falls back to BLAKE2b. Frame metadata includes
+`tile_hash_backend` so benchmark artifacts show which path ran. Large dirty regions still fall back
+to keyframes. Cursor-visible, scaled, JPEG, and WebP streams use the encoded screenshot fallback
+path.
+
+The SDK facade is:
+
+```python
+with computer.observation_stream(fps=5, options={"format": "png"}) as stream:
+    for frame in stream.frames():
+        ...
+```
+
+The SDK defaults observation streams to lossless PNG with the cursor hidden. Advanced callers can
+tune `tile_size`, `delta_max_ratio`, `delta_mode`, and `keyframe_interval`; keep the default
+64-pixel tiles unless measurements show a workload benefits from finer patch locality.
+
+Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
+single action-then-observe turns, because their one-shot latency remains easier to attribute and
+does not require stream setup. Observation stream frames count against the screenshot budget. Patch
+frames include `kind="patch"`, `dirty_rect`, `dirty_ratio`, `previous_seq`, and a binary patch image.
+Clients should apply patches only when their previous frame sequence matches; otherwise request or
+wait for a keyframe.
+
 For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
 screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
 plus in-memory Pillow encoding, avoiding the slower subprocess/temp-file/decode path. Cursor-visible
@@ -225,6 +266,25 @@ The hot-session surface reports `screenshot_full_raw`, `move_click`, `click_scre
 `move_click_sequence` over the persistent session. It intentionally does not run in `--mock-local`
 mode because FastAPI's in-process test client is not the SDK's network/WebSocket stack. Use a local
 daemon or a Modal-created sandbox for real transport attribution.
+
+Add `daemon-observation-stream` when measuring continuous observation:
+
+```bash
+uv run computer-use benchmark sdk \
+  --base-url http://127.0.0.1:8080 \
+  --token dev \
+  --surfaces daemon-observation-stream \
+  --iterations 10
+```
+
+This surface reports `observation_first_frame`, `observation_steady_no_change`,
+`observation_small_patch`, and `observation_large_change`. It records frame payload bytes, full-frame
+bytes, daemon capture/diff/encode timing, dirty-region metadata, metadata-only unchanged frames, and
+WebSocket transport labeling. It is intentionally separate from `screenshot_full_raw` because it
+measures stream startup and sustained observation behavior rather than a single request/response
+screenshot. The benchmark uses the SDK-default PNG screenshot format. Official stream benchmark
+wall times include stream setup, frame pacing, and visual mutation settling; use same-sandbox A/B
+runs when attributing raw continuous-observation latency against HTTP polling.
 
 The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
 

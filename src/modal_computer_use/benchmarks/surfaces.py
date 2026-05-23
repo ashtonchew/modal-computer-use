@@ -11,6 +11,7 @@ from .adapter_surface import _run_adapter_surface
 from .constants import DEFAULT_SDK_BENCHMARK_SURFACES, BenchmarkSurface
 from .daemon_surface import _run_daemon_http_surface
 from .hot_session_surface import _run_daemon_hot_session_surface
+from .observation_surface import _run_daemon_observation_surface
 from .surface_result import _surface_not_measured, _surface_result
 
 SurfaceBenchmarkMode = Literal["mock-local", "http"]
@@ -154,6 +155,20 @@ def _run_surface(
             )
         finally:
             hot_session.close()
+    if surface == "daemon-observation-stream":
+        if client is None or mode == "mock-local":
+            return _surface_not_measured(
+                "modal-daemon-observation-stream",
+                "daemon observation stream benchmark requires a reachable daemon websocket URL",
+            )
+        return _run_daemon_observation_surface(
+            base_url=client.base_url,
+            token=client.transport.token,
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            environment_metadata=environment_metadata,
+        )
     if surface == "sandbox-exec":
         return _surface_result(
             surface,

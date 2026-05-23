@@ -38,8 +38,9 @@ from .namespaces import (
     SessionNamespace,
     WindowsNamespace,
 )
+from .observations import ObservationClient
 from .state import compute_config_hash, default_tags, new_run_id
-from .transports import HotSessionTransport
+from .transports import HotSessionTransport, ObservationStreamTransport
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
@@ -460,6 +461,37 @@ class ComputerSandbox:
                 token=self.client.transport.token,
                 timeout=timeout,
             )
+        )
+
+    def observation_stream(
+        self,
+        *,
+        options: dict[str, Any] | None = None,
+        fps: float = 5.0,
+        max_frames: int | None = None,
+        idle_timeout_ms: int | None = None,
+        send_unchanged: bool = False,
+        delta_mode: Literal["auto", "off"] | None = None,
+        delta_max_ratio: float | None = None,
+        keyframe_interval: int | None = None,
+        tile_size: int | None = None,
+        timeout: float = 30.0,
+    ) -> ObservationClient:
+        return ObservationClient(
+            ObservationStreamTransport(
+                self.client.base_url,
+                token=self.client.transport.token,
+                timeout=timeout,
+            ),
+            options=options,
+            fps=fps,
+            max_frames=max_frames,
+            idle_timeout_ms=idle_timeout_ms,
+            send_unchanged=send_unchanged,
+            delta_mode=delta_mode,
+            delta_max_ratio=delta_max_ratio,
+            keyframe_interval=keyframe_interval,
+            tile_size=tile_size,
         )
 
     def snapshot_filesystem(self) -> object:
