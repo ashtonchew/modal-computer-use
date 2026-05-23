@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import ipaddress
-import json
-import time
-from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -18,6 +14,7 @@ from modal_computer_use.daemon.routes.screenshots import (
     _screenshot_headers,
     enforce_screenshot_options_pixels,
 )
+from modal_computer_use.daemon.routes.websocket_auth import daemon_websocket_auth_error
 from modal_computer_use.daemon.schemas import ScreenshotRequest
 from modal_computer_use.models import ActionBatchRequest
 from modal_computer_use.redaction import sanitize_payload, sanitize_text
@@ -27,7 +24,7 @@ router = APIRouter(prefix="/v1/session")
 
 @router.websocket("/hot")
 async def hot_session(websocket: WebSocket) -> None:
-    auth_error = _hot_session_auth_error(websocket)
+    auth_error = daemon_websocket_auth_error(websocket)
     if auth_error is not None:
         await websocket.close(code=1008, reason=auth_error)
         return
@@ -196,82 +193,3 @@ async def _send_hot_error(
             },
         }
     )
-
-
-def _hot_session_auth_error(websocket: WebSocket) -> str | None:
-    settings = websocket.app.state.settings
-    if settings.reject_query_tokens and "_modal_connect_token" in websocket.query_params:
-        return "query_token_rejected"
-    if _has_valid_hot_tunnel_token(websocket):
-        return None
-    if settings.local_token:
-        if not _is_hot_loopback_websocket(websocket):
-            return "local_token_requires_loopback"
-        if websocket.headers.get("authorization") != f"Bearer {settings.local_token}":
-            return "unauthorized"
-        return None
-    if settings.require_connect_user:
-        if not _is_hot_trusted_connect_proxy(
-            websocket,
-            trust_private=settings.trust_private_connect_proxy,
-        ):
-            return "connect_token_required"
-        raw = websocket.headers.get("x-verified-user-data")
-        if not raw:
-            return "connect_token_required"
-        with suppress(json.JSONDecodeError):
-            metadata = json.loads(raw)
-            if isinstance(metadata, dict) and metadata.get("sdk") == "modal-computer-use":
-                return None
-        return "invalid_verified_user_data"
-    return None
-
-
-def _is_hot_loopback_websocket(websocket: WebSocket) -> bool:
-    host = websocket.client.host if websocket.client else ""
-    if host in {"localhost", "testclient"}:
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
-def _is_hot_trusted_connect_proxy(websocket: WebSocket, *, trust_private: bool) -> bool:
-    host = websocket.client.host if websocket.client else ""
-    if host in {"localhost", "testclient"}:
-        return True
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    if address.is_loopback:
-        return True
-    return trust_private and (address.is_private or address.is_link_local)
-
-
-def _has_valid_hot_tunnel_token(websocket: WebSocket) -> bool:
-    token = _hot_bearer_token(websocket)
-    if not token:
-        return False
-    settings = websocket.app.state.settings
-    if settings.tunnel_token and token == settings.tunnel_token:
-        return True
-    sessions = getattr(websocket.app.state, "tunnel_sessions", {})
-    expires_at = sessions.get(token) if isinstance(sessions, dict) else None
-    if not isinstance(expires_at, int | float):
-        return False
-    if expires_at <= time.time():
-        with suppress(Exception):
-            sessions.pop(token, None)
-        return False
-    return True
-
-
-def _hot_bearer_token(websocket: WebSocket) -> str | None:
-    value = websocket.headers.get("authorization", "")
-    prefix = "Bearer "
-    if not value.startswith(prefix):
-        return None
-    token = value[len(prefix) :].strip()
-    return token or None

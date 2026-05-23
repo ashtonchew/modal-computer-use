@@ -24,6 +24,7 @@ from modal_computer_use.daemon.desktop.display import StaticDisplayController
 from modal_computer_use.daemon.desktop.keyboard import X11KeyboardController
 from modal_computer_use.daemon.desktop.mouse import BUTTON_NUMBERS, X11MouseController
 from modal_computer_use.daemon.desktop.screenshots import (
+    CapturedRawScreenshot,
     CapturedScreenshot,
     X11ScreenshotController,
     encode_image,
@@ -185,6 +186,13 @@ class DesktopBackend(ABC):
             cursor_position=screenshot.cursor_position if include_cursor_position else None,
             timings_ms={},
         )
+
+    async def screenshot_raw_pixels(
+        self,
+        *,
+        region: Region | None = None,
+    ) -> CapturedRawScreenshot | None:
+        return None
 
     @abstractmethod
     async def display_info(self) -> DisplayInfo:
@@ -454,6 +462,13 @@ class MockDesktopBackend(DesktopBackend):
             cursor_position=self.cursor if include_cursor_position else None,
             timings_ms={},
         )
+
+    async def screenshot_raw_pixels(
+        self,
+        *,
+        region: Region | None = None,
+    ) -> CapturedRawScreenshot | None:
+        return None
 
     async def display_info(self) -> DisplayInfo:
         display = DisplayGeometry(id=":99.0", x=0, y=0, width=self.width, height=self.height)
@@ -806,6 +821,13 @@ class X11DesktopBackend(MockDesktopBackend):
             include_cursor_position=include_cursor_position,
             prefer_native_png=prefer_native_png,
         )
+
+    async def screenshot_raw_pixels(
+        self,
+        *,
+        region: Region | None = None,
+    ) -> CapturedRawScreenshot | None:
+        return await self._screenshots.capture_raw_pixels(region=region)
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:
         result = await self._run(*command, timeout=timeout, check=False)

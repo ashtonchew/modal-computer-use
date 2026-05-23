@@ -6,6 +6,7 @@ BenchmarkMode = Literal["mock-local", "http"]
 BenchmarkSurface = Literal[
     "daemon-http",
     "daemon-hot-session",
+    "daemon-observation-stream",
     "sandbox-exec",
     "openai-adapter",
     "anthropic-adapter",

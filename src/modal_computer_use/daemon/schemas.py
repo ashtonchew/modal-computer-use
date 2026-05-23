@@ -125,6 +125,17 @@ class ScreenshotRequest(ScreenshotOptions):
     region: Region | None = None
 
 
+class ObservationStreamRequest(ScreenshotRequest):
+    fps: float = Field(default=5.0, gt=0, le=30)
+    max_frames: int | None = Field(default=None, ge=1, le=10_000)
+    idle_timeout_ms: int | None = Field(default=None, ge=100, le=300_000)
+    send_unchanged: bool = False
+    keyframe_interval: int = Field(default=30, ge=1, le=10_000)
+    delta_mode: Literal["auto", "off"] = "auto"
+    delta_max_ratio: float = Field(default=0.35, ge=0, le=1)
+    tile_size: int = Field(default=64, ge=16, le=512)
+
+
 class ZoomScreenshotRequest(Schema):
     region: Region
     scale: float = Field(default=2.0, gt=0, le=8)
