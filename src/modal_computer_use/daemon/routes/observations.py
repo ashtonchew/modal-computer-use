@@ -23,6 +23,7 @@ from modal_computer_use.daemon.desktop.tile_diff import (
     native_hash_available,
     tile_hashes_rgb,
 )
+from modal_computer_use.daemon.desktop.xdamage import XDamageWaitResult, XDamageWatcher
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_screenshot_capture
 from modal_computer_use.daemon.routes.screenshots import (
@@ -57,6 +58,17 @@ class _StreamState:
     emitted_frames: int = 0
     started_at: float = 0.0
     next_frame_at: float = 0.0
+    xdamage_watcher: XDamageWatcher | None = None
+    xdamage_display: str | None = None
+
+
+@dataclass
+class _PreparedChangeSignal:
+    requested: str
+    active: str
+    watcher: XDamageWatcher | None = None
+    unavailable_reason: str | None = None
+    prearmed: bool = False
 
 
 @router.websocket("/stream")
@@ -85,6 +97,8 @@ async def observation_stream(websocket: WebSocket) -> None:
             await _handle_observation_message(websocket, state, message)
     except WebSocketDisconnect:
         return
+    finally:
+        _close_stream_resources(state)
 
 
 async def _handle_observation_message(
@@ -176,11 +190,13 @@ async def _handle_observation_message(
                         "poll_interval_ms",
                         "poll_strategy",
                         "change_detection",
+                        "change_signal",
                         "change_detection_region",
                         "change_region_radius",
                     },
                 )
             )
+            change_signal = _prepare_change_signal(websocket, state, stream_request.change_signal)
             region = _resolve_change_detection_region(websocket, stream_request)
             region_baseline_sha256 = None
             if region is not None:
@@ -201,6 +217,7 @@ async def _handle_observation_message(
                 poll_strategy=stream_request.poll_strategy,
                 region=region,
                 region_baseline_sha256=region_baseline_sha256,
+                change_signal=change_signal,
                 extra_metadata={
                     "action_result": action_result.model_dump(mode="json"),
                     "capture_delay_ms": stream_request.capture_delay_ms,
@@ -208,6 +225,7 @@ async def _handle_observation_message(
                     "poll_interval_ms": stream_request.poll_interval_ms,
                     "poll_strategy": stream_request.poll_strategy,
                     "change_detection": stream_request.change_detection,
+                    "change_signal": stream_request.change_signal,
                     "change_detection_region": region.model_dump(mode="json")
                     if region is not None
                     else None,
@@ -376,6 +394,7 @@ async def _send_changed_frame(
     poll_strategy: str,
     region: Region | None,
     region_baseline_sha256: str | None,
+    change_signal: _PreparedChangeSignal,
     extra_metadata: dict[str, Any],
 ) -> None:
     request = state.request
@@ -391,11 +410,17 @@ async def _send_changed_frame(
     region_attempts = 0
     region_detected = False
     used_region = region is not None and region_baseline_sha256 is not None
+    signal_result: XDamageWaitResult | None = None
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
     change_detected = False
     try:
-        if used_region:
+        if change_signal.watcher is not None:
+            signal_result = await asyncio.to_thread(
+                change_signal.watcher.wait,
+                timeout_ms,
+            )
+        if used_region and not (signal_result is not None and signal_result.detected):
             while True:
                 region_attempts += 1
                 region_sha256 = await _capture_region_source_sha256(websocket, region=region)
@@ -473,6 +498,13 @@ async def _send_changed_frame(
             "change_region_detected": region_detected,
             "change_wait_ms": wait_ms,
             "change_timeout_reached": not (change_detected or region_detected),
+            "change_signal_requested": change_signal.requested,
+            "change_signal_active": change_signal.active,
+            "change_signal_available": _change_signal_available(signal_result, change_signal),
+            "change_signal_detected": None if signal_result is None else signal_result.detected,
+            "change_signal_wait_ms": None if signal_result is None else signal_result.wait_ms,
+            "change_signal_reason": _change_signal_reason(signal_result, change_signal),
+            "change_signal_version": None if signal_result is None else signal_result.version,
         },
     )
 
@@ -490,6 +522,69 @@ async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region)
         options,
     )
     return None if raw is None else raw.sha256
+
+
+def _prepare_change_signal(
+    websocket: WebSocket,
+    state: _StreamState,
+    requested: str,
+) -> _PreparedChangeSignal:
+    if requested == "poll":
+        return _PreparedChangeSignal(requested=requested, active="poll")
+    display = getattr(websocket.app.state.backend, "display", None)
+    if not isinstance(display, str) or not display:
+        return _PreparedChangeSignal(
+            requested=requested,
+            active="poll",
+            unavailable_reason="backend has no X11 display",
+        )
+    if state.xdamage_watcher is None or state.xdamage_display != display:
+        if state.xdamage_watcher is not None:
+            state.xdamage_watcher.close()
+        state.xdamage_watcher = XDamageWatcher(display=display)
+        state.xdamage_display = display
+    watcher = state.xdamage_watcher
+    try:
+        watcher.arm()
+    except Exception:
+        if requested == "auto":
+            return _PreparedChangeSignal(
+                requested=requested,
+                active="poll",
+                unavailable_reason=watcher.failure or "XDamage unavailable",
+            )
+        return _PreparedChangeSignal(
+            requested=requested,
+            active="xdamage",
+            watcher=watcher,
+            unavailable_reason=watcher.failure or "XDamage unavailable",
+        )
+    return _PreparedChangeSignal(
+        requested=requested,
+        active="xdamage",
+        watcher=watcher,
+        prearmed=True,
+    )
+
+
+def _change_signal_available(
+    result: XDamageWaitResult | None,
+    signal: _PreparedChangeSignal,
+) -> bool | None:
+    if signal.active == "poll":
+        return False if signal.requested != "poll" else None
+    if result is None:
+        return None
+    return result.available
+
+
+def _change_signal_reason(
+    result: XDamageWaitResult | None,
+    signal: _PreparedChangeSignal,
+) -> str | None:
+    if result is not None:
+        return result.reason
+    return signal.unavailable_reason
 
 
 def _change_poll_sleep_ms(
@@ -1109,12 +1204,24 @@ def _require_started(state: _StreamState) -> None:
 
 
 def _clear_stream(state: _StreamState) -> None:
+    _close_stream_resources(state)
     state.request = None
     state.stream_id = None
     state.paused = False
     state.last_sha256 = None
+    state.last_source_sha256 = None
     state.last_image = None
+    state.last_tile_hashes = None
     state.last_frame_seq = None
+    state.emitted_frames = 0
+    state.next_frame_at = 0.0
+
+
+def _close_stream_resources(state: _StreamState) -> None:
+    if state.xdamage_watcher is not None:
+        state.xdamage_watcher.close()
+    state.xdamage_watcher = None
+    state.xdamage_display = None
 
 
 async def _send_observation_error(

@@ -147,12 +147,13 @@ with computer.observation_stream(fps=0.01) as stream:
     observed = next(frames)
 ```
 
-This operation runs the action batch once, then polls raw screen state inside the daemon until the
-stream's source screenshot hash changes or the timeout is reached. It emits exactly one stream
-frame, preserving the same patch/keyframe/unchanged semantics as the rest of the observation
-stream. Frame metadata includes `change_detected`, `change_attempts`, `change_wait_ms`, and
-`change_timeout_reached` so callers can distinguish a real painted change from a no-op or timeout.
-Use this for paint-aware GUI loops instead of guessing a fixed post-action delay.
+This operation runs the action batch once, waits for a paint signal, then verifies raw screen state
+inside the daemon until the stream's source screenshot hash changes or the timeout is reached. It
+emits exactly one stream frame, preserving the same patch/keyframe/unchanged semantics as the rest
+of the observation stream. Frame metadata includes `change_detected`, `change_attempts`,
+`change_wait_ms`, and `change_timeout_reached` so callers can distinguish a real painted change
+from a no-op or timeout. Use this for paint-aware GUI loops instead of guessing a fixed post-action
+delay.
 
 The change detector supports two optional optimizations:
 
@@ -161,6 +162,12 @@ The change detector supports two optional optimizations:
 - `change_detection="auto_region"` captures a small region around the last pointer action before
   falling back to the full stream frame. Use `change_detection_region` for an explicit region, or
   `change_detection="full"` when keyboard or global UI changes are expected.
+- `change_signal="auto"` is the default. It uses a persistent X11 DAMAGE watcher as an event-driven
+  paint signal when the X server and image support it, then falls back to the same polling path when
+  unavailable. Use `change_signal="poll"` to disable XDamage, or `change_signal="xdamage"` to force
+  the XDamage probe for benchmarking. XDamage only decides when to try the final observation frame;
+  the daemon still verifies the screenshot hash before reporting a detected change, and the emitted
+  keyframe/patch/unchanged payload still comes from the normal raw screenshot and tile-diff path.
 
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
@@ -350,10 +357,15 @@ uv run computer-use benchmark sdk \
 This surface reports `observation_first_frame`, `observation_steady_no_change`,
 `observation_small_patch`, `observation_large_change`, `observation_capture_now_no_change`, and
 `observation_capture_now_small_patch`. It also reports action-causal cases:
-`observation_action_click_capture_now` and `observation_action_click_fused_raw`. The capture-now
-action case opens a synthetic page once, mutates it with a real daemon click action, then requests an
-immediate observation frame on the existing stream. The fused-raw case uses the same page and click
-through `POST /v1/actions/run/raw-screenshot`.
+`observation_action_click_capture_now`, `observation_action_click_observe_change`,
+`observation_action_click_observe_change_poll`,
+`observation_action_click_observe_change_xdamage`,
+`observation_action_click_observe_change_auto_signal`, and `observation_action_click_fused_raw`.
+The capture-now action case opens a synthetic page once, mutates it with a real daemon click action,
+then requests an immediate observation frame on the existing stream. The default observe-change case
+uses the SDK default `change_signal="auto"`; the poll, XDamage, and auto-signal variants make the
+signal policy explicit for A/B comparison. The fused-raw case uses the same page and click through
+`POST /v1/actions/run/raw-screenshot`.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
