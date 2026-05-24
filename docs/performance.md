@@ -295,14 +295,21 @@ uv run computer-use benchmark sdk \
 
 This surface reports `observation_first_frame`, `observation_steady_no_change`,
 `observation_small_patch`, `observation_large_change`, `observation_capture_now_no_change`, and
-`observation_capture_now_small_patch`. It records frame payload bytes, full-frame bytes, daemon
-capture/diff/encode timing, dirty-region metadata, metadata-only unchanged frames, action-to-frame
-timing for `capture_now` cases, and WebSocket transport labeling. It is intentionally separate from
-`screenshot_full_raw` because it measures stream startup, sustained observation behavior, and
-action-causal capture behavior rather than a single request/response screenshot. The benchmark uses
-the SDK-default PNG screenshot format. Passive stream benchmark wall times include stream setup,
-frame pacing, and visual mutation settling; use `capture_now` cases when attributing hot
-action-to-observation latency.
+`observation_capture_now_small_patch`. It also reports action-causal cases:
+`observation_action_click_capture_now` and `observation_action_click_fused_raw`. The capture-now
+action case opens a synthetic page once, mutates it with a real daemon click action, then requests an
+immediate observation frame on the existing stream. The fused-raw case uses the same page and click
+through `POST /v1/actions/run/raw-screenshot`.
+
+The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
+dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
+cases, action daemon timing for click-driven cases, and WebSocket transport labeling. It is
+intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
+observation behavior, and action-causal capture behavior rather than only a single
+request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive
+stream benchmark wall times include stream setup, frame pacing, and visual mutation settling; use
+`observation_action_click_capture_now` and `observation_action_click_fused_raw` when comparing hot
+action-to-observation SDK loops.
 
 The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
 
