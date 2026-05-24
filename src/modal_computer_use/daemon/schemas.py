@@ -41,6 +41,26 @@ class ObservationActionObserveChangeRequest(ObservationActionCaptureRequest):
     change_region_radius: int = Field(default=192, ge=1, le=10_000)
 
 
+class ActionObserveChangeScreenshotRequest(ActionBatchRequest):
+    screenshot_options: ScreenshotOptions = Field(default_factory=ScreenshotOptions)
+    previous_source_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    capture_delay_ms: int = Field(default=0, ge=0, le=60_000)
+    change_timeout_ms: int = Field(default=100, ge=0, le=60_000)
+    poll_interval_ms: int = Field(default=8, ge=1, le=1_000)
+    poll_strategy: Literal["fixed", "adaptive"] = "fixed"
+    change_detection: Literal["full", "region", "auto_region"] = "full"
+    change_signal: Literal["poll", "xdamage", "auto"] = "auto"
+    change_detection_region: Region | None = None
+    change_region_radius: int = Field(default=192, ge=1, le=10_000)
+
+    @field_validator("previous_source_sha256")
+    @classmethod
+    def _valid_previous_source_sha256(cls, value: str | None) -> str | None:
+        if value is not None and not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("previous_source_sha256 must be a lowercase sha256 hex digest")
+        return value
+
+
 class TextRequest(Schema):
     text: str
 

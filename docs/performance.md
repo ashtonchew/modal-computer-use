@@ -195,6 +195,14 @@ frames include `kind="patch"`, `dirty_rect`, `dirty_ratio`, `previous_seq`, and 
 Clients should apply patches only when their previous frame sequence matches; otherwise request or
 wait for a keyframe.
 
+For one-shot turns that need a paint-aware wait but do not maintain an observation stream, use
+`actions.run_and_observe_change_screenshot_bytes(...)` or
+`POST /v1/actions/run/observe-change/raw-screenshot`. With `change_signal="auto"`, the daemon uses
+XDamage as the paint signal when available, then captures one final binary screenshot. If XDamage is
+unavailable, or if callers set `change_signal="poll"`, the route falls back to source-hash polling.
+This route is intentionally a one-shot binary response, not a replacement for stream patch/delta
+state.
+
 For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
 screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
 plus in-memory Pillow encoding, avoiding the slower subprocess/temp-file/decode path. Cursor-visible
@@ -379,12 +387,16 @@ This surface reports `observation_first_frame`, `observation_steady_no_change`,
 `observation_action_click_capture_now`, `observation_action_click_observe_change`,
 `observation_action_click_observe_change_poll`,
 `observation_action_click_observe_change_xdamage`,
-`observation_action_click_observe_change_auto_signal`, and `observation_action_click_fused_raw`.
+`observation_action_click_observe_change_auto_signal`,
+`observation_action_click_observe_change_http_raw`, and
+`observation_action_click_fused_raw`.
 The capture-now action case opens a synthetic page once, mutates it with a real daemon click action,
 then requests an immediate observation frame on the existing stream. The default observe-change case
 uses the SDK default `change_signal="auto"`; the poll, XDamage, and auto-signal variants make the
-signal policy explicit for A/B comparison. The fused-raw case uses the same page and click through
-`POST /v1/actions/run/raw-screenshot`.
+signal policy explicit for A/B comparison. The HTTP raw observe-change case uses the same page and
+click through `POST /v1/actions/run/observe-change/raw-screenshot` so benchmarks can separate
+WebSocket stream framing from a one-shot binary response. The fused-raw case uses the same page and
+click through `POST /v1/actions/run/raw-screenshot`.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
@@ -697,6 +709,12 @@ For low-latency model turns, prefer `actions.run_and_screenshot_bytes(...)` or
 single daemon request while returning the screenshot as binary image bytes. The legacy
 `actions.run(..., screenshot_after=True)` path remains useful when callers need a structured JSON
 `Screenshot` object, but it pays base64 response overhead.
+
+When the caller needs to wait for the next paint instead of capturing immediately, use
+`actions.run_and_observe_change_screenshot_bytes(...)`. It returns binary image bytes plus parsed
+`change_result` and `change_timing_ms` metadata. The default `change_signal="auto"` is fastest on
+X11 images with DAMAGE support; set `change_signal="poll"` when the caller needs source-hash
+verification instead of event-driven paint detection.
 
 For raw PNG screenshots at native scale without the cursor, the daemon first tries an in-process
 MSS/XShm capture and falls back to `scrot`, then `maim`, if the fast capture is unavailable.

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import UTC, datetime
 
-from modal_computer_use.models import ActionResult
+from PIL import Image
+
+from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot
+from modal_computer_use.models import ActionResult, CoordinateSpace, sha256_bytes
 
 
 def test_action_batch_stop_on_error(test_client) -> None:
@@ -193,6 +197,51 @@ def test_action_batch_raw_screenshot_after_requires_screenshot_after(test_client
     assert response.json()["code"] == "missing_screenshot_after"
 
 
+def test_action_batch_observe_change_raw_screenshot_returns_image_and_change_headers(
+    test_client,
+    app,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    captures = iter([after])
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "poll",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    action_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-action-result"]).decode("utf-8")
+    )
+    change_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
+    )
+    change_timing = json.loads(response.headers["x-computer-use-change-timing-ms"])
+    assert action_result["ok"] is True
+    assert "screenshot" not in action_result
+    assert change_result["detected"] is True
+    assert change_result["attempts"] == 1
+    assert change_result["baseline_source_sha256"] == before.sha256
+    assert change_result["source_sha256"] == after.sha256
+    assert change_timing["baseline_capture_ms"] == 0.0
+    assert change_timing["total_ms"] >= 0.0
+
+
 def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
     sentinel = "_".join(["SENTINEL", "TYPED", "PAYLOAD", "NO", "LEAK"])
 
@@ -209,6 +258,27 @@ def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
     assert result["ok"] is False
     assert result["results"][0]["error"] == "typing failed for [redacted typed text]"
     assert sentinel not in serialized
+
+
+def _raw_screenshot_bytes(color: str) -> CapturedRawScreenshot:
+    image = Image.new("RGB", (8, 8), color)
+    rgb = image.tobytes()
+    return CapturedRawScreenshot(
+        width=8,
+        height=8,
+        rgb=rgb,
+        sha256=sha256_bytes(rgb),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=8,
+            desktop_height=8,
+            image_width=8,
+            image_height=8,
+        ),
+        cursor_visible=False,
+        capture_backend="test-raw",
+        timings_ms={"total_ms": 0.0},
+    )
 
 
 def test_hold_key_nested_type_failure_redacts_typed_text(test_client, app) -> None:
