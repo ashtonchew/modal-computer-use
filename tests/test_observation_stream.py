@@ -511,6 +511,12 @@ def test_observation_stream_run_actions_observe_change_waits_for_change(app) -> 
     assert second["change_signal_active"] == "poll"
     assert second["change_signal_reason"] == "backend has no X11 display"
     assert second["change_wait_ms"] >= 0
+    stage_timing = second["change_stage_timing_ms"]
+    assert stage_timing["signal_prepare_ms"] >= 0
+    assert stage_timing["action_wall_ms"] >= 0
+    assert stage_timing["signal_wait_wall_ms"] == 0
+    assert stage_timing["frame_poll_ms"] >= 0
+    assert stage_timing["server_pre_emit_ms"] >= stage_timing["action_wall_ms"]
     assert second["action_result"]["ok"] is True
 
 
@@ -721,6 +727,8 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert second["change_signal_available"] is True
     assert second["change_signal_detected"] is True
     assert second["change_signal_version"] == "1.1"
+    assert second["change_stage_timing_ms"]["signal_wait_wall_ms"] >= 0
+    assert second["change_stage_timing_ms"]["server_pre_emit_ms"] >= 0
     assert len(FakeXDamageWatcher.instances) == 1
     assert FakeXDamageWatcher.instances[0].armed == 1
     assert FakeXDamageWatcher.instances[0].closed is True

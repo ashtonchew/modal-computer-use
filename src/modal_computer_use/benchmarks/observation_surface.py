@@ -946,6 +946,7 @@ def _frame_observation(frame) -> dict[str, Any]:
         "change_signal_wait_ms": metadata.get("change_signal_wait_ms"),
         "change_signal_reason": metadata.get("change_signal_reason"),
         "change_signal_version": metadata.get("change_signal_version"),
+        "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
         "poll_strategy": metadata.get("poll_strategy"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
     }
@@ -1007,6 +1008,27 @@ def _add_frame_observations(
                 result["change_signal_detected_frames"] = sum(
                     1 for item in observations if item.get("change_signal_detected")
                 )
+            stage_names = sorted(
+                {
+                    key
+                    for item in observations
+                    if isinstance((timing := item.get("change_stage_timing_ms")), dict)
+                    for key, value in timing.items()
+                    if isinstance(value, int | float)
+                }
+            )
+            if stage_names:
+                result["change_stage_timing_summary_ms"] = {
+                    name: _summary(
+                        [
+                            float(timing[name])
+                            for item in observations
+                            if isinstance((timing := item.get("change_stage_timing_ms")), dict)
+                            and isinstance(timing.get(name), int | float)
+                        ]
+                    )
+                    for name in stage_names
+                }
     action_to_frame_samples = [
         timing["action_to_frame_ms"]
         for item in observations
@@ -1016,6 +1038,19 @@ def _add_frame_observations(
     if action_to_frame_samples:
         result["action_to_frame_samples_ms"] = action_to_frame_samples
         result["action_to_frame_summary_ms"] = _summary(action_to_frame_samples)
+    receive_minus_pre_emit_samples = [
+        timing["receive_frame_ms"] - stage_timing["server_pre_emit_ms"]
+        for item in observations
+        if isinstance((timing := item.get("benchmark_timing_ms")), dict)
+        and isinstance((stage_timing := item.get("change_stage_timing_ms")), dict)
+        and isinstance(timing.get("receive_frame_ms"), int | float)
+        and isinstance(stage_timing.get("server_pre_emit_ms"), int | float)
+    ]
+    if receive_minus_pre_emit_samples:
+        result["receive_minus_server_pre_emit_samples_ms"] = receive_minus_pre_emit_samples
+        result["receive_minus_server_pre_emit_summary_ms"] = _summary(
+            receive_minus_pre_emit_samples
+        )
     mutation_samples = [
         timing["mutation_ms"]
         for item in observations

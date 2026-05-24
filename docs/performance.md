@@ -169,6 +169,13 @@ The change detector supports two optional optimizations:
   the daemon still verifies the screenshot hash before reporting a detected change, and the emitted
   keyframe/patch/unchanged payload still comes from the normal raw screenshot and tile-diff path.
 
+Observe-change frames include `change_stage_timing_ms` for attribution. It records daemon-side
+signal preparation, region baseline capture, action batch wall time, explicit capture delay, signal
+wait, region polling, final frame polling/capture, and total server time before the frame is
+emitted. The client benchmark combines this with `request_frame_ms` and `receive_frame_ms`; the
+derived `receive_minus_server_pre_emit` bucket includes websocket send, network transit, client
+receive, and local scheduling because those happen after frame metadata has already been produced.
+
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
 does not require stream setup. Observation stream frames count against the screenshot budget. Patch
@@ -369,7 +376,8 @@ signal policy explicit for A/B comparison. The fused-raw case uses the same page
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
-cases, action daemon timing for click-driven cases, and WebSocket transport labeling. It is
+cases, action daemon timing for click-driven cases, observe-change stage timing, derived
+receive-minus-server-pre-emit timing, and WebSocket transport labeling. It is
 intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
 observation behavior, and action-causal capture behavior rather than only a single
 request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive

@@ -180,6 +180,7 @@ async def _handle_observation_message(
             )
         elif op == "run_actions_observe_change":
             _require_started(state)
+            observe_started = perf_counter()
             stream_request = ObservationActionObserveChangeRequest.model_validate(payload)
             action_request = ActionBatchRequest.model_validate(
                 stream_request.model_dump(
@@ -196,17 +197,27 @@ async def _handle_observation_message(
                     },
                 )
             )
+            signal_prepare_started = perf_counter()
             change_signal = _prepare_change_signal(websocket, state, stream_request.change_signal)
+            signal_prepare_ms = _elapsed_ms(signal_prepare_started)
             region = _resolve_change_detection_region(websocket, stream_request)
             region_baseline_sha256 = None
+            region_baseline_ms = 0.0
             if region is not None:
+                region_baseline_started = perf_counter()
                 region_baseline_sha256 = await _capture_region_source_sha256(
                     websocket,
                     region=region,
                 )
+                region_baseline_ms = _elapsed_ms(region_baseline_started)
+            action_started = perf_counter()
             action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
+            action_wall_ms = _elapsed_ms(action_started)
+            capture_delay_wall_ms = 0.0
             if stream_request.capture_delay_ms > 0:
+                capture_delay_started = perf_counter()
                 await asyncio.sleep(stream_request.capture_delay_ms / 1000)
+                capture_delay_wall_ms = _elapsed_ms(capture_delay_started)
             await _send_changed_frame(
                 websocket,
                 state,
@@ -218,6 +229,13 @@ async def _handle_observation_message(
                 region=region,
                 region_baseline_sha256=region_baseline_sha256,
                 change_signal=change_signal,
+                observe_started=observe_started,
+                stage_timing_ms={
+                    "signal_prepare_ms": signal_prepare_ms,
+                    "region_baseline_ms": region_baseline_ms,
+                    "action_wall_ms": action_wall_ms,
+                    "capture_delay_wall_ms": capture_delay_wall_ms,
+                },
                 extra_metadata={
                     "action_result": action_result.model_dump(mode="json"),
                     "capture_delay_ms": stream_request.capture_delay_ms,
@@ -395,6 +413,8 @@ async def _send_changed_frame(
     region: Region | None,
     region_baseline_sha256: str | None,
     change_signal: _PreparedChangeSignal,
+    observe_started: float,
+    stage_timing_ms: dict[str, float],
     extra_metadata: dict[str, Any],
 ) -> None:
     request = state.request
@@ -411,16 +431,22 @@ async def _send_changed_frame(
     region_detected = False
     used_region = region is not None and region_baseline_sha256 is not None
     signal_result: XDamageWaitResult | None = None
+    signal_wait_wall_ms = 0.0
+    region_poll_ms = 0.0
+    frame_poll_ms = 0.0
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
     change_detected = False
     try:
         if change_signal.watcher is not None:
+            signal_wait_started = perf_counter()
             signal_result = await asyncio.to_thread(
                 change_signal.watcher.wait,
                 timeout_ms,
             )
+            signal_wait_wall_ms = _elapsed_ms(signal_wait_started)
         if used_region and not (signal_result is not None and signal_result.detected):
+            region_poll_started = perf_counter()
             while True:
                 region_attempts += 1
                 region_sha256 = await _capture_region_source_sha256(websocket, region=region)
@@ -435,6 +461,8 @@ async def _send_changed_frame(
                     )
                     / 1000
                 )
+            region_poll_ms = _elapsed_ms(region_poll_started)
+        frame_poll_started = perf_counter()
         while True:
             attempts += 1
             metadata, payload = await _capture_frame(
@@ -461,6 +489,7 @@ async def _send_changed_frame(
                 )
                 / 1000
             )
+        frame_poll_ms = _elapsed_ms(frame_poll_started)
     except DaemonError as exc:
         await _send_observation_error(
             websocket,
@@ -482,6 +511,14 @@ async def _send_changed_frame(
         _clear_stream(state)
         return
     wait_ms = _elapsed_ms(started)
+    stage_timing = {
+        **stage_timing_ms,
+        "signal_wait_wall_ms": signal_wait_wall_ms,
+        "region_poll_ms": region_poll_ms,
+        "frame_poll_ms": frame_poll_ms,
+        "change_wait_ms": wait_ms,
+        "server_pre_emit_ms": _elapsed_ms(observe_started),
+    }
     await _emit_frame(
         websocket,
         state,
@@ -505,6 +542,7 @@ async def _send_changed_frame(
             "change_signal_wait_ms": None if signal_result is None else signal_result.wait_ms,
             "change_signal_reason": _change_signal_reason(signal_result, change_signal),
             "change_signal_version": None if signal_result is None else signal_result.version,
+            "change_stage_timing_ms": stage_timing,
         },
     )
 
