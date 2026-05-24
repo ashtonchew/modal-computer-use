@@ -3,12 +3,17 @@ from __future__ import annotations
 import base64
 import json
 import time
+from datetime import UTC, datetime
 from shlex import quote as shell_quote
 from time import perf_counter
 from typing import Any
 from urllib.parse import quote
 
 from ..client import DaemonClient
+from ..daemon.desktop.screenshots import CapturedRawScreenshot
+from ..daemon.routes.observations import _capture_raw_delta_frame
+from ..daemon.schemas import ObservationStreamRequest
+from ..models import CoordinateSpace, ScreenshotOptions, sha256_bytes
 from ..observations import ObservationClient
 from ..transports import ObservationStreamTransport
 from .measurement import _case_result, _measure_observed_case, _summary
@@ -241,6 +246,10 @@ def _run_daemon_observation_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=250 * 1024,
+        ),
+        "observation_delta_synthetic": _run_observation_delta_synthetic_benchmark(
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
         ),
     }
     return _surface_result(
@@ -746,6 +755,203 @@ def _run_observation_transport_probe_benchmark(
     )
     _add_probe_timing_observations(result, observations)
     return result
+
+
+def _run_observation_delta_synthetic_benchmark(
+    *,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    cases = {
+        "unchanged": _measure_synthetic_delta_case(
+            name="unchanged",
+            mutation_rects=[],
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+        "single_rect": _measure_synthetic_delta_case(
+            name="single_rect",
+            mutation_rects=[{"x": 128, "y": 128, "width": 96, "height": 96}],
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+        "two_sparse_rects": _measure_synthetic_delta_case(
+            name="two_sparse_rects",
+            mutation_rects=[
+                {"x": 64, "y": 64, "width": 96, "height": 96},
+                {"x": 832, "y": 576, "width": 96, "height": 96},
+            ],
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+        "four_sparse_rects": _measure_synthetic_delta_case(
+            name="four_sparse_rects",
+            mutation_rects=[
+                {"x": 64, "y": 64, "width": 64, "height": 64},
+                {"x": 832, "y": 64, "width": 64, "height": 64},
+                {"x": 64, "y": 576, "width": 64, "height": 64},
+                {"x": 832, "y": 576, "width": 64, "height": 64},
+            ],
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+        "large_fallback": _measure_synthetic_delta_case(
+            name="large_fallback",
+            mutation_rects=[{"x": 128, "y": 96, "width": 768, "height": 576}],
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+    }
+    return {
+        "status": "ok" if all(case.get("status") == "ok" for case in cases.values()) else "error",
+        "iterations": iterations,
+        "cases": cases,
+    }
+
+
+def _measure_synthetic_delta_case(
+    *,
+    name: str,
+    mutation_rects: list[dict[str, int]],
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    samples: list[float] = []
+    observations: list[dict[str, Any]] = []
+    request = ObservationStreamRequest(
+        format="png",
+        show_cursor=False,
+        fps=1,
+        keyframe_interval=10_000,
+        tile_size=64,
+        max_patch_rects=8,
+        multi_rect_min_savings=0.1,
+    )
+    options = ScreenshotOptions(format="png", show_cursor=False)
+    width = 1024
+    height = 768
+    baseline = _synthetic_raw_frame(width=width, height=height, rects=[])
+    previous_metadata, _previous_payload = _capture_raw_delta_frame(
+        raw=baseline,
+        request=request,
+        options=options,
+        seq=1,
+        last_source_sha256=None,
+        previous_tile_hashes=None,
+        previous_seq=None,
+        stream_id="synthetic",
+        captured_started=perf_counter(),
+    )
+    previous_hashes = previous_metadata.pop("_current_tile_hashes")
+    previous_seq = 1
+
+    total_iterations = warmup_iterations + iterations
+    for index in range(total_iterations):
+        seq = index + 2
+        raw = _synthetic_raw_frame(
+            width=width,
+            height=height,
+            rects=mutation_rects if index % 2 == 0 else [],
+        )
+        started = perf_counter()
+        try:
+            metadata, payload = _capture_raw_delta_frame(
+                raw=raw,
+                request=request,
+                options=options,
+                seq=seq,
+                last_source_sha256=baseline.sha256,
+                previous_tile_hashes=previous_hashes,
+                previous_seq=previous_seq,
+                stream_id="synthetic",
+                captured_started=started,
+            )
+        except Exception as exc:
+            failures.append(_failure(name, phase="measure", iteration=index, exc=exc))
+            continue
+        elapsed_ms = _elapsed_benchmark_ms(started)
+        current_hashes = metadata.pop("_current_tile_hashes")
+        observation = {
+            "kind": metadata.get("kind"),
+            "size_bytes": len(payload),
+            "dirty_rect": metadata.get("dirty_rect"),
+            "dirty_ratio": metadata.get("dirty_ratio"),
+            "patch_count": metadata.get("patch_count"),
+            "patch_rects": metadata.get("patch_rects"),
+            "timing_ms": metadata.get("timing_ms"),
+        }
+        if index >= warmup_iterations:
+            samples.append(elapsed_ms)
+            observations.append(observation)
+        previous_hashes = current_hashes
+        previous_seq = seq
+        baseline = raw
+
+    result = _case_result(f"observation_delta_synthetic_{name}", iterations, samples, failures)
+    result.update(
+        {
+            "mutation_rects": mutation_rects,
+            "samples_bytes": [item["size_bytes"] for item in observations],
+            "summary_bytes": _summary([float(item["size_bytes"]) for item in observations]),
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    patch_counts = [
+        item["patch_count"]
+        for item in observations
+        if isinstance(item.get("patch_count"), int | float)
+    ]
+    if patch_counts:
+        result["patch_count_summary"] = _summary([float(item) for item in patch_counts])
+    _add_direct_nested_timing_summary(
+        result,
+        observations,
+        nested_key="timing_ms",
+        result_key="timing_summary_ms",
+    )
+    return result
+
+
+def _synthetic_raw_frame(
+    *,
+    width: int,
+    height: int,
+    rects: list[dict[str, int]],
+) -> CapturedRawScreenshot:
+    rgb = bytearray(b"\xff" * (width * height * 3))
+    row_stride = width * 3
+    for rect_index, rect in enumerate(rects):
+        color = (
+            (17 + rect_index * 53) % 256,
+            (41 + rect_index * 71) % 256,
+            (97 + rect_index * 97) % 256,
+        )
+        row = bytes(color) * rect["width"]
+        for y in range(rect["y"], rect["y"] + rect["height"]):
+            start = y * row_stride + rect["x"] * 3
+            rgb[start : start + rect["width"] * 3] = row
+    data = bytes(rgb)
+    return CapturedRawScreenshot(
+        width=width,
+        height=height,
+        rgb=data,
+        sha256=sha256_bytes(data),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=width,
+            desktop_height=height,
+            image_width=width,
+            image_height=height,
+        ),
+        cursor_visible=False,
+        capture_backend="synthetic-raw",
+        timings_ms={"total_ms": 0.0},
+    )
+
+
+def _elapsed_benchmark_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000
 
 
 def _size_label(size_bytes: int) -> str:
