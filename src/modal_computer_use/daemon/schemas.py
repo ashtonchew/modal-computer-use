@@ -31,6 +31,11 @@ class ObservationActionCaptureRequest(ActionBatchRequest):
     capture_delay_ms: int = Field(default=0, ge=0, le=60_000)
 
 
+class ObservationActionObserveChangeRequest(ObservationActionCaptureRequest):
+    change_timeout_ms: int = Field(default=100, ge=0, le=60_000)
+    poll_interval_ms: int = Field(default=8, ge=1, le=1_000)
+
+
 class TextRequest(Schema):
     text: str
 

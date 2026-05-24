@@ -130,6 +130,28 @@ The operation defaults to immediate capture after the action batch. If the targe
 a paint boundary before the screenshot, pass an explicit `capture_delay_ms` or include an explicit
 `wait` action in the batch. The SDK does not add an implicit post-action delay.
 
+When correctness depends on observing the next visual change rather than taking the first possible
+post-action screenshot, use `run_actions_observe_change()`:
+
+```python
+with computer.observation_stream(fps=0.01) as stream:
+    frames = stream.frames()
+    first = next(frames)
+    stream.run_actions_observe_change(
+        actions=[{"type": "click", "x": 100, "y": 100}],
+        change_timeout_ms=100,
+        poll_interval_ms=8,
+    )
+    observed = next(frames)
+```
+
+This operation runs the action batch once, then polls raw screen state inside the daemon until the
+stream's source screenshot hash changes or the timeout is reached. It emits exactly one stream
+frame, preserving the same patch/keyframe/unchanged semantics as the rest of the observation
+stream. Frame metadata includes `change_detected`, `change_attempts`, `change_wait_ms`, and
+`change_timeout_reached` so callers can distinguish a real painted change from a no-op or timeout.
+Use this for paint-aware GUI loops instead of guessing a fixed post-action delay.
+
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
 does not require stream setup. Observation stream frames count against the screenshot budget. Patch

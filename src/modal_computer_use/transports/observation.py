@@ -146,6 +146,9 @@ class ObservationStreamTransport:
     def run_actions_capture(self, payload: dict[str, Any]) -> None:
         self._send("run_actions_capture", payload)
 
+    def run_actions_observe_change(self, payload: dict[str, Any]) -> None:
+        self._send("run_actions_observe_change", payload)
+
     def configure(self, payload: dict[str, Any]) -> None:
         self._send("configure", payload)
 
