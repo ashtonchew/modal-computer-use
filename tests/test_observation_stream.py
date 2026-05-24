@@ -561,6 +561,93 @@ def test_observation_stream_run_actions_observe_change_reports_timeout(app) -> N
     assert second["action_result"]["ok"] is True
 
 
+def test_observation_stream_run_actions_observe_change_can_detect_region(app) -> None:
+    full_before = _raw_screenshot_bytes("white")
+    full_after = _raw_screenshot_with_square()
+    region_before = _raw_screenshot_bytes("white")
+    region_after = _raw_screenshot_with_square()
+    region_captures = iter([region_before, region_before, region_after])
+
+    async def screenshot_raw_pixels(*_args, **kwargs):
+        if kwargs.get("region") is not None:
+            return next(region_captures)
+        return full_before if screenshot_raw_pixels.full_count == 0 else full_after
+
+    screenshot_raw_pixels.full_count = 0
+
+    async def counting_screenshot_raw_pixels(*_args, **kwargs):
+        result = await screenshot_raw_pixels(*_args, **kwargs)
+        if kwargs.get("region") is None:
+            screenshot_raw_pixels.full_count += 1
+        return result
+
+    app.state.backend.screenshot_raw_pixels = counting_screenshot_raw_pixels
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "change_detection": "region",
+                    "change_detection_region": {"x": 0, "y": 0, "width": 32, "height": 32},
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 1,
+                    "poll_strategy": "adaptive",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        assert websocket.receive_bytes()
+
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["change_region_detected"] is True
+    assert second["change_region_attempts"] == 2
+    assert second["change_detected"] is True
+    assert second["change_detection"] == "region"
+    assert second["poll_strategy"] == "adaptive"
+
+
+def test_adaptive_change_poll_schedule_is_bounded() -> None:
+    assert observation_routes._change_poll_sleep_ms(
+        attempt=1,
+        poll_interval_ms=8,
+        poll_strategy="adaptive",
+    ) == 4
+    assert observation_routes._change_poll_sleep_ms(
+        attempt=2,
+        poll_interval_ms=8,
+        poll_strategy="adaptive",
+    ) == 8
+    assert observation_routes._change_poll_sleep_ms(
+        attempt=4,
+        poll_interval_ms=8,
+        poll_strategy="adaptive",
+    ) == 8
+
+
 def test_observation_client_marshals_options_and_frames() -> None:
     transport = _FakeObservationTransport(
         [
