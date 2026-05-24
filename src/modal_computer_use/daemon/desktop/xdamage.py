@@ -55,8 +55,8 @@ class XDamageWatcher:
     def arm(self) -> None:
         self.start()
         self._subtract_damage()
-        self._drain_events()
         self._sync()
+        self._drain_events()
 
     def start(self) -> None:
         if self._display is not None and self._damage is not None:
@@ -132,6 +132,7 @@ class XDamageWatcher:
         while True:
             if self._next_damage_event():
                 self._subtract_damage()
+                self._sync()
                 return XDamageWaitResult(
                     available=True,
                     detected=True,

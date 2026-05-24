@@ -199,9 +199,6 @@ async def _handle_observation_message(
                     },
                 )
             )
-            signal_prepare_started = perf_counter()
-            change_signal = _prepare_change_signal(websocket, state, stream_request.change_signal)
-            signal_prepare_ms = _elapsed_ms(signal_prepare_started)
             region = _resolve_change_detection_region(websocket, stream_request)
             region_baseline_sha256 = None
             region_baseline_ms = 0.0
@@ -212,6 +209,9 @@ async def _handle_observation_message(
                     region=region,
                 )
                 region_baseline_ms = _elapsed_ms(region_baseline_started)
+            signal_prepare_started = perf_counter()
+            change_signal = _prepare_change_signal(websocket, state, stream_request.change_signal)
+            signal_prepare_ms = _elapsed_ms(signal_prepare_started)
             action_started = perf_counter()
             action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
             action_wall_ms = _elapsed_ms(action_started)
