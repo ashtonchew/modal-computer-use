@@ -51,6 +51,10 @@ class _FakeClient:
             "x-computer-use-action-result": base64.b64encode(
                 json_module_dumps(action_result).encode("utf-8")
             ).decode("ascii"),
+            "x-computer-use-change-result": base64.b64encode(
+                json_module_dumps({"detected": True, "attempts": 1}).encode("utf-8")
+            ).decode("ascii"),
+            "x-computer-use-change-timing-ms": json_module_dumps({"total_ms": 12.5}),
         }
 
 
@@ -108,6 +112,41 @@ def test_actions_namespace_run_and_screenshot_bytes_uses_raw_endpoint() -> None:
     assert client.posts[0]["path"] == "/v1/actions/run/raw-screenshot"
     assert client.posts[0]["headers"] == {"Idempotency-Key": "idem"}
     assert client.posts[0]["json"]["screenshot_after"] is True
+
+
+def test_actions_namespace_run_and_observe_change_screenshot_bytes_uses_fast_path() -> None:
+    client = _FakeClient()
+    namespace = ActionsNamespace(client)  # type: ignore[arg-type]
+
+    result = namespace.run_and_observe_change_screenshot_bytes(
+        [{"type": "move", "x": 1, "y": 2}],
+        previous_source_sha256="a" * 64,
+        change_timeout_ms=25,
+        poll_interval_ms=2,
+        poll_strategy="adaptive",
+        change_detection="auto_region",
+        change_region_radius=64,
+        change_signal="poll",
+        idempotency_key="idem",
+        call_id="call_test",
+    )
+
+    assert result.data == b"image-bytes"
+    assert result.width == 1024
+    assert result.height == 768
+    assert result.result.call_id == "call_test"
+    assert result.change_result == {"detected": True, "attempts": 1}
+    assert result.change_timing_ms == {"total_ms": 12.5}
+    assert client.posts[0]["path"] == "/v1/actions/run/observe-change/raw-screenshot"
+    assert client.posts[0]["headers"] == {"Idempotency-Key": "idem"}
+    assert client.posts[0]["json"]["screenshot_after"] is False
+    assert client.posts[0]["json"]["previous_source_sha256"] == "a" * 64
+    assert client.posts[0]["json"]["change_timeout_ms"] == 25
+    assert client.posts[0]["json"]["poll_interval_ms"] == 2
+    assert client.posts[0]["json"]["poll_strategy"] == "adaptive"
+    assert client.posts[0]["json"]["change_detection"] == "auto_region"
+    assert client.posts[0]["json"]["change_region_radius"] == 64
+    assert client.posts[0]["json"]["change_signal"] == "poll"
 
 
 def test_recordings_namespace_download_streams_to_target(tmp_path) -> None:

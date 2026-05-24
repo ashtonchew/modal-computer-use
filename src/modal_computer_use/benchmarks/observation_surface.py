@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import time
 from shlex import quote as shell_quote
 from time import perf_counter
@@ -175,6 +177,13 @@ def _run_daemon_observation_surface(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+        ),
+        "observation_action_click_observe_change_http_raw": (
+            _run_observation_action_click_observe_change_http_raw_benchmark(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
         ),
         "observation_transport_probe_0b": _run_observation_transport_probe_benchmark(
             base_url=base_url,
@@ -542,6 +551,68 @@ def _run_observation_action_click_fused_raw_benchmark(
             for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
+    return result
+
+
+def _run_observation_action_click_observe_change_http_raw_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    samples, observations = _measure_observed_case(
+        name="observation_action_click_observe_change_http_raw",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=lambda: _run_click_toggle_observe_change_http_raw(client),
+        failures=failures,
+    )
+    result = _case_result(
+        "observation_action_click_observe_change_http_raw",
+        iterations,
+        samples,
+        failures,
+    )
+    result.update(
+        {
+            "request": OBSERVATION_SCREENSHOT_OPTIONS,
+            "transport_encoding": "http_binary",
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    daemon_samples = [
+        sample
+        for item in observations
+        if isinstance((sample := item.get("change_timing_ms", {}).get("total_ms")), int | float)
+    ]
+    if daemon_samples:
+        result["daemon_samples_ms"] = daemon_samples
+        result["daemon_summary_ms"] = _summary(daemon_samples)
+        result["overhead_samples_ms"] = [
+            sample - daemon_sample
+            for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
+        ]
+        result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
+    _add_direct_nested_timing_summary(
+        result,
+        observations,
+        nested_key="change_timing_ms",
+        result_key="change_timing_summary_ms",
+    )
     return result
 
 
@@ -948,6 +1019,44 @@ def _run_click_toggle_fused_raw(client: DaemonClient) -> dict[str, Any]:
     }
 
 
+def _run_click_toggle_observe_change_http_raw(client: DaemonClient) -> dict[str, Any]:
+    payload, headers = client.post_bytes_with_headers(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [CLICK_TOGGLE_ACTION],
+            "screenshot_options": OBSERVATION_SCREENSHOT_OPTIONS,
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_signal": "auto",
+            "source": "benchmark",
+        },
+    )
+    action_result = _action_result_header(headers)
+    _ensure_ok_result(action_result)
+    return {
+        "format": OBSERVATION_SCREENSHOT_OPTIONS["format"],
+        "width": _int_header(headers, "x-computer-use-width"),
+        "height": _int_header(headers, "x-computer-use-height"),
+        "size_bytes": len(payload),
+        "storage": "inline",
+        "artifact_backed": False,
+        "cursor_visible": OBSERVATION_SCREENSHOT_OPTIONS["show_cursor"],
+        "capture_backend": _str_header(headers, "x-computer-use-capture-backend"),
+        "transport_http_version": _transport_http_version(client),
+        "input_backend": _input_backend_result(action_result),
+        "action_result": {
+            "ok": action_result.get("ok"),
+            "results_count": len(action_result.get("results", []))
+            if isinstance(action_result.get("results"), list)
+            else None,
+        },
+        "change_result": _encoded_json_header(headers, "x-computer-use-change-result"),
+        "change_timing_ms": _json_timing_header(headers, "x-computer-use-change-timing-ms"),
+        "screenshot_daemon_timing_ms": _timing_header(headers),
+    }
+
+
 def _collect_first_frame(base_url: str, token: str | None) -> dict[str, Any]:
     with ObservationClient(
         ObservationStreamTransport(base_url, token=token),
@@ -956,6 +1065,34 @@ def _collect_first_frame(base_url: str, token: str | None) -> dict[str, Any]:
         max_frames=1,
     ) as stream:
         return _frame_observation(next(stream.frames()))
+
+
+def _encoded_json_header(headers: Any, name: str) -> dict[str, Any]:
+    value = headers.get(name) if hasattr(headers, "get") else None
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(base64.b64decode(value).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _json_timing_header(headers: Any, name: str) -> dict[str, float]:
+    value = headers.get(name) if hasattr(headers, "get") else None
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(value)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key): float(item)
+        for key, item in data.items()
+        if not isinstance(item, bool) and isinstance(item, int | float)
+    }
 
 
 def _collect_no_change_frame(base_url: str, token: str | None) -> dict[str, Any]:

@@ -232,6 +232,178 @@
         "title": "ActionItemResult",
         "type": "object"
       },
+      "ActionObserveChangeScreenshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ComputerAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "capture_delay_ms": {
+            "default": 0,
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Capture Delay Ms",
+            "type": "integer"
+          },
+          "change_detection": {
+            "default": "full",
+            "enum": [
+              "full",
+              "region",
+              "auto_region"
+            ],
+            "title": "Change Detection",
+            "type": "string"
+          },
+          "change_detection_region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Region"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change_region_radius": {
+            "default": 192,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Change Region Radius",
+            "type": "integer"
+          },
+          "change_signal": {
+            "default": "auto",
+            "enum": [
+              "poll",
+              "xdamage",
+              "auto"
+            ],
+            "title": "Change Signal",
+            "type": "string"
+          },
+          "change_timeout_ms": {
+            "default": 100,
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Change Timeout Ms",
+            "type": "integer"
+          },
+          "continue_on_error": {
+            "default": false,
+            "description": "Continue after failed top-level actions. Compound actions such as hold_key remain atomic; their nested actions stop on the first failure.",
+            "title": "Continue On Error",
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "max_action_timeout_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Action Timeout Ms"
+          },
+          "poll_interval_ms": {
+            "default": 8,
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Poll Interval Ms",
+            "type": "integer"
+          },
+          "poll_strategy": {
+            "default": "fixed",
+            "enum": [
+              "fixed",
+              "adaptive"
+            ],
+            "title": "Poll Strategy",
+            "type": "string"
+          },
+          "previous_source_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Source Sha256"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "screenshot_after": {
+            "default": false,
+            "title": "Screenshot After",
+            "type": "boolean"
+          },
+          "screenshot_options": {
+            "$ref": "#/components/schemas/ScreenshotOptions"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence"
+          },
+          "source": {
+            "default": "sdk",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "title": "ActionObserveChangeScreenshotRequest",
+        "type": "object"
+      },
       "ActionResult": {
         "additionalProperties": false,
         "properties": {
@@ -3818,6 +3990,63 @@
           }
         },
         "summary": "Run"
+      }
+    },
+    "/v1/actions/run/observe-change/raw-screenshot": {
+      "post": {
+        "operationId": "run_observe_change_raw_screenshot_v1_actions_run_observe_change_raw_screenshot_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionObserveChangeScreenshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Observe Change Raw Screenshot"
       }
     },
     "/v1/actions/run/raw-screenshot": {
