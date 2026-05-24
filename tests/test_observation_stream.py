@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import ClassVar
@@ -15,7 +16,7 @@ from modal_computer_use.daemon.routes import observations as observation_routes
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import CoordinateSpace, sha256_bytes
 from modal_computer_use.observations import ObservationClient
-from modal_computer_use.transports.observation import ObservationFrame
+from modal_computer_use.transports.observation import ObservationFrame, ObservationStreamTransport
 
 
 def _app(tmp_path, **overrides):
@@ -73,6 +74,58 @@ def test_observation_stream_sends_metadata_then_binary_frame(test_client) -> Non
     assert payload.startswith(b"\x89PNG\r\n\x1a\n")
     assert stopped["type"] == "stopped"
     assert stopped["reason"] == "max_frames"
+
+
+def test_observation_stream_can_emit_transport_timing(test_client) -> None:
+    with test_client.websocket_connect("/v1/observations/stream") as websocket:
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 10,
+                    "max_frames": 1,
+                    "transport_timing": True,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        header = websocket.receive_json()
+        assert websocket.receive_bytes()
+        timing = websocket.receive_json()
+        stopped = websocket.receive_json()
+
+    assert header["type"] == "frame"
+    assert timing["type"] == "transport_timing"
+    assert timing["seq"] == header["seq"]
+    assert timing["server_emit_timing_ms"]["metadata_send_ms"] >= 0
+    assert timing["server_emit_timing_ms"]["payload_send_ms"] >= 0
+    assert timing["server_emit_timing_ms"]["emit_total_ms"] >= 0
+    assert stopped["type"] == "stopped"
+
+
+def test_observation_stream_transport_probe(test_client) -> None:
+    with test_client.websocket_connect("/v1/observations/stream") as websocket:
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "transport_probe",
+                "payload": {"size_bytes": 128},
+            }
+        )
+        header = websocket.receive_json()
+        payload = websocket.receive_bytes()
+        timing = websocket.receive_json()
+
+    assert header == {"type": "transport_probe", "id": "1", "ok": True, "size_bytes": 128}
+    assert payload == b"\0" * 128
+    assert timing["type"] == "transport_timing"
+    assert timing["id"] == "1"
+    assert timing["server_emit_timing_ms"]["payload_send_ms"] >= 0
 
 
 def test_observation_stream_screenshot_budget_blocks_first_frame(tmp_path) -> None:
@@ -843,6 +896,7 @@ def test_observation_client_marshals_options_and_frames() -> None:
         delta_max_ratio=0.2,
         keyframe_interval=10,
         tile_size=32,
+        transport_timing=True,
     )
 
     frames = list(client.frames())
@@ -857,6 +911,7 @@ def test_observation_client_marshals_options_and_frames() -> None:
     assert transport.payload["delta_max_ratio"] == 0.2
     assert transport.payload["keyframe_interval"] == 10
     assert transport.payload["tile_size"] == 32
+    assert transport.payload["transport_timing"] is True
     assert transport.requested_frame is False
     client.request_frame()
     assert transport.requested_frame is True
@@ -874,6 +929,76 @@ def test_observation_client_defaults_to_lossless_png() -> None:
 
     assert transport.payload["format"] == "png"
     assert transport.payload["show_cursor"] is False
+
+
+def test_observation_transport_splits_receive_timing() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "frame", "seq": 7, "kind": "keyframe", "unchanged": False}),
+            b"png",
+            json.dumps(
+                {
+                    "type": "transport_timing",
+                    "seq": 7,
+                    "server_emit_timing_ms": {
+                        "metadata_send_ms": 1.0,
+                        "payload_send_ms": 2.0,
+                        "emit_total_ms": 3.0,
+                    },
+                }
+            ),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+
+    frame = transport.recv_frame_with_timing()
+
+    assert frame.payload == b"png"
+    assert frame.transport_timing is not None
+    assert frame.transport_timing["server_emit_timing_ms"]["emit_total_ms"] == 3.0
+    client_timing = frame.transport_timing["client_receive_timing_ms"]
+    assert client_timing["wait_metadata_ms"] >= 0
+    assert client_timing["parse_metadata_ms"] >= 0
+    assert client_timing["wait_payload_ms"] >= 0
+    assert client_timing["wait_transport_timing_ms"] >= 0
+    assert client_timing["receive_total_ms"] >= 0
+
+
+def test_observation_transport_probe_splits_receive_timing() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "transport_probe", "id": "1", "ok": True, "size_bytes": 3}),
+            b"abc",
+            json.dumps(
+                {
+                    "type": "transport_timing",
+                    "id": "1",
+                    "seq": None,
+                    "server_emit_timing_ms": {
+                        "metadata_send_ms": 1.0,
+                        "payload_send_ms": 2.0,
+                        "emit_total_ms": 3.0,
+                    },
+                }
+            ),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+
+    result = transport.transport_probe(size_bytes=3)
+
+    assert result["size_bytes"] == 3
+    assert result["requested_size_bytes"] == 3
+    assert result["server_emit_timing_ms"]["emit_total_ms"] == 3.0
+    assert result["client_receive_timing_ms"]["wait_metadata_ms"] >= 0
 
 
 def test_observation_frame_compose_applies_patch() -> None:
@@ -936,6 +1061,21 @@ class _FakeObservationTransport:
 
     def configure(self, payload):
         self.payload.update(payload)
+
+
+class _FakeWebSocket:
+    def __init__(self, messages):
+        self._messages = iter(messages)
+        self.sent = []
+
+    def recv(self, **_kwargs):
+        return next(self._messages)
+
+    def send(self, message):
+        self.sent.append(message)
+
+    def close(self):
+        pass
 
 
 def _screenshot_bytes(color: str) -> CapturedScreenshot:

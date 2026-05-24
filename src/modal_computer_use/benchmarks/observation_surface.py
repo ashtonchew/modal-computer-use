@@ -176,6 +176,34 @@ def _run_daemon_observation_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "observation_transport_probe_0b": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=0,
+        ),
+        "observation_transport_probe_5kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=5 * 1024,
+        ),
+        "observation_transport_probe_50kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=50 * 1024,
+        ),
+        "observation_transport_probe_250kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=250 * 1024,
+        ),
     }
     return _surface_result(
         "daemon-observation-stream",
@@ -517,6 +545,140 @@ def _run_observation_action_click_fused_raw_benchmark(
     return result
 
 
+def _run_observation_transport_probe_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    iterations: int,
+    warmup_iterations: int,
+    size_bytes: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    name = f"observation_transport_probe_{_size_label(size_bytes)}"
+    transport = ObservationStreamTransport(base_url, token=token)
+    try:
+        samples, observations = _measure_observed_case(
+            name=name,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            operation=lambda: transport.transport_probe(size_bytes=size_bytes),
+            failures=failures,
+        )
+    finally:
+        transport.close()
+    result = _case_result(name, iterations, samples, failures)
+    result.update(
+        {
+            "transport_encoding": "websocket_binary",
+            "requested_size_bytes": size_bytes,
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    _add_probe_timing_observations(result, observations)
+    return result
+
+
+def _size_label(size_bytes: int) -> str:
+    if size_bytes == 0:
+        return "0b"
+    if size_bytes % 1024 == 0:
+        return f"{size_bytes // 1024}kb"
+    return f"{size_bytes}b"
+
+
+def _add_nested_timing_summary(
+    result: dict[str, Any],
+    observations: list[Any],
+    *,
+    source_key: str,
+    nested_key: str,
+    result_key: str,
+) -> None:
+    names = sorted(
+        {
+            key
+            for item in observations
+            if isinstance((source := item.get(source_key)), dict)
+            and isinstance((timing := source.get(nested_key)), dict)
+            for key, value in timing.items()
+            if isinstance(value, int | float)
+        }
+    )
+    if not names:
+        return
+    result[result_key] = {
+        name: _summary(
+            [
+                float(timing[name])
+                for item in observations
+                if isinstance((source := item.get(source_key)), dict)
+                and isinstance((timing := source.get(nested_key)), dict)
+                and isinstance(timing.get(name), int | float)
+            ]
+        )
+        for name in names
+    }
+
+
+def _add_probe_timing_observations(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    _add_direct_nested_timing_summary(
+        result,
+        observations,
+        nested_key="server_emit_timing_ms",
+        result_key="server_emit_timing_summary_ms",
+    )
+    _add_direct_nested_timing_summary(
+        result,
+        observations,
+        nested_key="client_receive_timing_ms",
+        result_key="client_receive_timing_summary_ms",
+    )
+
+
+def _add_direct_nested_timing_summary(
+    result: dict[str, Any],
+    observations: list[Any],
+    *,
+    nested_key: str,
+    result_key: str,
+) -> None:
+    names = sorted(
+        {
+            key
+            for item in observations
+            if isinstance((timing := item.get(nested_key)), dict)
+            for key, value in timing.items()
+            if isinstance(value, int | float)
+        }
+    )
+    if not names:
+        return
+    result[result_key] = {
+        name: _summary(
+            [
+                float(timing[name])
+                for item in observations
+                if isinstance((timing := item.get(nested_key)), dict)
+                and isinstance(timing.get(name), int | float)
+            ]
+        )
+        for name in names
+    }
+
+
 def _measure_capture_now_loop(
     *,
     name: str,
@@ -589,14 +751,15 @@ def _measure_stream_action_capture_loop(
             ObservationStreamTransport(base_url, token=token),
             options=OBSERVATION_SCREENSHOT_OPTIONS,
             fps=0.01,
+            transport_timing=True,
         ) as stream:
-            frames = stream.frames()
-            next(frames)
+            stream.transport.start(stream.payload)
+            stream.transport.recv_frame_with_timing()
             for warmup_index in range(warmup_iterations):
                 try:
                     _stream_action_capture_iteration(
                         stream,
-                        frames,
+                        None,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
@@ -613,7 +776,7 @@ def _measure_stream_action_capture_loop(
                 try:
                     observation = _stream_action_capture_iteration(
                         stream,
-                        frames,
+                        None,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
@@ -713,7 +876,7 @@ def _stream_action_capture_iteration(
     request_frame_ms = (perf_counter() - request_started) * 1000
 
     receive_started = perf_counter()
-    frame = next(frames)
+    frame = stream.transport.recv_frame_with_timing() if frames is None else next(frames)
     receive_frame_ms = (perf_counter() - receive_started) * 1000
 
     observation = _frame_observation(frame)
@@ -913,6 +1076,7 @@ def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
 def _frame_observation(frame) -> dict[str, Any]:
     metadata = frame.metadata
     timing = metadata.get("timing_ms")
+    transport_timing = getattr(frame, "transport_timing", None)
     return {
         "transport_http_version": "websocket",
         "content_type": metadata.get("content_type"),
@@ -949,6 +1113,9 @@ def _frame_observation(frame) -> dict[str, Any]:
         "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
         "poll_strategy": metadata.get("poll_strategy"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
+        "observation_transport_timing": transport_timing
+        if isinstance(transport_timing, dict)
+        else {},
     }
 
 
@@ -1029,6 +1196,20 @@ def _add_frame_observations(
                     )
                     for name in stage_names
                 }
+    _add_nested_timing_summary(
+        result,
+        observations,
+        source_key="observation_transport_timing",
+        nested_key="server_emit_timing_ms",
+        result_key="server_emit_timing_summary_ms",
+    )
+    _add_nested_timing_summary(
+        result,
+        observations,
+        source_key="observation_transport_timing",
+        nested_key="client_receive_timing_ms",
+        result_key="client_receive_timing_summary_ms",
+    )
     action_to_frame_samples = [
         timing["action_to_frame_ms"]
         for item in observations
@@ -1050,6 +1231,26 @@ def _add_frame_observations(
         result["receive_minus_server_pre_emit_samples_ms"] = receive_minus_pre_emit_samples
         result["receive_minus_server_pre_emit_summary_ms"] = _summary(
             receive_minus_pre_emit_samples
+        )
+    server_emit_minus_pre_emit_samples = [
+        timing["receive_frame_ms"]
+        - stage_timing["server_pre_emit_ms"]
+        - server_timing["emit_total_ms"]
+        for item in observations
+        if isinstance((timing := item.get("benchmark_timing_ms")), dict)
+        and isinstance((stage_timing := item.get("change_stage_timing_ms")), dict)
+        and isinstance((transport := item.get("observation_transport_timing")), dict)
+        and isinstance((server_timing := transport.get("server_emit_timing_ms")), dict)
+        and isinstance(timing.get("receive_frame_ms"), int | float)
+        and isinstance(stage_timing.get("server_pre_emit_ms"), int | float)
+        and isinstance(server_timing.get("emit_total_ms"), int | float)
+    ]
+    if server_emit_minus_pre_emit_samples:
+        result["receive_minus_server_pre_emit_and_send_samples_ms"] = (
+            server_emit_minus_pre_emit_samples
+        )
+        result["receive_minus_server_pre_emit_and_send_summary_ms"] = _summary(
+            server_emit_minus_pre_emit_samples
         )
     mutation_samples = [
         timing["mutation_ms"]
