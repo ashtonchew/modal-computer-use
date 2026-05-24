@@ -74,11 +74,13 @@ from blocking input, cancellation, or health checks.
 
 For default PNG, cursor-hidden observations, the daemon uses a raw MSS capture path before PNG
 encoding. It hashes raw RGB bytes to suppress unchanged frames without encoding a PNG, and uses
-64x64 tile hashes to choose a dirty rectangle for changed frames. When the native `xxhash` wheel is
-available, tile hashes use XXH3; otherwise the daemon falls back to BLAKE2b. Frame metadata includes
-`tile_hash_backend` so benchmark artifacts show which path ran. Large dirty regions still fall back
-to keyframes. Cursor-visible, scaled, JPEG, and WebP streams use the encoded screenshot fallback
-path.
+64x64 tile hashes to choose dirty regions for changed frames. Sparse changes can be emitted as
+multiple lossless PNG patch rectangles when that saves enough pixels over one bounding rectangle.
+When the native `xxhash` wheel is available, tile hashes use XXH3; otherwise the daemon falls back
+to BLAKE2b. Frame metadata includes `tile_hash_backend`, `source_version`, `emit_version`,
+`delivery`, and patch fields such as `patch_count` and `patch_rects` so benchmark artifacts show
+which path ran. Large dirty regions still fall back to keyframes. Cursor-visible, scaled, JPEG, and
+WebP streams use the encoded screenshot fallback path.
 
 The SDK facade is:
 
@@ -89,8 +91,11 @@ with computer.observation_stream(fps=5, options={"format": "png"}) as stream:
 ```
 
 The SDK defaults observation streams to lossless PNG with the cursor hidden. Advanced callers can
-tune `tile_size`, `delta_max_ratio`, `delta_mode`, and `keyframe_interval`; keep the default
-64-pixel tiles unless measurements show a workload benefits from finer patch locality.
+tune `tile_size`, `delta_max_ratio`, `delta_mode`, `keyframe_interval`, `max_patch_rects`, and
+`multi_rect_min_savings`; keep the default 64-pixel tiles unless measurements show a workload
+benefits from finer patch locality. Human viewing remains a noVNC concern. The observation stream
+does not switch to lossy video or preview codecs by default because agent observations need
+full-fidelity UI pixels.
 
 For action-causal observation loops, keep the stream open and request a frame immediately after the
 action:
@@ -385,12 +390,14 @@ uv run computer-use benchmark sdk \
 ```
 
 This surface reports `observation_first_frame`, `observation_steady_no_change`,
-`observation_small_patch`, `observation_large_change`, `observation_capture_now_no_change`, and
-`observation_capture_now_small_patch`. It also reports action-causal cases:
+`observation_small_patch`, `observation_sparse_patches`, `observation_large_change`,
+`observation_capture_now_no_change`, `observation_capture_now_small_patch`, and
+`observation_capture_now_sparse_patches`. It also reports action-causal cases:
 `observation_action_click_capture_now`, `observation_action_click_observe_change`,
 `observation_action_click_observe_change_poll`,
 `observation_action_click_observe_change_xdamage`,
 `observation_action_click_observe_change_auto_signal`,
+`observation_action_click_sparse_observe_change_auto_signal`,
 `observation_action_click_observe_change_http_raw`, and
 `observation_action_click_fused_raw`.
 The capture-now action case opens a synthetic page once, mutates it with a real daemon click action,
@@ -404,10 +411,10 @@ framing from a one-shot binary response. The fused-raw case uses the same page a
 `POST /v1/actions/run/raw-screenshot`.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
-dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
-cases, action daemon timing for click-driven cases, observe-change stage timing, derived
-receive-minus-server-pre-emit timing, optional stream transport send/receive timing, and WebSocket
-transport labeling. It is
+dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,
+action-to-frame timing for `capture_now` cases, action daemon timing for click-driven cases,
+observe-change stage timing, derived receive-minus-server-pre-emit timing, optional stream
+transport send/receive timing, and WebSocket transport labeling. It is
 intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
 observation behavior, and action-causal capture behavior rather than only a single
 request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive

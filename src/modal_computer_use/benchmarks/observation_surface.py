@@ -57,6 +57,13 @@ def _run_daemon_observation_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "observation_sparse_patches": _run_observation_sparse_patches_benchmark(
+            base_url=base_url,
+            token=token,
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
         "observation_large_change": _run_observation_large_change_benchmark(
             base_url=base_url,
             token=token,
@@ -76,6 +83,15 @@ def _run_daemon_observation_surface(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+        ),
+        "observation_capture_now_sparse_patches": (
+            _run_observation_capture_now_sparse_patches_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
         ),
         "observation_action_click_capture_now": _run_observation_action_click_capture_now_benchmark(
             base_url=base_url,
@@ -171,6 +187,19 @@ def _run_daemon_observation_surface(
                 name="observation_action_click_observe_change_auto_signal",
                 poll_strategy="adaptive",
                 change_signal="auto",
+            )
+        ),
+        "observation_action_click_sparse_observe_change_auto_signal": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_sparse_observe_change_auto_signal",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                page="sparse",
             )
         ),
         "observation_action_click_fused_raw": _run_observation_action_click_fused_raw_benchmark(
@@ -309,6 +338,31 @@ def _run_observation_small_patch_benchmark(
     return result
 
 
+def _run_observation_sparse_patches_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    state = {"variant": False}
+    _open_synthetic_page(client, mode="sparse", variant=state["variant"])
+    samples, observations = _measure_observed_case(
+        name="observation_sparse_patches",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=lambda: _collect_visual_change(
+            base_url, token, client, mode="sparse", state=state
+        ),
+        failures=failures,
+    )
+    result = _case_result("observation_sparse_patches", iterations, samples, failures)
+    _add_frame_observations(result, samples, observations)
+    return result
+
+
 def _run_observation_large_change_benchmark(
     *,
     base_url: str,
@@ -382,6 +436,36 @@ def _run_observation_capture_now_small_patch_benchmark(
         failures=failures,
     )
     result = _case_result("observation_capture_now_small_patch", iterations, samples, failures)
+    _add_frame_observations(result, samples, observations)
+    return result
+
+
+def _run_observation_capture_now_sparse_patches_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    state = {"variant": False}
+    _open_synthetic_page(client, mode="sparse", variant=state["variant"])
+
+    def mutate() -> None:
+        state["variant"] = not state["variant"]
+        _open_synthetic_page(client, mode="sparse", variant=state["variant"])
+
+    samples, observations = _measure_capture_now_loop(
+        name="observation_capture_now_sparse_patches",
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        mutate=mutate,
+        failures=failures,
+    )
+    result = _case_result("observation_capture_now_sparse_patches", iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
     return result
 
@@ -470,9 +554,13 @@ def _run_observation_action_click_observe_change_benchmark(
     poll_strategy: str = "fixed",
     change_detection: str = "full",
     change_signal: str | None = "poll",
+    page: str = "default",
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
-    _open_click_toggle_page(client)
+    if page == "sparse":
+        _open_sparse_click_toggle_page(client)
+    else:
+        _open_click_toggle_page(client)
     samples, observations = _measure_stream_action_capture_loop(
         name=name,
         base_url=base_url,
@@ -498,6 +586,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "poll_strategy": poll_strategy,
             "change_detection": change_detection,
             "change_signal": change_signal or "default",
+            "page": page,
         }
     )
     return result
@@ -1141,6 +1230,21 @@ def _open_synthetic_page(client: DaemonClient, *, mode: str, variant: bool) -> N
             f"width:96px;height:96px;background:{square};'></div>"
             "</body></html>"
         )
+    elif mode == "sparse":
+        color = "#ffffff"
+        square = "#ef4444" if variant else "#22c55e"
+        other = "#0f172a" if variant else "#f59e0b"
+        body = (
+            "<!doctype html>"
+            "<html style='margin:0;width:100%;height:100%;overflow:hidden;'>"
+            "<body style='margin:0;width:100%;height:100%;overflow:hidden;'>"
+            f"<div style='position:fixed;inset:0;background:{color};'></div>"
+            "<div style='position:fixed;left:72px;top:72px;"
+            f"width:96px;height:96px;background:{square};'></div>"
+            "<div style='position:fixed;right:72px;bottom:72px;"
+            f"width:96px;height:96px;background:{other};'></div>"
+            "</body></html>"
+        )
     else:
         color = "#14213d" if variant else "#fca311"
         body = (
@@ -1193,6 +1297,38 @@ def _open_click_toggle_page(client: DaemonClient) -> None:
     )
 
 
+def _open_sparse_click_toggle_page(client: DaemonClient) -> None:
+    body = (
+        "<!doctype html>"
+        "<html style='margin:0;width:100%;height:100%;overflow:hidden;'>"
+        "<body style='margin:0;width:100%;height:100%;overflow:hidden;"
+        "background:#ffffff;'>"
+        "<div id='a' style='position:fixed;left:72px;top:72px;width:96px;height:96px;'></div>"
+        "<div id='b' style='position:fixed;right:72px;bottom:72px;width:96px;height:96px;'></div>"
+        "<script>"
+        "let n=0;"
+        "const a=document.getElementById('a');"
+        "const b=document.getElementById('b');"
+        "function paint(){"
+        "a.style.background=(n%2)?'#ef4444':'#22c55e';"
+        "b.style.background=(n%2)?'#0f172a':'#f59e0b';"
+        "}"
+        "document.addEventListener('click',()=>{n++;paint();});"
+        "paint();"
+        "</script>"
+        "</body></html>"
+    )
+    cache_key = str(time.monotonic_ns())
+    _serve_synthetic_page(client, body)
+    client.post_json(
+        "/v1/browser/open-url",
+        json={
+            "url": f"http://127.0.0.1:8766/index.html?sparse-action={quote(cache_key)}",
+            "wait_for_window": True,
+        },
+    )
+
+
 def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
     script = (
         "set -eu; "
@@ -1230,6 +1366,13 @@ def _frame_observation(frame) -> dict[str, Any]:
         "capture_backend": metadata.get("capture_backend"),
         "tile_size": metadata.get("tile_size"),
         "tile_hash_backend": metadata.get("tile_hash_backend"),
+        "patch_count": metadata.get("patch_count"),
+        "patch_rects": metadata.get("patch_rects"),
+        "patch_sizes_bytes": metadata.get("patch_sizes_bytes"),
+        "source_version": metadata.get("source_version"),
+        "previous_source_version": metadata.get("previous_source_version"),
+        "emit_version": metadata.get("emit_version"),
+        "delivery": metadata.get("delivery"),
         "trigger": metadata.get("trigger"),
         "action_result": metadata.get("action_result"),
         "change_detected": metadata.get("change_detected"),
@@ -1248,6 +1391,8 @@ def _frame_observation(frame) -> dict[str, Any]:
         "change_signal_reason": metadata.get("change_signal_reason"),
         "change_signal_version": metadata.get("change_signal_version"),
         "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
+        "baseline_source_version": metadata.get("baseline_source_version"),
+        "baseline_source_sha256": metadata.get("baseline_source_sha256"),
         "poll_strategy": metadata.get("poll_strategy"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
         "observation_transport_timing": transport_timing
@@ -1283,6 +1428,14 @@ def _add_frame_observations(
         result["changed_frames"] = changed_count
         result["unchanged_frames"] = len(observations) - changed_count
         result["changed_frame_ratio"] = changed_count / len(observations)
+        patch_count_samples = [
+            item["patch_count"]
+            for item in observations
+            if isinstance(item.get("patch_count"), int | float)
+        ]
+        if patch_count_samples:
+            result["patch_count_samples"] = patch_count_samples
+            result["patch_count_summary"] = _summary([float(item) for item in patch_count_samples])
         change_detected_count = sum(1 for item in observations if item.get("change_detected"))
         if any(item.get("change_detected") is not None for item in observations):
             result["change_detected_frames"] = change_detected_count

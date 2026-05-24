@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
@@ -38,12 +39,18 @@ class ObservationFrame:
         """Return a full image payload by applying a patch frame to a previous image."""
         if self.payload is None:
             return previous_payload
-        if self.kind != "patch":
+        if self.kind not in {"patch", "patches"}:
             return self.payload
         if previous_payload is None:
             raise DaemonHTTPError(
                 "observation patch requires a previous frame",
                 code="observation_stream_protocol_error",
+            )
+        if self.kind == "patches":
+            return _apply_patch_bundle(
+                previous_payload,
+                self.payload,
+                image_format=self.metadata.get("format"),
             )
         rect = self.metadata.get("dirty_rect")
         if not isinstance(rect, dict):
@@ -423,6 +430,66 @@ def _apply_patch(
     base = Image.open(BytesIO(previous_payload)).convert("RGB")
     patch = Image.open(BytesIO(patch_payload)).convert("RGB")
     base.paste(patch, (x, y))
+    output = BytesIO()
+    fmt = "JPEG" if image_format == "jpeg" else str(image_format or "png").upper()
+    save_kwargs: dict[str, Any] = {"quality": 90}
+    if fmt == "WEBP":
+        save_kwargs["method"] = 0
+    base.save(output, format=fmt, **save_kwargs)
+    return output.getvalue()
+
+
+def _apply_patch_bundle(
+    previous_payload: bytes,
+    patch_payload: bytes,
+    *,
+    image_format: Any,
+) -> bytes:
+    from PIL import Image
+
+    if len(patch_payload) < 4:
+        raise DaemonHTTPError(
+            "observation patch bundle missing manifest",
+            code="observation_stream_protocol_error",
+        )
+    manifest_len = struct.unpack(">I", patch_payload[:4])[0]
+    manifest_end = 4 + manifest_len
+    if manifest_end > len(patch_payload):
+        raise DaemonHTTPError(
+            "observation patch bundle manifest is truncated",
+            code="observation_stream_protocol_error",
+        )
+    manifest = json.loads(patch_payload[4:manifest_end])
+    patches = manifest.get("patches") if isinstance(manifest, dict) else None
+    if not isinstance(patches, list):
+        raise DaemonHTTPError(
+            "observation patch bundle manifest is invalid",
+            code="observation_stream_protocol_error",
+        )
+    base = Image.open(BytesIO(previous_payload)).convert("RGB")
+    offset = manifest_end
+    for patch in patches:
+        if not isinstance(patch, dict):
+            raise DaemonHTTPError(
+                "observation patch bundle entry is invalid",
+                code="observation_stream_protocol_error",
+            )
+        x = patch.get("x")
+        y = patch.get("y")
+        size = patch.get("size_bytes")
+        if not isinstance(x, int) or not isinstance(y, int) or not isinstance(size, int):
+            raise DaemonHTTPError(
+                "observation patch bundle entry has invalid coordinates",
+                code="observation_stream_protocol_error",
+            )
+        chunk = patch_payload[offset : offset + size]
+        if len(chunk) != size:
+            raise DaemonHTTPError(
+                "observation patch bundle payload is truncated",
+                code="observation_stream_protocol_error",
+            )
+        offset += size
+        base.paste(Image.open(BytesIO(chunk)).convert("RGB"), (x, y))
     output = BytesIO()
     fmt = "JPEG" if image_format == "jpeg" else str(image_format or "png").upper()
     save_kwargs: dict[str, Any] = {"quality": 90}

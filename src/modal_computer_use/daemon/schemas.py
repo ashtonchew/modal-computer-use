@@ -166,10 +166,13 @@ class ObservationStreamRequest(ScreenshotRequest):
     idle_timeout_ms: int | None = Field(default=None, ge=100, le=300_000)
     send_unchanged: bool = False
     transport_timing: bool = False
+    delivery: Literal["latest", "reliable"] = "latest"
     keyframe_interval: int = Field(default=30, ge=1, le=10_000)
     delta_mode: Literal["auto", "off"] = "auto"
     delta_max_ratio: float = Field(default=0.35, ge=0, le=1)
     tile_size: int = Field(default=64, ge=16, le=512)
+    max_patch_rects: int = Field(default=4, ge=1, le=16)
+    multi_rect_min_savings: float = Field(default=0.3, ge=0, le=1)
 
 
 class ZoomScreenshotRequest(Schema):
