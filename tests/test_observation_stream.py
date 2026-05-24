@@ -67,6 +67,10 @@ def test_observation_stream_sends_metadata_then_binary_frame(test_client) -> Non
     assert started["protocol"] == "computer-use.observation-stream.v1"
     assert header["type"] == "frame"
     assert header["seq"] == 1
+    assert header["emit_version"] == 1
+    assert header["source_version"] == 1
+    assert header["previous_source_version"] == 0
+    assert header["delivery"] == "latest"
     assert header["content_type"] == "image/png"
     assert header["width"] == 1024
     assert header["height"] == 768
@@ -361,6 +365,63 @@ def test_observation_stream_raw_path_uses_tile_aligned_patch(app, monkeypatch) -
     assert second["dirty_rect"] == {"x": 16, "y": 16, "width": 16, "height": 16}
     assert second["dirty_ratio"] == 0.0625
     assert patch.startswith(b"encoded:(16, 16):")
+    assert stopped["reason"] == "max_frames"
+
+
+def test_observation_stream_raw_path_uses_lossless_multi_rect_patches(app, monkeypatch) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_two_squares(),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    def encode_rgb_png(rgb: bytes, size: tuple[int, int]) -> bytes:
+        return b"encoded:" + str(size).encode() + b":" + rgb[:3]
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "encode_rgb_png", encode_rgb_png)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 30,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                    "max_patch_rects": 4,
+                    "multi_rect_min_savings": 0.1,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        first = websocket.receive_json()
+        assert websocket.receive_bytes()
+        second = websocket.receive_json()
+        patch_bundle = websocket.receive_bytes()
+        stopped = websocket.receive_json()
+
+    assert first["kind"] == "keyframe"
+    assert second["kind"] == "patches"
+    assert second["dirty_rect"] == {"x": 0, "y": 0, "width": 64, "height": 64}
+    assert second["patch_count"] == 2
+    assert second["patch_rects"] == [
+        {"x": 0, "y": 0, "width": 16, "height": 16},
+        {"x": 48, "y": 48, "width": 16, "height": 16},
+    ]
+    assert second["dirty_ratio"] == 0.125
+    assert b"encoded:(16, 16):" in patch_bundle
     assert stopped["reason"] == "max_frames"
 
 
@@ -986,6 +1047,9 @@ def test_observation_client_marshals_options_and_frames() -> None:
         delta_max_ratio=0.2,
         keyframe_interval=10,
         tile_size=32,
+        delivery="reliable",
+        max_patch_rects=2,
+        multi_rect_min_savings=0.4,
         transport_timing=True,
     )
 
@@ -1001,6 +1065,9 @@ def test_observation_client_marshals_options_and_frames() -> None:
     assert transport.payload["delta_max_ratio"] == 0.2
     assert transport.payload["keyframe_interval"] == 10
     assert transport.payload["tile_size"] == 32
+    assert transport.payload["delivery"] == "reliable"
+    assert transport.payload["max_patch_rects"] == 2
+    assert transport.payload["multi_rect_min_savings"] == 0.4
     assert transport.payload["transport_timing"] is True
     assert transport.requested_frame is False
     client.request_frame()
@@ -1056,6 +1123,40 @@ def test_observation_transport_splits_receive_timing() -> None:
     assert client_timing["wait_payload_ms"] >= 0
     assert client_timing["wait_transport_timing_ms"] >= 0
     assert client_timing["receive_total_ms"] >= 0
+
+
+def test_observation_frame_composes_lossless_patch_bundle() -> None:
+    base = Image.new("RGB", (8, 8), "white")
+    patch_a = Image.new("RGB", (2, 2), "black")
+    patch_b = Image.new("RGB", (2, 2), "red")
+    base_bytes = _image_png_bytes(base)
+    patch_a_bytes = _image_png_bytes(patch_a)
+    patch_b_bytes = _image_png_bytes(patch_b)
+    manifest = {
+        "patches": [
+            {"x": 0, "y": 0, "width": 2, "height": 2, "size_bytes": len(patch_a_bytes)},
+            {"x": 6, "y": 6, "width": 2, "height": 2, "size_bytes": len(patch_b_bytes)},
+        ]
+    }
+    manifest_bytes = json.dumps(manifest, separators=(",", ":")).encode()
+    payload = (
+        len(manifest_bytes).to_bytes(4, "big")
+        + manifest_bytes
+        + patch_a_bytes
+        + patch_b_bytes
+    )
+    frame = ObservationFrame(
+        payload=payload,
+        metadata={"kind": "patches", "format": "png", "seq": 2},
+    )
+
+    composed_payload = frame.compose(base_bytes)
+    assert composed_payload is not None
+    composed = Image.open(BytesIO(composed_payload)).convert("RGB")
+
+    assert composed.getpixel((0, 0)) == (0, 0, 0)
+    assert composed.getpixel((6, 6)) == (255, 0, 0)
+    assert composed.getpixel((4, 4)) == (255, 255, 255)
 
 
 def test_observation_transport_probe_splits_receive_timing() -> None:
@@ -1213,10 +1314,43 @@ def _raw_screenshot_bytes(color: str) -> CapturedRawScreenshot:
     )
 
 
+def _image_png_bytes(image: Image.Image) -> bytes:
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
 def _raw_screenshot_with_square() -> CapturedRawScreenshot:
     image = Image.new("RGB", (64, 64), "white")
     for y in range(18, 22):
         for x in range(18, 22):
+            image.putpixel((x, y), (0, 0, 0))
+    rgb = image.tobytes()
+    return CapturedRawScreenshot(
+        width=64,
+        height=64,
+        rgb=rgb,
+        sha256=sha256_bytes(rgb),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=64,
+            desktop_height=64,
+            image_width=64,
+            image_height=64,
+        ),
+        cursor_visible=False,
+        capture_backend="test-raw",
+        timings_ms={"total_ms": 0.0},
+    )
+
+
+def _raw_screenshot_with_two_squares() -> CapturedRawScreenshot:
+    image = Image.new("RGB", (64, 64), "white")
+    for y in range(2, 6):
+        for x in range(2, 6):
+            image.putpixel((x, y), (0, 0, 0))
+    for y in range(50, 54):
+        for x in range(50, 54):
             image.putpixel((x, y), (0, 0, 0))
     rgb = image.tobytes()
     return CapturedRawScreenshot(

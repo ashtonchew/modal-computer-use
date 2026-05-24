@@ -83,6 +83,70 @@ def dirty_rect_from_tiles(
     return {"x": left, "y": top, "width": right - left, "height": bottom - top}
 
 
+def dirty_rects_from_tiles(
+    *,
+    current: dict[tuple[int, int], bytes],
+    previous: dict[tuple[int, int], bytes] | None,
+    width: int,
+    height: int,
+    tile_size: int,
+    max_rects: int,
+) -> list[dict[str, int]]:
+    if max_rects <= 1:
+        rect = dirty_rect_from_tiles(
+            current=current,
+            previous=previous,
+            width=width,
+            height=height,
+            tile_size=tile_size,
+        )
+        return [] if rect is None else [rect]
+    if previous is None:
+        return [{"x": 0, "y": 0, "width": width, "height": height}]
+
+    changed = {
+        (tile_left, tile_top)
+        for (tile_left, tile_top), digest in current.items()
+        if previous.get((tile_left, tile_top)) != digest
+    }
+    rects: list[dict[str, int]] = []
+    while changed:
+        start = changed.pop()
+        component = [start]
+        stack = [start]
+        while stack:
+            left, top = stack.pop()
+            for neighbor in (
+                (left - tile_size, top),
+                (left + tile_size, top),
+                (left, top - tile_size),
+                (left, top + tile_size),
+            ):
+                if neighbor not in changed:
+                    continue
+                changed.remove(neighbor)
+                stack.append(neighbor)
+                component.append(neighbor)
+        rects.append(
+            _rect_from_tile_component(
+                component,
+                width=width,
+                height=height,
+                tile_size=tile_size,
+            )
+        )
+        if len(rects) > max_rects:
+            rect = dirty_rect_from_tiles(
+                current=current,
+                previous=previous,
+                width=width,
+                height=height,
+                tile_size=tile_size,
+            )
+            return [] if rect is None else [rect]
+    return sorted(rects, key=lambda rect: (rect["y"], rect["x"]))
+
+
 def crop_rgb(
     rgb: bytes,
     source_width: int,
@@ -101,6 +165,20 @@ def crop_rgb(
             source_start : source_start + row_bytes
         ]
     return bytes(output)
+
+
+def _rect_from_tile_component(
+    component: list[tuple[int, int]],
+    *,
+    width: int,
+    height: int,
+    tile_size: int,
+) -> dict[str, int]:
+    left = min(tile_left for tile_left, _tile_top in component)
+    top = min(tile_top for _tile_left, tile_top in component)
+    right = max(min(tile_left + tile_size, width) for tile_left, _tile_top in component)
+    bottom = max(min(tile_top + tile_size, height) for _tile_left, tile_top in component)
+    return {"x": left, "y": top, "width": right - left, "height": bottom - top}
 
 
 def _default_hash_factory() -> HashFactory:

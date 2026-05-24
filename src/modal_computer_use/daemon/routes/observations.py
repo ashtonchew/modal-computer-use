@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import struct
 from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter
@@ -20,6 +22,7 @@ from modal_computer_use.daemon.desktop.screenshots import (
 from modal_computer_use.daemon.desktop.tile_diff import (
     crop_rgb,
     dirty_rect_from_tiles,
+    dirty_rects_from_tiles,
     native_hash_available,
     tile_hashes_rgb,
 )
@@ -50,6 +53,8 @@ class _StreamState:
     stream_id: str | None = None
     paused: bool = False
     seq: int = 0
+    emit_version: int = 0
+    source_version: int = 0
     last_sha256: str | None = None
     last_source_sha256: str | None = None
     last_image: Image.Image | None = None
@@ -200,6 +205,8 @@ async def _handle_observation_message(
                 )
             )
             region = _resolve_change_detection_region(websocket, stream_request)
+            baseline_source_version = state.source_version
+            baseline_source_sha256 = state.last_source_sha256
             region_baseline_sha256 = None
             region_baseline_ms = 0.0
             if region is not None:
@@ -246,6 +253,8 @@ async def _handle_observation_message(
                     "poll_strategy": stream_request.poll_strategy,
                     "change_detection": stream_request.change_detection,
                     "change_signal": stream_request.change_signal,
+                    "baseline_source_version": baseline_source_version,
+                    "baseline_source_sha256": baseline_source_sha256,
                     "change_detection_region": region.model_dump(mode="json")
                     if region is not None
                     else None,
@@ -302,6 +311,8 @@ async def _start_stream(
     state.stream_id = stream_id
     state.paused = False
     state.seq = 0
+    state.emit_version = 0
+    state.source_version = 0
     state.last_sha256 = None
     state.last_source_sha256 = None
     state.last_image = None
@@ -725,6 +736,15 @@ async def _emit_frame(
         metadata["id"] = request_id
     if extra_metadata:
         metadata.update(extra_metadata)
+    previous_source_sha256 = state.last_source_sha256
+    previous_source_version = state.source_version
+    if metadata["source_sha256"] != previous_source_sha256:
+        state.source_version += 1
+    state.emit_version += 1
+    metadata["source_version"] = state.source_version
+    metadata["previous_source_version"] = previous_source_version
+    metadata["emit_version"] = state.emit_version
+    metadata["delivery"] = request.delivery
     state.last_sha256 = metadata["sha256"]
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")
@@ -1000,12 +1020,29 @@ def _capture_raw_delta_frame(
         else:
             dirty_ratio = (dirty_rect["width"] * dirty_rect["height"]) / (raw.width * raw.height)
 
+        patch_rects: list[dict[str, int]] = []
+        patch_dirty_ratio = dirty_ratio
+        if dirty_rect is not None and not force_keyframe:
+            patch_rects = _select_patch_rects(
+                current=current_tile_hashes,
+                previous=previous_tile_hashes,
+                dirty_rect=dirty_rect,
+                width=raw.width,
+                height=raw.height,
+                tile_size=request.tile_size,
+                max_patch_rects=request.max_patch_rects,
+                min_savings=request.multi_rect_min_savings,
+            )
+            patch_dirty_ratio = sum(
+                rect["width"] * rect["height"] for rect in patch_rects
+            ) / (raw.width * raw.height)
+
         if dirty_rect is None and not force_keyframe:
             payload = b""
             kind = "delta-suppressed"
             previous = previous_seq
             full_size_bytes = None
-        elif force_keyframe or dirty_ratio > request.delta_max_ratio:
+        elif force_keyframe or patch_dirty_ratio > request.delta_max_ratio:
             encode_started = perf_counter()
             payload = encode_rgb_png(raw.rgb, (raw.width, raw.height))
             kind = "keyframe"
@@ -1039,10 +1076,46 @@ def _capture_raw_delta_frame(
             encode_started = perf_counter()
             if dirty_rect is None:
                 raise RuntimeError("patch frame requires dirty rectangle")
-            left = dirty_rect["x"]
-            top = dirty_rect["y"]
-            width = dirty_rect["width"]
-            height = dirty_rect["height"]
+            if len(patch_rects) > 1:
+                payload, patch_sizes = _encode_patch_bundle(
+                    raw=raw,
+                    rects=patch_rects,
+                )
+                kind = "patches"
+                previous = previous_seq
+                full_size_bytes = None
+                timing = {
+                    "diff_ms": tile_diff_ms,
+                    "tile_diff_ms": tile_diff_ms,
+                    "patch_encode_ms": _elapsed_ms(encode_started),
+                    "patch_count": float(len(patch_rects)),
+                }
+                payload_sha256 = raw.sha256
+                return _raw_metadata(
+                    raw=raw,
+                    request=request,
+                    options=options,
+                    stream_id=stream_id,
+                    seq=seq,
+                    kind=kind,
+                    payload=payload,
+                    payload_sha256=payload_sha256,
+                    full_size_bytes=full_size_bytes,
+                    unchanged=unchanged,
+                    dirty_rect=dirty_rect,
+                    dirty_ratio=patch_dirty_ratio,
+                    previous_seq=previous,
+                    timing=timing,
+                    captured_started=captured_started,
+                    current_tile_hashes=current_tile_hashes,
+                    patch_rects=patch_rects,
+                    patch_sizes=patch_sizes,
+                )
+            single_rect = patch_rects[0] if patch_rects else dirty_rect
+            left = single_rect["x"]
+            top = single_rect["y"]
+            width = single_rect["width"]
+            height = single_rect["height"]
             patch_rgb = crop_rgb(raw.rgb, raw.width, left, top, width, height)
             payload = encode_rgb_png(patch_rgb, (width, height))
             kind = "patch"
@@ -1071,6 +1144,8 @@ def _capture_raw_delta_frame(
                 timing=timing,
                 captured_started=captured_started,
                 current_tile_hashes=current_tile_hashes,
+                patch_rects=[single_rect],
+                patch_sizes=[len(payload)],
             )
         timing = {"diff_ms": tile_diff_ms, "tile_diff_ms": tile_diff_ms}
         payload_sha256 = raw.sha256
@@ -1113,6 +1188,8 @@ def _raw_metadata(
     timing: dict[str, float],
     captured_started: float,
     current_tile_hashes: dict[tuple[int, int], bytes] | None,
+    patch_rects: list[dict[str, int]] | None = None,
+    patch_sizes: list[int] | None = None,
 ) -> tuple[dict[str, Any], bytes]:
     metadata = {
         "type": "unchanged"
@@ -1140,6 +1217,9 @@ def _raw_metadata(
         },
         "unchanged": unchanged,
         "dirty_rect": dirty_rect,
+        "patch_rects": patch_rects,
+        "patch_count": 0 if patch_rects is None else len(patch_rects),
+        "patch_sizes_bytes": patch_sizes,
         "dirty_ratio": dirty_ratio,
         "previous_seq": previous_seq,
         "dropped_frames": 0,
@@ -1149,6 +1229,64 @@ def _raw_metadata(
         "_current_tile_hashes": current_tile_hashes,
     }
     return metadata, payload
+
+
+def _select_patch_rects(
+    *,
+    current: dict[tuple[int, int], bytes],
+    previous: dict[tuple[int, int], bytes] | None,
+    dirty_rect: dict[str, int],
+    width: int,
+    height: int,
+    tile_size: int,
+    max_patch_rects: int,
+    min_savings: float,
+) -> list[dict[str, int]]:
+    if previous is None or max_patch_rects <= 1:
+        return [dirty_rect]
+    rects = dirty_rects_from_tiles(
+        current=current,
+        previous=previous,
+        width=width,
+        height=height,
+        tile_size=tile_size,
+        max_rects=max_patch_rects,
+    )
+    if len(rects) <= 1:
+        return [dirty_rect]
+    single_area = dirty_rect["width"] * dirty_rect["height"]
+    rect_area = sum(rect["width"] * rect["height"] for rect in rects)
+    if single_area <= 0 or rect_area >= single_area:
+        return [dirty_rect]
+    savings = 1 - rect_area / single_area
+    if savings < min_savings:
+        return [dirty_rect]
+    return rects
+
+
+def _encode_patch_bundle(
+    *,
+    raw: CapturedRawScreenshot,
+    rects: list[dict[str, int]],
+) -> tuple[bytes, list[int]]:
+    chunks: list[bytes] = []
+    patch_sizes: list[int] = []
+    manifest: list[dict[str, int]] = []
+    for rect in rects:
+        patch_rgb = crop_rgb(
+            raw.rgb,
+            raw.width,
+            rect["x"],
+            rect["y"],
+            rect["width"],
+            rect["height"],
+        )
+        payload = encode_rgb_png(patch_rgb, (rect["width"], rect["height"]))
+        chunks.append(payload)
+        patch_sizes.append(len(payload))
+        manifest.append({**rect, "size_bytes": len(payload)})
+    manifest_bytes = json.dumps({"patches": manifest}, separators=(",", ":")).encode()
+    return struct.pack(">I", len(manifest_bytes)) + manifest_bytes + b"".join(chunks), patch_sizes
 
 
 def _build_delta_payload(
@@ -1298,6 +1436,9 @@ def _stream_screenshot_options(request: ObservationStreamRequest) -> ScreenshotO
                 "delta_mode",
                 "delta_max_ratio",
                 "tile_size",
+                "delivery",
+                "max_patch_rects",
+                "multi_rect_min_savings",
             }
         )
     )
@@ -1313,6 +1454,8 @@ def _clear_stream(state: _StreamState) -> None:
     state.request = None
     state.stream_id = None
     state.paused = False
+    state.emit_version = 0
+    state.source_version = 0
     state.last_sha256 = None
     state.last_source_sha256 = None
     state.last_image = None

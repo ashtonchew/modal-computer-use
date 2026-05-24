@@ -471,10 +471,13 @@ class ComputerSandbox:
         max_frames: int | None = None,
         idle_timeout_ms: int | None = None,
         send_unchanged: bool = False,
+        delivery: Literal["latest", "reliable"] | None = None,
         delta_mode: Literal["auto", "off"] | None = None,
         delta_max_ratio: float | None = None,
         keyframe_interval: int | None = None,
         tile_size: int | None = None,
+        max_patch_rects: int | None = None,
+        multi_rect_min_savings: float | None = None,
         timeout: float = 30.0,
     ) -> ObservationClient:
         return ObservationClient(
@@ -488,10 +491,13 @@ class ComputerSandbox:
             max_frames=max_frames,
             idle_timeout_ms=idle_timeout_ms,
             send_unchanged=send_unchanged,
+            delivery=delivery,
             delta_mode=delta_mode,
             delta_max_ratio=delta_max_ratio,
             keyframe_interval=keyframe_interval,
             tile_size=tile_size,
+            max_patch_rects=max_patch_rects,
+            multi_rect_min_savings=multi_rect_min_savings,
         )
 
     def snapshot_filesystem(self) -> object:
