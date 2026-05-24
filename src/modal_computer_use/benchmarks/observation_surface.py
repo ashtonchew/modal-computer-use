@@ -110,6 +110,29 @@ def _run_daemon_observation_surface(
                 warmup_iterations=warmup_iterations,
             )
         ),
+        "observation_action_click_observe_change_adaptive": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_adaptive",
+                poll_strategy="adaptive",
+            )
+        ),
+        "observation_action_click_observe_change_region_adaptive": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_region_adaptive",
+                poll_strategy="adaptive",
+                change_detection="auto_region",
+            )
+        ),
         "observation_action_click_fused_raw": _run_observation_action_click_fused_raw_benchmark(
             client=client,
             iterations=iterations,
@@ -368,9 +391,11 @@ def _run_observation_action_click_observe_change_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int,
+    name: str = "observation_action_click_observe_change",
+    poll_strategy: str = "fixed",
+    change_detection: str = "full",
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
-    name = "observation_action_click_observe_change"
     _open_click_toggle_page(client)
     samples, observations = _measure_stream_action_capture_loop(
         name=name,
@@ -381,6 +406,8 @@ def _run_observation_action_click_observe_change_benchmark(
         failures=failures,
         capture_delay_ms=0,
         observe_change=True,
+        poll_strategy=poll_strategy,
+        change_detection=change_detection,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -391,6 +418,8 @@ def _run_observation_action_click_observe_change_benchmark(
             "mutation_kind": "stream_action_click_observe_change",
             "change_timeout_ms": 100,
             "poll_interval_ms": 8,
+            "poll_strategy": poll_strategy,
+            "change_detection": change_detection,
         }
     )
     return result
@@ -508,6 +537,8 @@ def _measure_stream_action_capture_loop(
     failures: list[dict[str, Any]],
     capture_delay_ms: int,
     observe_change: bool = False,
+    poll_strategy: str = "fixed",
+    change_detection: str = "full",
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -526,6 +557,8 @@ def _measure_stream_action_capture_loop(
                         frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
+                        poll_strategy=poll_strategy,
+                        change_detection=change_detection,
                     )
                 except Exception as exc:
                     failures.append(
@@ -540,6 +573,8 @@ def _measure_stream_action_capture_loop(
                         frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
+                        poll_strategy=poll_strategy,
+                        change_detection=change_detection,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -607,6 +642,8 @@ def _stream_action_capture_iteration(
     *,
     capture_delay_ms: int,
     observe_change: bool,
+    poll_strategy: str,
+    change_detection: str,
 ) -> dict[str, Any]:
     request_started = perf_counter()
     payload = {
@@ -615,7 +652,14 @@ def _stream_action_capture_iteration(
         "capture_delay_ms": capture_delay_ms,
     }
     if observe_change:
-        payload.update({"change_timeout_ms": 100, "poll_interval_ms": 8})
+        payload.update(
+            {
+                "change_timeout_ms": 100,
+                "poll_interval_ms": 8,
+                "poll_strategy": poll_strategy,
+                "change_detection": change_detection,
+            }
+        )
         stream.run_actions_observe_change(**payload)
     else:
         stream.run_actions_capture(**payload)
@@ -631,6 +675,8 @@ def _stream_action_capture_iteration(
         "mutation_ms": 0.0,
         "capture_delay_ms": capture_delay_ms,
         "observe_change": observe_change,
+        "poll_strategy": poll_strategy,
+        "change_detection": change_detection,
         "request_frame_ms": request_frame_ms,
         "receive_frame_ms": receive_frame_ms,
         "action_to_frame_ms": request_frame_ms + receive_frame_ms,
@@ -841,6 +887,11 @@ def _frame_observation(frame) -> dict[str, Any]:
         "change_attempts": metadata.get("change_attempts"),
         "change_wait_ms": metadata.get("change_wait_ms"),
         "change_timeout_reached": metadata.get("change_timeout_reached"),
+        "change_region_attempts": metadata.get("change_region_attempts"),
+        "change_region_detected": metadata.get("change_region_detected"),
+        "change_detection": metadata.get("change_detection"),
+        "change_detection_region": metadata.get("change_detection_region"),
+        "poll_strategy": metadata.get("poll_strategy"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
     }
 
@@ -878,6 +929,9 @@ def _add_frame_observations(
             result["change_detected_ratio"] = change_detected_count / len(observations)
             result["change_timeout_frames"] = sum(
                 1 for item in observations if item.get("change_timeout_reached")
+            )
+            result["change_region_detected_frames"] = sum(
+                1 for item in observations if item.get("change_region_detected")
             )
             change_wait_samples = [
                 item["change_wait_ms"]

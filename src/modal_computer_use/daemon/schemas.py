@@ -34,6 +34,10 @@ class ObservationActionCaptureRequest(ActionBatchRequest):
 class ObservationActionObserveChangeRequest(ObservationActionCaptureRequest):
     change_timeout_ms: int = Field(default=100, ge=0, le=60_000)
     poll_interval_ms: int = Field(default=8, ge=1, le=1_000)
+    poll_strategy: Literal["fixed", "adaptive"] = "fixed"
+    change_detection: Literal["full", "region", "auto_region"] = "full"
+    change_detection_region: Region | None = None
+    change_region_radius: int = Field(default=192, ge=1, le=10_000)
 
 
 class TextRequest(Schema):

@@ -35,7 +35,7 @@ from modal_computer_use.daemon.schemas import (
     ObservationActionObserveChangeRequest,
     ObservationStreamRequest,
 )
-from modal_computer_use.models import ActionBatchRequest, ScreenshotOptions
+from modal_computer_use.models import ActionBatchRequest, Region, ScreenshotOptions
 from modal_computer_use.redaction import sanitize_payload, sanitize_text
 
 router = APIRouter(prefix="/v1/observations")
@@ -170,9 +170,24 @@ async def _handle_observation_message(
             action_request = ActionBatchRequest.model_validate(
                 stream_request.model_dump(
                     mode="json",
-                    exclude={"capture_delay_ms", "change_timeout_ms", "poll_interval_ms"},
+                    exclude={
+                        "capture_delay_ms",
+                        "change_timeout_ms",
+                        "poll_interval_ms",
+                        "poll_strategy",
+                        "change_detection",
+                        "change_detection_region",
+                        "change_region_radius",
+                    },
                 )
             )
+            region = _resolve_change_detection_region(websocket, stream_request)
+            region_baseline_sha256 = None
+            if region is not None:
+                region_baseline_sha256 = await _capture_region_source_sha256(
+                    websocket,
+                    region=region,
+                )
             action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
             if stream_request.capture_delay_ms > 0:
                 await asyncio.sleep(stream_request.capture_delay_ms / 1000)
@@ -183,11 +198,19 @@ async def _handle_observation_message(
                 request_id=request_id,
                 timeout_ms=stream_request.change_timeout_ms,
                 poll_interval_ms=stream_request.poll_interval_ms,
+                poll_strategy=stream_request.poll_strategy,
+                region=region,
+                region_baseline_sha256=region_baseline_sha256,
                 extra_metadata={
                     "action_result": action_result.model_dump(mode="json"),
                     "capture_delay_ms": stream_request.capture_delay_ms,
                     "change_timeout_ms": stream_request.change_timeout_ms,
                     "poll_interval_ms": stream_request.poll_interval_ms,
+                    "poll_strategy": stream_request.poll_strategy,
+                    "change_detection": stream_request.change_detection,
+                    "change_detection_region": region.model_dump(mode="json")
+                    if region is not None
+                    else None,
                 },
             )
         elif op == "stop":
@@ -350,6 +373,9 @@ async def _send_changed_frame(
     request_id: str,
     timeout_ms: int,
     poll_interval_ms: int,
+    poll_strategy: str,
+    region: Region | None,
+    region_baseline_sha256: str | None,
     extra_metadata: dict[str, Any],
 ) -> None:
     request = state.request
@@ -362,10 +388,28 @@ async def _send_changed_frame(
     started = perf_counter()
     deadline = started + timeout_ms / 1000
     attempts = 0
+    region_attempts = 0
+    region_detected = False
+    used_region = region is not None and region_baseline_sha256 is not None
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
     change_detected = False
     try:
+        if used_region:
+            while True:
+                region_attempts += 1
+                region_sha256 = await _capture_region_source_sha256(websocket, region=region)
+                region_detected = region_sha256 != region_baseline_sha256
+                if region_detected or perf_counter() >= deadline:
+                    break
+                await asyncio.sleep(
+                    _change_poll_sleep_ms(
+                        attempt=region_attempts,
+                        poll_interval_ms=poll_interval_ms,
+                        poll_strategy=poll_strategy,
+                    )
+                    / 1000
+                )
         while True:
             attempts += 1
             metadata, payload = await _capture_frame(
@@ -382,9 +426,16 @@ async def _send_changed_frame(
             last_metadata = metadata
             last_payload = payload
             change_detected = metadata["source_sha256"] != state.last_source_sha256
-            if change_detected or perf_counter() >= deadline:
+            if change_detected or region_detected or perf_counter() >= deadline:
                 break
-            await asyncio.sleep(poll_interval_ms / 1000)
+            await asyncio.sleep(
+                _change_poll_sleep_ms(
+                    attempt=attempts,
+                    poll_interval_ms=poll_interval_ms,
+                    poll_strategy=poll_strategy,
+                )
+                / 1000
+            )
     except DaemonError as exc:
         await _send_observation_error(
             websocket,
@@ -418,10 +469,92 @@ async def _send_changed_frame(
             **extra_metadata,
             "change_detected": change_detected,
             "change_attempts": attempts,
+            "change_region_attempts": region_attempts,
+            "change_region_detected": region_detected,
             "change_wait_ms": wait_ms,
-            "change_timeout_reached": not change_detected,
+            "change_timeout_reached": not (change_detected or region_detected),
         },
     )
+
+
+async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region) -> str | None:
+    validate_region(websocket, region, field="change_detection_region")
+    options = ScreenshotOptions(format="png", show_cursor=False)
+    raw = await _capture_raw_frame(
+        websocket,
+        ObservationStreamRequest(
+            format="png",
+            show_cursor=False,
+            region=region,
+        ),
+        options,
+    )
+    return None if raw is None else raw.sha256
+
+
+def _change_poll_sleep_ms(
+    *,
+    attempt: int,
+    poll_interval_ms: int,
+    poll_strategy: str,
+) -> int:
+    if poll_strategy != "adaptive":
+        return poll_interval_ms
+    return min(4 * (2 ** max(attempt - 1, 0)), poll_interval_ms)
+
+
+def _resolve_change_detection_region(
+    websocket: WebSocket,
+    request: ObservationActionObserveChangeRequest,
+) -> Region | None:
+    if request.change_detection == "full":
+        return None
+    region = request.change_detection_region
+    if region is None and request.change_detection == "auto_region":
+        region = _auto_change_region(
+            request.actions,
+            width=websocket.app.state.backend.width,
+            height=websocket.app.state.backend.height,
+            radius=request.change_region_radius,
+        )
+    if region is None:
+        return None
+    validate_region(websocket, region, field="change_detection_region")
+    return region
+
+
+def _auto_change_region(
+    actions: list[Any],
+    *,
+    width: int,
+    height: int,
+    radius: int,
+) -> Region | None:
+    for action in reversed(actions):
+        point = _action_observation_point(action)
+        if point is None:
+            continue
+        x, y = point
+        left = max(x - radius, 0)
+        top = max(y - radius, 0)
+        right = min(x + radius, width)
+        bottom = min(y + radius, height)
+        if right <= left or bottom <= top:
+            return None
+        return Region(x=left, y=top, width=right - left, height=bottom - top)
+    return None
+
+
+def _action_observation_point(action: Any) -> tuple[int, int] | None:
+    x = getattr(action, "x", None)
+    y = getattr(action, "y", None)
+    if isinstance(x, int) and isinstance(y, int):
+        return x, y
+    end_x = getattr(action, "end_x", None)
+    end_y = getattr(action, "end_y", None)
+    if isinstance(end_x, int) and isinstance(end_y, int):
+        return end_x, end_y
+    return None
 
 
 async def _stop_if_idle_timeout(

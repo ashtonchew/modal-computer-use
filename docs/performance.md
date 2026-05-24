@@ -141,6 +141,8 @@ with computer.observation_stream(fps=0.01) as stream:
         actions=[{"type": "click", "x": 100, "y": 100}],
         change_timeout_ms=100,
         poll_interval_ms=8,
+        poll_strategy="adaptive",
+        change_detection="auto_region",
     )
     observed = next(frames)
 ```
@@ -151,6 +153,14 @@ frame, preserving the same patch/keyframe/unchanged semantics as the rest of the
 stream. Frame metadata includes `change_detected`, `change_attempts`, `change_wait_ms`, and
 `change_timeout_reached` so callers can distinguish a real painted change from a no-op or timeout.
 Use this for paint-aware GUI loops instead of guessing a fixed post-action delay.
+
+The change detector supports two optional optimizations:
+
+- `poll_strategy="adaptive"` captures immediately, then backs off up to `poll_interval_ms`.
+  This avoids a tight fixed poll loop when the UI needs a frame boundary to paint.
+- `change_detection="auto_region"` captures a small region around the last pointer action before
+  falling back to the full stream frame. Use `change_detection_region` for an explicit region, or
+  `change_detection="full"` when keyboard or global UI changes are expected.
 
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
