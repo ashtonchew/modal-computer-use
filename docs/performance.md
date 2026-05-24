@@ -168,6 +168,9 @@ The change detector supports two optional optimizations:
   the XDamage probe for benchmarking. XDamage only decides when to try the final observation frame;
   the daemon still verifies the screenshot hash before reporting a detected change, and the emitted
   keyframe/patch/unchanged payload still comes from the normal raw screenshot and tile-diff path.
+  The stream arms the watcher after any region baseline capture and immediately before running the
+  action, then resets it after a detected event. That keeps stale damage from a prior capture from
+  satisfying the next action-observe turn.
 
 Observe-change frames include `change_stage_timing_ms` for attribution. It records daemon-side
 signal preparation, region baseline capture, action batch wall time, explicit capture delay, signal
@@ -393,10 +396,12 @@ This surface reports `observation_first_frame`, `observation_steady_no_change`,
 The capture-now action case opens a synthetic page once, mutates it with a real daemon click action,
 then requests an immediate observation frame on the existing stream. The default observe-change case
 uses the SDK default `change_signal="auto"`; the poll, XDamage, and auto-signal variants make the
-signal policy explicit for A/B comparison. The HTTP raw observe-change case uses the same page and
-click through `POST /v1/actions/run/observe-change/raw-screenshot` so benchmarks can separate
-WebSocket stream framing from a one-shot binary response. The fused-raw case uses the same page and
-click through `POST /v1/actions/run/raw-screenshot`.
+signal policy explicit for A/B comparison. Use the stream observe-change cases as the canonical
+low-latency action-observe benchmark because they keep frame/tile/XDamage state alive across turns.
+The HTTP raw observe-change case uses the same page and click through
+`POST /v1/actions/run/observe-change/raw-screenshot` so benchmarks can separate WebSocket stream
+framing from a one-shot binary response. The fused-raw case uses the same page and click through
+`POST /v1/actions/run/raw-screenshot`.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`

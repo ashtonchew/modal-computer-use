@@ -787,6 +787,96 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert FakeXDamageWatcher.instances[0].closed is True
 
 
+def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
+    app,
+    monkeypatch,
+) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_square(),
+            _raw_screenshot_bytes("black"),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    class FakeXDamageWatcher:
+        instances: ClassVar[list[FakeXDamageWatcher]] = []
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.closed = False
+            self.armed = 0
+            self.waits = 0
+            FakeXDamageWatcher.instances.append(self)
+
+        def arm(self) -> None:
+            self.armed += 1
+
+        def wait(self, timeout_ms: int):
+            self.waits += 1
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=1.0,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 0.01,
+                    "max_frames": 3,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        for request_id in ("2", "3"):
+            websocket.send_json(
+                {
+                    "id": request_id,
+                    "op": "run_actions_observe_change",
+                    "payload": {
+                        "actions": [{"type": "wait", "duration_ms": 0}],
+                        "change_timeout_ms": 100,
+                        "poll_interval_ms": 1,
+                        "change_signal": "xdamage",
+                        "source": "test",
+                    },
+                }
+            )
+            frame = websocket.receive_json()
+            assert frame["trigger"] == "run_actions_observe_change"
+            assert frame["change_signal_active"] == "xdamage"
+            assert websocket.receive_bytes()
+
+    assert len(FakeXDamageWatcher.instances) == 1
+    assert FakeXDamageWatcher.instances[0].armed == 2
+    assert FakeXDamageWatcher.instances[0].waits == 2
+    assert FakeXDamageWatcher.instances[0].closed is True
+
+
 def test_observation_stream_run_actions_observe_change_auto_falls_back_to_poll(
     app,
     monkeypatch,
