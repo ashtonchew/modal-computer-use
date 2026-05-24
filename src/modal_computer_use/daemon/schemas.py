@@ -166,6 +166,7 @@ class ObservationStreamRequest(ScreenshotRequest):
     idle_timeout_ms: int | None = Field(default=None, ge=100, le=300_000)
     send_unchanged: bool = False
     transport_timing: bool = False
+    frame_encoding: Literal["json-binary", "binary-envelope"] = "json-binary"
     delivery: Literal["latest", "reliable"] = "latest"
     keyframe_interval: int = Field(default=30, ge=1, le=10_000)
     delta_mode: Literal["auto", "off"] = "auto"

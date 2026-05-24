@@ -14,6 +14,8 @@ from websockets.sync.client import ClientConnection, connect
 
 from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
 
+FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
+
 
 @dataclass(frozen=True)
 class ObservationFrame:
@@ -103,11 +105,10 @@ class ObservationStreamTransport:
         while True:
             message = self._websocket.recv(timeout=self.timeout)
             if isinstance(message, bytes):
-                raise DaemonHTTPError(
-                    "observation frame metadata missing",
-                    code="observation_stream_protocol_error",
-                )
-            data = json.loads(message)
+                data, frame = _decode_frame_envelope(message)
+            else:
+                data = json.loads(message)
+                frame = None
             if not isinstance(data, dict):
                 raise DaemonHTTPError(
                     "unexpected observation stream frame",
@@ -118,11 +119,7 @@ class ObservationStreamTransport:
             if data.get("type") == "stopped":
                 return
             if data.get("type") == "unchanged":
-                timing = (
-                    self._recv_transport_timing(expected_seq=data.get("seq"))
-                    if transport_timing
-                    else None
-                )
+                timing = self._frame_transport_timing(data, transport_timing=transport_timing)
                 yield ObservationFrame(payload=None, metadata=data, transport_timing=timing)
                 continue
             if data.get("type") != "frame":
@@ -130,17 +127,14 @@ class ObservationStreamTransport:
                     "unexpected observation stream frame",
                     code="observation_stream_protocol_error",
                 )
-            frame = self._websocket.recv(timeout=self.timeout)
-            if not isinstance(frame, bytes):
-                raise DaemonHTTPError(
-                    "observation binary payload missing",
-                    code="observation_stream_protocol_error",
-                )
-            timing = (
-                self._recv_transport_timing(expected_seq=data.get("seq"))
-                if transport_timing
-                else None
-            )
+            if frame is None:
+                frame = self._websocket.recv(timeout=self.timeout)
+                if not isinstance(frame, bytes):
+                    raise DaemonHTTPError(
+                        "observation binary payload missing",
+                        code="observation_stream_protocol_error",
+                    )
+            timing = self._frame_transport_timing(data, transport_timing=transport_timing)
             yield ObservationFrame(payload=frame, metadata=data, transport_timing=timing)
 
     def start(self, payload: dict[str, Any]) -> None:
@@ -263,6 +257,35 @@ class ObservationStreamTransport:
         message = self._websocket.recv(timeout=self.timeout)
         wait_metadata_ms = _elapsed_ms(wait_metadata_started)
         parse_metadata_started = perf_counter()
+        if isinstance(message, bytes):
+            data, envelope_payload = _decode_frame_envelope(message)
+            envelope_timing = data.get("server_emit_timing_ms")
+            parse_metadata_ms = _elapsed_ms(parse_metadata_started)
+            if data.get("type") == "error":
+                self._raise_observation_error(data)
+            if data.get("type") == "stopped":
+                raise StopIteration
+            if data.get("type") not in {"frame", "unchanged"}:
+                raise DaemonHTTPError(
+                    "unexpected observation stream frame",
+                    code="observation_stream_protocol_error",
+                )
+            wait_timing_ms = 0.0
+            if not isinstance(envelope_timing, dict):
+                wait_timing_started = perf_counter()
+                timing = self._recv_transport_timing(expected_seq=data.get("seq"))
+                wait_timing_ms = _elapsed_ms(wait_timing_started)
+            else:
+                timing = {"server_emit_timing_ms": envelope_timing}
+            return self._construct_timed_frame(
+                payload=None if data.get("type") == "unchanged" else envelope_payload,
+                metadata=data,
+                transport_timing=timing,
+                wait_metadata_ms=wait_metadata_ms,
+                parse_metadata_ms=parse_metadata_ms,
+                wait_payload_ms=0.0,
+                wait_transport_timing_ms=wait_timing_ms,
+            )
         if not isinstance(message, str):
             raise DaemonHTTPError(
                 "unexpected observation stream frame",
@@ -283,29 +306,15 @@ class ObservationStreamTransport:
             wait_timing_started = perf_counter()
             transport_timing = self._recv_transport_timing(expected_seq=data.get("seq"))
             wait_timing_ms = _elapsed_ms(wait_timing_started)
-            construct_started = perf_counter()
-            frame = ObservationFrame(
+            return self._construct_timed_frame(
                 payload=None,
                 metadata=data,
-                transport_timing={
-                    **transport_timing,
-                    "client_receive_timing_ms": {
-                        "wait_metadata_ms": wait_metadata_ms,
-                        "parse_metadata_ms": parse_metadata_ms,
-                        "wait_payload_ms": 0.0,
-                        "wait_transport_timing_ms": wait_timing_ms,
-                        "frame_construct_ms": 0.0,
-                        "receive_total_ms": wait_metadata_ms + parse_metadata_ms + wait_timing_ms,
-                    },
-                },
+                transport_timing=transport_timing,
+                wait_metadata_ms=wait_metadata_ms,
+                parse_metadata_ms=parse_metadata_ms,
+                wait_payload_ms=0.0,
+                wait_transport_timing_ms=wait_timing_ms,
             )
-            construct_ms = _elapsed_ms(construct_started)
-            timing = frame.transport_timing or {}
-            client_timing = timing.get("client_receive_timing_ms")
-            if isinstance(client_timing, dict):
-                client_timing["frame_construct_ms"] = construct_ms
-                client_timing["receive_total_ms"] += construct_ms
-            return frame
         if data.get("type") != "frame":
             raise DaemonHTTPError(
                 "unexpected observation stream frame",
@@ -322,22 +331,43 @@ class ObservationStreamTransport:
         wait_timing_started = perf_counter()
         transport_timing = self._recv_transport_timing(expected_seq=data.get("seq"))
         wait_timing_ms = _elapsed_ms(wait_timing_started)
-        construct_started = perf_counter()
-        result = ObservationFrame(
+        return self._construct_timed_frame(
             payload=frame,
             metadata=data,
+            transport_timing=transport_timing,
+            wait_metadata_ms=wait_metadata_ms,
+            parse_metadata_ms=parse_metadata_ms,
+            wait_payload_ms=wait_payload_ms,
+            wait_transport_timing_ms=wait_timing_ms,
+        )
+
+    def _construct_timed_frame(
+        self,
+        *,
+        payload: bytes | None,
+        metadata: dict[str, Any],
+        transport_timing: dict[str, Any],
+        wait_metadata_ms: float,
+        parse_metadata_ms: float,
+        wait_payload_ms: float,
+        wait_transport_timing_ms: float,
+    ) -> ObservationFrame:
+        construct_started = perf_counter()
+        result = ObservationFrame(
+            payload=payload,
+            metadata=metadata,
             transport_timing={
                 **transport_timing,
                 "client_receive_timing_ms": {
                     "wait_metadata_ms": wait_metadata_ms,
                     "parse_metadata_ms": parse_metadata_ms,
                     "wait_payload_ms": wait_payload_ms,
-                    "wait_transport_timing_ms": wait_timing_ms,
+                    "wait_transport_timing_ms": wait_transport_timing_ms,
                     "frame_construct_ms": 0.0,
                     "receive_total_ms": wait_metadata_ms
                     + parse_metadata_ms
                     + wait_payload_ms
-                    + wait_timing_ms,
+                    + wait_transport_timing_ms,
                 },
             },
         )
@@ -348,6 +378,25 @@ class ObservationStreamTransport:
             client_timing["frame_construct_ms"] = construct_ms
             client_timing["receive_total_ms"] += construct_ms
         return result
+
+    def _frame_transport_timing(
+        self,
+        metadata: dict[str, Any],
+        *,
+        transport_timing: bool,
+    ) -> dict[str, Any] | None:
+        if not transport_timing:
+            return None
+        inline_timing = metadata.get("server_emit_timing_ms")
+        if isinstance(inline_timing, dict):
+            return {
+                "type": "transport_timing",
+                "stream_id": metadata.get("stream_id"),
+                "seq": metadata.get("seq"),
+                "trigger": metadata.get("trigger"),
+                "server_emit_timing_ms": inline_timing,
+            }
+        return self._recv_transport_timing(expected_seq=metadata.get("seq"))
 
     def _recv_json(self) -> dict[str, Any]:
         message = self._websocket.recv(timeout=self.timeout)
@@ -409,6 +458,30 @@ def _websocket_url(base_url: str, path: str) -> str:
 
 def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
+
+
+def _decode_frame_envelope(message: bytes) -> tuple[dict[str, Any], bytes]:
+    header_size = len(FRAME_ENVELOPE_MAGIC) + 4
+    if len(message) < header_size or not message.startswith(FRAME_ENVELOPE_MAGIC):
+        raise DaemonHTTPError(
+            "invalid observation binary envelope",
+            code="observation_stream_protocol_error",
+        )
+    metadata_size = struct.unpack(">I", message[len(FRAME_ENVELOPE_MAGIC) : header_size])[0]
+    metadata_start = header_size
+    metadata_end = metadata_start + metadata_size
+    if metadata_end > len(message):
+        raise DaemonHTTPError(
+            "truncated observation binary envelope",
+            code="observation_stream_protocol_error",
+        )
+    data = json.loads(message[metadata_start:metadata_end])
+    if not isinstance(data, dict):
+        raise DaemonHTTPError(
+            "invalid observation binary envelope metadata",
+            code="observation_stream_protocol_error",
+        )
+    return data, message[metadata_end:]
 
 
 def _apply_patch(

@@ -6,7 +6,7 @@ import time
 from datetime import UTC, datetime
 from shlex import quote as shell_quote
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 from ..client import DaemonClient
@@ -192,6 +192,19 @@ def _run_daemon_observation_surface(
                 name="observation_action_click_observe_change_auto_signal",
                 poll_strategy="adaptive",
                 change_signal="auto",
+            )
+        ),
+        "observation_action_click_observe_change_auto_signal_envelope": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_auto_signal_envelope",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                frame_encoding="binary-envelope",
             )
         ),
         "observation_action_click_sparse_observe_change_auto_signal": (
@@ -564,6 +577,7 @@ def _run_observation_action_click_observe_change_benchmark(
     change_detection: str = "full",
     change_signal: str | None = "poll",
     page: str = "default",
+    frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     if page == "sparse":
@@ -582,6 +596,7 @@ def _run_observation_action_click_observe_change_benchmark(
         poll_strategy=poll_strategy,
         change_detection=change_detection,
         change_signal=change_signal,
+        frame_encoding=frame_encoding,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -596,6 +611,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "change_detection": change_detection,
             "change_signal": change_signal or "default",
             "page": page,
+            "frame_encoding": frame_encoding or "json-binary",
         }
     )
     return result
@@ -1109,6 +1125,7 @@ def _measure_stream_action_capture_loop(
     poll_strategy: str = "fixed",
     change_detection: str = "full",
     change_signal: str | None = "poll",
+    frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -1118,6 +1135,7 @@ def _measure_stream_action_capture_loop(
             options=OBSERVATION_SCREENSHOT_OPTIONS,
             fps=0.01,
             transport_timing=True,
+            frame_encoding=frame_encoding,
         ) as stream:
             stream.transport.start(stream.payload)
             stream.transport.recv_frame_with_timing()
@@ -1579,6 +1597,7 @@ def _frame_observation(frame) -> dict[str, Any]:
         "previous_source_version": metadata.get("previous_source_version"),
         "emit_version": metadata.get("emit_version"),
         "delivery": metadata.get("delivery"),
+        "frame_encoding": metadata.get("frame_encoding"),
         "trigger": metadata.get("trigger"),
         "action_result": metadata.get("action_result"),
         "change_detected": metadata.get("change_detected"),
@@ -1615,7 +1634,7 @@ def _add_frame_observations(
     result.update(
         {
             "request": OBSERVATION_SCREENSHOT_OPTIONS,
-            "transport_encoding": "websocket_binary",
+            "transport_encoding": _observation_transport_encoding(observations),
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],
@@ -1715,6 +1734,8 @@ def _add_frame_observations(
     if action_to_frame_samples:
         result["action_to_frame_samples_ms"] = action_to_frame_samples
         result["action_to_frame_summary_ms"] = _summary(action_to_frame_samples)
+
+
     receive_minus_pre_emit_samples = [
         timing["receive_frame_ms"] - stage_timing["server_pre_emit_ms"]
         for item in observations
@@ -1789,3 +1810,14 @@ def _add_frame_observations(
             for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
+
+
+def _observation_transport_encoding(observations: list[Any]) -> str:
+    encodings = {
+        item.get("frame_encoding")
+        for item in observations
+        if isinstance(item, dict) and isinstance(item.get("frame_encoding"), str)
+    }
+    if encodings == {"binary-envelope"}:
+        return "websocket_binary_envelope"
+    return "websocket_json_metadata_binary_payload"

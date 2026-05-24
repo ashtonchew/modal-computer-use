@@ -45,6 +45,7 @@ from modal_computer_use.redaction import sanitize_payload, sanitize_text
 router = APIRouter(prefix="/v1/observations")
 
 PROTOCOL = "computer-use.observation-stream.v1"
+FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
 
 
 @dataclass
@@ -745,6 +746,7 @@ async def _emit_frame(
     metadata["previous_source_version"] = previous_source_version
     metadata["emit_version"] = state.emit_version
     metadata["delivery"] = request.delivery
+    metadata["frame_encoding"] = request.frame_encoding
     state.last_sha256 = metadata["sha256"]
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")
@@ -764,16 +766,22 @@ async def _emit_frame(
     )
     emit_started = perf_counter()
     metadata_send_started = perf_counter()
-    if should_suppress_payload:
-        await websocket.send_json(metadata)
+    if request.frame_encoding == "binary-envelope":
+        envelope_payload = b"" if should_suppress_payload else payload
+        await websocket.send_bytes(_encode_frame_envelope(metadata, envelope_payload))
         metadata_send_ms = _elapsed_ms(metadata_send_started)
         payload_send_ms = 0.0
     else:
-        await websocket.send_json(metadata)
-        metadata_send_ms = _elapsed_ms(metadata_send_started)
-        payload_send_started = perf_counter()
-        await websocket.send_bytes(payload)
-        payload_send_ms = _elapsed_ms(payload_send_started)
+        if should_suppress_payload:
+            await websocket.send_json(metadata)
+            metadata_send_ms = _elapsed_ms(metadata_send_started)
+            payload_send_ms = 0.0
+        else:
+            await websocket.send_json(metadata)
+            metadata_send_ms = _elapsed_ms(metadata_send_started)
+            payload_send_started = perf_counter()
+            await websocket.send_bytes(payload)
+            payload_send_ms = _elapsed_ms(payload_send_started)
     if request.transport_timing:
         await websocket.send_json(
             {
@@ -801,6 +809,16 @@ async def _emit_frame(
         _clear_stream(state)
         return
     state.next_frame_at = perf_counter() + 1 / request.fps
+
+
+def _encode_frame_envelope(metadata: dict[str, Any], payload: bytes) -> bytes:
+    metadata_payload = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
+    return (
+        FRAME_ENVELOPE_MAGIC
+        + struct.pack(">I", len(metadata_payload))
+        + metadata_payload
+        + payload
+    )
 
 
 async def _send_transport_probe(
@@ -1432,6 +1450,7 @@ def _stream_screenshot_options(request: ObservationStreamRequest) -> ScreenshotO
                 "idle_timeout_ms",
                 "send_unchanged",
                 "transport_timing",
+                "frame_encoding",
                 "keyframe_interval",
                 "delta_mode",
                 "delta_max_ratio",
