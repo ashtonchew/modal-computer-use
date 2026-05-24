@@ -145,6 +145,7 @@ class ObservationStreamRequest(ScreenshotRequest):
     max_frames: int | None = Field(default=None, ge=1, le=10_000)
     idle_timeout_ms: int | None = Field(default=None, ge=100, le=300_000)
     send_unchanged: bool = False
+    transport_timing: bool = False
     keyframe_interval: int = Field(default=30, ge=1, le=10_000)
     delta_mode: Literal["auto", "off"] = "auto"
     delta_max_ratio: float = Field(default=0.35, ge=0, le=1)

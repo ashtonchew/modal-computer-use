@@ -23,6 +23,7 @@ class ObservationClient:
         delta_max_ratio: float | None = None,
         keyframe_interval: int | None = None,
         tile_size: int | None = None,
+        transport_timing: bool = False,
     ) -> None:
         self.transport = transport
         self.payload = _observation_payload(
@@ -35,6 +36,7 @@ class ObservationClient:
             delta_max_ratio=delta_max_ratio,
             keyframe_interval=keyframe_interval,
             tile_size=tile_size,
+            transport_timing=transport_timing,
         )
 
     def close(self) -> None:
@@ -79,6 +81,7 @@ def _observation_payload(
     delta_max_ratio: float | None,
     keyframe_interval: int | None,
     tile_size: int | None,
+    transport_timing: bool,
 ) -> dict[str, Any]:
     if options is None:
         payload = ScreenshotOptions(format="png", show_cursor=False).model_dump(mode="json")
@@ -92,6 +95,8 @@ def _observation_payload(
             "send_unchanged": send_unchanged,
         }
     )
+    if transport_timing:
+        payload["transport_timing"] = True
     if max_frames is not None:
         payload["max_frames"] = max_frames
     if idle_timeout_ms is not None:

@@ -176,6 +176,18 @@ emitted. The client benchmark combines this with `request_frame_ms` and `receive
 derived `receive_minus_server_pre_emit` bucket includes websocket send, network transit, client
 receive, and local scheduling because those happen after frame metadata has already been produced.
 
+Benchmarks can also enable `transport_timing=true` on the observation stream. In that mode the
+daemon sends one small `transport_timing` control message immediately after each frame payload. The
+control message records server-side metadata send, payload send, and total emit timing. The
+benchmark receive path records client-side metadata wait, JSON parse, payload wait,
+transport-timing wait, and frame construction. Normal SDK streams leave this off so production
+frames keep the stable metadata-then-binary shape without an extra control message.
+
+The observation benchmark also includes `observation_transport_probe_*` cases. These send synthetic
+in-memory binary payloads over the same observation WebSocket without screenshot capture or X11
+work. Use them to distinguish a fixed tunnel/WebSocket scheduling floor from payload-size transfer
+cost before changing the screenshot or delta protocol.
+
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
 does not require stream setup. Observation stream frames count against the screenshot budget. Patch
@@ -377,7 +389,8 @@ signal policy explicit for A/B comparison. The fused-raw case uses the same page
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
 cases, action daemon timing for click-driven cases, observe-change stage timing, derived
-receive-minus-server-pre-emit timing, and WebSocket transport labeling. It is
+receive-minus-server-pre-emit timing, optional stream transport send/receive timing, and WebSocket
+transport labeling. It is
 intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
 observation behavior, and action-causal capture behavior rather than only a single
 request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive

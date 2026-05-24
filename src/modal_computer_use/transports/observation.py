@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
+from time import perf_counter
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -17,6 +18,7 @@ from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
 class ObservationFrame:
     payload: bytes | None
     metadata: dict[str, Any]
+    transport_timing: dict[str, Any] | None = None
 
     @property
     def seq(self) -> int:
@@ -89,15 +91,8 @@ class ObservationStreamTransport:
         self._websocket.close()
 
     def frames(self, payload: dict[str, Any]) -> Iterator[ObservationFrame]:
-        request_id = self._send("start", payload)
-        started = self._recv_json()
-        if started.get("type") == "error":
-            self._raise_observation_error(started)
-        if started.get("type") != "started" or started.get("id") != request_id:
-            raise DaemonHTTPError(
-                "unexpected observation stream start response",
-                code="observation_stream_protocol_error",
-            )
+        transport_timing = bool(payload.get("transport_timing"))
+        self.start(payload)
         while True:
             message = self._websocket.recv(timeout=self.timeout)
             if isinstance(message, bytes):
@@ -116,7 +111,12 @@ class ObservationStreamTransport:
             if data.get("type") == "stopped":
                 return
             if data.get("type") == "unchanged":
-                yield ObservationFrame(payload=None, metadata=data)
+                timing = (
+                    self._recv_transport_timing(expected_seq=data.get("seq"))
+                    if transport_timing
+                    else None
+                )
+                yield ObservationFrame(payload=None, metadata=data, transport_timing=timing)
                 continue
             if data.get("type") != "frame":
                 raise DaemonHTTPError(
@@ -129,7 +129,23 @@ class ObservationStreamTransport:
                     "observation binary payload missing",
                     code="observation_stream_protocol_error",
                 )
-            yield ObservationFrame(payload=frame, metadata=data)
+            timing = (
+                self._recv_transport_timing(expected_seq=data.get("seq"))
+                if transport_timing
+                else None
+            )
+            yield ObservationFrame(payload=frame, metadata=data, transport_timing=timing)
+
+    def start(self, payload: dict[str, Any]) -> None:
+        request_id = self._send("start", payload)
+        started = self._recv_json()
+        if started.get("type") == "error":
+            self._raise_observation_error(started)
+        if started.get("type") != "started" or started.get("id") != request_id:
+            raise DaemonHTTPError(
+                "unexpected observation stream start response",
+                code="observation_stream_protocol_error",
+            )
 
     def stop(self) -> None:
         self._send("stop", {})
@@ -152,6 +168,63 @@ class ObservationStreamTransport:
     def configure(self, payload: dict[str, Any]) -> None:
         self._send("configure", payload)
 
+    def transport_probe(self, *, size_bytes: int) -> dict[str, Any]:
+        request_id = self._send("transport_probe", {"size_bytes": size_bytes})
+        wait_metadata_started = perf_counter()
+        message = self._websocket.recv(timeout=self.timeout)
+        wait_metadata_ms = _elapsed_ms(wait_metadata_started)
+        parse_metadata_started = perf_counter()
+        if not isinstance(message, str):
+            raise DaemonHTTPError(
+                "unexpected observation transport probe response",
+                code="observation_stream_protocol_error",
+            )
+        data = json.loads(message)
+        parse_metadata_ms = _elapsed_ms(parse_metadata_started)
+        if not isinstance(data, dict):
+            raise DaemonHTTPError(
+                "unexpected observation transport probe response",
+                code="observation_stream_protocol_error",
+            )
+        if data.get("type") == "error":
+            self._raise_observation_error(data)
+        if data.get("type") != "transport_probe" or data.get("id") != request_id:
+            raise DaemonHTTPError(
+                "unexpected observation transport probe response",
+                code="observation_stream_protocol_error",
+            )
+        wait_payload_started = perf_counter()
+        frame = self._websocket.recv(timeout=self.timeout)
+        wait_payload_ms = _elapsed_ms(wait_payload_started)
+        if not isinstance(frame, bytes):
+            raise DaemonHTTPError(
+                "observation transport probe payload missing",
+                code="observation_stream_protocol_error",
+            )
+        wait_timing_started = perf_counter()
+        timing = self._recv_transport_timing(expected_seq=None)
+        wait_timing_ms = _elapsed_ms(wait_timing_started)
+        if timing.get("id") != request_id:
+            raise DaemonHTTPError(
+                "observation transport probe timing id mismatch",
+                code="observation_stream_protocol_error",
+            )
+        return {
+            "size_bytes": len(frame),
+            "requested_size_bytes": size_bytes,
+            "server_emit_timing_ms": timing.get("server_emit_timing_ms"),
+            "client_receive_timing_ms": {
+                "wait_metadata_ms": wait_metadata_ms,
+                "parse_metadata_ms": parse_metadata_ms,
+                "wait_payload_ms": wait_payload_ms,
+                "wait_transport_timing_ms": wait_timing_ms,
+                "receive_total_ms": wait_metadata_ms
+                + parse_metadata_ms
+                + wait_payload_ms
+                + wait_timing_ms,
+            },
+        }
+
     def _connect(self, *, timeout: float) -> ClientConnection:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
         try:
@@ -173,6 +246,102 @@ class ObservationStreamTransport:
         self._websocket.send(json.dumps({"id": request_id, "op": op, "payload": payload}))
         return request_id
 
+    def recv_frame_with_timing(self) -> ObservationFrame:
+        """Receive one frame and split client-side transport timing.
+
+        This low-level helper is intended for benchmarks. Normal callers should
+        iterate through ``frames()``.
+        """
+        wait_metadata_started = perf_counter()
+        message = self._websocket.recv(timeout=self.timeout)
+        wait_metadata_ms = _elapsed_ms(wait_metadata_started)
+        parse_metadata_started = perf_counter()
+        if not isinstance(message, str):
+            raise DaemonHTTPError(
+                "unexpected observation stream frame",
+                code="observation_stream_protocol_error",
+            )
+        data = json.loads(message)
+        parse_metadata_ms = _elapsed_ms(parse_metadata_started)
+        if not isinstance(data, dict):
+            raise DaemonHTTPError(
+                "unexpected observation stream frame",
+                code="observation_stream_protocol_error",
+            )
+        if data.get("type") == "error":
+            self._raise_observation_error(data)
+        if data.get("type") == "stopped":
+            raise StopIteration
+        if data.get("type") == "unchanged":
+            wait_timing_started = perf_counter()
+            transport_timing = self._recv_transport_timing(expected_seq=data.get("seq"))
+            wait_timing_ms = _elapsed_ms(wait_timing_started)
+            construct_started = perf_counter()
+            frame = ObservationFrame(
+                payload=None,
+                metadata=data,
+                transport_timing={
+                    **transport_timing,
+                    "client_receive_timing_ms": {
+                        "wait_metadata_ms": wait_metadata_ms,
+                        "parse_metadata_ms": parse_metadata_ms,
+                        "wait_payload_ms": 0.0,
+                        "wait_transport_timing_ms": wait_timing_ms,
+                        "frame_construct_ms": 0.0,
+                        "receive_total_ms": wait_metadata_ms + parse_metadata_ms + wait_timing_ms,
+                    },
+                },
+            )
+            construct_ms = _elapsed_ms(construct_started)
+            timing = frame.transport_timing or {}
+            client_timing = timing.get("client_receive_timing_ms")
+            if isinstance(client_timing, dict):
+                client_timing["frame_construct_ms"] = construct_ms
+                client_timing["receive_total_ms"] += construct_ms
+            return frame
+        if data.get("type") != "frame":
+            raise DaemonHTTPError(
+                "unexpected observation stream frame",
+                code="observation_stream_protocol_error",
+            )
+        wait_payload_started = perf_counter()
+        frame = self._websocket.recv(timeout=self.timeout)
+        wait_payload_ms = _elapsed_ms(wait_payload_started)
+        if not isinstance(frame, bytes):
+            raise DaemonHTTPError(
+                "observation binary payload missing",
+                code="observation_stream_protocol_error",
+            )
+        wait_timing_started = perf_counter()
+        transport_timing = self._recv_transport_timing(expected_seq=data.get("seq"))
+        wait_timing_ms = _elapsed_ms(wait_timing_started)
+        construct_started = perf_counter()
+        result = ObservationFrame(
+            payload=frame,
+            metadata=data,
+            transport_timing={
+                **transport_timing,
+                "client_receive_timing_ms": {
+                    "wait_metadata_ms": wait_metadata_ms,
+                    "parse_metadata_ms": parse_metadata_ms,
+                    "wait_payload_ms": wait_payload_ms,
+                    "wait_transport_timing_ms": wait_timing_ms,
+                    "frame_construct_ms": 0.0,
+                    "receive_total_ms": wait_metadata_ms
+                    + parse_metadata_ms
+                    + wait_payload_ms
+                    + wait_timing_ms,
+                },
+            },
+        )
+        construct_ms = _elapsed_ms(construct_started)
+        timing = result.transport_timing or {}
+        client_timing = timing.get("client_receive_timing_ms")
+        if isinstance(client_timing, dict):
+            client_timing["frame_construct_ms"] = construct_ms
+            client_timing["receive_total_ms"] += construct_ms
+        return result
+
     def _recv_json(self) -> dict[str, Any]:
         message = self._websocket.recv(timeout=self.timeout)
         if not isinstance(message, str):
@@ -184,6 +353,26 @@ class ObservationStreamTransport:
         if not isinstance(data, dict):
             raise DaemonHTTPError(
                 "unexpected observation stream frame",
+                code="observation_stream_protocol_error",
+            )
+        return data
+
+    def _recv_transport_timing(self, *, expected_seq: Any) -> dict[str, Any]:
+        message = self._websocket.recv(timeout=self.timeout)
+        if not isinstance(message, str):
+            raise DaemonHTTPError(
+                "observation transport timing missing",
+                code="observation_stream_protocol_error",
+            )
+        data = json.loads(message)
+        if not isinstance(data, dict) or data.get("type") != "transport_timing":
+            raise DaemonHTTPError(
+                "unexpected observation transport timing frame",
+                code="observation_stream_protocol_error",
+            )
+        if data.get("seq") != expected_seq:
+            raise DaemonHTTPError(
+                "observation transport timing seq mismatch",
                 code="observation_stream_protocol_error",
             )
         return data
@@ -209,6 +398,10 @@ def _websocket_url(base_url: str, path: str) -> str:
     parts = urlsplit(base_url)
     scheme = "wss" if parts.scheme == "https" else "ws"
     return urlunsplit((scheme, parts.netloc, path, "", ""))
+
+
+def _elapsed_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000
 
 
 def _apply_patch(

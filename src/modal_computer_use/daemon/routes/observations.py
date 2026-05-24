@@ -143,6 +143,8 @@ async def _handle_observation_message(
             await _send_empty_result(websocket, request_id)
         elif op == "configure":
             await _configure_stream(websocket, state, request_id, payload)
+        elif op == "transport_probe":
+            await _send_transport_probe(websocket, request_id, payload)
         elif op == "request_keyframe":
             _require_started(state)
             state.last_sha256 = None
@@ -740,11 +742,32 @@ async def _emit_frame(
         and metadata["kind"] == "delta-suppressed"
         and not request.send_unchanged
     )
+    emit_started = perf_counter()
+    metadata_send_started = perf_counter()
     if should_suppress_payload:
         await websocket.send_json(metadata)
+        metadata_send_ms = _elapsed_ms(metadata_send_started)
+        payload_send_ms = 0.0
     else:
         await websocket.send_json(metadata)
+        metadata_send_ms = _elapsed_ms(metadata_send_started)
+        payload_send_started = perf_counter()
         await websocket.send_bytes(payload)
+        payload_send_ms = _elapsed_ms(payload_send_started)
+    if request.transport_timing:
+        await websocket.send_json(
+            {
+                "type": "transport_timing",
+                "stream_id": state.stream_id,
+                "seq": metadata["seq"],
+                "trigger": trigger,
+                "server_emit_timing_ms": {
+                    "metadata_send_ms": metadata_send_ms,
+                    "payload_send_ms": payload_send_ms,
+                    "emit_total_ms": _elapsed_ms(emit_started),
+                },
+            }
+        )
     state.emitted_frames += 1
     if request.max_frames is not None and state.emitted_frames >= request.max_frames:
         await websocket.send_json(
@@ -758,6 +781,49 @@ async def _emit_frame(
         _clear_stream(state)
         return
     state.next_frame_at = perf_counter() + 1 / request.fps
+
+
+async def _send_transport_probe(
+    websocket: WebSocket,
+    request_id: str,
+    payload: dict[str, Any],
+) -> None:
+    size_bytes = payload.get("size_bytes", 0)
+    if not isinstance(size_bytes, int) or size_bytes < 0 or size_bytes > 1_000_000:
+        await _send_observation_error(
+            websocket,
+            request_id,
+            "validation_error",
+            "transport probe size_bytes must be an integer from 0 to 1000000",
+        )
+        return
+    probe_payload = b"\0" * size_bytes
+    emit_started = perf_counter()
+    metadata_send_started = perf_counter()
+    await websocket.send_json(
+        {
+            "type": "transport_probe",
+            "id": request_id,
+            "ok": True,
+            "size_bytes": size_bytes,
+        }
+    )
+    metadata_send_ms = _elapsed_ms(metadata_send_started)
+    payload_send_started = perf_counter()
+    await websocket.send_bytes(probe_payload)
+    payload_send_ms = _elapsed_ms(payload_send_started)
+    await websocket.send_json(
+        {
+            "type": "transport_timing",
+            "id": request_id,
+            "seq": None,
+            "server_emit_timing_ms": {
+                "metadata_send_ms": metadata_send_ms,
+                "payload_send_ms": payload_send_ms,
+                "emit_total_ms": _elapsed_ms(emit_started),
+            },
+        }
+    )
 
 
 async def _capture_frame(
@@ -1227,6 +1293,7 @@ def _stream_screenshot_options(request: ObservationStreamRequest) -> ScreenshotO
                 "max_frames",
                 "idle_timeout_ms",
                 "send_unchanged",
+                "transport_timing",
                 "keyframe_interval",
                 "delta_mode",
                 "delta_max_ratio",
