@@ -13,6 +13,7 @@ DESKTOP_APT_PACKAGES = [
     "websockify",
     "xdotool",
     "libx11-6",
+    "libxdamage1",
     "libxtst6",
     "wmctrl",
     "maim",

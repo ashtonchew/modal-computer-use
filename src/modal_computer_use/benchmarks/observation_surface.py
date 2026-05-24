@@ -108,6 +108,18 @@ def _run_daemon_observation_surface(
                 client=client,
                 iterations=iterations,
                 warmup_iterations=warmup_iterations,
+                change_signal=None,
+            )
+        ),
+        "observation_action_click_observe_change_poll": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_poll",
+                change_signal="poll",
             )
         ),
         "observation_action_click_observe_change_adaptive": (
@@ -119,6 +131,7 @@ def _run_daemon_observation_surface(
                 warmup_iterations=warmup_iterations,
                 name="observation_action_click_observe_change_adaptive",
                 poll_strategy="adaptive",
+                change_signal="poll",
             )
         ),
         "observation_action_click_observe_change_region_adaptive": (
@@ -131,6 +144,31 @@ def _run_daemon_observation_surface(
                 name="observation_action_click_observe_change_region_adaptive",
                 poll_strategy="adaptive",
                 change_detection="auto_region",
+                change_signal="poll",
+            )
+        ),
+        "observation_action_click_observe_change_xdamage": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_xdamage",
+                poll_strategy="adaptive",
+                change_signal="xdamage",
+            )
+        ),
+        "observation_action_click_observe_change_auto_signal": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_auto_signal",
+                poll_strategy="adaptive",
+                change_signal="auto",
             )
         ),
         "observation_action_click_fused_raw": _run_observation_action_click_fused_raw_benchmark(
@@ -394,6 +432,7 @@ def _run_observation_action_click_observe_change_benchmark(
     name: str = "observation_action_click_observe_change",
     poll_strategy: str = "fixed",
     change_detection: str = "full",
+    change_signal: str | None = "poll",
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     _open_click_toggle_page(client)
@@ -408,6 +447,7 @@ def _run_observation_action_click_observe_change_benchmark(
         observe_change=True,
         poll_strategy=poll_strategy,
         change_detection=change_detection,
+        change_signal=change_signal,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -420,6 +460,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "poll_interval_ms": 8,
             "poll_strategy": poll_strategy,
             "change_detection": change_detection,
+            "change_signal": change_signal or "default",
         }
     )
     return result
@@ -539,6 +580,7 @@ def _measure_stream_action_capture_loop(
     observe_change: bool = False,
     poll_strategy: str = "fixed",
     change_detection: str = "full",
+    change_signal: str | None = "poll",
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -559,6 +601,7 @@ def _measure_stream_action_capture_loop(
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
                         change_detection=change_detection,
+                        change_signal=change_signal,
                     )
                 except Exception as exc:
                     failures.append(
@@ -575,6 +618,7 @@ def _measure_stream_action_capture_loop(
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
                         change_detection=change_detection,
+                        change_signal=change_signal,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -644,6 +688,7 @@ def _stream_action_capture_iteration(
     observe_change: bool,
     poll_strategy: str,
     change_detection: str,
+    change_signal: str | None,
 ) -> dict[str, Any]:
     request_started = perf_counter()
     payload = {
@@ -660,6 +705,8 @@ def _stream_action_capture_iteration(
                 "change_detection": change_detection,
             }
         )
+        if change_signal is not None:
+            payload["change_signal"] = change_signal
         stream.run_actions_observe_change(**payload)
     else:
         stream.run_actions_capture(**payload)
@@ -677,6 +724,7 @@ def _stream_action_capture_iteration(
         "observe_change": observe_change,
         "poll_strategy": poll_strategy,
         "change_detection": change_detection,
+        "change_signal": change_signal or "default",
         "request_frame_ms": request_frame_ms,
         "receive_frame_ms": receive_frame_ms,
         "action_to_frame_ms": request_frame_ms + receive_frame_ms,
@@ -891,6 +939,13 @@ def _frame_observation(frame) -> dict[str, Any]:
         "change_region_detected": metadata.get("change_region_detected"),
         "change_detection": metadata.get("change_detection"),
         "change_detection_region": metadata.get("change_detection_region"),
+        "change_signal": metadata.get("change_signal"),
+        "change_signal_active": metadata.get("change_signal_active"),
+        "change_signal_available": metadata.get("change_signal_available"),
+        "change_signal_detected": metadata.get("change_signal_detected"),
+        "change_signal_wait_ms": metadata.get("change_signal_wait_ms"),
+        "change_signal_reason": metadata.get("change_signal_reason"),
+        "change_signal_version": metadata.get("change_signal_version"),
         "poll_strategy": metadata.get("poll_strategy"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
     }
@@ -941,6 +996,17 @@ def _add_frame_observations(
             if change_wait_samples:
                 result["change_wait_samples_ms"] = change_wait_samples
                 result["change_wait_summary_ms"] = _summary(change_wait_samples)
+            signal_wait_samples = [
+                item["change_signal_wait_ms"]
+                for item in observations
+                if isinstance(item.get("change_signal_wait_ms"), int | float)
+            ]
+            if signal_wait_samples:
+                result["change_signal_wait_samples_ms"] = signal_wait_samples
+                result["change_signal_wait_summary_ms"] = _summary(signal_wait_samples)
+                result["change_signal_detected_frames"] = sum(
+                    1 for item in observations if item.get("change_signal_detected")
+                )
     action_to_frame_samples = [
         timing["action_to_frame_ms"]
         for item in observations

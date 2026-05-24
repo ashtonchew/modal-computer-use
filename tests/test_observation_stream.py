@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from io import BytesIO
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -506,6 +507,9 @@ def test_observation_stream_run_actions_observe_change_waits_for_change(app) -> 
     assert second["change_detected"] is True
     assert second["change_timeout_reached"] is False
     assert second["change_attempts"] == 2
+    assert second["change_signal"] == "auto"
+    assert second["change_signal_active"] == "poll"
+    assert second["change_signal_reason"] == "backend has no X11 display"
     assert second["change_wait_ms"] >= 0
     assert second["action_result"]["ok"] is True
 
@@ -628,6 +632,173 @@ def test_observation_stream_run_actions_observe_change_can_detect_region(app) ->
     assert second["change_detected"] is True
     assert second["change_detection"] == "region"
     assert second["poll_strategy"] == "adaptive"
+
+
+def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
+    app,
+    monkeypatch,
+) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_square(),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    class FakeXDamageWatcher:
+        instances: ClassVar[list[FakeXDamageWatcher]] = []
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.closed = False
+            self.armed = 0
+            FakeXDamageWatcher.instances.append(self)
+
+        def arm(self) -> None:
+            self.armed += 1
+
+        def wait(self, timeout_ms: int):
+            assert timeout_ms == 100
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=1.0,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 1,
+                    "change_signal": "xdamage",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        assert websocket.receive_bytes()
+
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["kind"] == "patch"
+    assert second["change_detected"] is True
+    assert second["change_attempts"] == 1
+    assert second["change_signal_active"] == "xdamage"
+    assert second["change_signal_available"] is True
+    assert second["change_signal_detected"] is True
+    assert second["change_signal_version"] == "1.1"
+    assert len(FakeXDamageWatcher.instances) == 1
+    assert FakeXDamageWatcher.instances[0].armed == 1
+    assert FakeXDamageWatcher.instances[0].closed is True
+
+
+def test_observation_stream_run_actions_observe_change_auto_falls_back_to_poll(
+    app,
+    monkeypatch,
+) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_square(),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    class FakeXDamageWatcher:
+        failure = "XDamage extension unavailable"
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            raise RuntimeError("XDamage extension unavailable")
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 1,
+                    "change_signal": "auto",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        assert websocket.receive_bytes()
+
+    assert second["change_detected"] is True
+    assert second["change_attempts"] == 2
+    assert second["change_signal_active"] == "poll"
+    assert second["change_signal_available"] is False
+    assert second["change_signal_reason"] == "XDamage extension unavailable"
 
 
 def test_adaptive_change_poll_schedule_is_bounded() -> None:
