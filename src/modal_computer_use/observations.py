@@ -61,6 +61,9 @@ class ObservationClient:
     def run_actions_capture(self, **payload: Any) -> None:
         self.transport.run_actions_capture(payload)
 
+    def run_actions_observe_change(self, **payload: Any) -> None:
+        self.transport.run_actions_observe_change(payload)
+
     def configure(self, **payload: Any) -> None:
         self.transport.configure(payload)
 

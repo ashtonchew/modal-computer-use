@@ -32,6 +32,7 @@ from modal_computer_use.daemon.routes.validation import validate_region
 from modal_computer_use.daemon.routes.websocket_auth import daemon_websocket_auth_error
 from modal_computer_use.daemon.schemas import (
     ObservationActionCaptureRequest,
+    ObservationActionObserveChangeRequest,
     ObservationStreamRequest,
 )
 from modal_computer_use.models import ActionBatchRequest, ScreenshotOptions
@@ -163,6 +164,32 @@ async def _handle_observation_message(
                     "capture_delay_ms": stream_request.capture_delay_ms,
                 },
             )
+        elif op == "run_actions_observe_change":
+            _require_started(state)
+            stream_request = ObservationActionObserveChangeRequest.model_validate(payload)
+            action_request = ActionBatchRequest.model_validate(
+                stream_request.model_dump(
+                    mode="json",
+                    exclude={"capture_delay_ms", "change_timeout_ms", "poll_interval_ms"},
+                )
+            )
+            action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
+            if stream_request.capture_delay_ms > 0:
+                await asyncio.sleep(stream_request.capture_delay_ms / 1000)
+            await _send_changed_frame(
+                websocket,
+                state,
+                trigger="run_actions_observe_change",
+                request_id=request_id,
+                timeout_ms=stream_request.change_timeout_ms,
+                poll_interval_ms=stream_request.poll_interval_ms,
+                extra_metadata={
+                    "action_result": action_result.model_dump(mode="json"),
+                    "capture_delay_ms": stream_request.capture_delay_ms,
+                    "change_timeout_ms": stream_request.change_timeout_ms,
+                    "poll_interval_ms": stream_request.poll_interval_ms,
+                },
+            )
         elif op == "stop":
             _clear_stream(state)
             await _send_empty_result(websocket, request_id)
@@ -268,14 +295,8 @@ async def _send_next_frame(
     request = state.request
     if request is None:
         return
-    if request.idle_timeout_ms is not None:
-        elapsed_ms = (perf_counter() - state.started_at) * 1000
-        if elapsed_ms >= request.idle_timeout_ms:
-            await websocket.send_json(
-                {"type": "stopped", "stream_id": state.stream_id, "reason": "idle_timeout"}
-            )
-            _clear_stream(state)
-            return
+    if await _stop_if_idle_timeout(websocket, state, request):
+        return
     state.seq += 1
     try:
         metadata, payload = await _capture_frame(
@@ -309,6 +330,128 @@ async def _send_next_frame(
         )
         _clear_stream(state)
         return
+    await _emit_frame(
+        websocket,
+        state,
+        request,
+        metadata,
+        payload,
+        trigger=trigger,
+        request_id=request_id,
+        extra_metadata=extra_metadata,
+    )
+
+
+async def _send_changed_frame(
+    websocket: WebSocket,
+    state: _StreamState,
+    *,
+    trigger: str,
+    request_id: str,
+    timeout_ms: int,
+    poll_interval_ms: int,
+    extra_metadata: dict[str, Any],
+) -> None:
+    request = state.request
+    if request is None:
+        return
+    if await _stop_if_idle_timeout(websocket, state, request):
+        return
+    state.seq += 1
+    seq = state.seq
+    started = perf_counter()
+    deadline = started + timeout_ms / 1000
+    attempts = 0
+    last_metadata: dict[str, Any] | None = None
+    last_payload = b""
+    change_detected = False
+    try:
+        while True:
+            attempts += 1
+            metadata, payload = await _capture_frame(
+                websocket,
+                request,
+                seq,
+                state.last_sha256,
+                last_source_sha256=state.last_source_sha256,
+                previous_image=state.last_image,
+                previous_tile_hashes=state.last_tile_hashes,
+                previous_seq=state.last_frame_seq,
+                stream_id=state.stream_id or "unknown",
+            )
+            last_metadata = metadata
+            last_payload = payload
+            change_detected = metadata["source_sha256"] != state.last_source_sha256
+            if change_detected or perf_counter() >= deadline:
+                break
+            await asyncio.sleep(poll_interval_ms / 1000)
+    except DaemonError as exc:
+        await _send_observation_error(
+            websocket,
+            None,
+            exc.code,
+            sanitize_text(exc.message),
+            details=sanitize_payload(exc.details),
+        )
+        _clear_stream(state)
+        return
+    except Exception as exc:
+        await _send_observation_error(
+            websocket,
+            None,
+            "internal_error",
+            "internal server error",
+            details={"type": type(exc).__name__},
+        )
+        _clear_stream(state)
+        return
+    wait_ms = _elapsed_ms(started)
+    await _emit_frame(
+        websocket,
+        state,
+        request,
+        last_metadata,
+        last_payload,
+        trigger=trigger,
+        request_id=request_id,
+        extra_metadata={
+            **extra_metadata,
+            "change_detected": change_detected,
+            "change_attempts": attempts,
+            "change_wait_ms": wait_ms,
+            "change_timeout_reached": not change_detected,
+        },
+    )
+
+
+async def _stop_if_idle_timeout(
+    websocket: WebSocket,
+    state: _StreamState,
+    request: ObservationStreamRequest,
+) -> bool:
+    if request.idle_timeout_ms is None:
+        return False
+    elapsed_ms = (perf_counter() - state.started_at) * 1000
+    if elapsed_ms < request.idle_timeout_ms:
+        return False
+    await websocket.send_json(
+        {"type": "stopped", "stream_id": state.stream_id, "reason": "idle_timeout"}
+    )
+    _clear_stream(state)
+    return True
+
+
+async def _emit_frame(
+    websocket: WebSocket,
+    state: _StreamState,
+    request: ObservationStreamRequest,
+    metadata: dict[str, Any],
+    payload: bytes,
+    *,
+    trigger: str,
+    request_id: str | None,
+    extra_metadata: dict[str, Any] | None,
+) -> None:
     metadata["trigger"] = trigger
     if request_id is not None:
         metadata["id"] = request_id

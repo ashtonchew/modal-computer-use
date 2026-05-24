@@ -101,6 +101,15 @@ def _run_daemon_observation_surface(
                 capture_delay_ms=CLICK_TOGGLE_SETTLE_MS,
             )
         ),
+        "observation_action_click_observe_change": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
         "observation_action_click_fused_raw": _run_observation_action_click_fused_raw_benchmark(
             client=client,
             iterations=iterations,
@@ -352,6 +361,41 @@ def _run_observation_action_click_stream_capture_benchmark(
     return result
 
 
+def _run_observation_action_click_observe_change_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    name = "observation_action_click_observe_change"
+    _open_click_toggle_page(client)
+    samples, observations = _measure_stream_action_capture_loop(
+        name=name,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        capture_delay_ms=0,
+        observe_change=True,
+    )
+    result = _case_result(name, iterations, samples, failures)
+    _add_frame_observations(result, samples, observations)
+    result.update(
+        {
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change",
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+        }
+    )
+    return result
+
+
 def _run_observation_action_click_fused_raw_benchmark(
     *,
     client: DaemonClient,
@@ -463,6 +507,7 @@ def _measure_stream_action_capture_loop(
     warmup_iterations: int,
     failures: list[dict[str, Any]],
     capture_delay_ms: int,
+    observe_change: bool = False,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -480,6 +525,7 @@ def _measure_stream_action_capture_loop(
                         stream,
                         frames,
                         capture_delay_ms=capture_delay_ms,
+                        observe_change=observe_change,
                     )
                 except Exception as exc:
                     failures.append(
@@ -493,6 +539,7 @@ def _measure_stream_action_capture_loop(
                         stream,
                         frames,
                         capture_delay_ms=capture_delay_ms,
+                        observe_change=observe_change,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -559,13 +606,19 @@ def _stream_action_capture_iteration(
     frames: Any,
     *,
     capture_delay_ms: int,
+    observe_change: bool,
 ) -> dict[str, Any]:
     request_started = perf_counter()
-    stream.run_actions_capture(
-        actions=[CLICK_TOGGLE_ACTION],
-        source="benchmark",
-        capture_delay_ms=capture_delay_ms,
-    )
+    payload = {
+        "actions": [CLICK_TOGGLE_ACTION],
+        "source": "benchmark",
+        "capture_delay_ms": capture_delay_ms,
+    }
+    if observe_change:
+        payload.update({"change_timeout_ms": 100, "poll_interval_ms": 8})
+        stream.run_actions_observe_change(**payload)
+    else:
+        stream.run_actions_capture(**payload)
     request_frame_ms = (perf_counter() - request_started) * 1000
 
     receive_started = perf_counter()
@@ -577,6 +630,7 @@ def _stream_action_capture_iteration(
     observation["benchmark_timing_ms"] = {
         "mutation_ms": 0.0,
         "capture_delay_ms": capture_delay_ms,
+        "observe_change": observe_change,
         "request_frame_ms": request_frame_ms,
         "receive_frame_ms": receive_frame_ms,
         "action_to_frame_ms": request_frame_ms + receive_frame_ms,
@@ -783,6 +837,10 @@ def _frame_observation(frame) -> dict[str, Any]:
         "tile_hash_backend": metadata.get("tile_hash_backend"),
         "trigger": metadata.get("trigger"),
         "action_result": metadata.get("action_result"),
+        "change_detected": metadata.get("change_detected"),
+        "change_attempts": metadata.get("change_attempts"),
+        "change_wait_ms": metadata.get("change_wait_ms"),
+        "change_timeout_reached": metadata.get("change_timeout_reached"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
     }
 
@@ -814,6 +872,21 @@ def _add_frame_observations(
         result["changed_frames"] = changed_count
         result["unchanged_frames"] = len(observations) - changed_count
         result["changed_frame_ratio"] = changed_count / len(observations)
+        change_detected_count = sum(1 for item in observations if item.get("change_detected"))
+        if any(item.get("change_detected") is not None for item in observations):
+            result["change_detected_frames"] = change_detected_count
+            result["change_detected_ratio"] = change_detected_count / len(observations)
+            result["change_timeout_frames"] = sum(
+                1 for item in observations if item.get("change_timeout_reached")
+            )
+            change_wait_samples = [
+                item["change_wait_ms"]
+                for item in observations
+                if isinstance(item.get("change_wait_ms"), int | float)
+            ]
+            if change_wait_samples:
+                result["change_wait_samples_ms"] = change_wait_samples
+                result["change_wait_summary_ms"] = _summary(change_wait_samples)
     action_to_frame_samples = [
         timing["action_to_frame_ms"]
         for item in observations
