@@ -1068,6 +1068,17 @@ def test_adaptive_change_poll_schedule_is_bounded() -> None:
     ) == 8
 
 
+def test_latest_delivery_coalesces_overdue_scheduled_frames() -> None:
+    request = observation_routes.ObservationStreamRequest(fps=10, delivery="latest")
+    state = observation_routes._StreamState(request=request, next_frame_at=100.0)
+
+    assert observation_routes._coalesced_scheduled_frames(state, request, now=100.05) == 0
+    assert observation_routes._coalesced_scheduled_frames(state, request, now=100.35) == 3
+
+    reliable = observation_routes.ObservationStreamRequest(fps=10, delivery="reliable")
+    assert observation_routes._coalesced_scheduled_frames(state, reliable, now=100.35) == 0
+
+
 def test_observation_client_marshals_options_and_frames() -> None:
     transport = _FakeObservationTransport(
         [

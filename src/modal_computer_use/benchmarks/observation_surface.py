@@ -1598,6 +1598,7 @@ def _frame_observation(frame) -> dict[str, Any]:
         "emit_version": metadata.get("emit_version"),
         "delivery": metadata.get("delivery"),
         "frame_encoding": metadata.get("frame_encoding"),
+        "coalesced_scheduled_frames": metadata.get("coalesced_scheduled_frames"),
         "trigger": metadata.get("trigger"),
         "action_result": metadata.get("action_result"),
         "change_detected": metadata.get("change_detected"),
