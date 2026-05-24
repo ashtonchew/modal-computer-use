@@ -67,7 +67,7 @@ async def observation_stream(websocket: WebSocket) -> None:
             if state.request is not None and not state.paused:
                 now = perf_counter()
                 if state.next_frame_at <= now:
-                    await _send_next_frame(websocket, state)
+                    await _send_next_frame(websocket, state, trigger="scheduled")
                     now = perf_counter()
                 timeout = None if state.request is None else max(state.next_frame_at - now, 0.0)
             else:
@@ -131,6 +131,14 @@ async def _handle_observation_message(
             state.last_tile_hashes = None
             state.last_frame_seq = None
             await _send_empty_result(websocket, request_id)
+        elif op == "capture_now":
+            _require_started(state)
+            await _send_next_frame(
+                websocket,
+                state,
+                trigger="capture_now",
+                request_id=request_id,
+            )
         elif op == "stop":
             _clear_stream(state)
             await _send_empty_result(websocket, request_id)
@@ -200,7 +208,7 @@ async def _start_stream(
             "request": request.model_dump(mode="json"),
         }
     )
-    await _send_next_frame(websocket, state)
+    await _send_next_frame(websocket, state, trigger="start")
 
 
 async def _configure_stream(
@@ -225,7 +233,13 @@ async def _configure_stream(
     )
 
 
-async def _send_next_frame(websocket: WebSocket, state: _StreamState) -> None:
+async def _send_next_frame(
+    websocket: WebSocket,
+    state: _StreamState,
+    *,
+    trigger: str,
+    request_id: str | None = None,
+) -> None:
     request = state.request
     if request is None:
         return
@@ -270,6 +284,9 @@ async def _send_next_frame(websocket: WebSocket, state: _StreamState) -> None:
         )
         _clear_stream(state)
         return
+    metadata["trigger"] = trigger
+    if request_id is not None:
+        metadata["id"] = request_id
     state.last_sha256 = metadata["sha256"]
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")

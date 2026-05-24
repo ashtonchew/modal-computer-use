@@ -350,6 +350,50 @@ def test_observation_stream_reports_tile_hash_backend(app) -> None:
     assert second["tile_hash_backend"] in {"xxh3", "blake2b"}
 
 
+def test_observation_stream_capture_now_emits_immediate_frame(app) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_square(),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        first = websocket.receive_json()
+        assert websocket.receive_bytes()
+        websocket.send_json({"id": "2", "op": "capture_now", "payload": {}})
+        second = websocket.receive_json()
+        assert websocket.receive_bytes()
+
+    assert first["trigger"] == "start"
+    assert second["trigger"] == "capture_now"
+    assert second["id"] == "2"
+    assert second["kind"] == "patch"
+
+
 def test_observation_client_marshals_options_and_frames() -> None:
     transport = _FakeObservationTransport(
         [
@@ -380,6 +424,9 @@ def test_observation_client_marshals_options_and_frames() -> None:
     assert transport.payload["delta_max_ratio"] == 0.2
     assert transport.payload["keyframe_interval"] == 10
     assert transport.payload["tile_size"] == 32
+    assert transport.requested_frame is False
+    client.request_frame()
+    assert transport.requested_frame is True
 
 
 def test_observation_client_defaults_to_lossless_png() -> None:
@@ -424,6 +471,7 @@ class _FakeObservationTransport:
     def __init__(self, frames):
         self._frames = frames
         self.payload = {}
+        self.requested_frame = False
 
     def frames(self, payload):
         self.payload = payload
@@ -437,6 +485,9 @@ class _FakeObservationTransport:
 
     def resume(self):
         pass
+
+    def request_frame(self):
+        self.requested_frame = True
 
     def configure(self, payload):
         self.payload.update(payload)
