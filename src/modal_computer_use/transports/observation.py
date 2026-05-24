@@ -143,6 +143,9 @@ class ObservationStreamTransport:
     def request_frame(self) -> None:
         self._send("capture_now", {})
 
+    def run_actions_capture(self, payload: dict[str, Any]) -> None:
+        self._send("run_actions_capture", payload)
+
     def configure(self, payload: dict[str, Any]) -> None:
         self._send("configure", payload)
 

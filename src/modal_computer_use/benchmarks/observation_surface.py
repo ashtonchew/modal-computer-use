@@ -23,6 +23,7 @@ from .surface_result import _surface_result
 
 OBSERVATION_SCREENSHOT_OPTIONS = {"format": "png", "show_cursor": False}
 CLICK_TOGGLE_ACTION = {"type": "click", "x": 512, "y": 512, "button": "left"}
+CLICK_TOGGLE_SETTLE_MS = 16
 
 
 def _run_daemon_observation_surface(
@@ -80,6 +81,25 @@ def _run_daemon_observation_surface(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+        ),
+        "observation_action_click_stream_capture": (
+            _run_observation_action_click_stream_capture_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        "observation_action_click_stream_capture_settled": (
+            _run_observation_action_click_stream_capture_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                capture_delay_ms=CLICK_TOGGLE_SETTLE_MS,
+            )
         ),
         "observation_action_click_fused_raw": _run_observation_action_click_fused_raw_benchmark(
             client=client,
@@ -294,6 +314,44 @@ def _run_observation_action_click_capture_now_benchmark(
     return result
 
 
+def _run_observation_action_click_stream_capture_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+    capture_delay_ms: int = 0,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    name = (
+        "observation_action_click_stream_capture"
+        if capture_delay_ms == 0
+        else "observation_action_click_stream_capture_settled"
+    )
+    _open_click_toggle_page(client)
+    samples, observations = _measure_stream_action_capture_loop(
+        name=name,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        capture_delay_ms=capture_delay_ms,
+    )
+    result = _case_result(name, iterations, samples, failures)
+    _add_frame_observations(result, samples, observations)
+    result.update(
+        {
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click",
+            "capture_delay_ms": capture_delay_ms,
+        }
+    )
+    return result
+
+
 def _run_observation_action_click_fused_raw_benchmark(
     *,
     client: DaemonClient,
@@ -396,6 +454,65 @@ def _measure_capture_now_loop(
     return samples, observations
 
 
+def _measure_stream_action_capture_loop(
+    *,
+    name: str,
+    base_url: str,
+    token: str | None,
+    iterations: int,
+    warmup_iterations: int,
+    failures: list[dict[str, Any]],
+    capture_delay_ms: int,
+) -> tuple[list[float], list[dict[str, Any]]]:
+    samples: list[float] = []
+    observations: list[dict[str, Any]] = []
+    try:
+        with ObservationClient(
+            ObservationStreamTransport(base_url, token=token),
+            options=OBSERVATION_SCREENSHOT_OPTIONS,
+            fps=0.01,
+        ) as stream:
+            frames = stream.frames()
+            next(frames)
+            for warmup_index in range(warmup_iterations):
+                try:
+                    _stream_action_capture_iteration(
+                        stream,
+                        frames,
+                        capture_delay_ms=capture_delay_ms,
+                    )
+                except Exception as exc:
+                    failures.append(
+                        _failure(name, phase="warmup", iteration=warmup_index, exc=exc)
+                    )
+                    return samples, observations
+            for iteration in range(iterations):
+                start = perf_counter()
+                try:
+                    observation = _stream_action_capture_iteration(
+                        stream,
+                        frames,
+                        capture_delay_ms=capture_delay_ms,
+                    )
+                except Exception as exc:
+                    elapsed_ms = (perf_counter() - start) * 1000
+                    failures.append(
+                        _failure(
+                            name,
+                            phase="measure",
+                            iteration=iteration,
+                            exc=exc,
+                            elapsed_ms=elapsed_ms,
+                        )
+                    )
+                    continue
+                samples.append((perf_counter() - start) * 1000)
+                observations.append(observation)
+    except Exception as exc:
+        failures.append(_failure(name, phase="setup", iteration=0, exc=exc))
+    return samples, observations
+
+
 def _capture_now_iteration(
     stream: ObservationClient,
     frames: Any,
@@ -434,6 +551,41 @@ def _capture_now_iteration(
                 mutation_ms - action_daemon_ms,
                 0.0,
             )
+    return observation
+
+
+def _stream_action_capture_iteration(
+    stream: ObservationClient,
+    frames: Any,
+    *,
+    capture_delay_ms: int,
+) -> dict[str, Any]:
+    request_started = perf_counter()
+    stream.run_actions_capture(
+        actions=[CLICK_TOGGLE_ACTION],
+        source="benchmark",
+        capture_delay_ms=capture_delay_ms,
+    )
+    request_frame_ms = (perf_counter() - request_started) * 1000
+
+    receive_started = perf_counter()
+    frame = next(frames)
+    receive_frame_ms = (perf_counter() - receive_started) * 1000
+
+    observation = _frame_observation(frame)
+    action_result = observation.get("action_result")
+    observation["benchmark_timing_ms"] = {
+        "mutation_ms": 0.0,
+        "capture_delay_ms": capture_delay_ms,
+        "request_frame_ms": request_frame_ms,
+        "receive_frame_ms": receive_frame_ms,
+        "action_to_frame_ms": request_frame_ms + receive_frame_ms,
+    }
+    if isinstance(action_result, dict):
+        _ensure_ok_result(action_result)
+        action_daemon_ms = _extract_daemon_ms(action_result)
+        if isinstance(action_daemon_ms, int | float):
+            observation["benchmark_timing_ms"]["action_daemon_ms"] = action_daemon_ms
     return observation
 
 
@@ -630,6 +782,7 @@ def _frame_observation(frame) -> dict[str, Any]:
         "tile_size": metadata.get("tile_size"),
         "tile_hash_backend": metadata.get("tile_hash_backend"),
         "trigger": metadata.get("trigger"),
+        "action_result": metadata.get("action_result"),
         "screenshot_daemon_timing_ms": timing if isinstance(timing, dict) else {},
     }
 

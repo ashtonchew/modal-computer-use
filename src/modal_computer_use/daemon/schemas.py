@@ -12,6 +12,7 @@ from modal_computer_use._invariants import (
     require_safe_text,
 )
 from modal_computer_use.models import (
+    ActionBatchRequest,
     Button,
     ImageFormat,
     Point,
@@ -24,6 +25,10 @@ from modal_computer_use.models import (
 
 class Schema(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ObservationActionCaptureRequest(ActionBatchRequest):
+    capture_delay_ms: int = Field(default=0, ge=0, le=60_000)
 
 
 class TextRequest(Schema):

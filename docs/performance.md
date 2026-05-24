@@ -108,6 +108,28 @@ with computer.observation_stream(fps=0.01) as stream:
 can attribute action-to-frame latency without accidentally measuring scheduler sleep. The passive
 FPS loop remains useful for background visual monitoring.
 
+When the action and observation are both owned by the same stream session, prefer
+`run_actions_capture()`:
+
+```python
+with computer.observation_stream(fps=0.01) as stream:
+    frames = stream.frames()
+    first = next(frames)
+    stream.run_actions_capture(actions=[{"type": "click", "x": 100, "y": 100}])
+    observed = next(frames)
+```
+
+`run_actions_capture()` sends the action batch and emits the next observation frame from one
+WebSocket operation. It keeps the same keyframe, patch, unchanged-frame, and screenshot-budget
+behavior as the observation stream, but avoids the extra remote wait from running the action over
+REST and then sending `capture_now`. Use this path for tight SDK-owned loops that already maintain
+an observation stream. Keep fused raw screenshots for one-shot action-then-observe turns that do
+not need stream state or delta frames.
+
+The operation defaults to immediate capture after the action batch. If the target application needs
+a paint boundary before the screenshot, pass an explicit `capture_delay_ms` or include an explicit
+`wait` action in the batch. The SDK does not add an implicit post-action delay.
+
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
 does not require stream setup. Observation stream frames count against the screenshot budget. Patch
