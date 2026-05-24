@@ -58,6 +58,9 @@ class ObservationClient:
     def request_frame(self) -> None:
         self.transport.request_frame()
 
+    def run_actions_capture(self, **payload: Any) -> None:
+        self.transport.run_actions_capture(payload)
+
     def configure(self, **payload: Any) -> None:
         self.transport.configure(payload)
 

@@ -108,6 +108,28 @@ with computer.observation_stream(fps=0.01) as stream:
 can attribute action-to-frame latency without accidentally measuring scheduler sleep. The passive
 FPS loop remains useful for background visual monitoring.
 
+When the action and observation are both owned by the same stream session, prefer
+`run_actions_capture()`:
+
+```python
+with computer.observation_stream(fps=0.01) as stream:
+    frames = stream.frames()
+    first = next(frames)
+    stream.run_actions_capture(actions=[{"type": "click", "x": 100, "y": 100}])
+    observed = next(frames)
+```
+
+`run_actions_capture()` sends the action batch and emits the next observation frame from one
+WebSocket operation. It keeps the same keyframe, patch, unchanged-frame, and screenshot-budget
+behavior as the observation stream, but avoids the extra remote wait from running the action over
+REST and then sending `capture_now`. Use this path for tight SDK-owned loops that already maintain
+an observation stream. Keep fused raw screenshots for one-shot action-then-observe turns that do
+not need stream state or delta frames.
+
+The operation defaults to immediate capture after the action batch. If the target application needs
+a paint boundary before the screenshot, pass an explicit `capture_delay_ms` or include an explicit
+`wait` action in the batch. The SDK does not add an implicit post-action delay.
+
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
 does not require stream setup. Observation stream frames count against the screenshot budget. Patch
@@ -295,14 +317,21 @@ uv run computer-use benchmark sdk \
 
 This surface reports `observation_first_frame`, `observation_steady_no_change`,
 `observation_small_patch`, `observation_large_change`, `observation_capture_now_no_change`, and
-`observation_capture_now_small_patch`. It records frame payload bytes, full-frame bytes, daemon
-capture/diff/encode timing, dirty-region metadata, metadata-only unchanged frames, action-to-frame
-timing for `capture_now` cases, and WebSocket transport labeling. It is intentionally separate from
-`screenshot_full_raw` because it measures stream startup, sustained observation behavior, and
-action-causal capture behavior rather than a single request/response screenshot. The benchmark uses
-the SDK-default PNG screenshot format. Passive stream benchmark wall times include stream setup,
-frame pacing, and visual mutation settling; use `capture_now` cases when attributing hot
-action-to-observation latency.
+`observation_capture_now_small_patch`. It also reports action-causal cases:
+`observation_action_click_capture_now` and `observation_action_click_fused_raw`. The capture-now
+action case opens a synthetic page once, mutates it with a real daemon click action, then requests an
+immediate observation frame on the existing stream. The fused-raw case uses the same page and click
+through `POST /v1/actions/run/raw-screenshot`.
+
+The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
+dirty-region metadata, metadata-only unchanged frames, action-to-frame timing for `capture_now`
+cases, action daemon timing for click-driven cases, and WebSocket transport labeling. It is
+intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
+observation behavior, and action-causal capture behavior rather than only a single
+request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive
+stream benchmark wall times include stream setup, frame pacing, and visual mutation settling; use
+`observation_action_click_capture_now` and `observation_action_click_fused_raw` when comparing hot
+action-to-observation SDK loops.
 
 The Modal daemon can also be measured from a freshly created Modal-backed CUA sandbox:
 

@@ -10,6 +10,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from PIL import Image, ImageChops
 from pydantic import ValidationError
 
+from modal_computer_use.daemon.actions import ActionBatchContext
+from modal_computer_use.daemon.actions import run as run_batch
 from modal_computer_use.daemon.desktop.screenshots import (
     CapturedRawScreenshot,
     encode_image,
@@ -28,8 +30,11 @@ from modal_computer_use.daemon.routes.screenshots import (
 )
 from modal_computer_use.daemon.routes.validation import validate_region
 from modal_computer_use.daemon.routes.websocket_auth import daemon_websocket_auth_error
-from modal_computer_use.daemon.schemas import ObservationStreamRequest
-from modal_computer_use.models import ScreenshotOptions
+from modal_computer_use.daemon.schemas import (
+    ObservationActionCaptureRequest,
+    ObservationStreamRequest,
+)
+from modal_computer_use.models import ActionBatchRequest, ScreenshotOptions
 from modal_computer_use.redaction import sanitize_payload, sanitize_text
 
 router = APIRouter(prefix="/v1/observations")
@@ -139,6 +144,25 @@ async def _handle_observation_message(
                 trigger="capture_now",
                 request_id=request_id,
             )
+        elif op == "run_actions_capture":
+            _require_started(state)
+            stream_request = ObservationActionCaptureRequest.model_validate(payload)
+            action_request = ActionBatchRequest.model_validate(
+                stream_request.model_dump(mode="json", exclude={"capture_delay_ms"})
+            )
+            action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
+            if stream_request.capture_delay_ms > 0:
+                await asyncio.sleep(stream_request.capture_delay_ms / 1000)
+            await _send_next_frame(
+                websocket,
+                state,
+                trigger="run_actions_capture",
+                request_id=request_id,
+                extra_metadata={
+                    "action_result": action_result.model_dump(mode="json"),
+                    "capture_delay_ms": stream_request.capture_delay_ms,
+                },
+            )
         elif op == "stop":
             _clear_stream(state)
             await _send_empty_result(websocket, request_id)
@@ -239,6 +263,7 @@ async def _send_next_frame(
     *,
     trigger: str,
     request_id: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     request = state.request
     if request is None:
@@ -287,6 +312,8 @@ async def _send_next_frame(
     metadata["trigger"] = trigger
     if request_id is not None:
         metadata["id"] = request_id
+    if extra_metadata:
+        metadata.update(extra_metadata)
     state.last_sha256 = metadata["sha256"]
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")

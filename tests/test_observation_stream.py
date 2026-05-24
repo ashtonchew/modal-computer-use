@@ -394,6 +394,62 @@ def test_observation_stream_capture_now_emits_immediate_frame(app) -> None:
     assert second["kind"] == "patch"
 
 
+def test_observation_stream_run_actions_capture_emits_action_result(app) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_square(),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_capture",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "capture_delay_ms": 0,
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        assert websocket.receive_bytes()
+
+    assert second["trigger"] == "run_actions_capture"
+    assert second["id"] == "2"
+    assert second["kind"] == "patch"
+    assert second["capture_delay_ms"] == 0
+    assert second["action_result"]["ok"] is True
+    assert second["action_result"]["results"][0]["type"] == "wait"
+
+
 def test_observation_client_marshals_options_and_frames() -> None:
     transport = _FakeObservationTransport(
         [
@@ -427,6 +483,8 @@ def test_observation_client_marshals_options_and_frames() -> None:
     assert transport.requested_frame is False
     client.request_frame()
     assert transport.requested_frame is True
+    client.run_actions_capture(actions=[{"type": "wait", "duration_ms": 0}])
+    assert transport.action_payload == {"actions": [{"type": "wait", "duration_ms": 0}]}
 
 
 def test_observation_client_defaults_to_lossless_png() -> None:
@@ -472,6 +530,7 @@ class _FakeObservationTransport:
         self._frames = frames
         self.payload = {}
         self.requested_frame = False
+        self.action_payload = None
 
     def frames(self, payload):
         self.payload = payload
@@ -488,6 +547,9 @@ class _FakeObservationTransport:
 
     def request_frame(self):
         self.requested_frame = True
+
+    def run_actions_capture(self, payload):
+        self.action_payload = payload
 
     def configure(self, payload):
         self.payload.update(payload)
