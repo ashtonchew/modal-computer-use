@@ -478,6 +478,7 @@ class ComputerSandbox:
         tile_size: int | None = None,
         max_patch_rects: int | None = None,
         multi_rect_min_savings: float | None = None,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
         timeout: float = 30.0,
     ) -> ObservationClient:
         return ObservationClient(
@@ -498,6 +499,7 @@ class ComputerSandbox:
             tile_size=tile_size,
             max_patch_rects=max_patch_rects,
             multi_rect_min_savings=multi_rect_min_savings,
+            frame_encoding=frame_encoding,
         )
 
     def snapshot_filesystem(self) -> object:

@@ -27,6 +27,7 @@ class ObservationClient:
         max_patch_rects: int | None = None,
         multi_rect_min_savings: float | None = None,
         transport_timing: bool = False,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     ) -> None:
         self.transport = transport
         self.payload = _observation_payload(
@@ -43,6 +44,7 @@ class ObservationClient:
             max_patch_rects=max_patch_rects,
             multi_rect_min_savings=multi_rect_min_savings,
             transport_timing=transport_timing,
+            frame_encoding=frame_encoding,
         )
 
     def close(self) -> None:
@@ -91,6 +93,7 @@ def _observation_payload(
     max_patch_rects: int | None,
     multi_rect_min_savings: float | None,
     transport_timing: bool,
+    frame_encoding: Literal["json-binary", "binary-envelope"] | None,
 ) -> dict[str, Any]:
     if options is None:
         payload = ScreenshotOptions(format="png", show_cursor=False).model_dump(mode="json")
@@ -106,6 +109,8 @@ def _observation_payload(
     )
     if transport_timing:
         payload["transport_timing"] = True
+    if frame_encoding is not None:
+        payload["frame_encoding"] = frame_encoding
     if delivery is not None:
         payload["delivery"] = delivery
     if max_frames is not None:

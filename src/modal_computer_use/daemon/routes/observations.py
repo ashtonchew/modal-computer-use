@@ -45,6 +45,8 @@ from modal_computer_use.redaction import sanitize_payload, sanitize_text
 router = APIRouter(prefix="/v1/observations")
 
 PROTOCOL = "computer-use.observation-stream.v1"
+FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
+CONTROL_DRAIN_TIMEOUT_S = 0.001
 
 
 @dataclass
@@ -90,20 +92,37 @@ async def observation_stream(websocket: WebSocket) -> None:
             if state.request is not None and not state.paused:
                 now = perf_counter()
                 if state.next_frame_at <= now:
+                    message = await _receive_observation_message(
+                        websocket,
+                        timeout=CONTROL_DRAIN_TIMEOUT_S,
+                    )
+                    if message is not None:
+                        await _handle_observation_message(websocket, state, message)
+                        continue
                     await _send_next_frame(websocket, state, trigger="scheduled")
-                    now = perf_counter()
+                    continue
                 timeout = None if state.request is None else max(state.next_frame_at - now, 0.0)
             else:
                 timeout = None
-            try:
-                message = await asyncio.wait_for(websocket.receive_json(), timeout=timeout)
-            except TimeoutError:
+            message = await _receive_observation_message(websocket, timeout=timeout)
+            if message is None:
                 continue
             await _handle_observation_message(websocket, state, message)
     except WebSocketDisconnect:
         return
     finally:
         _close_stream_resources(state)
+
+
+async def _receive_observation_message(
+    websocket: WebSocket,
+    *,
+    timeout: float | None,
+) -> Any | None:
+    try:
+        return await asyncio.wait_for(websocket.receive_json(), timeout=timeout)
+    except TimeoutError:
+        return None
 
 
 async def _handle_observation_message(
@@ -370,6 +389,9 @@ async def _send_next_frame(
     if await _stop_if_idle_timeout(websocket, state, request):
         return
     state.seq += 1
+    coalesced_scheduled_frames = (
+        _coalesced_scheduled_frames(state, request) if trigger == "scheduled" else 0
+    )
     try:
         metadata, payload = await _capture_frame(
             websocket,
@@ -410,7 +432,10 @@ async def _send_next_frame(
         payload,
         trigger=trigger,
         request_id=request_id,
-        extra_metadata=extra_metadata,
+        extra_metadata=_with_backpressure_metadata(
+            extra_metadata,
+            coalesced_scheduled_frames=coalesced_scheduled_frames,
+        ),
     )
 
 
@@ -649,6 +674,34 @@ def _change_poll_sleep_ms(
     return min(4 * (2 ** max(attempt - 1, 0)), poll_interval_ms)
 
 
+def _coalesced_scheduled_frames(
+    state: _StreamState,
+    request: ObservationStreamRequest,
+    *,
+    now: float | None = None,
+) -> int:
+    if request.delivery != "latest" or state.next_frame_at <= 0:
+        return 0
+    interval = 1 / request.fps
+    overdue_s = (perf_counter() if now is None else now) - state.next_frame_at
+    if overdue_s <= interval:
+        return 0
+    return int(overdue_s // interval)
+
+
+def _with_backpressure_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    coalesced_scheduled_frames: int,
+) -> dict[str, Any] | None:
+    if coalesced_scheduled_frames <= 0:
+        return metadata
+    return {
+        **(metadata or {}),
+        "coalesced_scheduled_frames": coalesced_scheduled_frames,
+    }
+
+
 def _resolve_change_detection_region(
     websocket: WebSocket,
     request: ObservationActionObserveChangeRequest,
@@ -745,6 +798,7 @@ async def _emit_frame(
     metadata["previous_source_version"] = previous_source_version
     metadata["emit_version"] = state.emit_version
     metadata["delivery"] = request.delivery
+    metadata["frame_encoding"] = request.frame_encoding
     state.last_sha256 = metadata["sha256"]
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")
@@ -764,16 +818,22 @@ async def _emit_frame(
     )
     emit_started = perf_counter()
     metadata_send_started = perf_counter()
-    if should_suppress_payload:
-        await websocket.send_json(metadata)
+    if request.frame_encoding == "binary-envelope":
+        envelope_payload = b"" if should_suppress_payload else payload
+        await websocket.send_bytes(_encode_frame_envelope(metadata, envelope_payload))
         metadata_send_ms = _elapsed_ms(metadata_send_started)
         payload_send_ms = 0.0
     else:
-        await websocket.send_json(metadata)
-        metadata_send_ms = _elapsed_ms(metadata_send_started)
-        payload_send_started = perf_counter()
-        await websocket.send_bytes(payload)
-        payload_send_ms = _elapsed_ms(payload_send_started)
+        if should_suppress_payload:
+            await websocket.send_json(metadata)
+            metadata_send_ms = _elapsed_ms(metadata_send_started)
+            payload_send_ms = 0.0
+        else:
+            await websocket.send_json(metadata)
+            metadata_send_ms = _elapsed_ms(metadata_send_started)
+            payload_send_started = perf_counter()
+            await websocket.send_bytes(payload)
+            payload_send_ms = _elapsed_ms(payload_send_started)
     if request.transport_timing:
         await websocket.send_json(
             {
@@ -801,6 +861,16 @@ async def _emit_frame(
         _clear_stream(state)
         return
     state.next_frame_at = perf_counter() + 1 / request.fps
+
+
+def _encode_frame_envelope(metadata: dict[str, Any], payload: bytes) -> bytes:
+    metadata_payload = json.dumps(metadata, separators=(",", ":")).encode("utf-8")
+    return (
+        FRAME_ENVELOPE_MAGIC
+        + struct.pack(">I", len(metadata_payload))
+        + metadata_payload
+        + payload
+    )
 
 
 async def _send_transport_probe(
@@ -1432,6 +1502,7 @@ def _stream_screenshot_options(request: ObservationStreamRequest) -> ScreenshotO
                 "idle_timeout_ms",
                 "send_unchanged",
                 "transport_timing",
+                "frame_encoding",
                 "keyframe_interval",
                 "delta_mode",
                 "delta_max_ratio",
