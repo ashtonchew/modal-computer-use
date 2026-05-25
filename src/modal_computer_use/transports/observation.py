@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import struct
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
@@ -83,6 +84,7 @@ class ObservationStreamTransport:
         self.token = token
         self.timeout = timeout
         self._next_id = 1
+        self._pending_frames: deque[ObservationFrame] = deque()
         self._websocket = websocket or self._connect(timeout=timeout)
         try:
             ready = self._websocket.recv(timeout=timeout)
@@ -146,12 +148,13 @@ class ObservationStreamTransport:
         request_id = self._send("run_actions_observe_change", payload)
         while True:
             frame = (
-                self.recv_frame_with_timing()
+                self._recv_frame_with_timing()
                 if transport_timing
-                else self.receive_frame(transport_timing=False)
+                else self._receive_frame(transport_timing=False)
             )
             if frame.metadata.get("id") == request_id:
                 return frame
+            self._buffer_frame(frame)
 
     def configure(self, payload: dict[str, Any]) -> None:
         self._send("configure", payload)
@@ -256,6 +259,11 @@ class ObservationStreamTransport:
         This low-level helper is intended for benchmarks. Normal callers should
         iterate through ``frames()``.
         """
+        if self._pending_frames:
+            return self._pending_frames.popleft()
+        return self._recv_frame_with_timing()
+
+    def _recv_frame_with_timing(self) -> ObservationFrame:
         wait_metadata_started = perf_counter()
         message = self._websocket.recv(timeout=self.timeout)
         wait_metadata_ms = _elapsed_ms(wait_metadata_started)
@@ -345,6 +353,11 @@ class ObservationStreamTransport:
         )
 
     def receive_frame(self, *, transport_timing: bool = False) -> ObservationFrame:
+        if self._pending_frames:
+            return self._pending_frames.popleft()
+        return self._receive_frame(transport_timing=transport_timing)
+
+    def _receive_frame(self, *, transport_timing: bool = False) -> ObservationFrame:
         message = self._websocket.recv(timeout=self.timeout)
         if isinstance(message, bytes):
             data, frame = _decode_frame_envelope(message)
@@ -377,6 +390,9 @@ class ObservationStreamTransport:
                 )
         timing = self._frame_transport_timing(data, transport_timing=transport_timing)
         return ObservationFrame(payload=frame, metadata=data, transport_timing=timing)
+
+    def _buffer_frame(self, frame: ObservationFrame) -> None:
+        self._pending_frames.append(frame)
 
     def _construct_timed_frame(
         self,

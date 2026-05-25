@@ -39,7 +39,7 @@ from .models import (
     ScreenshotOptions,
     X11Window,
 )
-from .observations import ActionObservationResult, ObservationClient
+from .observations import ActionObservationResult, ObservationClient, ObservationSession
 from .registry import SandboxRegistry
 from .sandbox import ComputerSandbox
 
@@ -70,6 +70,7 @@ __all__ = [
     "HotSessionClient",
     "NetworkConfig",
     "ObservationClient",
+    "ObservationSession",
     "Point",
     "ProcessStatus",
     "Recording",
