@@ -169,18 +169,30 @@ class ObservationStreamTransport:
     def configure(self, payload: dict[str, Any]) -> None:
         self._send("configure", payload)
 
-    def transport_probe(self, *, size_bytes: int) -> dict[str, Any]:
-        request_id = self._send("transport_probe", {"size_bytes": size_bytes})
+    def transport_probe(
+        self,
+        *,
+        size_bytes: int,
+        frame_encoding: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"size_bytes": size_bytes}
+        if frame_encoding is not None:
+            payload["frame_encoding"] = frame_encoding
+        request_id = self._send("transport_probe", payload)
         wait_metadata_started = perf_counter()
         message = self._websocket.recv(timeout=self.timeout)
         wait_metadata_ms = _elapsed_ms(wait_metadata_started)
         parse_metadata_started = perf_counter()
-        if not isinstance(message, str):
-            raise DaemonHTTPError(
-                "unexpected observation transport probe response",
-                code="observation_stream_protocol_error",
-            )
-        data = json.loads(message)
+        if isinstance(message, bytes):
+            data, frame = _decode_frame_envelope(message)
+        else:
+            if not isinstance(message, str):
+                raise DaemonHTTPError(
+                    "unexpected observation transport probe response",
+                    code="observation_stream_protocol_error",
+                )
+            data = json.loads(message)
+            frame = None
         parse_metadata_ms = _elapsed_ms(parse_metadata_started)
         if not isinstance(data, dict):
             raise DaemonHTTPError(
@@ -194,14 +206,17 @@ class ObservationStreamTransport:
                 "unexpected observation transport probe response",
                 code="observation_stream_protocol_error",
             )
-        wait_payload_started = perf_counter()
-        frame = self._websocket.recv(timeout=self.timeout)
-        wait_payload_ms = _elapsed_ms(wait_payload_started)
-        if not isinstance(frame, bytes):
-            raise DaemonHTTPError(
-                "observation transport probe payload missing",
-                code="observation_stream_protocol_error",
-            )
+        if frame is None:
+            wait_payload_started = perf_counter()
+            frame = self._websocket.recv(timeout=self.timeout)
+            wait_payload_ms = _elapsed_ms(wait_payload_started)
+            if not isinstance(frame, bytes):
+                raise DaemonHTTPError(
+                    "observation transport probe payload missing",
+                    code="observation_stream_protocol_error",
+                )
+        else:
+            wait_payload_ms = 0.0
         wait_timing_started = perf_counter()
         timing = self._recv_transport_timing(expected_seq=None)
         wait_timing_ms = _elapsed_ms(wait_timing_started)
@@ -213,6 +228,7 @@ class ObservationStreamTransport:
         return {
             "size_bytes": len(frame),
             "requested_size_bytes": size_bytes,
+            "frame_encoding": data.get("frame_encoding"),
             "server_emit_timing_ms": timing.get("server_emit_timing_ms"),
             "client_receive_timing_ms": {
                 "wait_metadata_ms": wait_metadata_ms,

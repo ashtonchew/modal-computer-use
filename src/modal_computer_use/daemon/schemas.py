@@ -176,6 +176,11 @@ class ObservationStreamRequest(ScreenshotRequest):
     multi_rect_min_savings: float = Field(default=0.3, ge=0, le=1)
 
 
+class ObservationTransportProbeRequest(Schema):
+    size_bytes: int = Field(default=0, ge=0, le=1_000_000)
+    frame_encoding: Literal["json-binary", "binary-envelope"] = "json-binary"
+
+
 class ZoomScreenshotRequest(Schema):
     region: Region
     scale: float = Field(default=2.0, gt=0, le=8)

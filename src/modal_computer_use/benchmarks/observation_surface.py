@@ -239,9 +239,37 @@ def _run_daemon_observation_surface(
             warmup_iterations=warmup_iterations,
             size_bytes=0,
         ),
+        "observation_transport_probe_envelope_0b": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=0,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_0b": _run_observation_http_transport_probe_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=0,
+        ),
         "observation_transport_probe_5kb": _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=5 * 1024,
+        ),
+        "observation_transport_probe_envelope_5kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=5 * 1024,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_5kb": _run_observation_http_transport_probe_benchmark(
+            client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=5 * 1024,
@@ -253,9 +281,37 @@ def _run_daemon_observation_surface(
             warmup_iterations=warmup_iterations,
             size_bytes=50 * 1024,
         ),
+        "observation_transport_probe_envelope_50kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=50 * 1024,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_50kb": _run_observation_http_transport_probe_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=50 * 1024,
+        ),
         "observation_transport_probe_250kb": _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=250 * 1024,
+        ),
+        "observation_transport_probe_envelope_250kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=250 * 1024,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_250kb": _run_observation_http_transport_probe_benchmark(
+            client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=250 * 1024,
@@ -737,16 +793,24 @@ def _run_observation_transport_probe_benchmark(
     iterations: int,
     warmup_iterations: int,
     size_bytes: int,
+    frame_encoding: str | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
-    name = f"observation_transport_probe_{_size_label(size_bytes)}"
+    name = (
+        f"observation_transport_probe_envelope_{_size_label(size_bytes)}"
+        if frame_encoding == "binary-envelope"
+        else f"observation_transport_probe_{_size_label(size_bytes)}"
+    )
     transport = ObservationStreamTransport(base_url, token=token)
     try:
         samples, observations = _measure_observed_case(
             name=name,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
-            operation=lambda: transport.transport_probe(size_bytes=size_bytes),
+            operation=lambda: transport.transport_probe(
+                size_bytes=size_bytes,
+                frame_encoding=frame_encoding,
+            ),
             failures=failures,
         )
     finally:
@@ -754,8 +818,11 @@ def _run_observation_transport_probe_benchmark(
     result = _case_result(name, iterations, samples, failures)
     result.update(
         {
-            "transport_encoding": "websocket_binary",
+            "transport_encoding": "websocket_binary_envelope"
+            if frame_encoding == "binary-envelope"
+            else "websocket_json_metadata_binary_payload",
             "requested_size_bytes": size_bytes,
+            "frame_encoding": frame_encoding or "json-binary",
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],
@@ -771,6 +838,65 @@ def _run_observation_transport_probe_benchmark(
     )
     _add_probe_timing_observations(result, observations)
     return result
+
+
+def _run_observation_http_transport_probe_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+    size_bytes: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    name = f"observation_http_transport_probe_{_size_label(size_bytes)}"
+    samples, observations = _measure_observed_case(
+        name=name,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=lambda: _run_http_transport_probe(client, size_bytes=size_bytes),
+        failures=failures,
+    )
+    result = _case_result(name, iterations, samples, failures)
+    result.update(
+        {
+            "transport_encoding": "http_binary",
+            "requested_size_bytes": size_bytes,
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    _add_direct_nested_timing_summary(
+        result,
+        observations,
+        nested_key="server_emit_timing_ms",
+        result_key="server_emit_timing_summary_ms",
+    )
+    return result
+
+
+def _run_http_transport_probe(client: DaemonClient, *, size_bytes: int) -> dict[str, Any]:
+    payload, headers = client.post_bytes_with_headers(
+        "/v1/observations/transport-probe",
+        json={"size_bytes": size_bytes},
+    )
+    return {
+        "size_bytes": len(payload),
+        "requested_size_bytes": size_bytes,
+        "server_emit_timing_ms": _json_timing_header(
+            headers,
+            "x-computer-use-transport-timing-ms",
+        ),
+        "transport_http_version": _transport_http_version(client),
+    }
 
 
 def _run_observation_delta_synthetic_benchmark(
