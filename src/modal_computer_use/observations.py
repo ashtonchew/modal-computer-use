@@ -1,10 +1,46 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from .models import ScreenshotOptions
 from .transports.observation import ObservationFrame, ObservationStreamTransport
+
+
+@dataclass(frozen=True)
+class ActionObservationResult:
+    """Result for one causal action plus observation stream command."""
+
+    frame: ObservationFrame
+
+    @property
+    def action_result(self) -> dict[str, Any] | None:
+        value = self.frame.metadata.get("action_result")
+        return value if isinstance(value, dict) else None
+
+    @property
+    def action_id(self) -> str | None:
+        value = self.frame.metadata.get("action_id")
+        return value if isinstance(value, str) else None
+
+    @property
+    def timings(self) -> dict[str, Any]:
+        return {
+            "change_stage_timing_ms": self.frame.metadata.get("change_stage_timing_ms"),
+            "screenshot_daemon_timing_ms": self.frame.metadata.get("timing_ms"),
+            "transport_timing": self.frame.transport_timing,
+        }
+
+    @property
+    def change_detected(self) -> bool | None:
+        value = self.frame.metadata.get("change_detected")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def change_timeout_reached(self) -> bool | None:
+        value = self.frame.metadata.get("change_timeout_reached")
+        return value if isinstance(value, bool) else None
 
 
 class ObservationClient:
@@ -46,6 +82,7 @@ class ObservationClient:
             transport_timing=transport_timing,
             frame_encoding=frame_encoding,
         )
+        self._started = False
 
     def close(self) -> None:
         self.transport.close()
@@ -57,7 +94,29 @@ class ObservationClient:
         self.close()
 
     def frames(self) -> Iterator[ObservationFrame]:
-        yield from self.transport.frames(self.payload)
+        if self._started:
+            while True:
+                try:
+                    yield self.transport.receive_frame(
+                        transport_timing=bool(self.payload.get("transport_timing"))
+                    )
+                except StopIteration:
+                    self._started = False
+                    return
+        else:
+            self._started = True
+            yield from self.transport.frames(self.payload)
+
+    def start(self, *, drain_initial_frame: bool = False) -> ObservationFrame | None:
+        if self._started:
+            return None
+        self.transport.start(self.payload)
+        self._started = True
+        if drain_initial_frame:
+            return self.transport.receive_frame(
+                transport_timing=bool(self.payload.get("transport_timing"))
+            )
+        return None
 
     def pause(self) -> None:
         self.transport.pause()
@@ -73,6 +132,44 @@ class ObservationClient:
 
     def run_actions_observe_change(self, **payload: Any) -> None:
         self.transport.run_actions_observe_change(payload)
+
+    def act_and_observe(
+        self,
+        *,
+        actions: list[Mapping[str, Any]],
+        source: str = "sdk",
+        capture_delay_ms: int = 0,
+        change_timeout_ms: int = 100,
+        poll_interval_ms: int = 8,
+        poll_strategy: Literal["fixed", "adaptive"] = "adaptive",
+        change_detection: Literal["full", "auto_region"] = "full",
+        change_signal: Literal["poll", "xdamage", "auto"] = "auto",
+        change_detection_region: Mapping[str, Any] | None = None,
+        change_region_radius: int | None = None,
+        continue_on_error: bool = False,
+    ) -> ActionObservationResult:
+        self.start(drain_initial_frame=True)
+        payload: dict[str, Any] = {
+            "actions": [dict(action) for action in actions],
+            "source": source,
+            "capture_delay_ms": capture_delay_ms,
+            "change_timeout_ms": change_timeout_ms,
+            "poll_interval_ms": poll_interval_ms,
+            "poll_strategy": poll_strategy,
+            "change_detection": change_detection,
+            "change_signal": change_signal,
+        }
+        if continue_on_error:
+            payload["continue_on_error"] = True
+        if change_detection_region is not None:
+            payload["change_detection_region"] = dict(change_detection_region)
+        if change_region_radius is not None:
+            payload["change_region_radius"] = change_region_radius
+        frame = self.transport.run_actions_observe_change_and_recv(
+            payload,
+            transport_timing=bool(self.payload.get("transport_timing")),
+        )
+        return ActionObservationResult(frame=frame)
 
     def configure(self, **payload: Any) -> None:
         self.transport.configure(payload)
