@@ -15,7 +15,7 @@ from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot,
 from modal_computer_use.daemon.routes import observations as observation_routes
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import CoordinateSpace, sha256_bytes
-from modal_computer_use.observations import ObservationClient, ObservationSession
+from modal_computer_use.observations import ObservationClient
 from modal_computer_use.transports.observation import (
     ObservationFrame,
     ObservationStreamTransport,
@@ -1222,47 +1222,6 @@ def test_observation_client_act_and_observe_returns_causal_result() -> None:
     assert transport.change_payload["actions"] == [{"type": "wait", "duration_ms": 0}]
     assert transport.change_payload["change_signal"] == "auto"
     assert "continue_on_error" not in transport.change_payload
-
-
-def test_observation_session_caches_initial_and_causal_frames() -> None:
-    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
-    causal = ObservationFrame(
-        payload=b"patch",
-        metadata={
-            "id": "2",
-            "action_id": "2",
-            "seq": 2,
-            "kind": "patch",
-            "trigger": "run_actions_observe_change",
-            "causal_frame": True,
-            "change_detected": True,
-            "action_result": {"ok": True},
-        },
-    )
-    transport = _FakeObservationTransport([initial, causal])
-    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
-    session = ObservationSession(client)
-
-    assert session.start() is initial
-    result = session.act_and_observe(actions=[{"type": "wait", "duration_ms": 0}])
-
-    assert result.frame is causal
-    assert session.latest_frame is causal
-    assert transport.change_payload["source"] == "sdk-session"
-
-
-def test_observation_session_observe_latest_can_request_frame() -> None:
-    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1})
-    latest = ObservationFrame(payload=b"latest", metadata={"seq": 2})
-    transport = _FakeObservationTransport([initial, latest])
-    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
-    session = ObservationSession(client)
-
-    assert session.observe_latest() is initial
-    assert session.observe_latest(request_frame=True) is latest
-
-    assert transport.requested_frame is True
-    assert session.latest_frame is latest
 
 
 def test_observation_transport_splits_receive_timing() -> None:

@@ -14,7 +14,7 @@ from ..daemon.desktop.screenshots import CapturedRawScreenshot
 from ..daemon.routes.observations import _capture_raw_delta_frame
 from ..daemon.schemas import ObservationStreamRequest
 from ..models import CoordinateSpace, ScreenshotOptions, sha256_bytes
-from ..observations import ObservationClient, ObservationSession
+from ..observations import ObservationClient
 from ..transports import ObservationStreamTransport
 from .measurement import _case_result, _measure_observed_case, _summary
 from .operations import (
@@ -219,21 +219,6 @@ def _run_daemon_observation_surface(
                 change_signal="auto",
                 transport_timing=False,
                 causal_action_observe=True,
-            )
-        ),
-        "observation_action_click_session_act_and_observe_auto_signal_production": (
-            _run_observation_action_click_observe_change_benchmark(
-                base_url=base_url,
-                token=token,
-                client=client,
-                iterations=iterations,
-                warmup_iterations=warmup_iterations,
-                name="observation_action_click_session_act_and_observe_auto_signal_production",
-                poll_strategy="adaptive",
-                change_signal="auto",
-                transport_timing=False,
-                causal_action_observe=True,
-                session_action_observe=True,
             )
         ),
         "observation_action_click_observe_change_auto_signal_binary_envelope": (
@@ -692,7 +677,6 @@ def _run_observation_action_click_observe_change_benchmark(
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
-    session_action_observe: bool = False,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     if page == "sparse":
@@ -714,7 +698,6 @@ def _run_observation_action_click_observe_change_benchmark(
         frame_encoding=frame_encoding,
         transport_timing=transport_timing,
         causal_action_observe=causal_action_observe,
-        session_action_observe=session_action_observe,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -732,7 +715,6 @@ def _run_observation_action_click_observe_change_benchmark(
             "frame_encoding": frame_encoding or "json-binary",
             "transport_timing": transport_timing,
             "causal_action_observe": causal_action_observe,
-            "session_action_observe": session_action_observe,
         }
     )
     return result
@@ -1320,7 +1302,6 @@ def _measure_stream_action_capture_loop(
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
-    session_action_observe: bool = False,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -1333,19 +1314,15 @@ def _measure_stream_action_capture_loop(
             frame_encoding=frame_encoding,
         ) as stream:
             frames = None
-            session = ObservationSession(stream) if session_action_observe else None
-            if session is not None:
-                session.start(drain_initial_frame=True)
-            elif transport_timing:
+            if transport_timing:
                 stream.start(drain_initial_frame=True)
             else:
                 frames = stream.frames()
                 next(frames)
-            iteration_stream = session or stream
             for warmup_index in range(warmup_iterations):
                 try:
                     _stream_action_capture_iteration(
-                        iteration_stream,
+                        stream,
                         frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
@@ -1353,7 +1330,6 @@ def _measure_stream_action_capture_loop(
                         change_detection=change_detection,
                         change_signal=change_signal,
                         causal_action_observe=causal_action_observe,
-                        session_action_observe=session_action_observe,
                     )
                 except Exception as exc:
                     failures.append(
@@ -1364,7 +1340,7 @@ def _measure_stream_action_capture_loop(
                 start = perf_counter()
                 try:
                     observation = _stream_action_capture_iteration(
-                        iteration_stream,
+                        stream,
                         frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
@@ -1372,7 +1348,6 @@ def _measure_stream_action_capture_loop(
                         change_detection=change_detection,
                         change_signal=change_signal,
                         causal_action_observe=causal_action_observe,
-                        session_action_observe=session_action_observe,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -1435,7 +1410,7 @@ def _capture_now_iteration(
 
 
 def _stream_action_capture_iteration(
-    stream: ObservationClient | ObservationSession,
+    stream: ObservationClient,
     frames: Any,
     *,
     capture_delay_ms: int,
@@ -1444,7 +1419,6 @@ def _stream_action_capture_iteration(
     change_detection: str,
     change_signal: str | None,
     causal_action_observe: bool = False,
-    session_action_observe: bool = False,
 ) -> dict[str, Any]:
     payload = {
         "actions": [CLICK_TOGGLE_ACTION],
@@ -1470,8 +1444,6 @@ def _stream_action_capture_iteration(
             request_frame_ms = 0.0
             receive_frame_ms = action_to_frame_ms
         else:
-            if not isinstance(stream, ObservationClient):
-                raise RuntimeError("session action observe requires causal_action_observe=True")
             request_started = perf_counter()
             stream.run_actions_observe_change(**payload)
             request_frame_ms = (perf_counter() - request_started) * 1000
@@ -1479,8 +1451,6 @@ def _stream_action_capture_iteration(
             frame = stream.transport.recv_frame_with_timing() if frames is None else next(frames)
             receive_frame_ms = (perf_counter() - receive_started) * 1000
     else:
-        if not isinstance(stream, ObservationClient):
-            raise RuntimeError("session action observe requires observe_change=True")
         request_started = perf_counter()
         stream.run_actions_capture(**payload)
         request_frame_ms = (perf_counter() - request_started) * 1000
@@ -1498,7 +1468,6 @@ def _stream_action_capture_iteration(
         "change_detection": change_detection,
         "change_signal": change_signal or "default",
         "causal_action_observe": causal_action_observe,
-        "session_action_observe": session_action_observe,
         "request_frame_ms": request_frame_ms,
         "receive_frame_ms": receive_frame_ms,
         "action_to_frame_ms": request_frame_ms + receive_frame_ms,

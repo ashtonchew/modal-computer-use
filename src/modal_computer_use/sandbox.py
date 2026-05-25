@@ -38,7 +38,7 @@ from .namespaces import (
     SessionNamespace,
     WindowsNamespace,
 )
-from .observations import ObservationClient, ObservationSession
+from .observations import ObservationClient
 from .state import compute_config_hash, default_tags, new_run_id
 from .transports import HotSessionTransport, ObservationStreamTransport
 
@@ -500,41 +500,6 @@ class ComputerSandbox:
             max_patch_rects=max_patch_rects,
             multi_rect_min_savings=multi_rect_min_savings,
             frame_encoding=frame_encoding,
-        )
-
-    def observation_session(
-        self,
-        *,
-        options: dict[str, Any] | None = None,
-        fps: float = 5.0,
-        idle_timeout_ms: int | None = None,
-        send_unchanged: bool = False,
-        delivery: Literal["latest", "reliable"] | None = "latest",
-        delta_mode: Literal["auto", "off"] | None = None,
-        delta_max_ratio: float | None = None,
-        keyframe_interval: int | None = None,
-        tile_size: int | None = None,
-        max_patch_rects: int | None = None,
-        multi_rect_min_savings: float | None = None,
-        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
-        timeout: float = 30.0,
-    ) -> ObservationSession:
-        return ObservationSession(
-            self.observation_stream(
-                options=options,
-                fps=fps,
-                idle_timeout_ms=idle_timeout_ms,
-                send_unchanged=send_unchanged,
-                delivery=delivery,
-                delta_mode=delta_mode,
-                delta_max_ratio=delta_max_ratio,
-                keyframe_interval=keyframe_interval,
-                tile_size=tile_size,
-                max_patch_rects=max_patch_rects,
-                multi_rect_min_savings=multi_rect_min_savings,
-                frame_encoding=frame_encoding,
-                timeout=timeout,
-            )
         )
 
     def snapshot_filesystem(self) -> object:
