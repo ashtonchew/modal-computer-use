@@ -207,6 +207,20 @@ def _run_daemon_observation_surface(
                 transport_timing=False,
             )
         ),
+        "observation_action_click_act_and_observe_auto_signal_production": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_act_and_observe_auto_signal_production",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                transport_timing=False,
+                causal_action_observe=True,
+            )
+        ),
         "observation_action_click_observe_change_auto_signal_binary_envelope": (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
@@ -662,6 +676,7 @@ def _run_observation_action_click_observe_change_benchmark(
     page: str = "default",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
+    causal_action_observe: bool = False,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     if page == "sparse":
@@ -682,6 +697,7 @@ def _run_observation_action_click_observe_change_benchmark(
         change_signal=change_signal,
         frame_encoding=frame_encoding,
         transport_timing=transport_timing,
+        causal_action_observe=causal_action_observe,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -698,6 +714,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "page": page,
             "frame_encoding": frame_encoding or "json-binary",
             "transport_timing": transport_timing,
+            "causal_action_observe": causal_action_observe,
         }
     )
     return result
@@ -1284,6 +1301,7 @@ def _measure_stream_action_capture_loop(
     change_signal: str | None = "poll",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
+    causal_action_observe: bool = False,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -1297,8 +1315,7 @@ def _measure_stream_action_capture_loop(
         ) as stream:
             frames = None
             if transport_timing:
-                stream.transport.start(stream.payload)
-                stream.transport.recv_frame_with_timing()
+                stream.start(drain_initial_frame=True)
             else:
                 frames = stream.frames()
                 next(frames)
@@ -1312,6 +1329,7 @@ def _measure_stream_action_capture_loop(
                         poll_strategy=poll_strategy,
                         change_detection=change_detection,
                         change_signal=change_signal,
+                        causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
                     failures.append(
@@ -1329,6 +1347,7 @@ def _measure_stream_action_capture_loop(
                         poll_strategy=poll_strategy,
                         change_detection=change_detection,
                         change_signal=change_signal,
+                        causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -1399,8 +1418,8 @@ def _stream_action_capture_iteration(
     poll_strategy: str,
     change_detection: str,
     change_signal: str | None,
+    causal_action_observe: bool = False,
 ) -> dict[str, Any]:
-    request_started = perf_counter()
     payload = {
         "actions": [CLICK_TOGGLE_ACTION],
         "source": "benchmark",
@@ -1417,14 +1436,27 @@ def _stream_action_capture_iteration(
         )
         if change_signal is not None:
             payload["change_signal"] = change_signal
-        stream.run_actions_observe_change(**payload)
+        if causal_action_observe:
+            call_started = perf_counter()
+            result = stream.act_and_observe(**payload)
+            action_to_frame_ms = (perf_counter() - call_started) * 1000
+            frame = result.frame
+            request_frame_ms = 0.0
+            receive_frame_ms = action_to_frame_ms
+        else:
+            request_started = perf_counter()
+            stream.run_actions_observe_change(**payload)
+            request_frame_ms = (perf_counter() - request_started) * 1000
+            receive_started = perf_counter()
+            frame = stream.transport.recv_frame_with_timing() if frames is None else next(frames)
+            receive_frame_ms = (perf_counter() - receive_started) * 1000
     else:
+        request_started = perf_counter()
         stream.run_actions_capture(**payload)
-    request_frame_ms = (perf_counter() - request_started) * 1000
-
-    receive_started = perf_counter()
-    frame = stream.transport.recv_frame_with_timing() if frames is None else next(frames)
-    receive_frame_ms = (perf_counter() - receive_started) * 1000
+        request_frame_ms = (perf_counter() - request_started) * 1000
+        receive_started = perf_counter()
+        frame = stream.transport.recv_frame_with_timing() if frames is None else next(frames)
+        receive_frame_ms = (perf_counter() - receive_started) * 1000
 
     observation = _frame_observation(frame)
     action_result = observation.get("action_result")
@@ -1435,6 +1467,7 @@ def _stream_action_capture_iteration(
         "poll_strategy": poll_strategy,
         "change_detection": change_detection,
         "change_signal": change_signal or "default",
+        "causal_action_observe": causal_action_observe,
         "request_frame_ms": request_frame_ms,
         "receive_frame_ms": receive_frame_ms,
         "action_to_frame_ms": request_frame_ms + receive_frame_ms,

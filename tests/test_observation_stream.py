@@ -697,6 +697,8 @@ def test_observation_stream_run_actions_observe_change_waits_for_change(app) -> 
 
     assert second["trigger"] == "run_actions_observe_change"
     assert second["id"] == "2"
+    assert second["action_id"] == "2"
+    assert second["causal_frame"] is True
     assert second["kind"] == "patch"
     assert second["change_detected"] is True
     assert second["change_timeout_reached"] is False
@@ -1195,6 +1197,32 @@ def test_observation_client_can_force_binary_envelope_encoding() -> None:
     assert transport.payload["frame_encoding"] == "binary-envelope"
 
 
+def test_observation_client_act_and_observe_returns_causal_result() -> None:
+    frame = ObservationFrame(
+        payload=b"png",
+        metadata={
+            "id": "2",
+            "action_id": "2",
+            "trigger": "run_actions_observe_change",
+            "causal_frame": True,
+            "change_detected": True,
+            "action_result": {"ok": True},
+        },
+    )
+    transport = _FakeObservationTransport([frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    result = client.act_and_observe(actions=[{"type": "wait", "duration_ms": 0}])
+
+    assert result.frame is frame
+    assert result.action_id == "2"
+    assert result.action_result == {"ok": True}
+    assert result.change_detected is True
+    assert transport.change_payload["actions"] == [{"type": "wait", "duration_ms": 0}]
+    assert transport.change_payload["change_signal"] == "auto"
+    assert "continue_on_error" not in transport.change_payload
+
+
 def test_observation_transport_splits_receive_timing() -> None:
     websocket = _FakeWebSocket(
         [
@@ -1262,6 +1290,37 @@ def test_observation_transport_receives_binary_envelope_timing() -> None:
     client_timing = frame.transport_timing["client_receive_timing_ms"]
     assert client_timing["wait_payload_ms"] == 0.0
     assert client_timing["wait_transport_timing_ms"] == 0.0
+
+
+def test_observation_transport_run_actions_observe_change_receives_correlated_frame() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "frame", "id": "other", "seq": 1, "kind": "keyframe"}),
+            b"old",
+            json.dumps(
+                {
+                    "type": "frame",
+                    "id": "1",
+                    "seq": 2,
+                    "kind": "patch",
+                    "trigger": "run_actions_observe_change",
+                    "causal_frame": True,
+                }
+            ),
+            b"png",
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+
+    frame = transport.run_actions_observe_change_and_recv({"actions": []})
+
+    assert frame.payload == b"png"
+    assert frame.metadata["id"] == "1"
+    assert frame.metadata["causal_frame"] is True
 
 
 def test_observation_frame_composes_lossless_patch_bundle() -> None:
@@ -1408,10 +1467,18 @@ class _FakeObservationTransport:
         self.requested_frame = False
         self.action_payload = None
         self.change_payload = None
+        self.started = False
 
     def frames(self, payload):
         self.payload = payload
         yield from self._frames
+
+    def start(self, payload):
+        self.payload = payload
+        self.started = True
+
+    def receive_frame(self, *, transport_timing=False):
+        return self._frames[0]
 
     def close(self):
         pass
@@ -1430,6 +1497,10 @@ class _FakeObservationTransport:
 
     def run_actions_observe_change(self, payload):
         self.change_payload = payload
+
+    def run_actions_observe_change_and_recv(self, payload, *, transport_timing=False):
+        self.change_payload = payload
+        return self._frames[0]
 
     def configure(self, payload):
         self.payload.update(payload)

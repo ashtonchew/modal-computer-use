@@ -285,6 +285,8 @@ async def _handle_observation_message(
                 },
                 extra_metadata={
                     "action_result": action_result.model_dump(mode="json"),
+                    "action_id": request_id,
+                    "causal_frame": True,
                     "capture_delay_ms": stream_request.capture_delay_ms,
                     "change_timeout_ms": stream_request.change_timeout_ms,
                     "poll_interval_ms": stream_request.poll_interval_ms,

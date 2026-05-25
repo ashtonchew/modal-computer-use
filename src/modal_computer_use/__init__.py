@@ -39,7 +39,7 @@ from .models import (
     ScreenshotOptions,
     X11Window,
 )
-from .observations import ObservationClient
+from .observations import ActionObservationResult, ObservationClient
 from .registry import SandboxRegistry
 from .sandbox import ComputerSandbox
 
@@ -49,6 +49,7 @@ __all__ = [
     "ActionConfig",
     "ActionDecision",
     "ActionItemResult",
+    "ActionObservationResult",
     "ActionResult",
     "ArtifactInfo",
     "ArtifactSyncResult",
