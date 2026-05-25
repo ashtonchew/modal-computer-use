@@ -8,7 +8,7 @@ from io import BytesIO
 from time import perf_counter
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Response, WebSocket, WebSocketDisconnect
 from PIL import Image, ImageChops
 from pydantic import ValidationError
 
@@ -38,6 +38,7 @@ from modal_computer_use.daemon.schemas import (
     ObservationActionCaptureRequest,
     ObservationActionObserveChangeRequest,
     ObservationStreamRequest,
+    ObservationTransportProbeRequest,
 )
 from modal_computer_use.models import ActionBatchRequest, Region, ScreenshotOptions
 from modal_computer_use.redaction import sanitize_payload, sanitize_text
@@ -112,6 +113,24 @@ async def observation_stream(websocket: WebSocket) -> None:
         return
     finally:
         _close_stream_resources(state)
+
+
+@router.post("/transport-probe")
+async def observation_transport_probe(payload: ObservationTransportProbeRequest) -> Response:
+    probe_payload = _transport_probe_payload(payload.size_bytes)
+    emit_started = perf_counter()
+    headers = {
+        "x-computer-use-size-bytes": str(payload.size_bytes),
+        "x-computer-use-transport-timing-ms": json.dumps(
+            {"emit_total_ms": _elapsed_ms(emit_started)},
+            separators=(",", ":"),
+        ),
+    }
+    return Response(
+        content=probe_payload,
+        media_type="application/octet-stream",
+        headers=headers,
+    )
 
 
 async def _receive_observation_message(
@@ -878,30 +897,38 @@ async def _send_transport_probe(
     request_id: str,
     payload: dict[str, Any],
 ) -> None:
-    size_bytes = payload.get("size_bytes", 0)
-    if not isinstance(size_bytes, int) or size_bytes < 0 or size_bytes > 1_000_000:
+    try:
+        request = ObservationTransportProbeRequest.model_validate(payload)
+    except ValidationError as exc:
         await _send_observation_error(
             websocket,
             request_id,
             "validation_error",
-            "transport probe size_bytes must be an integer from 0 to 1000000",
+            "request validation failed",
+            details={"errors": exc.errors(include_input=False)},
         )
         return
-    probe_payload = b"\0" * size_bytes
+    probe_payload = _transport_probe_payload(request.size_bytes)
     emit_started = perf_counter()
     metadata_send_started = perf_counter()
-    await websocket.send_json(
-        {
-            "type": "transport_probe",
-            "id": request_id,
-            "ok": True,
-            "size_bytes": size_bytes,
-        }
-    )
-    metadata_send_ms = _elapsed_ms(metadata_send_started)
-    payload_send_started = perf_counter()
-    await websocket.send_bytes(probe_payload)
-    payload_send_ms = _elapsed_ms(payload_send_started)
+    metadata = {
+        "type": "transport_probe",
+        "id": request_id,
+        "ok": True,
+        "size_bytes": request.size_bytes,
+        "frame_encoding": request.frame_encoding,
+    }
+    if request.frame_encoding == "binary-envelope":
+        await websocket.send_bytes(_encode_frame_envelope(metadata, probe_payload))
+    else:
+        await websocket.send_json(metadata)
+        metadata_send_ms = _elapsed_ms(metadata_send_started)
+        payload_send_started = perf_counter()
+        await websocket.send_bytes(probe_payload)
+        payload_send_ms = _elapsed_ms(payload_send_started)
+    if request.frame_encoding == "binary-envelope":
+        metadata_send_ms = _elapsed_ms(metadata_send_started)
+        payload_send_ms = 0.0
     await websocket.send_json(
         {
             "type": "transport_timing",
@@ -914,6 +941,10 @@ async def _send_transport_probe(
             },
         }
     )
+
+
+def _transport_probe_payload(size_bytes: int) -> bytes:
+    return b"\0" * size_bytes
 
 
 async def _capture_frame(

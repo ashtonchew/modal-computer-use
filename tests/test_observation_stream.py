@@ -162,11 +162,54 @@ def test_observation_stream_transport_probe(test_client) -> None:
         payload = websocket.receive_bytes()
         timing = websocket.receive_json()
 
-    assert header == {"type": "transport_probe", "id": "1", "ok": True, "size_bytes": 128}
+    assert header == {
+        "type": "transport_probe",
+        "id": "1",
+        "ok": True,
+        "size_bytes": 128,
+        "frame_encoding": "json-binary",
+    }
     assert payload == b"\0" * 128
     assert timing["type"] == "transport_timing"
     assert timing["id"] == "1"
     assert timing["server_emit_timing_ms"]["payload_send_ms"] >= 0
+
+
+def test_observation_stream_transport_probe_can_use_binary_envelope(test_client) -> None:
+    with test_client.websocket_connect("/v1/observations/stream") as websocket:
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "transport_probe",
+                "payload": {"size_bytes": 128, "frame_encoding": "binary-envelope"},
+            }
+        )
+        envelope = websocket.receive_bytes()
+        timing = websocket.receive_json()
+
+    header, payload = _decode_frame_envelope(envelope)
+    assert header == {
+        "type": "transport_probe",
+        "id": "1",
+        "ok": True,
+        "size_bytes": 128,
+        "frame_encoding": "binary-envelope",
+    }
+    assert payload == b"\0" * 128
+    assert timing["type"] == "transport_timing"
+    assert timing["id"] == "1"
+    assert timing["server_emit_timing_ms"]["payload_send_ms"] == 0.0
+
+
+def test_observation_http_transport_probe(test_client) -> None:
+    response = test_client.post("/v1/observations/transport-probe", json={"size_bytes": 128})
+
+    assert response.status_code == 200
+    assert response.content == b"\0" * 128
+    assert response.headers["x-computer-use-size-bytes"] == "128"
+    timing = json.loads(response.headers["x-computer-use-transport-timing-ms"])
+    assert timing["emit_total_ms"] >= 0
 
 
 def test_observation_stream_screenshot_budget_blocks_first_frame(tmp_path) -> None:
@@ -1136,6 +1179,20 @@ def test_observation_client_defaults_to_lossless_png() -> None:
 
     assert transport.payload["format"] == "png"
     assert transport.payload["show_cursor"] is False
+    assert "frame_encoding" not in transport.payload
+
+
+def test_observation_client_can_force_binary_envelope_encoding() -> None:
+    transport = _FakeObservationTransport([])
+    client = ObservationClient(
+        transport,  # type: ignore[arg-type]
+        max_frames=0,
+        frame_encoding="binary-envelope",
+    )
+
+    list(client.frames())
+
+    assert transport.payload["frame_encoding"] == "binary-envelope"
 
 
 def test_observation_transport_splits_receive_timing() -> None:
@@ -1272,6 +1329,48 @@ def test_observation_transport_probe_splits_receive_timing() -> None:
     assert result["requested_size_bytes"] == 3
     assert result["server_emit_timing_ms"]["emit_total_ms"] == 3.0
     assert result["client_receive_timing_ms"]["wait_metadata_ms"] >= 0
+
+
+def test_observation_transport_probe_receives_binary_envelope() -> None:
+    envelope = observation_routes._encode_frame_envelope(
+        {
+            "type": "transport_probe",
+            "id": "1",
+            "ok": True,
+            "size_bytes": 3,
+            "frame_encoding": "binary-envelope",
+        },
+        b"abc",
+    )
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            envelope,
+            json.dumps(
+                {
+                    "type": "transport_timing",
+                    "id": "1",
+                    "seq": None,
+                    "server_emit_timing_ms": {
+                        "metadata_send_ms": 1.0,
+                        "payload_send_ms": 0.0,
+                        "emit_total_ms": 2.0,
+                    },
+                }
+            ),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+
+    result = transport.transport_probe(size_bytes=3, frame_encoding="binary-envelope")
+
+    assert result["size_bytes"] == 3
+    assert result["frame_encoding"] == "binary-envelope"
+    assert result["server_emit_timing_ms"]["emit_total_ms"] == 2.0
+    assert result["client_receive_timing_ms"]["wait_payload_ms"] == 0.0
 
 
 def test_observation_frame_compose_applies_patch() -> None:

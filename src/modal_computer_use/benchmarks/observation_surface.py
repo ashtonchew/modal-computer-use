@@ -194,17 +194,44 @@ def _run_daemon_observation_surface(
                 change_signal="auto",
             )
         ),
-        "observation_action_click_observe_change_auto_signal_envelope": (
+        "observation_action_click_observe_change_auto_signal_production": (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
                 iterations=iterations,
                 warmup_iterations=warmup_iterations,
-                name="observation_action_click_observe_change_auto_signal_envelope",
+                name="observation_action_click_observe_change_auto_signal_production",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                transport_timing=False,
+            )
+        ),
+        "observation_action_click_observe_change_auto_signal_binary_envelope": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_auto_signal_binary_envelope",
                 poll_strategy="adaptive",
                 change_signal="auto",
                 frame_encoding="binary-envelope",
+            )
+        ),
+        "observation_action_click_observe_change_auto_signal_binary_envelope_production": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_auto_signal_binary_envelope_production",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                frame_encoding="binary-envelope",
+                transport_timing=False,
             )
         ),
         "observation_action_click_sparse_observe_change_auto_signal": (
@@ -239,9 +266,37 @@ def _run_daemon_observation_surface(
             warmup_iterations=warmup_iterations,
             size_bytes=0,
         ),
+        "observation_transport_probe_envelope_0b": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=0,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_0b": _run_observation_http_transport_probe_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=0,
+        ),
         "observation_transport_probe_5kb": _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=5 * 1024,
+        ),
+        "observation_transport_probe_envelope_5kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=5 * 1024,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_5kb": _run_observation_http_transport_probe_benchmark(
+            client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=5 * 1024,
@@ -253,9 +308,37 @@ def _run_daemon_observation_surface(
             warmup_iterations=warmup_iterations,
             size_bytes=50 * 1024,
         ),
+        "observation_transport_probe_envelope_50kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=50 * 1024,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_50kb": _run_observation_http_transport_probe_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=50 * 1024,
+        ),
         "observation_transport_probe_250kb": _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=250 * 1024,
+        ),
+        "observation_transport_probe_envelope_250kb": _run_observation_transport_probe_benchmark(
+            base_url=base_url,
+            token=token,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            size_bytes=250 * 1024,
+            frame_encoding="binary-envelope",
+        ),
+        "observation_http_transport_probe_250kb": _run_observation_http_transport_probe_benchmark(
+            client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=250 * 1024,
@@ -578,6 +661,7 @@ def _run_observation_action_click_observe_change_benchmark(
     change_signal: str | None = "poll",
     page: str = "default",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+    transport_timing: bool = True,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     if page == "sparse":
@@ -597,6 +681,7 @@ def _run_observation_action_click_observe_change_benchmark(
         change_detection=change_detection,
         change_signal=change_signal,
         frame_encoding=frame_encoding,
+        transport_timing=transport_timing,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -612,6 +697,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "change_signal": change_signal or "default",
             "page": page,
             "frame_encoding": frame_encoding or "json-binary",
+            "transport_timing": transport_timing,
         }
     )
     return result
@@ -737,16 +823,24 @@ def _run_observation_transport_probe_benchmark(
     iterations: int,
     warmup_iterations: int,
     size_bytes: int,
+    frame_encoding: str | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
-    name = f"observation_transport_probe_{_size_label(size_bytes)}"
+    name = (
+        f"observation_transport_probe_envelope_{_size_label(size_bytes)}"
+        if frame_encoding == "binary-envelope"
+        else f"observation_transport_probe_{_size_label(size_bytes)}"
+    )
     transport = ObservationStreamTransport(base_url, token=token)
     try:
         samples, observations = _measure_observed_case(
             name=name,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
-            operation=lambda: transport.transport_probe(size_bytes=size_bytes),
+            operation=lambda: transport.transport_probe(
+                size_bytes=size_bytes,
+                frame_encoding=frame_encoding,
+            ),
             failures=failures,
         )
     finally:
@@ -754,8 +848,11 @@ def _run_observation_transport_probe_benchmark(
     result = _case_result(name, iterations, samples, failures)
     result.update(
         {
-            "transport_encoding": "websocket_binary",
+            "transport_encoding": "websocket_binary_envelope"
+            if frame_encoding == "binary-envelope"
+            else "websocket_json_metadata_binary_payload",
             "requested_size_bytes": size_bytes,
+            "frame_encoding": frame_encoding or "json-binary",
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],
@@ -771,6 +868,65 @@ def _run_observation_transport_probe_benchmark(
     )
     _add_probe_timing_observations(result, observations)
     return result
+
+
+def _run_observation_http_transport_probe_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+    size_bytes: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    name = f"observation_http_transport_probe_{_size_label(size_bytes)}"
+    samples, observations = _measure_observed_case(
+        name=name,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=lambda: _run_http_transport_probe(client, size_bytes=size_bytes),
+        failures=failures,
+    )
+    result = _case_result(name, iterations, samples, failures)
+    result.update(
+        {
+            "transport_encoding": "http_binary",
+            "requested_size_bytes": size_bytes,
+            "samples_bytes": [
+                item["size_bytes"] for item in observations if item.get("size_bytes") is not None
+            ],
+            "summary_bytes": _summary(
+                [
+                    float(item["size_bytes"])
+                    for item in observations
+                    if item.get("size_bytes") is not None
+                ]
+            ),
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    _add_direct_nested_timing_summary(
+        result,
+        observations,
+        nested_key="server_emit_timing_ms",
+        result_key="server_emit_timing_summary_ms",
+    )
+    return result
+
+
+def _run_http_transport_probe(client: DaemonClient, *, size_bytes: int) -> dict[str, Any]:
+    payload, headers = client.post_bytes_with_headers(
+        "/v1/observations/transport-probe",
+        json={"size_bytes": size_bytes},
+    )
+    return {
+        "size_bytes": len(payload),
+        "requested_size_bytes": size_bytes,
+        "server_emit_timing_ms": _json_timing_header(
+            headers,
+            "x-computer-use-transport-timing-ms",
+        ),
+        "transport_http_version": _transport_http_version(client),
+    }
 
 
 def _run_observation_delta_synthetic_benchmark(
@@ -1126,6 +1282,7 @@ def _measure_stream_action_capture_loop(
     change_detection: str = "full",
     change_signal: str | None = "poll",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+    transport_timing: bool = True,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -1134,16 +1291,21 @@ def _measure_stream_action_capture_loop(
             ObservationStreamTransport(base_url, token=token),
             options=OBSERVATION_SCREENSHOT_OPTIONS,
             fps=0.01,
-            transport_timing=True,
+            transport_timing=transport_timing,
             frame_encoding=frame_encoding,
         ) as stream:
-            stream.transport.start(stream.payload)
-            stream.transport.recv_frame_with_timing()
+            frames = None
+            if transport_timing:
+                stream.transport.start(stream.payload)
+                stream.transport.recv_frame_with_timing()
+            else:
+                frames = stream.frames()
+                next(frames)
             for warmup_index in range(warmup_iterations):
                 try:
                     _stream_action_capture_iteration(
                         stream,
-                        None,
+                        frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
@@ -1160,7 +1322,7 @@ def _measure_stream_action_capture_loop(
                 try:
                     observation = _stream_action_capture_iteration(
                         stream,
-                        None,
+                        frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
