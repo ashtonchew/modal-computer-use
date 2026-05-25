@@ -1179,6 +1179,20 @@ def test_observation_client_defaults_to_lossless_png() -> None:
 
     assert transport.payload["format"] == "png"
     assert transport.payload["show_cursor"] is False
+    assert "frame_encoding" not in transport.payload
+
+
+def test_observation_client_can_force_binary_envelope_encoding() -> None:
+    transport = _FakeObservationTransport([])
+    client = ObservationClient(
+        transport,  # type: ignore[arg-type]
+        max_frames=0,
+        frame_encoding="binary-envelope",
+    )
+
+    list(client.frames())
+
+    assert transport.payload["frame_encoding"] == "binary-envelope"
 
 
 def test_observation_transport_splits_receive_timing() -> None:
