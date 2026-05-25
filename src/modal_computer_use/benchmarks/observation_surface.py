@@ -194,17 +194,44 @@ def _run_daemon_observation_surface(
                 change_signal="auto",
             )
         ),
-        "observation_action_click_observe_change_auto_signal_envelope": (
+        "observation_action_click_observe_change_auto_signal_production": (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
                 iterations=iterations,
                 warmup_iterations=warmup_iterations,
-                name="observation_action_click_observe_change_auto_signal_envelope",
+                name="observation_action_click_observe_change_auto_signal_production",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                transport_timing=False,
+            )
+        ),
+        "observation_action_click_observe_change_auto_signal_binary_envelope": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_auto_signal_binary_envelope",
                 poll_strategy="adaptive",
                 change_signal="auto",
                 frame_encoding="binary-envelope",
+            )
+        ),
+        "observation_action_click_observe_change_auto_signal_binary_envelope_production": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_observe_change_auto_signal_binary_envelope_production",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                frame_encoding="binary-envelope",
+                transport_timing=False,
             )
         ),
         "observation_action_click_sparse_observe_change_auto_signal": (
@@ -634,6 +661,7 @@ def _run_observation_action_click_observe_change_benchmark(
     change_signal: str | None = "poll",
     page: str = "default",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+    transport_timing: bool = True,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     if page == "sparse":
@@ -653,6 +681,7 @@ def _run_observation_action_click_observe_change_benchmark(
         change_detection=change_detection,
         change_signal=change_signal,
         frame_encoding=frame_encoding,
+        transport_timing=transport_timing,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -668,6 +697,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "change_signal": change_signal or "default",
             "page": page,
             "frame_encoding": frame_encoding or "json-binary",
+            "transport_timing": transport_timing,
         }
     )
     return result
@@ -1252,6 +1282,7 @@ def _measure_stream_action_capture_loop(
     change_detection: str = "full",
     change_signal: str | None = "poll",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+    transport_timing: bool = True,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -1260,16 +1291,21 @@ def _measure_stream_action_capture_loop(
             ObservationStreamTransport(base_url, token=token),
             options=OBSERVATION_SCREENSHOT_OPTIONS,
             fps=0.01,
-            transport_timing=True,
+            transport_timing=transport_timing,
             frame_encoding=frame_encoding,
         ) as stream:
-            stream.transport.start(stream.payload)
-            stream.transport.recv_frame_with_timing()
+            frames = None
+            if transport_timing:
+                stream.transport.start(stream.payload)
+                stream.transport.recv_frame_with_timing()
+            else:
+                frames = stream.frames()
+                next(frames)
             for warmup_index in range(warmup_iterations):
                 try:
                     _stream_action_capture_iteration(
                         stream,
-                        None,
+                        frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
@@ -1286,7 +1322,7 @@ def _measure_stream_action_capture_loop(
                 try:
                     observation = _stream_action_capture_iteration(
                         stream,
-                        None,
+                        frames,
                         capture_delay_ms=capture_delay_ms,
                         observe_change=observe_change,
                         poll_strategy=poll_strategy,
