@@ -2296,6 +2296,29 @@
         "title": "MoveAction",
         "type": "object"
       },
+      "ObservationTransportProbeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "frame_encoding": {
+            "default": "json-binary",
+            "enum": [
+              "json-binary",
+              "binary-envelope"
+            ],
+            "title": "Frame Encoding",
+            "type": "string"
+          },
+          "size_bytes": {
+            "default": 0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "title": "ObservationTransportProbeRequest",
+        "type": "object"
+      },
       "OpenArtifactRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5213,6 +5236,42 @@
           }
         },
         "summary": "Up"
+      }
+    },
+    "/v1/observations/transport-probe": {
+      "post": {
+        "operationId": "observation_transport_probe_v1_observations_transport_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservationTransportProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observation Transport Probe"
       }
     },
     "/v1/processes/{name}/errors": {
