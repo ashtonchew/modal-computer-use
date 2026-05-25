@@ -156,6 +156,7 @@ def _case_result(
         "successful_iterations": len(samples),
         "samples_ms": samples,
         "summary_ms": _summary(samples),
+        "sample_stability": _sample_stability(samples),
         "failures": case_failures,
     }
 
@@ -202,16 +203,52 @@ def _attributed_case_result(
     )
     return result
 
-def _summary(samples: list[float]) -> dict[str, float | None]:
+def _summary(samples: list[float]) -> dict[str, float | int | list[int] | None]:
     if not samples:
-        return {"min": None, "p50": None, "p95": None, "mean": None, "max": None}
+        return {
+            "min": None,
+            "p50": None,
+            "p95": None,
+            "mean": None,
+            "max": None,
+            "trimmed_mean": None,
+            "mean_without_high_outliers": None,
+            "mad": None,
+            "jitter_ms": None,
+            "mean_p50_delta_ms": None,
+            "mean_p50_delta_ratio": None,
+            "high_outlier_threshold": None,
+            "high_outlier_count": 0,
+            "high_outlier_ratio": 0.0,
+            "high_outlier_indices": [],
+        }
     ordered = sorted(samples)
+    median = statistics.median(ordered)
+    mean = statistics.fmean(samples)
+    high_outlier_threshold = _high_outlier_threshold(samples)
+    high_outlier_indices = [
+        index for index, sample in enumerate(samples) if sample > high_outlier_threshold
+    ]
+    inliers = [
+        sample for index, sample in enumerate(samples) if index not in set(high_outlier_indices)
+    ]
+    mean_p50_delta = mean - median
     return {
         "min": min(samples),
-        "p50": statistics.median(ordered),
+        "p50": median,
         "p95": _percentile(ordered, 95),
-        "mean": statistics.fmean(samples),
+        "mean": mean,
         "max": max(samples),
+        "trimmed_mean": _trimmed_mean(ordered),
+        "mean_without_high_outliers": statistics.fmean(inliers) if inliers else None,
+        "mad": _median_absolute_deviation(samples),
+        "jitter_ms": _percentile(ordered, 95) - median,
+        "mean_p50_delta_ms": mean_p50_delta,
+        "mean_p50_delta_ratio": mean_p50_delta / median if median else None,
+        "high_outlier_threshold": high_outlier_threshold,
+        "high_outlier_count": len(high_outlier_indices),
+        "high_outlier_ratio": len(high_outlier_indices) / len(samples),
+        "high_outlier_indices": high_outlier_indices,
     }
 
 def _percentile(ordered_samples: list[float], percentile: int) -> float:
@@ -224,6 +261,56 @@ def _percentile(ordered_samples: list[float], percentile: int) -> float:
         return ordered_samples[lower]
     weight = rank - lower
     return ordered_samples[lower] * (1 - weight) + ordered_samples[upper] * weight
+
+def _trimmed_mean(ordered_samples: list[float]) -> float:
+    if len(ordered_samples) < 10:
+        return statistics.fmean(ordered_samples)
+    trim_count = math.floor(len(ordered_samples) * 0.1)
+    trimmed = ordered_samples[trim_count : len(ordered_samples) - trim_count]
+    return statistics.fmean(trimmed)
+
+def _median_absolute_deviation(samples: list[float]) -> float:
+    median = statistics.median(samples)
+    return statistics.median([abs(sample - median) for sample in samples])
+
+def _high_outlier_threshold(samples: list[float]) -> float:
+    median = statistics.median(samples)
+    scaled_mad = _median_absolute_deviation(samples) * 1.4826
+    tolerance = max(scaled_mad * 3.0, abs(median) * 0.25, 1.0)
+    return median + tolerance
+
+def _sample_stability(samples: list[float]) -> dict[str, Any]:
+    summary = _summary(samples)
+    if not samples:
+        return {
+            "status": "no_samples",
+            "reason": "case did not record measured samples",
+        }
+    mean = summary["mean"]
+    inlier_mean = summary["mean_without_high_outliers"]
+    high_outlier_count = summary["high_outlier_count"]
+    if (
+        isinstance(mean, int | float)
+        and isinstance(inlier_mean, int | float)
+        and isinstance(high_outlier_count, int)
+        and high_outlier_count > 0
+    ):
+        denominator = inlier_mean or mean
+        sensitivity = (mean - inlier_mean) / denominator if denominator else 0.0
+        if sensitivity >= 0.05:
+            return {
+                "status": "outlier_sensitive",
+                "reason": "mean changes by at least 5% after removing high outliers",
+                "mean_without_high_outliers": inlier_mean,
+                "mean_delta_ratio": sensitivity,
+                "high_outlier_count": high_outlier_count,
+                "high_outlier_indices": summary["high_outlier_indices"],
+            }
+    return {
+        "status": "stable",
+        "reason": "mean is not materially changed by high-outlier filtering",
+        "high_outlier_count": high_outlier_count,
+    }
 
 def _comparison(batch_case: dict[str, Any], separate_case: dict[str, Any]) -> dict[str, Any]:
     batch_mean = batch_case["summary_ms"]["mean"]

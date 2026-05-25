@@ -751,6 +751,7 @@ def _run_observation_action_click_fused_raw_benchmark(
             for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
+    _add_observation_latency_diagnosis(result)
     return result
 
 
@@ -1898,7 +1899,6 @@ def _add_frame_observations(
         result["action_to_frame_samples_ms"] = action_to_frame_samples
         result["action_to_frame_summary_ms"] = _summary(action_to_frame_samples)
 
-
     receive_minus_pre_emit_samples = [
         timing["receive_frame_ms"] - stage_timing["server_pre_emit_ms"]
         for item in observations
@@ -1973,6 +1973,7 @@ def _add_frame_observations(
             for sample, daemon_sample in zip(samples, daemon_samples, strict=False)
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
+    _add_observation_latency_diagnosis(result)
 
 
 def _observation_transport_encoding(observations: list[Any]) -> str:
@@ -1984,3 +1985,50 @@ def _observation_transport_encoding(observations: list[Any]) -> str:
     if encodings == {"binary-envelope"}:
         return "websocket_binary_envelope"
     return "websocket_json_metadata_binary_payload"
+
+
+def _add_observation_latency_diagnosis(result: dict[str, Any]) -> None:
+    total_p50 = _summary_value(result.get("summary_ms"), "p50")
+    daemon_p50 = _summary_value(result.get("daemon_summary_ms"), "p50")
+    overhead_p50 = _summary_value(result.get("overhead_summary_ms"), "p50")
+    receive_wait_p50 = _summary_value(
+        result.get("receive_minus_server_pre_emit_and_send_summary_ms"),
+        "p50",
+    )
+    stability = result.get("sample_stability")
+    stability_status = stability.get("status") if isinstance(stability, dict) else "unknown"
+    bottleneck = "unknown"
+    reason = "insufficient timing attribution"
+    if (
+        isinstance(overhead_p50, int | float)
+        and isinstance(daemon_p50, int | float)
+        and isinstance(total_p50, int | float)
+    ):
+        if overhead_p50 >= max(daemon_p50 * 2.0, total_p50 * 0.5):
+            bottleneck = "transport_or_client_wait"
+            reason = "overhead p50 dominates daemon p50"
+        elif daemon_p50 >= total_p50 * 0.5:
+            bottleneck = "daemon_capture_or_diff"
+            reason = "daemon p50 is at least half of total p50"
+        else:
+            bottleneck = "mixed"
+            reason = "no single stage dominates p50 latency"
+    if isinstance(receive_wait_p50, int | float) and receive_wait_p50 >= 50.0:
+        bottleneck = "client_receive_or_tunnel_wait"
+        reason = "client receive wait after server pre-emit is at least 50ms p50"
+    result["latency_diagnosis"] = {
+        "bottleneck": bottleneck,
+        "reason": reason,
+        "sample_stability": stability_status,
+        "total_p50_ms": total_p50,
+        "daemon_p50_ms": daemon_p50,
+        "overhead_p50_ms": overhead_p50,
+        "receive_minus_server_pre_emit_and_send_p50_ms": receive_wait_p50,
+    }
+
+
+def _summary_value(summary: Any, key: str) -> float | None:
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get(key)
+    return float(value) if isinstance(value, int | float) else None
