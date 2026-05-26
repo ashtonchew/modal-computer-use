@@ -119,17 +119,23 @@ To compare placement directly, run one fresh `daemon-transport-floor` sandbox pe
 
 ```bash
 uv run computer-use benchmark modal-region-ab --iterations 30 \
-  --modal-region default --modal-region us-west --modal-region us-east
+  --modal-region default --modal-region us-west --modal-region us-east \
+  --caller-region-label dev-laptop-us-west
 ```
 
 The region A/B command keeps ingress, daemon HTTP version, image profile, and resource knobs fixed
-while varying only Modal placement.
+while varying only Modal placement. `--caller-region-label` is descriptive metadata for where the
+benchmark caller or model loop ran; it does not affect Modal placement.
 
 Turn the raw JSON into a PR-ready table with:
 
 ```bash
 uv run computer-use benchmark modal-region-summary modal-region-ab-attested-h1-30x-20260526.json
 ```
+
+For production loops, keep the SDK default unpinned until you have a benchmark from the same caller
+environment. Then pin `runtime.modal_region` near the caller/model loop, not necessarily near the
+end user. See `examples/region_colocation.py`.
 
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`

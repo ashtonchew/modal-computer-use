@@ -258,6 +258,13 @@ def main(argv: list[str] | None = None) -> int:
         default="1.1",
         help="daemon transport HTTP version for created Modal sandboxes; defaults to 1.1",
     )
+    region_ab_parser.add_argument(
+        "--caller-region-label",
+        help=(
+            "free-form label for where the benchmark caller or model loop ran; "
+            "recorded as metadata only"
+        ),
+    )
     region_ab_parser.add_argument("--resource-profile")
     region_ab_parser.add_argument("--browser")
     region_ab_parser.add_argument("--gpu")
@@ -733,6 +740,7 @@ def _benchmark_modal_region_ab(
         "metadata": {
             "regions": regions,
             "surface": "daemon-transport-floor",
+            "caller_region_label": args.caller_region_label,
             "modal_ingress": args.modal_ingress,
             "daemon_http_version": args.daemon_http_version,
             "comparison": "fresh Modal sandbox per region, same daemon transport-floor surface",
@@ -787,6 +795,7 @@ def _modal_region_slug(region_label: str) -> str:
 
 def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
     return {
+        "caller_region_label": args.caller_region_label,
         "modal_ingress": args.modal_ingress,
         "daemon_http_version": args.daemon_http_version,
         "resource_profile": args.resource_profile,

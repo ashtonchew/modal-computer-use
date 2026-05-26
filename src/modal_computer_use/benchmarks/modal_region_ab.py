@@ -86,12 +86,19 @@ def modal_region_ab_markdown_summary(result: dict[str, Any]) -> str:
     lines = [
         f"### {title}",
         "",
-        (
-            "| Region | Fastest 0B p50 | Delta vs fastest | Fastest encoding | "
-            "HTTP 0B | WS envelope 0B | WS JSON 0B | WS envelope 250KB |"
-        ),
-        "| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
     ]
+    caller_region_label = metadata.get("caller_region_label")
+    if isinstance(caller_region_label, str) and caller_region_label:
+        lines.extend([f"Caller region label: `{caller_region_label}`.", ""])
+    lines.extend(
+        [
+            (
+                "| Region | Fastest 0B p50 | Delta vs fastest | Fastest encoding | "
+                "HTTP 0B | WS envelope 0B | WS JSON 0B | WS envelope 250KB |"
+            ),
+            "| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for region, row in rows.items():
         if not isinstance(row, dict):
             continue
