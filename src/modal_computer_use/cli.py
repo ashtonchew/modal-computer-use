@@ -228,6 +228,57 @@ def main(argv: list[str] | None = None) -> int:
     ingress_ab_parser.add_argument("--output", type=Path)
     ingress_ab_parser.add_argument("--json", action="store_true", default=True)
 
+    region_ab_parser = benchmark_subparsers.add_parser("modal-region-ab")
+    region_ab_parser.set_defaults(modal_region=None)
+    region_ab_parser.add_argument("--app-name", default="modal-computer-use")
+    region_ab_parser.add_argument("--name")
+    region_ab_parser.add_argument(
+        "--modal-region",
+        dest="modal_regions",
+        action="append",
+        help=(
+            "Modal region to test; repeatable. Use 'default' for Modal's default "
+            "placement. Defaults to default, us-west, us-east."
+        ),
+    )
+    region_ab_parser.add_argument(
+        "--modal-ingress",
+        choices=["attested-tunnel", "connect", "tunnel"],
+        default="attested-tunnel",
+        help="Modal daemon ingress to compare across regions; defaults to attested-tunnel",
+    )
+    region_ab_parser.add_argument(
+        "--daemon-http-version",
+        choices=["1.1", "2"],
+        default="1.1",
+        help="daemon transport HTTP version for created Modal sandboxes; defaults to 1.1",
+    )
+    region_ab_parser.add_argument("--resource-profile")
+    region_ab_parser.add_argument("--browser")
+    region_ab_parser.add_argument("--gpu")
+    region_ab_parser.add_argument("--modal-cpu", type=float)
+    region_ab_parser.add_argument("--modal-memory-mib", type=int)
+    region_ab_parser.add_argument(
+        "--input-rate-limit-per-sec",
+        type=int,
+        default=0,
+        help=(
+            "daemon input action rate limit for created benchmark sandboxes; "
+            "defaults to 0 so primitive latency runs do not measure throttling"
+        ),
+    )
+    region_ab_parser.add_argument(
+        "--input-backend",
+        choices=["auto", "xtest", "xdotool"],
+        default="auto",
+        help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
+    )
+    region_ab_parser.add_argument("--image-profile", dest="image_profile")
+    region_ab_parser.add_argument("--image-variant", dest="image_profile")
+    region_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
+    region_ab_parser.add_argument("--output", type=Path)
+    region_ab_parser.add_argument("--json", action="store_true", default=True)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -307,6 +358,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.benchmark_command == "modal-ingress-ab":
         _validate_modal_create_args(args, parser=ingress_ab_parser)
         return _benchmark_modal_ingress_ab(args)
+    if args.benchmark_command == "modal-region-ab":
+        _validate_modal_create_args(args, parser=region_ab_parser)
+        return _benchmark_modal_region_ab(args, parser=region_ab_parser)
     return _benchmark_report(args)
 
 
@@ -591,6 +645,142 @@ def _benchmark_modal_ingress_ab(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
+def _benchmark_modal_region_ab(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+) -> int:
+    import time
+
+    regions = _modal_region_ab_regions(args, parser=parser)
+    run_id = new_run_id()
+    runs: dict[str, Any] = {}
+    failures: list[dict[str, Any]] = []
+    for region_label in regions:
+        region = None if region_label == "default" else region_label
+        region_run_id = f"{run_id}-{_modal_region_slug(region_label)}"
+        config = _modal_benchmark_config(args, run_id=region_run_id, modal_region=region)
+        app_tags = {"benchmark": "modal-region-ab", "benchmark_run_id": run_id}
+        tags = {
+            "benchmark": "modal-region-ab",
+            "benchmark_run_id": run_id,
+            "surface": "daemon-transport-floor",
+            "modal_region": region_label,
+        }
+        computer_name = _modal_region_ab_name(args.name, region_label, region_count=len(regions))
+        started = time.perf_counter()
+        computer = ComputerSandbox.create(
+            config=config,
+            app_name=args.app_name,
+            name=computer_name,
+            app_tags=app_tags,
+            tags=tags,
+            wait=True,
+        )
+        cold_create_to_ready_ms = (time.perf_counter() - started) * 1000
+        try:
+            metadata = {
+                **_modal_region_ab_environment_metadata(args),
+                "modal_region": region,
+                "modal_region_label": region_label,
+                "modal_cold_create_to_ready_ms": cold_create_to_ready_ms,
+                "modal_run_id": region_run_id,
+                "modal_ab_run_id": run_id,
+                "modal_app_name": args.app_name,
+                "modal_sandbox_id": (
+                    computer.metadata().sandbox_id if computer.metadata() else None
+                ),
+                "modal_cpu_count": args.modal_cpu,
+                "modal_memory_gib": (
+                    args.modal_memory_mib / 1024 if args.modal_memory_mib is not None else None
+                ),
+            }
+            result = run_sdk_surface_benchmark(
+                surfaces=["daemon-transport-floor"],
+                client=computer.client,
+                mode="http",
+                iterations=args.iterations,
+                base_url=computer.client.base_url,
+                environment_metadata=metadata,
+            )
+            runs[region_label] = result
+            failures.extend(result.get("failures", []))
+        finally:
+            computer.terminate()
+            computer.detach()
+
+    result = {
+        "ok": all(run.get("ok") for run in runs.values()),
+        "benchmark": "modal-region-ab",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "iterations": args.iterations,
+        "metadata": {
+            "regions": regions,
+            "surface": "daemon-transport-floor",
+            "modal_ingress": args.modal_ingress,
+            "daemon_http_version": args.daemon_http_version,
+            "comparison": "fresh Modal sandbox per region, same daemon transport-floor surface",
+        },
+        "runs": runs,
+        "comparison": _modal_region_ab_comparison(runs),
+        "failures": failures,
+    }
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result["ok"] else 1
+
+
+def _modal_region_ab_regions(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+) -> list[str]:
+    values = args.modal_regions or ["default", "us-west", "us-east"]
+    regions: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        region = value.strip()
+        if not region:
+            parser.error("--modal-region must not be empty")
+        if region in seen:
+            continue
+        seen.add(region)
+        regions.append(region)
+    return regions
+
+
+def _modal_region_ab_name(
+    name: str | None,
+    region_label: str,
+    *,
+    region_count: int,
+) -> str | None:
+    if not name:
+        return None
+    if region_count == 1:
+        return name
+    return f"{name}-{_modal_region_slug(region_label)}"
+
+
+def _modal_region_slug(region_label: str) -> str:
+    return "".join(char if char.isalnum() else "-" for char in region_label).strip("-") or "region"
+
+
+def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "modal_ingress": args.modal_ingress,
+        "daemon_http_version": args.daemon_http_version,
+        "resource_profile": args.resource_profile,
+        "browser": args.browser,
+        "gpu": args.gpu,
+        "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
+        "image_profile": args.image_profile,
+    }
+
+
 def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:
     sandbox = computer._sandbox
     if sandbox is None:
@@ -649,6 +839,100 @@ def _modal_ingress_ab_comparison(
     return rows
 
 
+def _modal_region_ab_comparison(runs: dict[str, Any]) -> dict[str, Any]:
+    rows: dict[str, Any] = {}
+    fastest_region: str | None = None
+    fastest_ms: float | None = None
+    for region, result in runs.items():
+        summary = _transport_floor_summary(result)
+        cases = summary.get("cases") if isinstance(summary, dict) else {}
+        fastest_case = summary.get("fastest_floor_case") if isinstance(summary, dict) else None
+        fastest_case_summary = (
+            cases.get(fastest_case, {}) if isinstance(cases, dict) and fastest_case else {}
+        )
+        region_fastest_ms = _summary_p50(fastest_case_summary)
+        if region_fastest_ms is not None and (
+            fastest_ms is None or region_fastest_ms < fastest_ms
+        ):
+            fastest_ms = region_fastest_ms
+            fastest_region = region
+        rows[region] = {
+            "ok": bool(result.get("ok")),
+            "fastest_floor_case": fastest_case,
+            "fastest_floor_p50_ms": region_fastest_ms,
+            "fastest_floor_inlier_mean_ms": _summary_value(
+                fastest_case_summary,
+                "inlier_mean",
+            ),
+            "fastest_floor_outlier_count": _summary_value(
+                fastest_case_summary,
+                "outlier_count",
+            ),
+            "http_binary_0b_p50_ms": _transport_floor_case_p50(
+                cases,
+                "http_binary_0b",
+            ),
+            "websocket_binary_envelope_0b_p50_ms": _transport_floor_case_p50(
+                cases,
+                "websocket_binary_envelope_0b",
+            ),
+            "websocket_json_metadata_binary_payload_0b_p50_ms": _transport_floor_case_p50(
+                cases,
+                "websocket_json_metadata_binary_payload_0b",
+            ),
+            "websocket_binary_envelope_250kb_p50_ms": _transport_floor_case_p50(
+                cases,
+                "websocket_binary_envelope_250kb",
+            ),
+            "websocket_json_metadata_binary_payload_250kb_p50_ms": _transport_floor_case_p50(
+                cases,
+                "websocket_json_metadata_binary_payload_250kb",
+            ),
+        }
+    for row in rows.values():
+        region_fastest_ms = row["fastest_floor_p50_ms"]
+        row["delta_vs_fastest_ms"] = (
+            None
+            if region_fastest_ms is None or fastest_ms is None
+            else region_fastest_ms - fastest_ms
+        )
+        row["ratio_vs_fastest"] = (
+            None
+            if region_fastest_ms is None or fastest_ms is None or fastest_ms == 0
+            else region_fastest_ms / fastest_ms
+        )
+    return {
+        "fastest_region": fastest_region,
+        "fastest_floor_p50_ms": fastest_ms,
+        "regions": rows,
+    }
+
+
+def _transport_floor_summary(result: dict[str, Any]) -> dict[str, Any]:
+    value = (
+        result.get("surfaces", {})
+        .get("daemon-transport-floor", {})
+        .get("transport_floor_summary", {})
+    )
+    return value if isinstance(value, dict) else {}
+
+
+def _transport_floor_case_p50(cases: object, case_name: str) -> float | None:
+    if not isinstance(cases, dict):
+        return None
+    case = cases.get(case_name, {})
+    return _summary_p50(case if isinstance(case, dict) else {})
+
+
+def _summary_p50(summary: dict[str, Any]) -> float | None:
+    return _summary_value(summary, "p50")
+
+
+def _summary_value(summary: dict[str, Any], key: str) -> float | None:
+    value = summary.get(key)
+    return float(value) if isinstance(value, int | float) else None
+
+
 def _daemon_case(result: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
     value: Any = result.get("surfaces", {}).get("daemon-http", {}).get("cases", {})
     for key in path:
@@ -679,11 +963,12 @@ def _modal_benchmark_config(
     *,
     run_id: str,
     ingress: ModalIngress | None = None,
+    modal_region: str | None = None,
 ) -> ComputerConfig:
     config = ComputerConfig(run_id=run_id)
     config.ingress = ingress or args.modal_ingress
     config.network.daemon_http_version = getattr(args, "daemon_http_version", "1.1")
-    config.runtime.modal_region = args.modal_region
+    config.runtime.modal_region = modal_region if modal_region is not None else args.modal_region
     config.resources.profile = _modal_benchmark_resource_profile(args)
     config.resources.gpu = args.gpu
     config.resources.cpu = args.modal_cpu

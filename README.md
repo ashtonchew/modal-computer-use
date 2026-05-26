@@ -105,11 +105,25 @@ uv run computer-use benchmark sdk \
   --iterations 5
 ```
 
-Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through a Modal
-connect token, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a generated
+Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through the selected
+Modal ingress, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a generated
 `benchmark_run_id`, then terminates and detaches the sandbox. The report records the canonical
-ingress label as `modal-daemon-connect` in metadata. Passing `--gpu` defaults the created resource
-profile to `browser-gpu` unless `--resource-profile` is supplied.
+ingress label in metadata. Passing `--gpu` defaults the created resource profile to `browser-gpu`
+unless `--resource-profile` is supplied.
+Use `--modal-region` to pin placement for created benchmark sandboxes when measuring latency from a
+known caller location. The same creation knob is available in SDK code as
+`ComputerConfig(runtime={"modal_region": "us-west"})`; leaving it unset preserves Modal's default
+placement policy.
+
+To compare placement directly, run one fresh `daemon-transport-floor` sandbox per region:
+
+```bash
+uv run computer-use benchmark modal-region-ab --iterations 30 \
+  --modal-region default --modal-region us-west --modal-region us-east
+```
+
+The region A/B command keeps ingress, daemon HTTP version, image profile, and resource knobs fixed
+while varying only Modal placement.
 
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`

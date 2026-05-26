@@ -36,6 +36,13 @@ class RuntimeConfig(StrictBaseModel):
     readiness_timeout_seconds: int = Field(default=120, ge=1, le=900)
     modal_region: str | None = None
 
+    @field_validator("modal_region")
+    @classmethod
+    def _valid_modal_region(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("modal_region must be non-empty when set")
+        return value
+
 
 class ResourceConfig(StrictBaseModel):
     profile: Literal["standard", "browser", "browser-gpu", "custom"] = "standard"
