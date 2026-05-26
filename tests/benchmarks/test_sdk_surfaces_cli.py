@@ -217,6 +217,18 @@ def test_benchmark_sdk_requires_daemon_hot_session_target(capsys) -> None:
     ) in captured.err
 
 
+def test_benchmark_sdk_requires_daemon_transport_floor_target(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "sdk", "--surface", "daemon-transport-floor"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert (
+        "daemon-transport-floor surface benchmark requires --base-url "
+        "or --create-modal-sandbox"
+    ) in captured.err
+
+
 def test_benchmark_sdk_structures_and_redacts_surface_failures(monkeypatch) -> None:
     def fail_surface(**kwargs):
         raise RuntimeError(

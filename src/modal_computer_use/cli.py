@@ -90,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=[
             "daemon-http",
             "daemon-hot-session",
+            "daemon-transport-floor",
             "daemon-observation-stream",
             "sandbox-exec",
             "openai-adapter",
@@ -256,6 +257,13 @@ def main(argv: list[str] | None = None) -> int:
                 "daemon-observation-stream surface benchmark requires --base-url "
                 "or --create-modal-sandbox"
             )
+        if "daemon-transport-floor" in surfaces and not (
+            args.base_url or args.create_modal_sandbox
+        ):
+            sdk_parser.error(
+                "daemon-transport-floor surface benchmark requires --base-url "
+                "or --create-modal-sandbox"
+            )
         if args.create_modal_sandbox:
             if args.mock_local or args.base_url:
                 sdk_parser.error(
@@ -264,11 +272,13 @@ def main(argv: list[str] | None = None) -> int:
             if not {
                 "daemon-http",
                 "daemon-hot-session",
+                "daemon-transport-floor",
                 "daemon-observation-stream",
             }.intersection(surfaces):
                 sdk_parser.error(
                     "--create-modal-sandbox requires surface daemon-http, "
-                    "daemon-hot-session, or daemon-observation-stream"
+                    "daemon-hot-session, daemon-transport-floor, "
+                    "or daemon-observation-stream"
                 )
             _validate_modal_create_args(args, parser=sdk_parser)
         if "sandbox-exec" in surfaces and not args.sandbox_id:
@@ -727,6 +737,7 @@ def _sdk_surfaces(
         return list(DEFAULT_SDK_BENCHMARK_SURFACES)
     allowed = set(DEFAULT_SDK_BENCHMARK_SURFACES) | {
         "daemon-hot-session",
+        "daemon-transport-floor",
         "daemon-observation-stream",
         "sandbox-exec",
     }
