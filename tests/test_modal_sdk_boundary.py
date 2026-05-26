@@ -260,6 +260,25 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert computer.metadata().created_at is not None
 
 
+def test_create_passes_modal_region_when_set(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123", runtime={"modal_region": "us-west"})
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["region"] == "us-west"
+
+
+def test_create_omits_modal_region_by_default(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    ComputerSandbox.create(config=ComputerConfig(run_id="run-123"), image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert "region" not in kwargs
+
+
 def test_create_preserves_reserved_computer_use_tags(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(run_id="run-123")

@@ -468,6 +468,29 @@ lowest-dependency compatibility path and matches non-h2 local daemon clients. Us
 when benchmarking or operating a hot primitive loop that benefits from request multiplexing and
 lower connection overhead.
 
+Modal region placement is an explicit latency knob for created sandboxes. Use
+`ComputerConfig(runtime={"modal_region": "us-west"})` or benchmark `--modal-region us-west` when
+the caller/model location is known. Leave it unset when availability/cold-start flexibility matters
+more than predictable low latency. Region placement only affects new sandboxes; attach/reuse cannot
+relocate an existing sandbox.
+
+On May 26, 2026, a 30x `daemon-transport-floor` matrix from the development environment showed
+region dominated ingress and HTTP-version differences for the 0B receive floor:
+
+| Ingress | HTTP | Region | Fastest 0B p50 | Notes |
+| --- | ---: | --- | ---: | --- |
+| `attested-tunnel` | 1.1 | `us-west` | 51.4ms | Best measured canonical SDK path. |
+| `connect` | 1.1 | `us-west` | 58.2ms | Close to attested for small hot WebSocket frames. |
+| `attested-tunnel` | 1.1 | default | 97.3ms | Modal default placement for this run. |
+| `attested-tunnel` | 1.1 | `us-east` | 90.0ms | Cross-region path from this caller was slower. |
+| `connect` | 1.1 | `us-east` | 100.1ms | Similar cross-region penalty. |
+| `attested-tunnel` | 2 | default | 100.3ms | HTTP/2 did not improve the WebSocket receive floor. |
+
+The matching 10x observation sanity run on `attested-tunnel`, HTTP/1.1, `us-west` measured
+`73.4ms` p50 action-to-frame for `act_and_observe_auto_signal_production`, while daemon action
+work was only `0.7ms` p50. That supports the current diagnosis: for interactive observation, region
+and client receive path dominate daemon action execution.
+
 Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
 product default remains `20`, but primitive latency benchmarks should not measure intentional
 throttling. Pass `--input-rate-limit-per-sec` when the benchmark target is rate-limit behavior

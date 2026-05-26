@@ -22,6 +22,13 @@ Per current Modal docs, configure the Sandbox with:
   bootstrap request, then the daemon mints a short-lived bearer token for low-latency tunnel calls
   on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
   Connect, or `ingress="tunnel"` for a static daemon bearer token in trusted benchmark harnesses.
+- **Region placement** is controlled by `ComputerConfig(runtime={"modal_region": "..."})` for new
+  sandboxes. Leave it unset to let Modal choose placement. Pin it when latency matters and the
+  caller/model location is known; live 2026-05-26 transport-floor runs from the current development
+  environment measured `attested-tunnel` 0B WebSocket p50 at `51.4ms` in `us-west` versus `90.0ms`
+  in `us-east` and `97.3ms` with default placement. Region is part of `ComputerConfig`, so
+  attach-or-create reuse with config-hash checks will not silently reuse a sandbox created for a
+  different region.
 - **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
 - **Tags** are applied after creation with `Sandbox.set_tags()` and used for `Sandbox.list(tags=...)` attach and recovery flows.
 
@@ -78,6 +85,12 @@ so incompatible desktop/runtime settings are not silently reused. Use
 Attached metadata is limited to safe operational fields such as sandbox ID, app name, sandbox
 name, run ID, owner, creation time, config hash, tags, and artifact directory. Connect tokens are
 never stored there.
+
+Region placement only applies when a sandbox is created. `attach()` and the reuse branch of
+`attach_or_create()` cannot move an existing sandbox to a different Modal region. If a latency
+profile requires a specific region, create a new sandbox with
+`ComputerConfig(runtime={"modal_region": "us-west"})` or use the default config mismatch behavior to
+reject an incompatible reused sandbox.
 
 ## Cleanup
 

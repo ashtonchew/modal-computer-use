@@ -22,6 +22,11 @@ def test_config_aliases_and_vnc_normalization() -> None:
     assert config.actions.post_action_delay_ms == 0
 
 
+def test_runtime_modal_region_rejects_empty_string() -> None:
+    with pytest.raises(ValidationError, match="modal_region must be non-empty"):
+        ComputerConfig(runtime={"modal_region": "   "})
+
+
 def test_region_validation() -> None:
     with pytest.raises(ValidationError):
         Region(x=0, y=0, width=0, height=10)

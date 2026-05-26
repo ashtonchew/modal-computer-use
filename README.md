@@ -110,6 +110,10 @@ connect token, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus
 `benchmark_run_id`, then terminates and detaches the sandbox. The report records the canonical
 ingress label as `modal-daemon-connect` in metadata. Passing `--gpu` defaults the created resource
 profile to `browser-gpu` unless `--resource-profile` is supplied.
+Use `--modal-region` to pin placement for created benchmark sandboxes when measuring latency from a
+known caller location. The same creation knob is available in SDK code as
+`ComputerConfig(runtime={"modal_region": "us-west"})`; leaving it unset preserves Modal's default
+placement policy.
 
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`
