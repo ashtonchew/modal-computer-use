@@ -504,6 +504,24 @@ uv run computer-use benchmark modal-region-ab --iterations 30 \
 The helper creates one fresh Modal sandbox per region, keeps the ingress/resource/image knobs fixed,
 runs only `daemon-transport-floor`, and reports the fastest 0B receive floor plus common WebSocket
 and HTTP payload cases for each region. Use `default` to include Modal's unpinned placement policy.
+Render a copyable markdown table from the JSON artifact with:
+
+```bash
+uv run computer-use benchmark modal-region-summary modal-region-ab-attested-h1-30x-YYYYMMDD.json
+```
+
+Record the caller location, ingress, daemon HTTP version, image profile, resource profile, and
+iteration count next to any published table. Region benchmarks are most useful when they are treated
+as operational measurements from a specific caller/model-loop location, not as universal provider
+truths.
+
+A later May 26, 2026 `modal-region-ab` run from the same development environment measured:
+
+| Region | Fastest 0B p50 | Delta vs fastest | Fastest encoding | HTTP 0B | WS envelope 0B | WS JSON 0B | WS envelope 250KB |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| default | 71.3ms | 41.9ms | `websocket_binary_envelope` | 73.5ms | 71.3ms | 71.7ms | 101.1ms |
+| `us-east` | 70.7ms | 41.2ms | `websocket_binary_envelope` | 71.7ms | 70.7ms | 80.8ms | 93.8ms |
+| `us-west` | 29.5ms | 0.0ms | `websocket_binary_envelope` | 36.5ms | 29.5ms | 33.2ms | 54.4ms |
 
 Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
 product default remains `20`, but primitive latency benchmarks should not measure intentional

@@ -15,6 +15,11 @@ from .benchmarks import (
     run_benchmark_report_mock_local,
 )
 from .benchmarks.billing import modal_billing_reconciliation_request
+from .benchmarks.modal_region_ab import (
+    DEFAULT_MODAL_REGION_AB_REGIONS,
+    modal_region_ab_comparison,
+    modal_region_ab_markdown_summary,
+)
 from .benchmarks.surfaces import (
     run_sdk_surface_benchmark,
     run_sdk_surface_benchmark_mock_local,
@@ -279,6 +284,16 @@ def main(argv: list[str] | None = None) -> int:
     region_ab_parser.add_argument("--output", type=Path)
     region_ab_parser.add_argument("--json", action="store_true", default=True)
 
+    region_summary_parser = benchmark_subparsers.add_parser("modal-region-summary")
+    region_summary_parser.add_argument("path", type=Path)
+    region_summary_parser.add_argument(
+        "--format",
+        choices=["markdown", "json"],
+        default="markdown",
+        help="summary output format; defaults to markdown",
+    )
+    region_summary_parser.add_argument("--output", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -361,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.benchmark_command == "modal-region-ab":
         _validate_modal_create_args(args, parser=region_ab_parser)
         return _benchmark_modal_region_ab(args, parser=region_ab_parser)
+    if args.benchmark_command == "modal-region-summary":
+        return _benchmark_modal_region_summary(args)
     return _benchmark_report(args)
 
 
@@ -665,7 +682,6 @@ def _benchmark_modal_region_ab(
             "benchmark": "modal-region-ab",
             "benchmark_run_id": run_id,
             "surface": "daemon-transport-floor",
-            "modal_region": region_label,
         }
         computer_name = _modal_region_ab_name(args.name, region_label, region_count=len(regions))
         started = time.perf_counter()
@@ -722,7 +738,7 @@ def _benchmark_modal_region_ab(
             "comparison": "fresh Modal sandbox per region, same daemon transport-floor surface",
         },
         "runs": runs,
-        "comparison": _modal_region_ab_comparison(runs),
+        "comparison": modal_region_ab_comparison(runs),
         "failures": failures,
     }
     output = _json_string(result)
@@ -738,7 +754,7 @@ def _modal_region_ab_regions(
     *,
     parser: argparse.ArgumentParser,
 ) -> list[str]:
-    values = args.modal_regions or ["default", "us-west", "us-east"]
+    values = args.modal_regions or list(DEFAULT_MODAL_REGION_AB_REGIONS)
     regions: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -779,6 +795,28 @@ def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str,
         "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
         "image_profile": args.image_profile,
     }
+
+
+def _benchmark_modal_region_summary(args: argparse.Namespace) -> int:
+    payload = json.loads(args.path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit("modal region benchmark artifact must be a JSON object")
+    if args.format == "json":
+        output = _json_string(
+            {
+                "benchmark": payload.get("benchmark"),
+                "generated_at": payload.get("generated_at"),
+                "metadata": payload.get("metadata"),
+                "comparison": modal_region_ab_comparison(_dict_value(payload.get("runs"))),
+            }
+        )
+    else:
+        output = modal_region_ab_markdown_summary(payload)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0
 
 
 def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:
@@ -837,100 +875,6 @@ def _modal_ingress_ab_comparison(
             "attested_overhead_mean_ms": _case_overhead_mean(attested_case),
         }
     return rows
-
-
-def _modal_region_ab_comparison(runs: dict[str, Any]) -> dict[str, Any]:
-    rows: dict[str, Any] = {}
-    fastest_region: str | None = None
-    fastest_ms: float | None = None
-    for region, result in runs.items():
-        summary = _transport_floor_summary(result)
-        cases = summary.get("cases") if isinstance(summary, dict) else {}
-        fastest_case = summary.get("fastest_floor_case") if isinstance(summary, dict) else None
-        fastest_case_summary = (
-            cases.get(fastest_case, {}) if isinstance(cases, dict) and fastest_case else {}
-        )
-        region_fastest_ms = _summary_p50(fastest_case_summary)
-        if region_fastest_ms is not None and (
-            fastest_ms is None or region_fastest_ms < fastest_ms
-        ):
-            fastest_ms = region_fastest_ms
-            fastest_region = region
-        rows[region] = {
-            "ok": bool(result.get("ok")),
-            "fastest_floor_case": fastest_case,
-            "fastest_floor_p50_ms": region_fastest_ms,
-            "fastest_floor_inlier_mean_ms": _summary_value(
-                fastest_case_summary,
-                "inlier_mean",
-            ),
-            "fastest_floor_outlier_count": _summary_value(
-                fastest_case_summary,
-                "outlier_count",
-            ),
-            "http_binary_0b_p50_ms": _transport_floor_case_p50(
-                cases,
-                "http_binary_0b",
-            ),
-            "websocket_binary_envelope_0b_p50_ms": _transport_floor_case_p50(
-                cases,
-                "websocket_binary_envelope_0b",
-            ),
-            "websocket_json_metadata_binary_payload_0b_p50_ms": _transport_floor_case_p50(
-                cases,
-                "websocket_json_metadata_binary_payload_0b",
-            ),
-            "websocket_binary_envelope_250kb_p50_ms": _transport_floor_case_p50(
-                cases,
-                "websocket_binary_envelope_250kb",
-            ),
-            "websocket_json_metadata_binary_payload_250kb_p50_ms": _transport_floor_case_p50(
-                cases,
-                "websocket_json_metadata_binary_payload_250kb",
-            ),
-        }
-    for row in rows.values():
-        region_fastest_ms = row["fastest_floor_p50_ms"]
-        row["delta_vs_fastest_ms"] = (
-            None
-            if region_fastest_ms is None or fastest_ms is None
-            else region_fastest_ms - fastest_ms
-        )
-        row["ratio_vs_fastest"] = (
-            None
-            if region_fastest_ms is None or fastest_ms is None or fastest_ms == 0
-            else region_fastest_ms / fastest_ms
-        )
-    return {
-        "fastest_region": fastest_region,
-        "fastest_floor_p50_ms": fastest_ms,
-        "regions": rows,
-    }
-
-
-def _transport_floor_summary(result: dict[str, Any]) -> dict[str, Any]:
-    value = (
-        result.get("surfaces", {})
-        .get("daemon-transport-floor", {})
-        .get("transport_floor_summary", {})
-    )
-    return value if isinstance(value, dict) else {}
-
-
-def _transport_floor_case_p50(cases: object, case_name: str) -> float | None:
-    if not isinstance(cases, dict):
-        return None
-    case = cases.get(case_name, {})
-    return _summary_p50(case if isinstance(case, dict) else {})
-
-
-def _summary_p50(summary: dict[str, Any]) -> float | None:
-    return _summary_value(summary, "p50")
-
-
-def _summary_value(summary: dict[str, Any], key: str) -> float | None:
-    value = summary.get(key)
-    return float(value) if isinstance(value, int | float) else None
 
 
 def _daemon_case(result: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
@@ -1047,6 +991,10 @@ def _print_json(data: dict[str, Any]) -> None:
 
 def _json_string(data: dict[str, Any]) -> str:
     return json.dumps(data, indent=2, sort_keys=True)
+
+
+def _dict_value(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _sandbox_exec_setup_failure(exc: Exception) -> dict[str, Any]:
