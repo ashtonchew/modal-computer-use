@@ -23,12 +23,12 @@ Per current Modal docs, configure the Sandbox with:
   on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
   Connect, or `ingress="tunnel"` for a static daemon bearer token in trusted benchmark harnesses.
 - **Region placement** is controlled by `ComputerConfig(runtime={"modal_region": "..."})` for new
-  sandboxes. Leave it unset to let Modal choose placement. Pin it when latency matters and the
-  caller/model location is known; live 2026-05-26 transport-floor runs from the current development
-  environment measured `attested-tunnel` 0B WebSocket p50 at `51.4ms` in `us-west` versus `90.0ms`
-  in `us-east` and `97.3ms` with default placement. Region is part of `ComputerConfig`, so
-  attach-or-create reuse with config-hash checks will not silently reuse a sandbox created for a
-  different region.
+  sandboxes. Leave it unset to let Modal choose placement. Pin it when latency matters and a
+  benchmark from the caller/model-loop environment shows a clear winner; live 2026-05-26
+  transport-floor runs from the current development environment measured `attested-tunnel` 0B
+  WebSocket p50 at `29.5ms` in `us-west` versus roughly `71ms` for default/`us-east`. Region is
+  part of `ComputerConfig`, so attach-or-create reuse with config-hash checks will not silently
+  reuse a sandbox created for a different region.
 - **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
 - **Tags** are applied after creation with `Sandbox.set_tags()` and used for `Sandbox.list(tags=...)` attach and recovery flows.
 

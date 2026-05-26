@@ -474,6 +474,15 @@ the caller/model location is known. Leave it unset when availability/cold-start 
 more than predictable low latency. Region placement only affects new sandboxes; attach/reuse cannot
 relocate an existing sandbox.
 
+Region policy:
+
+| Situation | Policy | Why |
+| --- | --- | --- |
+| General SDK usage | Leave `runtime.modal_region=None` | Preserves Modal's default placement and availability behavior. |
+| Production agent/model loop | Pin the fastest measured region near the caller/model loop | The hot path is caller-to-sandbox receive latency, not end-user geography. |
+| Published latency claim | Run `modal-region-ab` from the actual caller environment | Region results are operational measurements and should include caller context. |
+| Reused sandbox | Do not expect relocation | Region only applies when creating a new Modal sandbox. |
+
 On May 26, 2026, a 30x `daemon-transport-floor` matrix from the development environment showed
 region dominated ingress and HTTP-version differences for the 0B receive floor:
 
@@ -498,12 +507,15 @@ fresh-sandbox commands:
 uv run computer-use benchmark modal-region-ab --iterations 30 \
   --modal-region default --modal-region us-west --modal-region us-east \
   --modal-ingress attested-tunnel --daemon-http-version 1.1 \
+  --caller-region-label dev-laptop-us-west \
   --output modal-region-ab-attested-h1-30x-YYYYMMDD.json
 ```
 
 The helper creates one fresh Modal sandbox per region, keeps the ingress/resource/image knobs fixed,
 runs only `daemon-transport-floor`, and reports the fastest 0B receive floor plus common WebSocket
 and HTTP payload cases for each region. Use `default` to include Modal's unpinned placement policy.
+`--caller-region-label` is free-form metadata for the caller/model-loop location; it does not change
+Modal placement.
 Render a copyable markdown table from the JSON artifact with:
 
 ```bash

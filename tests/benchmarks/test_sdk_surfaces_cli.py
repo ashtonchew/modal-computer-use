@@ -557,6 +557,8 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
             "1",
             "--modal-ingress",
             "attested-tunnel",
+            "--caller-region-label",
+            "dev-laptop-us-west",
             "--name",
             "region-ab",
         ]
@@ -579,6 +581,10 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
     assert benchmark_calls[1]["surfaces"] == ["daemon-transport-floor"]
     assert payload["benchmark"] == "modal-region-ab"
     assert payload["metadata"]["regions"] == ["default", "us-west"]
+    assert payload["metadata"]["caller_region_label"] == "dev-laptop-us-west"
+    assert benchmark_calls[0]["environment_metadata"]["caller_region_label"] == (
+        "dev-laptop-us-west"
+    )
     assert payload["comparison"]["fastest_region"] == "us-west"
     assert payload["comparison"]["regions"]["default"]["delta_vs_fastest_ms"] == 50.0
     assert payload["comparison"]["regions"]["default"]["fastest_floor_encoding"] == (

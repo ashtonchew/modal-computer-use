@@ -250,8 +250,10 @@ sandboxes; attaching or reusing an existing sandbox cannot relocate it. Because 
 `ComputerConfig`, it participates in the existing config-hash mismatch protection for reuse flows.
 Use `computer-use benchmark modal-region-ab` to compare fresh `daemon-transport-floor` runs across
 repeatable `--modal-region` values while holding ingress, HTTP version, image, and resource knobs
-fixed. Use `computer-use benchmark modal-region-summary <artifact.json>` to render the resulting
-JSON as a markdown table for benchmark notes and PR descriptions.
+fixed. Pass `--caller-region-label` to record where the benchmark caller or model loop ran; this is
+metadata only and does not affect Modal placement. Use
+`computer-use benchmark modal-region-summary <artifact.json>` to render the resulting JSON as a
+markdown table for benchmark notes and PR descriptions.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an

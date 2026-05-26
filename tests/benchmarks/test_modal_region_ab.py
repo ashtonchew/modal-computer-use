@@ -34,6 +34,7 @@ def test_modal_region_ab_markdown_summary_renders_copyable_table() -> None:
         "metadata": {
             "modal_ingress": "attested-tunnel",
             "daemon_http_version": "1.1",
+            "caller_region_label": "dev-laptop-us-west",
         },
         "runs": {
             "default": _region_result("default", p50=97.3),
@@ -44,6 +45,7 @@ def test_modal_region_ab_markdown_summary_renders_copyable_table() -> None:
     markdown = modal_region_ab_markdown_summary(result)
 
     assert "### Modal region benchmark (attested-tunnel, HTTP/1.1)" in markdown
+    assert "Caller region label: `dev-laptop-us-west`." in markdown
     assert "| Region | Fastest 0B p50 | Delta vs fastest |" in markdown
     assert "| default | 97.3ms | 45.9ms |" in markdown
     assert "| us-west | 51.4ms | 0.0ms |" in markdown
