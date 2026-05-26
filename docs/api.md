@@ -248,6 +248,9 @@ computer = ComputerSandbox.create(
 `runtime.modal_region=None` leaves placement to Modal. A region only affects newly created
 sandboxes; attaching or reusing an existing sandbox cannot relocate it. Because the region lives in
 `ComputerConfig`, it participates in the existing config-hash mismatch protection for reuse flows.
+Use `computer-use benchmark modal-region-ab` to compare fresh `daemon-transport-floor` runs across
+repeatable `--modal-region` values while holding ingress, HTTP version, image, and resource knobs
+fixed.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an

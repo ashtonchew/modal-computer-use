@@ -456,6 +456,119 @@ def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch,
     assert payload["comparison"]["move_click"]["delta_ms"] == 10.0
     assert closed == ["close:connect-token", "close:minted-token", "terminate", "detach"]
 
+
+def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
+    monkeypatch,
+    capsys,
+) -> None:
+    created: list[dict[str, object]] = []
+    closed: list[str] = []
+    benchmark_calls: list[dict[str, object]] = []
+
+    class RawClient:
+        def __init__(self, region_label: str) -> None:
+            self.base_url = f"https://{region_label}.daemon.example.modal.host"
+
+    class CreatedComputer:
+        def __init__(self, region_label: str) -> None:
+            self.region_label = region_label
+            self.client = RawClient(region_label)
+
+        def metadata(self):
+            return SimpleNamespace(sandbox_id=f"sb-{self.region_label}")
+
+        def terminate(self) -> None:
+            closed.append(f"terminate:{self.region_label}")
+
+        def detach(self) -> None:
+            closed.append(f"detach:{self.region_label}")
+
+    def fake_create(**kwargs):
+        created.append(kwargs)
+        config = kwargs["config"]
+        region_label = config.runtime.modal_region or "default"
+        return CreatedComputer(region_label)
+
+    def fake_run_sdk_surface_benchmark(**kwargs):
+        benchmark_calls.append(kwargs)
+        region_label = kwargs["environment_metadata"]["modal_region_label"]
+        p50 = 100.0 if region_label == "default" else 50.0
+        return {
+            "ok": True,
+            "surfaces": {
+                "daemon-transport-floor": {
+                    "transport_floor_summary": {
+                        "fastest_floor_case": "websocket_binary_envelope_0b",
+                        "cases": {
+                            "http_binary_0b": {"p50": p50 + 20.0},
+                            "websocket_binary_envelope_0b": {
+                                "p50": p50,
+                                "inlier_mean": p50 - 1.0,
+                                "outlier_count": 0,
+                            },
+                            "websocket_json_metadata_binary_payload_0b": {
+                                "p50": p50 + 10.0
+                            },
+                            "websocket_binary_envelope_250kb": {"p50": p50 + 30.0},
+                            "websocket_json_metadata_binary_payload_250kb": {
+                                "p50": p50 + 40.0
+                            },
+                        },
+                    }
+                }
+            },
+            "failures": [],
+        }
+
+    monkeypatch.setattr(cli.ComputerSandbox, "create", staticmethod(fake_create))
+    monkeypatch.setattr(cli, "run_sdk_surface_benchmark", fake_run_sdk_surface_benchmark)
+    monkeypatch.setattr(cli, "new_run_id", lambda: "modal_region_ab_test")
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "modal-region-ab",
+            "--modal-region",
+            "default",
+            "--modal-region",
+            "us-west",
+            "--iterations",
+            "1",
+            "--modal-ingress",
+            "attested-tunnel",
+            "--name",
+            "region-ab",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    configs = [call["config"] for call in created]
+    assert exit_code == 0
+    assert [config.runtime.modal_region for config in configs] == [None, "us-west"]
+    assert [config.ingress for config in configs] == ["attested-tunnel", "attested-tunnel"]
+    assert [call["name"] for call in created] == ["region-ab-default", "region-ab-us-west"]
+    assert len(benchmark_calls) == 2
+    assert benchmark_calls[0]["surfaces"] == ["daemon-transport-floor"]
+    assert benchmark_calls[1]["surfaces"] == ["daemon-transport-floor"]
+    assert payload["benchmark"] == "modal-region-ab"
+    assert payload["metadata"]["regions"] == ["default", "us-west"]
+    assert payload["comparison"]["fastest_region"] == "us-west"
+    assert payload["comparison"]["regions"]["default"]["delta_vs_fastest_ms"] == 50.0
+    assert payload["comparison"]["regions"]["us-west"]["ratio_vs_fastest"] == 1.0
+    assert closed == [
+        "terminate:default",
+        "detach:default",
+        "terminate:us-west",
+        "detach:us-west",
+    ]
+
+
+def test_benchmark_modal_region_ab_rejects_empty_region() -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["benchmark", "modal-region-ab", "--modal-region", " "])
+
+
 def test_benchmark_sdk_create_modal_sandbox_requires_daemon_http(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(

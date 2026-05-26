@@ -491,6 +491,20 @@ The matching 10x observation sanity run on `attested-tunnel`, HTTP/1.1, `us-west
 work was only `0.7ms` p50. That supports the current diagnosis: for interactive observation, region
 and client receive path dominate daemon action execution.
 
+Use the dedicated region A/B helper to regenerate this comparison without hand-rolling multiple
+fresh-sandbox commands:
+
+```bash
+uv run computer-use benchmark modal-region-ab --iterations 30 \
+  --modal-region default --modal-region us-west --modal-region us-east \
+  --modal-ingress attested-tunnel --daemon-http-version 1.1 \
+  --output modal-region-ab-attested-h1-30x-YYYYMMDD.json
+```
+
+The helper creates one fresh Modal sandbox per region, keeps the ingress/resource/image knobs fixed,
+runs only `daemon-transport-floor`, and reports the fastest 0B receive floor plus common WebSocket
+and HTTP payload cases for each region. Use `default` to include Modal's unpinned placement policy.
+
 Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
 product default remains `20`, but primitive latency benchmarks should not measure intentional
 throttling. Pass `--input-rate-limit-per-sec` when the benchmark target is rate-limit behavior
