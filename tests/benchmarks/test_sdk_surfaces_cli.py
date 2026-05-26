@@ -498,21 +498,42 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
             "surfaces": {
                 "daemon-transport-floor": {
                     "transport_floor_summary": {
-                        "fastest_floor_case": "websocket_binary_envelope_0b",
-                        "cases": {
-                            "http_binary_0b": {"p50": p50 + 20.0},
-                            "websocket_binary_envelope_0b": {
-                                "p50": p50,
-                                "inlier_mean": p50 - 1.0,
-                                "outlier_count": 0,
+                        "encodings": {
+                            "http_binary": {
+                                "cases": [
+                                    {"requested_size_bytes": 0, "p50_ms": p50 + 20.0},
+                                    {
+                                        "requested_size_bytes": 250 * 1024,
+                                        "p50_ms": p50 + 30.0,
+                                    },
+                                ]
                             },
-                            "websocket_json_metadata_binary_payload_0b": {
-                                "p50": p50 + 10.0
+                            "websocket_binary_envelope": {
+                                "cases": [
+                                    {"requested_size_bytes": 0, "p50_ms": p50},
+                                    {
+                                        "requested_size_bytes": 250 * 1024,
+                                        "p50_ms": p50 + 40.0,
+                                    },
+                                ]
                             },
-                            "websocket_binary_envelope_250kb": {"p50": p50 + 30.0},
-                            "websocket_json_metadata_binary_payload_250kb": {
-                                "p50": p50 + 40.0
+                            "websocket_json_metadata_binary_payload": {
+                                "cases": [
+                                    {"requested_size_bytes": 0, "p50_ms": p50 + 10.0},
+                                    {
+                                        "requested_size_bytes": 250 * 1024,
+                                        "p50_ms": p50 + 50.0,
+                                    },
+                                ]
                             },
+                        },
+                        "fastest_floor_case": {
+                            "case": "transport_floor_websocket_binary_envelope_0b",
+                            "requested_size_bytes": 0,
+                            "p50_ms": p50,
+                            "inlier_mean_ms": p50 - 1.0,
+                            "outlier_count": 0,
+                            "transport_encoding": "websocket_binary_envelope",
                         },
                     }
                 }
@@ -548,6 +569,11 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
     assert [config.runtime.modal_region for config in configs] == [None, "us-west"]
     assert [config.ingress for config in configs] == ["attested-tunnel", "attested-tunnel"]
     assert [call["name"] for call in created] == ["region-ab-default", "region-ab-us-west"]
+    assert created[0]["tags"] == {
+        "benchmark": "modal-region-ab",
+        "benchmark_run_id": "modal_region_ab_test",
+        "surface": "daemon-transport-floor",
+    }
     assert len(benchmark_calls) == 2
     assert benchmark_calls[0]["surfaces"] == ["daemon-transport-floor"]
     assert benchmark_calls[1]["surfaces"] == ["daemon-transport-floor"]
@@ -555,6 +581,9 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
     assert payload["metadata"]["regions"] == ["default", "us-west"]
     assert payload["comparison"]["fastest_region"] == "us-west"
     assert payload["comparison"]["regions"]["default"]["delta_vs_fastest_ms"] == 50.0
+    assert payload["comparison"]["regions"]["default"]["fastest_floor_encoding"] == (
+        "websocket_binary_envelope"
+    )
     assert payload["comparison"]["regions"]["us-west"]["ratio_vs_fastest"] == 1.0
     assert closed == [
         "terminate:default",
@@ -567,6 +596,54 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
 def test_benchmark_modal_region_ab_rejects_empty_region() -> None:
     with pytest.raises(SystemExit):
         cli.main(["benchmark", "modal-region-ab", "--modal-region", " "])
+
+
+def test_benchmark_modal_region_summary_outputs_markdown(tmp_path, capsys) -> None:
+    artifact = tmp_path / "modal-region-ab.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "benchmark": "modal-region-ab",
+                "metadata": {
+                    "modal_ingress": "attested-tunnel",
+                    "daemon_http_version": "1.1",
+                },
+                "comparison": {
+                    "fastest_region": "us-west",
+                    "fastest_floor_p50_ms": 51.4,
+                    "regions": {
+                        "default": {
+                            "fastest_floor_p50_ms": 97.3,
+                            "delta_vs_fastest_ms": 45.9,
+                            "fastest_floor_encoding": "websocket_binary_envelope",
+                            "http_binary_0b_p50_ms": 120.0,
+                            "websocket_binary_envelope_0b_p50_ms": 97.3,
+                            "websocket_json_metadata_binary_payload_0b_p50_ms": 110.0,
+                            "websocket_binary_envelope_250kb_p50_ms": 180.0,
+                        },
+                        "us-west": {
+                            "fastest_floor_p50_ms": 51.4,
+                            "delta_vs_fastest_ms": 0.0,
+                            "fastest_floor_encoding": "websocket_binary_envelope",
+                            "http_binary_0b_p50_ms": 70.0,
+                            "websocket_binary_envelope_0b_p50_ms": 51.4,
+                            "websocket_json_metadata_binary_payload_0b_p50_ms": 60.0,
+                            "websocket_binary_envelope_250kb_p50_ms": 100.0,
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = cli.main(["benchmark", "modal-region-summary", str(artifact)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "### Modal region benchmark (attested-tunnel, HTTP/1.1)" in captured.out
+    assert "| default | 97.3ms | 45.9ms |" in captured.out
+    assert "Fastest region: `us-west` at `51.4ms` p50." in captured.out
 
 
 def test_benchmark_sdk_create_modal_sandbox_requires_daemon_http(capsys) -> None:

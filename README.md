@@ -125,6 +125,12 @@ uv run computer-use benchmark modal-region-ab --iterations 30 \
 The region A/B command keeps ingress, daemon HTTP version, image profile, and resource knobs fixed
 while varying only Modal placement.
 
+Turn the raw JSON into a PR-ready table with:
+
+```bash
+uv run computer-use benchmark modal-region-summary modal-region-ab-attested-h1-30x-20260526.json
+```
+
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`
 surface is opt-in with `--surface sandbox-exec --sandbox-id <id>` because it attaches to a live
