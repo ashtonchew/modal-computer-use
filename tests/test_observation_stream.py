@@ -1198,6 +1198,7 @@ def test_observation_client_can_force_binary_envelope_encoding() -> None:
 
 
 def test_observation_client_act_and_observe_returns_causal_result() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
     frame = ObservationFrame(
         payload=b"png",
         metadata={
@@ -1209,7 +1210,7 @@ def test_observation_client_act_and_observe_returns_causal_result() -> None:
             "action_result": {"ok": True},
         },
     )
-    transport = _FakeObservationTransport([frame])
+    transport = _FakeObservationTransport([initial, frame])
     client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
 
     result = client.act_and_observe(actions=[{"type": "wait", "duration_ms": 0}])
@@ -1321,6 +1322,7 @@ def test_observation_transport_run_actions_observe_change_receives_correlated_fr
     assert frame.payload == b"png"
     assert frame.metadata["id"] == "1"
     assert frame.metadata["causal_frame"] is True
+    assert transport.receive_frame().payload == b"old"
 
 
 def test_observation_frame_composes_lossless_patch_bundle() -> None:
@@ -1463,6 +1465,7 @@ def test_observation_frame_compose_applies_patch() -> None:
 class _FakeObservationTransport:
     def __init__(self, frames):
         self._frames = frames
+        self._frame_index = 0
         self.payload = {}
         self.requested_frame = False
         self.action_payload = None
@@ -1478,7 +1481,9 @@ class _FakeObservationTransport:
         self.started = True
 
     def receive_frame(self, *, transport_timing=False):
-        return self._frames[0]
+        frame = self._frames[self._frame_index]
+        self._frame_index += 1
+        return frame
 
     def close(self):
         pass
@@ -1500,7 +1505,7 @@ class _FakeObservationTransport:
 
     def run_actions_observe_change_and_recv(self, payload, *, transport_timing=False):
         self.change_payload = payload
-        return self._frames[0]
+        return self.receive_frame(transport_timing=transport_timing)
 
     def configure(self, payload):
         self.payload.update(payload)
