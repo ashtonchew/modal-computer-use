@@ -142,11 +142,15 @@ normal external caller with an ephemeral same-region Modal runner:
 
 ```bash
 uv run computer-use benchmark modal-colocated-client --iterations 30 \
-  --modal-region us-west --caller-region-label dev-laptop-us-west
+  --modal-region us-west --caller-region-label dev-laptop-us-west --browser chromium \
+  --surface daemon-transport-floor --surface daemon-observation-stream
 ```
 
-This command creates a target sandbox, measures `daemon-transport-floor` from the current process,
-then runs the same benchmark from a temporary Modal runner in the target region.
+This command creates a target sandbox, measures the selected surfaces from the current process,
+then runs the same benchmark from a temporary Modal runner in the target region. Use
+`daemon-transport-floor` for raw receive-floor attribution and `daemon-observation-stream` for the
+causal action-to-frame workload that approximates an agent loop. Observation-stream benchmark runs
+need a browser-capable target image, so pass `--browser chromium` or `--browser firefox`.
 
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`

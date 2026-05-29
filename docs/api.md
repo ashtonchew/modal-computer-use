@@ -256,7 +256,9 @@ metadata only and does not affect Modal placement. Use
 markdown table for benchmark notes and PR descriptions.
 Use `computer-use benchmark modal-colocated-client --modal-region <region>` when you need to test
 whether running the benchmark client from a same-region Modal runner lowers the target sandbox's
-transport floor.
+transport floor. Pass `--surface daemon-observation-stream` as well when you need the causal
+action-to-frame comparison for the observation stream; that surface also requires a browser-capable
+target such as `--browser chromium`.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
