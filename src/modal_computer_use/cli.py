@@ -27,7 +27,12 @@ from .benchmarks.surfaces import (
 from .client import DaemonClient
 from .config import BrowserConfig, ComputerConfig, ModalIngress
 from .errors import ModalNotInstalledError, SandboxUnavailableError
-from .sandbox import ComputerSandbox, _connect_token_parts, modal_sandbox_exec_runner_from_id
+from .sandbox import (
+    ComputerSandbox,
+    _connect_token_parts,
+    modal_sandbox_exec_once,
+    modal_sandbox_exec_runner_from_id,
+)
 from .state import new_run_id
 from .tracing import ComputerTrace
 
@@ -301,6 +306,54 @@ def main(argv: list[str] | None = None) -> int:
     )
     region_summary_parser.add_argument("--output", type=Path)
 
+    colocated_parser = benchmark_subparsers.add_parser("modal-colocated-client")
+    colocated_parser.add_argument("--app-name", default="modal-computer-use")
+    colocated_parser.add_argument("--name")
+    colocated_parser.add_argument("--modal-region", required=True)
+    colocated_parser.add_argument(
+        "--caller-region-label",
+        help="free-form label for where the external benchmark caller ran",
+    )
+    colocated_parser.add_argument(
+        "--modal-ingress",
+        choices=["attested-tunnel", "connect", "tunnel"],
+        default="attested-tunnel",
+        help="Modal daemon ingress for the target sandbox; defaults to attested-tunnel",
+    )
+    colocated_parser.add_argument(
+        "--daemon-http-version",
+        choices=["1.1", "2"],
+        default="1.1",
+        help="daemon transport HTTP version for the target Modal sandbox; defaults to 1.1",
+    )
+    colocated_parser.add_argument("--resource-profile")
+    colocated_parser.add_argument("--browser")
+    colocated_parser.add_argument("--gpu")
+    colocated_parser.add_argument("--modal-cpu", type=float)
+    colocated_parser.add_argument("--modal-memory-mib", type=int)
+    colocated_parser.add_argument("--runner-cpu", type=float)
+    colocated_parser.add_argument("--runner-memory-mib", type=int)
+    colocated_parser.add_argument(
+        "--input-rate-limit-per-sec",
+        type=int,
+        default=0,
+        help=(
+            "daemon input action rate limit for the target benchmark sandbox; "
+            "defaults to 0 so primitive latency runs do not measure throttling"
+        ),
+    )
+    colocated_parser.add_argument(
+        "--input-backend",
+        choices=["auto", "xtest", "xdotool"],
+        default="auto",
+        help="daemon pointer input backend for the target benchmark sandbox; defaults to auto",
+    )
+    colocated_parser.add_argument("--image-profile", dest="image_profile")
+    colocated_parser.add_argument("--image-variant", dest="image_profile")
+    colocated_parser.add_argument("--iterations", type=_positive_int, default=5)
+    colocated_parser.add_argument("--output", type=Path)
+    colocated_parser.add_argument("--json", action="store_true", default=True)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -385,6 +438,9 @@ def main(argv: list[str] | None = None) -> int:
         return _benchmark_modal_region_ab(args, parser=region_ab_parser)
     if args.benchmark_command == "modal-region-summary":
         return _benchmark_modal_region_summary(args)
+    if args.benchmark_command == "modal-colocated-client":
+        _validate_modal_create_args(args, parser=colocated_parser)
+        return _benchmark_modal_colocated_client(args)
     return _benchmark_report(args)
 
 
@@ -826,6 +882,273 @@ def _benchmark_modal_region_summary(args: argparse.Namespace) -> int:
         args.output.write_text(f"{output}\n", encoding="utf-8")
     print(output)
     return 0
+
+
+def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
+    import time
+
+    if args.runner_cpu is not None and args.runner_cpu <= 0:
+        raise SystemExit("--runner-cpu must be greater than 0")
+    if args.runner_memory_mib is not None and args.runner_memory_mib < 128:
+        raise SystemExit("--runner-memory-mib must be at least 128")
+
+    run_id = new_run_id()
+    target_run_id = f"{run_id}-target"
+    config = _modal_benchmark_config(args, run_id=target_run_id)
+    app_tags = {"benchmark": "modal-colocated-client", "benchmark_run_id": run_id}
+    tags = {
+        "benchmark": "modal-colocated-client",
+        "benchmark_run_id": run_id,
+        "role": "target",
+    }
+    started = time.perf_counter()
+    computer = ComputerSandbox.create(
+        config=config,
+        app_name=args.app_name,
+        name=args.name,
+        app_tags=app_tags,
+        tags=tags,
+        wait=True,
+    )
+    cold_create_to_ready_ms = (time.perf_counter() - started) * 1000
+    try:
+        target_metadata = {
+            **_modal_colocated_environment_metadata(args),
+            "modal_colocation_role": "external-caller",
+            "modal_cold_create_to_ready_ms": cold_create_to_ready_ms,
+            "modal_run_id": target_run_id,
+            "modal_ab_run_id": run_id,
+            "modal_app_name": args.app_name,
+            "modal_sandbox_id": computer.metadata().sandbox_id if computer.metadata() else None,
+            "modal_cpu_count": args.modal_cpu,
+            "modal_memory_gib": (
+                args.modal_memory_mib / 1024 if args.modal_memory_mib is not None else None
+            ),
+        }
+        external_result = run_sdk_surface_benchmark(
+            surfaces=["daemon-transport-floor"],
+            client=computer.client,
+            mode="http",
+            iterations=args.iterations,
+            base_url=computer.client.base_url,
+            environment_metadata=target_metadata,
+        )
+        colocated_result = _run_modal_colocated_transport_floor(
+            args,
+            run_id=run_id,
+            target_base_url=computer.client.base_url,
+            target_token=getattr(computer.client.transport, "token", None),
+            target_sandbox_id=target_metadata["modal_sandbox_id"],
+        )
+        result = {
+            "ok": bool(external_result.get("ok")) and bool(colocated_result.get("ok")),
+            "benchmark": "modal-colocated-client",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "iterations": args.iterations,
+            "metadata": {
+                "modal_region": args.modal_region,
+                "caller_region_label": args.caller_region_label,
+                "modal_ingress": args.modal_ingress,
+                "daemon_http_version": args.daemon_http_version,
+                "target_sandbox_id": target_metadata["modal_sandbox_id"],
+                "comparison": "external caller versus same-region Modal runner",
+            },
+            "runs": {
+                "external_caller": external_result,
+                "modal_colocated_runner": colocated_result,
+            },
+            "comparison": _modal_colocated_comparison(external_result, colocated_result),
+            "failures": [
+                *external_result.get("failures", []),
+                *colocated_result.get("failures", []),
+            ],
+        }
+    finally:
+        computer.terminate()
+        computer.detach()
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result["ok"] else 1
+
+
+def _run_modal_colocated_transport_floor(
+    args: argparse.Namespace,
+    *,
+    run_id: str,
+    target_base_url: str,
+    target_token: str | None,
+    target_sandbox_id: str | None,
+) -> dict[str, Any]:
+    runner_region_label = f"modal-runner:{args.modal_region}"
+    metadata = {
+        **_modal_colocated_environment_metadata(args),
+        "caller_region_label": runner_region_label,
+        "modal_colocation_role": "modal-colocated-runner",
+        "modal_runner_region": args.modal_region,
+        "modal_target_sandbox_id": target_sandbox_id,
+    }
+    env = {
+        "COMPUTER_USE_BENCHMARK_BASE_URL": target_base_url,
+        "COMPUTER_USE_BENCHMARK_ITERATIONS": str(args.iterations),
+        "COMPUTER_USE_BENCHMARK_HTTP2": str(args.daemon_http_version == "2").lower(),
+        "COMPUTER_USE_BENCHMARK_METADATA_JSON": json.dumps(metadata, sort_keys=True),
+    }
+    if target_token:
+        env["COMPUTER_USE_BENCHMARK_TOKEN"] = target_token
+    exec_result = modal_sandbox_exec_once(
+        ("python", "-c", _MODAL_COLOCATED_RUNNER_CODE),
+        app_name=args.app_name,
+        name=_modal_colocated_runner_name(args.name),
+        region=args.modal_region,
+        env=env,
+        app_tags={"benchmark": "modal-colocated-client", "benchmark_run_id": run_id},
+        tags={
+            "benchmark": "modal-colocated-client",
+            "benchmark_run_id": run_id,
+            "role": "runner",
+        },
+        cpu=args.runner_cpu,
+        memory_mib=args.runner_memory_mib,
+    )
+    if exec_result.returncode not in (0, None):
+        return _modal_colocated_runner_failure(exec_result, metadata=metadata)
+    result = _extract_modal_colocated_result(exec_result.stdout)
+    result_metadata = result.setdefault("metadata", {})
+    if isinstance(result_metadata, dict):
+        environment = result_metadata.setdefault("environment", {})
+        if isinstance(environment, dict):
+            environment["modal_runner_sandbox_id"] = exec_result.sandbox_id
+            environment["modal_runner_region"] = args.modal_region
+    return result
+
+
+_MODAL_COLOCATED_RESULT_START = "__MODAL_COMPUTER_USE_RESULT_START__"
+_MODAL_COLOCATED_RESULT_END = "__MODAL_COMPUTER_USE_RESULT_END__"
+_MODAL_COLOCATED_RUNNER_CODE = f"""
+import json
+import os
+
+from modal_computer_use import DaemonClient
+from modal_computer_use.benchmarks.surfaces import run_sdk_surface_benchmark
+
+base_url = os.environ["COMPUTER_USE_BENCHMARK_BASE_URL"]
+token = os.environ.get("COMPUTER_USE_BENCHMARK_TOKEN") or None
+iterations = int(os.environ["COMPUTER_USE_BENCHMARK_ITERATIONS"])
+http2 = os.environ.get("COMPUTER_USE_BENCHMARK_HTTP2") == "true"
+metadata = json.loads(os.environ["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
+client = DaemonClient(base_url, token=token, http2=http2)
+try:
+    result = run_sdk_surface_benchmark(
+        surfaces=["daemon-transport-floor"],
+        client=client,
+        mode="http",
+        iterations=iterations,
+        base_url=base_url,
+        environment_metadata=metadata,
+    )
+finally:
+    client.close()
+print("{_MODAL_COLOCATED_RESULT_START}")
+print(json.dumps(result, sort_keys=True))
+print("{_MODAL_COLOCATED_RESULT_END}")
+"""
+
+
+def _modal_colocated_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "caller_region_label": args.caller_region_label,
+        "modal_region": args.modal_region,
+        "modal_ingress": args.modal_ingress,
+        "daemon_http_version": args.daemon_http_version,
+        "resource_profile": args.resource_profile,
+        "browser": args.browser,
+        "gpu": args.gpu,
+        "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
+        "image_profile": args.image_profile,
+    }
+
+
+def _modal_colocated_runner_name(name: str | None) -> str | None:
+    return None if name is None else f"{name}-runner"
+
+
+def _extract_modal_colocated_result(stdout: str) -> dict[str, Any]:
+    _, start, rest = stdout.partition(_MODAL_COLOCATED_RESULT_START)
+    if not start:
+        raise SandboxUnavailableError("co-located runner did not emit benchmark result")
+    payload, end, _ = rest.partition(_MODAL_COLOCATED_RESULT_END)
+    if not end:
+        raise SandboxUnavailableError("co-located runner emitted an incomplete benchmark result")
+    result = json.loads(payload.strip())
+    if not isinstance(result, dict):
+        raise SandboxUnavailableError("co-located runner emitted a non-object benchmark result")
+    return result
+
+
+def _modal_colocated_runner_failure(
+    exec_result: object,
+    *,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "benchmark": "sdk-surfaces",
+        "mode": "http",
+        "surfaces": {
+            "daemon-transport-floor": {
+                "status": "failed",
+                "metadata": {"environment": {k: v for k, v in metadata.items() if v is not None}},
+                "failures": [
+                    {
+                        "surface": "daemon-transport-floor",
+                        "phase": "modal_colocated_runner",
+                        "code": "modal_runner_failed",
+                        "returncode": getattr(exec_result, "returncode", None),
+                    }
+                ],
+            }
+        },
+        "failures": [
+            {
+                "surface": "daemon-transport-floor",
+                "phase": "modal_colocated_runner",
+                "code": "modal_runner_failed",
+                "returncode": getattr(exec_result, "returncode", None),
+            }
+        ],
+    }
+
+
+def _modal_colocated_comparison(
+    external_result: dict[str, Any],
+    colocated_result: dict[str, Any],
+) -> dict[str, Any]:
+    external_p50 = _transport_floor_fastest_p50(external_result)
+    colocated_p50 = _transport_floor_fastest_p50(colocated_result)
+    delta_ms = (
+        None if external_p50 is None or colocated_p50 is None else colocated_p50 - external_p50
+    )
+    return {
+        "external_fastest_floor_p50_ms": external_p50,
+        "colocated_fastest_floor_p50_ms": colocated_p50,
+        "delta_ms": delta_ms,
+        "ratio_vs_external": (
+            None
+            if external_p50 is None or colocated_p50 is None or external_p50 == 0
+            else colocated_p50 / external_p50
+        ),
+    }
+
+
+def _transport_floor_fastest_p50(result: dict[str, Any]) -> float | None:
+    surface = _dict_value(_dict_value(result.get("surfaces")).get("daemon-transport-floor"))
+    summary = _dict_value(surface.get("transport_floor_summary"))
+    fastest = _dict_value(summary.get("fastest_floor_case"))
+    value = fastest.get("p50_ms")
+    return float(value) if isinstance(value, int | float) else None
 
 
 def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:

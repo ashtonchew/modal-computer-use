@@ -535,6 +535,34 @@ A later May 26, 2026 `modal-region-ab` run from the same development environment
 | `us-east` | 70.7ms | 41.2ms | `websocket_binary_envelope` | 71.7ms | 70.7ms | 80.8ms | 93.8ms |
 | `us-west` | 29.5ms | 0.0ms | `websocket_binary_envelope` | 36.5ms | 29.5ms | 33.2ms | 54.4ms |
 
+Use the co-located client benchmark to test whether moving the client/model-loop side into Modal
+reduces the floor further:
+
+```bash
+uv run computer-use benchmark modal-colocated-client --iterations 30 \
+  --modal-region us-west --modal-ingress attested-tunnel --daemon-http-version 1.1 \
+  --caller-region-label dev-laptop-us-west \
+  --output modal-colocated-client-us-west-30x-YYYYMMDD.json
+```
+
+This creates one target desktop sandbox in the selected region, runs `daemon-transport-floor` from
+the external caller, then creates an ephemeral Modal runner sandbox in the same region and runs the
+same benchmark against the target daemon URL. Treat it as an architecture experiment: it measures
+whether co-locating the caller/model loop is likely to help before adding any hosted control-plane
+shape.
+
+A May 29, 2026 `modal-colocated-client` run with a `us-west` target and a development-laptop
+external caller measured:
+
+| Caller path | Fastest 0B p50 | Ratio vs external |
+| --- | ---: | ---: |
+| External caller -> `us-west` target | 29.4ms | 1.00x |
+| Same-region Modal runner -> `us-west` target | 1.7ms | 0.06x |
+
+This points to caller/ingress placement as the dominant remaining floor for remote SDK control
+loops. It does not make the ephemeral runner itself a product surface; it is a proof point for a
+future hosted model-loop/control-plane shape.
+
 Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
 product default remains `20`, but primitive latency benchmarks should not measure intentional
 throttling. Pass `--input-rate-limit-per-sec` when the benchmark target is rate-limit behavior

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets as _secrets
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -46,6 +47,14 @@ ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
 
 
+@dataclass(frozen=True)
+class ModalSandboxExecResult:
+    sandbox_id: str
+    returncode: int | None
+    stdout: str
+    stderr: str
+
+
 def modal_sandbox_exec_runner_from_id(sandbox_id: str):
     try:
         import modal
@@ -62,6 +71,85 @@ def modal_sandbox_exec_runner_from_id(sandbox_id: str):
         return sandbox.exec(*command, timeout=timeout)
 
     return run
+
+
+def modal_sandbox_exec_once(
+    command: tuple[str, ...],
+    *,
+    app_name: str,
+    name: str | None = None,
+    image: object | None = None,
+    region: str | None = None,
+    env: dict[str, str] | None = None,
+    app_tags: dict[str, str] | None = None,
+    tags: dict[str, str] | None = None,
+    cpu: float | None = None,
+    memory_mib: int | None = None,
+    timeout_seconds: int = 300,
+    idle_timeout_seconds: int = 60,
+    exec_timeout_seconds: int = 240,
+) -> ModalSandboxExecResult:
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "Modal sandbox exec requires the modal extra, for example "
+            "`uv sync --extra modal` in this repository or "
+            "`uv add 'modal-computer-use[modal]'` downstream"
+        ) from exc
+
+    app = modal.App.lookup(app_name, create_if_missing=True)
+    if app_tags:
+        _set_modal_object_tags(app, app_tags)
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image or default_image(profile="standard"),
+        "cpu": cpu,
+        "memory": memory_mib,
+        "encrypted_ports": [],
+        "timeout": timeout_seconds,
+        "idle_timeout": idle_timeout_seconds,
+        "name": name,
+    }
+    if region:
+        create_kwargs["region"] = region
+    runner = modal.Sandbox.create("sleep", "infinity", **create_kwargs)
+    try:
+        if tags and hasattr(runner, "set_tags"):
+            _set_modal_object_tags(runner, tags)
+        process = runner.exec(*command, timeout=exec_timeout_seconds, env=env or {})
+        stdout = _read_modal_process_stream(getattr(process, "stdout", ""))
+        stderr = _read_modal_process_stream(getattr(process, "stderr", ""))
+        returncode = _modal_process_returncode(process)
+        return ModalSandboxExecResult(
+            sandbox_id=getattr(runner, "object_id", "unknown"),
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    finally:
+        if hasattr(runner, "terminate"):
+            runner.terminate()
+
+
+def _read_modal_process_stream(stream: object) -> str:
+    read = getattr(stream, "read", None)
+    value = read() if callable(read) else stream
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    if isinstance(value, str):
+        return value
+    return "" if value is None else str(value)
+
+
+def _modal_process_returncode(process: object) -> int | None:
+    wait = getattr(process, "wait", None)
+    if callable(wait):
+        value = wait()
+        if isinstance(value, int):
+            return value
+    value = getattr(process, "returncode", None)
+    return value if isinstance(value, int) else None
 
 
 def modal_workspace_billing_report(

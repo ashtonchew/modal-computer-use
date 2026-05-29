@@ -137,6 +137,17 @@ For production loops, keep the SDK default unpinned until you have a benchmark f
 environment. Then pin `runtime.modal_region` near the caller/model loop, not necessarily near the
 end user. See `examples/region_colocation.py`.
 
+To test whether moving the benchmark client into Modal lowers the receive floor further, compare the
+normal external caller with an ephemeral same-region Modal runner:
+
+```bash
+uv run computer-use benchmark modal-colocated-client --iterations 30 \
+  --modal-region us-west --caller-region-label dev-laptop-us-west
+```
+
+This command creates a target sandbox, measures `daemon-transport-floor` from the current process,
+then runs the same benchmark from a temporary Modal runner in the target region.
+
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`
 surface is opt-in with `--surface sandbox-exec --sandbox-id <id>` because it attaches to a live
