@@ -144,6 +144,7 @@ class ObservationClient:
         poll_strategy: Literal["fixed", "adaptive"] = "adaptive",
         change_detection: Literal["full", "auto_region"] = "full",
         change_signal: Literal["poll", "xdamage", "auto"] = "auto",
+        dirty_frame_producer: Literal["auto", "off"] = "auto",
         change_detection_region: Mapping[str, Any] | None = None,
         change_region_radius: int | None = None,
         continue_on_error: bool = False,
@@ -158,6 +159,7 @@ class ObservationClient:
             "poll_strategy": poll_strategy,
             "change_detection": change_detection,
             "change_signal": change_signal,
+            "dirty_frame_producer": dirty_frame_producer,
         }
         if continue_on_error:
             payload["continue_on_error"] = True

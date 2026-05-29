@@ -76,3 +76,41 @@ def test_frame_observations_attach_latency_diagnosis() -> None:
 
     assert result["latency_diagnosis"]["bottleneck"] == "client_receive_or_tunnel_wait"
     assert result["latency_diagnosis"]["sample_stability"] == "stable"
+
+
+def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
+    result = {"summary_ms": {"p50": 50.0}}
+    observations = [
+        {
+            "size_bytes": 100,
+            "unchanged": False,
+            "dirty_frame_producer": True,
+            "dirty_frame_producer_used": True,
+            "dirty_frame_age_ms": 0.1,
+            "change_detected": True,
+            "change_stage_timing_ms": {
+                "server_pre_emit_ms": 20.0,
+                "dirty_producer_wait_ms": 15.0,
+            },
+        },
+        {
+            "size_bytes": 100,
+            "unchanged": False,
+            "dirty_frame_producer": True,
+            "dirty_frame_producer_used": False,
+            "dirty_frame_producer_fallback_reason": "no_changed_frame",
+            "change_detected": True,
+            "change_stage_timing_ms": {
+                "server_pre_emit_ms": 30.0,
+                "dirty_producer_wait_ms": 25.0,
+            },
+        },
+    ]
+
+    _add_frame_observations(result, [50.0, 55.0], observations)
+
+    assert result["dirty_frame_producer_frames"] == 2
+    assert result["dirty_frame_producer_used_frames"] == 1
+    assert result["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
+    assert result["dirty_frame_age_summary_ms"]["p50"] == 0.1
+    assert result["change_stage_timing_summary_ms"]["dirty_producer_wait_ms"]["p50"] == 20.0

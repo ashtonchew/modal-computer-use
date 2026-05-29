@@ -184,6 +184,20 @@ emitted. The client benchmark combines this with `request_frame_ms` and `receive
 derived `receive_minus_server_pre_emit` bucket includes websocket send, network transit, client
 receive, and local scheduling because those happen after frame metadata has already been produced.
 
+For raw PNG, no-cursor observation streams, the daemon also starts a dirty-frame producer before
+`run_actions_observe_change` executes the action. The producer uses XDamage as an event-driven
+wakeup, captures the latest raw frame in the background, and lets the observe-change path consume
+that already-captured frame if its source hash is newer than the baseline. XDamage remains a hint,
+not truth: unchanged hashes, unavailable XDamage, unsupported stream options, or producer misses
+fall back to the synchronous capture/poll path. Producer metadata appears as
+`dirty_frame_producer`, `dirty_frame_producer_used`, `dirty_frame_age_ms`,
+`dirty_frame_producer_fallback_reason`, and the `dirty_producer_*` stage timings.
+Benchmarks include a sibling `*_production_sync` case with `dirty_frame_producer="off"` so producer
+changes can be compared against the synchronous path in the same target sandbox. Treat the producer
+as a latency attribution and correctness-preserving pipeline step; it removes the route-level frame
+poll when successful, but full-screen capture can still remain on the critical path after the
+damage event.
+
 Benchmarks can also enable `transport_timing=true` on the observation stream. In that mode the
 daemon sends one small `transport_timing` control message immediately after each frame payload. The
 control message records server-side metadata send, payload send, and total emit timing. The

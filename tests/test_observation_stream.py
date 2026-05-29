@@ -923,7 +923,14 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert second["change_signal_available"] is True
     assert second["change_signal_detected"] is True
     assert second["change_signal_version"] == "1.1"
+    assert second["dirty_frame_producer"] is True
+    assert second["dirty_frame_producer_used"] is True
+    assert second["dirty_frame_producer_fallback_reason"] is None
+    assert second["dirty_frame_age_ms"] >= 0
     assert second["change_stage_timing_ms"]["signal_wait_wall_ms"] >= 0
+    assert second["change_stage_timing_ms"]["dirty_producer_wait_ms"] >= 0
+    assert second["change_stage_timing_ms"]["dirty_producer_capture_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
     assert second["change_stage_timing_ms"]["server_pre_emit_ms"] >= 0
     assert len(FakeXDamageWatcher.instances) == 1
     assert FakeXDamageWatcher.instances[0].armed == 1
@@ -1018,6 +1025,89 @@ def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
     assert FakeXDamageWatcher.instances[0].armed == 2
     assert FakeXDamageWatcher.instances[0].waits == 2
     assert FakeXDamageWatcher.instances[0].closed is True
+
+
+def test_observation_stream_dirty_producer_ignores_unchanged_frame_and_falls_back(
+    app,
+    monkeypatch,
+) -> None:
+    captures = iter(
+        [
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_bytes("white"),
+            _raw_screenshot_with_square(),
+        ]
+    )
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    class FakeXDamageWatcher:
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.failure = None
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=1.0,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 0.01,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 1,
+                    "change_signal": "xdamage",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        assert websocket.receive_bytes()
+
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["change_detected"] is True
+    assert second["dirty_frame_producer"] is True
+    assert second["dirty_frame_producer_used"] is False
+    assert second["dirty_frame_producer_fallback_reason"] == "no_changed_frame"
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] >= 0
 
 
 def test_observation_stream_run_actions_observe_change_auto_falls_back_to_poll(
