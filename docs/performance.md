@@ -541,15 +541,21 @@ reduces the floor further:
 ```bash
 uv run computer-use benchmark modal-colocated-client --iterations 30 \
   --modal-region us-west --modal-ingress attested-tunnel --daemon-http-version 1.1 \
+  --browser chromium --surface daemon-transport-floor --surface daemon-observation-stream \
   --caller-region-label dev-laptop-us-west \
   --output modal-colocated-client-us-west-30x-YYYYMMDD.json
 ```
 
-This creates one target desktop sandbox in the selected region, runs `daemon-transport-floor` from
-the external caller, then creates an ephemeral Modal runner sandbox in the same region and runs the
-same benchmark against the target daemon URL. Treat it as an architecture experiment: it measures
+This creates one target desktop sandbox in the selected region, runs the selected benchmark surfaces
+from the external caller, then creates an ephemeral Modal runner sandbox in the same region and runs
+the same surfaces against the target daemon URL. Treat it as an architecture experiment: it measures
 whether co-locating the caller/model loop is likely to help before adding any hosted control-plane
-shape.
+shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor attribution, and add
+`daemon-observation-stream` when the question is the causal action-to-frame workload an agent loop
+actually experiences.
+Observation-stream runs need a browser-capable target image, so pass `--browser chromium` or
+`--browser firefox`; the CLI rejects that surface on the standard image because its browser setup
+would fail before measuring the workload.
 
 A May 29, 2026 `modal-colocated-client` run with a `us-west` target and a development-laptop
 external caller measured:
@@ -562,6 +568,23 @@ external caller measured:
 This points to caller/ingress placement as the dominant remaining floor for remote SDK control
 loops. It does not make the ephemeral runner itself a product surface; it is a proof point for a
 future hosted model-loop/control-plane shape.
+
+When `daemon-observation-stream` is selected, the comparison also reports the preferred causal
+observation case, currently `observation_action_click_act_and_observe_auto_signal_production`, as
+`causal_action_to_frame_p50_ms`. That metric is the better next-step proof than transport floor
+alone because it includes action submission, daemon execution, change detection, and frame receipt.
+
+A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
+`daemon-observation-stream` selected measured:
+
+| Surface metric | External caller | Same-region Modal runner | Ratio vs external |
+| --- | ---: | ---: | ---: |
+| Fastest 0B transport floor p50 | 31.5ms | 31.1ms | 0.99x |
+| Causal action-to-frame p50 | 82.8ms | 52.5ms | 0.63x |
+
+That run shows the co-located runner improvement on the actual agent-like action-observe path even
+when the synthetic 0B transport floor is flat. Treat this as directional until repeated 30x runs
+confirm tail behavior.
 
 Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
 product default remains `20`, but primitive latency benchmarks should not measure intentional

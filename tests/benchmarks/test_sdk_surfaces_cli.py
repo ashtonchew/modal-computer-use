@@ -656,63 +656,30 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
     monkeypatch,
     capsys,
 ) -> None:
-    created: dict[str, object] = {}
-    closed: list[str] = []
-    exec_calls: list[dict[str, object]] = []
+    calls: list[object] = []
 
-    class CreatedComputer:
-        client = SimpleNamespace(
-            base_url="https://target.example.modal.host",
-            transport=SimpleNamespace(token="target-token"),
-        )
+    def fake_run_modal_colocated_client_benchmark(config):
+        calls.append(config)
+        target_config = config.target_config_factory("modal_colocated_test-target")
+        assert target_config.runtime.modal_region == "us-west"
+        assert target_config.actions.input_rate_limit_per_sec == 0
+        return {
+            "ok": True,
+            "benchmark": "modal-colocated-client",
+            "metadata": {"surfaces": config.surfaces},
+            "comparison": {
+                "external_fastest_floor_p50_ms": 30.0,
+                "colocated_fastest_floor_p50_ms": 12.0,
+                "delta_ms": -18.0,
+                "ratio_vs_external": 0.4,
+            },
+        }
 
-        def metadata(self):
-            return SimpleNamespace(sandbox_id="sb-target")
-
-        def terminate(self) -> None:
-            closed.append("terminate")
-
-        def detach(self) -> None:
-            closed.append("detach")
-
-    def fake_create(**kwargs):
-        created.update(kwargs)
-        return CreatedComputer()
-
-    def fake_run_sdk_surface_benchmark(**kwargs):
-        environment = kwargs["environment_metadata"]
-        assert environment["modal_colocation_role"] == "external-caller"
-        return _transport_floor_result(
-            p50=30.0,
-            environment=environment,
-        )
-
-    def fake_modal_sandbox_exec_once(command, **kwargs):
-        exec_calls.append({"command": command, **kwargs})
-        assert kwargs["region"] == "us-west"
-        assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "target-token"  # noqa: S105
-        assert kwargs["env"]["COMPUTER_USE_BENCHMARK_BASE_URL"] == (
-            "https://target.example.modal.host"
-        )
-        metadata = json.loads(kwargs["env"]["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
-        assert metadata["modal_colocation_role"] == "modal-colocated-runner"
-        result = _transport_floor_result(p50=12.0, environment=metadata)
-        stdout = (
-            f"{cli._MODAL_COLOCATED_RESULT_START}\n"
-            f"{json.dumps(result)}\n"
-            f"{cli._MODAL_COLOCATED_RESULT_END}\n"
-        )
-        return SimpleNamespace(
-            sandbox_id="sb-runner",
-            returncode=0,
-            stdout=stdout,
-            stderr="",
-        )
-
-    monkeypatch.setattr(cli.ComputerSandbox, "create", staticmethod(fake_create))
-    monkeypatch.setattr(cli, "run_sdk_surface_benchmark", fake_run_sdk_surface_benchmark)
-    monkeypatch.setattr(cli, "modal_sandbox_exec_once", fake_modal_sandbox_exec_once)
-    monkeypatch.setattr(cli, "new_run_id", lambda: "modal_colocated_test")
+    monkeypatch.setattr(
+        cli,
+        "run_modal_colocated_client_benchmark",
+        fake_run_modal_colocated_client_benchmark,
+    )
 
     exit_code = cli.main(
         [
@@ -726,20 +693,22 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
             "1",
             "--name",
             "colocated",
+            "--browser",
+            "chromium",
+            "--surface",
+            "daemon-transport-floor",
+            "--surface",
+            "daemon-observation-stream",
         ]
     )
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    config = created["config"]
     assert exit_code == 0
-    assert config.runtime.modal_region == "us-west"
-    assert created["tags"] == {
-        "benchmark": "modal-colocated-client",
-        "benchmark_run_id": "modal_colocated_test",
-        "role": "target",
-    }
-    assert exec_calls[0]["name"] == "colocated-runner"
+    config = calls[0]
+    assert config.name == "colocated"
+    assert config.modal_region == "us-west"
+    assert config.surfaces == ["daemon-transport-floor", "daemon-observation-stream"]
     assert payload["benchmark"] == "modal-colocated-client"
     assert payload["comparison"] == {
         "external_fastest_floor_p50_ms": 30.0,
@@ -747,37 +716,24 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
         "delta_ms": -18.0,
         "ratio_vs_external": 0.4,
     }
-    runner_environment = payload["runs"]["modal_colocated_runner"]["metadata"]["environment"]
-    assert runner_environment["modal_runner_sandbox_id"] == "sb-runner"
-    assert runner_environment["caller_region_label"] == "modal-runner:us-west"
-    assert "target-token" not in captured.out
-    assert closed == ["terminate", "detach"]
 
 
-def _transport_floor_result(*, p50: float, environment: dict[str, object]) -> dict[str, object]:
-    return {
-        "ok": True,
-        "benchmark": "sdk-surfaces",
-        "mode": "http",
-        "metadata": {"environment": environment},
-        "surfaces": {
-            "daemon-transport-floor": {
-                "status": "ok",
-                "metadata": {"environment": environment},
-                "transport_floor_summary": {
-                    "fastest_floor_case": {
-                        "case": "transport_floor_websocket_binary_envelope_0b",
-                        "requested_size_bytes": 0,
-                        "p50_ms": p50,
-                        "inlier_mean_ms": p50,
-                        "outlier_count": 0,
-                        "transport_encoding": "websocket_binary_envelope",
-                    }
-                },
-            }
-        },
-        "failures": [],
-    }
+def test_benchmark_modal_colocated_observation_requires_browser(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "benchmark",
+                "modal-colocated-client",
+                "--modal-region",
+                "us-west",
+                "--surface",
+                "daemon-observation-stream",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "daemon-observation-stream requires a browser-capable target" in captured.err
 
 
 def test_benchmark_sdk_create_modal_sandbox_requires_daemon_http(capsys) -> None:
