@@ -13,7 +13,11 @@ from modal_computer_use.errors import (
     SandboxUnavailableError,
 )
 from modal_computer_use.registry import SandboxRegistry
-from modal_computer_use.sandbox import _connect_token_parts, modal_sandbox_exec_runner_from_id
+from modal_computer_use.sandbox import (
+    _connect_token_parts,
+    modal_sandbox_exec_once,
+    modal_sandbox_exec_runner_from_id,
+)
 from modal_computer_use.state import compute_config_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +86,7 @@ class FakeSandboxObject:
         self.set_tags_calls: list[dict[str, str]] = []
         self.wait_until_ready_calls: list[int] = []
         self.mount_image_calls: list[tuple[str, object]] = []
+        self.exec_calls: list[dict[str, object]] = []
         self.terminated = False
 
     def set_tags(self, tags: dict[str, str]) -> None:
@@ -98,8 +103,14 @@ class FakeSandboxObject:
         assert user_metadata["sdk"] == "modal-computer-use"
         return FakeConnectToken()
 
-    def exec(self, *args: str, timeout: int | None = None) -> object:
-        return SimpleNamespace(args=args, timeout=timeout, returncode=0)
+    def exec(
+        self,
+        *args: str,
+        timeout: int | None = None,
+        env: dict[str, str] | None = None,
+    ) -> object:
+        self.exec_calls.append({"args": args, "timeout": timeout, "env": env})
+        return SimpleNamespace(args=args, timeout=timeout, env=env, returncode=0)
 
     def terminate(self) -> None:
         self.terminated = True
@@ -644,6 +655,42 @@ def test_modal_sandbox_exec_runner_attaches_by_id(monkeypatch) -> None:
     assert process.args == ("xdotool", "mousemove", "24", "24")
     assert process.timeout == 10
     assert process.returncode == 0
+
+
+def test_modal_sandbox_exec_once_creates_ephemeral_runner(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    result = modal_sandbox_exec_once(
+        ("python", "-c", "print('ok')"),
+        app_name="computer-app",
+        name="runner",
+        image=object(),
+        region="us-west",
+        env={"TOKEN": "secret"},
+        app_tags={"benchmark": "modal-colocated-client"},
+        tags={"role": "runner"},
+        cpu=0.5,
+        memory_mib=512,
+    )
+
+    args, kwargs = FakeSandbox.create_calls[0]
+    assert args == ("sleep", "infinity")
+    assert kwargs["app"] == "app:computer-app"
+    assert kwargs["region"] == "us-west"
+    assert kwargs["encrypted_ports"] == []
+    assert kwargs["cpu"] == 0.5
+    assert kwargs["memory"] == 512
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.set_tags_calls == [{"role": "runner"}]
+    assert FakeSandbox.created.exec_calls == [
+        {
+            "args": ("python", "-c", "print('ok')"),
+            "timeout": 240,
+            "env": {"TOKEN": "secret"},
+        }
+    ]
+    assert FakeSandbox.created.terminated is True
+    assert result.returncode == 0
 
 
 def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:
