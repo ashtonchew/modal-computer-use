@@ -92,6 +92,25 @@ profile requires a specific region, create a new sandbox with
 `ComputerConfig(runtime={"modal_region": "us-west"})` or use the default config mismatch behavior to
 reject an incompatible reused sandbox.
 
+## Co-located runners and brokers
+
+When the caller or model loop is the latency bottleneck, the lowest-risk production pattern is a
+short-lived co-located runner Sandbox. The external SDK process creates the target desktop sandbox,
+then starts a second runner Sandbox in the same Modal region. The runner receives only ephemeral
+daemon connection details through its environment, talks directly to the target daemon, and is
+terminated after the workload. See `examples/modal_colocated_runner.py`.
+
+This is a data-plane optimization, not a new daemon primitive. Keep user/model code in the runner
+or application layer; core SDK modules should only provide generic Sandbox orchestration helpers.
+Use Connect Tokens or the attested tunnel default for daemon access, and treat returned daemon
+tokens as secrets.
+
+A Modal ASGI broker is a separate control-plane pattern. The broker may create, list, inspect, and
+terminate sessions, but it should return direct daemon or runner connection metadata instead of
+proxying screenshots and input actions. Proxying the hot path through the broker adds another
+network hop and hides the latency source. See `examples/modal_session_broker.py` for a testable
+control-plane example based on Modal's ASGI, lifecycle, concurrency, and proxy-auth primitives.
+
 ## Cleanup
 
 `ComputerSandboxManager.cleanup_expired(ttl_seconds=..., owner=None, dry_run=True)` inspects

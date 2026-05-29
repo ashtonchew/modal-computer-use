@@ -569,6 +569,15 @@ This points to caller/ingress placement as the dominant remaining floor for remo
 loops. It does not make the ephemeral runner itself a product surface; it is a proof point for a
 future hosted model-loop/control-plane shape.
 
+For application code, the same pattern is available as a co-located runner Sandbox. The target
+desktop sandbox and runner sandbox are created in the same Modal region, and the runner talks
+directly to the target daemon. Use `examples/modal_colocated_runner.py` as the minimal shape before
+building a hosted control plane.
+
+A broker should stay off this hot path. Use a broker for session lifecycle, placement, auth, and
+cleanup; have it return direct daemon/runner connection metadata. Use `examples/modal_session_broker.py`
+for the ASGI control-plane shape.
+
 When `daemon-observation-stream` is selected, the comparison also reports the preferred causal
 observation case, currently `observation_action_click_act_and_observe_auto_signal_production`, as
 `causal_action_to_frame_p50_ms`. That metric is the better next-step proof than transport floor
