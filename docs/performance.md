@@ -198,6 +198,16 @@ as a latency attribution and correctness-preserving pipeline step; it removes th
 poll when successful, but full-screen capture can still remain on the critical path after the
 damage event.
 
+When `change_detection="region"` or `"auto_region"` resolves a region and the stream has a raw
+full-frame baseline, the producer captures only that region. The daemon then splices those pixels
+into the cached full raw frame, computes a full-frame source hash, and emits the normal patch or
+keyframe shape. That keeps `source_sha256`, `source_version`, `dirty_rect`, and client composition
+semantics full-frame and lossless while avoiding a full-screen X11 capture for pointer-local paints.
+The optimization is intentionally narrow: stream-level screenshot regions, missing baselines,
+keyframe turns, unsupported raw options, unchanged regional hashes, or any reconstruction failure
+fall back to the full-frame producer/poll path. Frame metadata records the selected
+`dirty_frame_capture_region`, and stage timings include `dirty_region_reconstruct_ms`.
+
 Benchmarks can also enable `transport_timing=true` on the observation stream. In that mode the
 daemon sends one small `transport_timing` control message immediately after each frame payload. The
 control message records server-side metadata send, payload send, and total emit timing. The

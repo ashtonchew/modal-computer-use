@@ -42,7 +42,7 @@ from modal_computer_use.daemon.schemas import (
     ObservationStreamRequest,
     ObservationTransportProbeRequest,
 )
-from modal_computer_use.models import ActionBatchRequest, Region, ScreenshotOptions
+from modal_computer_use.models import ActionBatchRequest, Region, ScreenshotOptions, sha256_bytes
 from modal_computer_use.redaction import sanitize_payload, sanitize_text
 
 router = APIRouter(prefix="/v1/observations")
@@ -64,6 +64,7 @@ class _StreamState:
     last_source_sha256: str | None = None
     last_image: Image.Image | None = None
     last_tile_hashes: dict[tuple[int, int], bytes] | None = None
+    last_raw_frame: CapturedRawScreenshot | None = None
     last_frame_seq: int | None = None
     emitted_frames: int = 0
     started_at: float = 0.0
@@ -91,6 +92,7 @@ class _DirtyFrameProducerResult:
     wait_result: XDamageWaitResult
     wait_wall_ms: float
     capture_ms: float
+    capture_region: Region | None = None
 
 
 class _DirtyFrameProducer:
@@ -107,9 +109,16 @@ class _DirtyFrameProducer:
         self._latest: _DirtyFrameProducerResult | None = None
         self._task: asyncio.Task[None] | None = None
         self._closed = False
+        self.capture_region: Region | None = None
         self.failure: str | None = None
 
-    async def arm(self, request: ObservationStreamRequest, *, timeout_ms: int) -> None:
+    async def arm(
+        self,
+        request: ObservationStreamRequest,
+        *,
+        timeout_ms: int,
+        capture_region: Region | None = None,
+    ) -> None:
         if self._closed:
             raise RuntimeError("dirty-frame producer is closed")
         if self._task is not None and not self._task.done():
@@ -119,13 +128,21 @@ class _DirtyFrameProducer:
         self._generation += 1
         generation = self._generation
         self._latest = None
+        self.capture_region = capture_region
         try:
             await asyncio.to_thread(self._watcher.arm)
         except Exception as exc:
             self.failure = getattr(self._watcher, "failure", None) or str(exc)
             raise
         self.failure = None
-        self._task = asyncio.create_task(self._produce_once(request, generation, timeout_ms))
+        self._task = asyncio.create_task(
+            self._produce_once(
+                request,
+                generation,
+                timeout_ms,
+                capture_region=capture_region,
+            )
+        )
 
     async def wait_for_change(
         self,
@@ -177,6 +194,8 @@ class _DirtyFrameProducer:
         request: ObservationStreamRequest,
         generation: int,
         timeout_ms: int,
+        *,
+        capture_region: Region | None,
     ) -> None:
         wait_started = perf_counter()
         wait_result = await asyncio.to_thread(self._watcher.wait, timeout_ms)
@@ -185,7 +204,7 @@ class _DirtyFrameProducer:
             self._latest = None
             return
         capture_started = perf_counter()
-        raw = await self._capture_raw(request.region)
+        raw = await self._capture_raw(capture_region or request.region)
         capture_ms = _elapsed_ms(capture_started)
         if raw is None:
             return
@@ -196,6 +215,7 @@ class _DirtyFrameProducer:
             wait_result=wait_result,
             wait_wall_ms=wait_wall_ms,
             capture_ms=capture_ms,
+            capture_region=capture_region,
         )
 
 
@@ -314,6 +334,7 @@ async def _handle_observation_message(
             state.last_source_sha256 = None
             state.last_image = None
             state.last_tile_hashes = None
+            state.last_raw_frame = None
             state.last_frame_seq = None
             await _send_empty_result(websocket, request_id)
         elif op == "capture_now":
@@ -368,7 +389,17 @@ async def _handle_observation_message(
             baseline_source_sha256 = state.last_source_sha256
             region_baseline_sha256 = None
             region_baseline_ms = 0.0
-            if region is not None:
+            producer_capture_region = _dirty_producer_capture_region(
+                state,
+                region=region,
+                next_seq=state.seq + 1,
+            )
+            skip_region_baseline = (
+                producer_capture_region is not None
+                and stream_request.dirty_frame_producer != "off"
+                and stream_request.change_signal != "poll"
+            )
+            if region is not None and not skip_region_baseline:
                 region_baseline_started = perf_counter()
                 region_baseline_sha256 = await _capture_region_source_sha256(
                     websocket,
@@ -380,6 +411,7 @@ async def _handle_observation_message(
                 websocket,
                 state,
                 stream_request,
+                capture_region=producer_capture_region,
             )
             change_signal = (
                 _PreparedChangeSignal(
@@ -430,6 +462,9 @@ async def _handle_observation_message(
                     "change_detection": stream_request.change_detection,
                     "change_signal": stream_request.change_signal,
                     "dirty_frame_producer_policy": stream_request.dirty_frame_producer,
+                    "dirty_frame_capture_region": producer_capture_region.model_dump(mode="json")
+                    if producer_capture_region is not None
+                    else None,
                     "baseline_source_version": baseline_source_version,
                     "baseline_source_sha256": baseline_source_sha256,
                     "change_detection_region": region.model_dump(mode="json")
@@ -494,6 +529,7 @@ async def _start_stream(
     state.last_source_sha256 = None
     state.last_image = None
     state.last_tile_hashes = None
+    state.last_raw_frame = None
     state.last_frame_seq = None
     state.emitted_frames = 0
     state.started_at = perf_counter()
@@ -632,6 +668,7 @@ async def _send_changed_frame(
     signal_wait_wall_ms = 0.0
     dirty_producer_wait_ms = 0.0
     dirty_producer_capture_ms = 0.0
+    dirty_region_reconstruct_ms = 0.0
     dirty_frame_age_ms: float | None = None
     dirty_producer_used = False
     dirty_producer_fallback_reason: str | None = None
@@ -644,7 +681,9 @@ async def _send_changed_frame(
         if dirty_producer is not None:
             producer_wait_started = perf_counter()
             producer_result = await dirty_producer.wait_for_change(
-                baseline_source_sha256=baseline_source_sha256,
+                baseline_source_sha256=region_baseline_sha256
+                if dirty_producer.capture_region is not None
+                else baseline_source_sha256,
                 timeout_ms=timeout_ms,
             )
             dirty_producer_wait_ms = _elapsed_ms(producer_wait_started)
@@ -653,8 +692,17 @@ async def _send_changed_frame(
                 signal_wait_wall_ms = producer_result.wait_wall_ms
                 dirty_producer_capture_ms = producer_result.capture_ms
                 dirty_frame_age_ms = max((perf_counter() - producer_result.produced_at) * 1000, 0.0)
+                raw = producer_result.raw
+                if producer_result.capture_region is not None:
+                    reconstruct_started = perf_counter()
+                    raw = _reconstruct_full_raw_frame_from_region(
+                        state=state,
+                        region_raw=producer_result.raw,
+                        region=producer_result.capture_region,
+                    )
+                    dirty_region_reconstruct_ms = _elapsed_ms(reconstruct_started)
                 metadata, payload = _capture_raw_delta_frame(
-                    raw=producer_result.raw,
+                    raw=raw,
                     request=request,
                     options=_stream_screenshot_options(request),
                     seq=seq,
@@ -754,6 +802,7 @@ async def _send_changed_frame(
         "signal_wait_wall_ms": signal_wait_wall_ms,
         "dirty_producer_wait_ms": dirty_producer_wait_ms,
         "dirty_producer_capture_ms": dirty_producer_capture_ms,
+        "dirty_region_reconstruct_ms": dirty_region_reconstruct_ms,
         "region_poll_ms": region_poll_ms,
         "frame_poll_ms": frame_poll_ms,
         "change_wait_ms": wait_ms,
@@ -810,6 +859,8 @@ async def _prepare_dirty_frame_producer(
     websocket: WebSocket,
     state: _StreamState,
     request: ObservationActionObserveChangeRequest,
+    *,
+    capture_region: Region | None = None,
 ) -> _DirtyFrameProducer | None:
     if request.dirty_frame_producer == "off":
         return None
@@ -838,12 +889,36 @@ async def _prepare_dirty_frame_producer(
         state.dirty_frame_display = display
     producer = state.dirty_frame_producer
     try:
-        await producer.arm(stream_request, timeout_ms=request.change_timeout_ms)
+        await producer.arm(
+            stream_request,
+            timeout_ms=request.change_timeout_ms,
+            capture_region=capture_region,
+        )
     except Exception:
         if request.change_signal == "xdamage":
             return None
         return None
     return producer
+
+
+def _dirty_producer_capture_region(
+    state: _StreamState,
+    *,
+    region: Region | None,
+    next_seq: int,
+) -> Region | None:
+    request = state.request
+    if request is None or region is None:
+        return None
+    if request.region is not None:
+        return None
+    if state.last_raw_frame is None or state.last_tile_hashes is None:
+        return None
+    if state.last_frame_seq is None:
+        return None
+    if request.delta_mode == "off" or next_seq % request.keyframe_interval == 0:
+        return None
+    return region
 
 
 def _prepare_change_signal(
@@ -1049,14 +1124,21 @@ async def _emit_frame(
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")
     current_tile_hashes = metadata.pop("_current_tile_hashes")
+    current_raw_frame = metadata.pop("_current_raw_frame", None)
     if isinstance(current_image, Image.Image):
         state.last_image = current_image
         state.last_tile_hashes = None
+        state.last_raw_frame = None
         state.last_frame_seq = state.seq
     elif isinstance(current_tile_hashes, dict):
         state.last_image = None
         state.last_tile_hashes = current_tile_hashes
+        state.last_raw_frame = (
+            current_raw_frame if isinstance(current_raw_frame, CapturedRawScreenshot) else None
+        )
         state.last_frame_seq = state.seq
+    else:
+        state.last_raw_frame = None
     should_suppress_payload = (
         metadata["unchanged"]
         and metadata["kind"] == "delta-suppressed"
@@ -1288,6 +1370,50 @@ async def _capture_raw_frame(
     if raw is None:
         return None
     return raw
+
+
+def _reconstruct_full_raw_frame_from_region(
+    *,
+    state: _StreamState,
+    region_raw: CapturedRawScreenshot,
+    region: Region,
+) -> CapturedRawScreenshot:
+    previous = state.last_raw_frame
+    if previous is None:
+        raise RuntimeError("regional dirty frame requires a full raw baseline")
+    if region.x < 0 or region.y < 0:
+        raise RuntimeError("regional dirty frame has invalid origin")
+    if region.width != region_raw.width or region.height != region_raw.height:
+        raise RuntimeError("regional dirty frame dimensions do not match capture region")
+    if region.x + region.width > previous.width or region.y + region.height > previous.height:
+        raise RuntimeError("regional dirty frame is outside the baseline frame")
+
+    rgb = bytearray(previous.rgb)
+    bytes_per_pixel = 3
+    source_stride = region_raw.width * bytes_per_pixel
+    target_stride = previous.width * bytes_per_pixel
+    row_width = region.width * bytes_per_pixel
+    for row in range(region.height):
+        source_start = row * source_stride
+        source_end = source_start + row_width
+        target_start = ((region.y + row) * target_stride) + region.x * bytes_per_pixel
+        rgb[target_start : target_start + row_width] = region_raw.rgb[source_start:source_end]
+    reconstructed = bytes(rgb)
+    return CapturedRawScreenshot(
+        width=previous.width,
+        height=previous.height,
+        rgb=reconstructed,
+        sha256=sha256_bytes(reconstructed),
+        captured_at=region_raw.captured_at,
+        coordinate_space=previous.coordinate_space,
+        cursor_visible=False,
+        capture_backend=region_raw.capture_backend,
+        timings_ms={
+            **dict(region_raw.timings_ms),
+            "dirty_region_width": float(region.width),
+            "dirty_region_height": float(region.height),
+        },
+    )
 
 
 def _can_use_raw_observation_path(
@@ -1555,6 +1681,7 @@ def _raw_metadata(
         "tile_hash_backend": "xxh3" if native_hash_available() else "blake2b",
         "_current_image": None,
         "_current_tile_hashes": current_tile_hashes,
+        "_current_raw_frame": raw,
     }
     return metadata, payload
 
