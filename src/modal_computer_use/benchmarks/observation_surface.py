@@ -221,6 +221,21 @@ def _run_daemon_observation_surface(
                 causal_action_observe=True,
             )
         ),
+        "observation_action_click_act_and_observe_auto_region_production": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_act_and_observe_auto_region_production",
+                poll_strategy="adaptive",
+                change_detection="auto_region",
+                change_signal="auto",
+                transport_timing=False,
+                causal_action_observe=True,
+            )
+        ),
         "observation_action_click_act_and_observe_auto_signal_production_sync": (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
@@ -1840,6 +1855,7 @@ def _frame_observation(frame) -> dict[str, Any]:
         "dirty_frame_producer_fallback_reason": metadata.get(
             "dirty_frame_producer_fallback_reason"
         ),
+        "dirty_frame_capture_region": metadata.get("dirty_frame_capture_region"),
         "dirty_frame_age_ms": metadata.get("dirty_frame_age_ms"),
         "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
         "baseline_source_version": metadata.get("baseline_source_version"),
@@ -1941,6 +1957,9 @@ def _add_frame_observations(
                 if dirty_frame_age_samples:
                     result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
                     result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
+                result["dirty_frame_region_capture_frames"] = sum(
+                    1 for item in observations if item.get("dirty_frame_capture_region") is not None
+                )
             stage_names = sorted(
                 {
                     key

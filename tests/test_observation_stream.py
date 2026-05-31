@@ -14,7 +14,7 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot, CapturedScreenshot
 from modal_computer_use.daemon.routes import observations as observation_routes
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.models import CoordinateSpace, sha256_bytes
+from modal_computer_use.models import CoordinateSpace, Region, sha256_bytes
 from modal_computer_use.observations import ObservationClient
 from modal_computer_use.transports.observation import (
     ObservationFrame,
@@ -821,6 +821,8 @@ def test_observation_stream_run_actions_observe_change_can_detect_region(app) ->
                     "change_timeout_ms": 100,
                     "poll_interval_ms": 1,
                     "poll_strategy": "adaptive",
+                    "change_signal": "poll",
+                    "dirty_frame_producer": "off",
                     "source": "test",
                 },
             }
@@ -935,6 +937,103 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert len(FakeXDamageWatcher.instances) == 1
     assert FakeXDamageWatcher.instances[0].armed == 1
     assert FakeXDamageWatcher.instances[0].closed is True
+
+
+def test_observation_stream_dirty_producer_captures_action_region(
+    app,
+    monkeypatch,
+) -> None:
+    white = Image.new("RGB", (64, 64), "white")
+    changed = Image.new("RGB", (64, 64), "white")
+    for y in range(18, 22):
+        for x in range(18, 22):
+            changed.putpixel((x, y), (0, 0, 0))
+    capture_images = iter([white, changed])
+    capture_regions: list[Region | None] = []
+
+    async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
+        capture_regions.append(region)
+        return _raw_screenshot_from_image(next(capture_images), region=region)
+
+    class FakeXDamageWatcher:
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.failure = None
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=1.0,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        first_payload = websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "click", "x": 20, "y": 20, "button": "left"}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 1,
+                    "change_detection": "auto_region",
+                    "change_region_radius": 8,
+                    "change_signal": "xdamage",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        second_payload = websocket.receive_bytes()
+
+    assert capture_regions[0] is None
+    assert capture_regions[1] == Region(x=12, y=12, width=16, height=16)
+    assert len(capture_regions) == 2
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["dirty_frame_capture_region"] == {"x": 12, "y": 12, "width": 16, "height": 16}
+    assert second["dirty_frame_producer"] is True
+    assert second["dirty_frame_producer_used"] is True
+    assert second["change_stage_timing_ms"]["region_baseline_ms"] == 0
+    assert second["change_stage_timing_ms"]["dirty_region_reconstruct_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
+    assert second["width"] == 64
+    assert second["height"] == 64
+    composed = ObservationFrame(
+        payload=second_payload,
+        metadata=second,
+    ).compose(first_payload)
+    assert composed == _image_png_bytes(changed)
 
 
 def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
@@ -1642,18 +1741,37 @@ def _screenshot_bytes(color: str) -> CapturedScreenshot:
 
 def _raw_screenshot_bytes(color: str) -> CapturedRawScreenshot:
     image = Image.new("RGB", (64, 64), color)
+    return _raw_screenshot_from_image(image)
+
+
+def _raw_screenshot_from_image(
+    image: Image.Image,
+    *,
+    region: Region | None = None,
+) -> CapturedRawScreenshot:
+    source = image.crop(
+        (
+            region.x,
+            region.y,
+            region.x + region.width,
+            region.y + region.height,
+        )
+    ) if region is not None else image
     rgb = image.tobytes()
+    if region is not None:
+        rgb = source.tobytes()
     return CapturedRawScreenshot(
-        width=64,
-        height=64,
+        width=source.width,
+        height=source.height,
         rgb=rgb,
         sha256=sha256_bytes(rgb),
         captured_at=datetime.now(UTC),
         coordinate_space=CoordinateSpace.from_dimensions(
-            desktop_width=64,
-            desktop_height=64,
-            image_width=64,
-            image_height=64,
+            desktop_width=image.width,
+            desktop_height=image.height,
+            image_width=source.width,
+            image_height=source.height,
+            source_region=region,
         ),
         cursor_visible=False,
         capture_backend="test-raw",
