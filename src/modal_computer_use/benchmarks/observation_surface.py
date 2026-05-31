@@ -221,6 +221,21 @@ def _run_daemon_observation_surface(
                 causal_action_observe=True,
             )
         ),
+        "observation_action_click_act_and_observe_auto_signal_production_sync": (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_act_and_observe_auto_signal_production_sync",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                dirty_frame_producer="off",
+                transport_timing=False,
+                causal_action_observe=True,
+            )
+        ),
         "observation_action_click_observe_change_auto_signal_binary_envelope": (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
@@ -673,6 +688,7 @@ def _run_observation_action_click_observe_change_benchmark(
     poll_strategy: str = "fixed",
     change_detection: str = "full",
     change_signal: str | None = "poll",
+    dirty_frame_producer: Literal["auto", "off"] = "auto",
     page: str = "default",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
@@ -695,6 +711,7 @@ def _run_observation_action_click_observe_change_benchmark(
         poll_strategy=poll_strategy,
         change_detection=change_detection,
         change_signal=change_signal,
+        dirty_frame_producer=dirty_frame_producer,
         frame_encoding=frame_encoding,
         transport_timing=transport_timing,
         causal_action_observe=causal_action_observe,
@@ -711,6 +728,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "poll_strategy": poll_strategy,
             "change_detection": change_detection,
             "change_signal": change_signal or "default",
+            "dirty_frame_producer": dirty_frame_producer,
             "page": page,
             "frame_encoding": frame_encoding or "json-binary",
             "transport_timing": transport_timing,
@@ -1299,6 +1317,7 @@ def _measure_stream_action_capture_loop(
     poll_strategy: str = "fixed",
     change_detection: str = "full",
     change_signal: str | None = "poll",
+    dirty_frame_producer: Literal["auto", "off"] = "auto",
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
@@ -1329,6 +1348,7 @@ def _measure_stream_action_capture_loop(
                         poll_strategy=poll_strategy,
                         change_detection=change_detection,
                         change_signal=change_signal,
+                        dirty_frame_producer=dirty_frame_producer,
                         causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
@@ -1347,6 +1367,7 @@ def _measure_stream_action_capture_loop(
                         poll_strategy=poll_strategy,
                         change_detection=change_detection,
                         change_signal=change_signal,
+                        dirty_frame_producer=dirty_frame_producer,
                         causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
@@ -1418,6 +1439,7 @@ def _stream_action_capture_iteration(
     poll_strategy: str,
     change_detection: str,
     change_signal: str | None,
+    dirty_frame_producer: Literal["auto", "off"] = "auto",
     causal_action_observe: bool = False,
 ) -> dict[str, Any]:
     payload = {
@@ -1436,6 +1458,7 @@ def _stream_action_capture_iteration(
         )
         if change_signal is not None:
             payload["change_signal"] = change_signal
+        payload["dirty_frame_producer"] = dirty_frame_producer
         if causal_action_observe:
             call_started = perf_counter()
             result = stream.act_and_observe(**payload)
@@ -1812,6 +1835,12 @@ def _frame_observation(frame) -> dict[str, Any]:
         "change_signal_wait_ms": metadata.get("change_signal_wait_ms"),
         "change_signal_reason": metadata.get("change_signal_reason"),
         "change_signal_version": metadata.get("change_signal_version"),
+        "dirty_frame_producer": metadata.get("dirty_frame_producer"),
+        "dirty_frame_producer_used": metadata.get("dirty_frame_producer_used"),
+        "dirty_frame_producer_fallback_reason": metadata.get(
+            "dirty_frame_producer_fallback_reason"
+        ),
+        "dirty_frame_age_ms": metadata.get("dirty_frame_age_ms"),
         "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
         "baseline_source_version": metadata.get("baseline_source_version"),
         "baseline_source_sha256": metadata.get("baseline_source_sha256"),
@@ -1887,6 +1916,31 @@ def _add_frame_observations(
                 result["change_signal_detected_frames"] = sum(
                     1 for item in observations if item.get("change_signal_detected")
                 )
+            if any(item.get("dirty_frame_producer") is not None for item in observations):
+                result["dirty_frame_producer_frames"] = sum(
+                    1 for item in observations if item.get("dirty_frame_producer")
+                )
+                result["dirty_frame_producer_used_frames"] = sum(
+                    1 for item in observations if item.get("dirty_frame_producer_used")
+                )
+                result["dirty_frame_producer_fallback_reasons"] = sorted(
+                    {
+                        reason
+                        for item in observations
+                        if isinstance(
+                            reason := item.get("dirty_frame_producer_fallback_reason"),
+                            str,
+                        )
+                    }
+                )
+                dirty_frame_age_samples = [
+                    item["dirty_frame_age_ms"]
+                    for item in observations
+                    if isinstance(item.get("dirty_frame_age_ms"), int | float)
+                ]
+                if dirty_frame_age_samples:
+                    result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
+                    result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
             stage_names = sorted(
                 {
                     key

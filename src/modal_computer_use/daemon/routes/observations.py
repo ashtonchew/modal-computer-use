@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import struct
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter
@@ -68,6 +70,8 @@ class _StreamState:
     next_frame_at: float = 0.0
     xdamage_watcher: XDamageWatcher | None = None
     xdamage_display: str | None = None
+    dirty_frame_producer: _DirtyFrameProducer | None = None
+    dirty_frame_display: str | None = None
 
 
 @dataclass
@@ -77,6 +81,122 @@ class _PreparedChangeSignal:
     watcher: XDamageWatcher | None = None
     unavailable_reason: str | None = None
     prearmed: bool = False
+
+
+@dataclass(frozen=True)
+class _DirtyFrameProducerResult:
+    raw: CapturedRawScreenshot
+    produced_at: float
+    generation: int
+    wait_result: XDamageWaitResult
+    wait_wall_ms: float
+    capture_ms: float
+
+
+class _DirtyFrameProducer:
+    def __init__(
+        self,
+        *,
+        capture_raw: Callable[[Region | None], Awaitable[CapturedRawScreenshot | None]],
+        display: str,
+    ) -> None:
+        self._capture_raw = capture_raw
+        self._display = display
+        self._watcher = XDamageWatcher(display=display)
+        self._generation = 0
+        self._latest: _DirtyFrameProducerResult | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._closed = False
+        self.failure: str | None = None
+
+    async def arm(self, request: ObservationStreamRequest, *, timeout_ms: int) -> None:
+        if self._closed:
+            raise RuntimeError("dirty-frame producer is closed")
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+        self._generation += 1
+        generation = self._generation
+        self._latest = None
+        try:
+            await asyncio.to_thread(self._watcher.arm)
+        except Exception as exc:
+            self.failure = getattr(self._watcher, "failure", None) or str(exc)
+            raise
+        self.failure = None
+        self._task = asyncio.create_task(self._produce_once(request, generation, timeout_ms))
+
+    async def wait_for_change(
+        self,
+        *,
+        baseline_source_sha256: str | None,
+        timeout_ms: int,
+    ) -> _DirtyFrameProducerResult | None:
+        deadline = perf_counter() + timeout_ms / 1000
+        while True:
+            latest = self._latest
+            if (
+                latest is not None
+                and latest.generation == self._generation
+                and latest.raw.sha256 != baseline_source_sha256
+            ):
+                return latest
+            task = self._task
+            if task is None:
+                return None
+            remaining = deadline - perf_counter()
+            if remaining <= 0:
+                return None
+            done, _ = await asyncio.wait({task}, timeout=remaining)
+            if not done:
+                return None
+            if task.cancelled():
+                return None
+            exc = task.exception()
+            if exc is not None:
+                self.failure = str(exc)
+                return None
+
+    async def close(self) -> None:
+        self._closed = True
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+        await asyncio.to_thread(self._watcher.close)
+
+    def close_sync(self) -> None:
+        self._closed = True
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._watcher.close()
+
+    async def _produce_once(
+        self,
+        request: ObservationStreamRequest,
+        generation: int,
+        timeout_ms: int,
+    ) -> None:
+        wait_started = perf_counter()
+        wait_result = await asyncio.to_thread(self._watcher.wait, timeout_ms)
+        wait_wall_ms = _elapsed_ms(wait_started)
+        if not wait_result.detected:
+            self._latest = None
+            return
+        capture_started = perf_counter()
+        raw = await self._capture_raw(request.region)
+        capture_ms = _elapsed_ms(capture_started)
+        if raw is None:
+            return
+        self._latest = _DirtyFrameProducerResult(
+            raw=raw,
+            produced_at=perf_counter(),
+            generation=generation,
+            wait_result=wait_result,
+            wait_wall_ms=wait_wall_ms,
+            capture_ms=capture_ms,
+        )
 
 
 @router.websocket("/stream")
@@ -237,6 +357,7 @@ async def _handle_observation_message(
                         "poll_strategy",
                         "change_detection",
                         "change_signal",
+                        "dirty_frame_producer",
                         "change_detection_region",
                         "change_region_radius",
                     },
@@ -255,7 +376,20 @@ async def _handle_observation_message(
                 )
                 region_baseline_ms = _elapsed_ms(region_baseline_started)
             signal_prepare_started = perf_counter()
-            change_signal = _prepare_change_signal(websocket, state, stream_request.change_signal)
+            dirty_producer = await _prepare_dirty_frame_producer(
+                websocket,
+                state,
+                stream_request,
+            )
+            change_signal = (
+                _PreparedChangeSignal(
+                    requested=stream_request.change_signal,
+                    active="xdamage",
+                    prearmed=True,
+                )
+                if dirty_producer is not None
+                else _prepare_change_signal(websocket, state, stream_request.change_signal)
+            )
             signal_prepare_ms = _elapsed_ms(signal_prepare_started)
             action_started = perf_counter()
             action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
@@ -276,6 +410,8 @@ async def _handle_observation_message(
                 region=region,
                 region_baseline_sha256=region_baseline_sha256,
                 change_signal=change_signal,
+                dirty_producer=dirty_producer,
+                baseline_source_sha256=baseline_source_sha256,
                 observe_started=observe_started,
                 stage_timing_ms={
                     "signal_prepare_ms": signal_prepare_ms,
@@ -293,6 +429,7 @@ async def _handle_observation_message(
                     "poll_strategy": stream_request.poll_strategy,
                     "change_detection": stream_request.change_detection,
                     "change_signal": stream_request.change_signal,
+                    "dirty_frame_producer_policy": stream_request.dirty_frame_producer,
                     "baseline_source_version": baseline_source_version,
                     "baseline_source_sha256": baseline_source_sha256,
                     "change_detection_region": region.model_dump(mode="json")
@@ -472,6 +609,8 @@ async def _send_changed_frame(
     region: Region | None,
     region_baseline_sha256: str | None,
     change_signal: _PreparedChangeSignal,
+    dirty_producer: _DirtyFrameProducer | None,
+    baseline_source_sha256: str | None,
     observe_started: float,
     stage_timing_ms: dict[str, float],
     extra_metadata: dict[str, Any],
@@ -491,20 +630,59 @@ async def _send_changed_frame(
     used_region = region is not None and region_baseline_sha256 is not None
     signal_result: XDamageWaitResult | None = None
     signal_wait_wall_ms = 0.0
+    dirty_producer_wait_ms = 0.0
+    dirty_producer_capture_ms = 0.0
+    dirty_frame_age_ms: float | None = None
+    dirty_producer_used = False
+    dirty_producer_fallback_reason: str | None = None
     region_poll_ms = 0.0
     frame_poll_ms = 0.0
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
     change_detected = False
     try:
-        if change_signal.watcher is not None:
+        if dirty_producer is not None:
+            producer_wait_started = perf_counter()
+            producer_result = await dirty_producer.wait_for_change(
+                baseline_source_sha256=baseline_source_sha256,
+                timeout_ms=timeout_ms,
+            )
+            dirty_producer_wait_ms = _elapsed_ms(producer_wait_started)
+            if producer_result is not None:
+                signal_result = producer_result.wait_result
+                signal_wait_wall_ms = producer_result.wait_wall_ms
+                dirty_producer_capture_ms = producer_result.capture_ms
+                dirty_frame_age_ms = max((perf_counter() - producer_result.produced_at) * 1000, 0.0)
+                metadata, payload = _capture_raw_delta_frame(
+                    raw=producer_result.raw,
+                    request=request,
+                    options=_stream_screenshot_options(request),
+                    seq=seq,
+                    last_source_sha256=state.last_source_sha256,
+                    previous_tile_hashes=state.last_tile_hashes,
+                    previous_seq=state.last_frame_seq,
+                    stream_id=state.stream_id or "unknown",
+                    captured_started=observe_started,
+                )
+                last_metadata = metadata
+                last_payload = payload
+                change_detected = metadata["source_sha256"] != state.last_source_sha256
+                dirty_producer_used = change_detected
+                attempts = 1
+            if not dirty_producer_used:
+                dirty_producer_fallback_reason = dirty_producer.failure or "no_changed_frame"
+        if not dirty_producer_used and change_signal.watcher is not None:
             signal_wait_started = perf_counter()
             signal_result = await asyncio.to_thread(
                 change_signal.watcher.wait,
                 timeout_ms,
             )
             signal_wait_wall_ms = _elapsed_ms(signal_wait_started)
-        if used_region and not (signal_result is not None and signal_result.detected):
+        if (
+            not dirty_producer_used
+            and used_region
+            and not (signal_result is not None and signal_result.detected)
+        ):
             region_poll_started = perf_counter()
             while True:
                 region_attempts += 1
@@ -521,34 +699,35 @@ async def _send_changed_frame(
                     / 1000
                 )
             region_poll_ms = _elapsed_ms(region_poll_started)
-        frame_poll_started = perf_counter()
-        while True:
-            attempts += 1
-            metadata, payload = await _capture_frame(
-                websocket,
-                request,
-                seq,
-                state.last_sha256,
-                last_source_sha256=state.last_source_sha256,
-                previous_image=state.last_image,
-                previous_tile_hashes=state.last_tile_hashes,
-                previous_seq=state.last_frame_seq,
-                stream_id=state.stream_id or "unknown",
-            )
-            last_metadata = metadata
-            last_payload = payload
-            change_detected = metadata["source_sha256"] != state.last_source_sha256
-            if change_detected or region_detected or perf_counter() >= deadline:
-                break
-            await asyncio.sleep(
-                _change_poll_sleep_ms(
-                    attempt=attempts,
-                    poll_interval_ms=poll_interval_ms,
-                    poll_strategy=poll_strategy,
+        if not dirty_producer_used:
+            frame_poll_started = perf_counter()
+            while True:
+                attempts += 1
+                metadata, payload = await _capture_frame(
+                    websocket,
+                    request,
+                    seq,
+                    state.last_sha256,
+                    last_source_sha256=state.last_source_sha256,
+                    previous_image=state.last_image,
+                    previous_tile_hashes=state.last_tile_hashes,
+                    previous_seq=state.last_frame_seq,
+                    stream_id=state.stream_id or "unknown",
                 )
-                / 1000
-            )
-        frame_poll_ms = _elapsed_ms(frame_poll_started)
+                last_metadata = metadata
+                last_payload = payload
+                change_detected = metadata["source_sha256"] != state.last_source_sha256
+                if change_detected or region_detected or perf_counter() >= deadline:
+                    break
+                await asyncio.sleep(
+                    _change_poll_sleep_ms(
+                        attempt=attempts,
+                        poll_interval_ms=poll_interval_ms,
+                        poll_strategy=poll_strategy,
+                    )
+                    / 1000
+                )
+            frame_poll_ms = _elapsed_ms(frame_poll_started)
     except DaemonError as exc:
         await _send_observation_error(
             websocket,
@@ -573,6 +752,8 @@ async def _send_changed_frame(
     stage_timing = {
         **stage_timing_ms,
         "signal_wait_wall_ms": signal_wait_wall_ms,
+        "dirty_producer_wait_ms": dirty_producer_wait_ms,
+        "dirty_producer_capture_ms": dirty_producer_capture_ms,
         "region_poll_ms": region_poll_ms,
         "frame_poll_ms": frame_poll_ms,
         "change_wait_ms": wait_ms,
@@ -601,6 +782,10 @@ async def _send_changed_frame(
             "change_signal_wait_ms": None if signal_result is None else signal_result.wait_ms,
             "change_signal_reason": _change_signal_reason(signal_result, change_signal),
             "change_signal_version": None if signal_result is None else signal_result.version,
+            "dirty_frame_producer": dirty_producer is not None,
+            "dirty_frame_producer_used": dirty_producer_used,
+            "dirty_frame_producer_fallback_reason": dirty_producer_fallback_reason,
+            "dirty_frame_age_ms": dirty_frame_age_ms,
             "change_stage_timing_ms": stage_timing,
         },
     )
@@ -619,6 +804,46 @@ async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region)
         options,
     )
     return None if raw is None else raw.sha256
+
+
+async def _prepare_dirty_frame_producer(
+    websocket: WebSocket,
+    state: _StreamState,
+    request: ObservationActionObserveChangeRequest,
+) -> _DirtyFrameProducer | None:
+    if request.dirty_frame_producer == "off":
+        return None
+    if request.change_signal == "poll":
+        return None
+    if state.request is None:
+        return None
+    stream_request = state.request
+    options = _stream_screenshot_options(stream_request)
+    if not _can_use_raw_observation_path(stream_request, options):
+        return None
+    display = getattr(websocket.app.state.backend, "display", None)
+    if not isinstance(display, str) or not display:
+        return None
+
+    async def capture_raw(region: Region | None) -> CapturedRawScreenshot | None:
+        async def operation():
+            return await websocket.app.state.backend.screenshot_raw_pixels(region=region)
+
+        return await run_screenshot_capture(websocket, operation)
+
+    if state.dirty_frame_producer is None or state.dirty_frame_display != display:
+        if state.dirty_frame_producer is not None:
+            state.dirty_frame_producer.close_sync()
+        state.dirty_frame_producer = _DirtyFrameProducer(capture_raw=capture_raw, display=display)
+        state.dirty_frame_display = display
+    producer = state.dirty_frame_producer
+    try:
+        await producer.arm(stream_request, timeout_ms=request.change_timeout_ms)
+    except Exception:
+        if request.change_signal == "xdamage":
+            return None
+        return None
+    return producer
 
 
 def _prepare_change_signal(
@@ -1570,6 +1795,10 @@ def _clear_stream(state: _StreamState) -> None:
 
 
 def _close_stream_resources(state: _StreamState) -> None:
+    if state.dirty_frame_producer is not None:
+        state.dirty_frame_producer.close_sync()
+    state.dirty_frame_producer = None
+    state.dirty_frame_display = None
     if state.xdamage_watcher is not None:
         state.xdamage_watcher.close()
     state.xdamage_watcher = None

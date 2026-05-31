@@ -37,6 +37,7 @@ class ObservationActionObserveChangeRequest(ObservationActionCaptureRequest):
     poll_strategy: Literal["fixed", "adaptive"] = "fixed"
     change_detection: Literal["full", "region", "auto_region"] = "full"
     change_signal: Literal["poll", "xdamage", "auto"] = "auto"
+    dirty_frame_producer: Literal["auto", "off"] = "auto"
     change_detection_region: Region | None = None
     change_region_radius: int = Field(default=192, ge=1, le=10_000)
 
