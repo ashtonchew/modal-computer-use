@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import struct
 from collections.abc import Awaitable, Callable
@@ -65,6 +66,7 @@ class _StreamState:
     last_image: Image.Image | None = None
     last_tile_hashes: dict[tuple[int, int], bytes] | None = None
     last_raw_frame: CapturedRawScreenshot | None = None
+    last_raw_frame_current: bool = False
     last_frame_seq: int | None = None
     emitted_frames: int = 0
     started_at: float = 0.0
@@ -156,7 +158,10 @@ class _DirtyFrameProducer:
             if (
                 latest is not None
                 and latest.generation == self._generation
-                and latest.raw.sha256 != baseline_source_sha256
+                and (
+                    latest.capture_region is not None
+                    or latest.raw.sha256 != baseline_source_sha256
+                )
             ):
                 return latest
             task = self._task
@@ -335,6 +340,7 @@ async def _handle_observation_message(
             state.last_image = None
             state.last_tile_hashes = None
             state.last_raw_frame = None
+            state.last_raw_frame_current = False
             state.last_frame_seq = None
             await _send_empty_result(websocket, request_id)
         elif op == "capture_now":
@@ -530,6 +536,7 @@ async def _start_stream(
     state.last_image = None
     state.last_tile_hashes = None
     state.last_raw_frame = None
+    state.last_raw_frame_current = False
     state.last_frame_seq = None
     state.emitted_frames = 0
     state.started_at = perf_counter()
@@ -669,6 +676,7 @@ async def _send_changed_frame(
     dirty_producer_wait_ms = 0.0
     dirty_producer_capture_ms = 0.0
     dirty_region_reconstruct_ms = 0.0
+    dirty_region_native_ms = 0.0
     dirty_frame_age_ms: float | None = None
     dirty_producer_used = False
     dirty_producer_fallback_reason: str | None = None
@@ -693,32 +701,68 @@ async def _send_changed_frame(
                 dirty_producer_capture_ms = producer_result.capture_ms
                 dirty_frame_age_ms = max((perf_counter() - producer_result.produced_at) * 1000, 0.0)
                 raw = producer_result.raw
+                native_frame: tuple[dict[str, Any], bytes] | None = None
                 if producer_result.capture_region is not None:
-                    reconstruct_started = perf_counter()
-                    raw = _reconstruct_full_raw_frame_from_region(
+                    native_started = perf_counter()
+                    native_frame = _capture_region_native_delta_frame(
                         state=state,
                         region_raw=producer_result.raw,
                         region=producer_result.capture_region,
+                        request=request,
+                        options=_stream_screenshot_options(request),
+                        seq=seq,
+                        previous_seq=state.last_frame_seq,
+                        stream_id=state.stream_id or "unknown",
+                        captured_started=observe_started,
                     )
-                    dirty_region_reconstruct_ms = _elapsed_ms(reconstruct_started)
-                metadata, payload = _capture_raw_delta_frame(
-                    raw=raw,
-                    request=request,
-                    options=_stream_screenshot_options(request),
-                    seq=seq,
-                    last_source_sha256=state.last_source_sha256,
-                    previous_tile_hashes=state.last_tile_hashes,
-                    previous_seq=state.last_frame_seq,
-                    stream_id=state.stream_id or "unknown",
-                    captured_started=observe_started,
-                )
-                last_metadata = metadata
-                last_payload = payload
-                change_detected = metadata["source_sha256"] != state.last_source_sha256
-                dirty_producer_used = change_detected
+                    dirty_region_native_ms = _elapsed_ms(native_started)
+                    if native_frame is None:
+                        if not state.last_raw_frame_current:
+                            dirty_producer_fallback_reason = "stale_full_raw_baseline"
+                        else:
+                            reconstruct_started = perf_counter()
+                            raw = _reconstruct_full_raw_frame_from_region(
+                                state=state,
+                                region_raw=producer_result.raw,
+                                region=producer_result.capture_region,
+                            )
+                            dirty_region_reconstruct_ms = _elapsed_ms(reconstruct_started)
+                if producer_result.capture_region is not None and native_frame is not None:
+                    metadata, payload = native_frame
+                elif (
+                    producer_result.capture_region is not None
+                    and dirty_producer_fallback_reason == "stale_full_raw_baseline"
+                ):
+                    metadata = {}
+                    payload = b""
+                else:
+                    metadata, payload = _capture_raw_delta_frame(
+                        raw=raw,
+                        request=request,
+                        options=_stream_screenshot_options(request),
+                        seq=seq,
+                        last_source_sha256=state.last_source_sha256,
+                        previous_tile_hashes=state.last_tile_hashes,
+                        previous_seq=state.last_frame_seq,
+                        stream_id=state.stream_id or "unknown",
+                        captured_started=observe_started,
+                    )
+                if metadata:
+                    last_metadata = metadata
+                    last_payload = payload
+                    change_detected = (
+                        not metadata["unchanged"]
+                        if metadata.get("source_hash_kind") == "tile-fingerprint"
+                        else metadata["source_sha256"] != state.last_source_sha256
+                    )
+                    dirty_producer_used = change_detected
                 attempts = 1
             if not dirty_producer_used:
-                dirty_producer_fallback_reason = dirty_producer.failure or "no_changed_frame"
+                dirty_producer_fallback_reason = (
+                    dirty_producer_fallback_reason
+                    or dirty_producer.failure
+                    or "no_changed_frame"
+                )
         if not dirty_producer_used and change_signal.watcher is not None:
             signal_wait_started = perf_counter()
             signal_result = await asyncio.to_thread(
@@ -802,6 +846,7 @@ async def _send_changed_frame(
         "signal_wait_wall_ms": signal_wait_wall_ms,
         "dirty_producer_wait_ms": dirty_producer_wait_ms,
         "dirty_producer_capture_ms": dirty_producer_capture_ms,
+        "dirty_region_native_ms": dirty_region_native_ms,
         "dirty_region_reconstruct_ms": dirty_region_reconstruct_ms,
         "region_poll_ms": region_poll_ms,
         "frame_poll_ms": frame_poll_ms,
@@ -918,7 +963,37 @@ def _dirty_producer_capture_region(
         return None
     if request.delta_mode == "off" or next_seq % request.keyframe_interval == 0:
         return None
-    return region
+    native_region = _tile_aligned_region_for_frame(
+        region=region,
+        width=state.last_raw_frame.width,
+        height=state.last_raw_frame.height,
+        tile_size=request.tile_size,
+    )
+    if native_region is not None:
+        native_ratio = (native_region.width * native_region.height) / (
+            state.last_raw_frame.width * state.last_raw_frame.height
+        )
+        if native_ratio <= request.delta_max_ratio:
+            return native_region
+    if state.last_raw_frame_current:
+        return region
+    return None
+
+
+def _tile_aligned_region_for_frame(
+    *,
+    region: Region,
+    width: int,
+    height: int,
+    tile_size: int,
+) -> Region | None:
+    x0 = max((region.x // tile_size) * tile_size, 0)
+    y0 = max((region.y // tile_size) * tile_size, 0)
+    x1 = min(((region.x + region.width + tile_size - 1) // tile_size) * tile_size, width)
+    y1 = min(((region.y + region.height + tile_size - 1) // tile_size) * tile_size, height)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return Region(x=x0, y=y0, width=x1 - x0, height=y1 - y0)
 
 
 def _prepare_change_signal(
@@ -1125,10 +1200,12 @@ async def _emit_frame(
     current_image = metadata.pop("_current_image")
     current_tile_hashes = metadata.pop("_current_tile_hashes")
     current_raw_frame = metadata.pop("_current_raw_frame", None)
+    current_raw_frame_current = metadata.pop("_current_raw_frame_current", True)
     if isinstance(current_image, Image.Image):
         state.last_image = current_image
         state.last_tile_hashes = None
         state.last_raw_frame = None
+        state.last_raw_frame_current = False
         state.last_frame_seq = state.seq
     elif isinstance(current_tile_hashes, dict):
         state.last_image = None
@@ -1136,9 +1213,11 @@ async def _emit_frame(
         state.last_raw_frame = (
             current_raw_frame if isinstance(current_raw_frame, CapturedRawScreenshot) else None
         )
+        state.last_raw_frame_current = bool(current_raw_frame_current and state.last_raw_frame)
         state.last_frame_seq = state.seq
     else:
         state.last_raw_frame = None
+        state.last_raw_frame_current = False
     should_suppress_payload = (
         metadata["unchanged"]
         and metadata["kind"] == "delta-suppressed"
@@ -1381,6 +1460,8 @@ def _reconstruct_full_raw_frame_from_region(
     previous = state.last_raw_frame
     if previous is None:
         raise RuntimeError("regional dirty frame requires a full raw baseline")
+    if not state.last_raw_frame_current:
+        raise RuntimeError("regional dirty frame requires a current full raw baseline")
     if region.x < 0 or region.y < 0:
         raise RuntimeError("regional dirty frame has invalid origin")
     if region.width != region_raw.width or region.height != region_raw.height:
@@ -1413,6 +1494,214 @@ def _reconstruct_full_raw_frame_from_region(
             "dirty_region_width": float(region.width),
             "dirty_region_height": float(region.height),
         },
+    )
+
+
+def _capture_region_native_delta_frame(
+    *,
+    state: _StreamState,
+    region_raw: CapturedRawScreenshot,
+    region: Region,
+    request: ObservationStreamRequest,
+    options: ScreenshotOptions,
+    seq: int,
+    previous_seq: int | None,
+    stream_id: str,
+    captured_started: float,
+) -> tuple[dict[str, Any], bytes] | None:
+    previous = state.last_raw_frame
+    previous_tile_hashes = state.last_tile_hashes
+    if previous is None or previous_tile_hashes is None:
+        return None
+    if not _can_emit_region_native_patch(
+        region=region,
+        region_raw=region_raw,
+        width=previous.width,
+        height=previous.height,
+        tile_size=request.tile_size,
+    ):
+        return None
+
+    delta_started = perf_counter()
+    region_tile_hashes = tile_hashes_rgb(
+        region_raw.rgb,
+        region_raw.width,
+        region_raw.height,
+        request.tile_size,
+    )
+    current_tile_hashes = dict(previous_tile_hashes)
+    for (tile_left, tile_top), digest in region_tile_hashes.items():
+        current_tile_hashes[(tile_left + region.x, tile_top + region.y)] = digest
+    tile_diff_ms = _elapsed_ms(delta_started)
+    dirty_rect = dirty_rect_from_tiles(
+        current=current_tile_hashes,
+        previous=previous_tile_hashes,
+        width=previous.width,
+        height=previous.height,
+        tile_size=request.tile_size,
+    )
+    if dirty_rect is None:
+        source_fingerprint = _source_fingerprint_from_tile_hashes(
+            current_tile_hashes,
+            width=previous.width,
+            height=previous.height,
+            tile_size=request.tile_size,
+        )
+        raw = _fingerprinted_raw_frame(
+            previous=previous,
+            region_raw=region_raw,
+            source_fingerprint=source_fingerprint,
+        )
+        return _raw_metadata(
+            raw=raw,
+            request=request,
+            options=options,
+            stream_id=stream_id,
+            seq=seq,
+            kind="delta-suppressed",
+            payload=b"",
+            payload_sha256=source_fingerprint,
+            full_size_bytes=None,
+            unchanged=True,
+            dirty_rect=None,
+            dirty_ratio=0.0,
+            previous_seq=previous_seq,
+            timing={
+                "diff_ms": tile_diff_ms,
+                "tile_diff_ms": tile_diff_ms,
+                "region_native_patch_ms": _elapsed_ms(delta_started),
+            },
+            captured_started=captured_started,
+            current_tile_hashes=current_tile_hashes,
+            current_raw_frame=previous,
+            current_raw_frame_current=False,
+            source_hash_kind="tile-fingerprint",
+        )
+
+    patch_dirty_ratio = (dirty_rect["width"] * dirty_rect["height"]) / (
+        previous.width * previous.height
+    )
+    if patch_dirty_ratio > request.delta_max_ratio:
+        return None
+    if not _rect_within_region(dirty_rect, region):
+        return None
+    encode_started = perf_counter()
+    patch_left = dirty_rect["x"] - region.x
+    patch_top = dirty_rect["y"] - region.y
+    patch_rgb = crop_rgb(
+        region_raw.rgb,
+        region_raw.width,
+        patch_left,
+        patch_top,
+        dirty_rect["width"],
+        dirty_rect["height"],
+    )
+    payload = encode_rgb_png(patch_rgb, (dirty_rect["width"], dirty_rect["height"]))
+    source_fingerprint = _source_fingerprint_from_tile_hashes(
+        current_tile_hashes,
+        width=previous.width,
+        height=previous.height,
+        tile_size=request.tile_size,
+    )
+    raw = _fingerprinted_raw_frame(
+        previous=previous,
+        region_raw=region_raw,
+        source_fingerprint=source_fingerprint,
+    )
+    return _raw_metadata(
+        raw=raw,
+        request=request,
+        options=options,
+        stream_id=stream_id,
+        seq=seq,
+        kind="patch",
+        payload=payload,
+        payload_sha256=source_fingerprint,
+        full_size_bytes=None,
+        unchanged=False,
+        dirty_rect=dirty_rect,
+        dirty_ratio=patch_dirty_ratio,
+        previous_seq=previous_seq,
+        timing={
+            "diff_ms": tile_diff_ms,
+            "tile_diff_ms": tile_diff_ms,
+            "patch_encode_ms": _elapsed_ms(encode_started),
+            "region_native_patch_ms": _elapsed_ms(delta_started),
+        },
+        captured_started=captured_started,
+        current_tile_hashes=current_tile_hashes,
+        patch_rects=[dirty_rect],
+        patch_sizes=[len(payload)],
+        current_raw_frame=previous,
+        current_raw_frame_current=False,
+        source_hash_kind="tile-fingerprint",
+    )
+
+
+def _can_emit_region_native_patch(
+    *,
+    region: Region,
+    region_raw: CapturedRawScreenshot,
+    width: int,
+    height: int,
+    tile_size: int,
+) -> bool:
+    return (
+        region.x >= 0
+        and region.y >= 0
+        and region.width == region_raw.width
+        and region.height == region_raw.height
+        and region.x + region.width <= width
+        and region.y + region.height <= height
+        and region.x % tile_size == 0
+        and region.y % tile_size == 0
+        and region.width % tile_size == 0
+        and region.height % tile_size == 0
+    )
+
+
+def _rect_within_region(rect: dict[str, int], region: Region) -> bool:
+    return (
+        rect["x"] >= region.x
+        and rect["y"] >= region.y
+        and rect["x"] + rect["width"] <= region.x + region.width
+        and rect["y"] + rect["height"] <= region.y + region.height
+    )
+
+
+def _source_fingerprint_from_tile_hashes(
+    tile_hashes: dict[tuple[int, int], bytes],
+    *,
+    width: int,
+    height: int,
+    tile_size: int,
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(f"{width}x{height}:{tile_size}:".encode("ascii"))
+    for tile_y in range((height + tile_size - 1) // tile_size):
+        for tile_x in range((width + tile_size - 1) // tile_size):
+            digest.update(tile_x.to_bytes(2, "big"))
+            digest.update(tile_y.to_bytes(2, "big"))
+            digest.update(tile_hashes.get((tile_x, tile_y), b""))
+    return digest.hexdigest()
+
+
+def _fingerprinted_raw_frame(
+    *,
+    previous: CapturedRawScreenshot,
+    region_raw: CapturedRawScreenshot,
+    source_fingerprint: str,
+) -> CapturedRawScreenshot:
+    return CapturedRawScreenshot(
+        width=previous.width,
+        height=previous.height,
+        rgb=previous.rgb,
+        sha256=source_fingerprint,
+        captured_at=region_raw.captured_at,
+        coordinate_space=previous.coordinate_space,
+        cursor_visible=False,
+        capture_backend=region_raw.capture_backend,
+        timings_ms=dict(region_raw.timings_ms),
     )
 
 
@@ -1644,6 +1933,9 @@ def _raw_metadata(
     current_tile_hashes: dict[tuple[int, int], bytes] | None,
     patch_rects: list[dict[str, int]] | None = None,
     patch_sizes: list[int] | None = None,
+    current_raw_frame: CapturedRawScreenshot | None = None,
+    current_raw_frame_current: bool = True,
+    source_hash_kind: str = "raw-rgb-sha256",
 ) -> tuple[dict[str, Any], bytes]:
     metadata = {
         "type": "unchanged"
@@ -1660,6 +1952,7 @@ def _raw_metadata(
         "full_size_bytes": full_size_bytes,
         "sha256": payload_sha256,
         "source_sha256": raw.sha256,
+        "source_hash_kind": source_hash_kind,
         "captured_at": raw.captured_at.isoformat(),
         "coordinate_space": raw.coordinate_space.model_dump(mode="json"),
         "cursor_visible": raw.cursor_visible,
@@ -1681,7 +1974,8 @@ def _raw_metadata(
         "tile_hash_backend": "xxh3" if native_hash_available() else "blake2b",
         "_current_image": None,
         "_current_tile_hashes": current_tile_hashes,
-        "_current_raw_frame": raw,
+        "_current_raw_frame": raw if current_raw_frame is None else current_raw_frame,
+        "_current_raw_frame_current": current_raw_frame_current,
     }
     return metadata, payload
 
@@ -1916,6 +2210,8 @@ def _clear_stream(state: _StreamState) -> None:
     state.last_source_sha256 = None
     state.last_image = None
     state.last_tile_hashes = None
+    state.last_raw_frame = None
+    state.last_raw_frame_current = False
     state.last_frame_seq = None
     state.emitted_frames = 0
     state.next_frame_at = 0.0

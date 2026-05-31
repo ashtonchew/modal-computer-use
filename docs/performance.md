@@ -199,14 +199,22 @@ poll when successful, but full-screen capture can still remain on the critical p
 damage event.
 
 When `change_detection="region"` or `"auto_region"` resolves a region and the stream has a raw
-full-frame baseline, the producer captures only that region. The daemon then splices those pixels
-into the cached full raw frame, computes a full-frame source hash, and emits the normal patch or
-keyframe shape. That keeps `source_sha256`, `source_version`, `dirty_rect`, and client composition
-semantics full-frame and lossless while avoiding a full-screen X11 capture for pointer-local paints.
-The optimization is intentionally narrow: stream-level screenshot regions, missing baselines,
-keyframe turns, unsupported raw options, unchanged regional hashes, or any reconstruction failure
-fall back to the full-frame producer/poll path. Frame metadata records the selected
-`dirty_frame_capture_region`, and stage timings include `dirty_region_reconstruct_ms`.
+full-frame baseline, the producer captures only that region. If the region can be expanded to the
+stream tile grid, the daemon hashes only the captured region, overlays those tile hashes onto the
+previous full-frame tile map, and emits a full-coordinate patch directly from the regional raw
+pixels. That avoids both full-screen X11 capture and full-frame raw reconstruction on the hot path.
+These frames set `source_hash_kind="tile-fingerprint"` because `source_sha256` identifies the
+ordered full-frame tile map rather than a freshly reconstructed RGB buffer. Client composition
+semantics remain full-frame and lossless because `dirty_rect` and patch coordinates stay in stream
+coordinates.
+
+The region-native optimization is intentionally narrow: stream-level screenshot regions, missing
+baselines, keyframe turns, unsupported raw options, oversized tile-aligned regions, or non-native
+regional captures fall back to the full-frame producer/poll path. If a previous region-native patch
+made the cached full raw frame stale, the daemon will not use it for reconstruction; it either keeps
+advancing through tile-native regional patches or falls back to a fresh full-frame capture. Frame
+metadata records the selected `dirty_frame_capture_region`, and stage timings include
+`dirty_region_native_ms` and `dirty_region_reconstruct_ms`.
 
 Benchmarks can also enable `transport_timing=true` on the observation stream. In that mode the
 daemon sends one small `transport_timing` control message immediately after each frame payload. The
