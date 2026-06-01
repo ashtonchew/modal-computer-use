@@ -92,7 +92,11 @@ class _DirtyFrameProducerResult:
     produced_at: float
     generation: int
     wait_result: XDamageWaitResult
+    wait_started_at: float
+    wait_ended_at: float
     wait_wall_ms: float
+    capture_started_at: float
+    capture_ended_at: float
     capture_ms: float
     capture_region: Region | None = None
 
@@ -210,7 +214,8 @@ class _DirtyFrameProducer:
             return
         capture_started = perf_counter()
         raw = await self._capture_raw(capture_region or request.region)
-        capture_ms = _elapsed_ms(capture_started)
+        capture_ended = perf_counter()
+        capture_ms = (capture_ended - capture_started) * 1000
         if raw is None:
             return
         self._latest = _DirtyFrameProducerResult(
@@ -218,7 +223,11 @@ class _DirtyFrameProducer:
             produced_at=perf_counter(),
             generation=generation,
             wait_result=wait_result,
+            wait_started_at=wait_started,
+            wait_ended_at=capture_started,
             wait_wall_ms=wait_wall_ms,
+            capture_started_at=capture_started,
+            capture_ended_at=capture_ended,
             capture_ms=capture_ms,
             capture_region=capture_region,
         )
@@ -431,7 +440,8 @@ async def _handle_observation_message(
             signal_prepare_ms = _elapsed_ms(signal_prepare_started)
             action_started = perf_counter()
             action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
-            action_wall_ms = _elapsed_ms(action_started)
+            action_ended = perf_counter()
+            action_wall_ms = (action_ended - action_started) * 1000
             capture_delay_wall_ms = 0.0
             if stream_request.capture_delay_ms > 0:
                 capture_delay_started = perf_counter()
@@ -451,6 +461,8 @@ async def _handle_observation_message(
                 dirty_producer=dirty_producer,
                 baseline_source_sha256=baseline_source_sha256,
                 observe_started=observe_started,
+                action_started=action_started,
+                action_ended=action_ended,
                 stage_timing_ms={
                     "signal_prepare_ms": signal_prepare_ms,
                     "region_baseline_ms": region_baseline_ms,
@@ -655,6 +667,8 @@ async def _send_changed_frame(
     dirty_producer: _DirtyFrameProducer | None,
     baseline_source_sha256: str | None,
     observe_started: float,
+    action_started: float,
+    action_ended: float,
     stage_timing_ms: dict[str, float],
     extra_metadata: dict[str, Any],
 ) -> None:
@@ -685,6 +699,12 @@ async def _send_changed_frame(
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
     change_detected = False
+    signal_wait_started_at: float | None = None
+    signal_wait_ended_at: float | None = None
+    signal_detected_at: float | None = None
+    capture_started_at: float | None = None
+    capture_ended_at: float | None = None
+    delta_ready_at: float | None = None
     try:
         if dirty_producer is not None:
             producer_wait_started = perf_counter()
@@ -700,6 +720,13 @@ async def _send_changed_frame(
                 signal_wait_wall_ms = producer_result.wait_wall_ms
                 dirty_producer_capture_ms = producer_result.capture_ms
                 dirty_frame_age_ms = max((perf_counter() - producer_result.produced_at) * 1000, 0.0)
+                signal_wait_started_at = producer_result.wait_started_at
+                signal_wait_ended_at = producer_result.wait_ended_at
+                signal_detected_at = (
+                    producer_result.wait_ended_at if producer_result.wait_result.detected else None
+                )
+                capture_started_at = producer_result.capture_started_at
+                capture_ended_at = producer_result.capture_ended_at
                 raw = producer_result.raw
                 native_frame: tuple[dict[str, Any], bytes] | None = None
                 if producer_result.capture_region is not None:
@@ -747,6 +774,7 @@ async def _send_changed_frame(
                         stream_id=state.stream_id or "unknown",
                         captured_started=observe_started,
                     )
+                delta_ready_at = perf_counter()
                 if metadata:
                     last_metadata = metadata
                     last_payload = payload
@@ -765,11 +793,14 @@ async def _send_changed_frame(
                 )
         if not dirty_producer_used and change_signal.watcher is not None:
             signal_wait_started = perf_counter()
+            signal_wait_started_at = signal_wait_started
             signal_result = await asyncio.to_thread(
                 change_signal.watcher.wait,
                 timeout_ms,
             )
-            signal_wait_wall_ms = _elapsed_ms(signal_wait_started)
+            signal_wait_ended_at = perf_counter()
+            signal_wait_wall_ms = (signal_wait_ended_at - signal_wait_started) * 1000
+            signal_detected_at = signal_wait_ended_at if signal_result.detected else None
         if (
             not dirty_producer_used
             and used_region
@@ -808,6 +839,7 @@ async def _send_changed_frame(
                 )
                 last_metadata = metadata
                 last_payload = payload
+                delta_ready_at = perf_counter()
                 change_detected = metadata["source_sha256"] != state.last_source_sha256
                 if change_detected or region_detected or perf_counter() >= deadline:
                     break
@@ -841,6 +873,7 @@ async def _send_changed_frame(
         _clear_stream(state)
         return
     wait_ms = _elapsed_ms(started)
+    pre_emit_at = perf_counter()
     stage_timing = {
         **stage_timing_ms,
         "signal_wait_wall_ms": signal_wait_wall_ms,
@@ -851,8 +884,20 @@ async def _send_changed_frame(
         "region_poll_ms": region_poll_ms,
         "frame_poll_ms": frame_poll_ms,
         "change_wait_ms": wait_ms,
-        "server_pre_emit_ms": _elapsed_ms(observe_started),
+        "server_pre_emit_ms": (pre_emit_at - observe_started) * 1000,
     }
+    action_observe_attribution = _action_observe_attribution(
+        observe_started=observe_started,
+        action_started=action_started,
+        action_ended=action_ended,
+        signal_wait_started_at=signal_wait_started_at,
+        signal_wait_ended_at=signal_wait_ended_at,
+        signal_detected_at=signal_detected_at,
+        capture_started_at=capture_started_at,
+        capture_ended_at=capture_ended_at,
+        delta_ready_at=delta_ready_at,
+        pre_emit_at=pre_emit_at,
+    )
     await _emit_frame(
         websocket,
         state,
@@ -881,6 +926,7 @@ async def _send_changed_frame(
             "dirty_frame_producer_fallback_reason": dirty_producer_fallback_reason,
             "dirty_frame_age_ms": dirty_frame_age_ms,
             "change_stage_timing_ms": stage_timing,
+            "action_observe_attribution_ms": action_observe_attribution,
         },
     )
 
@@ -898,6 +944,87 @@ async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region)
         options,
     )
     return None if raw is None else raw.sha256
+
+
+def _action_observe_attribution(
+    *,
+    observe_started: float,
+    action_started: float,
+    action_ended: float,
+    signal_wait_started_at: float | None,
+    signal_wait_ended_at: float | None,
+    signal_detected_at: float | None,
+    capture_started_at: float | None,
+    capture_ended_at: float | None,
+    delta_ready_at: float | None,
+    pre_emit_at: float,
+) -> dict[str, float]:
+    attribution: dict[str, float] = {
+        "request_to_action_start_ms": _interval_ms(observe_started, action_started),
+        "action_wall_ms": _interval_ms(action_started, action_ended),
+        "action_end_to_pre_emit_ms": _interval_ms(action_ended, pre_emit_at),
+        "request_to_pre_emit_ms": _interval_ms(observe_started, pre_emit_at),
+    }
+    if signal_wait_started_at is not None:
+        attribution["request_to_signal_wait_start_ms"] = _interval_ms(
+            observe_started,
+            signal_wait_started_at,
+        )
+        attribution["action_end_to_signal_wait_start_ms"] = _interval_ms(
+            action_ended,
+            signal_wait_started_at,
+        )
+    if signal_wait_started_at is not None and signal_wait_ended_at is not None:
+        attribution["signal_wait_wall_ms"] = _interval_ms(
+            signal_wait_started_at,
+            signal_wait_ended_at,
+        )
+    if signal_detected_at is not None:
+        attribution["request_to_signal_detect_ms"] = _interval_ms(
+            observe_started,
+            signal_detected_at,
+        )
+        attribution["action_end_to_signal_detect_ms"] = _interval_ms(
+            action_ended,
+            signal_detected_at,
+        )
+        attribution["signal_detect_to_pre_emit_ms"] = _interval_ms(
+            signal_detected_at,
+            pre_emit_at,
+        )
+    if capture_started_at is not None:
+        attribution["request_to_capture_start_ms"] = _interval_ms(
+            observe_started,
+            capture_started_at,
+        )
+        attribution["action_end_to_capture_start_ms"] = _interval_ms(
+            action_ended,
+            capture_started_at,
+        )
+    if signal_detected_at is not None and capture_started_at is not None:
+        attribution["signal_detect_to_capture_start_ms"] = _interval_ms(
+            signal_detected_at,
+            capture_started_at,
+        )
+    if capture_started_at is not None and capture_ended_at is not None:
+        attribution["capture_wall_ms"] = _interval_ms(capture_started_at, capture_ended_at)
+    if capture_ended_at is not None and delta_ready_at is not None:
+        attribution["capture_end_to_delta_ready_ms"] = _interval_ms(
+            capture_ended_at,
+            delta_ready_at,
+        )
+    if capture_started_at is not None and delta_ready_at is not None:
+        attribution["capture_start_to_delta_ready_ms"] = _interval_ms(
+            capture_started_at,
+            delta_ready_at,
+        )
+    if delta_ready_at is not None:
+        attribution["delta_ready_to_pre_emit_ms"] = _interval_ms(delta_ready_at, pre_emit_at)
+    return attribution
+
+
+def _interval_ms(started: float, ended: float) -> float:
+    return (ended - started) * 1000
 
 
 async def _prepare_dirty_frame_producer(

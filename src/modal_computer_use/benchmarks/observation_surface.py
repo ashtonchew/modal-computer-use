@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from shlex import quote as shell_quote
 from time import perf_counter
@@ -31,6 +32,7 @@ from .surface_result import _surface_result
 OBSERVATION_SCREENSHOT_OPTIONS = {"format": "png", "show_cursor": False}
 CLICK_TOGGLE_ACTION = {"type": "click", "x": 512, "y": 512, "button": "left"}
 CLICK_TOGGLE_SETTLE_MS = 16
+ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
 def _run_daemon_observation_surface(
@@ -41,55 +43,98 @@ def _run_daemon_observation_surface(
     iterations: int,
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
+    observation_cases: list[str] | None = None,
 ) -> dict[str, Any]:
-    cases = {
-        "observation_first_frame": _run_observation_first_frame_benchmark(
+    factories = _observation_case_factories(
+        base_url=base_url,
+        token=token,
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+    )
+    selected = list(factories) if observation_cases is None else observation_cases
+    invalid = [name for name in selected if name not in factories]
+    if invalid:
+        raise ValueError(f"unknown observation benchmark case: {', '.join(invalid)}")
+    cases = {name: factories[name]() for name in selected}
+    return _surface_result(
+        "daemon-observation-stream",
+        cases=cases,
+        metadata={
+            "transport": "daemon-observation-stream",
+            "protocol": "computer-use.observation-stream.v1",
+            "canonical_name": _observation_canonical_name(environment_metadata),
+            "environment": {
+                key: value
+                for key, value in (environment_metadata or {}).items()
+                if value is not None
+            },
+            "selected_cases": selected,
+        },
+        runtime_seconds=None,
+    )
+
+
+def _observation_case_factories(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, ObservationCaseFactory]:
+    return {
+        "observation_first_frame": lambda: _run_observation_first_frame_benchmark(
             base_url=base_url,
             token=token,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "observation_steady_no_change": _run_observation_no_change_benchmark(
+        "observation_steady_no_change": lambda: _run_observation_no_change_benchmark(
             base_url=base_url,
             token=token,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "observation_small_patch": _run_observation_small_patch_benchmark(
+        "observation_small_patch": lambda: _run_observation_small_patch_benchmark(
             base_url=base_url,
             token=token,
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "observation_sparse_patches": _run_observation_sparse_patches_benchmark(
+        "observation_sparse_patches": lambda: _run_observation_sparse_patches_benchmark(
             base_url=base_url,
             token=token,
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "observation_large_change": _run_observation_large_change_benchmark(
+        "observation_large_change": lambda: _run_observation_large_change_benchmark(
             base_url=base_url,
             token=token,
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "observation_capture_now_no_change": _run_observation_capture_now_no_change_benchmark(
-            base_url=base_url,
-            token=token,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
+        "observation_capture_now_no_change": lambda: (
+            _run_observation_capture_now_no_change_benchmark(
+                base_url=base_url,
+                token=token,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
         ),
-        "observation_capture_now_small_patch": _run_observation_capture_now_small_patch_benchmark(
-            base_url=base_url,
-            token=token,
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
+        "observation_capture_now_small_patch": lambda: (
+            _run_observation_capture_now_small_patch_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
         ),
-        "observation_capture_now_sparse_patches": (
+        "observation_capture_now_sparse_patches": lambda: (
             _run_observation_capture_now_sparse_patches_benchmark(
                 base_url=base_url,
                 token=token,
@@ -98,14 +143,16 @@ def _run_daemon_observation_surface(
                 warmup_iterations=warmup_iterations,
             )
         ),
-        "observation_action_click_capture_now": _run_observation_action_click_capture_now_benchmark(
-            base_url=base_url,
-            token=token,
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
+        "observation_action_click_capture_now": lambda: (
+            _run_observation_action_click_capture_now_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
         ),
-        "observation_action_click_stream_capture": (
+        "observation_action_click_stream_capture": lambda: (
             _run_observation_action_click_stream_capture_benchmark(
                 base_url=base_url,
                 token=token,
@@ -114,7 +161,7 @@ def _run_daemon_observation_surface(
                 warmup_iterations=warmup_iterations,
             )
         ),
-        "observation_action_click_stream_capture_settled": (
+        "observation_action_click_stream_capture_settled": lambda: (
             _run_observation_action_click_stream_capture_benchmark(
                 base_url=base_url,
                 token=token,
@@ -124,7 +171,7 @@ def _run_daemon_observation_surface(
                 capture_delay_ms=CLICK_TOGGLE_SETTLE_MS,
             )
         ),
-        "observation_action_click_observe_change": (
+        "observation_action_click_observe_change": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -134,7 +181,7 @@ def _run_daemon_observation_surface(
                 change_signal=None,
             )
         ),
-        "observation_action_click_observe_change_poll": (
+        "observation_action_click_observe_change_poll": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -145,7 +192,7 @@ def _run_daemon_observation_surface(
                 change_signal="poll",
             )
         ),
-        "observation_action_click_observe_change_adaptive": (
+        "observation_action_click_observe_change_adaptive": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -157,7 +204,7 @@ def _run_daemon_observation_surface(
                 change_signal="poll",
             )
         ),
-        "observation_action_click_observe_change_region_adaptive": (
+        "observation_action_click_observe_change_region_adaptive": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -170,7 +217,7 @@ def _run_daemon_observation_surface(
                 change_signal="poll",
             )
         ),
-        "observation_action_click_observe_change_xdamage": (
+        "observation_action_click_observe_change_xdamage": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -182,7 +229,7 @@ def _run_daemon_observation_surface(
                 change_signal="xdamage",
             )
         ),
-        "observation_action_click_observe_change_auto_signal": (
+        "observation_action_click_observe_change_auto_signal": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -194,7 +241,7 @@ def _run_daemon_observation_surface(
                 change_signal="auto",
             )
         ),
-        "observation_action_click_observe_change_auto_signal_production": (
+        "observation_action_click_observe_change_auto_signal_production": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -207,7 +254,7 @@ def _run_daemon_observation_surface(
                 transport_timing=False,
             )
         ),
-        "observation_action_click_act_and_observe_auto_signal_production": (
+        "observation_action_click_act_and_observe_auto_signal_production": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -221,7 +268,7 @@ def _run_daemon_observation_surface(
                 causal_action_observe=True,
             )
         ),
-        "observation_action_click_act_and_observe_auto_region_production": (
+        "observation_action_click_act_and_observe_auto_region_production": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -236,7 +283,7 @@ def _run_daemon_observation_surface(
                 causal_action_observe=True,
             )
         ),
-        "observation_action_click_act_and_observe_auto_signal_production_sync": (
+        "observation_action_click_act_and_observe_auto_signal_production_sync": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -251,7 +298,7 @@ def _run_daemon_observation_surface(
                 causal_action_observe=True,
             )
         ),
-        "observation_action_click_observe_change_auto_signal_binary_envelope": (
+        "observation_action_click_observe_change_auto_signal_binary_envelope": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -264,7 +311,7 @@ def _run_daemon_observation_surface(
                 frame_encoding="binary-envelope",
             )
         ),
-        "observation_action_click_observe_change_auto_signal_binary_envelope_production": (
+        "observation_action_click_observe_change_auto_signal_binary_envelope_production": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -278,7 +325,7 @@ def _run_daemon_observation_surface(
                 transport_timing=False,
             )
         ),
-        "observation_action_click_sparse_observe_change_auto_signal": (
+        "observation_action_click_sparse_observe_change_auto_signal": lambda: (
             _run_observation_action_click_observe_change_benchmark(
                 base_url=base_url,
                 token=token,
@@ -291,122 +338,125 @@ def _run_daemon_observation_surface(
                 page="sparse",
             )
         ),
-        "observation_action_click_fused_raw": _run_observation_action_click_fused_raw_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
+        "observation_action_click_fused_raw": lambda: (
+            _run_observation_action_click_fused_raw_benchmark(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
         ),
-        "observation_action_click_observe_change_http_raw": (
+        "observation_action_click_observe_change_http_raw": lambda: (
             _run_observation_action_click_observe_change_http_raw_benchmark(
                 client=client,
                 iterations=iterations,
                 warmup_iterations=warmup_iterations,
             )
         ),
-        "observation_transport_probe_0b": _run_observation_transport_probe_benchmark(
+        "observation_transport_probe_0b": lambda: _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=0,
         ),
-        "observation_transport_probe_envelope_0b": _run_observation_transport_probe_benchmark(
-            base_url=base_url,
-            token=token,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=0,
-            frame_encoding="binary-envelope",
+        "observation_transport_probe_envelope_0b": lambda: (
+            _run_observation_transport_probe_benchmark(
+                base_url=base_url,
+                token=token,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=0,
+                frame_encoding="binary-envelope",
+            )
         ),
-        "observation_http_transport_probe_0b": _run_observation_http_transport_probe_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=0,
+        "observation_http_transport_probe_0b": lambda: (
+            _run_observation_http_transport_probe_benchmark(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=0,
+            )
         ),
-        "observation_transport_probe_5kb": _run_observation_transport_probe_benchmark(
+        "observation_transport_probe_5kb": lambda: _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=5 * 1024,
         ),
-        "observation_transport_probe_envelope_5kb": _run_observation_transport_probe_benchmark(
-            base_url=base_url,
-            token=token,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=5 * 1024,
-            frame_encoding="binary-envelope",
+        "observation_transport_probe_envelope_5kb": lambda: (
+            _run_observation_transport_probe_benchmark(
+                base_url=base_url,
+                token=token,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=5 * 1024,
+                frame_encoding="binary-envelope",
+            )
         ),
-        "observation_http_transport_probe_5kb": _run_observation_http_transport_probe_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=5 * 1024,
+        "observation_http_transport_probe_5kb": lambda: (
+            _run_observation_http_transport_probe_benchmark(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=5 * 1024,
+            )
         ),
-        "observation_transport_probe_50kb": _run_observation_transport_probe_benchmark(
+        "observation_transport_probe_50kb": lambda: _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=50 * 1024,
         ),
-        "observation_transport_probe_envelope_50kb": _run_observation_transport_probe_benchmark(
-            base_url=base_url,
-            token=token,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=50 * 1024,
-            frame_encoding="binary-envelope",
+        "observation_transport_probe_envelope_50kb": lambda: (
+            _run_observation_transport_probe_benchmark(
+                base_url=base_url,
+                token=token,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=50 * 1024,
+                frame_encoding="binary-envelope",
+            )
         ),
-        "observation_http_transport_probe_50kb": _run_observation_http_transport_probe_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=50 * 1024,
+        "observation_http_transport_probe_50kb": lambda: (
+            _run_observation_http_transport_probe_benchmark(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=50 * 1024,
+            )
         ),
-        "observation_transport_probe_250kb": _run_observation_transport_probe_benchmark(
+        "observation_transport_probe_250kb": lambda: _run_observation_transport_probe_benchmark(
             base_url=base_url,
             token=token,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             size_bytes=250 * 1024,
         ),
-        "observation_transport_probe_envelope_250kb": _run_observation_transport_probe_benchmark(
-            base_url=base_url,
-            token=token,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=250 * 1024,
-            frame_encoding="binary-envelope",
+        "observation_transport_probe_envelope_250kb": lambda: (
+            _run_observation_transport_probe_benchmark(
+                base_url=base_url,
+                token=token,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=250 * 1024,
+                frame_encoding="binary-envelope",
+            )
         ),
-        "observation_http_transport_probe_250kb": _run_observation_http_transport_probe_benchmark(
-            client=client,
-            iterations=iterations,
-            warmup_iterations=warmup_iterations,
-            size_bytes=250 * 1024,
+        "observation_http_transport_probe_250kb": lambda: (
+            _run_observation_http_transport_probe_benchmark(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                size_bytes=250 * 1024,
+            )
         ),
-        "observation_delta_synthetic": _run_observation_delta_synthetic_benchmark(
+        "observation_delta_synthetic": lambda: _run_observation_delta_synthetic_benchmark(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
     }
-    return _surface_result(
-        "daemon-observation-stream",
-        cases=cases,
-        metadata={
-            "transport": "daemon-observation-stream",
-            "protocol": "computer-use.observation-stream.v1",
-            "canonical_name": _observation_canonical_name(environment_metadata),
-            "environment": {
-                key: value
-                for key, value in (environment_metadata or {}).items()
-                if value is not None
-            },
-        },
-        runtime_seconds=None,
-    )
 
 
 def _observation_canonical_name(environment_metadata: dict[str, Any] | None) -> str:
@@ -1292,9 +1342,7 @@ def _measure_capture_now_loop(
                 try:
                     _capture_now_iteration(stream, frames, mutate=mutate)
                 except Exception as exc:
-                    failures.append(
-                        _failure(name, phase="warmup", iteration=warmup_index, exc=exc)
-                    )
+                    failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
                     return samples, observations
             for iteration in range(iterations):
                 start = perf_counter()
@@ -1367,9 +1415,7 @@ def _measure_stream_action_capture_loop(
                         causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
-                    failures.append(
-                        _failure(name, phase="warmup", iteration=warmup_index, exc=exc)
-                    )
+                    failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
                     return samples, observations
             for iteration in range(iterations):
                 start = perf_counter()
@@ -1791,10 +1837,10 @@ def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
     script = (
         "set -eu; "
         "dir=/tmp/modal-computer-use-observation; "
-        "mkdir -p \"$dir\"; "
-        f"printf %s {shell_quote(body)} > \"$dir/index.html\"; "
+        'mkdir -p "$dir"; '
+        f'printf %s {shell_quote(body)} > "$dir/index.html"; '
         "if ! pgrep -f 'http.server 8766' >/dev/null 2>&1; then "
-        "python3 -m http.server 8766 --bind 127.0.0.1 --directory \"$dir\" "
+        'python3 -m http.server 8766 --bind 127.0.0.1 --directory "$dir" '
         ">/tmp/modal-computer-use-observation-http.log 2>&1 & "
         "fi"
     )
@@ -1858,6 +1904,7 @@ def _frame_observation(frame) -> dict[str, Any]:
         "dirty_frame_capture_region": metadata.get("dirty_frame_capture_region"),
         "dirty_frame_age_ms": metadata.get("dirty_frame_age_ms"),
         "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
+        "action_observe_attribution_ms": metadata.get("action_observe_attribution_ms"),
         "baseline_source_version": metadata.get("baseline_source_version"),
         "baseline_source_sha256": metadata.get("baseline_source_sha256"),
         "poll_strategy": metadata.get("poll_strategy"),
@@ -1981,6 +2028,33 @@ def _add_frame_observations(
                     )
                     for name in stage_names
                 }
+            attribution_names = sorted(
+                {
+                    key
+                    for item in observations
+                    if isinstance(
+                        (attribution := item.get("action_observe_attribution_ms")),
+                        dict,
+                    )
+                    for key, value in attribution.items()
+                    if isinstance(value, int | float)
+                }
+            )
+            if attribution_names:
+                result["action_observe_attribution_summary_ms"] = {
+                    name: _summary(
+                        [
+                            float(attribution[name])
+                            for item in observations
+                            if isinstance(
+                                (attribution := item.get("action_observe_attribution_ms")),
+                                dict,
+                            )
+                            and isinstance(attribution.get(name), int | float)
+                        ]
+                    )
+                    for name in attribution_names
+                }
     _add_nested_timing_summary(
         result,
         observations,
@@ -2097,6 +2171,28 @@ def _add_observation_latency_diagnosis(result: dict[str, Any]) -> None:
     total_p50 = _summary_value(result.get("summary_ms"), "p50")
     daemon_p50 = _summary_value(result.get("daemon_summary_ms"), "p50")
     overhead_p50 = _summary_value(result.get("overhead_summary_ms"), "p50")
+    attribution = result.get("action_observe_attribution_summary_ms")
+    action_to_signal_p50 = _nested_summary_value(
+        attribution,
+        "action_end_to_signal_detect_ms",
+        "p50",
+    )
+    signal_to_capture_p50 = _nested_summary_value(
+        attribution,
+        "signal_detect_to_capture_start_ms",
+        "p50",
+    )
+    capture_to_delta_p50 = _nested_summary_value(
+        attribution,
+        "capture_start_to_delta_ready_ms",
+        "p50",
+    )
+    delta_to_pre_emit_p50 = _nested_summary_value(attribution, "delta_ready_to_pre_emit_ms", "p50")
+    action_end_to_pre_emit_p50 = _nested_summary_value(
+        attribution,
+        "action_end_to_pre_emit_ms",
+        "p50",
+    )
     receive_wait_p50 = _summary_value(
         result.get("receive_minus_server_pre_emit_and_send_summary_ms"),
         "p50",
@@ -2122,6 +2218,20 @@ def _add_observation_latency_diagnosis(result: dict[str, Any]) -> None:
     if isinstance(receive_wait_p50, int | float) and receive_wait_p50 >= 50.0:
         bottleneck = "client_receive_or_tunnel_wait"
         reason = "client receive wait after server pre-emit is at least 50ms p50"
+    elif (
+        isinstance(action_to_signal_p50, int | float)
+        and isinstance(action_end_to_pre_emit_p50, int | float)
+        and action_to_signal_p50 >= max(8.0, action_end_to_pre_emit_p50 * 0.5)
+    ):
+        bottleneck = "action_to_damage_signal"
+        reason = "action end to XDamage signal is the largest attributed daemon interval"
+    elif (
+        isinstance(capture_to_delta_p50, int | float)
+        and isinstance(action_end_to_pre_emit_p50, int | float)
+        and capture_to_delta_p50 >= max(4.0, action_end_to_pre_emit_p50 * 0.35)
+    ):
+        bottleneck = "capture_diff_or_encode"
+        reason = "capture-to-delta-ready is a material share of daemon pre-emit latency"
     result["latency_diagnosis"] = {
         "bottleneck": bottleneck,
         "reason": reason,
@@ -2129,6 +2239,11 @@ def _add_observation_latency_diagnosis(result: dict[str, Any]) -> None:
         "total_p50_ms": total_p50,
         "daemon_p50_ms": daemon_p50,
         "overhead_p50_ms": overhead_p50,
+        "action_end_to_signal_detect_p50_ms": action_to_signal_p50,
+        "signal_detect_to_capture_start_p50_ms": signal_to_capture_p50,
+        "capture_start_to_delta_ready_p50_ms": capture_to_delta_p50,
+        "delta_ready_to_pre_emit_p50_ms": delta_to_pre_emit_p50,
+        "action_end_to_pre_emit_p50_ms": action_end_to_pre_emit_p50,
         "receive_minus_server_pre_emit_and_send_p50_ms": receive_wait_p50,
     }
 
@@ -2138,3 +2253,9 @@ def _summary_value(summary: Any, key: str) -> float | None:
         return None
     value = summary.get(key)
     return float(value) if isinstance(value, int | float) else None
+
+
+def _nested_summary_value(summary: Any, name: str, key: str) -> float | None:
+    if not isinstance(summary, dict):
+        return None
+    return _summary_value(summary.get(name), key)

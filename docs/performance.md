@@ -223,10 +223,40 @@ benchmark receive path records client-side metadata wait, JSON parse, payload wa
 transport-timing wait, and frame construction. Normal SDK streams leave this off so production
 frames keep the stable metadata-then-binary shape without an extra control message.
 
+`run_actions_observe_change` frames also include `action_observe_attribution_ms`. This is a derived
+diagnostic map for the causal action-observe turn, separate from raw stage timings. It records
+request-to-action, action end to XDamage signal, signal to capture start, capture to delta-ready,
+delta-ready to pre-emit, and action end to pre-emit intervals when those boundaries are available.
+Interpret it as a decision aid:
+
+- if `action_end_to_signal_detect_ms` dominates, the next lever is action-to-paint/XDamage behavior
+  or keeping a producer/watch loop armed outside the request path.
+- if `capture_start_to_delta_ready_ms` dominates, the next lever is native capture/diff/encode work.
+- if `delta_ready_to_pre_emit_ms` grows, the next lever is daemon orchestration before WebSocket
+  send.
+- if benchmark receive-minus-server-pre-emit dominates, the next lever is caller placement,
+  co-located runners, or transport/client receive behavior.
+
 The observation benchmark also includes `observation_transport_probe_*` cases. These send synthetic
 in-memory binary payloads over the same observation WebSocket without screenshot capture or X11
 work. Use them to distinguish a fixed tunnel/WebSocket scheduling floor from payload-size transfer
 cost before changing the screenshot or delta protocol.
+
+Live observation benchmark runs can be narrowed to the cases under investigation:
+
+```bash
+uv run computer-use benchmark modal-colocated-client \
+  --modal-region us-west \
+  --surface daemon-observation-stream \
+  --browser chromium \
+  --iterations 10 \
+  --observation-case observation_action_click_act_and_observe_auto_signal_production \
+  --observation-case observation_action_click_act_and_observe_auto_region_production
+```
+
+Use this for diagnostic PRs. The full observation surface intentionally covers older ablations,
+transport probes, and synthetic delta cases, so it is too broad for a quick action-observe
+regression check.
 
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
@@ -445,8 +475,9 @@ framing from a one-shot binary response. The fused-raw case uses the same page a
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,
 action-to-frame timing for `capture_now` cases, action daemon timing for click-driven cases,
-observe-change stage timing, derived receive-minus-server-pre-emit timing, optional stream
-transport send/receive timing, and WebSocket transport labeling. It is
+observe-change stage timing, causal action-observe attribution, derived
+receive-minus-server-pre-emit timing, optional stream transport send/receive timing, and WebSocket
+transport labeling. It is
 intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
 observation behavior, and action-causal capture behavior rather than only a single
 request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive

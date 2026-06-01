@@ -1029,6 +1029,12 @@ def test_observation_stream_dirty_producer_captures_action_region(
     assert second["change_stage_timing_ms"]["dirty_region_native_ms"] >= 0
     assert second["change_stage_timing_ms"]["dirty_region_reconstruct_ms"] == 0
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
+    attribution = second["action_observe_attribution_ms"]
+    assert attribution["action_wall_ms"] >= 0
+    assert attribution["action_end_to_signal_detect_ms"] >= 0
+    assert attribution["signal_detect_to_capture_start_ms"] >= 0
+    assert attribution["capture_start_to_delta_ready_ms"] >= 0
+    assert attribution["delta_ready_to_pre_emit_ms"] >= 0
     assert second["width"] == 64
     assert second["height"] == 64
     composed = ObservationFrame(

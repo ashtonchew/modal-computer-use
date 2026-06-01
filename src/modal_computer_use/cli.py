@@ -355,6 +355,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     colocated_parser.add_argument(
+        "--observation-case",
+        action="append",
+        help=(
+            "daemon-observation-stream case to measure; may be passed more than once; "
+            "defaults to every observation case"
+        ),
+    )
+    colocated_parser.add_argument(
+        "--observation-cases",
+        help="comma-separated daemon-observation-stream case list",
+    )
+    colocated_parser.add_argument(
         "--input-rate-limit-per-sec",
         type=int,
         default=0,
@@ -936,6 +948,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 input_rate_limit_per_sec=args.input_rate_limit_per_sec,
                 image_profile=args.image_profile,
                 surfaces=_modal_colocated_surfaces(args),
+                observation_cases=_modal_colocated_observation_cases(args),
                 iterations=args.iterations,
             )
         )
@@ -1126,6 +1139,16 @@ def _sdk_surfaces(
             parser.error(f"invalid benchmark surface: {', '.join(invalid)}")
         raise SystemExit(f"invalid benchmark surface: {', '.join(invalid)}")
     return values  # type: ignore[return-value]
+
+
+def _modal_colocated_observation_cases(args: argparse.Namespace) -> list[str] | None:
+    values: list[str] = []
+    if args.observation_cases:
+        values.extend(case.strip() for case in args.observation_cases.split(","))
+    if args.observation_case:
+        values.extend(args.observation_case)
+    values = [value for value in values if value]
+    return values or None
 
 
 def _positive_int(value: str) -> int:
