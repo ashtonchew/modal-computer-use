@@ -1018,14 +1018,16 @@ def test_observation_stream_dirty_producer_captures_action_region(
         second_payload = websocket.receive_bytes()
 
     assert capture_regions[0] is None
-    assert capture_regions[1] == Region(x=12, y=12, width=16, height=16)
+    assert capture_regions[1] == Region(x=0, y=0, width=32, height=32)
     assert len(capture_regions) == 2
     assert second["trigger"] == "run_actions_observe_change"
-    assert second["dirty_frame_capture_region"] == {"x": 12, "y": 12, "width": 16, "height": 16}
+    assert second["dirty_frame_capture_region"] == {"x": 0, "y": 0, "width": 32, "height": 32}
     assert second["dirty_frame_producer"] is True
     assert second["dirty_frame_producer_used"] is True
     assert second["change_stage_timing_ms"]["region_baseline_ms"] == 0
-    assert second["change_stage_timing_ms"]["dirty_region_reconstruct_ms"] >= 0
+    assert second["source_hash_kind"] == "tile-fingerprint"
+    assert second["change_stage_timing_ms"]["dirty_region_native_ms"] >= 0
+    assert second["change_stage_timing_ms"]["dirty_region_reconstruct_ms"] == 0
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
     assert second["width"] == 64
     assert second["height"] == 64
@@ -1034,6 +1036,63 @@ def test_observation_stream_dirty_producer_captures_action_region(
         metadata=second,
     ).compose(first_payload)
     assert composed == _image_png_bytes(changed)
+
+
+def test_region_native_dirty_patch_can_advance_from_stale_raw_cache() -> None:
+    white = Image.new("RGB", (64, 64), "white")
+    changed = Image.new("RGB", (64, 64), "white")
+    for y in range(18, 22):
+        for x in range(18, 22):
+            changed.putpixel((x, y), (0, 0, 0))
+    changed_again = changed.copy()
+    for y in range(34, 38):
+        for x in range(34, 38):
+            changed_again.putpixel((x, y), (0, 0, 0))
+
+    request = observation_routes.ObservationStreamRequest(
+        format="png",
+        show_cursor=False,
+        fps=1,
+        tile_size=16,
+    )
+    previous_raw = _raw_screenshot_from_image(white)
+    state = observation_routes._StreamState(
+        request=request,
+        stream_id="test",
+        last_raw_frame=previous_raw,
+        last_raw_frame_current=False,
+        last_tile_hashes=observation_routes.tile_hashes_rgb(
+            changed.tobytes(),
+            changed.width,
+            changed.height,
+            request.tile_size,
+        ),
+        last_frame_seq=2,
+    )
+    frame = observation_routes._capture_region_native_delta_frame(
+        state=state,
+        region_raw=_raw_screenshot_from_image(
+            changed_again,
+            region=Region(x=16, y=16, width=32, height=32),
+        ),
+        region=Region(x=16, y=16, width=32, height=32),
+        request=request,
+        options=observation_routes._stream_screenshot_options(request),
+        seq=3,
+        previous_seq=2,
+        stream_id="test",
+        captured_started=0.0,
+    )
+
+    assert frame is not None
+    metadata, payload = frame
+    assert metadata["kind"] == "patch"
+    assert metadata["source_hash_kind"] == "tile-fingerprint"
+    assert metadata["dirty_rect"] == {"x": 32, "y": 32, "width": 16, "height": 16}
+    composed = ObservationFrame(payload=payload, metadata=metadata).compose(
+        _image_png_bytes(changed)
+    )
+    assert composed == _image_png_bytes(changed_again)
 
 
 def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
