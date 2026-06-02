@@ -100,12 +100,6 @@ class XDamageWatcher:
             return False
         return True
 
-    def set_rect_hints(self, enabled: bool) -> None:
-        if self._rect_hints == enabled:
-            return
-        self.close()
-        self._rect_hints = enabled
-
     def arm(self) -> None:
         self.start()
         self._subtract_damage()

@@ -115,7 +115,8 @@ class _DirtyFrameProducer:
     ) -> None:
         self._capture_raw = capture_raw
         self._display = display
-        self._watcher = XDamageWatcher(display=display)
+        self._wakeup_watcher = XDamageWatcher(display=display)
+        self._rect_watcher: XDamageWatcher | None = None
         self._generation = 0
         self._latest: _DirtyFrameProducerResult | None = None
         self._task: asyncio.Task[None] | None = None
@@ -143,13 +144,11 @@ class _DirtyFrameProducer:
         self._latest = None
         self.capture_region = capture_region
         self.capture_region_source = "action_region" if capture_region is not None else None
+        watcher = self._select_watcher(xdamage_region_frame=xdamage_region_frame)
         try:
-            set_rect_hints = getattr(self._watcher, "set_rect_hints", None)
-            if callable(set_rect_hints):
-                set_rect_hints(xdamage_region_frame is not None)
-            await asyncio.to_thread(self._watcher.arm)
+            await asyncio.to_thread(watcher.arm)
         except Exception as exc:
-            self.failure = getattr(self._watcher, "failure", None) or str(exc)
+            self.failure = getattr(watcher, "failure", None) or str(exc)
             raise
         self.failure = None
         self._task = asyncio.create_task(
@@ -157,6 +156,7 @@ class _DirtyFrameProducer:
                 request,
                 generation,
                 timeout_ms,
+                watcher=watcher,
                 capture_region=capture_region,
                 xdamage_region_frame=xdamage_region_frame,
             )
@@ -202,13 +202,13 @@ class _DirtyFrameProducer:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-        await asyncio.to_thread(self._watcher.close)
+        await asyncio.to_thread(self._close_watchers)
 
     def close_sync(self) -> None:
         self._closed = True
         if self._task is not None and not self._task.done():
             self._task.cancel()
-        self._watcher.close()
+        self._close_watchers()
 
     async def _produce_once(
         self,
@@ -216,11 +216,12 @@ class _DirtyFrameProducer:
         generation: int,
         timeout_ms: int,
         *,
+        watcher: XDamageWatcher,
         capture_region: Region | None,
         xdamage_region_frame: tuple[int, int, int, float] | None,
     ) -> None:
         wait_started = perf_counter()
-        wait_result = await asyncio.to_thread(self._watcher.wait, timeout_ms)
+        wait_result = await asyncio.to_thread(watcher.wait, timeout_ms)
         wait_wall_ms = _elapsed_ms(wait_started)
         if not wait_result.detected:
             self._latest = None
@@ -254,6 +255,22 @@ class _DirtyFrameProducer:
             capture_region=resolved_capture_region,
             capture_region_source=capture_region_source,
         )
+
+    def _select_watcher(
+        self,
+        *,
+        xdamage_region_frame: tuple[int, int, int, float] | None,
+    ) -> XDamageWatcher:
+        if xdamage_region_frame is None:
+            return self._wakeup_watcher
+        if self._rect_watcher is None:
+            self._rect_watcher = XDamageWatcher(display=self._display, rect_hints=True)
+        return self._rect_watcher
+
+    def _close_watchers(self) -> None:
+        self._wakeup_watcher.close()
+        if self._rect_watcher is not None:
+            self._rect_watcher.close()
 
 
 @router.websocket("/stream")

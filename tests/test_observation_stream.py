@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from io import BytesIO
@@ -867,8 +868,9 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     class FakeXDamageWatcher:
         instances: ClassVar[list[FakeXDamageWatcher]] = []
 
-        def __init__(self, *, display: str) -> None:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
+            self.rect_hints = rect_hints
             self.closed = False
             self.armed = 0
             FakeXDamageWatcher.instances.append(self)
@@ -949,9 +951,13 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert second["change_stage_timing_ms"]["dirty_producer_capture_ms"] >= 0
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
     assert second["change_stage_timing_ms"]["server_pre_emit_ms"] >= 0
-    assert len(FakeXDamageWatcher.instances) == 1
-    assert FakeXDamageWatcher.instances[0].armed == 1
+    assert len(FakeXDamageWatcher.instances) == 2
+    assert FakeXDamageWatcher.instances[0].rect_hints is False
+    assert FakeXDamageWatcher.instances[0].armed == 0
+    assert FakeXDamageWatcher.instances[1].rect_hints is True
+    assert FakeXDamageWatcher.instances[1].armed == 1
     assert FakeXDamageWatcher.instances[0].closed is True
+    assert FakeXDamageWatcher.instances[1].closed is True
 
 
 def test_observation_stream_dirty_producer_captures_action_region(
@@ -971,8 +977,9 @@ def test_observation_stream_dirty_producer_captures_action_region(
         return _raw_screenshot_from_image(next(capture_images), region=region)
 
     class FakeXDamageWatcher:
-        def __init__(self, *, display: str) -> None:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
+            self.rect_hints = rect_hints
             self.failure = None
 
         def arm(self) -> None:
@@ -1077,8 +1084,9 @@ def test_observation_stream_dirty_producer_can_capture_xdamage_region(
         return _raw_screenshot_from_image(next(capture_images), region=region)
 
     class FakeXDamageWatcher:
-        def __init__(self, *, display: str) -> None:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
+            self.rect_hints = rect_hints
             self.failure = None
 
         def arm(self) -> None:
@@ -1157,6 +1165,92 @@ def test_observation_stream_dirty_producer_can_capture_xdamage_region(
     assert composed == _image_png_bytes(changed)
 
 
+def test_dirty_frame_producer_uses_separate_xdamage_watchers(monkeypatch) -> None:
+    class FakeXDamageWatcher:
+        instances: ClassVar[list[FakeXDamageWatcher]] = []
+
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
+            self.display = display
+            self.rect_hints = rect_hints
+            self.armed = 0
+            self.waits = 0
+            self.closed = False
+            self.mode_switches = 0
+            FakeXDamageWatcher.instances.append(self)
+
+        def set_rect_hints(self, enabled: bool) -> None:
+            self.mode_switches += 1
+            self.rect_hints = enabled
+
+        def arm(self) -> None:
+            self.armed += 1
+
+        def wait(self, timeout_ms: int):
+            self.waits += 1
+            dirty_rect = (
+                observation_routes.XDamageRect(40, 40, 4, 4) if self.rect_hints else None
+            )
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=1.0,
+                version="1.1",
+                dirty_rect=dirty_rect,
+                dirty_rects=(dirty_rect,) if dirty_rect is not None else (),
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    async def run() -> None:
+        async def capture_raw(region=None):
+            return _raw_screenshot_from_image(Image.new("RGB", (64, 64), "white"), region=region)
+
+        producer = observation_routes._DirtyFrameProducer(capture_raw=capture_raw, display=":99")
+        request = observation_routes.ObservationStreamRequest(
+            format="png",
+            show_cursor=False,
+            fps=1,
+            tile_size=16,
+        )
+        await producer.arm(
+            request,
+            timeout_ms=100,
+            capture_region=Region(x=0, y=0, width=16, height=16),
+        )
+        first = await producer.wait_for_change(baseline_source_sha256=None, timeout_ms=100)
+        await producer.arm(
+            request,
+            timeout_ms=100,
+            xdamage_region_frame=(64, 64, 16, 0.5),
+        )
+        second = await producer.wait_for_change(baseline_source_sha256=None, timeout_ms=100)
+        await producer.close()
+
+        assert first is not None
+        assert first.capture_region_source == "action_region"
+        assert second is not None
+        assert second.capture_region_source == "xdamage_dirty_rect"
+        assert second.capture_region == Region(x=32, y=32, width=16, height=16)
+
+    asyncio.run(run())
+
+    assert len(FakeXDamageWatcher.instances) == 2
+    wakeup, rect = FakeXDamageWatcher.instances
+    assert wakeup.rect_hints is False
+    assert wakeup.armed == 1
+    assert wakeup.waits == 1
+    assert rect.rect_hints is True
+    assert rect.armed == 1
+    assert rect.waits == 1
+    assert wakeup.mode_switches == 0
+    assert rect.mode_switches == 0
+    assert wakeup.closed is True
+    assert rect.closed is True
+
+
 def test_region_native_dirty_patch_can_advance_from_stale_raw_cache() -> None:
     white = Image.new("RGB", (64, 64), "white")
     changed = Image.new("RGB", (64, 64), "white")
@@ -1232,8 +1326,9 @@ def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
     class FakeXDamageWatcher:
         instances: ClassVar[list[FakeXDamageWatcher]] = []
 
-        def __init__(self, *, display: str) -> None:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
+            self.rect_hints = rect_hints
             self.closed = False
             self.armed = 0
             self.waits = 0
@@ -1298,10 +1393,15 @@ def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
             assert frame["change_signal_active"] == "xdamage"
             assert websocket.receive_bytes()
 
-    assert len(FakeXDamageWatcher.instances) == 1
-    assert FakeXDamageWatcher.instances[0].armed == 2
-    assert FakeXDamageWatcher.instances[0].waits == 2
+    assert len(FakeXDamageWatcher.instances) == 2
+    assert FakeXDamageWatcher.instances[0].rect_hints is False
+    assert FakeXDamageWatcher.instances[0].armed == 0
+    assert FakeXDamageWatcher.instances[0].waits == 0
+    assert FakeXDamageWatcher.instances[1].rect_hints is True
+    assert FakeXDamageWatcher.instances[1].armed == 2
+    assert FakeXDamageWatcher.instances[1].waits == 2
     assert FakeXDamageWatcher.instances[0].closed is True
+    assert FakeXDamageWatcher.instances[1].closed is True
 
 
 def test_observation_stream_dirty_producer_ignores_unchanged_frame_and_falls_back(
@@ -1320,8 +1420,9 @@ def test_observation_stream_dirty_producer_ignores_unchanged_frame_and_falls_bac
         return next(captures)
 
     class FakeXDamageWatcher:
-        def __init__(self, *, display: str) -> None:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
+            self.rect_hints = rect_hints
             self.failure = None
 
         def arm(self) -> None:
@@ -1405,7 +1506,7 @@ def test_observation_stream_run_actions_observe_change_auto_falls_back_to_poll(
     class FakeXDamageWatcher:
         failure = "XDamage extension unavailable"
 
-        def __init__(self, *, display: str) -> None:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
 
         def arm(self) -> None:
