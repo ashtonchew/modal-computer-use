@@ -1986,7 +1986,13 @@ def _frame_observation(frame) -> dict[str, Any]:
             "dirty_frame_producer_fallback_reason"
         ),
         "dirty_frame_capture_region": metadata.get("dirty_frame_capture_region"),
+        "dirty_frame_capture_region_source": metadata.get(
+            "dirty_frame_capture_region_source"
+        ),
         "dirty_frame_age_ms": metadata.get("dirty_frame_age_ms"),
+        "xdamage_dirty_rect": metadata.get("xdamage_dirty_rect"),
+        "xdamage_dirty_rects": metadata.get("xdamage_dirty_rects"),
+        "xdamage_dirty_ratio": metadata.get("xdamage_dirty_ratio"),
         "change_stage_timing_ms": metadata.get("change_stage_timing_ms"),
         "action_observe_attribution_ms": metadata.get("action_observe_attribution_ms"),
         "baseline_source_version": metadata.get("baseline_source_version"),

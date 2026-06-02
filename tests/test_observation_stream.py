@@ -941,6 +941,9 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert second["dirty_frame_producer_used"] is True
     assert second["dirty_frame_producer_fallback_reason"] is None
     assert second["dirty_frame_age_ms"] >= 0
+    assert second["dirty_frame_capture_region_source"] is None
+    assert second["xdamage_dirty_rect"] is None
+    assert second["xdamage_dirty_rects"] == []
     assert second["change_stage_timing_ms"]["signal_wait_wall_ms"] >= 0
     assert second["change_stage_timing_ms"]["dirty_producer_wait_ms"] >= 0
     assert second["change_stage_timing_ms"]["dirty_producer_capture_ms"] >= 0
@@ -1034,6 +1037,7 @@ def test_observation_stream_dirty_producer_captures_action_region(
     assert len(capture_regions) == 2
     assert second["trigger"] == "run_actions_observe_change"
     assert second["dirty_frame_capture_region"] == {"x": 0, "y": 0, "width": 32, "height": 32}
+    assert second["dirty_frame_capture_region_source"] == "action_region"
     assert second["dirty_frame_producer"] is True
     assert second["dirty_frame_producer_used"] is True
     assert second["change_stage_timing_ms"]["region_baseline_ms"] == 0
@@ -1049,6 +1053,103 @@ def test_observation_stream_dirty_producer_captures_action_region(
     assert attribution["delta_ready_to_pre_emit_ms"] >= 0
     assert second["width"] == 64
     assert second["height"] == 64
+    composed = ObservationFrame(
+        payload=second_payload,
+        metadata=second,
+    ).compose(first_payload)
+    assert composed == _image_png_bytes(changed)
+
+
+def test_observation_stream_dirty_producer_can_capture_xdamage_region(
+    app,
+    monkeypatch,
+) -> None:
+    white = Image.new("RGB", (64, 64), "white")
+    changed = Image.new("RGB", (64, 64), "white")
+    for y in range(40, 44):
+        for x in range(40, 44):
+            changed.putpixel((x, y), (0, 0, 0))
+    capture_images = iter([white, changed])
+    capture_regions: list[Region | None] = []
+
+    async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
+        capture_regions.append(region)
+        return _raw_screenshot_from_image(next(capture_images), region=region)
+
+    class FakeXDamageWatcher:
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.failure = None
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=1.0,
+                version="1.1",
+                dirty_rect=observation_routes.XDamageRect(40, 40, 4, 4),
+                dirty_rects=(observation_routes.XDamageRect(40, 40, 4, 4),),
+            )
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        first_payload = websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 1,
+                    "change_detection": "full",
+                    "change_signal": "xdamage",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+        second_payload = websocket.receive_bytes()
+
+    assert capture_regions[0] is None
+    assert capture_regions[1] == Region(x=32, y=32, width=16, height=16)
+    assert len(capture_regions) == 2
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["dirty_frame_capture_region"] == {"x": 32, "y": 32, "width": 16, "height": 16}
+    assert second["dirty_frame_capture_region_source"] == "xdamage_dirty_rect"
+    assert second["xdamage_dirty_rect"] == {"x": 40, "y": 40, "width": 4, "height": 4}
+    assert second["xdamage_dirty_rects"] == [{"x": 40, "y": 40, "width": 4, "height": 4}]
+    assert second["xdamage_dirty_ratio"] == 0.0625
+    assert second["dirty_frame_producer"] is True
+    assert second["dirty_frame_producer_used"] is True
     composed = ObservationFrame(
         payload=second_payload,
         metadata=second,
