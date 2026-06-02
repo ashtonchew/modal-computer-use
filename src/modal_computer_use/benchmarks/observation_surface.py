@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import random
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -42,7 +43,9 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
     "observation_action_click_act_and_observe_auto_region_production",
     "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
+    "observation_action_click_act_and_observe_paired_envelope_ab_production",
 )
+PAIRED_ENVELOPE_ORDER_SEED = 20260602
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
@@ -339,6 +342,15 @@ def _observation_case_factories(
                 frame_encoding="binary-envelope",
                 transport_timing=False,
                 causal_action_observe=True,
+            )
+        ),
+        "observation_action_click_act_and_observe_paired_envelope_ab_production": lambda: (
+            _run_observation_action_click_paired_envelope_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
             )
         ),
         "observation_action_click_act_and_observe_auto_signal_production_sync": lambda: (
@@ -868,6 +880,213 @@ def _run_observation_action_click_observe_change_benchmark(
         }
     )
     return result
+
+
+def _run_observation_action_click_paired_envelope_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+    name: str = "observation_action_click_act_and_observe_paired_envelope_ab_production",
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    paired = _measure_paired_stream_action_observe_loop(
+        name=name,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        baseline_frame_encoding="json-binary",
+        variant_frame_encoding="binary-envelope",
+        order_seed=PAIRED_ENVELOPE_ORDER_SEED,
+    )
+    paired_deltas = paired["paired_delta_samples_ms"]
+    result = _case_result(name, iterations, paired_deltas, failures)
+    result.update(
+        {
+            "metric": "paired_delta_ms",
+            "delta_direction": "variant_minus_baseline",
+            "negative_delta_interpretation": "variant_faster",
+            "baseline": {
+                "label": "json-binary",
+                "frame_encoding": "json-binary",
+                "samples_ms": paired["baseline_samples_ms"],
+                "summary_ms": _summary(paired["baseline_samples_ms"]),
+            },
+            "variant": {
+                "label": "binary-envelope",
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["variant_samples_ms"],
+                "summary_ms": _summary(paired["variant_samples_ms"]),
+            },
+            "paired_comparison": _paired_ab_comparison(paired_deltas),
+            "paired_observations": paired["paired_observations"],
+            "pair_order_seed": PAIRED_ENVELOPE_ORDER_SEED,
+            "pairing": {
+                "scope": "same sandbox/client path/page, separate stream per arm",
+                "order_policy": "seeded_random_ab_ba",
+                "reason": "frame_encoding is negotiated when an observation stream starts",
+            },
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change_paired_ab",
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "dirty_frame_producer": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    )
+    return result
+
+
+def _measure_paired_stream_action_observe_loop(
+    *,
+    name: str,
+    base_url: str,
+    token: str | None,
+    iterations: int,
+    warmup_iterations: int,
+    failures: list[dict[str, Any]],
+    baseline_frame_encoding: Literal["json-binary", "binary-envelope"],
+    variant_frame_encoding: Literal["json-binary", "binary-envelope"],
+    order_seed: int,
+) -> dict[str, Any]:
+    baseline_samples: list[float] = []
+    variant_samples: list[float] = []
+    paired_deltas: list[float] = []
+    paired_observations: list[dict[str, Any]] = []
+    arms = {
+        "baseline": baseline_frame_encoding,
+        "variant": variant_frame_encoding,
+    }
+    for warmup_index in range(warmup_iterations):
+        for arm_label in ("baseline", "variant"):
+            try:
+                _measure_paired_stream_action_observe_arm(
+                    base_url=base_url,
+                    token=token,
+                    frame_encoding=arms[arm_label],
+                )
+            except Exception as exc:
+                failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
+                return {
+                    "baseline_samples_ms": baseline_samples,
+                    "variant_samples_ms": variant_samples,
+                    "paired_delta_samples_ms": paired_deltas,
+                    "paired_observations": paired_observations,
+                }
+
+    rng = random.Random(order_seed)  # noqa: S311 - deterministic benchmark ordering only.
+    for pair_index in range(iterations):
+        order = ["baseline", "variant"]
+        if rng.getrandbits(1):
+            order.reverse()
+        pair_samples: dict[str, float] = {}
+        pair_frames: dict[str, dict[str, Any]] = {}
+        for arm_label in order:
+            started = perf_counter()
+            try:
+                observation = _measure_paired_stream_action_observe_arm(
+                    base_url=base_url,
+                    token=token,
+                    frame_encoding=arms[arm_label],
+                )
+            except Exception as exc:
+                elapsed_ms = (perf_counter() - started) * 1000
+                failures.append(
+                    _failure(
+                        name,
+                        phase=f"measure:{arm_label}",
+                        iteration=pair_index,
+                        exc=exc,
+                        elapsed_ms=elapsed_ms,
+                    )
+                )
+                break
+            sample_ms = (perf_counter() - started) * 1000
+            pair_samples[arm_label] = sample_ms
+            pair_frames[arm_label] = observation
+        if set(pair_samples) != {"baseline", "variant"}:
+            continue
+        baseline_ms = pair_samples["baseline"]
+        variant_ms = pair_samples["variant"]
+        delta_ms = variant_ms - baseline_ms
+        baseline_samples.append(baseline_ms)
+        variant_samples.append(variant_ms)
+        paired_deltas.append(delta_ms)
+        paired_observations.append(
+            {
+                "pair_index": pair_index,
+                "order": order,
+                "baseline_ms": baseline_ms,
+                "variant_ms": variant_ms,
+                "delta_ms": delta_ms,
+                "ratio": variant_ms / baseline_ms if baseline_ms else None,
+                "baseline_observation": _compact_observation_sample(pair_frames["baseline"]),
+                "variant_observation": _compact_observation_sample(pair_frames["variant"]),
+            }
+        )
+    return {
+        "baseline_samples_ms": baseline_samples,
+        "variant_samples_ms": variant_samples,
+        "paired_delta_samples_ms": paired_deltas,
+        "paired_observations": paired_observations,
+    }
+
+
+def _measure_paired_stream_action_observe_arm(
+    *,
+    base_url: str,
+    token: str | None,
+    frame_encoding: Literal["json-binary", "binary-envelope"],
+) -> dict[str, Any]:
+    with ObservationClient(
+        ObservationStreamTransport(base_url, token=token),
+        options=OBSERVATION_SCREENSHOT_OPTIONS,
+        fps=0.01,
+        transport_timing=False,
+        frame_encoding=frame_encoding,
+    ) as stream:
+        observation = _stream_action_capture_iteration(
+            stream,
+            None,
+            capture_delay_ms=0,
+            observe_change=True,
+            poll_strategy="adaptive",
+            change_detection="auto",
+            change_signal="auto",
+            dirty_frame_producer="auto",
+            causal_action_observe=True,
+        )
+        observation["benchmark_arm"] = {
+            "frame_encoding": frame_encoding,
+            "pairing": "separate_stream_arm",
+        }
+        return observation
+
+
+def _paired_ab_comparison(deltas: list[float]) -> dict[str, Any]:
+    variant_wins = sum(1 for value in deltas if value < 0)
+    baseline_wins = sum(1 for value in deltas if value > 0)
+    ties = len(deltas) - variant_wins - baseline_wins
+    return {
+        "status": "measured" if deltas else "unavailable",
+        "samples": len(deltas),
+        "delta_summary_ms": _summary(deltas),
+        "variant_wins": variant_wins,
+        "baseline_wins": baseline_wins,
+        "ties": ties,
+        "variant_win_rate": variant_wins / len(deltas) if deltas else None,
+        "baseline_win_rate": baseline_wins / len(deltas) if deltas else None,
+    }
 
 
 def _run_observation_action_click_fused_raw_benchmark(

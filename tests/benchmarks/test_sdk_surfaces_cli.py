@@ -774,6 +774,7 @@ def test_benchmark_modal_colocated_client_observation_profile(monkeypatch, capsy
         "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
         "observation_action_click_act_and_observe_auto_region_production",
         "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
+        "observation_action_click_act_and_observe_paired_envelope_ab_production",
     ]
 
 
