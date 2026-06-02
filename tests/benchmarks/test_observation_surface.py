@@ -7,6 +7,7 @@ from modal_computer_use.benchmarks.observation_surface import (
     _add_frame_observations,
     _add_observation_latency_diagnosis,
     _frame_observation,
+    _paired_ab_comparison,
 )
 
 
@@ -300,6 +301,62 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
         "observation_action_click_act_and_observe_sdk_default_production"
         in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
     )
+    assert (
+        "observation_action_click_act_and_observe_paired_envelope_ab_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
+
+
+def test_paired_ab_comparison_reports_variant_win_rate() -> None:
+    result = _paired_ab_comparison([-4.0, 2.0, -1.0, 0.0])
+
+    assert result["status"] == "measured"
+    assert result["samples"] == 4
+    assert result["delta_summary_ms"]["p50"] == -0.5
+    assert result["variant_wins"] == 2
+    assert result["baseline_wins"] == 1
+    assert result["ties"] == 1
+    assert result["variant_win_rate"] == 0.5
+
+
+def test_paired_envelope_case_reports_delta_samples(monkeypatch) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        lambda **_: {
+            "baseline_samples_ms": [100.0, 110.0],
+            "variant_samples_ms": [80.0, 120.0],
+            "paired_delta_samples_ms": [-20.0, 10.0],
+            "paired_observations": [
+                {
+                    "pair_index": 0,
+                    "order": ["baseline", "variant"],
+                    "baseline_ms": 100.0,
+                    "variant_ms": 80.0,
+                    "delta_ms": -20.0,
+                    "ratio": 0.8,
+                }
+            ],
+        },
+    )
+
+    result = observation_surface._run_observation_action_click_paired_envelope_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=2,
+        warmup_iterations=0,
+    )
+
+    assert result["status"] == "ok"
+    assert result["metric"] == "paired_delta_ms"
+    assert result["summary_ms"]["p50"] == -5.0
+    assert result["baseline"]["summary_ms"]["p50"] == 105.0
+    assert result["variant"]["summary_ms"]["p50"] == 100.0
+    assert result["paired_comparison"]["variant_wins"] == 1
+    assert result["paired_comparison"]["baseline_wins"] == 1
+    assert result["pairing"]["order_policy"] == "seeded_random_ab_ba"
 
 
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:

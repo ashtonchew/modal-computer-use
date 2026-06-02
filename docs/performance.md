@@ -519,6 +519,12 @@ The HTTP raw observe-change case uses the same page and click through
 `POST /v1/actions/run/observe-change/raw-screenshot` so benchmarks can separate WebSocket stream
 framing from a one-shot binary response. The fused-raw case uses the same page and click through
 `POST /v1/actions/run/raw-screenshot`.
+`observation_action_click_act_and_observe_paired_envelope_ab_production` is the paired
+JSON-binary-vs-binary-envelope diagnostic. It runs seeded randomized `AB`/`BA` pairs in the same
+sandbox, client path, and synthetic page, then reports `variant_ms - baseline_ms` deltas so negative
+values mean binary-envelope was faster. Because frame encoding is negotiated when the observation
+stream starts, each arm uses a separate stream session; treat this as a drift-resistant policy
+diagnostic, not a per-frame encoding toggle benchmark.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,
@@ -725,6 +731,9 @@ When the `causal-action-observe-diagnostic` profile is selected, the comparison 
 framing. Treat it as a triage aid: a material binary-envelope win points at WebSocket message
 framing, a large transport win with a smaller causal win points at daemon action/capture/change
 detection, and matching transport/causal wins point at caller placement or Modal receive floor.
+The same profile also includes the paired envelope A/B case. Use its per-pair deltas before making
+small encoding-policy claims from separate before/after artifacts; noisy tail movement in unpaired
+Modal runs is common enough that p95 alone should not drive small optimization decisions.
 The co-located runner also records `metadata.runner_preflight` with safe route-level HTTP probes
 from the runner sandbox to the target daemon. Use it to separate target reachability/auth failures
 from observation WebSocket upgrade failures. It records route names, elapsed time, HTTP version, and
