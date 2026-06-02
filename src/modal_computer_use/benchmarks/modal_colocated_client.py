@@ -6,18 +6,31 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from textwrap import dedent
-from typing import Any
+from typing import Any, Literal
 
 from ..errors import SandboxUnavailableError
-from ..sandbox import ComputerSandbox, modal_sandbox_exec_once
+from ..sandbox import (
+    ComputerSandbox,
+    _connect_token_parts,
+    modal_sandbox_exec_in_place,
+    modal_sandbox_exec_once,
+)
 from ..state import new_run_id
 from .constants import BenchmarkSurface
 from .surfaces import run_sdk_surface_benchmark
+
+ModalColocatedRunnerPath = Literal["inherited", "connect", "target-loopback"]
 
 DEFAULT_MODAL_COLOCATED_SURFACES: tuple[BenchmarkSurface, ...] = ("daemon-transport-floor",)
 MODAL_COLOCATED_ALLOWED_SURFACES: tuple[BenchmarkSurface, ...] = (
     "daemon-transport-floor",
     "daemon-observation-stream",
+)
+DEFAULT_MODAL_COLOCATED_RUNNER_PATHS: tuple[ModalColocatedRunnerPath, ...] = ("inherited",)
+MODAL_COLOCATED_ALLOWED_RUNNER_PATHS: tuple[ModalColocatedRunnerPath, ...] = (
+    "inherited",
+    "connect",
+    "target-loopback",
 )
 MODAL_COLOCATED_RESULT_START = "__MODAL_COMPUTER_USE_RESULT_START__"
 MODAL_COLOCATED_RESULT_END = "__MODAL_COMPUTER_USE_RESULT_END__"
@@ -43,7 +56,16 @@ class ModalColocatedClientBenchmarkConfig:
     image_profile: str | None
     surfaces: list[BenchmarkSurface]
     observation_cases: list[str] | None
+    runner_paths: list[ModalColocatedRunnerPath]
     iterations: int
+
+
+@dataclass(frozen=True)
+class ModalColocatedRunnerEndpoint:
+    path: ModalColocatedRunnerPath
+    base_url: str
+    token: str | None
+    execute_in_target: bool
 
 
 def run_modal_colocated_client_benchmark(
@@ -52,6 +74,7 @@ def run_modal_colocated_client_benchmark(
     run_id_factory: Callable[[], str] = new_run_id,
     create_computer: Callable[..., ComputerSandbox] = ComputerSandbox.create,
     exec_once: Callable[..., Any] = modal_sandbox_exec_once,
+    exec_in_target: Callable[..., Any] = modal_sandbox_exec_in_place,
     surface_benchmark: Callable[..., dict[str, Any]] = run_sdk_surface_benchmark,
 ) -> dict[str, Any]:
     if config.runner_cpu is not None and config.runner_cpu <= 0:
@@ -60,11 +83,18 @@ def run_modal_colocated_client_benchmark(
         raise ValueError("runner_memory_mib must be at least 128")
     if not config.surfaces:
         raise ValueError("at least one surface is required")
+    if not config.runner_paths:
+        raise ValueError("at least one runner path is required")
     invalid = [
         surface for surface in config.surfaces if surface not in MODAL_COLOCATED_ALLOWED_SURFACES
     ]
     if invalid:
         raise ValueError(f"unsupported co-located benchmark surface: {', '.join(invalid)}")
+    invalid_paths = [
+        path for path in config.runner_paths if path not in MODAL_COLOCATED_ALLOWED_RUNNER_PATHS
+    ]
+    if invalid_paths:
+        raise ValueError(f"unsupported co-located runner path: {', '.join(invalid_paths)}")
 
     run_id = run_id_factory()
     target_run_id = f"{run_id}-target"
@@ -109,16 +139,25 @@ def run_modal_colocated_client_benchmark(
             environment_metadata=target_metadata,
             observation_cases=config.observation_cases,
         )
-        colocated_result = run_modal_colocated_runner_benchmark(
+        runner_results = run_modal_colocated_runner_paths(
             config,
             run_id=run_id,
-            target_base_url=computer.client.base_url,
-            target_token=getattr(computer.client.transport, "token", None),
+            computer=computer,
             target_sandbox_id=target_metadata["modal_sandbox_id"],
             exec_once=exec_once,
+            exec_in_target=exec_in_target,
         )
+        primary_runner_path = config.runner_paths[0]
+        colocated_result = runner_results[primary_runner_path]
+        comparison = modal_colocated_comparison(external_result, colocated_result)
+        if len(runner_results) > 1:
+            comparison["runner_paths"] = {
+                path: modal_colocated_comparison(external_result, result)
+                for path, result in runner_results.items()
+            }
         return {
-            "ok": bool(external_result.get("ok")) and bool(colocated_result.get("ok")),
+            "ok": bool(external_result.get("ok"))
+            and all(bool(result.get("ok")) for result in runner_results.values()),
             "benchmark": "modal-colocated-client",
             "generated_at": datetime.now(UTC).isoformat(),
             "iterations": config.iterations,
@@ -129,16 +168,23 @@ def run_modal_colocated_client_benchmark(
                 "daemon_http_version": config.daemon_http_version,
                 "target_sandbox_id": target_metadata["modal_sandbox_id"],
                 "surfaces": config.surfaces,
+                "runner_paths": config.runner_paths,
+                "primary_runner_path": primary_runner_path,
                 "comparison": "external caller versus same-region Modal runner",
             },
             "runs": {
                 "external_caller": external_result,
                 "modal_colocated_runner": colocated_result,
+                "modal_colocated_runner_paths": runner_results,
             },
-            "comparison": modal_colocated_comparison(external_result, colocated_result),
+            "comparison": comparison,
             "failures": [
                 *external_result.get("failures", []),
-                *colocated_result.get("failures", []),
+                *[
+                    failure
+                    for result in runner_results.values()
+                    for failure in result.get("failures", [])
+                ],
             ],
         }
     finally:
@@ -146,10 +192,87 @@ def run_modal_colocated_client_benchmark(
         computer.detach()
 
 
+def run_modal_colocated_runner_paths(
+    config: ModalColocatedClientBenchmarkConfig,
+    *,
+    run_id: str,
+    computer: ComputerSandbox,
+    target_sandbox_id: str | None,
+    exec_once: Callable[..., Any] = modal_sandbox_exec_once,
+    exec_in_target: Callable[..., Any] = modal_sandbox_exec_in_place,
+) -> dict[str, dict[str, Any]]:
+    results: dict[str, dict[str, Any]] = {}
+    for path in config.runner_paths:
+        endpoint = modal_colocated_runner_endpoint(computer, path)
+        if endpoint.execute_in_target:
+            result = run_modal_target_loopback_benchmark(
+                config,
+                run_id=run_id,
+                endpoint=endpoint,
+                target_sandbox=computer._sandbox,
+                target_sandbox_id=target_sandbox_id,
+                exec_in_target=exec_in_target,
+            )
+        else:
+            result = run_modal_colocated_runner_benchmark(
+                config,
+                run_id=run_id,
+                runner_path=path,
+                target_base_url=endpoint.base_url,
+                target_token=endpoint.token,
+                target_sandbox_id=target_sandbox_id,
+                exec_once=exec_once,
+            )
+        results[path] = result
+    return results
+
+
+def modal_colocated_runner_endpoint(
+    computer: ComputerSandbox,
+    path: ModalColocatedRunnerPath,
+) -> ModalColocatedRunnerEndpoint:
+    if path == "inherited":
+        return ModalColocatedRunnerEndpoint(
+            path=path,
+            base_url=computer.client.base_url,
+            token=getattr(computer.client.transport, "token", None),
+            execute_in_target=False,
+        )
+    if path == "connect":
+        sandbox = _require_modal_sandbox(computer, path=path)
+        token_info = sandbox.create_connect_token(
+            user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-colocated-client"}
+        )
+        base_url, token = _connect_token_parts(token_info)
+        return ModalColocatedRunnerEndpoint(
+            path=path,
+            base_url=base_url,
+            token=token,
+            execute_in_target=False,
+        )
+    if path == "target-loopback":
+        _require_modal_sandbox(computer, path=path)
+        return ModalColocatedRunnerEndpoint(
+            path=path,
+            base_url="http://127.0.0.1:8080",
+            token=getattr(computer.client.transport, "token", None),
+            execute_in_target=True,
+        )
+    raise ValueError(f"unsupported co-located runner path: {path}")
+
+
+def _require_modal_sandbox(computer: ComputerSandbox, *, path: str) -> object:
+    sandbox = computer._sandbox
+    if sandbox is None:
+        raise SandboxUnavailableError(f"{path} runner path requires a Modal-backed sandbox")
+    return sandbox
+
+
 def run_modal_colocated_runner_benchmark(
     config: ModalColocatedClientBenchmarkConfig,
     *,
     run_id: str,
+    runner_path: ModalColocatedRunnerPath,
     target_base_url: str,
     target_token: str | None,
     target_sandbox_id: str | None,
@@ -160,6 +283,7 @@ def run_modal_colocated_runner_benchmark(
         **_modal_colocated_environment_metadata(config),
         "caller_region_label": runner_region_label,
         "modal_colocation_role": "modal-colocated-runner",
+        "modal_runner_path": runner_path,
         "modal_runner_region": config.modal_region,
         "modal_target_sandbox_id": target_sandbox_id,
     }
@@ -200,6 +324,56 @@ def run_modal_colocated_runner_benchmark(
         environment = result_metadata.setdefault("environment", {})
         if isinstance(environment, dict):
             environment["modal_runner_sandbox_id"] = getattr(exec_result, "sandbox_id", None)
+            environment["modal_runner_region"] = config.modal_region
+    return result
+
+
+def run_modal_target_loopback_benchmark(
+    config: ModalColocatedClientBenchmarkConfig,
+    *,
+    run_id: str,
+    endpoint: ModalColocatedRunnerEndpoint,
+    target_sandbox: object | None,
+    target_sandbox_id: str | None,
+    exec_in_target: Callable[..., Any] = modal_sandbox_exec_in_place,
+) -> dict[str, Any]:
+    if target_sandbox is None:
+        raise SandboxUnavailableError("target-loopback runner path requires a Modal-backed sandbox")
+    metadata = {
+        **_modal_colocated_environment_metadata(config),
+        "caller_region_label": f"modal-target-loopback:{config.modal_region}",
+        "modal_colocation_role": "modal-target-loopback",
+        "modal_runner_path": endpoint.path,
+        "modal_runner_region": config.modal_region,
+        "modal_target_sandbox_id": target_sandbox_id,
+    }
+    env = build_modal_colocated_runner_env(
+        base_url=endpoint.base_url,
+        token=endpoint.token,
+        iterations=config.iterations,
+        http2=False,
+        surfaces=config.surfaces,
+        observation_cases=config.observation_cases,
+        metadata=metadata,
+    )
+    exec_result = exec_in_target(
+        target_sandbox,
+        ("python", "-c", modal_colocated_runner_code()),
+        env=env,
+        exec_timeout_seconds=_runner_exec_timeout_seconds(config),
+    )
+    if getattr(exec_result, "returncode", None) not in (0, None):
+        return modal_colocated_runner_failure(
+            exec_result,
+            metadata=metadata,
+            surfaces=config.surfaces,
+        )
+    result = extract_modal_colocated_result(getattr(exec_result, "stdout", ""))
+    result_metadata = result.setdefault("metadata", {})
+    if isinstance(result_metadata, dict):
+        environment = result_metadata.setdefault("environment", {})
+        if isinstance(environment, dict):
+            environment["modal_runner_sandbox_id"] = target_sandbox_id
             environment["modal_runner_region"] = config.modal_region
     return result
 

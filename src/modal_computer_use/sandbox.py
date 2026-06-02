@@ -132,6 +132,24 @@ def modal_sandbox_exec_once(
             runner.terminate()
 
 
+def modal_sandbox_exec_in_place(
+    sandbox: object,
+    command: tuple[str, ...],
+    *,
+    env: dict[str, str] | None = None,
+    exec_timeout_seconds: int = 240,
+) -> ModalSandboxExecResult:
+    process = sandbox.exec(*command, timeout=exec_timeout_seconds, env=env or {})
+    stdout = _read_modal_process_stream(getattr(process, "stdout", ""))
+    stderr = _read_modal_process_stream(getattr(process, "stderr", ""))
+    return ModalSandboxExecResult(
+        sandbox_id=getattr(sandbox, "object_id", "unknown"),
+        returncode=_modal_process_returncode(process),
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
 def _read_modal_process_stream(stream: object) -> str:
     read = getattr(stream, "read", None)
     value = read() if callable(read) else stream

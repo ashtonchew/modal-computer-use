@@ -16,7 +16,9 @@ from .benchmarks import (
 )
 from .benchmarks.billing import modal_billing_reconciliation_request
 from .benchmarks.modal_colocated_client import (
+    DEFAULT_MODAL_COLOCATED_RUNNER_PATHS,
     DEFAULT_MODAL_COLOCATED_SURFACES,
+    MODAL_COLOCATED_ALLOWED_RUNNER_PATHS,
     MODAL_COLOCATED_ALLOWED_SURFACES,
     ModalColocatedClientBenchmarkConfig,
     run_modal_colocated_client_benchmark,
@@ -353,6 +355,22 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "comma-separated co-located surface list; defaults to "
             + ",".join(DEFAULT_MODAL_COLOCATED_SURFACES)
+        ),
+    )
+    colocated_parser.add_argument(
+        "--runner-path",
+        action="append",
+        choices=list(MODAL_COLOCATED_ALLOWED_RUNNER_PATHS),
+        help=(
+            "target daemon path used by the Modal runner; may be passed more than once; "
+            "defaults to inherited"
+        ),
+    )
+    colocated_parser.add_argument(
+        "--runner-paths",
+        help=(
+            "comma-separated Modal runner path list; defaults to "
+            + ",".join(DEFAULT_MODAL_COLOCATED_RUNNER_PATHS)
         ),
     )
     colocated_parser.add_argument(
@@ -959,6 +977,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 image_profile=args.image_profile,
                 surfaces=_modal_colocated_surfaces(args),
                 observation_cases=_modal_colocated_observation_cases(args),
+                runner_paths=_modal_colocated_runner_paths(args),
                 iterations=args.iterations,
             )
         )
@@ -990,6 +1009,19 @@ def _modal_colocated_surfaces(
             parser.error(f"invalid co-located benchmark surface: {', '.join(invalid)}")
         raise SystemExit(f"invalid co-located benchmark surface: {', '.join(invalid)}")
     return values  # type: ignore[return-value]
+
+
+def _modal_colocated_runner_paths(args: argparse.Namespace) -> list[str]:
+    values: list[str] = []
+    if getattr(args, "runner_paths", None):
+        values.extend(path.strip() for path in args.runner_paths.split(",") if path.strip())
+    values.extend(getattr(args, "runner_path", None) or [])
+    if not values:
+        return list(DEFAULT_MODAL_COLOCATED_RUNNER_PATHS)
+    invalid = [path for path in values if path not in MODAL_COLOCATED_ALLOWED_RUNNER_PATHS]
+    if invalid:
+        raise SystemExit(f"unsupported co-located runner path: {', '.join(invalid)}")
+    return values
 
 
 def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:

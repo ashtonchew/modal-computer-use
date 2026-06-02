@@ -609,6 +609,7 @@ reduces the floor further:
 uv run computer-use benchmark modal-colocated-client --iterations 30 \
   --modal-region us-west --modal-ingress attested-tunnel --daemon-http-version 1.1 \
   --browser chromium --surface daemon-transport-floor --surface daemon-observation-stream \
+  --runner-path inherited --runner-path connect --runner-path target-loopback \
   --observation-profile causal-action-observe-diagnostic \
   --caller-region-label dev-laptop-us-west \
   --output modal-colocated-client-us-west-30x-YYYYMMDD.json
@@ -624,6 +625,18 @@ actually experiences.
 Observation-stream runs need a browser-capable target image, so pass `--browser chromium` or
 `--browser firefox`; the CLI rejects that surface on the standard image because its browser setup
 would fail before measuring the workload.
+
+Use runner paths to separate caller placement from target ingress:
+
+| Runner path | Caller location | Target daemon path | Use |
+| --- | --- | --- | --- |
+| `inherited` | Separate same-region Modal runner sandbox | The same URL/token as the external caller | Backward-compatible baseline. |
+| `connect` | Separate same-region Modal runner sandbox | Fresh Modal Connect Token URL/token for the same target sandbox | Tests Modal's documented HTTP/WebSocket Sandbox path from inside Modal. |
+| `target-loopback` | The target desktop sandbox itself via `Sandbox.exec` | `http://127.0.0.1:8080` plus the daemon bearer token | Measures the daemon/client loopback floor without tunnel or Connect ingress. |
+
+`target-loopback` is not a separate runner sandbox: `127.0.0.1` only reaches the target daemon from
+inside the target sandbox. Treat it as a lower-bound diagnostic for a future same-container hosted
+control loop, not as proof that two independent sandboxes can talk over loopback.
 
 A May 29, 2026 `modal-colocated-client` run with a `us-west` target and a development-laptop
 external caller measured:
@@ -677,6 +690,22 @@ A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 That run shows the co-located runner improvement on the actual agent-like action-observe path even
 when the synthetic 0B transport floor is flat. Treat this as directional until repeated 30x runs
 confirm tail behavior.
+
+A June 2, 2026 10x browser-target runner-path matrix in `us-west` measured:
+
+| Caller or runner path | Fastest 0B transport p50 | Causal action-to-frame p50 | Notes |
+| --- | ---: | ---: | --- |
+| External caller | 22.4ms | 69.6ms | Development caller to `us-west` target. |
+| `inherited` runner | n/a | 32.4ms | Transport-floor WebSocket setup timed out, observation stream completed. |
+| `connect` runner | n/a | 25.4ms | Transport-floor WebSocket setup timed out, observation stream completed. |
+| `target-loopback` | 0.6ms | 32.1ms | Runs inside the target sandbox over `127.0.0.1:8080`. |
+
+The matrix artifact was intentionally partial because the inherited and Connect runner paths timed
+out while setting up the synthetic transport-floor WebSocket probe. A separate `target-loopback`-only
+10x run completed cleanly and measured external caller `23.3ms` transport / `63.2ms` action-to-frame
+versus target loopback `0.6ms` transport / `31.7ms` action-to-frame. That result is a lower-bound
+diagnostic: removing public ingress nearly eliminates raw receive floor, while the remaining
+action-to-frame time is dominated by daemon/browser change detection and capture work.
 
 Created Modal benchmark sandboxes set `actions.input_rate_limit_per_sec=0` by default. The SDK
 product default remains `20`, but primitive latency benchmarks should not measure intentional
