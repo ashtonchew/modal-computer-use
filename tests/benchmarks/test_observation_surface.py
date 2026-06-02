@@ -413,6 +413,8 @@ def test_frame_observations_record_per_iteration_diagnostics() -> None:
             "dirty_frame_producer": True,
             "dirty_frame_producer_used": False,
             "dirty_frame_producer_fallback_reason": "no_changed_frame",
+            "frame_poll_skipped_reason": "deadline_exhausted_after_region_confirmation",
+            "dirty_region_confirmation_result": "unchanged",
             "change_wait_ms": 13.0,
             "benchmark_timing_ms": {"receive_frame_ms": 13.0},
         },
@@ -441,6 +443,10 @@ def test_frame_observations_record_per_iteration_diagnostics() -> None:
     assert first["dirty_frame_capture_region_source"] == "action_region"
     assert first["server_emit_timing_ms"] == {"emit_total_ms": 0.5}
     assert first["client_receive_timing_ms"] == {"payload_wait_ms": 1.0}
+    assert result["sample_observations"][1]["frame_poll_skipped_reason"] == (
+        "deadline_exhausted_after_region_confirmation"
+    )
+    assert result["sample_observations"][1]["dirty_region_confirmation_result"] == "unchanged"
 
     outliers = result["outlier_observations"]
     assert len(outliers) == 1
@@ -479,6 +485,8 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
             "dirty_frame_producer": True,
             "dirty_frame_producer_used": False,
             "dirty_frame_producer_fallback_reason": "no_changed_frame",
+            "frame_poll_skipped_reason": "dirty_region_confirmation_changed",
+            "dirty_region_confirmation_result": "changed",
             "change_detected": True,
             "change_stage_timing_ms": {
                 "server_pre_emit_ms": 30.0,
@@ -497,6 +505,8 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert result["dirty_frame_producer_frames"] == 2
     assert result["dirty_frame_producer_used_frames"] == 1
     assert result["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
+    assert result["frame_poll_skipped_reasons"] == ["dirty_region_confirmation_changed"]
+    assert result["dirty_region_confirmation_results"] == ["changed"]
     assert result["dirty_frame_age_summary_ms"]["p50"] == 0.1
     assert result["change_stage_timing_summary_ms"]["dirty_producer_wait_ms"]["p50"] == 20.0
     assert (
