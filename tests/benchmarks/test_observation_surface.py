@@ -55,6 +55,74 @@ def test_daemon_observation_surface_rejects_unknown_case(monkeypatch) -> None:
         )
 
 
+def test_causal_binary_envelope_cases_use_production_action_observe_flags(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    client = object()
+
+    def fake_action_observe_benchmark(**kwargs):
+        calls.append(kwargs)
+        return {"status": "ok", "name": kwargs["name"]}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_run_observation_action_click_observe_change_benchmark",
+        fake_action_observe_benchmark,
+    )
+
+    factories = observation_surface._observation_case_factories(
+        base_url="http://daemon.test",
+        token=None,
+        client=client,  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    signal = factories[
+        "observation_action_click_act_and_observe_auto_signal_binary_envelope_production"
+    ]()
+    region = factories[
+        "observation_action_click_act_and_observe_auto_region_binary_envelope_production"
+    ]()
+
+    assert signal["status"] == "ok"
+    assert region["status"] == "ok"
+    assert calls == [
+        {
+            "base_url": "http://daemon.test",
+            "token": None,
+            "client": client,
+            "iterations": 1,
+            "warmup_iterations": 0,
+            "name": (
+                "observation_action_click_act_and_observe_auto_signal_"
+                "binary_envelope_production"
+            ),
+            "poll_strategy": "adaptive",
+            "change_signal": "auto",
+            "frame_encoding": "binary-envelope",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        },
+        {
+            "base_url": "http://daemon.test",
+            "token": None,
+            "client": client,
+            "iterations": 1,
+            "warmup_iterations": 0,
+            "name": (
+                "observation_action_click_act_and_observe_auto_region_"
+                "binary_envelope_production"
+            ),
+            "poll_strategy": "adaptive",
+            "change_detection": "auto_region",
+            "change_signal": "auto",
+            "frame_encoding": "binary-envelope",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        },
+    ]
+
+
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:
     result = {
         "summary_ms": {"p50": 110.0},

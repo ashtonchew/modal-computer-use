@@ -26,6 +26,7 @@ from .benchmarks.modal_region_ab import (
     modal_region_ab_comparison,
     modal_region_ab_markdown_summary,
 )
+from .benchmarks.observation_surface import CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
 from .benchmarks.surfaces import (
     run_sdk_surface_benchmark,
     run_sdk_surface_benchmark_mock_local,
@@ -365,6 +366,15 @@ def main(argv: list[str] | None = None) -> int:
     colocated_parser.add_argument(
         "--observation-cases",
         help="comma-separated daemon-observation-stream case list",
+    )
+    colocated_parser.add_argument(
+        "--observation-profile",
+        choices=["causal-action-observe-diagnostic"],
+        help=(
+            "named daemon-observation-stream case profile; "
+            "causal-action-observe-diagnostic measures transport probes plus json/binary-envelope "
+            "causal action-observe production cases"
+        ),
     )
     colocated_parser.add_argument(
         "--input-rate-limit-per-sec",
@@ -1143,6 +1153,8 @@ def _sdk_surfaces(
 
 def _modal_colocated_observation_cases(args: argparse.Namespace) -> list[str] | None:
     values: list[str] = []
+    if args.observation_profile == "causal-action-observe-diagnostic":
+        values.extend(CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES)
     if args.observation_cases:
         values.extend(case.strip() for case in args.observation_cases.split(","))
     if args.observation_case:

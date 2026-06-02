@@ -723,6 +723,54 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
     }
 
 
+def test_benchmark_modal_colocated_client_observation_profile(monkeypatch, capsys) -> None:
+    calls: list[object] = []
+
+    def fake_run_modal_colocated_client_benchmark(config):
+        calls.append(config)
+        return {
+            "ok": True,
+            "benchmark": "modal-colocated-client",
+            "metadata": {"surfaces": config.surfaces},
+            "comparison": {},
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "run_modal_colocated_client_benchmark",
+        fake_run_modal_colocated_client_benchmark,
+    )
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "modal-colocated-client",
+            "--modal-region",
+            "us-west",
+            "--browser",
+            "chromium",
+            "--surface",
+            "daemon-observation-stream",
+            "--observation-profile",
+            "causal-action-observe-diagnostic",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert json.loads(captured.out)["benchmark"] == "modal-colocated-client"
+    assert calls[0].observation_cases == [
+        "observation_transport_probe_0b",
+        "observation_transport_probe_5kb",
+        "observation_transport_probe_50kb",
+        "observation_transport_probe_250kb",
+        "observation_action_click_act_and_observe_auto_signal_production",
+        "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
+        "observation_action_click_act_and_observe_auto_region_production",
+        "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
+    ]
+
+
 def test_benchmark_modal_colocated_observation_requires_browser(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(

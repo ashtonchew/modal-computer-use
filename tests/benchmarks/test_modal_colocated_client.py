@@ -134,6 +134,102 @@ def test_modal_colocated_runner_failure_is_structured_without_output() -> None:
     assert "secret" not in json.dumps(result)
 
 
+def test_modal_colocated_latency_diagnosis_identifies_daemon_bound() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+    colocated_result = _surface_result(
+        transport_p50=2.0,
+        observation_p50=60.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    assert comparison["diagnosis"]["likely_bound"] == "daemon_action_capture_or_change_detection"
+    assert (
+        comparison["diagnosis"]["interpretation"]
+        == "co-location reduced raw transport more than causal action-observe; daemon action, "
+        "damage, capture, or diff work remains material."
+    )
+
+
+def test_modal_colocated_latency_diagnosis_identifies_placement_bound() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+    colocated_result = _surface_result(
+        transport_p50=20.0,
+        observation_p50=40.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    assert comparison["diagnosis"]["likely_bound"] == "caller_placement_or_modal_receive_floor"
+
+
+def test_modal_colocated_latency_diagnosis_identifies_framing_win() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+        envelope_observation_p50=60.0,
+    )
+    colocated_result = _surface_result(
+        transport_p50=40.0,
+        observation_p50=70.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+        envelope_observation_p50=55.0,
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    diagnosis = comparison["diagnosis"]
+    assert diagnosis["likely_bound"] == "websocket_message_framing"
+    assert diagnosis["causal_framing"]["material_envelope_win"] is True
+    assert (
+        diagnosis["causal_framing"]["cases"]["auto_signal"]["external"][
+            "binary_envelope_p50_ms"
+        ]
+        == 60.0
+    )
+
+
+def test_modal_colocated_latency_diagnosis_does_not_overclaim_partial_framing() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+        envelope_observation_p50=60.0,
+    )
+    colocated_result = _surface_result(
+        transport_p50=40.0,
+        observation_p50=70.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    diagnosis = comparison["diagnosis"]
+    assert diagnosis["likely_bound"] == "partial_websocket_message_framing_evidence"
+    assert diagnosis["causal_framing"]["material_envelope_wins"] == [
+        {"case_group": "auto_signal", "caller_path": "external"}
+    ]
+
+
 def test_extract_modal_colocated_result_rejects_missing_markers() -> None:
     with pytest.raises(SandboxUnavailableError):
         colocated.extract_modal_colocated_result("{}")
@@ -169,6 +265,7 @@ def _surface_result(
     observation_p50: float,
     environment: dict[str, object],
     surfaces: list[str],
+    envelope_observation_p50: float | None = None,
 ) -> dict[str, object]:
     surface_results: dict[str, object] = {}
     if "daemon-transport-floor" in surfaces:
@@ -187,15 +284,23 @@ def _surface_result(
             },
         }
     if "daemon-observation-stream" in surfaces:
+        cases: dict[str, object] = {
+            "observation_action_click_act_and_observe_auto_signal_production": {
+                "status": "ok",
+                "action_to_frame_summary_ms": {"p50": observation_p50},
+            }
+        }
+        if envelope_observation_p50 is not None:
+            cases[
+                "observation_action_click_act_and_observe_auto_signal_binary_envelope_production"
+            ] = {
+                "status": "ok",
+                "action_to_frame_summary_ms": {"p50": envelope_observation_p50},
+            }
         surface_results["daemon-observation-stream"] = {
             "status": "ok",
             "metadata": {"environment": environment},
-            "cases": {
-                "observation_action_click_act_and_observe_auto_signal_production": {
-                    "status": "ok",
-                    "action_to_frame_summary_ms": {"p50": observation_p50},
-                }
-            },
+            "cases": cases,
         }
     return {
         "ok": True,
