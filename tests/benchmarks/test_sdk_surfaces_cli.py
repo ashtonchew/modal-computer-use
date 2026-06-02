@@ -701,6 +701,10 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
             "daemon-observation-stream",
             "--observation-case",
             "observation_action_click_act_and_observe_auto_signal_production",
+            "--runner-paths",
+            "inherited,connect",
+            "--runner-path",
+            "target-loopback",
         ]
     )
 
@@ -714,6 +718,7 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
     assert config.observation_cases == [
         "observation_action_click_act_and_observe_auto_signal_production"
     ]
+    assert config.runner_paths == ["inherited", "connect", "target-loopback"]
     assert payload["benchmark"] == "modal-colocated-client"
     assert payload["comparison"] == {
         "external_fastest_floor_p50_ms": 30.0,

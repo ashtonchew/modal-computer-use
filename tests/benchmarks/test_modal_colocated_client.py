@@ -120,6 +120,101 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
     assert closed == ["terminate", "detach"]
 
 
+def test_modal_colocated_client_runs_runner_path_matrix() -> None:
+    exec_paths: list[str] = []
+    target_exec_paths: list[str] = []
+    closed: list[str] = []
+
+    class TargetSandbox:
+        object_id = "sb-target"
+
+        def create_connect_token(self, *, user_metadata):
+            assert user_metadata["sdk"] == "modal-computer-use"
+            return SimpleNamespace(url="https://connect.modal.run/sb-target", token="connect-token")
+
+    class CreatedComputer:
+        _sandbox = TargetSandbox()
+        client = SimpleNamespace(
+            base_url="https://target.example.modal.host",
+            transport=SimpleNamespace(token="attested-token"),
+        )
+
+        def metadata(self):
+            return SimpleNamespace(sandbox_id="sb-target")
+
+        def terminate(self) -> None:
+            closed.append("terminate")
+
+        def detach(self) -> None:
+            closed.append("detach")
+
+    def fake_surface_benchmark(**kwargs):
+        return _surface_result(
+            transport_p50=30.0,
+            observation_p50=80.0,
+            environment=kwargs["environment_metadata"],
+            surfaces=kwargs["surfaces"],
+        )
+
+    def fake_exec_once(command, **kwargs):
+        metadata = json.loads(kwargs["env"]["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
+        path = metadata["modal_runner_path"]
+        exec_paths.append(path)
+        if path == "inherited":
+            assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "attested-token"  # noqa: S105
+        if path == "connect":
+            assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "connect-token"  # noqa: S105
+        result = _surface_result(
+            transport_p50=10.0,
+            observation_p50=20.0,
+            environment=metadata,
+            surfaces=["daemon-transport-floor"],
+        )
+        return _exec_result(result, sandbox_id=f"sb-runner-{path}")
+
+    def fake_exec_in_target(sandbox, command, **kwargs):
+        assert sandbox is CreatedComputer._sandbox
+        assert kwargs["env"]["COMPUTER_USE_BENCHMARK_BASE_URL"] == "http://127.0.0.1:8080"
+        assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "attested-token"  # noqa: S105
+        metadata = json.loads(kwargs["env"]["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
+        path = metadata["modal_runner_path"]
+        target_exec_paths.append(path)
+        result = _surface_result(
+            transport_p50=1.0,
+            observation_p50=2.0,
+            environment=metadata,
+            surfaces=["daemon-transport-floor"],
+        )
+        return _exec_result(result, sandbox_id="sb-target")
+
+    result = colocated.run_modal_colocated_client_benchmark(
+        _config(
+            surfaces=["daemon-transport-floor"],
+            runner_paths=["inherited", "connect", "target-loopback"],
+        ),
+        run_id_factory=lambda: "modal_colocated_paths_test",
+        create_computer=lambda **kwargs: CreatedComputer(),
+        exec_once=fake_exec_once,
+        exec_in_target=fake_exec_in_target,
+        surface_benchmark=fake_surface_benchmark,
+    )
+
+    assert result["ok"] is True
+    assert exec_paths == ["inherited", "connect"]
+    assert target_exec_paths == ["target-loopback"]
+    assert set(result["runs"]["modal_colocated_runner_paths"]) == {
+        "inherited",
+        "connect",
+        "target-loopback",
+    }
+    assert result["metadata"]["runner_paths"] == ["inherited", "connect", "target-loopback"]
+    assert result["metadata"]["primary_runner_path"] == "inherited"
+    assert "runner_paths" in result["comparison"]
+    assert "attested-token" not in json.dumps(result)
+    assert "connect-token" not in json.dumps(result)
+    assert closed == ["terminate", "detach"]
+
+
 def test_modal_colocated_runner_code_compiles_and_records_preflight() -> None:
     code = colocated.modal_colocated_runner_code()
 
@@ -247,7 +342,11 @@ def test_extract_modal_colocated_result_rejects_missing_markers() -> None:
         colocated.extract_modal_colocated_result("{}")
 
 
-def _config(*, surfaces: list[str]) -> colocated.ModalColocatedClientBenchmarkConfig:
+def _config(
+    *,
+    surfaces: list[str],
+    runner_paths: list[str] | None = None,
+) -> colocated.ModalColocatedClientBenchmarkConfig:
     return colocated.ModalColocatedClientBenchmarkConfig(
         app_name="modal-computer-use",
         name="colocated",
@@ -267,7 +366,22 @@ def _config(*, surfaces: list[str]) -> colocated.ModalColocatedClientBenchmarkCo
         image_profile=None,
         surfaces=surfaces,  # type: ignore[arg-type]
         observation_cases=None,
+        runner_paths=runner_paths or list(colocated.DEFAULT_MODAL_COLOCATED_RUNNER_PATHS),  # type: ignore[arg-type]
         iterations=1,
+    )
+
+
+def _exec_result(result: dict[str, object], *, sandbox_id: str):
+    stdout = (
+        f"{colocated.MODAL_COLOCATED_RESULT_START}\n"
+        f"{json.dumps(result)}\n"
+        f"{colocated.MODAL_COLOCATED_RESULT_END}\n"
+    )
+    return SimpleNamespace(
+        sandbox_id=sandbox_id,
+        returncode=0,
+        stdout=stdout,
+        stderr="",
     )
 
 
