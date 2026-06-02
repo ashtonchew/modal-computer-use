@@ -357,6 +357,9 @@ def test_paired_envelope_case_reports_delta_samples(monkeypatch) -> None:
     assert result["paired_comparison"]["variant_wins"] == 1
     assert result["paired_comparison"]["baseline_wins"] == 1
     assert result["pairing"]["order_policy"] == "seeded_random_ab_ba"
+    assert result["pairing"]["scope"] == (
+        "same sandbox/client path/page/stream, per-command frame encoding"
+    )
 
 
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:

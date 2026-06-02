@@ -162,6 +162,47 @@ def test_observation_stream_can_emit_binary_envelope(test_client) -> None:
     assert stopped["type"] == "stopped"
 
 
+def test_observation_stream_action_observe_can_override_frame_encoding(test_client) -> None:
+    with test_client.websocket_connect("/v1/observations/stream") as websocket:
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 0.01,
+                    "frame_encoding": "json-binary",
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        initial = websocket.receive_json()
+        assert initial["frame_encoding"] == "json-binary"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "wait", "duration_ms": 0}],
+                    "change_timeout_ms": 0,
+                    "frame_encoding": "binary-envelope",
+                    "source": "test",
+                },
+            }
+        )
+        envelope = websocket.receive_bytes()
+
+    header, payload = _decode_frame_envelope(envelope)
+    assert header["id"] == "2"
+    assert header["trigger"] == "run_actions_observe_change"
+    assert header["frame_encoding"] == "binary-envelope"
+    assert header["frame_encoding_override"] == "binary-envelope"
+    assert payload == b""
+
+
 def test_observation_stream_transport_probe(test_client) -> None:
     with test_client.websocket_connect("/v1/observations/stream") as websocket:
         assert websocket.receive_json()["type"] == "ready"
@@ -2057,6 +2098,20 @@ def test_observation_client_act_and_observe_returns_causal_result() -> None:
     assert "continue_on_error" not in transport.change_payload
 
 
+def test_observation_client_act_and_observe_can_override_frame_encoding() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "wait", "duration_ms": 0}],
+        frame_encoding="json-binary",
+    )
+
+    assert transport.change_payload["frame_encoding"] == "json-binary"
+
+
 def test_observation_client_act_and_observe_defaults_pointer_actions_to_auto_region() -> None:
     initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
     frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
@@ -2320,7 +2375,7 @@ def test_observation_transport_run_actions_observe_change_receives_correlated_fr
     assert transport.receive_frame().payload == b"old"
 
 
-def test_observation_transport_json_binary_rejects_binary_payload_at_metadata_boundary() -> None:
+def test_observation_transport_rejects_invalid_binary_payload_at_metadata_boundary() -> None:
     websocket = _FakeWebSocket(
         [
             json.dumps({"type": "ready"}),
@@ -2334,11 +2389,11 @@ def test_observation_transport_json_binary_rejects_binary_payload_at_metadata_bo
     )
     transport.start({"frame_encoding": "json-binary"})
 
-    with pytest.raises(DaemonHTTPError, match="unexpected observation binary payload"):
+    with pytest.raises(DaemonHTTPError, match="invalid observation binary envelope"):
         transport.receive_frame()
 
 
-def test_observation_transport_json_binary_timing_rejects_metadata_boundary_payload() -> None:
+def test_observation_transport_timing_rejects_invalid_binary_payload_at_metadata_boundary() -> None:
     websocket = _FakeWebSocket(
         [
             json.dumps({"type": "ready"}),
@@ -2352,8 +2407,75 @@ def test_observation_transport_json_binary_timing_rejects_metadata_boundary_payl
     )
     transport.start({"frame_encoding": "json-binary"})
 
-    with pytest.raises(DaemonHTTPError, match="unexpected observation binary payload"):
+    with pytest.raises(DaemonHTTPError, match="invalid observation binary envelope"):
         transport.recv_frame_with_timing()
+
+
+def test_observation_transport_json_binary_stream_accepts_binary_envelope_frame() -> None:
+    envelope = observation_routes._encode_frame_envelope(
+        {
+            "type": "frame",
+            "id": "1",
+            "seq": 2,
+            "kind": "patch",
+            "trigger": "run_actions_observe_change",
+            "frame_encoding": "binary-envelope",
+        },
+        b"png",
+    )
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            envelope,
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"frame_encoding": "json-binary"})
+
+    frame = transport.receive_frame()
+
+    assert frame.payload == b"png"
+    assert frame.metadata["frame_encoding"] == "binary-envelope"
+
+
+def test_observation_transport_json_binary_stream_buffers_mixed_correlated_frame() -> None:
+    target = observation_routes._encode_frame_envelope(
+        {
+            "type": "frame",
+            "id": "2",
+            "seq": 2,
+            "kind": "patch",
+            "trigger": "run_actions_observe_change",
+            "causal_frame": True,
+            "frame_encoding": "binary-envelope",
+        },
+        b"png",
+    )
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            json.dumps({"type": "frame", "id": "other", "seq": 1, "kind": "keyframe"}),
+            b"old",
+            target,
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"frame_encoding": "json-binary"})
+
+    frame = transport.run_actions_observe_change_and_recv({"actions": []})
+
+    assert frame.payload == b"png"
+    assert frame.metadata["id"] == "2"
+    assert frame.metadata["frame_encoding"] == "binary-envelope"
+    assert transport.receive_frame().payload == b"old"
 
 
 def test_observation_transport_binary_envelope_receives_correlated_frame() -> None:

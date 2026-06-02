@@ -522,9 +522,9 @@ framing from a one-shot binary response. The fused-raw case uses the same page a
 `observation_action_click_act_and_observe_paired_envelope_ab_production` is the paired
 JSON-binary-vs-binary-envelope diagnostic. It runs seeded randomized `AB`/`BA` pairs in the same
 sandbox, client path, and synthetic page, then reports `variant_ms - baseline_ms` deltas so negative
-values mean binary-envelope was faster. Because frame encoding is negotiated when the observation
-stream starts, each arm uses a separate stream session; treat this as a drift-resistant policy
-diagnostic, not a per-frame encoding toggle benchmark.
+values mean binary-envelope was faster. The stream default remains start-time negotiated, but this
+diagnostic uses a command-scoped action-observe `frame_encoding` override so both arms share one
+observation stream.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,
