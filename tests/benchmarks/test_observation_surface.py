@@ -324,6 +324,83 @@ def test_frame_observations_attach_latency_diagnosis() -> None:
     assert result["latency_diagnosis"]["sample_stability"] == "stable"
 
 
+def test_frame_observations_record_per_iteration_diagnostics() -> None:
+    result = {
+        "summary_ms": {
+            "p50": 12.0,
+            "high_outlier_indices": [2],
+        },
+        "sample_stability": {"status": "outlier_sensitive"},
+    }
+    observations = [
+        {
+            "size_bytes": 100,
+            "metadata_size_bytes": 200,
+            "kind": "patch",
+            "unchanged": False,
+            "frame_encoding": "json-binary",
+            "dirty_frame_producer": True,
+            "dirty_frame_producer_used": True,
+            "dirty_frame_capture_region_source": "action_region",
+            "dirty_frame_capture_region": {"x": 0, "y": 0, "width": 64, "height": 64},
+            "change_stage_timing_ms": {"server_pre_emit_ms": 10.0},
+            "action_observe_attribution_ms": {
+                "action_end_to_signal_detect_ms": 5.0,
+            },
+            "benchmark_timing_ms": {"receive_frame_ms": 12.0},
+            "screenshot_daemon_timing_ms": {"observation_total_ms": 7.0},
+            "observation_transport_timing": {
+                "server_emit_timing_ms": {"emit_total_ms": 0.5},
+                "client_receive_timing_ms": {"payload_wait_ms": 1.0},
+            },
+        },
+        {
+            "size_bytes": 101,
+            "kind": "patch",
+            "unchanged": False,
+            "dirty_frame_producer": True,
+            "dirty_frame_producer_used": False,
+            "dirty_frame_producer_fallback_reason": "no_changed_frame",
+            "change_wait_ms": 13.0,
+            "benchmark_timing_ms": {"receive_frame_ms": 13.0},
+        },
+        {
+            "size_bytes": 102,
+            "kind": "patch",
+            "unchanged": False,
+            "dirty_frame_producer": True,
+            "dirty_frame_producer_used": True,
+            "dirty_frame_capture_region_source": "xdamage_dirty_rect",
+            "xdamage_dirty_rect": {"x": 40, "y": 40, "width": 4, "height": 4},
+            "xdamage_dirty_rects": [{"x": 40, "y": 40, "width": 4, "height": 4}],
+            "xdamage_dirty_ratio": 0.0625,
+            "change_wait_ms": 100.0,
+            "benchmark_timing_ms": {"receive_frame_ms": 100.0},
+        },
+    ]
+
+    _add_frame_observations(result, [12.0, 13.0, 100.0], observations)
+
+    assert len(result["sample_observations"]) == 3
+    first = result["sample_observations"][0]
+    assert first["iteration"] == 0
+    assert first["sample_ms"] == 12.0
+    assert first["high_outlier"] is False
+    assert first["dirty_frame_capture_region_source"] == "action_region"
+    assert first["server_emit_timing_ms"] == {"emit_total_ms": 0.5}
+    assert first["client_receive_timing_ms"] == {"payload_wait_ms": 1.0}
+
+    outliers = result["outlier_observations"]
+    assert len(outliers) == 1
+    assert outliers[0]["iteration"] == 2
+    assert outliers[0]["high_outlier"] is True
+    assert outliers[0]["dirty_frame_capture_region_source"] == "xdamage_dirty_rect"
+    assert outliers[0]["xdamage_dirty_rects"] == [
+        {"x": 40, "y": 40, "width": 4, "height": 4}
+    ]
+    assert outliers[0]["benchmark_timing_ms"] == {"receive_frame_ms": 100.0}
+
+
 def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     result = {"summary_ms": {"p50": 50.0}}
     observations = [

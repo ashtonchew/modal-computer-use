@@ -259,6 +259,14 @@ in-memory binary payloads over the same observation WebSocket without screenshot
 work. Use them to distinguish a fixed tunnel/WebSocket scheduling floor from payload-size transfer
 cost before changing the screenshot or delta protocol.
 
+Observation benchmark artifacts preserve one compact `sample_observations` row per measured
+iteration and an `outlier_observations` subset keyed by the summary's high-outlier indices. Use
+those rows for tail diagnosis because aggregate p50/p95 summaries can identify the likely stage
+class, but they cannot prove whether a specific slow iteration came from XDamage wait, dirty-frame
+producer fallback, capture/diff work, WebSocket receive, or browser paint behavior. The rows keep
+timing, dirty-region source, fallback reason, patch, XDamage, and transport metadata; they do not
+store screenshot payload bytes.
+
 Live observation benchmark runs can be narrowed to the cases under investigation:
 
 ```bash
