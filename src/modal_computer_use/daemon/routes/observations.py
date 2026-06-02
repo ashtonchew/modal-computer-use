@@ -731,6 +731,10 @@ async def _send_changed_frame(
     dirty_producer_capture_ms = 0.0
     dirty_region_reconstruct_ms = 0.0
     dirty_region_native_ms = 0.0
+    dirty_region_confirmation_ms = 0.0
+    dirty_region_confirmation_capture_ms = 0.0
+    dirty_region_confirmation_native_ms = 0.0
+    dirty_region_confirmation_result: str | None = None
     dirty_frame_age_ms: float | None = None
     dirty_frame_capture_region: Region | None = None
     dirty_frame_capture_region_source: str | None = None
@@ -750,6 +754,7 @@ async def _send_changed_frame(
     capture_started_at: float | None = None
     capture_ended_at: float | None = None
     delta_ready_at: float | None = None
+    producer_result: _DirtyFrameProducerResult | None = None
     try:
         if dirty_producer is not None:
             producer_wait_started = perf_counter()
@@ -878,10 +883,51 @@ async def _send_changed_frame(
         if (
             not dirty_producer_used
             and not region_detected
+            and dirty_producer is not None
+            and dirty_producer.capture_region is not None
+            and producer_result is None
+        ):
+            confirmation_started = perf_counter()
+            confirmation_frame, confirmation_capture_ms, confirmation_native_ms = (
+                await _capture_dirty_region_confirmation_frame(
+                    websocket,
+                    state=state,
+                    request=request,
+                    region=dirty_producer.capture_region,
+                    seq=seq,
+                    observe_started=observe_started,
+                )
+            )
+            dirty_region_confirmation_ms = _elapsed_ms(confirmation_started)
+            dirty_region_confirmation_capture_ms = confirmation_capture_ms
+            dirty_region_confirmation_native_ms = confirmation_native_ms
+            if confirmation_frame is not None:
+                metadata, payload = confirmation_frame
+                last_metadata = metadata
+                last_payload = payload
+                delta_ready_at = perf_counter()
+                change_detected = (
+                    not metadata["unchanged"]
+                    if metadata.get("source_hash_kind") == "tile-fingerprint"
+                    else metadata["source_sha256"] != state.last_source_sha256
+                )
+                dirty_region_confirmation_result = "changed" if change_detected else "unchanged"
+                if change_detected:
+                    frame_poll_skipped_reason = "dirty_region_confirmation_changed"
+            else:
+                dirty_region_confirmation_result = "unavailable"
+        if (
+            not dirty_producer_used
+            and not region_detected
             and last_metadata is not None
             and perf_counter() >= deadline
+            and frame_poll_skipped_reason is None
         ):
-            frame_poll_skipped_reason = "deadline_exhausted_after_dirty_producer"
+            frame_poll_skipped_reason = (
+                "deadline_exhausted_after_region_confirmation"
+                if dirty_region_confirmation_result is not None
+                else "deadline_exhausted_after_dirty_producer"
+            )
         if not dirty_producer_used and frame_poll_skipped_reason is None:
             frame_poll_started = perf_counter()
             while True:
@@ -941,6 +987,9 @@ async def _send_changed_frame(
         "dirty_producer_capture_ms": dirty_producer_capture_ms,
         "dirty_region_native_ms": dirty_region_native_ms,
         "dirty_region_reconstruct_ms": dirty_region_reconstruct_ms,
+        "dirty_region_confirmation_ms": dirty_region_confirmation_ms,
+        "dirty_region_confirmation_capture_ms": dirty_region_confirmation_capture_ms,
+        "dirty_region_confirmation_native_ms": dirty_region_confirmation_native_ms,
         "region_poll_ms": region_poll_ms,
         "frame_poll_ms": frame_poll_ms,
         "change_wait_ms": wait_ms,
@@ -990,6 +1039,7 @@ async def _send_changed_frame(
             else extra_metadata.get("dirty_frame_capture_region"),
             "dirty_frame_capture_region_source": dirty_frame_capture_region_source,
             "frame_poll_skipped_reason": frame_poll_skipped_reason,
+            "dirty_region_confirmation_result": dirty_region_confirmation_result,
             "xdamage_dirty_rect": _xdamage_rect_metadata(xdamage_dirty_rect),
             "xdamage_dirty_rects": [_xdamage_rect_metadata(rect) for rect in xdamage_dirty_rects],
             "xdamage_dirty_ratio": _region_ratio(
@@ -1016,6 +1066,43 @@ async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region)
         options,
     )
     return None if raw is None else raw.sha256
+
+
+async def _capture_dirty_region_confirmation_frame(
+    websocket: WebSocket,
+    *,
+    state: _StreamState,
+    request: ObservationStreamRequest,
+    region: Region,
+    seq: int,
+    observe_started: float,
+) -> tuple[tuple[dict[str, Any], bytes] | None, float, float]:
+    options = _stream_screenshot_options(request)
+    if not _can_use_raw_observation_path(request, options):
+        return None, 0.0, 0.0
+    validate_region(websocket, region, field="dirty_frame_capture_region")
+
+    async def operation():
+        return await websocket.app.state.backend.screenshot_raw_pixels(region=region)
+
+    capture_started = perf_counter()
+    raw = await run_screenshot_capture(websocket, operation)
+    capture_ms = _elapsed_ms(capture_started)
+    if raw is None:
+        return None, capture_ms, 0.0
+    native_started = perf_counter()
+    frame = _capture_region_native_delta_frame(
+        state=state,
+        region_raw=raw,
+        region=region,
+        request=request,
+        options=options,
+        seq=seq,
+        previous_seq=state.last_frame_seq,
+        stream_id=state.stream_id or "unknown",
+        captured_started=observe_started,
+    )
+    return frame, capture_ms, _elapsed_ms(native_started)
 
 
 def _action_observe_attribution(

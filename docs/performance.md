@@ -210,6 +210,13 @@ full-frame poll. Those frames are emitted as timeout/unchanged observations with
 fallback reason such as `producer_same_region` or `producer_same_frame`. A remaining frame-poll
 fallback means there was still caller budget left, or the route did not have a verified producer
 frame it could safely emit.
+When the dirty producer misses but still has an action-derived capture region, the daemon performs
+one bounded regional confirmation before escalating to full-frame polling. That confirmation uses
+the same native tile-diff gate as producer patches, so it can emit a verified changed patch or a
+verified unchanged frame without trusting XDamage as truth. Confirmation frames record
+`dirty_region_confirmation_result` and the `dirty_region_confirmation_*` stage timings; if a changed
+regional confirmation avoids full-frame polling, `frame_poll_skipped_reason` is
+`dirty_region_confirmation_changed`.
 Benchmarks include a sibling `*_production_sync` case with `dirty_frame_producer="off"` so producer
 changes can be compared against the synchronous path in the same target sandbox. Treat the producer
 as a latency attribution and correctness-preserving pipeline step; it removes the route-level frame

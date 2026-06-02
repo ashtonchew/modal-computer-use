@@ -1995,6 +1995,10 @@ def _frame_observation(frame) -> dict[str, Any]:
         "dirty_frame_producer_fallback_reason": metadata.get(
             "dirty_frame_producer_fallback_reason"
         ),
+        "frame_poll_skipped_reason": metadata.get("frame_poll_skipped_reason"),
+        "dirty_region_confirmation_result": metadata.get(
+            "dirty_region_confirmation_result"
+        ),
         "dirty_frame_capture_region": metadata.get("dirty_frame_capture_region"),
         "dirty_frame_capture_region_source": metadata.get(
             "dirty_frame_capture_region_source"
@@ -2097,6 +2101,23 @@ def _add_frame_observations(
                         for item in observations
                         if isinstance(
                             reason := item.get("dirty_frame_producer_fallback_reason"),
+                            str,
+                        )
+                    }
+                )
+                result["frame_poll_skipped_reasons"] = sorted(
+                    {
+                        reason
+                        for item in observations
+                        if isinstance(reason := item.get("frame_poll_skipped_reason"), str)
+                    }
+                )
+                result["dirty_region_confirmation_results"] = sorted(
+                    {
+                        reason
+                        for item in observations
+                        if isinstance(
+                            reason := item.get("dirty_region_confirmation_result"),
                             str,
                         )
                     }
@@ -2323,6 +2344,10 @@ def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
         "dirty_frame_producer_used": observation.get("dirty_frame_producer_used"),
         "dirty_frame_producer_fallback_reason": observation.get(
             "dirty_frame_producer_fallback_reason"
+        ),
+        "frame_poll_skipped_reason": observation.get("frame_poll_skipped_reason"),
+        "dirty_region_confirmation_result": observation.get(
+            "dirty_region_confirmation_result"
         ),
         "dirty_frame_age_ms": observation.get("dirty_frame_age_ms"),
         "dirty_frame_capture_region": observation.get("dirty_frame_capture_region"),
