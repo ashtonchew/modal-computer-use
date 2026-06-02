@@ -55,6 +55,83 @@ def test_daemon_observation_surface_rejects_unknown_case(monkeypatch) -> None:
         )
 
 
+def test_transport_probe_setup_failure_returns_failed_case(monkeypatch) -> None:
+    def fake_transport(*_args, **_kwargs):
+        raise TimeoutError("timed out while waiting for handshake response")
+
+    monkeypatch.setattr(observation_surface, "ObservationStreamTransport", fake_transport)
+
+    result = observation_surface._run_observation_transport_probe_benchmark(
+        base_url="https://daemon.example",
+        token="secret-token",
+        iterations=1,
+        warmup_iterations=0,
+        size_bytes=0,
+        connect_backoff_seconds=0,
+    )
+
+    assert result["status"] == "failed"
+    assert result["successful_iterations"] == 0
+    assert result["failures"][0]["phase"] == "setup"
+    assert result["failures"][0]["type"] == "TimeoutError"
+    assert result["setup"] == {
+        "attempts": 0,
+        "retry_count": 0,
+        "elapsed_ms": None,
+        "retry_errors": [],
+    }
+    assert "secret-token" not in str(result)
+
+
+def test_transport_probe_records_websocket_setup_retries(monkeypatch) -> None:
+    class FakeTransport:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            self.setup_attempts = 2
+            self.setup_elapsed_ms = 25.0
+            self.setup_retry_errors = [
+                {
+                    "type": "TimeoutError",
+                    "message": "timed out while waiting for handshake response",
+                }
+            ]
+
+        def transport_probe(self, *, size_bytes, frame_encoding=None):
+            return {
+                "size_bytes": size_bytes,
+                "requested_size_bytes": size_bytes,
+                "frame_encoding": frame_encoding or "json-binary",
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(observation_surface, "ObservationStreamTransport", FakeTransport)
+
+    result = observation_surface._run_observation_transport_probe_benchmark(
+        base_url="https://daemon.example",
+        token="secret-token",
+        iterations=1,
+        warmup_iterations=0,
+        size_bytes=1024,
+        connect_backoff_seconds=0,
+    )
+
+    assert result["status"] == "ok"
+    assert result["setup"] == {
+        "attempts": 2,
+        "retry_count": 1,
+        "elapsed_ms": 25.0,
+        "retry_errors": [
+            {
+                "type": "TimeoutError",
+                "message": "timed out while waiting for handshake response",
+            }
+        ],
+    }
+
+
 def test_causal_binary_envelope_cases_use_production_action_observe_flags(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
     client = object()

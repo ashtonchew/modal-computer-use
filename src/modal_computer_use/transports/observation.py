@@ -6,7 +6,7 @@ from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any
 
 from websockets.exceptions import ConnectionClosed
@@ -79,13 +79,27 @@ class ObservationStreamTransport:
         token: str | None = None,
         timeout: float = 30.0,
         websocket: ClientConnection | None = None,
+        connect_attempts: int = 1,
+        connect_backoff_seconds: float = 0.25,
     ) -> None:
+        if connect_attempts < 1:
+            raise ValueError("connect_attempts must be at least 1")
+        if connect_backoff_seconds < 0:
+            raise ValueError("connect_backoff_seconds must be non-negative")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.connect_attempts = connect_attempts
+        self.connect_backoff_seconds = connect_backoff_seconds
+        self.setup_attempts = 1
+        self.setup_elapsed_ms = 0.0
+        self.setup_retry_errors: list[dict[str, str]] = []
         self._next_id = 1
         self._pending_frames: deque[ObservationFrame] = deque()
-        self._websocket = websocket or self._connect(timeout=timeout)
+        if websocket is None:
+            self._websocket = self._connect_with_retries(timeout=timeout)
+        else:
+            self._websocket = websocket
         try:
             ready = self._websocket.recv(timeout=timeout)
         except ConnectionClosed as exc:
@@ -97,6 +111,36 @@ class ObservationStreamTransport:
                 "observation stream did not return a ready frame",
                 code="observation_stream_failed",
             )
+
+    def _connect_with_retries(self, *, timeout: float) -> ClientConnection:
+        started = perf_counter()
+        retry_errors: list[dict[str, str]] = []
+        last_exc: Exception | None = None
+        for attempt in range(1, self.connect_attempts + 1):
+            websocket: ClientConnection | None = None
+            try:
+                websocket = self._connect(timeout=timeout)
+                self.setup_attempts = attempt
+                self.setup_elapsed_ms = _elapsed_ms(started)
+                self.setup_retry_errors = retry_errors
+                return websocket
+            except Exception as exc:
+                last_exc = exc
+                if websocket is not None:
+                    websocket.close()
+                if not _retryable_setup_error(exc) or attempt >= self.connect_attempts:
+                    self.setup_attempts = attempt
+                    self.setup_elapsed_ms = _elapsed_ms(started)
+                    self.setup_retry_errors = retry_errors
+                    raise
+                retry_errors.append(_setup_error_metadata(exc))
+                sleep(self.connect_backoff_seconds * attempt)
+        if last_exc is not None:
+            raise last_exc
+        raise DaemonHTTPError(
+            "observation stream setup failed",
+            code="observation_stream_failed",
+        )
 
     def close(self) -> None:
         self._websocket.close()
@@ -505,6 +549,19 @@ class ObservationStreamTransport:
 
 def _websocket_url(base_url: str, path: str) -> str:
     return daemon_websocket_url(base_url, path)
+
+
+def _retryable_setup_error(exc: Exception) -> bool:
+    if isinstance(exc, AuthenticationError | DaemonHTTPError):
+        return False
+    return isinstance(exc, TimeoutError | OSError | ConnectionError)
+
+
+def _setup_error_metadata(exc: Exception) -> dict[str, str]:
+    message = str(exc)
+    if len(message) > 160:
+        message = message[:157] + "..."
+    return {"type": type(exc).__name__, "message": message}
 
 
 def _elapsed_ms(started: float) -> float:
