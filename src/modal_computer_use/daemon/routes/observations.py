@@ -2055,9 +2055,19 @@ def _source_fingerprint_from_tile_hashes(
     digest.update(f"{width}x{height}:{tile_size}:".encode("ascii"))
     for tile_y in range((height + tile_size - 1) // tile_size):
         for tile_x in range((width + tile_size - 1) // tile_size):
+            tile_left = tile_x * tile_size
+            tile_top = tile_y * tile_size
+            tile_digest = tile_hashes.get((tile_left, tile_top))
             digest.update(tile_x.to_bytes(2, "big"))
             digest.update(tile_y.to_bytes(2, "big"))
-            digest.update(tile_hashes.get((tile_x, tile_y), b""))
+            if tile_digest is None:
+                digest.update(b"M")
+                digest.update(tile_left.to_bytes(4, "big"))
+                digest.update(tile_top.to_bytes(4, "big"))
+                continue
+            digest.update(b"T")
+            digest.update(len(tile_digest).to_bytes(2, "big"))
+            digest.update(tile_digest)
     return digest.hexdigest()
 
 

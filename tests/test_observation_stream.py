@@ -1623,6 +1623,42 @@ def test_region_native_dirty_patch_can_advance_from_stale_raw_cache() -> None:
     assert composed == _image_png_bytes(changed_again)
 
 
+def test_tile_fingerprint_includes_off_origin_tile_hashes() -> None:
+    first = Image.new("RGB", (64, 64), "white")
+    second = first.copy()
+    for y in range(34, 38):
+        for x in range(34, 38):
+            second.putpixel((x, y), (0, 0, 0))
+
+    tile_size = 16
+    first_hashes = observation_routes.tile_hashes_rgb(
+        first.tobytes(),
+        first.width,
+        first.height,
+        tile_size,
+    )
+    second_hashes = observation_routes.tile_hashes_rgb(
+        second.tobytes(),
+        second.width,
+        second.height,
+        tile_size,
+    )
+
+    assert first_hashes[(0, 0)] == second_hashes[(0, 0)]
+    assert first_hashes[(32, 32)] != second_hashes[(32, 32)]
+    assert observation_routes._source_fingerprint_from_tile_hashes(
+        first_hashes,
+        width=first.width,
+        height=first.height,
+        tile_size=tile_size,
+    ) != observation_routes._source_fingerprint_from_tile_hashes(
+        second_hashes,
+        width=second.width,
+        height=second.height,
+        tile_size=tile_size,
+    )
+
+
 def test_observation_stream_reuses_xdamage_watcher_across_action_observe_calls(
     app,
     monkeypatch,
