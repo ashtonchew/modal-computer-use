@@ -8,12 +8,12 @@ from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
+from modal_computer_use.transports.websocket_url import daemon_websocket_url
 
 FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
 
@@ -504,9 +504,7 @@ class ObservationStreamTransport:
 
 
 def _websocket_url(base_url: str, path: str) -> str:
-    parts = urlsplit(base_url)
-    scheme = "wss" if parts.scheme == "https" else "ws"
-    return urlunsplit((scheme, parts.netloc, path, "", ""))
+    return daemon_websocket_url(base_url, path)
 
 
 def _elapsed_ms(started: float) -> float:

@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from textwrap import dedent
 from typing import Any
 
 from ..errors import SandboxUnavailableError
@@ -227,12 +228,50 @@ def build_modal_colocated_runner_env(
 
 
 def modal_colocated_runner_code() -> str:
-    return f"""
+    return dedent(f"""\
 import json
 import os
+import time
 
 from modal_computer_use import DaemonClient
 from modal_computer_use.benchmarks.surfaces import run_sdk_surface_benchmark
+
+
+def _runner_preflight(client):
+    probes = []
+    for name, path in (
+        ("healthz", "/healthz"),
+        ("version", "/v1/version"),
+        ("capabilities", "/v1/capabilities"),
+    ):
+        started = time.perf_counter()
+        try:
+            client.get_json(path)
+        except Exception as exc:
+            probes.append(
+                {{
+                    "route": name,
+                    "ok": False,
+                    "elapsed_ms": (time.perf_counter() - started) * 1000,
+                    "error_type": type(exc).__name__,
+                    "status_code": getattr(exc, "status_code", None),
+                    "error_code": getattr(exc, "code", None),
+                }}
+            )
+        else:
+            probes.append(
+                {{
+                    "route": name,
+                    "ok": True,
+                    "elapsed_ms": (time.perf_counter() - started) * 1000,
+                    "http_version": getattr(client.transport, "last_http_version", None),
+                }}
+            )
+    return {{
+        "ok": all(probe.get("ok") for probe in probes),
+        "probes": probes,
+    }}
+
 
 base_url = os.environ["COMPUTER_USE_BENCHMARK_BASE_URL"]
 token = os.environ.get("COMPUTER_USE_BENCHMARK_TOKEN") or None
@@ -243,6 +282,7 @@ observation_cases = json.loads(os.environ["COMPUTER_USE_BENCHMARK_OBSERVATION_CA
 metadata = json.loads(os.environ["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
 client = DaemonClient(base_url, token=token, http2=http2)
 try:
+    runner_preflight = _runner_preflight(client)
     result = run_sdk_surface_benchmark(
         surfaces=surfaces,
         client=client,
@@ -254,10 +294,11 @@ try:
     )
 finally:
     client.close()
+result.setdefault("metadata", {{}})["runner_preflight"] = runner_preflight
 print("{MODAL_COLOCATED_RESULT_START}")
 print(json.dumps(result, sort_keys=True))
 print("{MODAL_COLOCATED_RESULT_END}")
-"""
+""")
 
 
 def modal_colocated_runner_name(name: str | None) -> str | None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from types import SimpleNamespace
 
@@ -117,6 +118,17 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
         "benchmark_run_id": "modal_colocated_test",
     }
     assert closed == ["terminate", "detach"]
+
+
+def test_modal_colocated_runner_code_compiles_and_records_preflight() -> None:
+    code = colocated.modal_colocated_runner_code()
+
+    ast.parse(code)
+
+    assert "def _runner_preflight(client):" in code
+    assert 'result.setdefault("metadata", {})["runner_preflight"] = runner_preflight' in code
+    assert '"route": name' in code
+    assert "COMPUTER_USE_BENCHMARK_TOKEN" in code
 
 
 def test_modal_colocated_runner_failure_is_structured_without_output() -> None:

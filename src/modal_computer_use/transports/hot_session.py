@@ -6,12 +6,12 @@ import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
+from modal_computer_use.transports.websocket_url import daemon_websocket_url
 
 
 @dataclass(frozen=True)
@@ -139,6 +139,4 @@ class HotSessionTransport:
 
 
 def _websocket_url(base_url: str, path: str) -> str:
-    parts = urlsplit(base_url)
-    scheme = "wss" if parts.scheme == "https" else "ws"
-    return urlunsplit((scheme, parts.netloc, path, "", ""))
+    return daemon_websocket_url(base_url, path)

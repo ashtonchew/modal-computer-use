@@ -20,6 +20,7 @@ from modal_computer_use.transports.observation import (
     ObservationFrame,
     ObservationStreamTransport,
     _decode_frame_envelope,
+    _websocket_url,
 )
 
 
@@ -31,6 +32,16 @@ def _app(tmp_path, **overrides):
             recordings_dir=tmp_path / "recordings",
             **overrides,
         )
+    )
+
+
+def test_observation_websocket_url_preserves_base_path_and_query() -> None:
+    assert _websocket_url(
+        "https://connect.modal.run/abc123?workspace=ws&_modal_connect_token=secret",
+        "/v1/observations/stream",
+    ) == (
+        "wss://connect.modal.run/abc123/v1/observations/stream"
+        "?workspace=ws&_modal_connect_token=secret"
     )
 
 
