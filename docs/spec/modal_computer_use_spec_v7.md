@@ -732,7 +732,7 @@ The shipped test matrix lives under `tests/`:
 | `tests/test_adapters.py` | OpenAI & Anthropic action normalization across tool versions; provider-action redaction; unknown-action handling. |
 | `tests/test_artifacts.py` | Path traversal (single + double-encoded), symlink rejection, control-path rejection, manifest write, sync semantics. |
 | `tests/test_auth_security.py` | Query-token rejection, loopback requirement for local token, verified-user header validation, log redaction. |
-| `tests/test_benchmark_cli.py` | Benchmark report generation. |
+| `tests/benchmarks/test_report_cli.py`; `tests/benchmarks/test_action_batch_cli.py` | Benchmark report generation and action-batch CLI behavior. |
 | `tests/test_budgets.py` | Action/screenshot/artifact-byte/recording-duration/idle budgets; rate-limit window. |
 | `tests/test_daemon_routes.py` | Route surface and error-shape contracts. |
 | `tests/test_daemon_validation.py` | Coordinate/region/key/holdkey-nested validation; readiness preflight. |
@@ -860,7 +860,7 @@ Outstanding for v0.2:
 | `NetworkFileSystem` not used in v1 core. | Yes | Grep clean. |
 | Browser prewarm/GPU documented as optional. | Yes | `docs/performance.md`. |
 | CI verifies Modal API surface against pinned SDK range. | Yes | `tests/test_modal_sdk_boundary.py`. |
-| Benchmark output generated for release candidates. | Yes | `benchmark-report.json`; `tests/test_benchmark_cli.py`. |
+| Benchmark output generated for release candidates. | Yes | `benchmark-report.json`; `tests/benchmarks/test_report_cli.py`; `tests/benchmarks/test_action_batch_cli.py`. |
 
 Outstanding for v0.2 / v1.0: dry-run replay coverage of Anthropic enhanced action set, recording dashboard UI polish, warm-pool helper, snapshot example, optional OpenTelemetry, deployable manager class.
 

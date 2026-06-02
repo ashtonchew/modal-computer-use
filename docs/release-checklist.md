@@ -10,7 +10,7 @@ Run this checklist before publishing a release or opening a production-readiness
 - `uv run pytest -q`
 - `uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json`
 - `uv build`
-- `uvx twine check dist/*`
+- `uvx --from 'twine>=6.2.0' twine check dist/*`
 
 The `Release Validation` GitHub Actions workflow repeats these checks on pull requests and pushes
 to `main`, validates wheel/sdist installability, validates installed console scripts, smoke-tests
@@ -53,11 +53,11 @@ than a human token.
 Run these targeted checks before the full suite when changing release-critical surfaces:
 
 ```bash
-uv run pytest tests/test_benchmark_cli.py -q
+uv run pytest tests/benchmarks/test_report_cli.py tests/benchmarks/test_action_batch_cli.py -q
 uv run pytest tests/test_modal_sdk_boundary.py tests/test_imports.py -q
 uv run pytest tests/test_adapters.py tests/test_trace_replay.py -q
 uv build
-uvx twine check dist/*
+uvx --from 'twine>=6.2.0' twine check dist/*
 uv venv /tmp/mcu-wheel-smoke --python 3.12
 uv pip install --python /tmp/mcu-wheel-smoke/bin/python dist/*.whl
 /tmp/mcu-wheel-smoke/bin/computer-use --help
