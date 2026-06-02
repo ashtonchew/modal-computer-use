@@ -203,6 +203,13 @@ fall back to the synchronous capture/poll path. Producer metadata appears as
 `dirty_frame_producer`, `dirty_frame_producer_used`, `dirty_frame_age_ms`,
 `dirty_frame_producer_fallback_reason`, `dirty_frame_capture_region_source`, and the
 `dirty_producer_*` stage timings.
+If the producer returns a verified unchanged regional or full-frame capture after consuming the
+observe-change deadline, the daemon preserves the caller's timeout contract and skips the final
+full-frame poll. Those frames are emitted as timeout/unchanged observations with
+`frame_poll_skipped_reason="deadline_exhausted_after_dirty_producer"` and a specific producer
+fallback reason such as `producer_same_region` or `producer_same_frame`. A remaining frame-poll
+fallback means there was still caller budget left, or the route did not have a verified producer
+frame it could safely emit.
 Benchmarks include a sibling `*_production_sync` case with `dirty_frame_producer="off"` so producer
 changes can be compared against the synchronous path in the same target sandbox. Treat the producer
 as a latency attribution and correctness-preserving pipeline step; it removes the route-level frame
