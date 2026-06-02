@@ -29,6 +29,7 @@ def run_sdk_surface_benchmark(
     sandbox_exec_runner: Any = None,
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
+    observation_cases: list[str] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -48,6 +49,7 @@ def run_sdk_surface_benchmark(
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=environment_metadata,
+                observation_cases=observation_cases,
             )
         except Exception as exc:
             result = _surface_result(
@@ -100,6 +102,7 @@ def run_sdk_surface_benchmark_mock_local(
     sandbox_exec_runner: Any = None,
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
+    observation_cases: list[str] | None = None,
 ) -> dict[str, Any]:
     return core._with_mock_local_client(
         lambda client: run_sdk_surface_benchmark(
@@ -111,6 +114,7 @@ def run_sdk_surface_benchmark_mock_local(
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=environment_metadata,
+            observation_cases=observation_cases,
         )
     )
 
@@ -125,6 +129,7 @@ def _run_surface(
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
     environment_metadata: dict[str, Any] | None,
+    observation_cases: list[str] | None,
 ) -> dict[str, Any]:
     if surface == "daemon-http":
         return _run_daemon_http_surface(
@@ -169,6 +174,7 @@ def _run_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             environment_metadata=environment_metadata,
+            observation_cases=observation_cases,
         )
     if surface == "daemon-transport-floor":
         if client is None or mode == "mock-local":

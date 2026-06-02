@@ -37,6 +37,7 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
 
     def fake_surface_benchmark(**kwargs):
         assert kwargs["surfaces"] == surfaces
+        assert kwargs["observation_cases"] is None
         environment = kwargs["environment_metadata"]
         assert environment["modal_colocation_role"] == "external-caller"
         return _surface_result(
@@ -54,6 +55,7 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
         env = kwargs["env"]
         assert env["COMPUTER_USE_BENCHMARK_TOKEN"] == "target-token"  # noqa: S105
         assert json.loads(env["COMPUTER_USE_BENCHMARK_SURFACES_JSON"]) == surfaces
+        assert json.loads(env["COMPUTER_USE_BENCHMARK_OBSERVATION_CASES_JSON"]) is None
         metadata = json.loads(env["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
         assert metadata["modal_colocation_role"] == "modal-colocated-runner"
         result = _surface_result(
@@ -156,6 +158,7 @@ def _config(*, surfaces: list[str]) -> colocated.ModalColocatedClientBenchmarkCo
         input_rate_limit_per_sec=0,
         image_profile=None,
         surfaces=surfaces,  # type: ignore[arg-type]
+        observation_cases=None,
         iterations=1,
     )
 

@@ -41,6 +41,7 @@ class ModalColocatedClientBenchmarkConfig:
     input_rate_limit_per_sec: int
     image_profile: str | None
     surfaces: list[BenchmarkSurface]
+    observation_cases: list[str] | None
     iterations: int
 
 
@@ -105,6 +106,7 @@ def run_modal_colocated_client_benchmark(
             iterations=config.iterations,
             base_url=computer.client.base_url,
             environment_metadata=target_metadata,
+            observation_cases=config.observation_cases,
         )
         colocated_result = run_modal_colocated_runner_benchmark(
             config,
@@ -166,6 +168,7 @@ def run_modal_colocated_runner_benchmark(
         iterations=config.iterations,
         http2=config.daemon_http_version == "2",
         surfaces=config.surfaces,
+        observation_cases=config.observation_cases,
         metadata=metadata,
     )
     exec_result = exec_once(
@@ -207,6 +210,7 @@ def build_modal_colocated_runner_env(
     iterations: int,
     http2: bool,
     surfaces: list[BenchmarkSurface],
+    observation_cases: list[str] | None,
     metadata: dict[str, Any],
 ) -> dict[str, str]:
     env = {
@@ -214,6 +218,7 @@ def build_modal_colocated_runner_env(
         "COMPUTER_USE_BENCHMARK_ITERATIONS": str(iterations),
         "COMPUTER_USE_BENCHMARK_HTTP2": str(http2).lower(),
         "COMPUTER_USE_BENCHMARK_SURFACES_JSON": json.dumps(surfaces),
+        "COMPUTER_USE_BENCHMARK_OBSERVATION_CASES_JSON": json.dumps(observation_cases),
         "COMPUTER_USE_BENCHMARK_METADATA_JSON": json.dumps(metadata, sort_keys=True),
     }
     if token:
@@ -234,6 +239,7 @@ token = os.environ.get("COMPUTER_USE_BENCHMARK_TOKEN") or None
 iterations = int(os.environ["COMPUTER_USE_BENCHMARK_ITERATIONS"])
 http2 = os.environ.get("COMPUTER_USE_BENCHMARK_HTTP2") == "true"
 surfaces = json.loads(os.environ["COMPUTER_USE_BENCHMARK_SURFACES_JSON"])
+observation_cases = json.loads(os.environ["COMPUTER_USE_BENCHMARK_OBSERVATION_CASES_JSON"])
 metadata = json.loads(os.environ["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
 client = DaemonClient(base_url, token=token, http2=http2)
 try:
@@ -244,6 +250,7 @@ try:
         iterations=iterations,
         base_url=base_url,
         environment_metadata=metadata,
+        observation_cases=observation_cases,
     )
 finally:
     client.close()
