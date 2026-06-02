@@ -208,10 +208,13 @@ damage event.
 When `change_detection="region"` or `"auto_region"` resolves a region, that action-derived region
 is the preferred dirty-frame capture hint. Otherwise, if XDamage reports a dirty rectangle and the
 stream has a current raw full-frame baseline, the producer can use the XDamage rectangle as a
-secondary capture hint. The daemon uses the DAMAGE extension in delta-rectangle mode and, when
-available, fetches the accumulated XFixes damage region after subtracting damage. The resulting
-rectangle metadata appears as `xdamage_dirty_rect`, `xdamage_dirty_rects`, and
-`xdamage_dirty_ratio`. Those fields are diagnostic hints only; emitted patches still come from
+secondary capture hint. The dirty-frame producer keeps separate persistent DAMAGE watchers for
+those two behaviors: a `NonEmpty` watcher for action-region wakeups, and a `DeltaRectangles`
+watcher for XDamage rectangle hints. Report level is chosen when each DAMAGE object is created, so
+the producer does not destroy and recreate a watcher just to switch modes on a hot path. When
+available, the rectangle watcher fetches the accumulated XFixes damage region after subtracting
+damage. The resulting rectangle metadata appears as `xdamage_dirty_rect`, `xdamage_dirty_rects`,
+and `xdamage_dirty_ratio`. Those fields are diagnostic hints only; emitted patches still come from
 captured pixels and tile/source-hash verification.
 
 If a dirty capture region can be expanded to the stream tile grid, the daemon hashes only the
