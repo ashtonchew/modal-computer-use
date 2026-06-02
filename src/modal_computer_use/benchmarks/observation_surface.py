@@ -2010,6 +2010,7 @@ def _add_frame_observations(
     samples: list[float],
     observations: list[Any],
 ) -> None:
+    sample_rows = _observation_sample_rows(result, samples, observations)
     result.update(
         {
             "request": OBSERVATION_SCREENSHOT_OPTIONS,
@@ -2025,6 +2026,10 @@ def _add_frame_observations(
                 ]
             ),
             "last_result": observations[-1] if observations else None,
+            "sample_observations": sample_rows,
+            "outlier_observations": [
+                row for row in sample_rows if row.get("high_outlier") is True
+            ],
         }
     )
     changed_count = sum(1 for item in observations if item.get("unchanged") is False)
@@ -2244,6 +2249,96 @@ def _add_frame_observations(
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
     _add_observation_latency_diagnosis(result)
+
+
+def _observation_sample_rows(
+    result: dict[str, Any],
+    samples: list[float],
+    observations: list[Any],
+) -> list[dict[str, Any]]:
+    summary = result.get("summary_ms")
+    outlier_indices = (
+        set(summary.get("high_outlier_indices", [])) if isinstance(summary, dict) else set()
+    )
+    rows: list[dict[str, Any]] = []
+    for index, (sample_ms, observation) in enumerate(zip(samples, observations, strict=False)):
+        if not isinstance(observation, dict):
+            continue
+        compact = _compact_observation_sample(observation)
+        compact.update(
+            {
+                "iteration": index,
+                "sample_ms": sample_ms,
+                "high_outlier": index in outlier_indices,
+            }
+        )
+        rows.append(compact)
+    return rows
+
+
+def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
+    benchmark_timing = observation.get("benchmark_timing_ms")
+    transport_timing = observation.get("observation_transport_timing")
+    server_emit_timing = (
+        transport_timing.get("server_emit_timing_ms")
+        if isinstance(transport_timing, dict)
+        else None
+    )
+    client_receive_timing = (
+        transport_timing.get("client_receive_timing_ms")
+        if isinstance(transport_timing, dict)
+        else None
+    )
+    return {
+        "kind": observation.get("kind"),
+        "unchanged": observation.get("unchanged"),
+        "size_bytes": observation.get("size_bytes"),
+        "metadata_size_bytes": observation.get("metadata_size_bytes"),
+        "frame_encoding": observation.get("frame_encoding"),
+        "dirty_rect": observation.get("dirty_rect"),
+        "dirty_ratio": observation.get("dirty_ratio"),
+        "patch_count": observation.get("patch_count"),
+        "patch_rects": observation.get("patch_rects"),
+        "patch_sizes_bytes": observation.get("patch_sizes_bytes"),
+        "change_detected": observation.get("change_detected"),
+        "change_timeout_reached": observation.get("change_timeout_reached"),
+        "change_wait_ms": observation.get("change_wait_ms"),
+        "change_signal": observation.get("change_signal"),
+        "change_signal_detected": observation.get("change_signal_detected"),
+        "change_signal_wait_ms": observation.get("change_signal_wait_ms"),
+        "change_signal_reason": observation.get("change_signal_reason"),
+        "change_detection": observation.get("change_detection"),
+        "change_detection_region": observation.get("change_detection_region"),
+        "dirty_frame_producer": observation.get("dirty_frame_producer"),
+        "dirty_frame_producer_used": observation.get("dirty_frame_producer_used"),
+        "dirty_frame_producer_fallback_reason": observation.get(
+            "dirty_frame_producer_fallback_reason"
+        ),
+        "dirty_frame_age_ms": observation.get("dirty_frame_age_ms"),
+        "dirty_frame_capture_region": observation.get("dirty_frame_capture_region"),
+        "dirty_frame_capture_region_source": observation.get(
+            "dirty_frame_capture_region_source"
+        ),
+        "xdamage_dirty_rect": observation.get("xdamage_dirty_rect"),
+        "xdamage_dirty_rects": observation.get("xdamage_dirty_rects"),
+        "xdamage_dirty_ratio": observation.get("xdamage_dirty_ratio"),
+        "source_version": observation.get("source_version"),
+        "previous_source_version": observation.get("previous_source_version"),
+        "emit_version": observation.get("emit_version"),
+        "delivery": observation.get("delivery"),
+        "capture_backend": observation.get("capture_backend"),
+        "tile_hash_backend": observation.get("tile_hash_backend"),
+        "change_stage_timing_ms": observation.get("change_stage_timing_ms"),
+        "action_observe_attribution_ms": observation.get("action_observe_attribution_ms"),
+        "screenshot_daemon_timing_ms": observation.get("screenshot_daemon_timing_ms"),
+        "benchmark_timing_ms": benchmark_timing if isinstance(benchmark_timing, dict) else {},
+        "server_emit_timing_ms": server_emit_timing
+        if isinstance(server_emit_timing, dict)
+        else {},
+        "client_receive_timing_ms": client_receive_timing
+        if isinstance(client_receive_timing, dict)
+        else {},
+    }
 
 
 def _observation_transport_encoding(observations: list[Any]) -> str:
