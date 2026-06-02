@@ -29,7 +29,11 @@ from modal_computer_use.daemon.desktop.tile_diff import (
     native_hash_available,
     tile_hashes_rgb,
 )
-from modal_computer_use.daemon.desktop.xdamage import XDamageWaitResult, XDamageWatcher
+from modal_computer_use.daemon.desktop.xdamage import (
+    XDamageRect,
+    XDamageWaitResult,
+    XDamageWatcher,
+)
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_screenshot_capture
 from modal_computer_use.daemon.routes.screenshots import (
@@ -99,6 +103,7 @@ class _DirtyFrameProducerResult:
     capture_ended_at: float
     capture_ms: float
     capture_region: Region | None = None
+    capture_region_source: str | None = None
 
 
 class _DirtyFrameProducer:
@@ -116,6 +121,7 @@ class _DirtyFrameProducer:
         self._task: asyncio.Task[None] | None = None
         self._closed = False
         self.capture_region: Region | None = None
+        self.capture_region_source: str | None = None
         self.failure: str | None = None
 
     async def arm(
@@ -124,6 +130,7 @@ class _DirtyFrameProducer:
         *,
         timeout_ms: int,
         capture_region: Region | None = None,
+        xdamage_region_frame: tuple[int, int, int, float] | None = None,
     ) -> None:
         if self._closed:
             raise RuntimeError("dirty-frame producer is closed")
@@ -135,7 +142,11 @@ class _DirtyFrameProducer:
         generation = self._generation
         self._latest = None
         self.capture_region = capture_region
+        self.capture_region_source = "action_region" if capture_region is not None else None
         try:
+            set_rect_hints = getattr(self._watcher, "set_rect_hints", None)
+            if callable(set_rect_hints):
+                set_rect_hints(xdamage_region_frame is not None)
             await asyncio.to_thread(self._watcher.arm)
         except Exception as exc:
             self.failure = getattr(self._watcher, "failure", None) or str(exc)
@@ -147,6 +158,7 @@ class _DirtyFrameProducer:
                 generation,
                 timeout_ms,
                 capture_region=capture_region,
+                xdamage_region_frame=xdamage_region_frame,
             )
         )
 
@@ -205,6 +217,7 @@ class _DirtyFrameProducer:
         timeout_ms: int,
         *,
         capture_region: Region | None,
+        xdamage_region_frame: tuple[int, int, int, float] | None,
     ) -> None:
         wait_started = perf_counter()
         wait_result = await asyncio.to_thread(self._watcher.wait, timeout_ms)
@@ -212,8 +225,17 @@ class _DirtyFrameProducer:
         if not wait_result.detected:
             self._latest = None
             return
+        resolved_capture_region = capture_region
+        capture_region_source = "action_region" if capture_region is not None else None
+        if resolved_capture_region is None:
+            resolved_capture_region = _xdamage_capture_region(
+                wait_result.dirty_rect,
+                frame=xdamage_region_frame,
+            )
+            if resolved_capture_region is not None:
+                capture_region_source = "xdamage_dirty_rect"
         capture_started = perf_counter()
-        raw = await self._capture_raw(capture_region or request.region)
+        raw = await self._capture_raw(resolved_capture_region or request.region)
         capture_ended = perf_counter()
         capture_ms = (capture_ended - capture_started) * 1000
         if raw is None:
@@ -229,7 +251,8 @@ class _DirtyFrameProducer:
             capture_started_at=capture_started,
             capture_ended_at=capture_ended,
             capture_ms=capture_ms,
-            capture_region=capture_region,
+            capture_region=resolved_capture_region,
+            capture_region_source=capture_region_source,
         )
 
 
@@ -692,6 +715,10 @@ async def _send_changed_frame(
     dirty_region_reconstruct_ms = 0.0
     dirty_region_native_ms = 0.0
     dirty_frame_age_ms: float | None = None
+    dirty_frame_capture_region: Region | None = None
+    dirty_frame_capture_region_source: str | None = None
+    xdamage_dirty_rect: XDamageRect | None = None
+    xdamage_dirty_rects: tuple[XDamageRect, ...] = ()
     dirty_producer_used = False
     dirty_producer_fallback_reason: str | None = None
     region_poll_ms = 0.0
@@ -720,6 +747,10 @@ async def _send_changed_frame(
                 signal_wait_wall_ms = producer_result.wait_wall_ms
                 dirty_producer_capture_ms = producer_result.capture_ms
                 dirty_frame_age_ms = max((perf_counter() - producer_result.produced_at) * 1000, 0.0)
+                dirty_frame_capture_region = producer_result.capture_region
+                dirty_frame_capture_region_source = producer_result.capture_region_source
+                xdamage_dirty_rect = producer_result.wait_result.dirty_rect
+                xdamage_dirty_rects = producer_result.wait_result.dirty_rects
                 signal_wait_started_at = producer_result.wait_started_at
                 signal_wait_ended_at = producer_result.wait_ended_at
                 signal_detected_at = (
@@ -925,6 +956,17 @@ async def _send_changed_frame(
             "dirty_frame_producer_used": dirty_producer_used,
             "dirty_frame_producer_fallback_reason": dirty_producer_fallback_reason,
             "dirty_frame_age_ms": dirty_frame_age_ms,
+            "dirty_frame_capture_region": dirty_frame_capture_region.model_dump(mode="json")
+            if dirty_frame_capture_region is not None
+            else extra_metadata.get("dirty_frame_capture_region"),
+            "dirty_frame_capture_region_source": dirty_frame_capture_region_source,
+            "xdamage_dirty_rect": _xdamage_rect_metadata(xdamage_dirty_rect),
+            "xdamage_dirty_rects": [_xdamage_rect_metadata(rect) for rect in xdamage_dirty_rects],
+            "xdamage_dirty_ratio": _region_ratio(
+                dirty_frame_capture_region,
+                width=state.last_raw_frame.width if state.last_raw_frame is not None else None,
+                height=state.last_raw_frame.height if state.last_raw_frame is not None else None,
+            ),
             "change_stage_timing_ms": stage_timing,
             "action_observe_attribution_ms": action_observe_attribution,
         },
@@ -1065,6 +1107,9 @@ async def _prepare_dirty_frame_producer(
             stream_request,
             timeout_ms=request.change_timeout_ms,
             capture_region=capture_region,
+            xdamage_region_frame=_xdamage_region_frame(state, stream_request)
+            if capture_region is None
+            else None,
         )
     except Exception:
         if request.change_signal == "xdamage":
@@ -1105,6 +1150,65 @@ def _dirty_producer_capture_region(
     if state.last_raw_frame_current:
         return region
     return None
+
+
+def _xdamage_region_frame(
+    state: _StreamState,
+    request: ObservationStreamRequest,
+) -> tuple[int, int, int, float] | None:
+    if request.region is not None:
+        return None
+    if state.last_raw_frame is None or state.last_tile_hashes is None:
+        return None
+    if state.last_frame_seq is None:
+        return None
+    if request.delta_mode == "off" or (state.seq + 1) % request.keyframe_interval == 0:
+        return None
+    return (
+        state.last_raw_frame.width,
+        state.last_raw_frame.height,
+        request.tile_size,
+        request.delta_max_ratio,
+    )
+
+
+def _xdamage_capture_region(
+    rect: XDamageRect | None,
+    *,
+    frame: tuple[int, int, int, float] | None,
+) -> Region | None:
+    if rect is None or frame is None or not rect.valid():
+        return None
+    width, height, tile_size, delta_max_ratio = frame
+    x0 = max(rect.x, 0)
+    y0 = max(rect.y, 0)
+    x1 = min(rect.x + rect.width, width)
+    y1 = min(rect.y + rect.height, height)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    region = _tile_aligned_region_for_frame(
+        region=Region(x=x0, y=y0, width=x1 - x0, height=y1 - y0),
+        width=width,
+        height=height,
+        tile_size=tile_size,
+    )
+    if region is None:
+        return None
+    if (region.width * region.height) / (width * height) > delta_max_ratio:
+        return None
+    return region
+
+
+def _xdamage_rect_metadata(rect: XDamageRect | None) -> dict[str, int] | None:
+    if rect is None:
+        return None
+    return rect.model_dump()
+
+
+def _region_ratio(region: Region | None, *, width: int | None, height: int | None) -> float | None:
+    if region is None or width is None or height is None or width <= 0 or height <= 0:
+        return None
+    return (region.width * region.height) / (width * height)
 
 
 def _tile_aligned_region_for_frame(

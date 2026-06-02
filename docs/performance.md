@@ -197,22 +197,30 @@ that already-captured frame if its source hash is newer than the baseline. XDama
 not truth: unchanged hashes, unavailable XDamage, unsupported stream options, or producer misses
 fall back to the synchronous capture/poll path. Producer metadata appears as
 `dirty_frame_producer`, `dirty_frame_producer_used`, `dirty_frame_age_ms`,
-`dirty_frame_producer_fallback_reason`, and the `dirty_producer_*` stage timings.
+`dirty_frame_producer_fallback_reason`, `dirty_frame_capture_region_source`, and the
+`dirty_producer_*` stage timings.
 Benchmarks include a sibling `*_production_sync` case with `dirty_frame_producer="off"` so producer
 changes can be compared against the synchronous path in the same target sandbox. Treat the producer
 as a latency attribution and correctness-preserving pipeline step; it removes the route-level frame
 poll when successful, but full-screen capture can still remain on the critical path after the
 damage event.
 
-When `change_detection="region"` or `"auto_region"` resolves a region and the stream has a raw
-full-frame baseline, the producer captures only that region. If the region can be expanded to the
-stream tile grid, the daemon hashes only the captured region, overlays those tile hashes onto the
-previous full-frame tile map, and emits a full-coordinate patch directly from the regional raw
-pixels. That avoids both full-screen X11 capture and full-frame raw reconstruction on the hot path.
-These frames set `source_hash_kind="tile-fingerprint"` because `source_sha256` identifies the
-ordered full-frame tile map rather than a freshly reconstructed RGB buffer. Client composition
-semantics remain full-frame and lossless because `dirty_rect` and patch coordinates stay in stream
-coordinates.
+When `change_detection="region"` or `"auto_region"` resolves a region, that action-derived region
+is the preferred dirty-frame capture hint. Otherwise, if XDamage reports a dirty rectangle and the
+stream has a current raw full-frame baseline, the producer can use the XDamage rectangle as a
+secondary capture hint. The daemon uses the DAMAGE extension in delta-rectangle mode and, when
+available, fetches the accumulated XFixes damage region after subtracting damage. The resulting
+rectangle metadata appears as `xdamage_dirty_rect`, `xdamage_dirty_rects`, and
+`xdamage_dirty_ratio`. Those fields are diagnostic hints only; emitted patches still come from
+captured pixels and tile/source-hash verification.
+
+If a dirty capture region can be expanded to the stream tile grid, the daemon hashes only the
+captured region, overlays those tile hashes onto the previous full-frame tile map, and emits a
+full-coordinate patch directly from the regional raw pixels. That avoids both full-screen X11
+capture and full-frame raw reconstruction on the hot path. These frames set
+`source_hash_kind="tile-fingerprint"` because `source_sha256` identifies the ordered full-frame
+tile map rather than a freshly reconstructed RGB buffer. Client composition semantics remain
+full-frame and lossless because `dirty_rect` and patch coordinates stay in stream coordinates.
 
 The region-native optimization is intentionally narrow: stream-level screenshot regions, missing
 baselines, keyframe turns, unsupported raw options, oversized tile-aligned regions, or non-native

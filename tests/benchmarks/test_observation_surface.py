@@ -6,6 +6,7 @@ from modal_computer_use.benchmarks import observation_surface
 from modal_computer_use.benchmarks.observation_surface import (
     _add_frame_observations,
     _add_observation_latency_diagnosis,
+    _frame_observation,
 )
 
 
@@ -374,3 +375,32 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
         == 20.0
     )
     assert result["latency_diagnosis"]["bottleneck"] == "action_to_damage_signal"
+
+
+def test_frame_observation_preserves_xdamage_dirty_metadata() -> None:
+    class FakeFrame:
+        def __init__(self) -> None:
+            self.payload = b"patch"
+            self.transport_timing = None
+            self.metadata = {
+                "dirty_frame_capture_region": {"x": 32, "y": 32, "width": 16, "height": 16},
+                "dirty_frame_capture_region_source": "xdamage_dirty_rect",
+                "xdamage_dirty_rect": {"x": 40, "y": 40, "width": 4, "height": 4},
+                "xdamage_dirty_rects": [{"x": 40, "y": 40, "width": 4, "height": 4}],
+                "xdamage_dirty_ratio": 0.0625,
+            }
+
+    observation = _frame_observation(FakeFrame())
+
+    assert observation["dirty_frame_capture_region"] == {
+        "x": 32,
+        "y": 32,
+        "width": 16,
+        "height": 16,
+    }
+    assert observation["dirty_frame_capture_region_source"] == "xdamage_dirty_rect"
+    assert observation["xdamage_dirty_rect"] == {"x": 40, "y": 40, "width": 4, "height": 4}
+    assert observation["xdamage_dirty_rects"] == [
+        {"x": 40, "y": 40, "width": 4, "height": 4}
+    ]
+    assert observation["xdamage_dirty_ratio"] == 0.0625
