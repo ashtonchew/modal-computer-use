@@ -595,7 +595,7 @@ class ComputerSandbox:
         tile_size: int | None = None,
         max_patch_rects: int | None = None,
         multi_rect_min_savings: float | None = None,
-        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = "binary-envelope",
         timeout: float = 30.0,
     ) -> ObservationClient:
         return ObservationClient(

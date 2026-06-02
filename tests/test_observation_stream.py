@@ -15,7 +15,7 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot, CapturedScreenshot
 from modal_computer_use.daemon.routes import observations as observation_routes
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.errors import AuthenticationError
+from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
 from modal_computer_use.models import CoordinateSpace, Region, sha256_bytes
 from modal_computer_use.observations import ObservationClient
 from modal_computer_use.transports.observation import (
@@ -409,6 +409,35 @@ def test_observation_stream_raw_path_suppresses_unchanged_without_png_encode(
     assert second["timing_ms"]["diff_ms"] == 0.0
     assert encode_count == 1
     assert stopped["reason"] == "max_frames"
+
+
+def test_changed_delta_suppressed_frame_keeps_payload_boundary() -> None:
+    raw = _raw_screenshot_bytes("white")
+    request = observation_routes.ObservationStreamRequest()
+    options = observation_routes.ScreenshotOptions(format="png", show_cursor=False)
+
+    metadata, payload = observation_routes._raw_metadata(
+        raw=raw,
+        request=request,
+        options=options,
+        stream_id="stream-1",
+        seq=2,
+        kind="delta-suppressed",
+        payload=b"",
+        payload_sha256=raw.sha256,
+        full_size_bytes=None,
+        unchanged=False,
+        dirty_rect=None,
+        dirty_ratio=0.0,
+        previous_seq=1,
+        timing={"diff_ms": 1.0},
+        captured_started=0.0,
+        current_tile_hashes=None,
+    )
+
+    assert metadata["type"] == "frame"
+    assert metadata["unchanged"] is False
+    assert payload == b""
 
 
 def test_observation_stream_raw_path_uses_tile_aligned_patch(app, monkeypatch) -> None:
@@ -1641,7 +1670,7 @@ def test_observation_client_marshals_options_and_frames() -> None:
     assert transport.change_payload == {"actions": [{"type": "wait", "duration_ms": 0}]}
 
 
-def test_observation_client_defaults_to_lossless_png() -> None:
+def test_observation_client_defaults_to_lossless_png_binary_envelope() -> None:
     transport = _FakeObservationTransport([])
     client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
 
@@ -1649,6 +1678,19 @@ def test_observation_client_defaults_to_lossless_png() -> None:
 
     assert transport.payload["format"] == "png"
     assert transport.payload["show_cursor"] is False
+    assert transport.payload["frame_encoding"] == "binary-envelope"
+
+
+def test_observation_client_can_use_daemon_default_frame_encoding() -> None:
+    transport = _FakeObservationTransport([])
+    client = ObservationClient(
+        transport,  # type: ignore[arg-type]
+        max_frames=0,
+        frame_encoding=None,
+    )
+
+    list(client.frames())
+
     assert "frame_encoding" not in transport.payload
 
 
@@ -1900,11 +1942,18 @@ def test_observation_transport_receives_binary_envelope_timing() -> None:
         },
         b"png",
     )
-    websocket = _FakeWebSocket([json.dumps({"type": "ready"}), envelope])
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            envelope,
+        ]
+    )
     transport = ObservationStreamTransport(
         "http://daemon.test",
         websocket=websocket,  # type: ignore[arg-type]
     )
+    transport.start({"frame_encoding": "binary-envelope"})
 
     frame = transport.recv_frame_with_timing()
 
@@ -1945,6 +1994,80 @@ def test_observation_transport_run_actions_observe_change_receives_correlated_fr
 
     assert frame.payload == b"png"
     assert frame.metadata["id"] == "1"
+    assert frame.metadata["causal_frame"] is True
+    assert transport.receive_frame().payload == b"old"
+
+
+def test_observation_transport_json_binary_rejects_binary_payload_at_metadata_boundary() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            b"orphan-payload",
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"frame_encoding": "json-binary"})
+
+    with pytest.raises(DaemonHTTPError, match="unexpected observation binary payload"):
+        transport.receive_frame()
+
+
+def test_observation_transport_json_binary_timing_rejects_metadata_boundary_payload() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            b"orphan-payload",
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"frame_encoding": "json-binary"})
+
+    with pytest.raises(DaemonHTTPError, match="unexpected observation binary payload"):
+        transport.recv_frame_with_timing()
+
+
+def test_observation_transport_binary_envelope_receives_correlated_frame() -> None:
+    old = observation_routes._encode_frame_envelope(
+        {"type": "frame", "id": "other", "seq": 1, "kind": "keyframe"},
+        b"old",
+    )
+    target = observation_routes._encode_frame_envelope(
+        {
+            "type": "frame",
+            "id": "2",
+            "seq": 2,
+            "kind": "patch",
+            "trigger": "run_actions_observe_change",
+            "causal_frame": True,
+        },
+        b"png",
+    )
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            old,
+            target,
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"frame_encoding": "binary-envelope"})
+
+    frame = transport.run_actions_observe_change_and_recv({"actions": []})
+
+    assert frame.payload == b"png"
+    assert frame.metadata["id"] == "2"
     assert frame.metadata["causal_frame"] is True
     assert transport.receive_frame().payload == b"old"
 

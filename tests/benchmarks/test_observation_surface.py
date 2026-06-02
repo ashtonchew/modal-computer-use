@@ -239,8 +239,60 @@ def test_sdk_default_causal_case_uses_auto_policy(monkeypatch) -> None:
             "change_signal": "auto",
             "transport_timing": False,
             "causal_action_observe": True,
+            "use_sdk_default_frame_encoding": True,
         }
     ]
+
+
+def test_action_observe_benchmark_keeps_raw_json_binary_matrix_explicit(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_measure(**kwargs):
+        captured.update(kwargs)
+        return [1.0], [{"frame_encoding": kwargs["frame_encoding"] or "binary-envelope"}]
+
+    monkeypatch.setattr(observation_surface, "_measure_stream_action_capture_loop", fake_measure)
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+
+    result = observation_surface._run_observation_action_click_observe_change_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+        transport_timing=False,
+        causal_action_observe=True,
+    )
+
+    assert captured["frame_encoding"] == "json-binary"
+    assert result["frame_encoding"] == "json-binary"
+    assert result["frame_encoding_policy"] == "benchmark-explicit"
+
+
+def test_action_observe_benchmark_can_measure_sdk_default_frame_encoding(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_measure(**kwargs):
+        captured.update(kwargs)
+        return [1.0], [{"frame_encoding": kwargs["frame_encoding"] or "binary-envelope"}]
+
+    monkeypatch.setattr(observation_surface, "_measure_stream_action_capture_loop", fake_measure)
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+
+    result = observation_surface._run_observation_action_click_observe_change_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+        transport_timing=False,
+        causal_action_observe=True,
+        use_sdk_default_frame_encoding=True,
+    )
+
+    assert captured["frame_encoding"] is None
+    assert result["frame_encoding"] == "binary-envelope"
+    assert result["frame_encoding_policy"] == "sdk-default"
 
 
 def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
