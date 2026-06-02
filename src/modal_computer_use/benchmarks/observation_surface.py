@@ -32,6 +32,16 @@ from .surface_result import _surface_result
 OBSERVATION_SCREENSHOT_OPTIONS = {"format": "png", "show_cursor": False}
 CLICK_TOGGLE_ACTION = {"type": "click", "x": 512, "y": 512, "button": "left"}
 CLICK_TOGGLE_SETTLE_MS = 16
+CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
+    "observation_transport_probe_0b",
+    "observation_transport_probe_5kb",
+    "observation_transport_probe_50kb",
+    "observation_transport_probe_250kb",
+    "observation_action_click_act_and_observe_auto_signal_production",
+    "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
+    "observation_action_click_act_and_observe_auto_region_production",
+    "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
+)
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
@@ -279,6 +289,37 @@ def _observation_case_factories(
                 poll_strategy="adaptive",
                 change_detection="auto_region",
                 change_signal="auto",
+                transport_timing=False,
+                causal_action_observe=True,
+            )
+        ),
+        "observation_action_click_act_and_observe_auto_signal_binary_envelope_production": lambda: (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
+                poll_strategy="adaptive",
+                change_signal="auto",
+                frame_encoding="binary-envelope",
+                transport_timing=False,
+                causal_action_observe=True,
+            )
+        ),
+        "observation_action_click_act_and_observe_auto_region_binary_envelope_production": lambda: (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name="observation_action_click_act_and_observe_auto_region_binary_envelope_production",
+                poll_strategy="adaptive",
+                change_detection="auto_region",
+                change_signal="auto",
+                frame_encoding="binary-envelope",
                 transport_timing=False,
                 causal_action_observe=True,
             )

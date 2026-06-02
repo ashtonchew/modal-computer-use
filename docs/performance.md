@@ -247,16 +247,20 @@ Live observation benchmark runs can be narrowed to the cases under investigation
 ```bash
 uv run computer-use benchmark modal-colocated-client \
   --modal-region us-west \
+  --surface daemon-transport-floor \
   --surface daemon-observation-stream \
   --browser chromium \
   --iterations 10 \
-  --observation-case observation_action_click_act_and_observe_auto_signal_production \
-  --observation-case observation_action_click_act_and_observe_auto_region_production
+  --observation-profile causal-action-observe-diagnostic \
+  --output modal-action-observe-diagnostics-us-west-browser-10x-YYYYMMDD.json
 ```
 
-Use this for diagnostic PRs. The full observation surface intentionally covers older ablations,
-transport probes, and synthetic delta cases, so it is too broad for a quick action-observe
-regression check.
+Use this for diagnostic PRs. The profile includes 0B/5KB/50KB/250KB transport probes plus the
+production causal action-observe cases for `auto_signal` and `auto_region`, each measured in the
+default metadata-then-binary frame shape and the single-message binary-envelope shape. Production
+comparisons keep `transport_timing=false` so the measurement does not add extra control frames.
+The full observation surface intentionally covers older ablations and synthetic delta cases, so it
+is too broad for a quick action-observe regression check.
 
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
@@ -605,6 +609,7 @@ reduces the floor further:
 uv run computer-use benchmark modal-colocated-client --iterations 30 \
   --modal-region us-west --modal-ingress attested-tunnel --daemon-http-version 1.1 \
   --browser chromium --surface daemon-transport-floor --surface daemon-observation-stream \
+  --observation-profile causal-action-observe-diagnostic \
   --caller-region-label dev-laptop-us-west \
   --output modal-colocated-client-us-west-30x-YYYYMMDD.json
 ```
@@ -645,6 +650,11 @@ When `daemon-observation-stream` is selected, the comparison also reports the pr
 observation case, currently `observation_action_click_act_and_observe_auto_signal_production`, as
 `causal_action_to_frame_p50_ms`. That metric is the better next-step proof than transport floor
 alone because it includes action submission, daemon execution, change detection, and frame receipt.
+When the `causal-action-observe-diagnostic` profile is selected, the comparison also includes a
+`diagnosis` object that relates transport floor, causal action-observe, and JSON-vs-binary-envelope
+framing. Treat it as a triage aid: a material binary-envelope win points at WebSocket message
+framing, a large transport win with a smaller causal win points at daemon action/capture/change
+detection, and matching transport/causal wins point at caller placement or Modal receive floor.
 
 A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 `daemon-observation-stream` selected measured:

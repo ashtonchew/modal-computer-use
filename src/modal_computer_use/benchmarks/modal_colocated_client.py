@@ -349,7 +349,32 @@ def modal_colocated_comparison(
                 "ratio_vs_external": transport["ratio_vs_external"],
             }
         )
+    diagnosis = modal_colocated_latency_diagnosis(external_result, colocated_result, result)
+    if diagnosis is not None:
+        result["diagnosis"] = diagnosis
     return result
+
+
+def modal_colocated_latency_diagnosis(
+    external_result: dict[str, Any],
+    colocated_result: dict[str, Any],
+    comparison: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    comparison = comparison or modal_colocated_comparison(external_result, colocated_result)
+    surfaces = _dict_value(comparison.get("surfaces"))
+    transport = _dict_value(surfaces.get("daemon-transport-floor"))
+    observation = _dict_value(surfaces.get("daemon-observation-stream"))
+    framing = _causal_framing_comparison(external_result, colocated_result)
+    likely_bound = _likely_latency_bound(transport, observation, framing)
+    if likely_bound is None and framing is None:
+        return None
+    return {
+        "likely_bound": likely_bound or "insufficient_evidence",
+        "transport_floor": transport or None,
+        "causal_action_observe": observation or None,
+        "causal_framing": framing,
+        "interpretation": _latency_diagnosis_interpretation(likely_bound),
+    }
 
 
 def _metric_comparison(
@@ -418,6 +443,142 @@ def _observation_causal_action_p50(result: dict[str, Any]) -> dict[str, Any] | N
         if value is not None:
             return {"case": case_name, "p50_ms": value}
     return None
+
+
+def _causal_framing_comparison(
+    external_result: dict[str, Any],
+    colocated_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    pairs = {
+        "auto_signal": (
+            "observation_action_click_act_and_observe_auto_signal_production",
+            "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
+        ),
+        "auto_region": (
+            "observation_action_click_act_and_observe_auto_region_production",
+            "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
+        ),
+    }
+    rows: dict[str, Any] = {}
+    for name, (json_case, envelope_case) in pairs.items():
+        external = _framing_row(external_result, json_case=json_case, envelope_case=envelope_case)
+        colocated = _framing_row(colocated_result, json_case=json_case, envelope_case=envelope_case)
+        if external is not None or colocated is not None:
+            rows[name] = {
+                "external": external,
+                "colocated": colocated,
+            }
+    if not rows:
+        return None
+    material_wins = [
+        {"case_group": name, "caller_path": role}
+        for name, row in rows.items()
+        for role in ("external", "colocated")
+        if isinstance(row.get(role), dict)
+        and bool(row.get(role, {}).get("material_envelope_win"))
+    ]
+    return {
+        "cases": rows,
+        "material_envelope_win": bool(material_wins),
+        "material_envelope_wins": material_wins,
+    }
+
+
+def _framing_row(
+    result: dict[str, Any],
+    *,
+    json_case: str,
+    envelope_case: str,
+) -> dict[str, Any] | None:
+    cases = _observation_cases(result)
+    json_p50 = _summary_p50(_dict_value(cases.get(json_case)).get("action_to_frame_summary_ms"))
+    envelope_p50 = _summary_p50(
+        _dict_value(cases.get(envelope_case)).get("action_to_frame_summary_ms")
+    )
+    if json_p50 is None and envelope_p50 is None:
+        return None
+    delta_ms = (
+        None if json_p50 is None or envelope_p50 is None else envelope_p50 - json_p50
+    )
+    ratio = (
+        None
+        if json_p50 is None or envelope_p50 is None or json_p50 == 0
+        else envelope_p50 / json_p50
+    )
+    return {
+        "json_binary_case": json_case,
+        "binary_envelope_case": envelope_case,
+        "json_binary_p50_ms": json_p50,
+        "binary_envelope_p50_ms": envelope_p50,
+        "delta_ms": delta_ms,
+        "ratio_vs_json_binary": ratio,
+        "material_envelope_win": bool(
+            delta_ms is not None and ratio is not None and delta_ms <= -5.0 and ratio <= 0.9
+        ),
+    }
+
+
+def _observation_cases(result: dict[str, Any]) -> dict[str, Any]:
+    return _dict_value(
+        _dict_value(_dict_value(result.get("surfaces")).get("daemon-observation-stream")).get(
+            "cases"
+        )
+    )
+
+
+def _likely_latency_bound(
+    transport: dict[str, Any],
+    observation: dict[str, Any],
+    framing: dict[str, Any] | None,
+) -> str | None:
+    if framing is not None and framing.get("material_envelope_win"):
+        win_paths = {
+            item.get("caller_path")
+            for item in framing.get("material_envelope_wins", [])
+            if isinstance(item, dict)
+        }
+        if {"external", "colocated"}.issubset(win_paths):
+            return "websocket_message_framing"
+        return "partial_websocket_message_framing_evidence"
+    transport_ratio = transport.get("ratio_vs_external")
+    observation_ratio = observation.get("ratio_vs_external")
+    if isinstance(transport_ratio, int | float) and isinstance(observation_ratio, int | float):
+        if transport_ratio <= 0.25 and observation_ratio >= 0.5:
+            return "daemon_action_capture_or_change_detection"
+        if transport_ratio <= 0.75 and observation_ratio <= 0.75:
+            return "caller_placement_or_modal_receive_floor"
+    if transport or observation or framing:
+        return "mixed_or_inconclusive"
+    return None
+
+
+def _latency_diagnosis_interpretation(likely_bound: str | None) -> str:
+    if likely_bound == "websocket_message_framing":
+        return (
+            "binary-envelope materially improves the causal production path; consider a policy PR "
+            "only after repeating the live A/B."
+        )
+    if likely_bound == "partial_websocket_message_framing_evidence":
+        return (
+            "binary-envelope materially improves at least one caller path, but the selected matrix "
+            "did not prove the win across both external and co-located callers."
+        )
+    if likely_bound == "daemon_action_capture_or_change_detection":
+        return (
+            "co-location reduced raw transport more than causal action-observe; daemon action, "
+            "damage, capture, or diff work remains material."
+        )
+    if likely_bound == "caller_placement_or_modal_receive_floor":
+        return (
+            "co-location improves transport and causal action-observe together; caller placement "
+            "is the primary lever."
+        )
+    if likely_bound == "mixed_or_inconclusive":
+        return (
+            "selected cases do not isolate one dominant lever; inspect per-case attribution and "
+            "rerun the focused matrix."
+        )
+    return "insufficient successful cases to diagnose the latency bound."
 
 
 def _summary_p50(value: object) -> float | None:
