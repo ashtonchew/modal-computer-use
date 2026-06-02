@@ -292,6 +292,7 @@ def _observation_case_factories(
                 change_signal="auto",
                 transport_timing=False,
                 causal_action_observe=True,
+                use_sdk_default_frame_encoding=True,
             )
         ),
         "observation_action_click_act_and_observe_auto_region_production": lambda: (
@@ -815,8 +816,14 @@ def _run_observation_action_click_observe_change_benchmark(
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
+    use_sdk_default_frame_encoding: bool = False,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
+    effective_frame_encoding = (
+        None
+        if use_sdk_default_frame_encoding
+        else frame_encoding or "json-binary"
+    )
     if page == "sparse":
         _open_sparse_click_toggle_page(client)
     else:
@@ -834,7 +841,7 @@ def _run_observation_action_click_observe_change_benchmark(
         change_detection=change_detection,
         change_signal=change_signal,
         dirty_frame_producer=dirty_frame_producer,
-        frame_encoding=frame_encoding,
+        frame_encoding=effective_frame_encoding,
         transport_timing=transport_timing,
         causal_action_observe=causal_action_observe,
     )
@@ -852,7 +859,10 @@ def _run_observation_action_click_observe_change_benchmark(
             "change_signal": change_signal or "default",
             "dirty_frame_producer": dirty_frame_producer,
             "page": page,
-            "frame_encoding": frame_encoding or "json-binary",
+            "frame_encoding": effective_frame_encoding or "binary-envelope",
+            "frame_encoding_policy": "sdk-default"
+            if use_sdk_default_frame_encoding
+            else "benchmark-explicit",
             "transport_timing": transport_timing,
             "causal_action_observe": causal_action_observe,
         }

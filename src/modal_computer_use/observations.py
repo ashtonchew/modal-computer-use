@@ -63,7 +63,7 @@ class ObservationClient:
         max_patch_rects: int | None = None,
         multi_rect_min_savings: float | None = None,
         transport_timing: bool = False,
-        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = "binary-envelope",
     ) -> None:
         self.transport = transport
         self.payload = _observation_payload(

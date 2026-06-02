@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Response, WebSocket, WebSocketDisconnect
 from PIL import Image, ImageChops
@@ -1346,6 +1346,17 @@ def _with_backpressure_metadata(
     }
 
 
+def _observation_frame_type(
+    *,
+    unchanged: bool,
+    kind: str,
+    send_unchanged: bool,
+) -> Literal["frame", "unchanged"]:
+    if unchanged and kind == "delta-suppressed" and not send_unchanged:
+        return "unchanged"
+    return "frame"
+
+
 def _resolve_change_detection_region(
     websocket: WebSocket,
     request: ObservationActionObserveChangeRequest,
@@ -1648,9 +1659,11 @@ async def _capture_frame(
         )
     observation_ms = (perf_counter() - captured_started) * 1000
     metadata = {
-        "type": "unchanged"
-        if delta["kind"] == "delta-suppressed" and not request.send_unchanged
-        else "frame",
+        "type": _observation_frame_type(
+            unchanged=unchanged,
+            kind=delta["kind"],
+            send_unchanged=request.send_unchanged,
+        ),
         "stream_id": stream_id,
         "seq": seq,
         "kind": delta["kind"],
@@ -2186,9 +2199,11 @@ def _raw_metadata(
     source_hash_kind: str = "raw-rgb-sha256",
 ) -> tuple[dict[str, Any], bytes]:
     metadata = {
-        "type": "unchanged"
-        if kind == "delta-suppressed" and not request.send_unchanged
-        else "frame",
+        "type": _observation_frame_type(
+            unchanged=unchanged,
+            kind=kind,
+            send_unchanged=request.send_unchanged,
+        ),
         "stream_id": stream_id,
         "seq": seq,
         "kind": kind,

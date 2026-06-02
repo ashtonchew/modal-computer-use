@@ -64,13 +64,17 @@ For continuous observation, use the observation stream instead of polling screen
 GET /v1/observations/stream
 ```
 
-The observation stream is a passive, server-pushed WebSocket that sends one JSON metadata frame
-followed by one binary image frame for changed observations. It sends periodic keyframes, can send
-small dirty-region patch frames, and can suppress unchanged observations to metadata-only frames.
-That keeps idle observation loops from repeatedly transferring the same screenshot bytes while still
-letting clients recover by requesting or waiting for a keyframe. Actions still run on the REST or
-hot-session control paths; separating observation bytes from control messages prevents large frames
-from blocking input, cancellation, or health checks.
+The observation stream is a passive, server-pushed WebSocket. The daemon protocol supports the raw
+`json-binary` shape, which sends one JSON metadata frame followed by one binary image frame for
+changed observations, and the atomic `binary-envelope` shape, which wraps metadata and payload in
+one binary WebSocket message. The SDK facade requests `binary-envelope` by default because causal
+action-observe loops should not depend on split-message metadata/payload alignment. Raw daemon
+WebSocket clients can still use `json-binary` for broad compatibility. The stream sends periodic
+keyframes, can send small dirty-region patch frames, and can suppress unchanged observations to
+metadata-only frames. That keeps idle observation loops from repeatedly transferring the same
+screenshot bytes while still letting clients recover by requesting or waiting for a keyframe.
+Actions still run on the REST or hot-session control paths; separating observation bytes from
+control messages prevents large frames from blocking input, cancellation, or health checks.
 
 For default PNG, cursor-hidden observations, the daemon uses a raw MSS capture path before PNG
 encoding. It hashes raw RGB bytes to suppress unchanged frames without encoding a PNG, and uses
@@ -281,11 +285,12 @@ uv run computer-use benchmark modal-colocated-client \
 ```
 
 Use this for diagnostic PRs. The profile includes 0B/5KB/50KB/250KB transport probes plus the
-production causal action-observe cases for `auto_signal` and `auto_region`, each measured in the
-default metadata-then-binary frame shape and the single-message binary-envelope shape. Production
-comparisons keep `transport_timing=false` so the measurement does not add extra control frames.
-The full observation surface intentionally covers older ablations and synthetic delta cases, so it
-is too broad for a quick action-observe regression check.
+production causal action-observe cases for `auto_signal` and `auto_region`, each measured in the raw
+metadata-then-binary frame shape and the single-message binary-envelope shape. Production
+comparisons keep `transport_timing=false` so the measurement does not add extra control frames. The
+SDK-default production case uses binary-envelope unless the caller explicitly opts into
+`json-binary`. The full observation surface intentionally covers older ablations and synthetic delta
+cases, so it is too broad for a quick action-observe regression check.
 
 Use the observation stream for long-lived visual feedback loops. Use fused raw screenshots for
 single action-then-observe turns, because their one-shot latency remains easier to attribute and
