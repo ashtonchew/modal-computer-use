@@ -54,7 +54,9 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
         assert kwargs["name"] == "colocated-runner"
         assert kwargs["exec_timeout_seconds"] == 900
         env = kwargs["env"]
-        assert env["COMPUTER_USE_BENCHMARK_TOKEN"] == "target-token"  # noqa: S105
+        assert env["COMPUTER_USE_DAEMON_BASE_URL"] == "https://target.example.modal.host"
+        assert env["COMPUTER_USE_DAEMON_TOKEN"] == "target-token"  # noqa: S105
+        assert env["COMPUTER_USE_DAEMON_RUNNER_PATH"] == "inherited"
         assert json.loads(env["COMPUTER_USE_BENCHMARK_SURFACES_JSON"]) == surfaces
         assert json.loads(env["COMPUTER_USE_BENCHMARK_OBSERVATION_CASES_JSON"]) is None
         metadata = json.loads(env["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
@@ -161,9 +163,16 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
         path = metadata["modal_runner_path"]
         exec_paths.append(path)
         if path == "inherited":
-            assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "attested-token"  # noqa: S105
+            assert kwargs["env"]["COMPUTER_USE_DAEMON_TOKEN"] == "attested-token"  # noqa: S105
+            assert kwargs["env"]["COMPUTER_USE_DAEMON_BASE_URL"] == (
+                "https://target.example.modal.host"
+            )
         if path == "connect":
-            assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "connect-token"  # noqa: S105
+            assert kwargs["env"]["COMPUTER_USE_DAEMON_TOKEN"] == "connect-token"  # noqa: S105
+            assert kwargs["env"]["COMPUTER_USE_DAEMON_BASE_URL"] == (
+                "https://connect.modal.run/sb-target"
+            )
+        assert kwargs["env"]["COMPUTER_USE_DAEMON_RUNNER_PATH"] == path
         result = _surface_result(
             transport_p50=10.0,
             observation_p50=20.0,
@@ -174,8 +183,9 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
 
     def fake_exec_in_target(sandbox, command, **kwargs):
         assert sandbox is CreatedComputer._sandbox
-        assert kwargs["env"]["COMPUTER_USE_BENCHMARK_BASE_URL"] == "http://127.0.0.1:8080"
-        assert kwargs["env"]["COMPUTER_USE_BENCHMARK_TOKEN"] == "attested-token"  # noqa: S105
+        assert kwargs["env"]["COMPUTER_USE_DAEMON_BASE_URL"] == "http://127.0.0.1:8080"
+        assert kwargs["env"]["COMPUTER_USE_DAEMON_TOKEN"] == "attested-token"  # noqa: S105
+        assert kwargs["env"]["COMPUTER_USE_DAEMON_RUNNER_PATH"] == "target-loopback"
         metadata = json.loads(kwargs["env"]["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
         path = metadata["modal_runner_path"]
         target_exec_paths.append(path)
@@ -223,6 +233,7 @@ def test_modal_colocated_runner_code_compiles_and_records_preflight() -> None:
     assert "def _runner_preflight(client):" in code
     assert 'result.setdefault("metadata", {})["runner_preflight"] = runner_preflight' in code
     assert '"route": name' in code
+    assert "COMPUTER_USE_DAEMON_BASE_URL" in code
     assert "COMPUTER_USE_BENCHMARK_TOKEN" in code
 
 

@@ -637,6 +637,9 @@ Use runner paths to separate caller placement from target ingress:
 `target-loopback` is not a separate runner sandbox: `127.0.0.1` only reaches the target daemon from
 inside the target sandbox. Treat it as a lower-bound diagnostic for a future same-container hosted
 control loop, not as proof that two independent sandboxes can talk over loopback.
+The benchmark uses the SDK-owned `run_modal_daemon_command()` helper for these paths so endpoint
+selection, Connect Token creation, loopback execution, and reserved daemon environment variables stay
+in the Modal SDK boundary instead of benchmark-local code.
 
 A May 29, 2026 `modal-colocated-client` run with a `us-west` target and a development-laptop
 external caller measured:
@@ -652,8 +655,8 @@ future hosted model-loop/control-plane shape.
 
 For application code, the same pattern is available as a co-located runner Sandbox. The target
 desktop sandbox and runner sandbox are created in the same Modal region, and the runner talks
-directly to the target daemon. Use `examples/modal_colocated_runner.py` as the minimal shape before
-building a hosted control plane.
+directly to the target daemon. Use `run_modal_daemon_command()` or
+`examples/modal_colocated_runner.py` as the minimal shape before building a hosted control plane.
 
 If a runner can reach `/healthz`, `/v1/version`, and `/v1/capabilities` but times out opening
 `/v1/observations/stream`, the failure is likely specific to WebSocket ingress rather than daemon

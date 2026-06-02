@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets as _secrets
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -45,6 +46,16 @@ from .transports import HotSessionTransport, ObservationStreamTransport
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
+ModalDaemonEndpointPath = Literal["inherited", "connect", "target-loopback"]
+
+
+@dataclass(frozen=True)
+class ModalDaemonEndpoint:
+    path: ModalDaemonEndpointPath
+    base_url: str
+    token: str | None
+    target_sandbox_id: str | None
+    execute_in_target: bool = False
 
 
 @dataclass(frozen=True)
@@ -644,6 +655,116 @@ class ComputerSandbox:
                 "mount_image requires a Modal-backed sandbox with Sandbox.mount_image support"
             )
         self._sandbox.mount_image(path, image)
+
+
+def modal_daemon_endpoint(
+    computer: ComputerSandbox,
+    path: ModalDaemonEndpointPath = "inherited",
+) -> ModalDaemonEndpoint:
+    metadata = computer.metadata()
+    target_sandbox_id = None if metadata is None else metadata.sandbox_id
+    if path == "inherited":
+        return ModalDaemonEndpoint(
+            path=path,
+            base_url=computer.client.base_url,
+            token=computer.client.transport.token,
+            target_sandbox_id=target_sandbox_id,
+        )
+    sandbox = _require_modal_backing(computer, path=path)
+    if path == "connect":
+        token_info = sandbox.create_connect_token(
+            user_metadata={"sdk": "modal-computer-use", "runner_path": path}
+        )
+        base_url, token = _connect_token_parts(token_info)
+        return ModalDaemonEndpoint(
+            path=path,
+            base_url=base_url,
+            token=token,
+            target_sandbox_id=target_sandbox_id,
+        )
+    if path == "target-loopback":
+        return ModalDaemonEndpoint(
+            path=path,
+            base_url="http://127.0.0.1:8080",
+            token=computer.client.transport.token,
+            target_sandbox_id=target_sandbox_id,
+            execute_in_target=True,
+        )
+    raise ValueError("path must be inherited, connect, or target-loopback")
+
+
+def modal_daemon_env(
+    endpoint: ModalDaemonEndpoint,
+    env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    reserved = {
+        "COMPUTER_USE_DAEMON_BASE_URL": endpoint.base_url,
+        "COMPUTER_USE_DAEMON_RUNNER_PATH": endpoint.path,
+    }
+    if endpoint.token:
+        reserved["COMPUTER_USE_DAEMON_TOKEN"] = endpoint.token
+    if endpoint.target_sandbox_id:
+        reserved["COMPUTER_USE_TARGET_SANDBOX_ID"] = endpoint.target_sandbox_id
+    conflicts = sorted(set(reserved) & set(env or {}))
+    if conflicts:
+        raise ValueError(
+            "runner env cannot override reserved daemon keys: " + ", ".join(conflicts)
+        )
+    return {**reserved, **(env or {})}
+
+
+def run_modal_daemon_command(
+    computer: ComputerSandbox,
+    command: Sequence[str],
+    *,
+    path: ModalDaemonEndpointPath = "inherited",
+    app_name: str = "modal-computer-use",
+    modal_region: str | None = None,
+    runner_name: str | None = None,
+    env: dict[str, str] | None = None,
+    runner_cpu: float | None = None,
+    runner_memory_mib: int | None = None,
+    exec_timeout_seconds: int = 240,
+    app_tags: dict[str, str] | None = None,
+    tags: dict[str, str] | None = None,
+    exec_once: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_once,
+    exec_in_target: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_in_place,
+) -> ModalSandboxExecResult:
+    command_tuple = tuple(command)
+    endpoint = modal_daemon_endpoint(computer, path)
+    runner_env = modal_daemon_env(endpoint, env)
+    if endpoint.execute_in_target:
+        sandbox = _require_modal_backing(computer, path=path)
+        return exec_in_target(
+            sandbox,
+            command_tuple,
+            env=runner_env,
+            exec_timeout_seconds=exec_timeout_seconds,
+        )
+    if not modal_region:
+        raise ValueError("modal_region is required for separate runner paths")
+    return exec_once(
+        command_tuple,
+        app_name=app_name,
+        name=runner_name,
+        region=modal_region,
+        env=runner_env,
+        app_tags=app_tags,
+        tags={
+            "computer-use.runner": "colocated",
+            "computer-use.runner_path": path,
+            **(tags or {}),
+        },
+        cpu=runner_cpu,
+        memory_mib=runner_memory_mib,
+        exec_timeout_seconds=exec_timeout_seconds,
+    )
+
+
+def _require_modal_backing(computer: ComputerSandbox, *, path: str) -> object:
+    if computer._sandbox is None:
+        raise SandboxUnavailableError(f"{path} requires a Modal-backed sandbox")
+    return computer._sandbox
 
 
 def _daemon_environment(

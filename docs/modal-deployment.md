@@ -100,6 +100,20 @@ then starts a second runner Sandbox in the same Modal region. The runner receive
 daemon connection details through its environment, talks directly to the target daemon, and is
 terminated after the workload. See `examples/modal_colocated_runner.py`.
 
+Use `run_modal_daemon_command()` when application code needs this shape without rebuilding endpoint
+selection. It supports three explicit paths:
+
+| Path | Execution location | Daemon endpoint | Use when |
+| --- | --- | --- | --- |
+| `inherited` | Separate runner Sandbox | The target `ComputerSandbox` client's current URL/token | The target already exposes the desired attested tunnel or tunnel endpoint. |
+| `connect` | Separate runner Sandbox | A fresh Modal Connect Token URL/token | You want Modal's authenticated HTTP/WebSocket ingress for the runner. |
+| `target-loopback` | Target desktop Sandbox via `Sandbox.exec` | `http://127.0.0.1:8080` plus the daemon bearer token | You need the same-container lower-bound diagnostic or trusted in-sandbox command execution. |
+
+The helper injects `COMPUTER_USE_DAEMON_BASE_URL`, `COMPUTER_USE_DAEMON_RUNNER_PATH`,
+`COMPUTER_USE_DAEMON_TOKEN` when present, and `COMPUTER_USE_TARGET_SANDBOX_ID` when available. User
+environment values cannot override those reserved keys. `target-loopback` is intentionally not a
+same-region runner: `127.0.0.1` only reaches the target daemon from inside the target sandbox.
+
 This is a data-plane optimization, not a new daemon primitive. Keep user/model code in the runner
 or application layer; core SDK modules should only provide generic Sandbox orchestration helpers.
 Use Connect Tokens or the attested tunnel default for daemon access, and treat returned daemon

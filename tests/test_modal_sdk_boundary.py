@@ -5,7 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
-from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSandboxManager, DaemonClient
+from modal_computer_use import (
+    ComputerConfig,
+    ComputerSandbox,
+    ComputerSandboxManager,
+    DaemonClient,
+    SandboxRef,
+)
 from modal_computer_use.config import BrowserConfig
 from modal_computer_use.errors import (
     ConfigConflictError,
@@ -15,8 +21,11 @@ from modal_computer_use.errors import (
 from modal_computer_use.registry import SandboxRegistry
 from modal_computer_use.sandbox import (
     _connect_token_parts,
+    modal_daemon_endpoint,
+    modal_daemon_env,
     modal_sandbox_exec_once,
     modal_sandbox_exec_runner_from_id,
+    run_modal_daemon_command,
 )
 from modal_computer_use.state import compute_config_hash
 
@@ -187,6 +196,14 @@ def fake_modal() -> SimpleNamespace:
     return SimpleNamespace(App=FakeApp, Probe=FakeProbe, Sandbox=FakeSandbox)
 
 
+def fake_sandbox_ref(sandbox_id: str = "sb-target") -> SandboxRef:
+    return SandboxRef(
+        sandbox_id=sandbox_id,
+        app_name="computer-app",
+        status="ready",
+    )
+
+
 def test_computer_sandbox_context_manager_terminates_modal_sandbox() -> None:
     sandbox = FakeSandboxObject()
     computer = ComputerSandbox(DaemonClient(base_url="http://127.0.0.1:1"), sandbox=sandbox)
@@ -334,6 +351,180 @@ def test_connect_token_parts_prefers_explicit_token_and_strips_query() -> None:
 
     assert base_url == "https://sandbox-connect.example/path"
     assert token == "explicit-value"  # noqa: S105 - synthetic connect-token fixture.
+
+
+def test_modal_daemon_endpoint_inherits_client_details() -> None:
+    computer = ComputerSandbox(
+        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
+        sandbox=FakeSandboxObject(sandbox_id="sb-target"),
+        metadata=fake_sandbox_ref(),
+    )
+
+    endpoint = modal_daemon_endpoint(computer, "inherited")
+
+    assert endpoint.path == "inherited"
+    assert endpoint.base_url == "https://daemon.example.modal.host"
+    assert endpoint.token == "attested-token"  # noqa: S105 - synthetic token fixture.
+    assert endpoint.target_sandbox_id == "sb-target"
+    assert endpoint.execute_in_target is False
+
+
+def test_modal_daemon_endpoint_creates_connect_token() -> None:
+    computer = ComputerSandbox(
+        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
+        sandbox=FakeSandboxObject(sandbox_id="sb-target"),
+        metadata=fake_sandbox_ref(),
+    )
+
+    endpoint = modal_daemon_endpoint(computer, "connect")
+
+    assert endpoint.path == "connect"
+    assert endpoint.base_url == "https://sandbox-connect.example"
+    assert endpoint.token == "connect-token"  # noqa: S105 - synthetic token fixture.
+    assert endpoint.target_sandbox_id == "sb-target"
+    assert endpoint.execute_in_target is False
+
+
+def test_modal_daemon_endpoint_target_loopback_executes_in_target() -> None:
+    computer = ComputerSandbox(
+        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
+        sandbox=FakeSandboxObject(sandbox_id="sb-target"),
+        metadata=fake_sandbox_ref(),
+    )
+
+    endpoint = modal_daemon_endpoint(computer, "target-loopback")
+
+    assert endpoint.path == "target-loopback"
+    assert endpoint.base_url == "http://127.0.0.1:8080"
+    assert endpoint.token == "attested-token"  # noqa: S105 - synthetic token fixture.
+    assert endpoint.target_sandbox_id == "sb-target"
+    assert endpoint.execute_in_target is True
+
+
+def test_modal_daemon_endpoint_modal_paths_require_modal_sandbox() -> None:
+    computer = ComputerSandbox(
+        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token")
+    )
+
+    for path in ("connect", "target-loopback"):
+        try:
+            modal_daemon_endpoint(computer, path)  # type: ignore[arg-type]
+        except SandboxUnavailableError as exc:
+            assert f"{path} requires a Modal-backed sandbox" in str(exc)
+        else:
+            raise AssertionError(f"expected {path} without Modal sandbox to fail")
+
+
+def test_modal_daemon_env_rejects_reserved_key_overrides() -> None:
+    endpoint = modal_daemon_endpoint(
+        ComputerSandbox(
+            DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
+            sandbox=FakeSandboxObject(sandbox_id="sb-target"),
+            metadata=fake_sandbox_ref(),
+        ),
+        "inherited",
+    )
+
+    try:
+        modal_daemon_env(
+            endpoint,
+            {"COMPUTER_USE_DAEMON_BASE_URL": "https://wrong.example", "WORKLOAD": "ok"},
+        )
+    except ValueError as exc:
+        assert "COMPUTER_USE_DAEMON_BASE_URL" in str(exc)
+    else:
+        raise AssertionError("expected reserved daemon env override to fail")
+
+
+def test_run_modal_daemon_command_uses_separate_runner_for_inherited_path() -> None:
+    computer = ComputerSandbox(
+        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
+        sandbox=FakeSandboxObject(sandbox_id="sb-target"),
+        metadata=fake_sandbox_ref(),
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_exec_once(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        return SimpleNamespace(sandbox_id="sb-runner", returncode=0, stdout="ok", stderr="")
+
+    result = run_modal_daemon_command(
+        computer,
+        ["python", "-m", "worker"],
+        path="inherited",
+        app_name="computer-app",
+        modal_region="us-west",
+        runner_name="runner",
+        env={"WORKLOAD": "benchmark"},
+        runner_cpu=0.5,
+        runner_memory_mib=512,
+        exec_timeout_seconds=60,
+        exec_once=fake_exec_once,
+    )
+
+    assert result.sandbox_id == "sb-runner"
+    assert calls == [
+        {
+            "command": ("python", "-m", "worker"),
+            "app_name": "computer-app",
+            "name": "runner",
+            "region": "us-west",
+            "env": {
+                "COMPUTER_USE_DAEMON_BASE_URL": "https://daemon.example.modal.host",
+                "COMPUTER_USE_DAEMON_RUNNER_PATH": "inherited",
+                "COMPUTER_USE_DAEMON_TOKEN": "attested-token",
+                "COMPUTER_USE_TARGET_SANDBOX_ID": "sb-target",
+                "WORKLOAD": "benchmark",
+            },
+            "app_tags": None,
+            "tags": {
+                "computer-use.runner": "colocated",
+                "computer-use.runner_path": "inherited",
+            },
+            "cpu": 0.5,
+            "memory_mib": 512,
+            "exec_timeout_seconds": 60,
+        }
+    ]
+
+
+def test_run_modal_daemon_command_uses_target_sandbox_for_loopback_path() -> None:
+    target = FakeSandboxObject(sandbox_id="sb-target")
+    computer = ComputerSandbox(
+        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
+        sandbox=target,
+        metadata=fake_sandbox_ref(),
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_exec_in_target(sandbox, command, **kwargs):
+        calls.append({"sandbox": sandbox, "command": command, **kwargs})
+        return SimpleNamespace(sandbox_id="sb-target", returncode=0, stdout="ok", stderr="")
+
+    result = run_modal_daemon_command(
+        computer,
+        ("python", "-m", "worker"),
+        path="target-loopback",
+        env={"WORKLOAD": "benchmark"},
+        exec_timeout_seconds=60,
+        exec_in_target=fake_exec_in_target,
+    )
+
+    assert result.sandbox_id == "sb-target"
+    assert calls == [
+        {
+            "sandbox": target,
+            "command": ("python", "-m", "worker"),
+            "env": {
+                "COMPUTER_USE_DAEMON_BASE_URL": "http://127.0.0.1:8080",
+                "COMPUTER_USE_DAEMON_RUNNER_PATH": "target-loopback",
+                "COMPUTER_USE_DAEMON_TOKEN": "attested-token",
+                "COMPUTER_USE_TARGET_SANDBOX_ID": "sb-target",
+                "WORKLOAD": "benchmark",
+            },
+            "exec_timeout_seconds": 60,
+        }
+    ]
 
 
 def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:

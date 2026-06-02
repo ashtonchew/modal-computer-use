@@ -41,7 +41,15 @@ from .models import (
 )
 from .observations import ActionObservationResult, ObservationClient
 from .registry import SandboxRegistry
-from .sandbox import ComputerSandbox
+from .sandbox import (
+    ComputerSandbox,
+    ModalDaemonEndpoint,
+    ModalDaemonEndpointPath,
+    ModalSandboxExecResult,
+    modal_daemon_endpoint,
+    modal_daemon_env,
+    run_modal_daemon_command,
+)
 
 __all__ = [
     "ActionBatchResult",
@@ -68,6 +76,9 @@ __all__ = [
     "DisplayGeometry",
     "DisplayInfo",
     "HotSessionClient",
+    "ModalDaemonEndpoint",
+    "ModalDaemonEndpointPath",
+    "ModalSandboxExecResult",
     "NetworkConfig",
     "ObservationClient",
     "Point",
@@ -88,4 +99,7 @@ __all__ = [
     "StorageConfig",
     "X11Window",
     "__version__",
+    "modal_daemon_endpoint",
+    "modal_daemon_env",
+    "run_modal_daemon_command",
 ]

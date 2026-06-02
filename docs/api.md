@@ -259,6 +259,12 @@ whether running the benchmark client from a same-region Modal runner lowers the 
 transport floor. Pass `--surface daemon-observation-stream` as well when you need the causal
 action-to-frame comparison for the observation stream; that surface also requires a browser-capable
 target such as `--browser chromium`.
+Application code can use `run_modal_daemon_command(computer, command, path=...)` for the same
+runner pattern. `path="inherited"` passes the target client's current daemon URL/token into a
+same-region runner, `path="connect"` creates a fresh Modal Connect Token for that runner, and
+`path="target-loopback"` executes inside the target sandbox against `http://127.0.0.1:8080`.
+The helper owns the reserved daemon env keys and rejects user overrides so benchmark or workload
+metadata cannot accidentally replace the daemon endpoint or bearer token.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
