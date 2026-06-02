@@ -200,6 +200,55 @@ def test_causal_binary_envelope_cases_use_production_action_observe_flags(monkey
     ]
 
 
+def test_sdk_default_causal_case_uses_auto_policy(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    client = object()
+
+    def fake_action_observe_benchmark(**kwargs):
+        calls.append(kwargs)
+        return {"status": "ok", "name": kwargs["name"]}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_run_observation_action_click_observe_change_benchmark",
+        fake_action_observe_benchmark,
+    )
+
+    factories = observation_surface._observation_case_factories(
+        base_url="http://daemon.test",
+        token=None,
+        client=client,  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    result = factories["observation_action_click_act_and_observe_sdk_default_production"]()
+
+    assert result["status"] == "ok"
+    assert calls == [
+        {
+            "base_url": "http://daemon.test",
+            "token": None,
+            "client": client,
+            "iterations": 1,
+            "warmup_iterations": 0,
+            "name": "observation_action_click_act_and_observe_sdk_default_production",
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    ]
+
+
+def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
+    assert (
+        "observation_action_click_act_and_observe_sdk_default_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
+
+
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:
     result = {
         "summary_ms": {"p50": 110.0},

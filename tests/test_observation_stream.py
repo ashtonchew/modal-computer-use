@@ -1486,8 +1486,110 @@ def test_observation_client_act_and_observe_returns_causal_result() -> None:
     assert result.action_result == {"ok": True}
     assert result.change_detected is True
     assert transport.change_payload["actions"] == [{"type": "wait", "duration_ms": 0}]
+    assert transport.change_payload["change_detection"] == "full"
     assert transport.change_payload["change_signal"] == "auto"
     assert "continue_on_error" not in transport.change_payload
+
+
+def test_observation_client_act_and_observe_defaults_pointer_actions_to_auto_region() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(actions=[{"type": "click", "x": 12, "y": 34}])
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+
+
+def test_observation_client_act_and_observe_defaults_drag_actions_to_auto_region() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "drag", "start_x": 1, "start_y": 2, "end_x": 120, "end_y": 140}]
+    )
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+
+
+def test_observation_client_act_and_observe_ignores_trailing_wait_for_auto_region() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[
+            {"type": "click", "x": 12, "y": 34},
+            {"type": "wait", "duration_ms": 10},
+        ]
+    )
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+
+
+def test_observation_client_act_and_observe_uses_full_frame_after_global_action() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[
+            {"type": "click", "x": 12, "y": 34},
+            {"type": "keypress", "key": "enter"},
+        ]
+    )
+
+    assert transport.change_payload["change_detection"] == "full"
+
+
+def test_observation_client_act_and_observe_keeps_keyboard_actions_full_frame() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(actions=[{"type": "keypress", "key": "enter"}])
+
+    assert transport.change_payload["change_detection"] == "full"
+
+
+def test_observation_client_act_and_observe_respects_explicit_change_detection() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "click", "x": 12, "y": 34}],
+        change_detection="full",
+    )
+
+    assert transport.change_payload["change_detection"] == "full"
+
+
+def test_observation_client_act_and_observe_uses_explicit_region_with_auto_policy() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "keypress", "key": "enter"}],
+        change_detection_region={"x": 10, "y": 20, "width": 30, "height": 40},
+    )
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["change_detection_region"] == {
+        "x": 10,
+        "y": 20,
+        "width": 30,
+        "height": 40,
+    }
 
 
 def test_observation_transport_splits_receive_timing() -> None:

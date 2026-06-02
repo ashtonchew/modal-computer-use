@@ -547,7 +547,9 @@ def _observation_causal_action_p50(result: dict[str, Any]) -> dict[str, Any] | N
         )
     )
     preferred_cases = (
+        "observation_action_click_act_and_observe_sdk_default_production",
         "observation_action_click_act_and_observe_auto_signal_production",
+        "observation_action_click_act_and_observe_auto_region_production",
         "observation_action_click_observe_change_auto_signal_binary_envelope_production",
         "observation_action_click_observe_change_auto_signal_production",
         "observation_action_click_observe_change_auto_signal",

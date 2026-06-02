@@ -276,6 +276,35 @@ def test_modal_colocated_latency_diagnosis_identifies_daemon_bound() -> None:
     )
 
 
+def test_modal_colocated_comparison_prefers_sdk_default_causal_case() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        sdk_default_observation_p50=45.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+    colocated_result = _surface_result(
+        transport_p50=2.0,
+        observation_p50=60.0,
+        sdk_default_observation_p50=18.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    assert comparison["surfaces"]["daemon-observation-stream"] == {
+        "surface": "daemon-observation-stream",
+        "metric": "causal_action_to_frame_p50_ms",
+        "case": "observation_action_click_act_and_observe_sdk_default_production",
+        "external_p50_ms": 45.0,
+        "colocated_p50_ms": 18.0,
+        "delta_ms": -27.0,
+        "ratio_vs_external": 0.4,
+    }
+
+
 def test_modal_colocated_latency_diagnosis_identifies_placement_bound() -> None:
     external = _surface_result(
         transport_p50=50.0,
@@ -402,6 +431,7 @@ def _surface_result(
     observation_p50: float,
     environment: dict[str, object],
     surfaces: list[str],
+    sdk_default_observation_p50: float | None = None,
     envelope_observation_p50: float | None = None,
 ) -> dict[str, object]:
     surface_results: dict[str, object] = {}
@@ -427,6 +457,11 @@ def _surface_result(
                 "action_to_frame_summary_ms": {"p50": observation_p50},
             }
         }
+        if sdk_default_observation_p50 is not None:
+            cases["observation_action_click_act_and_observe_sdk_default_production"] = {
+                "status": "ok",
+                "action_to_frame_summary_ms": {"p50": sdk_default_observation_p50},
+            }
         if envelope_observation_p50 is not None:
             cases[
                 "observation_action_click_act_and_observe_auto_signal_binary_envelope_production"
