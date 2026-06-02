@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import ClassVar
@@ -1094,6 +1095,97 @@ def test_observation_stream_dirty_producer_captures_action_region(
         metadata=second,
     ).compose(first_payload)
     assert composed == _image_png_bytes(changed)
+
+
+def test_observation_stream_dirty_producer_does_not_poll_frame_after_deadline(
+    app,
+    monkeypatch,
+) -> None:
+    white = Image.new("RGB", (64, 64), "white")
+    capture_images = iter([white, white])
+    capture_regions: list[Region | None] = []
+
+    async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
+        capture_regions.append(region)
+        if region is not None:
+            time.sleep(0.005)
+        return _raw_screenshot_from_image(next(capture_images), region=region)
+
+    class FakeXDamageWatcher:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
+            self.display = display
+            self.rect_hints = rect_hints
+            self.failure = None
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "click", "x": 20, "y": 20, "button": "left"}],
+                    "change_timeout_ms": 3,
+                    "poll_interval_ms": 1,
+                    "change_detection": "auto_region",
+                    "change_region_radius": 8,
+                    "change_signal": "xdamage",
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+
+    assert capture_regions[0] is None
+    assert capture_regions[1] == Region(x=0, y=0, width=32, height=32)
+    assert len(capture_regions) == 2
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["type"] == "unchanged"
+    assert second["dirty_frame_producer"] is True
+    assert second["dirty_frame_producer_used"] is False
+    assert second["dirty_frame_producer_fallback_reason"] == "producer_same_region"
+    assert second["frame_poll_skipped_reason"] == "deadline_exhausted_after_dirty_producer"
+    assert second["change_timeout_reached"] is True
+    assert second["change_stage_timing_ms"]["dirty_producer_wait_ms"] >= 3
+    assert second["change_stage_timing_ms"]["dirty_region_native_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
 
 
 def test_observation_stream_dirty_producer_can_capture_xdamage_region(

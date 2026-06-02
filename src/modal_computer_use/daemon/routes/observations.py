@@ -734,6 +734,7 @@ async def _send_changed_frame(
     dirty_frame_age_ms: float | None = None
     dirty_frame_capture_region: Region | None = None
     dirty_frame_capture_region_source: str | None = None
+    frame_poll_skipped_reason: str | None = None
     xdamage_dirty_rect: XDamageRect | None = None
     xdamage_dirty_rects: tuple[XDamageRect, ...] = ()
     dirty_producer_used = False
@@ -836,6 +837,10 @@ async def _send_changed_frame(
             if not dirty_producer_used:
                 dirty_producer_fallback_reason = (
                     dirty_producer_fallback_reason
+                    or _dirty_producer_no_change_reason(
+                        producer_result,
+                        metadata=last_metadata,
+                    )
                     or dirty_producer.failure
                     or "no_changed_frame"
                 )
@@ -870,7 +875,14 @@ async def _send_changed_frame(
                     / 1000
                 )
             region_poll_ms = _elapsed_ms(region_poll_started)
-        if not dirty_producer_used:
+        if (
+            not dirty_producer_used
+            and not region_detected
+            and last_metadata is not None
+            and perf_counter() >= deadline
+        ):
+            frame_poll_skipped_reason = "deadline_exhausted_after_dirty_producer"
+        if not dirty_producer_used and frame_poll_skipped_reason is None:
             frame_poll_started = perf_counter()
             while True:
                 attempts += 1
@@ -977,6 +989,7 @@ async def _send_changed_frame(
             if dirty_frame_capture_region is not None
             else extra_metadata.get("dirty_frame_capture_region"),
             "dirty_frame_capture_region_source": dirty_frame_capture_region_source,
+            "frame_poll_skipped_reason": frame_poll_skipped_reason,
             "xdamage_dirty_rect": _xdamage_rect_metadata(xdamage_dirty_rect),
             "xdamage_dirty_rects": [_xdamage_rect_metadata(rect) for rect in xdamage_dirty_rects],
             "xdamage_dirty_ratio": _region_ratio(
@@ -1133,6 +1146,20 @@ async def _prepare_dirty_frame_producer(
             return None
         return None
     return producer
+
+
+def _dirty_producer_no_change_reason(
+    result: _DirtyFrameProducerResult | None,
+    *,
+    metadata: dict[str, Any] | None,
+) -> str | None:
+    if result is None:
+        return None
+    if metadata is None:
+        return "producer_no_frame"
+    if result.capture_region is not None:
+        return "producer_same_region"
+    return "producer_same_frame"
 
 
 def _dirty_producer_capture_region(
