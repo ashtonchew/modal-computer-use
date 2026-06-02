@@ -142,7 +142,7 @@ class ObservationClient:
         change_timeout_ms: int = 100,
         poll_interval_ms: int = 8,
         poll_strategy: Literal["fixed", "adaptive"] = "adaptive",
-        change_detection: Literal["full", "auto_region"] = "full",
+        change_detection: Literal["auto", "full", "auto_region"] = "auto",
         change_signal: Literal["poll", "xdamage", "auto"] = "auto",
         dirty_frame_producer: Literal["auto", "off"] = "auto",
         change_detection_region: Mapping[str, Any] | None = None,
@@ -150,14 +150,19 @@ class ObservationClient:
         continue_on_error: bool = False,
     ) -> ActionObservationResult:
         self.start(drain_initial_frame=True)
+        action_payloads = [dict(action) for action in actions]
         payload: dict[str, Any] = {
-            "actions": [dict(action) for action in actions],
+            "actions": action_payloads,
             "source": source,
             "capture_delay_ms": capture_delay_ms,
             "change_timeout_ms": change_timeout_ms,
             "poll_interval_ms": poll_interval_ms,
             "poll_strategy": poll_strategy,
-            "change_detection": change_detection,
+            "change_detection": _resolve_action_change_detection(
+                action_payloads,
+                requested=change_detection,
+                change_detection_region=change_detection_region,
+            ),
             "change_signal": change_signal,
             "dirty_frame_producer": dirty_frame_producer,
         }
@@ -229,3 +234,36 @@ def _observation_payload(
     if multi_rect_min_savings is not None:
         payload["multi_rect_min_savings"] = multi_rect_min_savings
     return payload
+
+
+def _resolve_action_change_detection(
+    actions: list[Mapping[str, Any]],
+    *,
+    requested: Literal["auto", "full", "auto_region"],
+    change_detection_region: Mapping[str, Any] | None,
+) -> Literal["full", "auto_region"]:
+    if requested != "auto":
+        return requested
+    if change_detection_region is not None:
+        return "auto_region"
+    for action in reversed(actions):
+        if _action_is_neutral_for_region_policy(action):
+            continue
+        if _action_has_observation_point(action):
+            return "auto_region"
+        return "full"
+    return "full"
+
+
+def _action_has_observation_point(action: Mapping[str, Any]) -> bool:
+    return _has_int_pair(action, "x", "y") or _has_int_pair(action, "end_x", "end_y")
+
+
+def _action_is_neutral_for_region_policy(action: Mapping[str, Any]) -> bool:
+    return action.get("type") == "wait"
+
+
+def _has_int_pair(action: Mapping[str, Any], x_key: str, y_key: str) -> bool:
+    x = action.get(x_key)
+    y = action.get(y_key)
+    return type(x) is int and type(y) is int

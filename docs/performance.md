@@ -177,6 +177,12 @@ The change detector supports two optional optimizations:
   action, then resets it after a detected event. That keeps stale damage from a prior capture from
   satisfying the next action-observe turn.
 
+`ObservationClient.act_and_observe()` uses the same route with `change_detection="auto"` by
+default. The SDK resolves that policy from the last non-wait action: pointer-local actions such as
+clicks, moves, and drags use `auto_region`, and explicit `change_detection_region` also opts into
+region detection. Keyboard-only and global actions stay on full-frame detection unless the caller
+opts into a region.
+
 Observe-change frames include `change_stage_timing_ms` for attribution. It records daemon-side
 signal preparation, region baseline capture, action batch wall time, explicit capture delay, signal
 wait, region polling, final frame polling/capture, and total server time before the frame is
@@ -669,9 +675,13 @@ cleanup; have it return direct daemon/runner connection metadata. Use `examples/
 for the ASGI control-plane shape.
 
 When `daemon-observation-stream` is selected, the comparison also reports the preferred causal
-observation case, currently `observation_action_click_act_and_observe_auto_signal_production`, as
-`causal_action_to_frame_p50_ms`. That metric is the better next-step proof than transport floor
-alone because it includes action submission, daemon execution, change detection, and frame receipt.
+observation case as `causal_action_to_frame_p50_ms`. New artifacts prefer
+`observation_action_click_act_and_observe_sdk_default_production`, which measures the SDK
+`ObservationClient.act_and_observe()` default policy. The SDK resolves `change_detection="auto"` to
+`auto_region` only when the last non-wait action has pointer coordinates or the caller provides an
+explicit change-detection region; keyboard-only or global actions stay on full-frame detection. That
+metric is the better next-step proof than transport floor alone because it includes action
+submission, daemon execution, change detection, and frame receipt.
 When the `causal-action-observe-diagnostic` profile is selected, the comparison also includes a
 `diagnosis` object that relates transport floor, causal action-observe, and JSON-vs-binary-envelope
 framing. Treat it as a triage aid: a material binary-envelope win points at WebSocket message
