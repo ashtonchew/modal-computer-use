@@ -927,9 +927,9 @@ def _run_observation_action_click_paired_envelope_benchmark(
             "paired_observations": paired["paired_observations"],
             "pair_order_seed": PAIRED_ENVELOPE_ORDER_SEED,
             "pairing": {
-                "scope": "same sandbox/client path/page, separate stream per arm",
+                "scope": "same sandbox/client path/page/stream, per-command frame encoding",
                 "order_policy": "seeded_random_ab_ba",
-                "reason": "frame_encoding is negotiated when an observation stream starts",
+                "reason": "frame_encoding is overridden per action-observe command",
             },
             "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
             "action_count": 1,
@@ -967,73 +967,87 @@ def _measure_paired_stream_action_observe_loop(
         "baseline": baseline_frame_encoding,
         "variant": variant_frame_encoding,
     }
-    for warmup_index in range(warmup_iterations):
-        for arm_label in ("baseline", "variant"):
-            try:
-                _measure_paired_stream_action_observe_arm(
-                    base_url=base_url,
-                    token=token,
-                    frame_encoding=arms[arm_label],
-                )
-            except Exception as exc:
-                failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
-                return {
-                    "baseline_samples_ms": baseline_samples,
-                    "variant_samples_ms": variant_samples,
-                    "paired_delta_samples_ms": paired_deltas,
-                    "paired_observations": paired_observations,
-                }
+    try:
+        with ObservationClient(
+            ObservationStreamTransport(base_url, token=token),
+            options=OBSERVATION_SCREENSHOT_OPTIONS,
+            fps=0.01,
+            transport_timing=False,
+            frame_encoding=baseline_frame_encoding,
+        ) as stream:
+            for warmup_index in range(warmup_iterations):
+                for arm_label in ("baseline", "variant"):
+                    try:
+                        _measure_paired_stream_action_observe_arm(
+                            stream,
+                            frame_encoding=arms[arm_label],
+                        )
+                    except Exception as exc:
+                        failures.append(
+                            _failure(name, phase="warmup", iteration=warmup_index, exc=exc)
+                        )
+                        return {
+                            "baseline_samples_ms": baseline_samples,
+                            "variant_samples_ms": variant_samples,
+                            "paired_delta_samples_ms": paired_deltas,
+                            "paired_observations": paired_observations,
+                        }
 
-    rng = random.Random(order_seed)  # noqa: S311 - deterministic benchmark ordering only.
-    for pair_index in range(iterations):
-        order = ["baseline", "variant"]
-        if rng.getrandbits(1):
-            order.reverse()
-        pair_samples: dict[str, float] = {}
-        pair_frames: dict[str, dict[str, Any]] = {}
-        for arm_label in order:
-            started = perf_counter()
-            try:
-                observation = _measure_paired_stream_action_observe_arm(
-                    base_url=base_url,
-                    token=token,
-                    frame_encoding=arms[arm_label],
+            rng = random.Random(order_seed)  # noqa: S311 - deterministic benchmark ordering only.
+            for pair_index in range(iterations):
+                order = ["baseline", "variant"]
+                if rng.getrandbits(1):
+                    order.reverse()
+                pair_samples: dict[str, float] = {}
+                pair_frames: dict[str, dict[str, Any]] = {}
+                for arm_label in order:
+                    started = perf_counter()
+                    try:
+                        observation = _measure_paired_stream_action_observe_arm(
+                            stream,
+                            frame_encoding=arms[arm_label],
+                        )
+                    except Exception as exc:
+                        elapsed_ms = (perf_counter() - started) * 1000
+                        failures.append(
+                            _failure(
+                                name,
+                                phase=f"measure:{arm_label}",
+                                iteration=pair_index,
+                                exc=exc,
+                                elapsed_ms=elapsed_ms,
+                            )
+                        )
+                        break
+                    sample_ms = (perf_counter() - started) * 1000
+                    pair_samples[arm_label] = sample_ms
+                    pair_frames[arm_label] = observation
+                if set(pair_samples) != {"baseline", "variant"}:
+                    continue
+                baseline_ms = pair_samples["baseline"]
+                variant_ms = pair_samples["variant"]
+                delta_ms = variant_ms - baseline_ms
+                baseline_samples.append(baseline_ms)
+                variant_samples.append(variant_ms)
+                paired_deltas.append(delta_ms)
+                paired_observations.append(
+                    {
+                        "pair_index": pair_index,
+                        "order": order,
+                        "baseline_ms": baseline_ms,
+                        "variant_ms": variant_ms,
+                        "delta_ms": delta_ms,
+                        "ratio": variant_ms / baseline_ms if baseline_ms else None,
+                        "baseline_observation": _compact_observation_sample(
+                            pair_frames["baseline"]
+                        ),
+                        "variant_observation": _compact_observation_sample(
+                            pair_frames["variant"]
+                        ),
+                    }
                 )
-            except Exception as exc:
-                elapsed_ms = (perf_counter() - started) * 1000
-                failures.append(
-                    _failure(
-                        name,
-                        phase=f"measure:{arm_label}",
-                        iteration=pair_index,
-                        exc=exc,
-                        elapsed_ms=elapsed_ms,
-                    )
-                )
-                break
-            sample_ms = (perf_counter() - started) * 1000
-            pair_samples[arm_label] = sample_ms
-            pair_frames[arm_label] = observation
-        if set(pair_samples) != {"baseline", "variant"}:
-            continue
-        baseline_ms = pair_samples["baseline"]
-        variant_ms = pair_samples["variant"]
-        delta_ms = variant_ms - baseline_ms
-        baseline_samples.append(baseline_ms)
-        variant_samples.append(variant_ms)
-        paired_deltas.append(delta_ms)
-        paired_observations.append(
-            {
-                "pair_index": pair_index,
-                "order": order,
-                "baseline_ms": baseline_ms,
-                "variant_ms": variant_ms,
-                "delta_ms": delta_ms,
-                "ratio": variant_ms / baseline_ms if baseline_ms else None,
-                "baseline_observation": _compact_observation_sample(pair_frames["baseline"]),
-                "variant_observation": _compact_observation_sample(pair_frames["variant"]),
-            }
-        )
+    except Exception as exc:
+        failures.append(_failure(name, phase="setup", iteration=0, exc=exc))
     return {
         "baseline_samples_ms": baseline_samples,
         "variant_samples_ms": variant_samples,
@@ -1043,34 +1057,27 @@ def _measure_paired_stream_action_observe_loop(
 
 
 def _measure_paired_stream_action_observe_arm(
+    stream: ObservationClient,
     *,
-    base_url: str,
-    token: str | None,
     frame_encoding: Literal["json-binary", "binary-envelope"],
 ) -> dict[str, Any]:
-    with ObservationClient(
-        ObservationStreamTransport(base_url, token=token),
-        options=OBSERVATION_SCREENSHOT_OPTIONS,
-        fps=0.01,
-        transport_timing=False,
-        frame_encoding=frame_encoding,
-    ) as stream:
-        observation = _stream_action_capture_iteration(
-            stream,
-            None,
-            capture_delay_ms=0,
-            observe_change=True,
-            poll_strategy="adaptive",
-            change_detection="auto",
-            change_signal="auto",
-            dirty_frame_producer="auto",
-            causal_action_observe=True,
-        )
-        observation["benchmark_arm"] = {
-            "frame_encoding": frame_encoding,
-            "pairing": "separate_stream_arm",
-        }
-        return observation
+    observation = _stream_action_capture_iteration(
+        stream,
+        None,
+        capture_delay_ms=0,
+        observe_change=True,
+        poll_strategy="adaptive",
+        change_detection="auto",
+        change_signal="auto",
+        dirty_frame_producer="auto",
+        frame_encoding_override=frame_encoding,
+        causal_action_observe=True,
+    )
+    observation["benchmark_arm"] = {
+        "frame_encoding": frame_encoding,
+        "pairing": "same_stream_command_override",
+    }
+    return observation
 
 
 def _paired_ab_comparison(deltas: list[float]) -> dict[str, Any]:
@@ -1814,6 +1821,7 @@ def _stream_action_capture_iteration(
     change_detection: str,
     change_signal: str | None,
     dirty_frame_producer: Literal["auto", "off"] = "auto",
+    frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
     causal_action_observe: bool = False,
 ) -> dict[str, Any]:
     payload = {
@@ -1833,6 +1841,8 @@ def _stream_action_capture_iteration(
         if change_signal is not None:
             payload["change_signal"] = change_signal
         payload["dirty_frame_producer"] = dirty_frame_producer
+        if frame_encoding_override is not None:
+            payload["frame_encoding"] = frame_encoding_override
         if causal_action_observe:
             call_started = perf_counter()
             result = stream.act_and_observe(**payload)

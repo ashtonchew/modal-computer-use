@@ -434,6 +434,7 @@ async def _handle_observation_message(
                         "change_detection",
                         "change_signal",
                         "dirty_frame_producer",
+                        "frame_encoding",
                         "change_detection_region",
                         "change_region_radius",
                     },
@@ -513,6 +514,7 @@ async def _handle_observation_message(
                     "action_result": action_result.model_dump(mode="json"),
                     "action_id": request_id,
                     "causal_frame": True,
+                    "frame_encoding_override": stream_request.frame_encoding,
                     "capture_delay_ms": stream_request.capture_delay_ms,
                     "change_timeout_ms": stream_request.change_timeout_ms,
                     "poll_interval_ms": stream_request.poll_interval_ms,
@@ -529,6 +531,7 @@ async def _handle_observation_message(
                     if region is not None
                     else None,
                 },
+                frame_encoding_override=stream_request.frame_encoding,
             )
         elif op == "stop":
             _clear_stream(state)
@@ -711,6 +714,7 @@ async def _send_changed_frame(
     action_ended: float,
     stage_timing_ms: dict[str, float],
     extra_metadata: dict[str, Any],
+    frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
 ) -> None:
     request = state.request
     if request is None:
@@ -1050,6 +1054,7 @@ async def _send_changed_frame(
             "change_stage_timing_ms": stage_timing,
             "action_observe_attribution_ms": action_observe_attribution,
         },
+        frame_encoding_override=frame_encoding_override,
     )
 
 
@@ -1552,12 +1557,15 @@ async def _emit_frame(
     trigger: str,
     request_id: str | None,
     extra_metadata: dict[str, Any] | None,
+    frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
 ) -> None:
     metadata["trigger"] = trigger
     if request_id is not None:
         metadata["id"] = request_id
     if extra_metadata:
         metadata.update(extra_metadata)
+    if metadata.get("frame_encoding_override") is None:
+        metadata.pop("frame_encoding_override", None)
     previous_source_sha256 = state.last_source_sha256
     previous_source_version = state.source_version
     if metadata["source_sha256"] != previous_source_sha256:
@@ -1567,7 +1575,8 @@ async def _emit_frame(
     metadata["previous_source_version"] = previous_source_version
     metadata["emit_version"] = state.emit_version
     metadata["delivery"] = request.delivery
-    metadata["frame_encoding"] = request.frame_encoding
+    frame_encoding = frame_encoding_override or request.frame_encoding
+    metadata["frame_encoding"] = frame_encoding
     state.last_sha256 = metadata["sha256"]
     state.last_source_sha256 = metadata["source_sha256"]
     current_image = metadata.pop("_current_image")
@@ -1598,7 +1607,7 @@ async def _emit_frame(
     )
     emit_started = perf_counter()
     metadata_send_started = perf_counter()
-    if request.frame_encoding == "binary-envelope":
+    if frame_encoding == "binary-envelope":
         envelope_payload = b"" if should_suppress_payload else payload
         await websocket.send_bytes(_encode_frame_envelope(metadata, envelope_payload))
         metadata_send_ms = _elapsed_ms(metadata_send_started)

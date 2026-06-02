@@ -316,8 +316,6 @@ class ObservationStreamTransport:
         wait_metadata_ms = _elapsed_ms(wait_metadata_started)
         parse_metadata_started = perf_counter()
         if isinstance(message, bytes):
-            if self._frame_encoding != "binary-envelope":
-                raise _unexpected_binary_payload_error()
             data, envelope_payload = _decode_frame_envelope(message)
             envelope_timing = data.get("server_emit_timing_ms")
             parse_metadata_ms = _elapsed_ms(parse_metadata_started)
@@ -409,8 +407,6 @@ class ObservationStreamTransport:
     def _receive_frame(self, *, transport_timing: bool = False) -> ObservationFrame:
         message = self._websocket.recv(timeout=self.timeout)
         if isinstance(message, bytes):
-            if self._frame_encoding != "binary-envelope":
-                raise _unexpected_binary_payload_error()
             data, frame = _decode_frame_envelope(message)
         else:
             data = json.loads(message)
@@ -580,13 +576,6 @@ def _frame_encoding_from_payload(payload: dict[str, Any]) -> FrameEncoding:
     if value == "binary-envelope":
         return "binary-envelope"
     return "json-binary"
-
-
-def _unexpected_binary_payload_error() -> DaemonHTTPError:
-    return DaemonHTTPError(
-        "unexpected observation binary payload before metadata",
-        code="observation_stream_protocol_error",
-    )
 
 
 def _decode_frame_envelope(message: bytes) -> tuple[dict[str, Any], bytes]:

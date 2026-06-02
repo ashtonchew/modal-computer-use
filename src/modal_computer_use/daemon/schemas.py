@@ -38,6 +38,7 @@ class ObservationActionObserveChangeRequest(ObservationActionCaptureRequest):
     change_detection: Literal["full", "region", "auto_region"] = "full"
     change_signal: Literal["poll", "xdamage", "auto"] = "auto"
     dirty_frame_producer: Literal["auto", "off"] = "auto"
+    frame_encoding: Literal["json-binary", "binary-envelope"] | None = None
     change_detection_region: Region | None = None
     change_region_radius: int = Field(default=192, ge=1, le=10_000)
 
