@@ -8,6 +8,7 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.hot_session import HotSessionClient
 from modal_computer_use.models import ActionBatchResult
+from modal_computer_use.transports.hot_session import _websocket_url
 
 
 def _app(tmp_path, **overrides):
@@ -19,6 +20,13 @@ def _app(tmp_path, **overrides):
             **overrides,
         )
     )
+
+
+def test_hot_session_websocket_url_preserves_base_path_and_query() -> None:
+    assert _websocket_url(
+        "https://connect.modal.run/abc123?workspace=ws&_modal_connect_token=secret",
+        "/v1/session/hot",
+    ) == "wss://connect.modal.run/abc123/v1/session/hot?workspace=ws&_modal_connect_token=secret"
 
 
 def test_hot_session_rejects_missing_auth(tmp_path) -> None:

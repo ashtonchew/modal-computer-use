@@ -642,6 +642,12 @@ desktop sandbox and runner sandbox are created in the same Modal region, and the
 directly to the target daemon. Use `examples/modal_colocated_runner.py` as the minimal shape before
 building a hosted control plane.
 
+If a runner can reach `/healthz`, `/v1/version`, and `/v1/capabilities` but times out opening
+`/v1/observations/stream`, the failure is likely specific to WebSocket ingress rather than daemon
+readiness. Modal documents Connect Tokens as the authenticated HTTP/WebSocket path and encrypted
+tunnels as raw forwarded ports where the application owns auth, so compare Connect Token and tunnel
+ingress before treating same-region placement as proven.
+
 A broker should stay off this hot path. Use a broker for session lifecycle, placement, auth, and
 cleanup; have it return direct daemon/runner connection metadata. Use `examples/modal_session_broker.py`
 for the ASGI control-plane shape.
@@ -655,6 +661,10 @@ When the `causal-action-observe-diagnostic` profile is selected, the comparison 
 framing. Treat it as a triage aid: a material binary-envelope win points at WebSocket message
 framing, a large transport win with a smaller causal win points at daemon action/capture/change
 detection, and matching transport/causal wins point at caller placement or Modal receive floor.
+The co-located runner also records `metadata.runner_preflight` with safe route-level HTTP probes
+from the runner sandbox to the target daemon. Use it to separate target reachability/auth failures
+from observation WebSocket upgrade failures. It records route names, elapsed time, HTTP version, and
+bounded error metadata only; it does not include the target URL or bearer token.
 
 A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 `daemon-observation-stream` selected measured:
