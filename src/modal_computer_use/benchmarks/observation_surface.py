@@ -44,8 +44,10 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_auto_region_production",
     "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
     "observation_action_click_act_and_observe_paired_envelope_ab_production",
+    "observation_action_click_act_and_observe_paired_dirty_producer_ab_production",
 )
 PAIRED_ENVELOPE_ORDER_SEED = 20260602
+PAIRED_DIRTY_PRODUCER_ORDER_SEED = 20260603
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
@@ -346,6 +348,15 @@ def _observation_case_factories(
         ),
         "observation_action_click_act_and_observe_paired_envelope_ab_production": lambda: (
             _run_observation_action_click_paired_envelope_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        "observation_action_click_act_and_observe_paired_dirty_producer_ab_production": lambda: (
+            _run_observation_action_click_paired_dirty_producer_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
@@ -947,6 +958,74 @@ def _run_observation_action_click_paired_envelope_benchmark(
     return result
 
 
+def _run_observation_action_click_paired_dirty_producer_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+    name: str = "observation_action_click_act_and_observe_paired_dirty_producer_ab_production",
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    paired = _measure_paired_stream_action_observe_loop(
+        name=name,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        baseline_frame_encoding="binary-envelope",
+        variant_frame_encoding="binary-envelope",
+        baseline_dirty_frame_producer="off",
+        variant_dirty_frame_producer="auto",
+        order_seed=PAIRED_DIRTY_PRODUCER_ORDER_SEED,
+    )
+    paired_deltas = paired["paired_delta_samples_ms"]
+    result = _case_result(name, iterations, paired_deltas, failures)
+    result.update(
+        {
+            "metric": "paired_delta_ms",
+            "delta_direction": "variant_minus_baseline",
+            "negative_delta_interpretation": "variant_faster",
+            "baseline": {
+                "label": "dirty-producer-off",
+                "dirty_frame_producer": "off",
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["baseline_samples_ms"],
+                "summary_ms": _summary(paired["baseline_samples_ms"]),
+            },
+            "variant": {
+                "label": "dirty-producer-auto",
+                "dirty_frame_producer": "auto",
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["variant_samples_ms"],
+                "summary_ms": _summary(paired["variant_samples_ms"]),
+            },
+            "paired_comparison": _paired_ab_comparison(paired_deltas),
+            "paired_observations": paired["paired_observations"],
+            "pair_order_seed": PAIRED_DIRTY_PRODUCER_ORDER_SEED,
+            "pairing": {
+                "scope": "same sandbox/client path/page/stream, per-command dirty producer policy",
+                "order_policy": "seeded_random_ab_ba",
+                "reason": "dirty_frame_producer is overridden per action-observe command",
+            },
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change_paired_dirty_producer_ab",
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    )
+    return result
+
+
 def _measure_paired_stream_action_observe_loop(
     *,
     name: str,
@@ -958,14 +1037,22 @@ def _measure_paired_stream_action_observe_loop(
     baseline_frame_encoding: Literal["json-binary", "binary-envelope"],
     variant_frame_encoding: Literal["json-binary", "binary-envelope"],
     order_seed: int,
+    baseline_dirty_frame_producer: Literal["auto", "off"] = "auto",
+    variant_dirty_frame_producer: Literal["auto", "off"] = "auto",
 ) -> dict[str, Any]:
     baseline_samples: list[float] = []
     variant_samples: list[float] = []
     paired_deltas: list[float] = []
     paired_observations: list[dict[str, Any]] = []
     arms = {
-        "baseline": baseline_frame_encoding,
-        "variant": variant_frame_encoding,
+        "baseline": {
+            "frame_encoding": baseline_frame_encoding,
+            "dirty_frame_producer": baseline_dirty_frame_producer,
+        },
+        "variant": {
+            "frame_encoding": variant_frame_encoding,
+            "dirty_frame_producer": variant_dirty_frame_producer,
+        },
     }
     try:
         with ObservationClient(
@@ -980,7 +1067,8 @@ def _measure_paired_stream_action_observe_loop(
                     try:
                         _measure_paired_stream_action_observe_arm(
                             stream,
-                            frame_encoding=arms[arm_label],
+                            frame_encoding=arms[arm_label]["frame_encoding"],
+                            dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
                         )
                     except Exception as exc:
                         failures.append(
@@ -1005,7 +1093,8 @@ def _measure_paired_stream_action_observe_loop(
                     try:
                         observation = _measure_paired_stream_action_observe_arm(
                             stream,
-                            frame_encoding=arms[arm_label],
+                            frame_encoding=arms[arm_label]["frame_encoding"],
+                            dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
                         )
                     except Exception as exc:
                         elapsed_ms = (perf_counter() - started) * 1000
@@ -1060,6 +1149,7 @@ def _measure_paired_stream_action_observe_arm(
     stream: ObservationClient,
     *,
     frame_encoding: Literal["json-binary", "binary-envelope"],
+    dirty_frame_producer: Literal["auto", "off"],
 ) -> dict[str, Any]:
     observation = _stream_action_capture_iteration(
         stream,
@@ -1069,12 +1159,13 @@ def _measure_paired_stream_action_observe_arm(
         poll_strategy="adaptive",
         change_detection="auto",
         change_signal="auto",
-        dirty_frame_producer="auto",
+        dirty_frame_producer=dirty_frame_producer,
         frame_encoding_override=frame_encoding,
         causal_action_observe=True,
     )
     observation["benchmark_arm"] = {
         "frame_encoding": frame_encoding,
+        "dirty_frame_producer": dirty_frame_producer,
         "pairing": "same_stream_command_override",
     }
     return observation
