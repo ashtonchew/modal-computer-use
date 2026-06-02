@@ -681,6 +681,12 @@ The co-located runner also records `metadata.runner_preflight` with safe route-l
 from the runner sandbox to the target daemon. Use it to separate target reachability/auth failures
 from observation WebSocket upgrade failures. It records route names, elapsed time, HTTP version, and
 bounded error metadata only; it does not include the target URL or bearer token.
+Transport-floor WebSocket probe cases also record safe `setup` metadata with the number of
+WebSocket open attempts, retry count, elapsed setup time, and bounded retry error types/messages.
+Retries are only setup resilience: they make transient Modal WebSocket upgrade delays visible and
+keep one failed open from hiding the remaining HTTP and WebSocket cases. Do not count retry-covered
+setup as a latency improvement; use it to decide whether public ingress is flaky enough to prefer
+target-loopback or a hosted control-loop path for hot loops.
 
 A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 `daemon-observation-stream` selected measured:

@@ -14,6 +14,7 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot, CapturedScreenshot
 from modal_computer_use.daemon.routes import observations as observation_routes
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.errors import AuthenticationError
 from modal_computer_use.models import CoordinateSpace, Region, sha256_bytes
 from modal_computer_use.observations import ObservationClient
 from modal_computer_use.transports.observation import (
@@ -1524,6 +1525,60 @@ def test_observation_transport_splits_receive_timing() -> None:
     assert client_timing["wait_payload_ms"] >= 0
     assert client_timing["wait_transport_timing_ms"] >= 0
     assert client_timing["receive_total_ms"] >= 0
+
+
+def test_observation_transport_retries_websocket_open_timeout(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_connect(*_args, **_kwargs):
+        calls.append("connect")
+        if len(calls) == 1:
+            raise TimeoutError("timed out while waiting for handshake response")
+        return _FakeWebSocket([json.dumps({"type": "ready"})])
+
+    monkeypatch.setattr("modal_computer_use.transports.observation.connect", fake_connect)
+
+    transport = ObservationStreamTransport(
+        "https://daemon.example",
+        connect_attempts=2,
+        connect_backoff_seconds=0,
+    )
+
+    assert calls == ["connect", "connect"]
+    assert transport.setup_attempts == 2
+    assert transport.setup_retry_errors == [
+        {
+            "type": "TimeoutError",
+            "message": "timed out while waiting for handshake response",
+        }
+    ]
+
+
+def test_observation_transport_does_not_retry_authentication_error(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_connect(*_args, **_kwargs):
+        calls.append("connect")
+        raise AuthenticationError("observation stream authentication failed")
+
+    monkeypatch.setattr("modal_computer_use.transports.observation.connect", fake_connect)
+
+    with pytest.raises(AuthenticationError):
+        ObservationStreamTransport(
+            "https://daemon.example",
+            connect_attempts=3,
+            connect_backoff_seconds=0,
+        )
+
+    assert calls == ["connect"]
+
+
+def test_observation_transport_validates_setup_retry_options() -> None:
+    with pytest.raises(ValueError, match="connect_attempts"):
+        ObservationStreamTransport("https://daemon.example", connect_attempts=0)
+
+    with pytest.raises(ValueError, match="connect_backoff_seconds"):
+        ObservationStreamTransport("https://daemon.example", connect_backoff_seconds=-0.1)
 
 
 def test_observation_transport_receives_binary_envelope_timing() -> None:

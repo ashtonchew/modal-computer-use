@@ -966,6 +966,8 @@ def _run_observation_transport_probe_benchmark(
     warmup_iterations: int,
     size_bytes: int,
     frame_encoding: str | None = None,
+    connect_attempts: int = 3,
+    connect_backoff_seconds: float = 0.25,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     name = (
@@ -973,20 +975,44 @@ def _run_observation_transport_probe_benchmark(
         if frame_encoding == "binary-envelope"
         else f"observation_transport_probe_{_size_label(size_bytes)}"
     )
-    transport = ObservationStreamTransport(base_url, token=token)
+    transport: ObservationStreamTransport | None = None
+    observations: list[dict[str, Any]] = []
+    samples: list[float] = []
+    setup: dict[str, Any] = {
+        "attempts": 0,
+        "retry_count": 0,
+        "elapsed_ms": None,
+        "retry_errors": [],
+    }
     try:
+        transport = ObservationStreamTransport(
+            base_url,
+            token=token,
+            connect_attempts=connect_attempts,
+            connect_backoff_seconds=connect_backoff_seconds,
+        )
+        setup = {
+            "attempts": transport.setup_attempts,
+            "retry_count": max(transport.setup_attempts - 1, 0),
+            "elapsed_ms": transport.setup_elapsed_ms,
+            "retry_errors": transport.setup_retry_errors,
+        }
+        active_transport = transport
         samples, observations = _measure_observed_case(
             name=name,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
-            operation=lambda: transport.transport_probe(
+            operation=lambda: active_transport.transport_probe(
                 size_bytes=size_bytes,
                 frame_encoding=frame_encoding,
             ),
             failures=failures,
         )
+    except Exception as exc:
+        failures.append(_failure(name, phase="setup", iteration=0, exc=exc))
     finally:
-        transport.close()
+        if transport is not None:
+            transport.close()
     result = _case_result(name, iterations, samples, failures)
     result.update(
         {
@@ -995,6 +1021,7 @@ def _run_observation_transport_probe_benchmark(
             else "websocket_json_metadata_binary_payload",
             "requested_size_bytes": size_bytes,
             "frame_encoding": frame_encoding or "json-binary",
+            "setup": setup,
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],
