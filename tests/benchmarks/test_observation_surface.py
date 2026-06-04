@@ -423,6 +423,10 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
                     },
                     "change_stage_timing_ms": {
                         "frame_poll_ms": 12.0,
+                        "frame_poll_capture_ms": 6.0,
+                        "frame_poll_capture_ready_ms": 0.05,
+                        "frame_poll_capture_lock_wait_ms": 0.15,
+                        "frame_poll_capture_operation_ms": 4.0,
                         "server_pre_emit_ms": 40.0,
                         "dirty_region_confirmation_capture_ms": 5.0,
                         "dirty_region_confirmation_capture_ready_ms": 0.1,
@@ -536,6 +540,11 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert deadline_summary["unchanged_frames"] == 0
     assert deadline_summary["timeout_frames"] == 0
     assert deadline_summary["frame_poll_summary_ms"]["p50"] == 12.0
+    frame_poll_capture_timing = deadline_summary["frame_poll_capture_timing_summary_ms"]
+    assert frame_poll_capture_timing["total_ms"]["p50"] == 6.0
+    assert frame_poll_capture_timing["ready_ms"]["p50"] == 0.05
+    assert frame_poll_capture_timing["lock_wait_ms"]["p50"] == 0.15
+    assert frame_poll_capture_timing["operation_ms"]["p50"] == 4.0
     assert deadline_summary["dirty_region_confirmation_capture_timing_summary_ms"][
         "operation_ms"
     ]["p50"] == 2.0
@@ -812,6 +821,10 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
                 "server_pre_emit_ms": 30.0,
                 "dirty_producer_wait_ms": 25.0,
                 "frame_poll_ms": 12.0,
+                "frame_poll_capture_ms": 6.0,
+                "frame_poll_capture_ready_ms": 0.05,
+                "frame_poll_capture_lock_wait_ms": 0.1,
+                "frame_poll_capture_operation_ms": 4.0,
                 "dirty_region_confirmation_capture_ms": 4.0,
                 "dirty_region_confirmation_capture_ready_ms": 0.1,
                 "dirty_region_confirmation_capture_lock_wait_ms": 0.2,
@@ -840,6 +853,10 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
                 "server_pre_emit_ms": 40.0,
                 "dirty_producer_wait_ms": 20.0,
                 "frame_poll_ms": 14.0,
+                "frame_poll_capture_ms": 8.0,
+                "frame_poll_capture_ready_ms": 0.07,
+                "frame_poll_capture_lock_wait_ms": 0.2,
+                "frame_poll_capture_operation_ms": 5.0,
                 "dirty_region_confirmation_capture_ms": 8.0,
                 "dirty_region_confirmation_capture_ready_ms": 0.3,
                 "dirty_region_confirmation_capture_lock_wait_ms": 0.4,
@@ -880,6 +897,11 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert deadline_summary["timeout_frames"] == 1
     assert deadline_summary["dirty_region_confirmation_results"] == ["unchanged"]
     assert deadline_summary["frame_poll_summary_ms"]["p50"] == 13.0
+    frame_poll_capture_timing = deadline_summary["frame_poll_capture_timing_summary_ms"]
+    assert frame_poll_capture_timing["total_ms"]["p50"] == 7.0
+    assert frame_poll_capture_timing["ready_ms"]["p50"] == pytest.approx(0.06)
+    assert frame_poll_capture_timing["lock_wait_ms"]["p50"] == pytest.approx(0.15)
+    assert frame_poll_capture_timing["operation_ms"]["p50"] == 4.5
     assert result["dirty_region_confirmation_results"] == ["unchanged"]
     confirmation_timing = result["dirty_region_confirmation_capture_timing_summary_ms"]
     assert confirmation_timing["total_ms"]["p50"] == 6.0
