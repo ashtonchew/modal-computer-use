@@ -405,6 +405,13 @@ def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None
         "_probe_click_page_server",
         lambda _client, beacon_id: {"ok": beacon_id == "token-123", "status": 200},
     )
+    monkeypatch.setattr(
+        observation_surface,
+        "_probe_direct_action_click_beacon",
+        lambda _client, beacon_id, _action: {"before": 2, "after": 3, "delta": 1}
+        if beacon_id == "token-123"
+        else {"before": 0},
+    )
 
     result = observation_surface._run_observation_action_click_beacon_benchmark(
         base_url="http://daemon.test",
@@ -428,6 +435,7 @@ def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None
     assert result["click_ready_events_after_actions"] == 1
     assert result["click_server_probe_before_actions"] == {"ok": True, "status": 200}
     assert result["click_server_probe_after_actions"] == {"ok": True, "status": 200}
+    assert result["click_direct_action_probe"] == {"before": 2, "after": 3, "delta": 1}
     assert result["frame_encoding_policy"] == "sdk-default"
 
 
@@ -474,6 +482,11 @@ def test_click_target_state_case_reports_window_state(monkeypatch) -> None:
         observation_surface,
         "_read_click_target_state",
         lambda _client: next(states),
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_probe_direct_action_click_beacon",
+        lambda _client, _beacon_id, _action: {"before": 2, "after": 3, "delta": 1},
     )
 
     result = observation_surface._run_observation_action_click_target_state_benchmark(
@@ -536,6 +549,11 @@ def test_lower_click_target_state_case_uses_lower_action(monkeypatch) -> None:
         observation_surface,
         "_read_click_target_state",
         lambda _client: next(states),
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_probe_direct_action_click_beacon",
+        lambda _client, _beacon_id, _action: {"before": 2, "after": 3, "delta": 1},
     )
 
     result = observation_surface._run_observation_action_lower_click_target_state_benchmark(
@@ -927,6 +945,45 @@ def test_probe_click_page_server_parses_command_stdout() -> None:
     assert path == "/v1/commands/run"
     assert isinstance(payload["command"], list)
     assert "server-probe=token%20with%20spaces" in str(payload["command"])
+
+
+def test_probe_direct_action_click_beacon_records_action_result(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            calls.append((path, json))
+            return {"ok": True, "items": [{"ok": True, "error_code": None}]}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_beacon_count",
+        lambda _client, _token: 4,
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_wait_for_click_beacon_count",
+        lambda _client, _token, *, expected_events, timeout_ms: expected_events,
+    )
+
+    result = observation_surface._probe_direct_action_click_beacon(
+        FakeClient(),  # type: ignore[arg-type]
+        "token-123",
+        {"type": "click", "x": 512, "y": 650, "button": "left"},
+    )
+
+    assert result == {
+        "before": 4,
+        "after": 5,
+        "delta": 1,
+        "ok": True,
+        "item_count": 1,
+        "item_ok": [True],
+        "item_error_code": [None],
+    }
+    path, payload = calls[0]
+    assert path == "/v1/actions/run"
+    assert payload["actions"] == [{"type": "click", "x": 512, "y": 650, "button": "left"}]
 
 
 def test_wait_for_click_beacon_count_polls_until_expected(monkeypatch) -> None:
