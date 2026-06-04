@@ -525,6 +525,12 @@ sandbox, client path, and synthetic page, then reports `variant_ms - baseline_ms
 values mean binary-envelope was faster. The stream default remains start-time negotiated, but this
 diagnostic uses a command-scoped action-observe `frame_encoding` override so both arms share one
 observation stream.
+`observation_action_click_act_and_observe_paired_dirty_producer_ab_production` uses the same
+paired shape for dirty-frame policy: baseline disables the dirty producer and variant uses
+`dirty_frame_producer="auto"`. Negative deltas mean the dirty producer path was faster. Use this
+case before changing dirty producer, XDamage, or regional confirmation policy because it preserves
+the same sandbox, page, stream, encoding, and randomized pair order while recording the producer
+fallback and confirmation metadata for each arm.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,

@@ -305,6 +305,10 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
         "observation_action_click_act_and_observe_paired_envelope_ab_production"
         in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
     )
+    assert (
+        "observation_action_click_act_and_observe_paired_dirty_producer_ab_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
 
 
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
@@ -359,6 +363,51 @@ def test_paired_envelope_case_reports_delta_samples(monkeypatch) -> None:
     assert result["pairing"]["order_policy"] == "seeded_random_ab_ba"
     assert result["pairing"]["scope"] == (
         "same sandbox/client path/page/stream, per-command frame encoding"
+    )
+
+
+def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        lambda **_: {
+            "baseline_samples_ms": [120.0, 130.0],
+            "variant_samples_ms": [90.0, 140.0],
+            "paired_delta_samples_ms": [-30.0, 10.0],
+            "paired_observations": [
+                {
+                    "pair_index": 0,
+                    "order": ["baseline", "variant"],
+                    "baseline_ms": 120.0,
+                    "variant_ms": 90.0,
+                    "delta_ms": -30.0,
+                    "ratio": 0.75,
+                }
+            ],
+        },
+    )
+
+    result = observation_surface._run_observation_action_click_paired_dirty_producer_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=2,
+        warmup_iterations=0,
+    )
+
+    assert result["status"] == "ok"
+    assert result["metric"] == "paired_delta_ms"
+    assert result["summary_ms"]["p50"] == -10.0
+    assert result["baseline"]["dirty_frame_producer"] == "off"
+    assert result["baseline"]["summary_ms"]["p50"] == 125.0
+    assert result["variant"]["dirty_frame_producer"] == "auto"
+    assert result["variant"]["summary_ms"]["p50"] == 115.0
+    assert result["paired_comparison"]["variant_wins"] == 1
+    assert result["paired_comparison"]["baseline_wins"] == 1
+    assert result["pairing"]["order_policy"] == "seeded_random_ab_ba"
+    assert result["pairing"]["scope"] == (
+        "same sandbox/client path/page/stream, per-command dirty producer policy"
     )
 
 
