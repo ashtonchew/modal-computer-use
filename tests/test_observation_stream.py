@@ -1515,7 +1515,11 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_region(
 
     assert capture_regions[0] is None
     assert capture_regions[1] == Region(x=0, y=0, width=32, height=32)
-    assert len(capture_regions) <= 4
+    assert capture_regions == [
+        None,
+        Region(x=0, y=0, width=32, height=32),
+        None,
+    ]
     assert second["trigger"] == "run_actions_observe_change"
     assert second["type"] == "unchanged"
     assert second["dirty_region_confirmation_result"] == "unchanged"
@@ -1523,7 +1527,7 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_region(
     assert second["frame_poll_deadline_reason"] == "after_unchanged_dirty_region_confirmation"
     assert second["change_timeout_reached"] is True
     assert second["change_wait_ms"] < 80
-    assert second["change_stage_timing_ms"]["frame_poll_ms"] < 50
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] < 30
 
 
 def test_observation_stream_dirty_producer_can_capture_xdamage_region(

@@ -219,8 +219,8 @@ verified unchanged frame without trusting XDamage as truth. Confirmation frames 
 `dirty_region_confirmation_result` and the `dirty_region_confirmation_*` stage timings; if a changed
 regional confirmation avoids full-frame polling, `frame_poll_skipped_reason` is
 `dirty_region_confirmation_changed`.
-If confirmation is unchanged and the route still needs a full-frame truth check, that fallback poll
-uses a short bounded deadline instead of waiting out the caller's full observe-change timeout.
+If confirmation is unchanged and the route still needs a full-frame truth check, that fallback uses
+one full-frame capture instead of waiting out the caller's full observe-change timeout.
 Those frames record `frame_poll_budget_ms` and
 `frame_poll_deadline_reason="after_unchanged_dirty_region_confirmation"`.
 Benchmarks include a sibling `*_production_sync` case with `dirty_frame_producer="off"` so producer
