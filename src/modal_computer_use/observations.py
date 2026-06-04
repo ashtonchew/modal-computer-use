@@ -7,6 +7,8 @@ from typing import Any, Literal
 from .models import ScreenshotOptions
 from .transports.observation import ObservationFrame, ObservationStreamTransport
 
+SDK_AUTO_REGION_RADIUS = 96
+
 
 @dataclass(frozen=True)
 class ActionObservationResult:
@@ -179,8 +181,12 @@ class ObservationClient:
             payload["continue_on_error"] = True
         if change_detection_region is not None:
             payload["change_detection_region"] = dict(change_detection_region)
-        if change_region_radius is not None:
-            payload["change_region_radius"] = change_region_radius
+        resolved_change_region_radius = _resolve_change_region_radius(
+            resolved_change_detection,
+            requested=change_region_radius,
+        )
+        if resolved_change_region_radius is not None:
+            payload["change_region_radius"] = resolved_change_region_radius
         frame = self.transport.run_actions_observe_change_and_recv(
             payload,
             transport_timing=bool(self.payload.get("transport_timing")),
@@ -272,6 +278,18 @@ def _resolve_full_frame_fallback(
     if requested is not None:
         return requested
     return change_detection == "full"
+
+
+def _resolve_change_region_radius(
+    change_detection: Literal["full", "auto_region"],
+    *,
+    requested: int | None,
+) -> int | None:
+    if requested is not None:
+        return requested
+    if change_detection == "auto_region":
+        return SDK_AUTO_REGION_RADIUS
+    return None
 
 
 def _action_has_observation_point(action: Mapping[str, Any]) -> bool:

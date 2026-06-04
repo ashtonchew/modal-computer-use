@@ -236,7 +236,8 @@ and records `frame_poll_skipped_reason="dirty_region_confirmation_unchanged"` or
 `"dirty_producer_same_region"` when it skips the full-frame fallback.
 The raw daemon route default remains conservative, while SDK `act_and_observe()` resolves pointer
 and explicit-region auto-region requests to `full_frame_fallback=false` unless the caller passes an
-explicit override.
+explicit override. The raw daemon route keeps the conservative `change_region_radius=192` default;
+SDK auto-region requests use `change_region_radius=96` unless the caller passes an explicit radius.
 Confirmation capture timing is split into ready, input-lock wait, backend operation, total capture,
 and native tile-diff timings so live tails can distinguish scheduler/lock delay from backend
 capture work. Benchmark summaries also expose
@@ -788,7 +789,8 @@ observation case as `causal_action_to_frame_p50_ms`. New artifacts prefer
 `observation_action_click_act_and_observe_sdk_default_production`, which measures the SDK
 `ObservationClient.act_and_observe()` default policy. The SDK resolves `change_detection="auto"` to
 `auto_region` only when the last non-wait action has pointer coordinates or the caller provides an
-explicit change-detection region; keyboard-only or global actions stay on full-frame detection. That
+explicit change-detection region; keyboard-only or global actions stay on full-frame detection. SDK
+auto-region requests default to a 96 px region radius while preserving caller overrides. That
 metric is the better next-step proof than transport floor alone because it includes action
 submission, daemon execution, change detection, and frame receipt.
 When the `causal-action-observe-diagnostic` profile is selected, the comparison also includes a
