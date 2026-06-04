@@ -39,7 +39,7 @@ CLICK_TOGGLE_TARGET_WIDTH = 1024
 CLICK_TOGGLE_TARGET_HEIGHT = 768
 CLICK_TOGGLE_PAGE_READY_SETTLE_MS = 250
 CLICK_TOGGLE_SETTLE_MS = 16
-CLICK_TOGGLE_READY_TIMEOUT_MS = 2_000
+CLICK_TOGGLE_READY_TIMEOUT_MS = 10_000
 CLICK_TOGGLE_HTTP_LOG_PATH = "/tmp/modal-computer-use-observation-http.log"  # noqa: S108
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_0b",
@@ -3299,7 +3299,7 @@ def _open_click_toggle_beacon_page(client: DaemonClient) -> str:
     _run_click_beacon_setup_step("settle_page", _wait_for_click_toggle_page_ready)
     _run_click_beacon_setup_step(
         "wait_ready",
-        lambda: _wait_for_click_ready_count(
+        lambda: _require_click_ready_count(
             client,
             beacon_token,
             expected_events=1,
@@ -3525,6 +3525,24 @@ def _wait_for_click_ready_count(
     while count < expected_events and time.monotonic() < deadline:
         time.sleep(0.05)
         count = _read_click_ready_count(client, token)
+    return count
+
+
+def _require_click_ready_count(
+    client: DaemonClient,
+    token: str,
+    *,
+    expected_events: int,
+    timeout_ms: int,
+) -> int:
+    count = _wait_for_click_ready_count(
+        client,
+        token,
+        expected_events=expected_events,
+        timeout_ms=timeout_ms,
+    )
+    if count < expected_events:
+        raise RuntimeError("click benchmark page did not report ready")
     return count
 
 
