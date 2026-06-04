@@ -305,6 +305,50 @@ def test_modal_colocated_comparison_prefers_sdk_default_causal_case() -> None:
     }
 
 
+def test_modal_colocated_latency_diagnosis_includes_selected_case_stages() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        sdk_default_observation_p50=45.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+    colocated_result = _surface_result(
+        transport_p50=2.0,
+        observation_p50=60.0,
+        sdk_default_observation_p50=18.0,
+        environment={},
+        surfaces=["daemon-transport-floor", "daemon-observation-stream"],
+    )
+    colocated_case = colocated_result["surfaces"]["daemon-observation-stream"]["cases"][
+        "observation_action_click_act_and_observe_sdk_default_production"
+    ]
+    colocated_case["latency_diagnosis"] = {
+        "bottleneck": "capture_diff_or_encode",
+        "reason": "capture-to-delta-ready is material",
+    }
+    colocated_case["change_stage_timing_summary_ms"] = {
+        "server_pre_emit_ms": {"p50": 9.0},
+        "dirty_producer_wait_ms": {"p50": 2.2},
+        "dirty_region_confirmation_ms": {"p50": 4.3},
+        "dirty_region_confirmation_capture_ms": {"p50": 3.1},
+        "dirty_region_confirmation_native_ms": {"p50": 1.2},
+        "frame_poll_ms": {"p50": 0.0},
+    }
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    stage = comparison["diagnosis"]["causal_stage_diagnosis"]
+    assert stage["case"] == "observation_action_click_act_and_observe_sdk_default_production"
+    assert stage["external"] is None
+    assert stage["colocated"]["latency_diagnosis"]["bottleneck"] == "capture_diff_or_encode"
+    assert stage["colocated"]["stage_p50_ms"]["dirty_region_confirmation_ms"] == 4.3
+    assert stage["colocated"]["dominant_stage"] == {
+        "name": "dirty_region_confirmation_ms",
+        "p50_ms": 4.3,
+    }
+
+
 def test_modal_colocated_latency_diagnosis_identifies_placement_bound() -> None:
     external = _surface_result(
         transport_p50=50.0,
