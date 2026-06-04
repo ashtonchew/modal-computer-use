@@ -970,7 +970,13 @@ async def _send_changed_frame(
                 last_payload = payload
                 delta_ready_at = perf_counter()
                 change_detected = metadata["source_sha256"] != state.last_source_sha256
-                if change_detected or region_detected or perf_counter() >= frame_poll_deadline:
+                if (
+                    change_detected
+                    or region_detected
+                    or frame_poll_deadline_reason
+                    == "after_unchanged_dirty_region_confirmation"
+                    or perf_counter() >= frame_poll_deadline
+                ):
                     break
                 remaining_sleep_ms = max((frame_poll_deadline - perf_counter()) * 1000, 0.0)
                 if remaining_sleep_ms <= 0:
