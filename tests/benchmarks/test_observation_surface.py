@@ -397,7 +397,14 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
                     "change_detected": True,
                     "unchanged": False,
                     "change_timeout_reached": False,
-                    "change_stage_timing_ms": {"frame_poll_ms": 12.0},
+                    "change_stage_timing_ms": {
+                        "frame_poll_ms": 12.0,
+                        "dirty_region_confirmation_capture_ms": 5.0,
+                        "dirty_region_confirmation_capture_ready_ms": 0.1,
+                        "dirty_region_confirmation_capture_lock_wait_ms": 0.2,
+                        "dirty_region_confirmation_capture_operation_ms": 2.0,
+                        "dirty_region_confirmation_native_ms": 1.0,
+                    },
                 },
                 {
                     "dirty_frame_producer": True,
@@ -443,6 +450,14 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert result["variant"]["dirty_frame_producer_used_frames"] == 1
     assert result["variant"]["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
     assert result["variant"]["frame_poll_budget_summary_ms"]["p50"] == 12.0
+    confirmation_timing = result["variant"][
+        "dirty_region_confirmation_capture_timing_summary_ms"
+    ]
+    assert confirmation_timing["total_ms"]["p50"] == 5.0
+    assert confirmation_timing["ready_ms"]["p50"] == 0.1
+    assert confirmation_timing["lock_wait_ms"]["p50"] == 0.2
+    assert confirmation_timing["operation_ms"]["p50"] == 2.0
+    assert confirmation_timing["native_ms"]["p50"] == 1.0
     assert result["variant"]["dirty_frame_capture_region_sources"] == [
         "action_region",
         "xdamage_dirty_rect",
@@ -454,6 +469,9 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert action_region_summary["producer_used_frames"] == 0
     assert action_region_summary["fallback_reasons"] == ["no_changed_frame"]
     assert action_region_summary["dirty_region_confirmation_results"] == ["unchanged"]
+    assert action_region_summary["dirty_region_confirmation_capture_timing_summary_ms"][
+        "total_ms"
+    ]["p50"] == 5.0
     xdamage_summary = result["variant"]["dirty_frame_capture_region_source_summaries"][
         "xdamage_dirty_rect"
     ]
@@ -468,6 +486,9 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert deadline_summary["unchanged_frames"] == 0
     assert deadline_summary["timeout_frames"] == 0
     assert deadline_summary["frame_poll_summary_ms"]["p50"] == 12.0
+    assert deadline_summary["dirty_region_confirmation_capture_timing_summary_ms"][
+        "operation_ms"
+    ]["p50"] == 2.0
     assert result["paired_comparison"]["variant_wins"] == 1
     assert result["paired_comparison"]["baseline_wins"] == 1
     assert result["pairing"]["order_policy"] == "seeded_random_ab_ba"
@@ -741,6 +762,11 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
                 "server_pre_emit_ms": 30.0,
                 "dirty_producer_wait_ms": 25.0,
                 "frame_poll_ms": 12.0,
+                "dirty_region_confirmation_capture_ms": 4.0,
+                "dirty_region_confirmation_capture_ready_ms": 0.1,
+                "dirty_region_confirmation_capture_lock_wait_ms": 0.2,
+                "dirty_region_confirmation_capture_operation_ms": 1.5,
+                "dirty_region_confirmation_native_ms": 0.8,
             },
             "action_observe_attribution_ms": {
                 "action_end_to_signal_detect_ms": 30.0,
@@ -764,6 +790,11 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
                 "server_pre_emit_ms": 40.0,
                 "dirty_producer_wait_ms": 20.0,
                 "frame_poll_ms": 14.0,
+                "dirty_region_confirmation_capture_ms": 8.0,
+                "dirty_region_confirmation_capture_ready_ms": 0.3,
+                "dirty_region_confirmation_capture_lock_wait_ms": 0.4,
+                "dirty_region_confirmation_capture_operation_ms": 2.5,
+                "dirty_region_confirmation_native_ms": 1.2,
             },
             "action_observe_attribution_ms": {
                 "action_end_to_signal_detect_ms": 20.0,
@@ -800,6 +831,12 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert deadline_summary["dirty_region_confirmation_results"] == ["unchanged"]
     assert deadline_summary["frame_poll_summary_ms"]["p50"] == 13.0
     assert result["dirty_region_confirmation_results"] == ["unchanged"]
+    confirmation_timing = result["dirty_region_confirmation_capture_timing_summary_ms"]
+    assert confirmation_timing["total_ms"]["p50"] == 6.0
+    assert confirmation_timing["ready_ms"]["p50"] == 0.2
+    assert confirmation_timing["lock_wait_ms"]["p50"] == pytest.approx(0.3)
+    assert confirmation_timing["operation_ms"]["p50"] == 2.0
+    assert confirmation_timing["native_ms"]["p50"] == 1.0
     assert result["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 20.0
     assert result["dirty_frame_age_summary_ms"]["p50"] == 0.2
     assert result["change_stage_timing_summary_ms"]["dirty_producer_wait_ms"]["p50"] == 20.0

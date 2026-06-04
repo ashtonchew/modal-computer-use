@@ -2652,6 +2652,7 @@ def _add_dirty_frame_producer_rollups(
             if isinstance(reason := item.get("dirty_region_confirmation_result"), str)
         }
     )
+    _add_dirty_region_confirmation_capture_timing_rollups(result, observations)
     _add_dirty_frame_capture_region_source_rollups(result, observations)
     dirty_frame_age_samples = [
         item["dirty_frame_age_ms"]
@@ -2748,6 +2749,7 @@ def _dirty_frame_capture_region_source_summary(
     if dirty_frame_age_samples:
         result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
         result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
+    _add_dirty_region_confirmation_capture_timing_rollups(result, rows)
     return result
 
 
@@ -2811,7 +2813,48 @@ def _frame_poll_deadline_reason_summary(
     if frame_poll_samples:
         result["frame_poll_samples_ms"] = frame_poll_samples
         result["frame_poll_summary_ms"] = _summary(frame_poll_samples)
+    _add_dirty_region_confirmation_capture_timing_rollups(result, rows)
     return result
+
+
+def _add_dirty_region_confirmation_capture_timing_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    rows = [
+        item
+        for item in observations
+        if isinstance(item, dict)
+        and (
+            isinstance(item.get("dirty_region_confirmation_result"), str)
+            or (
+                isinstance((timing := item.get("change_stage_timing_ms")), dict)
+                and isinstance(timing.get("dirty_region_confirmation_capture_ms"), int | float)
+                and timing["dirty_region_confirmation_capture_ms"] > 0
+            )
+        )
+    ]
+    timing_keys = {
+        "total_ms": "dirty_region_confirmation_capture_ms",
+        "ready_ms": "dirty_region_confirmation_capture_ready_ms",
+        "lock_wait_ms": "dirty_region_confirmation_capture_lock_wait_ms",
+        "operation_ms": "dirty_region_confirmation_capture_operation_ms",
+        "native_ms": "dirty_region_confirmation_native_ms",
+    }
+    timing_summary = {
+        summary_name: _summary(samples)
+        for summary_name, timing_name in timing_keys.items()
+        if (
+            samples := [
+                float(timing[timing_name])
+                for item in rows
+                if isinstance((timing := item.get("change_stage_timing_ms")), dict)
+                and isinstance(timing.get(timing_name), int | float)
+            ]
+        )
+    }
+    if timing_summary:
+        result["dirty_region_confirmation_capture_timing_summary_ms"] = timing_summary
 
 
 def _observation_sample_rows(
