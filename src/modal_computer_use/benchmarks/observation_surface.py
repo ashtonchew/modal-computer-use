@@ -1070,6 +1070,7 @@ def _run_observation_action_click_beacon_benchmark(
     failures: list[dict[str, Any]] = []
     action = action or CLICK_TOGGLE_ACTION
     beacon_token = _open_click_toggle_beacon_page(client)
+    index_events_before_actions = _read_click_index_count(client, beacon_token)
     ready_events_before_actions = _read_click_ready_count(client, beacon_token)
     state_before = _read_click_target_state(client) if state_probe else None
     samples, observations = _measure_stream_action_capture_loop(
@@ -1094,6 +1095,7 @@ def _run_observation_action_click_beacon_benchmark(
         beacon_token,
         expected_events=expected_events,
     )
+    index_events_after_actions = _read_click_index_count(client, beacon_token)
     ready_events_after_actions = _read_click_ready_count(client, beacon_token)
     state_after = _read_click_target_state(client) if state_probe else None
     result = _case_result(
@@ -1121,6 +1123,8 @@ def _run_observation_action_click_beacon_benchmark(
             "click_beacon_expected_events": expected_events,
             "click_beacon_events": beacon_events,
             "click_beacon_missing_events": max(expected_events - beacon_events, 0),
+            "click_index_events_before_actions": index_events_before_actions,
+            "click_index_events_after_actions": index_events_after_actions,
             "click_ready_events_before_actions": ready_events_before_actions,
             "click_ready_events_after_actions": ready_events_after_actions,
         }
@@ -3239,14 +3243,13 @@ def _open_click_toggle_beacon_page(client: DaemonClient) -> str:
         "</script>"
         "</body></html>"
     )
-    cache_key = str(time.monotonic_ns())
     _serve_synthetic_page(client, body)
     client.post_json(
         "/v1/browser/open-url",
         json={
             "url": (
                 "http://127.0.0.1:8766/index.html?"
-                f"action-observe-beacon={quote(cache_key)}"
+                f"action-observe-beacon={quote(beacon_token)}"
             ),
             "wait_for_window": True,
         },
@@ -3313,6 +3316,11 @@ def _read_click_beacon_count(client: DaemonClient, token: str) -> int:
     return _read_http_log_event_count(client, "click", token)
 
 
+def _read_click_index_count(client: DaemonClient, token: str) -> int:
+    needle = f"GET /index.html?action-observe-beacon={quote(token, safe='')}"
+    return _read_http_log_needle_count(client, needle)
+
+
 def _read_click_ready_count(client: DaemonClient, token: str) -> int:
     return _read_http_log_event_count(client, "ready", token)
 
@@ -3323,6 +3331,10 @@ def _read_http_log_event_count(
     token: str,
 ) -> int:
     needle = f"GET /{event}?token={quote(token, safe='')}"
+    return _read_http_log_needle_count(client, needle)
+
+
+def _read_http_log_needle_count(client: DaemonClient, needle: str) -> int:
     script = (
         "set -eu; "
         f"log={shell_quote(CLICK_TOGGLE_HTTP_LOG_PATH)}; "
