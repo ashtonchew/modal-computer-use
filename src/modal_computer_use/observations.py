@@ -145,7 +145,7 @@ class ObservationClient:
         change_detection: Literal["auto", "full", "auto_region"] = "auto",
         change_signal: Literal["poll", "xdamage", "auto"] = "auto",
         dirty_frame_producer: Literal["auto", "off"] = "auto",
-        full_frame_fallback: bool = True,
+        full_frame_fallback: bool | None = None,
         frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
         change_detection_region: Mapping[str, Any] | None = None,
         change_region_radius: int | None = None,
@@ -153,6 +153,11 @@ class ObservationClient:
     ) -> ActionObservationResult:
         self.start(drain_initial_frame=True)
         action_payloads = [dict(action) for action in actions]
+        resolved_change_detection = _resolve_action_change_detection(
+            action_payloads,
+            requested=change_detection,
+            change_detection_region=change_detection_region,
+        )
         payload: dict[str, Any] = {
             "actions": action_payloads,
             "source": source,
@@ -160,14 +165,13 @@ class ObservationClient:
             "change_timeout_ms": change_timeout_ms,
             "poll_interval_ms": poll_interval_ms,
             "poll_strategy": poll_strategy,
-            "change_detection": _resolve_action_change_detection(
-                action_payloads,
-                requested=change_detection,
-                change_detection_region=change_detection_region,
-            ),
+            "change_detection": resolved_change_detection,
             "change_signal": change_signal,
             "dirty_frame_producer": dirty_frame_producer,
-            "full_frame_fallback": full_frame_fallback,
+            "full_frame_fallback": _resolve_full_frame_fallback(
+                resolved_change_detection,
+                requested=full_frame_fallback,
+            ),
         }
         if frame_encoding is not None:
             payload["frame_encoding"] = frame_encoding
@@ -258,6 +262,16 @@ def _resolve_action_change_detection(
             return "auto_region"
         return "full"
     return "full"
+
+
+def _resolve_full_frame_fallback(
+    change_detection: Literal["full", "auto_region"],
+    *,
+    requested: bool | None,
+) -> bool:
+    if requested is not None:
+        return requested
+    return change_detection == "full"
 
 
 def _action_has_observation_point(action: Mapping[str, Any]) -> bool:

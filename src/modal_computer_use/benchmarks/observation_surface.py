@@ -1189,8 +1189,8 @@ def _measure_paired_stream_action_observe_loop(
     order_seed: int,
     baseline_dirty_frame_producer: Literal["auto", "off"] = "auto",
     variant_dirty_frame_producer: Literal["auto", "off"] = "auto",
-    baseline_full_frame_fallback: bool = True,
-    variant_full_frame_fallback: bool = True,
+    baseline_full_frame_fallback: bool | None = None,
+    variant_full_frame_fallback: bool | None = None,
     change_detection: str = "auto",
     change_signal: str = "auto",
 ) -> dict[str, Any]:
@@ -1320,7 +1320,7 @@ def _measure_paired_stream_action_observe_arm(
     *,
     frame_encoding: Literal["json-binary", "binary-envelope"],
     dirty_frame_producer: Literal["auto", "off"],
-    full_frame_fallback: bool,
+    full_frame_fallback: bool | None,
     change_detection: str,
     change_signal: str,
 ) -> dict[str, Any]:
@@ -1969,7 +1969,7 @@ def _measure_stream_action_capture_loop(
     change_detection: str = "full",
     change_signal: str | None = "poll",
     dirty_frame_producer: Literal["auto", "off"] = "auto",
-    full_frame_fallback: bool = True,
+    full_frame_fallback: bool | None = None,
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
@@ -2092,7 +2092,7 @@ def _stream_action_capture_iteration(
     change_detection: str,
     change_signal: str | None,
     dirty_frame_producer: Literal["auto", "off"] = "auto",
-    full_frame_fallback: bool = True,
+    full_frame_fallback: bool | None = None,
     frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
     causal_action_observe: bool = False,
 ) -> dict[str, Any]:
@@ -2113,7 +2113,8 @@ def _stream_action_capture_iteration(
         if change_signal is not None:
             payload["change_signal"] = change_signal
         payload["dirty_frame_producer"] = dirty_frame_producer
-        payload["full_frame_fallback"] = full_frame_fallback
+        if full_frame_fallback is not None:
+            payload["full_frame_fallback"] = full_frame_fallback
         if frame_encoding_override is not None:
             payload["frame_encoding"] = frame_encoding_override
         if causal_action_observe:
