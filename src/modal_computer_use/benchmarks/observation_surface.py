@@ -36,6 +36,7 @@ CLICK_TOGGLE_TARGET_LEFT = 0
 CLICK_TOGGLE_TARGET_TOP = 0
 CLICK_TOGGLE_TARGET_WIDTH = 1024
 CLICK_TOGGLE_TARGET_HEIGHT = 768
+CLICK_TOGGLE_PAGE_READY_SETTLE_MS = 250
 CLICK_TOGGLE_SETTLE_MS = 16
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_0b",
@@ -2907,6 +2908,7 @@ def _open_click_toggle_page(client: DaemonClient) -> None:
             "wait_for_window": True,
         },
     )
+    _wait_for_click_toggle_page_ready()
 
 
 def _open_sparse_click_toggle_page(client: DaemonClient) -> None:
@@ -2939,6 +2941,11 @@ def _open_sparse_click_toggle_page(client: DaemonClient) -> None:
             "wait_for_window": True,
         },
     )
+    _wait_for_click_toggle_page_ready()
+
+
+def _wait_for_click_toggle_page_ready() -> None:
+    time.sleep(CLICK_TOGGLE_PAGE_READY_SETTLE_MS / 1000)
 
 
 def _serve_synthetic_page(client: DaemonClient, body: str) -> None:

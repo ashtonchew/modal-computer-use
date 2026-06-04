@@ -401,6 +401,41 @@ def test_click_toggle_action_hits_visual_target_region() -> None:
     assert region_bottom > top
 
 
+def test_open_click_toggle_page_settles_after_browser_open(monkeypatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            calls.append((path, json))
+            return {"ok": True}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_serve_synthetic_page",
+        lambda _client, _body: calls.append(("serve", _body)),
+    )
+    monkeypatch.setattr(
+        observation_surface.time,
+        "sleep",
+        lambda seconds: calls.append(("sleep", seconds)),
+    )
+
+    observation_surface._open_click_toggle_page(FakeClient())  # type: ignore[arg-type]
+
+    assert calls[0][0] == "serve"
+    open_path, open_payload = calls[1]
+    assert open_path == "/v1/browser/open-url"
+    assert isinstance(open_payload, dict)
+    assert open_payload["wait_for_window"] is True
+    assert str(open_payload["url"]).startswith(
+        "http://127.0.0.1:8766/index.html?action-observe="
+    )
+    assert calls[2] == (
+        "sleep",
+        observation_surface.CLICK_TOGGLE_PAGE_READY_SETTLE_MS / 1000,
+    )
+
+
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
     result = _paired_ab_comparison([-4.0, 2.0, -1.0, 0.0])
 
