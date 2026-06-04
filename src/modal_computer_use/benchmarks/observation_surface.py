@@ -2088,13 +2088,17 @@ def _measure_stream_action_capture_loop(
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
+    client_kwargs: dict[str, Any] = {
+        "options": OBSERVATION_SCREENSHOT_OPTIONS,
+        "fps": 0.01,
+        "transport_timing": transport_timing,
+    }
+    if frame_encoding is not None:
+        client_kwargs["frame_encoding"] = frame_encoding
     try:
         with ObservationClient(
             ObservationStreamTransport(base_url, token=token),
-            options=OBSERVATION_SCREENSHOT_OPTIONS,
-            fps=0.01,
-            transport_timing=transport_timing,
-            frame_encoding=frame_encoding,
+            **client_kwargs,
         ) as stream:
             frames = None
             if transport_timing:
