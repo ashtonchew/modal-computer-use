@@ -35,7 +35,11 @@ from modal_computer_use.daemon.desktop.xdamage import (
     XDamageWatcher,
 )
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.execution import run_screenshot_capture
+from modal_computer_use.daemon.routes.execution import (
+    ScreenshotCaptureTiming,
+    run_screenshot_capture,
+    run_screenshot_capture_with_timing,
+)
 from modal_computer_use.daemon.routes.screenshots import (
     enforce_screenshot_options_pixels,
 )
@@ -741,6 +745,9 @@ async def _send_changed_frame(
     dirty_region_native_ms = 0.0
     dirty_region_confirmation_ms = 0.0
     dirty_region_confirmation_capture_ms = 0.0
+    dirty_region_confirmation_capture_ready_ms = 0.0
+    dirty_region_confirmation_capture_lock_wait_ms = 0.0
+    dirty_region_confirmation_capture_operation_ms = 0.0
     dirty_region_confirmation_native_ms = 0.0
     dirty_region_confirmation_result: str | None = None
     dirty_frame_age_ms: float | None = None
@@ -902,7 +909,11 @@ async def _send_changed_frame(
             and producer_result is None
         ):
             confirmation_started = perf_counter()
-            confirmation_frame, confirmation_capture_ms, confirmation_native_ms = (
+            (
+                confirmation_frame,
+                confirmation_capture_timing,
+                confirmation_native_ms,
+            ) = (
                 await _capture_dirty_region_confirmation_frame(
                     websocket,
                     state=state,
@@ -913,7 +924,14 @@ async def _send_changed_frame(
                 )
             )
             dirty_region_confirmation_ms = _elapsed_ms(confirmation_started)
-            dirty_region_confirmation_capture_ms = confirmation_capture_ms
+            dirty_region_confirmation_capture_ms = confirmation_capture_timing.total_ms
+            dirty_region_confirmation_capture_ready_ms = confirmation_capture_timing.ready_ms
+            dirty_region_confirmation_capture_lock_wait_ms = (
+                confirmation_capture_timing.lock_wait_ms
+            )
+            dirty_region_confirmation_capture_operation_ms = (
+                confirmation_capture_timing.operation_ms
+            )
             dirty_region_confirmation_native_ms = confirmation_native_ms
             if confirmation_frame is not None:
                 metadata, payload = confirmation_frame
@@ -1030,6 +1048,13 @@ async def _send_changed_frame(
         "dirty_region_reconstruct_ms": dirty_region_reconstruct_ms,
         "dirty_region_confirmation_ms": dirty_region_confirmation_ms,
         "dirty_region_confirmation_capture_ms": dirty_region_confirmation_capture_ms,
+        "dirty_region_confirmation_capture_ready_ms": dirty_region_confirmation_capture_ready_ms,
+        "dirty_region_confirmation_capture_lock_wait_ms": (
+            dirty_region_confirmation_capture_lock_wait_ms
+        ),
+        "dirty_region_confirmation_capture_operation_ms": (
+            dirty_region_confirmation_capture_operation_ms
+        ),
         "dirty_region_confirmation_native_ms": dirty_region_confirmation_native_ms,
         "region_poll_ms": region_poll_ms,
         "frame_poll_ms": frame_poll_ms,
@@ -1121,20 +1146,24 @@ async def _capture_dirty_region_confirmation_frame(
     region: Region,
     seq: int,
     observe_started: float,
-) -> tuple[tuple[dict[str, Any], bytes] | None, float, float]:
+) -> tuple[tuple[dict[str, Any], bytes] | None, ScreenshotCaptureTiming, float]:
+    empty_timing = ScreenshotCaptureTiming(
+        ready_ms=0.0,
+        lock_wait_ms=0.0,
+        operation_ms=0.0,
+        total_ms=0.0,
+    )
     options = _stream_screenshot_options(request)
     if not _can_use_raw_observation_path(request, options):
-        return None, 0.0, 0.0
+        return None, empty_timing, 0.0
     validate_region(websocket, region, field="dirty_frame_capture_region")
 
     async def operation():
         return await websocket.app.state.backend.screenshot_raw_pixels(region=region)
 
-    capture_started = perf_counter()
-    raw = await run_screenshot_capture(websocket, operation)
-    capture_ms = _elapsed_ms(capture_started)
+    raw, capture_timing = await run_screenshot_capture_with_timing(websocket, operation)
     if raw is None:
-        return None, capture_ms, 0.0
+        return None, capture_timing, 0.0
     native_started = perf_counter()
     frame = _capture_region_native_delta_frame(
         state=state,
@@ -1147,7 +1176,7 @@ async def _capture_dirty_region_confirmation_frame(
         stream_id=state.stream_id or "unknown",
         captured_started=observe_started,
     )
-    return frame, capture_ms, _elapsed_ms(native_started)
+    return frame, capture_timing, _elapsed_ms(native_started)
 
 
 def _action_observe_attribution(

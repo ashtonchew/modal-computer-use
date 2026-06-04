@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from time import perf_counter
 
 from fastapi import Request
 
@@ -9,6 +11,14 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, ready_input_lock
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenshotCaptureTiming:
+    ready_ms: float
+    lock_wait_ms: float
+    operation_ms: float
+    total_ms: float
 
 
 def budget_policy(request: Request) -> BudgetPolicy:
@@ -41,19 +51,40 @@ async def run_screenshot_capture[T](
     request: Request,
     operation: Callable[[], Awaitable[T]],
 ) -> T:
+    result, _timing = await run_screenshot_capture_with_timing(request, operation)
+    return result
+
+
+async def run_screenshot_capture_with_timing[T](
+    request: Request,
+    operation: Callable[[], Awaitable[T]],
+) -> tuple[T, ScreenshotCaptureTiming]:
+    total_started = perf_counter()
+    ready_started = total_started
     await ensure_desktop_ready(request)
+    ready_ms = (perf_counter() - ready_started) * 1000
     policy = budget_policy(request)
     error = policy.screenshot_reservation_error()
     if error is not None:
         raise error
+    lock_wait_started = perf_counter()
     async with ready_input_lock(request):
+        lock_wait_ms = (perf_counter() - lock_wait_started) * 1000
         error = policy.screenshot_reservation_error()
         if error is not None:
             raise error
         policy.reserve_screenshot()
+        operation_started = perf_counter()
         result = await operation()
+        operation_ms = (perf_counter() - operation_started) * 1000
         policy.enforce("screenshots", "artifacts")
-        return result
+    timing = ScreenshotCaptureTiming(
+        ready_ms=ready_ms,
+        lock_wait_ms=lock_wait_ms,
+        operation_ms=operation_ms,
+        total_ms=(perf_counter() - total_started) * 1000,
+    )
+    return result, timing
 
 
 async def run_recording_start[T](
