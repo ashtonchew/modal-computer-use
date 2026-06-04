@@ -424,8 +424,12 @@ def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None
     assert captured["name"] == "observation_action_click_act_and_observe_click_beacon_production"
     assert captured["change_detection"] == "auto"
     assert captured["change_signal"] == "auto"
+    assert captured["capture_delay_ms"] == observation_surface.CLICK_TOGGLE_SETTLE_MS
+    assert captured["change_timeout_ms"] == observation_surface.CLICK_TOGGLE_CHANGE_TIMEOUT_MS
     assert captured["transport_timing"] is False
     assert captured["causal_action_observe"] is True
+    assert result["change_timeout_ms"] == observation_surface.CLICK_TOGGLE_CHANGE_TIMEOUT_MS
+    assert result["capture_delay_ms"] == observation_surface.CLICK_TOGGLE_SETTLE_MS
     assert result["click_beacon_expected_events"] == 3
     assert result["click_beacon_events"] == 2
     assert result["click_beacon_missing_events"] == 1
@@ -568,6 +572,8 @@ def test_lower_click_target_state_case_uses_lower_action(monkeypatch) -> None:
         captured["name"]
         == "observation_action_click_act_and_observe_lower_click_target_state_production"
     )
+    assert captured["capture_delay_ms"] == observation_surface.CLICK_TOGGLE_SETTLE_MS
+    assert captured["change_timeout_ms"] == observation_surface.CLICK_TOGGLE_CHANGE_TIMEOUT_MS
     assert captured["action"] == observation_surface.CLICK_TOGGLE_LOWER_ACTION
     assert result["actions"] == [
         observation_surface._safe_action_metadata(observation_surface.CLICK_TOGGLE_LOWER_ACTION)

@@ -39,6 +39,7 @@ CLICK_TOGGLE_TARGET_WIDTH = 1024
 CLICK_TOGGLE_TARGET_HEIGHT = 768
 CLICK_TOGGLE_PAGE_READY_SETTLE_MS = 250
 CLICK_TOGGLE_SETTLE_MS = 16
+CLICK_TOGGLE_CHANGE_TIMEOUT_MS = 200
 CLICK_TOGGLE_READY_TIMEOUT_MS = 10_000
 CLICK_TOGGLE_HTTP_LOG_PATH = "/tmp/modal-computer-use-observation-http.log"  # noqa: S108
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
@@ -1114,13 +1115,14 @@ def _run_observation_action_click_beacon_benchmark(
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         failures=failures,
-        capture_delay_ms=0,
+        capture_delay_ms=CLICK_TOGGLE_SETTLE_MS,
         observe_change=True,
         poll_strategy="adaptive",
         change_detection="auto",
         change_signal="auto",
         transport_timing=False,
         causal_action_observe=True,
+        change_timeout_ms=CLICK_TOGGLE_CHANGE_TIMEOUT_MS,
         action=action,
     )
     expected_events = iterations + warmup_iterations
@@ -1146,7 +1148,8 @@ def _run_observation_action_click_beacon_benchmark(
             "actions": [_safe_action_metadata(action)],
             "action_count": 1,
             "mutation_kind": mutation_kind,
-            "change_timeout_ms": 100,
+            "change_timeout_ms": CLICK_TOGGLE_CHANGE_TIMEOUT_MS,
+            "capture_delay_ms": CLICK_TOGGLE_SETTLE_MS,
             "poll_interval_ms": 8,
             "poll_strategy": "adaptive",
             "change_detection": "auto",
