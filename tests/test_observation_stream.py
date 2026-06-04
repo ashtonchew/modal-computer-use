@@ -2575,6 +2575,7 @@ def test_observation_client_act_and_observe_defaults_pointer_actions_to_auto_reg
     client.act_and_observe(actions=[{"type": "click", "x": 12, "y": 34}])
 
     assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["full_frame_fallback"] is False
 
 
 def test_observation_client_act_and_observe_defaults_drag_actions_to_auto_region() -> None:
@@ -2588,6 +2589,7 @@ def test_observation_client_act_and_observe_defaults_drag_actions_to_auto_region
     )
 
     assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["full_frame_fallback"] is False
 
 
 def test_observation_client_act_and_observe_ignores_trailing_wait_for_auto_region() -> None:
@@ -2604,6 +2606,7 @@ def test_observation_client_act_and_observe_ignores_trailing_wait_for_auto_regio
     )
 
     assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["full_frame_fallback"] is False
 
 
 def test_observation_client_act_and_observe_uses_full_frame_after_global_action() -> None:
@@ -2620,6 +2623,7 @@ def test_observation_client_act_and_observe_uses_full_frame_after_global_action(
     )
 
     assert transport.change_payload["change_detection"] == "full"
+    assert transport.change_payload["full_frame_fallback"] is True
 
 
 def test_observation_client_act_and_observe_keeps_keyboard_actions_full_frame() -> None:
@@ -2631,6 +2635,7 @@ def test_observation_client_act_and_observe_keeps_keyboard_actions_full_frame() 
     client.act_and_observe(actions=[{"type": "keypress", "key": "enter"}])
 
     assert transport.change_payload["change_detection"] == "full"
+    assert transport.change_payload["full_frame_fallback"] is True
 
 
 def test_observation_client_act_and_observe_respects_explicit_change_detection() -> None:
@@ -2645,6 +2650,7 @@ def test_observation_client_act_and_observe_respects_explicit_change_detection()
     )
 
     assert transport.change_payload["change_detection"] == "full"
+    assert transport.change_payload["full_frame_fallback"] is True
 
 
 def test_observation_client_act_and_observe_can_disable_full_frame_fallback() -> None:
@@ -2661,6 +2667,21 @@ def test_observation_client_act_and_observe_can_disable_full_frame_fallback() ->
     assert transport.change_payload["full_frame_fallback"] is False
 
 
+def test_observation_client_act_and_observe_can_force_full_frame_fallback() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "click", "x": 12, "y": 34}],
+        full_frame_fallback=True,
+    )
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["full_frame_fallback"] is True
+
+
 def test_observation_client_act_and_observe_uses_explicit_region_with_auto_policy() -> None:
     initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
     frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
@@ -2673,6 +2694,7 @@ def test_observation_client_act_and_observe_uses_explicit_region_with_auto_polic
     )
 
     assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["full_frame_fallback"] is False
     assert transport.change_payload["change_detection_region"] == {
         "x": 10,
         "y": 20,

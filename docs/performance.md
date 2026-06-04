@@ -234,6 +234,9 @@ action-region workflows that prefer the verified regional unchanged frame over t
 full-frame truth check. It preserves the default conservative behavior unless explicitly disabled
 and records `frame_poll_skipped_reason="dirty_region_confirmation_unchanged"` or
 `"dirty_producer_same_region"` when it skips the full-frame fallback.
+The raw daemon route default remains conservative, while SDK `act_and_observe()` resolves pointer
+and explicit-region auto-region requests to `full_frame_fallback=false` unless the caller passes an
+explicit override.
 Confirmation capture timing is split into ready, input-lock wait, backend operation, total capture,
 and native tile-diff timings so live tails can distinguish scheduler/lock delay from backend
 capture work. Benchmark summaries also expose
