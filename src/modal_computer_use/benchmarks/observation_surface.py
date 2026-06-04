@@ -32,6 +32,7 @@ from .surface_result import _surface_result
 
 OBSERVATION_SCREENSHOT_OPTIONS = {"format": "png", "show_cursor": False}
 CLICK_TOGGLE_ACTION = {"type": "click", "x": 512, "y": 512, "button": "left"}
+CLICK_TOGGLE_LOWER_ACTION = {"type": "click", "x": 512, "y": 650, "button": "left"}
 CLICK_TOGGLE_TARGET_LEFT = 0
 CLICK_TOGGLE_TARGET_TOP = 0
 CLICK_TOGGLE_TARGET_WIDTH = 1024
@@ -48,6 +49,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production",
     "observation_action_click_act_and_observe_click_beacon_production",
     "observation_action_click_act_and_observe_click_target_state_production",
+    "observation_action_click_act_and_observe_lower_click_target_state_production",
     "observation_action_click_act_and_observe_auto_signal_production",
     "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
     "observation_action_click_act_and_observe_auto_region_production",
@@ -375,6 +377,15 @@ def _observation_case_factories(
         ),
         "observation_action_click_act_and_observe_click_target_state_production": lambda: (
             _run_observation_action_click_target_state_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        "observation_action_click_act_and_observe_lower_click_target_state_production": lambda: (
+            _run_observation_action_lower_click_target_state_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
@@ -1054,8 +1065,10 @@ def _run_observation_action_click_beacon_benchmark(
     name: str = "observation_action_click_act_and_observe_click_beacon_production",
     mutation_kind: str = "stream_action_click_observe_change_click_beacon",
     state_probe: bool = False,
+    action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
+    action = action or CLICK_TOGGLE_ACTION
     beacon_token = _open_click_toggle_beacon_page(client)
     state_before = _read_click_target_state(client) if state_probe else None
     samples, observations = _measure_stream_action_capture_loop(
@@ -1072,6 +1085,7 @@ def _run_observation_action_click_beacon_benchmark(
         change_signal="auto",
         transport_timing=False,
         causal_action_observe=True,
+        action=action,
     )
     expected_events = iterations + warmup_iterations
     beacon_events = _wait_for_click_beacon_count(
@@ -1089,7 +1103,7 @@ def _run_observation_action_click_beacon_benchmark(
     _add_frame_observations(result, samples, observations)
     result.update(
         {
-            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "actions": [_safe_action_metadata(action)],
             "action_count": 1,
             "mutation_kind": mutation_kind,
             "change_timeout_ms": 100,
@@ -1130,6 +1144,30 @@ def _run_observation_action_click_target_state_benchmark(
         name="observation_action_click_act_and_observe_click_target_state_production",
         mutation_kind="stream_action_click_observe_change_click_target_state",
         state_probe=True,
+    )
+    result["click_target_state_before"] = result.pop("_click_target_state_before")
+    result["click_target_state_after"] = result.pop("_click_target_state_after")
+    return result
+
+
+def _run_observation_action_lower_click_target_state_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    result = _run_observation_action_click_beacon_benchmark(
+        base_url=base_url,
+        token=token,
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        name="observation_action_click_act_and_observe_lower_click_target_state_production",
+        mutation_kind="stream_action_click_observe_change_lower_click_target_state",
+        state_probe=True,
+        action=CLICK_TOGGLE_LOWER_ACTION,
     )
     result["click_target_state_before"] = result.pop("_click_target_state_before")
     result["click_target_state_after"] = result.pop("_click_target_state_after")
@@ -2711,6 +2749,7 @@ def _measure_stream_action_capture_loop(
     transport_timing: bool = True,
     causal_action_observe: bool = False,
     change_timeout_ms: int = 100,
+    action: dict[str, Any] | None = None,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -2746,6 +2785,7 @@ def _measure_stream_action_capture_loop(
                         full_frame_fallback=full_frame_fallback,
                         causal_action_observe=causal_action_observe,
                         change_timeout_ms=change_timeout_ms,
+                        action=action,
                     )
                 except Exception as exc:
                     failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
@@ -2765,6 +2805,7 @@ def _measure_stream_action_capture_loop(
                         full_frame_fallback=full_frame_fallback,
                         causal_action_observe=causal_action_observe,
                         change_timeout_ms=change_timeout_ms,
+                        action=action,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -2843,9 +2884,10 @@ def _stream_action_capture_iteration(
     frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
     causal_action_observe: bool = False,
     change_timeout_ms: int = 100,
+    action: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
-        "actions": [CLICK_TOGGLE_ACTION],
+        "actions": [action or CLICK_TOGGLE_ACTION],
         "source": "benchmark",
         "capture_delay_ms": capture_delay_ms,
     }

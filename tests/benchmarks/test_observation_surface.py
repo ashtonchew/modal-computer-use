@@ -455,6 +455,57 @@ def test_click_target_state_case_reports_window_state(monkeypatch) -> None:
     assert result["click_target_state_after"]["pointer_x"] == 512
 
 
+def test_lower_click_target_state_case_uses_lower_action(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    states = iter(
+        [
+            {"available": True, "window_name": "Firefox", "window_height": 717},
+            {"available": True, "window_name": "Firefox", "pointer_y": 650},
+        ]
+    )
+
+    def fake_measure(**kwargs):
+        captured.update(kwargs)
+        return [1.0], [{"change_detected": True}]
+
+    monkeypatch.setattr(observation_surface, "_measure_stream_action_capture_loop", fake_measure)
+    monkeypatch.setattr(
+        observation_surface,
+        "_open_click_toggle_beacon_page",
+        lambda _client: "token-123",
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_wait_for_click_beacon_count",
+        lambda _client, _beacon_id, *, expected_events: expected_events,
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_target_state",
+        lambda _client: next(states),
+    )
+
+    result = observation_surface._run_observation_action_lower_click_target_state_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=1,
+    )
+
+    assert (
+        captured["name"]
+        == "observation_action_click_act_and_observe_lower_click_target_state_production"
+    )
+    assert captured["action"] == observation_surface.CLICK_TOGGLE_LOWER_ACTION
+    assert result["actions"] == [
+        observation_surface._safe_action_metadata(observation_surface.CLICK_TOGGLE_LOWER_ACTION)
+    ]
+    assert result["mutation_kind"] == "stream_action_click_observe_change_lower_click_target_state"
+    assert result["click_target_state_before"]["window_height"] == 717
+    assert result["click_target_state_after"]["pointer_y"] == 650
+
+
 def test_stream_action_capture_loop_omits_sdk_default_frame_encoding(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -533,6 +584,10 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
     )
     assert (
         "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
+    assert (
+        "observation_action_click_act_and_observe_lower_click_target_state_production"
         in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
     )
 
