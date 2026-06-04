@@ -1133,6 +1133,7 @@ def _run_observation_action_click_beacon_benchmark(
     index_events_after_actions = _read_click_index_count(client, beacon_token)
     ready_events_after_actions = _read_click_ready_count(client, beacon_token)
     state_after = _read_click_target_state(client) if state_probe else None
+    direct_action_probe = _probe_direct_action_click_beacon(client, beacon_token, action)
     result = _case_result(
         name,
         iterations,
@@ -1164,6 +1165,7 @@ def _run_observation_action_click_beacon_benchmark(
             "click_ready_events_after_actions": ready_events_after_actions,
             "click_server_probe_before_actions": server_probe_before_actions,
             "click_server_probe_after_actions": server_probe_after_actions,
+            "click_direct_action_probe": direct_action_probe,
         }
     )
     if state_probe:
@@ -3524,6 +3526,41 @@ def _wait_for_click_ready_count(
         time.sleep(0.05)
         count = _read_click_ready_count(client, token)
     return count
+
+
+def _probe_direct_action_click_beacon(
+    client: DaemonClient,
+    token: str,
+    action: dict[str, Any],
+) -> dict[str, Any]:
+    before = _read_click_beacon_count(client, token)
+    probe: dict[str, Any] = {"before": before}
+    try:
+        result = client.post_json(
+            "/v1/actions/run",
+            json={"actions": [dict(action)]},
+        )
+    except Exception as exc:
+        probe["error_type"] = type(exc).__name__
+        return probe
+    after = _wait_for_click_beacon_count(
+        client,
+        token,
+        expected_events=before + 1,
+        timeout_ms=CLICK_TOGGLE_READY_TIMEOUT_MS,
+    )
+    probe["after"] = after
+    probe["delta"] = after - before
+    if isinstance(result, dict):
+        probe["ok"] = result.get("ok")
+        items = result.get("items")
+        if isinstance(items, list):
+            probe["item_count"] = len(items)
+            probe["item_ok"] = [item.get("ok") for item in items if isinstance(item, dict)]
+            probe["item_error_code"] = [
+                item.get("error_code") for item in items if isinstance(item, dict)
+            ]
+    return probe
 
 
 def _frame_observation(frame) -> dict[str, Any]:
