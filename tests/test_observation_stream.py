@@ -959,6 +959,15 @@ def test_observation_stream_run_actions_observe_change_can_detect_region(app) ->
     assert second["change_detected"] is True
     assert second["change_detection"] == "region"
     assert second["poll_strategy"] == "adaptive"
+    timing = second["change_stage_timing_ms"]
+    assert timing["region_baseline_ms"] >= timing["region_baseline_capture_ms"] >= 0
+    assert timing["region_baseline_capture_ready_ms"] >= 0
+    assert timing["region_baseline_capture_lock_wait_ms"] >= 0
+    assert timing["region_baseline_capture_operation_ms"] >= 0
+    assert timing["region_poll_ms"] >= timing["region_poll_capture_ms"] >= 0
+    assert timing["region_poll_capture_ready_ms"] >= 0
+    assert timing["region_poll_capture_lock_wait_ms"] >= 0
+    assert timing["region_poll_capture_operation_ms"] >= 0
 
 
 def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
@@ -1161,6 +1170,10 @@ def test_observation_stream_dirty_producer_captures_action_region(
     assert second["dirty_frame_producer"] is True
     assert second["dirty_frame_producer_used"] is True
     assert second["change_stage_timing_ms"]["region_baseline_ms"] == 0
+    assert second["change_stage_timing_ms"]["region_baseline_capture_ms"] == 0
+    assert second["change_stage_timing_ms"]["region_baseline_capture_ready_ms"] == 0
+    assert second["change_stage_timing_ms"]["region_baseline_capture_lock_wait_ms"] == 0
+    assert second["change_stage_timing_ms"]["region_baseline_capture_operation_ms"] == 0
     assert second["source_hash_kind"] == "tile-fingerprint"
     assert second["change_stage_timing_ms"]["dirty_region_native_ms"] >= 0
     assert second["change_stage_timing_ms"]["dirty_region_reconstruct_ms"] == 0

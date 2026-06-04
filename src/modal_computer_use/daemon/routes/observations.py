@@ -452,6 +452,10 @@ async def _handle_observation_message(
             baseline_source_sha256 = state.last_source_sha256
             region_baseline_sha256 = None
             region_baseline_ms = 0.0
+            region_baseline_capture_ready_ms = 0.0
+            region_baseline_capture_lock_wait_ms = 0.0
+            region_baseline_capture_operation_ms = 0.0
+            region_baseline_capture_ms = 0.0
             producer_capture_region = _dirty_producer_capture_region(
                 state,
                 region=region,
@@ -464,10 +468,20 @@ async def _handle_observation_message(
             )
             if region is not None and not skip_region_baseline:
                 region_baseline_started = perf_counter()
-                region_baseline_sha256 = await _capture_region_source_sha256(
-                    websocket,
-                    region=region,
+                region_baseline_sha256, region_baseline_capture_timing = (
+                    await _capture_region_source_sha256_with_timing(
+                        websocket,
+                        region=region,
+                    )
                 )
+                region_baseline_capture_ready_ms = region_baseline_capture_timing.ready_ms
+                region_baseline_capture_lock_wait_ms = (
+                    region_baseline_capture_timing.lock_wait_ms
+                )
+                region_baseline_capture_operation_ms = (
+                    region_baseline_capture_timing.operation_ms
+                )
+                region_baseline_capture_ms = region_baseline_capture_timing.total_ms
                 region_baseline_ms = _elapsed_ms(region_baseline_started)
             signal_prepare_started = perf_counter()
             dirty_producer = await _prepare_dirty_frame_producer(
@@ -514,6 +528,14 @@ async def _handle_observation_message(
                 stage_timing_ms={
                     "signal_prepare_ms": signal_prepare_ms,
                     "region_baseline_ms": region_baseline_ms,
+                    "region_baseline_capture_ms": region_baseline_capture_ms,
+                    "region_baseline_capture_ready_ms": region_baseline_capture_ready_ms,
+                    "region_baseline_capture_lock_wait_ms": (
+                        region_baseline_capture_lock_wait_ms
+                    ),
+                    "region_baseline_capture_operation_ms": (
+                        region_baseline_capture_operation_ms
+                    ),
                     "action_wall_ms": action_wall_ms,
                     "capture_delay_wall_ms": capture_delay_wall_ms,
                 },
@@ -761,6 +783,10 @@ async def _send_changed_frame(
     dirty_producer_used = False
     dirty_producer_fallback_reason: str | None = None
     region_poll_ms = 0.0
+    region_poll_capture_ms = 0.0
+    region_poll_capture_ready_ms = 0.0
+    region_poll_capture_lock_wait_ms = 0.0
+    region_poll_capture_operation_ms = 0.0
     frame_poll_ms = 0.0
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
@@ -888,7 +914,13 @@ async def _send_changed_frame(
             region_poll_started = perf_counter()
             while True:
                 region_attempts += 1
-                region_sha256 = await _capture_region_source_sha256(websocket, region=region)
+                region_sha256, region_poll_capture_timing = (
+                    await _capture_region_source_sha256_with_timing(websocket, region=region)
+                )
+                region_poll_capture_ms += region_poll_capture_timing.total_ms
+                region_poll_capture_ready_ms += region_poll_capture_timing.ready_ms
+                region_poll_capture_lock_wait_ms += region_poll_capture_timing.lock_wait_ms
+                region_poll_capture_operation_ms += region_poll_capture_timing.operation_ms
                 region_detected = region_sha256 != region_baseline_sha256
                 if region_detected or perf_counter() >= deadline:
                     break
@@ -1057,6 +1089,10 @@ async def _send_changed_frame(
         ),
         "dirty_region_confirmation_native_ms": dirty_region_confirmation_native_ms,
         "region_poll_ms": region_poll_ms,
+        "region_poll_capture_ms": region_poll_capture_ms,
+        "region_poll_capture_ready_ms": region_poll_capture_ready_ms,
+        "region_poll_capture_lock_wait_ms": region_poll_capture_lock_wait_ms,
+        "region_poll_capture_operation_ms": region_poll_capture_operation_ms,
         "frame_poll_ms": frame_poll_ms,
         "change_wait_ms": wait_ms,
         "server_pre_emit_ms": (pre_emit_at - observe_started) * 1000,
@@ -1124,18 +1160,36 @@ async def _send_changed_frame(
 
 
 async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region) -> str | None:
+    sha256, _timing = await _capture_region_source_sha256_with_timing(websocket, region=region)
+    return sha256
+
+
+async def _capture_region_source_sha256_with_timing(
+    websocket: WebSocket,
+    *,
+    region: Region,
+) -> tuple[str | None, ScreenshotCaptureTiming]:
+    empty_timing = ScreenshotCaptureTiming(
+        ready_ms=0.0,
+        lock_wait_ms=0.0,
+        operation_ms=0.0,
+        total_ms=0.0,
+    )
     validate_region(websocket, region, field="change_detection_region")
     options = ScreenshotOptions(format="png", show_cursor=False)
-    raw = await _capture_raw_frame(
-        websocket,
-        ObservationStreamRequest(
-            format="png",
-            show_cursor=False,
-            region=region,
-        ),
-        options,
+    request = ObservationStreamRequest(
+        format="png",
+        show_cursor=False,
+        region=region,
     )
-    return None if raw is None else raw.sha256
+    if not _can_use_raw_observation_path(request, options):
+        return None, empty_timing
+
+    async def operation():
+        return await websocket.app.state.backend.screenshot_raw_pixels(region=region)
+
+    raw, timing = await run_screenshot_capture_with_timing(websocket, operation)
+    return (None if raw is None else raw.sha256), timing
 
 
 async def _capture_dirty_region_confirmation_frame(
