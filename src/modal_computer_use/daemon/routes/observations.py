@@ -1302,7 +1302,9 @@ def _dirty_frame_producer_wait_timeout_ms(
     *,
     regional_capture: bool,
 ) -> int:
-    if change_timeout_ms <= DIRTY_FRAME_PRODUCER_MAX_WAIT_MS:
+    if change_timeout_ms <= 0:
+        return change_timeout_ms
+    if not regional_capture and change_timeout_ms <= DIRTY_FRAME_PRODUCER_MAX_WAIT_MS:
         return change_timeout_ms
     if not regional_capture:
         return max(1, change_timeout_ms - DIRTY_FRAME_PRODUCER_FALLBACK_RESERVE_MS)
