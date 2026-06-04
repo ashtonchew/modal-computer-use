@@ -39,6 +39,7 @@ CLICK_TOGGLE_TARGET_WIDTH = 1024
 CLICK_TOGGLE_TARGET_HEIGHT = 768
 CLICK_TOGGLE_PAGE_READY_SETTLE_MS = 250
 CLICK_TOGGLE_SETTLE_MS = 16
+CLICK_TOGGLE_READY_TIMEOUT_MS = 2_000
 CLICK_TOGGLE_HTTP_LOG_PATH = "/tmp/modal-computer-use-observation-http.log"  # noqa: S108
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_0b",
@@ -1070,6 +1071,7 @@ def _run_observation_action_click_beacon_benchmark(
     failures: list[dict[str, Any]] = []
     action = action or CLICK_TOGGLE_ACTION
     beacon_token = _open_click_toggle_beacon_page(client)
+    server_probe_before_actions = _probe_click_page_server(client, beacon_token)
     index_events_before_actions = _read_click_index_count(client, beacon_token)
     ready_events_before_actions = _read_click_ready_count(client, beacon_token)
     state_before = _read_click_target_state(client) if state_probe else None
@@ -1095,6 +1097,7 @@ def _run_observation_action_click_beacon_benchmark(
         beacon_token,
         expected_events=expected_events,
     )
+    server_probe_after_actions = _probe_click_page_server(client, beacon_token)
     index_events_after_actions = _read_click_index_count(client, beacon_token)
     ready_events_after_actions = _read_click_ready_count(client, beacon_token)
     state_after = _read_click_target_state(client) if state_probe else None
@@ -1127,6 +1130,8 @@ def _run_observation_action_click_beacon_benchmark(
             "click_index_events_after_actions": index_events_after_actions,
             "click_ready_events_before_actions": ready_events_before_actions,
             "click_ready_events_after_actions": ready_events_after_actions,
+            "click_server_probe_before_actions": server_probe_before_actions,
+            "click_server_probe_after_actions": server_probe_after_actions,
         }
     )
     if state_probe:
@@ -3255,6 +3260,12 @@ def _open_click_toggle_beacon_page(client: DaemonClient) -> str:
         },
     )
     _wait_for_click_toggle_page_ready()
+    _wait_for_click_ready_count(
+        client,
+        beacon_token,
+        expected_events=1,
+        timeout_ms=CLICK_TOGGLE_READY_TIMEOUT_MS,
+    )
     return beacon_token
 
 
@@ -3301,7 +3312,11 @@ def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
         "dir=/tmp/modal-computer-use-observation; "
         'mkdir -p "$dir"; '
         f'printf %s {shell_quote(body)} > "$dir/index.html"; '
-        "if ! pgrep -f 'http.server 8766' >/dev/null 2>&1; then "
+        "if ! python3 -c "
+        "'import socket, sys; "
+        "sock=socket.socket(); sock.settimeout(0.2); "
+        "sys.exit(0 if sock.connect_ex((\"127.0.0.1\", 8766)) == 0 else 1)' "
+        ">/dev/null 2>&1; then "
         'python3 -m http.server 8766 --bind 127.0.0.1 --directory "$dir" '
         ">/tmp/modal-computer-use-observation-http.log 2>&1 & "
         "fi"
@@ -3323,6 +3338,32 @@ def _read_click_index_count(client: DaemonClient, token: str) -> int:
 
 def _read_click_ready_count(client: DaemonClient, token: str) -> int:
     return _read_http_log_event_count(client, "ready", token)
+
+
+def _probe_click_page_server(client: DaemonClient, token: str) -> dict[str, Any]:
+    url = f"http://127.0.0.1:8766/index.html?server-probe={quote(token)}"
+    py = (
+        "import sys, urllib.request\n"
+        "url = sys.argv[1]\n"
+        "try:\n"
+        "    with urllib.request.urlopen(url, timeout=2) as response:\n"
+        "        body = response.read()\n"
+        "        print('ok=true')\n"
+        "        print(f'status={response.status}')\n"
+        "        print(f'bytes={len(body)}')\n"
+        "except Exception as exc:\n"
+        "    print('ok=false')\n"
+        "    print(f'error_type={type(exc).__name__}')\n"
+        "    print(f'error={str(exc)[:200]}')\n"
+    )
+    script = f"python3 -c {shell_quote(py)} {shell_quote(url)}"
+    result = client.post_json(
+        "/v1/commands/run",
+        json={"command": ["sh", "-lc", script], "timeout": 5},
+    )
+    output = result.get("output") if isinstance(result, dict) else {}
+    stdout = output.get("stdout") if isinstance(output, dict) else None
+    return _parse_click_target_state(str(stdout or ""))
 
 
 def _read_http_log_event_count(
@@ -3412,6 +3453,21 @@ def _wait_for_click_beacon_count(
     while count < expected_events and time.monotonic() < deadline:
         time.sleep(0.05)
         count = _read_click_beacon_count(client, token)
+    return count
+
+
+def _wait_for_click_ready_count(
+    client: DaemonClient,
+    token: str,
+    *,
+    expected_events: int,
+    timeout_ms: int = 500,
+) -> int:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    count = _read_click_ready_count(client, token)
+    while count < expected_events and time.monotonic() < deadline:
+        time.sleep(0.05)
+        count = _read_click_ready_count(client, token)
     return count
 
 
