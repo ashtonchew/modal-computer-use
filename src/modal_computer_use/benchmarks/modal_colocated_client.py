@@ -485,10 +485,12 @@ def modal_colocated_latency_diagnosis(
     likely_bound = _likely_latency_bound(transport, observation, framing)
     if likely_bound is None and framing is None:
         return None
+    stage_diagnosis = _causal_stage_diagnosis(external_result, colocated_result, observation)
     return {
         "likely_bound": likely_bound or "insufficient_evidence",
         "transport_floor": transport or None,
         "causal_action_observe": observation or None,
+        "causal_stage_diagnosis": stage_diagnosis,
         "causal_framing": framing,
         "interpretation": _latency_diagnosis_interpretation(likely_bound),
     }
@@ -562,6 +564,64 @@ def _observation_causal_action_p50(result: dict[str, Any]) -> dict[str, Any] | N
         if value is not None:
             return {"case": case_name, "p50_ms": value}
     return None
+
+
+def _causal_stage_diagnosis(
+    external_result: dict[str, Any],
+    colocated_result: dict[str, Any],
+    observation: dict[str, Any],
+) -> dict[str, Any] | None:
+    case_name = observation.get("case")
+    if not isinstance(case_name, str):
+        return None
+    external = _case_stage_diagnosis(external_result, case_name)
+    colocated = _case_stage_diagnosis(colocated_result, case_name)
+    if external is None and colocated is None:
+        return None
+    return {
+        "case": case_name,
+        "external": external,
+        "colocated": colocated,
+    }
+
+
+def _case_stage_diagnosis(result: dict[str, Any], case_name: str) -> dict[str, Any] | None:
+    case = _dict_value(_observation_cases(result).get(case_name))
+    latency_diagnosis = _dict_value(case.get("latency_diagnosis"))
+    stage_summary = _dict_value(case.get("change_stage_timing_summary_ms"))
+    stage_p50 = {
+        name: p50
+        for name in (
+            "server_pre_emit_ms",
+            "dirty_producer_wait_ms",
+            "dirty_region_confirmation_ms",
+            "dirty_region_confirmation_capture_ms",
+            "dirty_region_confirmation_capture_operation_ms",
+            "dirty_region_confirmation_native_ms",
+            "frame_poll_ms",
+        )
+        if (p50 := _summary_p50(_dict_value(stage_summary.get(name)))) is not None
+    }
+    if not latency_diagnosis and not stage_p50:
+        return None
+    dominant_stage = _dominant_stage(stage_p50)
+    return {
+        "latency_diagnosis": latency_diagnosis or None,
+        "stage_p50_ms": stage_p50,
+        "dominant_stage": dominant_stage,
+    }
+
+
+def _dominant_stage(stage_p50: dict[str, float]) -> dict[str, Any] | None:
+    candidates = {
+        name: value
+        for name, value in stage_p50.items()
+        if name != "server_pre_emit_ms" and value > 0
+    }
+    if not candidates:
+        return None
+    name, value = max(candidates.items(), key=lambda item: item[1])
+    return {"name": name, "p50_ms": value}
 
 
 def _causal_framing_comparison(
