@@ -202,9 +202,11 @@ not truth: unchanged hashes, unavailable XDamage, unsupported stream options, or
 fall back to the synchronous capture/poll path. Producer metadata appears as
 `dirty_frame_producer`, `dirty_frame_producer_used`, `dirty_frame_age_ms`,
 `dirty_frame_producer_fallback_reason`, `dirty_frame_producer_wait_budget_ms`,
-`dirty_frame_capture_region_source`, and the `dirty_producer_*` stage timings. The producer wait is
-bounded below the caller's observe-change timeout on normal windows so a slow producer cannot
-consume the whole deadline before regional confirmation or full-frame polling runs.
+`dirty_frame_capture_region_source`, and the `dirty_producer_*` stage timings. Regional producer
+captures keep a short wait cap so a slow producer cannot consume the whole deadline before regional
+confirmation runs. Full-frame XDamage producer captures can use the caller's timeout minus the
+fallback reserve, because their fallback is another full-frame check rather than regional
+confirmation.
 If the producer returns a verified unchanged regional or full-frame capture after consuming the
 observe-change deadline, the daemon preserves the caller's timeout contract and skips the final
 full-frame poll. Those frames are emitted as timeout/unchanged observations with
