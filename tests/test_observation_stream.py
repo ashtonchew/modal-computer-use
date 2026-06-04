@@ -862,13 +862,13 @@ def test_dirty_frame_producer_wait_timeout_reserves_fallback_budget() -> None:
         observation_routes._dirty_frame_producer_wait_timeout_ms(
             3, regional_capture=True
         )
-        == 3
+        == 1
     )
     assert (
         observation_routes._dirty_frame_producer_wait_timeout_ms(
             20, regional_capture=True
         )
-        == 20
+        == 12
     )
     assert (
         observation_routes._dirty_frame_producer_wait_timeout_ms(
@@ -1266,7 +1266,8 @@ def test_observation_stream_dirty_producer_does_not_poll_frame_after_deadline(
     assert second["dirty_frame_producer_fallback_reason"] == "producer_same_region"
     assert second["frame_poll_skipped_reason"] == "deadline_exhausted_after_dirty_producer"
     assert second["change_timeout_reached"] is True
-    assert second["change_stage_timing_ms"]["dirty_producer_wait_ms"] >= 3
+    assert second["dirty_frame_producer_wait_budget_ms"] == 1
+    assert second["change_stage_timing_ms"]["dirty_producer_wait_ms"] >= 1
     assert second["change_stage_timing_ms"]["dirty_region_native_ms"] >= 0
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
 
