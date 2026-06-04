@@ -955,6 +955,10 @@ def _run_observation_action_click_paired_envelope_benchmark(
             "causal_action_observe": True,
         }
     )
+    _add_frame_poll_deadline_rollups(
+        result["baseline"], paired.get("baseline_observations", [])
+    )
+    _add_frame_poll_deadline_rollups(result["variant"], paired.get("variant_observations", []))
     return result
 
 
@@ -1023,6 +1027,10 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
             "causal_action_observe": True,
         }
     )
+    _add_frame_poll_deadline_rollups(
+        result["baseline"], paired.get("baseline_observations", [])
+    )
+    _add_frame_poll_deadline_rollups(result["variant"], paired.get("variant_observations", []))
     return result
 
 
@@ -1042,6 +1050,8 @@ def _measure_paired_stream_action_observe_loop(
 ) -> dict[str, Any]:
     baseline_samples: list[float] = []
     variant_samples: list[float] = []
+    baseline_observations: list[dict[str, Any]] = []
+    variant_observations: list[dict[str, Any]] = []
     paired_deltas: list[float] = []
     paired_observations: list[dict[str, Any]] = []
     arms = {
@@ -1077,6 +1087,8 @@ def _measure_paired_stream_action_observe_loop(
                         return {
                             "baseline_samples_ms": baseline_samples,
                             "variant_samples_ms": variant_samples,
+                            "baseline_observations": baseline_observations,
+                            "variant_observations": variant_observations,
                             "paired_delta_samples_ms": paired_deltas,
                             "paired_observations": paired_observations,
                         }
@@ -1118,6 +1130,8 @@ def _measure_paired_stream_action_observe_loop(
                 delta_ms = variant_ms - baseline_ms
                 baseline_samples.append(baseline_ms)
                 variant_samples.append(variant_ms)
+                baseline_observations.append(pair_frames["baseline"])
+                variant_observations.append(pair_frames["variant"])
                 paired_deltas.append(delta_ms)
                 paired_observations.append(
                     {
@@ -1140,6 +1154,8 @@ def _measure_paired_stream_action_observe_loop(
     return {
         "baseline_samples_ms": baseline_samples,
         "variant_samples_ms": variant_samples,
+        "baseline_observations": baseline_observations,
+        "variant_observations": variant_observations,
         "paired_delta_samples_ms": paired_deltas,
         "paired_observations": paired_observations,
     }
@@ -2437,6 +2453,7 @@ def _add_frame_observations(
                         if isinstance(reason := item.get("frame_poll_skipped_reason"), str)
                     }
                 )
+                _add_frame_poll_deadline_rollups(result, observations)
                 result["dirty_region_confirmation_results"] = sorted(
                     {
                         reason
@@ -2619,6 +2636,69 @@ def _add_frame_observations(
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
     _add_observation_latency_diagnosis(result)
+
+
+def _add_frame_poll_deadline_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    frame_poll_deadline_reasons = sorted(
+        {
+            reason
+            for item in observations
+            if isinstance(item, dict)
+            if isinstance(reason := item.get("frame_poll_deadline_reason"), str)
+        }
+    )
+    if frame_poll_deadline_reasons:
+        result["frame_poll_deadline_reasons"] = frame_poll_deadline_reasons
+        result["frame_poll_deadline_reason_summaries"] = {
+            reason: _frame_poll_deadline_reason_summary(observations, reason)
+            for reason in frame_poll_deadline_reasons
+        }
+    frame_poll_budget_samples = [
+        item["frame_poll_budget_ms"]
+        for item in observations
+        if isinstance(item, dict)
+        if isinstance(item.get("frame_poll_budget_ms"), int | float)
+    ]
+    if frame_poll_budget_samples:
+        result["frame_poll_budget_samples_ms"] = frame_poll_budget_samples
+        result["frame_poll_budget_summary_ms"] = _summary(frame_poll_budget_samples)
+
+
+def _frame_poll_deadline_reason_summary(
+    observations: list[Any],
+    reason: str,
+) -> dict[str, Any]:
+    rows = [
+        item
+        for item in observations
+        if isinstance(item, dict) and item.get("frame_poll_deadline_reason") == reason
+    ]
+    frame_poll_samples = [
+        float(timing["frame_poll_ms"])
+        for item in rows
+        if isinstance((timing := item.get("change_stage_timing_ms")), dict)
+        and isinstance(timing.get("frame_poll_ms"), int | float)
+    ]
+    result: dict[str, Any] = {
+        "frames": len(rows),
+        "changed_frames": sum(1 for item in rows if item.get("change_detected") is True),
+        "unchanged_frames": sum(1 for item in rows if item.get("unchanged") is True),
+        "timeout_frames": sum(1 for item in rows if item.get("change_timeout_reached") is True),
+        "dirty_region_confirmation_results": sorted(
+            {
+                value
+                for item in rows
+                if isinstance(value := item.get("dirty_region_confirmation_result"), str)
+            }
+        ),
+    }
+    if frame_poll_samples:
+        result["frame_poll_samples_ms"] = frame_poll_samples
+        result["frame_poll_summary_ms"] = _summary(frame_poll_samples)
+    return result
 
 
 def _observation_sample_rows(
