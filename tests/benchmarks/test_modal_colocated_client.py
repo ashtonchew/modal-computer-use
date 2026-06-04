@@ -305,6 +305,43 @@ def test_modal_colocated_comparison_prefers_sdk_default_causal_case() -> None:
     }
 
 
+def test_modal_colocated_comparison_surfaces_paired_observation_cases() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-observation-stream"],
+        paired_region_radius=True,
+    )
+    colocated_result = _surface_result(
+        transport_p50=2.0,
+        observation_p50=60.0,
+        environment={},
+        surfaces=["daemon-observation-stream"],
+        paired_region_radius=True,
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    paired = comparison["paired_observation_cases"][
+        "observation_action_click_act_and_observe_paired_region_radius_ab_production"
+    ]
+    assert paired["external"]["paired_comparison"]["variant_win_rate"] == 0.6
+    assert paired["colocated"]["paired_comparison"]["variant_win_rate"] == 0.6
+    assert paired["colocated"]["baseline"]["change_region_radius"] == 96
+    assert paired["colocated"]["baseline"]["dirty_frame_capture_region"]["area_px"] == {
+        "p50": 65536.0
+    }
+    assert paired["colocated"]["baseline"]["stage_p50_ms"]["server_pre_emit_ms"] == 7.0
+    assert paired["colocated"]["variant"]["change_region_radius"] == 64
+    assert paired["colocated"]["variant"]["dirty_frame_capture_region"]["width_px"] == {
+        "p50": 128.0
+    }
+    assert paired["colocated"]["variant"]["stage_p50_ms"][
+        "dirty_region_confirmation_ms"
+    ] == 2.2
+
+
 def test_modal_colocated_latency_diagnosis_includes_selected_case_stages() -> None:
     external = _surface_result(
         transport_p50=50.0,
@@ -492,6 +529,7 @@ def _surface_result(
     surfaces: list[str],
     sdk_default_observation_p50: float | None = None,
     envelope_observation_p50: float | None = None,
+    paired_region_radius: bool = False,
 ) -> dict[str, object]:
     surface_results: dict[str, object] = {}
     if "daemon-transport-floor" in surfaces:
@@ -528,6 +566,10 @@ def _surface_result(
                 "status": "ok",
                 "action_to_frame_summary_ms": {"p50": envelope_observation_p50},
             }
+        if paired_region_radius:
+            cases[
+                "observation_action_click_act_and_observe_paired_region_radius_ab_production"
+            ] = _paired_region_radius_case()
         surface_results["daemon-observation-stream"] = {
             "status": "ok",
             "metadata": {"environment": environment},
@@ -540,4 +582,56 @@ def _surface_result(
         "metadata": {"environment": environment, "surfaces": surfaces},
         "surfaces": surface_results,
         "failures": [],
+    }
+
+
+def _paired_region_radius_case() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "metric": "paired_delta_ms",
+        "delta_direction": "variant_minus_baseline",
+        "negative_delta_interpretation": "variant_faster",
+        "sample_stability": {"status": "stable"},
+        "baseline": {
+            "label": "region-radius-96",
+            "frame_encoding": "binary-envelope",
+            "dirty_frame_producer": "auto",
+            "full_frame_fallback": False,
+            "change_region_radius": 96,
+            "summary_ms": {"p50": 8.5},
+            "dirty_frame_capture_region_width_summary_px": {"p50": 256.0},
+            "dirty_frame_capture_region_height_summary_px": {"p50": 256.0},
+            "dirty_frame_capture_region_area_summary_px": {"p50": 65536.0},
+            "dirty_frame_capture_region_sources": ["action_region"],
+            "change_stage_timing_summary_ms": {
+                "server_pre_emit_ms": {"p50": 7.0},
+                "dirty_region_confirmation_ms": {"p50": 3.0},
+            },
+        },
+        "variant": {
+            "label": "region-radius-64",
+            "frame_encoding": "binary-envelope",
+            "dirty_frame_producer": "auto",
+            "full_frame_fallback": False,
+            "change_region_radius": 64,
+            "summary_ms": {"p50": 7.5},
+            "dirty_frame_capture_region_width_summary_px": {"p50": 128.0},
+            "dirty_frame_capture_region_height_summary_px": {"p50": 128.0},
+            "dirty_frame_capture_region_area_summary_px": {"p50": 16384.0},
+            "dirty_frame_capture_region_sources": ["action_region"],
+            "change_stage_timing_summary_ms": {
+                "server_pre_emit_ms": {"p50": 6.4},
+                "dirty_region_confirmation_ms": {"p50": 2.2},
+            },
+        },
+        "paired_comparison": {
+            "status": "measured",
+            "samples": 10,
+            "variant_wins": 6,
+            "baseline_wins": 4,
+            "ties": 0,
+            "variant_win_rate": 0.6,
+            "baseline_win_rate": 0.4,
+            "delta_summary_ms": {"p50": -0.5},
+        },
     }
