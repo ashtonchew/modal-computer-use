@@ -3553,7 +3553,7 @@ def _probe_direct_action_click_beacon(
     probe["delta"] = after - before
     if isinstance(result, dict):
         probe["ok"] = result.get("ok")
-        items = result.get("items")
+        items = _action_result_items(result)
         if isinstance(items, list):
             probe["item_count"] = len(items)
             probe["item_ok"] = [item.get("ok") for item in items if isinstance(item, dict)]
@@ -4283,6 +4283,7 @@ def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
         "tile_hash_backend": observation.get("tile_hash_backend"),
         "change_stage_timing_ms": observation.get("change_stage_timing_ms"),
         "action_observe_attribution_ms": observation.get("action_observe_attribution_ms"),
+        "action_result": _compact_action_result(observation.get("action_result")),
         "screenshot_daemon_timing_ms": observation.get("screenshot_daemon_timing_ms"),
         "benchmark_timing_ms": benchmark_timing if isinstance(benchmark_timing, dict) else {},
         "server_emit_timing_ms": server_emit_timing
@@ -4292,6 +4293,33 @@ def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
         if isinstance(client_receive_timing, dict)
         else {},
     }
+
+
+def _compact_action_result(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    compact: dict[str, Any] = {"ok": value.get("ok")}
+    items = _action_result_items(value)
+    if isinstance(items, list):
+        compact["item_count"] = len(items)
+        compact["item_ok"] = [item.get("ok") for item in items if isinstance(item, dict)]
+        compact["item_error_code"] = [
+            item.get("error_code") for item in items if isinstance(item, dict)
+        ]
+        input_backends = [
+            output.get("input_backend")
+            for item in items
+            if isinstance(item, dict)
+            and isinstance((output := item.get("output")), dict)
+            and output.get("input_backend") is not None
+        ]
+        if input_backends:
+            compact["input_backend"] = input_backends
+    return compact
+
+
+def _action_result_items(value: dict[str, Any]) -> Any:
+    return value.get("items", value.get("results"))
 
 
 def _observation_transport_encoding(observations: list[Any]) -> str:
