@@ -227,6 +227,9 @@ If confirmation is unchanged and the route still needs a full-frame truth check,
 one full-frame capture instead of waiting out the caller's full observe-change timeout.
 Those frames record `frame_poll_budget_ms` and
 `frame_poll_deadline_reason="after_unchanged_dirty_region_confirmation"`.
+Confirmation capture timing is split into ready, input-lock wait, backend operation, total capture,
+and native tile-diff timings so live tails can distinguish scheduler/lock delay from backend
+capture work.
 Benchmarks include a sibling `*_production_sync` case with `dirty_frame_producer="off"` so producer
 changes can be compared against the synchronous path in the same target sandbox. Treat the producer
 as a latency attribution and correctness-preserving pipeline step; it removes the route-level frame

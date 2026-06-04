@@ -1369,6 +1369,13 @@ def test_observation_stream_confirms_dirty_region_after_producer_timeout(
     assert second["frame_poll_skipped_reason"] == "dirty_region_confirmation_changed"
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_ms"] >= 0
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_capture_ms"] >= 0
+    assert second["change_stage_timing_ms"]["dirty_region_confirmation_capture_ready_ms"] >= 0
+    assert (
+        second["change_stage_timing_ms"]["dirty_region_confirmation_capture_lock_wait_ms"] >= 0
+    )
+    assert (
+        second["change_stage_timing_ms"]["dirty_region_confirmation_capture_operation_ms"] >= 0
+    )
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_native_ms"] >= 0
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
     composed = ObservationFrame(
@@ -1468,6 +1475,14 @@ def test_observation_stream_confirms_unchanged_dirty_region_after_deadline(
     assert second["frame_poll_skipped_reason"] == "deadline_exhausted_after_region_confirmation"
     assert second["change_timeout_reached"] is True
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_ms"] >= 3
+    assert second["change_stage_timing_ms"]["dirty_region_confirmation_capture_ms"] >= 3
+    assert second["change_stage_timing_ms"]["dirty_region_confirmation_capture_ready_ms"] >= 0
+    assert (
+        second["change_stage_timing_ms"]["dirty_region_confirmation_capture_lock_wait_ms"] >= 0
+    )
+    assert (
+        second["change_stage_timing_ms"]["dirty_region_confirmation_capture_operation_ms"] >= 3
+    )
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
 
 
