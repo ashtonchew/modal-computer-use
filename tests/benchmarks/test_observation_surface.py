@@ -875,6 +875,7 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
             "dirty_frame_producer_wait_budget_ms": 20,
             "dirty_frame_age_ms": 0.3,
             "dirty_frame_capture_region_source": "action_region",
+            "dirty_frame_capture_region": {"x": 0, "y": 0, "width": 64, "height": 64},
             "dirty_frame_producer_fallback_reason": "no_changed_frame",
             "frame_poll_budget_ms": 12.0,
             "frame_poll_deadline_reason": "after_unchanged_dirty_region_confirmation",
@@ -940,8 +941,12 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert result["dirty_frame_producer_used_frames"] == 1
     assert result["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
     assert result["dirty_frame_capture_region_sources"] == ["action_region"]
+    assert result["dirty_frame_capture_region_width_summary_px"]["p50"] == 64.0
+    assert result["dirty_frame_capture_region_height_summary_px"]["p50"] == 64.0
+    assert result["dirty_frame_capture_region_area_summary_px"]["p50"] == 4096.0
     source_summary = result["dirty_frame_capture_region_source_summaries"]["action_region"]
     assert source_summary["frames"] == 1
+    assert source_summary["dirty_frame_capture_region_area_summary_px"]["p50"] == 4096.0
     assert source_summary["producer_used_frames"] == 0
     assert source_summary["changed_frames"] == 1
     assert source_summary["fallback_reasons"] == ["no_changed_frame"]
