@@ -44,6 +44,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_50kb",
     "observation_transport_probe_250kb",
     "observation_action_click_act_and_observe_sdk_default_production",
+    "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production",
     "observation_action_click_act_and_observe_auto_signal_production",
     "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
     "observation_action_click_act_and_observe_auto_region_production",
@@ -332,6 +333,26 @@ def _observation_case_factories(
                 poll_strategy="adaptive",
                 change_detection="auto",
                 change_signal="auto",
+                transport_timing=False,
+                causal_action_observe=True,
+                use_sdk_default_frame_encoding=True,
+            )
+        ),
+        "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production": lambda: (
+            _run_observation_action_click_observe_change_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name=(
+                    "observation_action_click_act_and_observe_sdk_default_"
+                    "timeout_200ms_production"
+                ),
+                poll_strategy="adaptive",
+                change_detection="auto",
+                change_signal="auto",
+                change_timeout_ms=200,
                 transport_timing=False,
                 causal_action_observe=True,
                 use_sdk_default_frame_encoding=True,
@@ -935,6 +956,7 @@ def _run_observation_action_click_observe_change_benchmark(
     transport_timing: bool = True,
     causal_action_observe: bool = False,
     use_sdk_default_frame_encoding: bool = False,
+    change_timeout_ms: int = 100,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     effective_frame_encoding = (
@@ -962,6 +984,7 @@ def _run_observation_action_click_observe_change_benchmark(
         frame_encoding=effective_frame_encoding,
         transport_timing=transport_timing,
         causal_action_observe=causal_action_observe,
+        change_timeout_ms=change_timeout_ms,
     )
     result = _case_result(name, iterations, samples, failures)
     _add_frame_observations(result, samples, observations)
@@ -970,7 +993,7 @@ def _run_observation_action_click_observe_change_benchmark(
             "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
             "action_count": 1,
             "mutation_kind": "stream_action_click_observe_change",
-            "change_timeout_ms": 100,
+            "change_timeout_ms": change_timeout_ms,
             "poll_interval_ms": 8,
             "poll_strategy": poll_strategy,
             "change_detection": change_detection,
@@ -2469,6 +2492,7 @@ def _measure_stream_action_capture_loop(
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
+    change_timeout_ms: int = 100,
 ) -> tuple[list[float], list[dict[str, Any]]]:
     samples: list[float] = []
     observations: list[dict[str, Any]] = []
@@ -2503,6 +2527,7 @@ def _measure_stream_action_capture_loop(
                         dirty_frame_producer=dirty_frame_producer,
                         full_frame_fallback=full_frame_fallback,
                         causal_action_observe=causal_action_observe,
+                        change_timeout_ms=change_timeout_ms,
                     )
                 except Exception as exc:
                     failures.append(_failure(name, phase="warmup", iteration=warmup_index, exc=exc))
@@ -2521,6 +2546,7 @@ def _measure_stream_action_capture_loop(
                         dirty_frame_producer=dirty_frame_producer,
                         full_frame_fallback=full_frame_fallback,
                         causal_action_observe=causal_action_observe,
+                        change_timeout_ms=change_timeout_ms,
                     )
                 except Exception as exc:
                     elapsed_ms = (perf_counter() - start) * 1000
@@ -2598,6 +2624,7 @@ def _stream_action_capture_iteration(
     dirty_region_confirmation: Literal["auto", "off"] = "auto",
     frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
     causal_action_observe: bool = False,
+    change_timeout_ms: int = 100,
 ) -> dict[str, Any]:
     payload = {
         "actions": [CLICK_TOGGLE_ACTION],
@@ -2607,7 +2634,7 @@ def _stream_action_capture_iteration(
     if observe_change:
         payload.update(
             {
-                "change_timeout_ms": 100,
+                "change_timeout_ms": change_timeout_ms,
                 "poll_interval_ms": 8,
                 "poll_strategy": poll_strategy,
                 "change_detection": change_detection,
