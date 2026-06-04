@@ -953,7 +953,7 @@ def test_probe_direct_action_click_beacon_records_action_result(monkeypatch) -> 
     class FakeClient:
         def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
             calls.append((path, json))
-            return {"ok": True, "items": [{"ok": True, "error_code": None}]}
+            return {"ok": True, "results": [{"ok": True, "error_code": None}]}
 
     monkeypatch.setattr(
         observation_surface,
@@ -984,6 +984,32 @@ def test_probe_direct_action_click_beacon_records_action_result(monkeypatch) -> 
     path, payload = calls[0]
     assert path == "/v1/actions/run"
     assert payload["actions"] == [{"type": "click", "x": 512, "y": 650, "button": "left"}]
+
+
+def test_compact_observation_sample_includes_safe_action_result() -> None:
+    compact = observation_surface._compact_observation_sample(
+        {
+            "kind": "patch",
+            "action_result": {
+                "ok": True,
+                "results": [
+                    {
+                        "ok": True,
+                        "error_code": None,
+                        "output": {"input_backend": "xtest", "x": 512, "y": 650},
+                    }
+                ],
+            },
+        }
+    )
+
+    assert compact["action_result"] == {
+        "ok": True,
+        "item_count": 1,
+        "item_ok": [True],
+        "item_error_code": [None],
+        "input_backend": ["xtest"],
+    }
 
 
 def test_wait_for_click_beacon_count_polls_until_expected(monkeypatch) -> None:
