@@ -190,9 +190,11 @@ opts into a region.
 Observe-change frames include `change_stage_timing_ms` for attribution. It records daemon-side
 signal preparation, region baseline capture, action batch wall time, explicit capture delay, signal
 wait, region polling, final frame polling/capture, and total server time before the frame is
-emitted. The client benchmark combines this with `request_frame_ms` and `receive_frame_ms`; the
-derived `receive_minus_server_pre_emit` bucket includes websocket send, network transit, client
-receive, and local scheduling because those happen after frame metadata has already been produced.
+emitted. Region baseline and poll captures also split ready, input-lock wait, backend operation,
+and total capture time. The client benchmark combines this with `request_frame_ms` and
+`receive_frame_ms`; the derived `receive_minus_server_pre_emit` bucket includes websocket send,
+network transit, client receive, and local scheduling because those happen after frame metadata has
+already been produced.
 
 For raw PNG, no-cursor observation streams, the daemon also starts a dirty-frame producer before
 `run_actions_observe_change` executes the action. The producer uses XDamage as an event-driven
