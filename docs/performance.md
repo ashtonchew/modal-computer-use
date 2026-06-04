@@ -229,6 +229,11 @@ If confirmation is unchanged and the route still needs a full-frame truth check,
 one full-frame capture instead of waiting out the caller's full observe-change timeout.
 Those frames record `frame_poll_budget_ms` and
 `frame_poll_deadline_reason="after_unchanged_dirty_region_confirmation"`.
+The `full_frame_fallback=false` request option is an opt-in diagnostic/latency mode for
+action-region workflows that prefer the verified regional unchanged frame over that final
+full-frame truth check. It preserves the default conservative behavior unless explicitly disabled
+and records `frame_poll_skipped_reason="dirty_region_confirmation_unchanged"` or
+`"dirty_producer_same_region"` when it skips the full-frame fallback.
 Confirmation capture timing is split into ready, input-lock wait, backend operation, total capture,
 and native tile-diff timings so live tails can distinguish scheduler/lock delay from backend
 capture work. Benchmark summaries also expose
@@ -311,6 +316,9 @@ confirmation outcomes can be compared by action-region versus XDamage-region hin
 Use `observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_production` when the
 paired dirty-producer artifact needs full-frame XDamage signal coverage without action-region
 capture.
+Use `observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production` to compare
+the default conservative full-frame fallback against `full_frame_fallback=false` on the same
+sandbox, stream, and action ordering before changing SDK defaults.
 
 Capture timing breakdowns split desktop readiness from input-lock wait and backend screenshot
 operation time. Successful screenshot captures and action batches refresh the daemon's positive

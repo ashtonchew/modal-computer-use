@@ -442,6 +442,7 @@ async def _handle_observation_message(
                         "change_detection",
                         "change_signal",
                         "dirty_frame_producer",
+                        "full_frame_fallback",
                         "frame_encoding",
                         "change_detection_region",
                         "change_region_radius",
@@ -518,6 +519,7 @@ async def _handle_observation_message(
                 timeout_ms=stream_request.change_timeout_ms,
                 poll_interval_ms=stream_request.poll_interval_ms,
                 poll_strategy=stream_request.poll_strategy,
+                full_frame_fallback=stream_request.full_frame_fallback,
                 region=region,
                 region_baseline_sha256=region_baseline_sha256,
                 change_signal=change_signal,
@@ -552,6 +554,7 @@ async def _handle_observation_message(
                     "change_detection": stream_request.change_detection,
                     "change_signal": stream_request.change_signal,
                     "dirty_frame_producer_policy": stream_request.dirty_frame_producer,
+                    "full_frame_fallback": stream_request.full_frame_fallback,
                     "dirty_frame_capture_region": producer_capture_region.model_dump(mode="json")
                     if producer_capture_region is not None
                     else None,
@@ -734,6 +737,7 @@ async def _send_changed_frame(
     timeout_ms: int,
     poll_interval_ms: int,
     poll_strategy: str,
+    full_frame_fallback: bool,
     region: Region | None,
     region_baseline_sha256: str | None,
     change_signal: _PreparedChangeSignal,
@@ -983,8 +987,18 @@ async def _send_changed_frame(
                 dirty_region_confirmation_result = "changed" if change_detected else "unchanged"
                 if change_detected:
                     frame_poll_skipped_reason = "dirty_region_confirmation_changed"
+                elif not full_frame_fallback:
+                    frame_poll_skipped_reason = "dirty_region_confirmation_unchanged"
             else:
                 dirty_region_confirmation_result = "unavailable"
+        if (
+            not dirty_producer_used
+            and not full_frame_fallback
+            and dirty_producer_fallback_reason == "producer_same_region"
+            and last_metadata is not None
+            and frame_poll_skipped_reason is None
+        ):
+            frame_poll_skipped_reason = "dirty_producer_same_region"
         if (
             not dirty_producer_used
             and not region_detected
