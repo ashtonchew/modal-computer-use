@@ -56,6 +56,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_paired_regional_producer_wait_ab_production",
     "observation_action_click_act_and_observe_paired_dirty_region_confirmation_ab_production",
     "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production",
+    "observation_action_click_act_and_observe_paired_timeout_ab_production",
 )
 PAIRED_ENVELOPE_ORDER_SEED = 20260602
 PAIRED_DIRTY_PRODUCER_ORDER_SEED = 20260603
@@ -86,6 +87,8 @@ PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_ORDER_SEED = 20260609
 PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_CASE = (
     "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production"
 )
+PAIRED_TIMEOUT_ORDER_SEED = 20260610
+PAIRED_TIMEOUT_CASE = "observation_action_click_act_and_observe_paired_timeout_ab_production"
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
@@ -473,6 +476,15 @@ def _observation_case_factories(
         ),
         PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_CASE: lambda: (
             _run_observation_action_click_paired_confirmation_off_producer_wait_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        PAIRED_TIMEOUT_CASE: lambda: (
+            _run_observation_action_click_paired_timeout_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
@@ -1349,6 +1361,90 @@ def _run_observation_action_click_paired_region_radius_benchmark(
     return result
 
 
+def _run_observation_action_click_paired_timeout_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    paired = _measure_paired_stream_action_observe_loop(
+        name=PAIRED_TIMEOUT_CASE,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        baseline_frame_encoding="binary-envelope",
+        variant_frame_encoding="binary-envelope",
+        baseline_dirty_frame_producer="auto",
+        variant_dirty_frame_producer="auto",
+        baseline_change_timeout_ms=100,
+        variant_change_timeout_ms=200,
+        change_detection="auto",
+        change_signal="auto",
+        order_seed=PAIRED_TIMEOUT_ORDER_SEED,
+    )
+    paired_deltas = paired["paired_delta_samples_ms"]
+    result = _case_result(PAIRED_TIMEOUT_CASE, iterations, paired_deltas, failures)
+    result.update(
+        {
+            "metric": "paired_delta_ms",
+            "delta_direction": "variant_minus_baseline",
+            "negative_delta_interpretation": "variant_faster",
+            "baseline": {
+                "label": "timeout-100ms",
+                "dirty_frame_producer": "auto",
+                "change_timeout_ms": 100,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["baseline_samples_ms"],
+                "summary_ms": _summary(paired["baseline_samples_ms"]),
+            },
+            "variant": {
+                "label": "timeout-200ms",
+                "dirty_frame_producer": "auto",
+                "change_timeout_ms": 200,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["variant_samples_ms"],
+                "summary_ms": _summary(paired["variant_samples_ms"]),
+            },
+            "paired_comparison": _paired_ab_comparison(paired_deltas),
+            "paired_observations": paired["paired_observations"],
+            "pair_order_seed": PAIRED_TIMEOUT_ORDER_SEED,
+            "pairing": {
+                "scope": "same sandbox/client path/page/stream, per-command timeout budget",
+                "order_policy": "seeded_random_ab_ba",
+                "reason": "change_timeout_ms is overridden per action-observe command",
+            },
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change_paired_timeout_ab",
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    )
+    _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_change_stage_timing_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_change_stage_timing_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_action_observe_receive_residual_rollups(
+        result["baseline"],
+        paired.get("baseline_observations", []),
+    )
+    _add_action_observe_receive_residual_rollups(
+        result["variant"],
+        paired.get("variant_observations", []),
+    )
+    return result
+
+
 def _run_observation_action_click_paired_regional_producer_wait_benchmark(
     *,
     base_url: str,
@@ -1681,6 +1777,8 @@ def _measure_paired_stream_action_observe_loop(
     variant_dirty_frame_producer_wait_ms: int | None = None,
     baseline_dirty_region_confirmation: Literal["auto", "off"] = "auto",
     variant_dirty_region_confirmation: Literal["auto", "off"] = "auto",
+    baseline_change_timeout_ms: int = 100,
+    variant_change_timeout_ms: int = 100,
     change_detection: str = "auto",
     change_signal: str = "auto",
 ) -> dict[str, Any]:
@@ -1698,6 +1796,7 @@ def _measure_paired_stream_action_observe_loop(
             "change_region_radius": baseline_change_region_radius,
             "dirty_frame_producer_wait_ms": baseline_dirty_frame_producer_wait_ms,
             "dirty_region_confirmation": baseline_dirty_region_confirmation,
+            "change_timeout_ms": baseline_change_timeout_ms,
         },
         "variant": {
             "frame_encoding": variant_frame_encoding,
@@ -1706,6 +1805,7 @@ def _measure_paired_stream_action_observe_loop(
             "change_region_radius": variant_change_region_radius,
             "dirty_frame_producer_wait_ms": variant_dirty_frame_producer_wait_ms,
             "dirty_region_confirmation": variant_dirty_region_confirmation,
+            "change_timeout_ms": variant_change_timeout_ms,
         },
     }
     try:
@@ -1731,6 +1831,7 @@ def _measure_paired_stream_action_observe_loop(
                             dirty_region_confirmation=arms[arm_label][
                                 "dirty_region_confirmation"
                             ],
+                            change_timeout_ms=arms[arm_label]["change_timeout_ms"],
                             change_detection=change_detection,
                             change_signal=change_signal,
                         )
@@ -1769,6 +1870,7 @@ def _measure_paired_stream_action_observe_loop(
                             dirty_region_confirmation=arms[arm_label][
                                 "dirty_region_confirmation"
                             ],
+                            change_timeout_ms=arms[arm_label]["change_timeout_ms"],
                             change_detection=change_detection,
                             change_signal=change_signal,
                         )
@@ -1834,6 +1936,7 @@ def _measure_paired_stream_action_observe_arm(
     change_region_radius: int | None,
     dirty_frame_producer_wait_ms: int | None,
     dirty_region_confirmation: Literal["auto", "off"],
+    change_timeout_ms: int,
     change_detection: str,
     change_signal: str,
 ) -> dict[str, Any]:
@@ -1852,6 +1955,7 @@ def _measure_paired_stream_action_observe_arm(
         dirty_region_confirmation=dirty_region_confirmation,
         frame_encoding_override=frame_encoding,
         causal_action_observe=True,
+        change_timeout_ms=change_timeout_ms,
     )
     observation["benchmark_arm"] = {
         "frame_encoding": frame_encoding,
@@ -1860,6 +1964,7 @@ def _measure_paired_stream_action_observe_arm(
         "change_region_radius": change_region_radius,
         "dirty_frame_producer_wait_ms": dirty_frame_producer_wait_ms,
         "dirty_region_confirmation": dirty_region_confirmation,
+        "change_timeout_ms": change_timeout_ms,
         "change_detection": change_detection,
         "change_signal": change_signal,
         "pairing": "same_stream_command_override",
