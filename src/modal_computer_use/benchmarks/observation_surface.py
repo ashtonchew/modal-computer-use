@@ -977,6 +977,8 @@ def _run_observation_action_click_paired_envelope_benchmark(
     )
     _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
     _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_change_stage_timing_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_change_stage_timing_rollups(result["variant"], paired.get("variant_observations", []))
     _add_action_observe_receive_residual_rollups(
         result["baseline"],
         paired.get("baseline_observations", []),
@@ -1060,6 +1062,8 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
     )
     _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
     _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_change_stage_timing_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_change_stage_timing_rollups(result["variant"], paired.get("variant_observations", []))
     _add_action_observe_receive_residual_rollups(
         result["baseline"],
         paired.get("baseline_observations", []),
@@ -2477,27 +2481,7 @@ def _add_frame_observations(
                     1 for item in observations if item.get("change_signal_detected")
                 )
             _add_dirty_frame_producer_rollups(result, observations)
-            stage_names = sorted(
-                {
-                    key
-                    for item in observations
-                    if isinstance((timing := item.get("change_stage_timing_ms")), dict)
-                    for key, value in timing.items()
-                    if isinstance(value, int | float)
-                }
-            )
-            if stage_names:
-                result["change_stage_timing_summary_ms"] = {
-                    name: _summary(
-                        [
-                            float(timing[name])
-                            for item in observations
-                            if isinstance((timing := item.get("change_stage_timing_ms")), dict)
-                            and isinstance(timing.get(name), int | float)
-                        ]
-                    )
-                    for name in stage_names
-                }
+            _add_change_stage_timing_rollups(result, observations)
             attribution_names = sorted(
                 {
                     key
@@ -2655,6 +2639,36 @@ def _add_dirty_frame_producer_rollups(
         for item in observations
         if isinstance(item, dict) and item.get("dirty_frame_capture_region") is not None
     )
+
+
+def _add_change_stage_timing_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    stage_names = sorted(
+        {
+            key
+            for item in observations
+            if isinstance(item, dict)
+            and isinstance((timing := item.get("change_stage_timing_ms")), dict)
+            for key, value in timing.items()
+            if isinstance(value, int | float)
+        }
+    )
+    if not stage_names:
+        return
+    result["change_stage_timing_summary_ms"] = {
+        name: _summary(
+            [
+                float(timing[name])
+                for item in observations
+                if isinstance(item, dict)
+                and isinstance((timing := item.get("change_stage_timing_ms")), dict)
+                and isinstance(timing.get(name), int | float)
+            ]
+        )
+        for name in stage_names
+    }
 
 
 def _add_action_observe_receive_residual_rollups(
