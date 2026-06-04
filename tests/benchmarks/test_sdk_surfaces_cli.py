@@ -780,6 +780,7 @@ def test_benchmark_modal_colocated_client_observation_profile(monkeypatch, capsy
         "observation_action_click_act_and_observe_paired_region_radius_ab_production",
         "observation_action_click_act_and_observe_paired_regional_producer_wait_ab_production",
         "observation_action_click_act_and_observe_paired_dirty_region_confirmation_ab_production",
+        "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production",
     ]
 
 

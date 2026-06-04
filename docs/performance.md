@@ -620,6 +620,10 @@ compares the default regional confirmation capture against the diagnostic
 and binary-envelope framing. Negative deltas mean the confirmation-disabled variant was faster.
 Use this case to quantify the cost of regional confirmation before considering any default policy
 change.
+`observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production`
+holds `dirty_region_confirmation="off"` in both arms and compares the current 2 ms regional
+dirty-producer wait against a 1 ms diagnostic override. Use this after the confirmation-off
+diagnostic to decide whether the producer wait cap itself remains a meaningful lower-bound lever.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,

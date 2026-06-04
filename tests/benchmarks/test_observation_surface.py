@@ -372,6 +372,10 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
         "observation_action_click_act_and_observe_paired_dirty_region_confirmation_ab_production"
         in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
     )
+    assert (
+        "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
 
 
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
@@ -942,6 +946,78 @@ def test_paired_dirty_region_confirmation_case_compares_confirmation_policy(
         ]["p50"]
         == 0.0
     )
+    assert result["paired_comparison"]["variant_wins"] == 1
+
+
+def test_paired_confirmation_off_producer_wait_case_compares_wait_budget(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    captured: dict[str, object] = {}
+
+    def fake_measure_paired_stream_action_observe_loop(**kwargs):
+        captured.update(kwargs)
+        return {
+            "baseline_samples_ms": [7.0],
+            "variant_samples_ms": [5.0],
+            "baseline_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "dirty_frame_producer_wait_budget_ms": 2,
+                    "dirty_region_confirmation": "off",
+                    "change_stage_timing_ms": {
+                        "dirty_producer_wait_ms": 2.0,
+                        "dirty_region_confirmation_capture_ms": 0.0,
+                        "server_pre_emit_ms": 6.0,
+                    },
+                }
+            ],
+            "variant_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "dirty_frame_producer_wait_budget_ms": 1,
+                    "dirty_region_confirmation": "off",
+                    "change_stage_timing_ms": {
+                        "dirty_producer_wait_ms": 1.0,
+                        "dirty_region_confirmation_capture_ms": 0.0,
+                        "server_pre_emit_ms": 4.0,
+                    },
+                }
+            ],
+            "paired_delta_samples_ms": [-2.0],
+            "paired_observations": [],
+        }
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        fake_measure_paired_stream_action_observe_loop,
+    )
+
+    result = (
+        observation_surface._run_observation_action_click_paired_confirmation_off_producer_wait_benchmark(
+            base_url="http://daemon.test",
+            token=None,
+            client=object(),  # type: ignore[arg-type]
+            iterations=1,
+            warmup_iterations=0,
+        )
+    )
+
+    assert captured["baseline_dirty_frame_producer_wait_ms"] == 2
+    assert captured["variant_dirty_frame_producer_wait_ms"] == 1
+    assert captured["baseline_dirty_region_confirmation"] == "off"
+    assert captured["variant_dirty_region_confirmation"] == "off"
+    assert (
+        captured["order_seed"]
+        == observation_surface.PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_ORDER_SEED
+    )
+    assert result["baseline"]["dirty_frame_producer_wait_ms"] == 2
+    assert result["variant"]["dirty_frame_producer_wait_ms"] == 1
+    assert result["baseline"]["dirty_region_confirmation"] == "off"
+    assert result["variant"]["dirty_region_confirmation"] == "off"
+    assert result["baseline"]["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 2.0
+    assert result["variant"]["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 1.0
     assert result["paired_comparison"]["variant_wins"] == 1
 
 

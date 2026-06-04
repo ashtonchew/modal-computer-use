@@ -49,6 +49,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_paired_region_radius_ab_production",
     "observation_action_click_act_and_observe_paired_regional_producer_wait_ab_production",
     "observation_action_click_act_and_observe_paired_dirty_region_confirmation_ab_production",
+    "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production",
 )
 PAIRED_ENVELOPE_ORDER_SEED = 20260602
 PAIRED_DIRTY_PRODUCER_ORDER_SEED = 20260603
@@ -74,6 +75,10 @@ PAIRED_REGIONAL_PRODUCER_WAIT_CASE = (
 PAIRED_DIRTY_REGION_CONFIRMATION_ORDER_SEED = 20260608
 PAIRED_DIRTY_REGION_CONFIRMATION_CASE = (
     "observation_action_click_act_and_observe_paired_dirty_region_confirmation_ab_production"
+)
+PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_ORDER_SEED = 20260609
+PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_CASE = (
+    "observation_action_click_act_and_observe_paired_confirmation_off_producer_wait_ab_production"
 )
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
@@ -433,6 +438,15 @@ def _observation_case_factories(
         ),
         PAIRED_DIRTY_REGION_CONFIRMATION_CASE: lambda: (
             _run_observation_action_click_paired_dirty_region_confirmation_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_CASE: lambda: (
+            _run_observation_action_click_paired_confirmation_off_producer_wait_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
@@ -1483,6 +1497,116 @@ def _run_observation_action_click_paired_dirty_region_confirmation_benchmark(
             "action_count": 1,
             "mutation_kind": (
                 "stream_action_click_observe_change_paired_dirty_region_confirmation_ab"
+            ),
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto_region",
+            "change_signal": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    )
+    _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_change_stage_timing_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_change_stage_timing_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_action_observe_receive_residual_rollups(
+        result["baseline"],
+        paired.get("baseline_observations", []),
+    )
+    _add_action_observe_receive_residual_rollups(
+        result["variant"],
+        paired.get("variant_observations", []),
+    )
+    return result
+
+
+def _run_observation_action_click_paired_confirmation_off_producer_wait_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    paired = _measure_paired_stream_action_observe_loop(
+        name=PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_CASE,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        baseline_frame_encoding="binary-envelope",
+        variant_frame_encoding="binary-envelope",
+        baseline_dirty_frame_producer="auto",
+        variant_dirty_frame_producer="auto",
+        baseline_full_frame_fallback=False,
+        variant_full_frame_fallback=False,
+        baseline_change_region_radius=64,
+        variant_change_region_radius=64,
+        baseline_dirty_frame_producer_wait_ms=2,
+        variant_dirty_frame_producer_wait_ms=1,
+        baseline_dirty_region_confirmation="off",
+        variant_dirty_region_confirmation="off",
+        change_detection="auto_region",
+        change_signal="auto",
+        order_seed=PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_ORDER_SEED,
+    )
+    paired_deltas = paired["paired_delta_samples_ms"]
+    result = _case_result(
+        PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_CASE,
+        iterations,
+        paired_deltas,
+        failures,
+    )
+    result.update(
+        {
+            "metric": "paired_delta_ms",
+            "delta_direction": "variant_minus_baseline",
+            "negative_delta_interpretation": "variant_faster",
+            "baseline": {
+                "label": "confirmation-off-producer-wait-2ms",
+                "dirty_frame_producer": "auto",
+                "dirty_frame_producer_wait_ms": 2,
+                "dirty_region_confirmation": "off",
+                "full_frame_fallback": False,
+                "change_region_radius": 64,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["baseline_samples_ms"],
+                "summary_ms": _summary(paired["baseline_samples_ms"]),
+            },
+            "variant": {
+                "label": "confirmation-off-producer-wait-1ms",
+                "dirty_frame_producer": "auto",
+                "dirty_frame_producer_wait_ms": 1,
+                "dirty_region_confirmation": "off",
+                "full_frame_fallback": False,
+                "change_region_radius": 64,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["variant_samples_ms"],
+                "summary_ms": _summary(paired["variant_samples_ms"]),
+            },
+            "paired_comparison": _paired_ab_comparison(paired_deltas),
+            "paired_observations": paired["paired_observations"],
+            "pair_order_seed": PAIRED_CONFIRMATION_OFF_PRODUCER_WAIT_ORDER_SEED,
+            "pairing": {
+                "scope": (
+                    "same sandbox/client path/page/stream, confirmation disabled, "
+                    "per-command regional dirty producer wait budget"
+                ),
+                "order_policy": "seeded_random_ab_ba",
+                "reason": (
+                    "dirty_frame_producer_wait_ms is overridden while "
+                    "dirty_region_confirmation is held off"
+                ),
+            },
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": (
+                "stream_action_click_observe_change_paired_confirmation_off_producer_wait_ab"
             ),
             "change_timeout_ms": 100,
             "poll_interval_ms": 8,
