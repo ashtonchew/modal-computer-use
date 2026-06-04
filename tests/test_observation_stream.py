@@ -1391,6 +1391,10 @@ def test_observation_stream_confirms_dirty_region_after_producer_timeout(
     )
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_native_ms"] >= 0
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] == 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_ready_ms"] == 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_lock_wait_ms"] == 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_operation_ms"] == 0
     composed = ObservationFrame(
         payload=second_payload,
         metadata=second,
@@ -1589,6 +1593,10 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_region(
     assert second["change_timeout_reached"] is True
     assert second["change_wait_ms"] < 80
     assert second["change_stage_timing_ms"]["frame_poll_ms"] < 30
+    assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] > 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_ready_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_lock_wait_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_operation_ms"] > 0
 
 
 def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_producer(
@@ -1680,6 +1688,10 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_producer(
     assert second["change_timeout_reached"] is True
     assert second["change_wait_ms"] < 80
     assert second["change_stage_timing_ms"]["frame_poll_ms"] < 30
+    assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] > 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_ready_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_lock_wait_ms"] >= 0
+    assert second["change_stage_timing_ms"]["frame_poll_capture_operation_ms"] > 0
 
 
 def test_observation_stream_dirty_producer_can_capture_xdamage_region(

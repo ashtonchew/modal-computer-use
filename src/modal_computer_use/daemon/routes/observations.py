@@ -789,6 +789,10 @@ async def _send_changed_frame(
     region_poll_capture_lock_wait_ms = 0.0
     region_poll_capture_operation_ms = 0.0
     frame_poll_ms = 0.0
+    frame_poll_capture_ms = 0.0
+    frame_poll_capture_ready_ms = 0.0
+    frame_poll_capture_lock_wait_ms = 0.0
+    frame_poll_capture_operation_ms = 0.0
     last_metadata: dict[str, Any] | None = None
     last_payload = b""
     change_detected = False
@@ -1015,7 +1019,7 @@ async def _send_changed_frame(
                 )
             while True:
                 attempts += 1
-                metadata, payload = await _capture_frame(
+                metadata, payload, frame_poll_capture_timing = await _capture_frame_with_timing(
                     websocket,
                     request,
                     seq,
@@ -1026,6 +1030,10 @@ async def _send_changed_frame(
                     previous_seq=state.last_frame_seq,
                     stream_id=state.stream_id or "unknown",
                 )
+                frame_poll_capture_ms += frame_poll_capture_timing.total_ms
+                frame_poll_capture_ready_ms += frame_poll_capture_timing.ready_ms
+                frame_poll_capture_lock_wait_ms += frame_poll_capture_timing.lock_wait_ms
+                frame_poll_capture_operation_ms += frame_poll_capture_timing.operation_ms
                 last_metadata = metadata
                 last_payload = payload
                 delta_ready_at = perf_counter()
@@ -1095,6 +1103,10 @@ async def _send_changed_frame(
         "region_poll_capture_lock_wait_ms": region_poll_capture_lock_wait_ms,
         "region_poll_capture_operation_ms": region_poll_capture_operation_ms,
         "frame_poll_ms": frame_poll_ms,
+        "frame_poll_capture_ms": frame_poll_capture_ms,
+        "frame_poll_capture_ready_ms": frame_poll_capture_ready_ms,
+        "frame_poll_capture_lock_wait_ms": frame_poll_capture_lock_wait_ms,
+        "frame_poll_capture_operation_ms": frame_poll_capture_operation_ms,
         "change_wait_ms": wait_ms,
         "server_pre_emit_ms": (pre_emit_at - observe_started) * 1000,
     }
@@ -1876,6 +1888,32 @@ async def _capture_frame(
     previous_seq: int | None,
     stream_id: str,
 ) -> tuple[dict[str, Any], bytes]:
+    metadata, payload, _timing = await _capture_frame_with_timing(
+        websocket,
+        request,
+        seq,
+        last_sha256,
+        last_source_sha256=last_source_sha256,
+        previous_image=previous_image,
+        previous_tile_hashes=previous_tile_hashes,
+        previous_seq=previous_seq,
+        stream_id=stream_id,
+    )
+    return metadata, payload
+
+
+async def _capture_frame_with_timing(
+    websocket: WebSocket,
+    request: ObservationStreamRequest,
+    seq: int,
+    last_sha256: str | None,
+    *,
+    last_source_sha256: str | None,
+    previous_image: Image.Image | None,
+    previous_tile_hashes: dict[tuple[int, int], bytes] | None,
+    previous_seq: int | None,
+    stream_id: str,
+) -> tuple[dict[str, Any], bytes, ScreenshotCaptureTiming]:
     options = _stream_screenshot_options(request)
 
     async def operation():
@@ -1886,7 +1924,7 @@ async def _capture_frame(
         )
 
     captured_started = perf_counter()
-    raw = await _capture_raw_frame(websocket, request, options)
+    raw, capture_timing = await _capture_raw_frame_with_timing(websocket, request, options)
     if raw is not None:
         metadata, payload = _capture_raw_delta_frame(
             raw=raw,
@@ -1899,9 +1937,9 @@ async def _capture_frame(
             stream_id=stream_id,
             captured_started=captured_started,
         )
-        return metadata, payload
+        return metadata, payload, capture_timing
 
-    shot = await run_screenshot_capture(websocket, operation)
+    shot, capture_timing = await run_screenshot_capture_with_timing(websocket, operation)
     unchanged = shot.sha256 == last_sha256
     force_keyframe = _should_force_keyframe(
         previous_image=previous_image,
@@ -1962,7 +2000,7 @@ async def _capture_frame(
         "_current_image": current_image,
         "_current_tile_hashes": None,
     }
-    return metadata, delta["payload"]
+    return metadata, delta["payload"], capture_timing
 
 
 async def _capture_raw_frame(
@@ -1970,16 +2008,31 @@ async def _capture_raw_frame(
     request: ObservationStreamRequest,
     options: ScreenshotOptions,
 ) -> CapturedRawScreenshot | None:
+    raw, _timing = await _capture_raw_frame_with_timing(websocket, request, options)
+    return raw
+
+
+async def _capture_raw_frame_with_timing(
+    websocket: WebSocket,
+    request: ObservationStreamRequest,
+    options: ScreenshotOptions,
+) -> tuple[CapturedRawScreenshot | None, ScreenshotCaptureTiming]:
+    empty_timing = ScreenshotCaptureTiming(
+        ready_ms=0.0,
+        lock_wait_ms=0.0,
+        operation_ms=0.0,
+        total_ms=0.0,
+    )
     if not _can_use_raw_observation_path(request, options):
-        return None
+        return None, empty_timing
 
     async def operation():
         return await websocket.app.state.backend.screenshot_raw_pixels(region=request.region)
 
-    raw = await run_screenshot_capture(websocket, operation)
+    raw, timing = await run_screenshot_capture_with_timing(websocket, operation)
     if raw is None:
-        return None
-    return raw
+        return None, timing
+    return raw, timing
 
 
 def _reconstruct_full_raw_frame_from_region(
