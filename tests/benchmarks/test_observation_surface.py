@@ -439,6 +439,9 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert result["baseline"]["summary_ms"]["p50"] == 125.0
     assert result["variant"]["dirty_frame_producer"] == "auto"
     assert result["variant"]["summary_ms"]["p50"] == 115.0
+    assert result["variant"]["dirty_frame_producer_frames"] == 2
+    assert result["variant"]["dirty_frame_producer_used_frames"] == 1
+    assert result["variant"]["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
     assert result["variant"]["frame_poll_budget_summary_ms"]["p50"] == 12.0
     assert result["variant"]["dirty_frame_capture_region_sources"] == [
         "action_region",
@@ -471,6 +474,68 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert result["pairing"]["scope"] == (
         "same sandbox/client path/page/stream, per-command dirty producer policy"
     )
+
+
+def test_paired_dirty_producer_xdamage_case_uses_xdamage_signal(monkeypatch) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    captured: dict[str, object] = {}
+
+    def fake_measure_paired_stream_action_observe_loop(**kwargs):
+        captured.update(kwargs)
+        return {
+            "baseline_samples_ms": [120.0],
+            "variant_samples_ms": [80.0],
+            "baseline_observations": [
+                {
+                    "dirty_frame_producer": False,
+                    "benchmark_arm": {
+                        "change_detection": kwargs["change_detection"],
+                        "change_signal": kwargs["change_signal"],
+                    },
+                }
+            ],
+            "variant_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "dirty_frame_producer_used": False,
+                    "dirty_frame_producer_fallback_reason": "no_changed_frame",
+                    "benchmark_arm": {
+                        "change_detection": kwargs["change_detection"],
+                        "change_signal": kwargs["change_signal"],
+                    },
+                }
+            ],
+            "paired_delta_samples_ms": [-40.0],
+            "paired_observations": [],
+        }
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        fake_measure_paired_stream_action_observe_loop,
+    )
+
+    result = observation_surface._run_observation_action_click_paired_dirty_producer_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+        name="observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_production",
+        change_detection="full",
+        change_signal="xdamage",
+        order_seed=observation_surface.PAIRED_DIRTY_PRODUCER_XDAMAGE_ORDER_SEED,
+    )
+
+    assert captured["change_detection"] == "full"
+    assert captured["change_signal"] == "xdamage"
+    assert captured["order_seed"] == observation_surface.PAIRED_DIRTY_PRODUCER_XDAMAGE_ORDER_SEED
+    assert result["change_detection"] == "full"
+    assert result["change_signal"] == "xdamage"
+    assert result["pair_order_seed"] == observation_surface.PAIRED_DIRTY_PRODUCER_XDAMAGE_ORDER_SEED
+    assert result["variant"]["dirty_frame_producer_frames"] == 1
+    assert result["variant"]["dirty_frame_producer_used_frames"] == 0
+    assert result["variant"]["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
 
 
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:
