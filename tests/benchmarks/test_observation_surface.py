@@ -388,6 +388,11 @@ def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None
             2 if beacon_id == "token-123" and expected_events == 3 else 0
         ),
     )
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_ready_count",
+        lambda _client, beacon_id: 1 if beacon_id == "token-123" else 0,
+    )
 
     result = observation_surface._run_observation_action_click_beacon_benchmark(
         base_url="http://daemon.test",
@@ -405,6 +410,8 @@ def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None
     assert result["click_beacon_expected_events"] == 3
     assert result["click_beacon_events"] == 2
     assert result["click_beacon_missing_events"] == 1
+    assert result["click_ready_events_before_actions"] == 1
+    assert result["click_ready_events_after_actions"] == 1
     assert result["frame_encoding_policy"] == "sdk-default"
 
 
@@ -431,6 +438,11 @@ def test_click_target_state_case_reports_window_state(monkeypatch) -> None:
         observation_surface,
         "_wait_for_click_beacon_count",
         lambda _client, _beacon_id, *, expected_events: expected_events,
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_ready_count",
+        lambda _client, _beacon_id: 1,
     )
     monkeypatch.setattr(
         observation_surface,
@@ -478,6 +490,11 @@ def test_lower_click_target_state_case_uses_lower_action(monkeypatch) -> None:
         observation_surface,
         "_wait_for_click_beacon_count",
         lambda _client, _beacon_id, *, expected_events: expected_events,
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_ready_count",
+        lambda _client, _beacon_id: 1,
     )
     monkeypatch.setattr(
         observation_surface,
@@ -677,6 +694,7 @@ def test_open_click_toggle_beacon_page_installs_click_beacon(monkeypatch) -> Non
     assert "new Image()" in str(body)
     assert "window.__clickBeacons.push(img)" in str(body)
     assert "/click?token=" in str(body)
+    assert "/ready?token=" in str(body)
     assert token in str(body)
     open_path, open_payload = calls[1]
     assert open_path == "/v1/browser/open-url"
@@ -708,6 +726,26 @@ def test_read_click_beacon_count_parses_command_stdout() -> None:
     assert path == "/v1/commands/run"
     assert isinstance(payload["command"], list)
     assert "GET /click?token=token%20with%20spaces" in str(payload["command"])
+
+
+def test_read_click_ready_count_parses_command_stdout() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            calls.append((path, json))
+            return {"ok": True, "output": {"stdout": "1\n"}}
+
+    count = observation_surface._read_click_ready_count(
+        FakeClient(),  # type: ignore[arg-type]
+        "token with spaces",
+    )
+
+    assert count == 1
+    path, payload = calls[0]
+    assert path == "/v1/commands/run"
+    assert isinstance(payload["command"], list)
+    assert "GET /ready?token=token%20with%20spaces" in str(payload["command"])
 
 
 def test_wait_for_click_beacon_count_polls_until_expected(monkeypatch) -> None:

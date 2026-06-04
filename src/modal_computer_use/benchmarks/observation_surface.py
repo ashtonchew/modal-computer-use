@@ -1070,6 +1070,7 @@ def _run_observation_action_click_beacon_benchmark(
     failures: list[dict[str, Any]] = []
     action = action or CLICK_TOGGLE_ACTION
     beacon_token = _open_click_toggle_beacon_page(client)
+    ready_events_before_actions = _read_click_ready_count(client, beacon_token)
     state_before = _read_click_target_state(client) if state_probe else None
     samples, observations = _measure_stream_action_capture_loop(
         name=name,
@@ -1093,6 +1094,7 @@ def _run_observation_action_click_beacon_benchmark(
         beacon_token,
         expected_events=expected_events,
     )
+    ready_events_after_actions = _read_click_ready_count(client, beacon_token)
     state_after = _read_click_target_state(client) if state_probe else None
     result = _case_result(
         name,
@@ -1119,6 +1121,8 @@ def _run_observation_action_click_beacon_benchmark(
             "click_beacon_expected_events": expected_events,
             "click_beacon_events": beacon_events,
             "click_beacon_missing_events": max(expected_events - beacon_events, 0),
+            "click_ready_events_before_actions": ready_events_before_actions,
+            "click_ready_events_after_actions": ready_events_after_actions,
         }
     )
     if state_probe:
@@ -3225,8 +3229,13 @@ def _open_click_toggle_beacon_page(client: DaemonClient) -> str:
         "img.src='/click?token='+encodeURIComponent(token)+'&n='+n+'&t='+Date.now();"
         "window.__clickBeacons.push(img);"
         "}"
+        "function readyBeacon(){"
+        "window.__readyBeacon=new Image();"
+        "window.__readyBeacon.src='/ready?token='+encodeURIComponent(token)+'&t='+Date.now();"
+        "}"
         "document.addEventListener('click',()=>{n++;paint();beacon();});"
         "paint();"
+        "readyBeacon();"
         "</script>"
         "</body></html>"
     )
@@ -3301,7 +3310,19 @@ def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
 
 
 def _read_click_beacon_count(client: DaemonClient, token: str) -> int:
-    needle = f"GET /click?token={quote(token, safe='')}"
+    return _read_http_log_event_count(client, "click", token)
+
+
+def _read_click_ready_count(client: DaemonClient, token: str) -> int:
+    return _read_http_log_event_count(client, "ready", token)
+
+
+def _read_http_log_event_count(
+    client: DaemonClient,
+    event: Literal["click", "ready"],
+    token: str,
+) -> int:
+    needle = f"GET /{event}?token={quote(token, safe='')}"
     script = (
         "set -eu; "
         f"log={shell_quote(CLICK_TOGGLE_HTTP_LOG_PATH)}; "
