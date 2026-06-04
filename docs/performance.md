@@ -330,7 +330,7 @@ probe while they are actively proving that the desktop is usable. `/readyz` stil
 probe for health checks, and failed operations do not refresh the cache.
 Regional dirty-frame producer waits are capped below full-frame producer waits because regional
 confirmation can cheaply verify the action-derived capture region and still leave a bounded
-frame-poll fallback. The regional cap is 4 ms, which keeps missed producer frames from dominating
+frame-poll fallback. The regional cap is 2 ms, which keeps missed producer frames from dominating
 the common post-confirmation fallback path. Full-frame producer waits keep the larger budget because
 fallback capture is more expensive and has no regional confirmation shortcut.
 Frame-poll fallback timings split the full poll wall time from `frame_poll_capture_*` capture
