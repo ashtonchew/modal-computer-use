@@ -945,6 +945,61 @@ def test_paired_region_radius_case_compares_auto_region_radius(monkeypatch) -> N
     )
 
 
+def test_paired_timeout_case_compares_change_timeout_budget(monkeypatch) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    captured: dict[str, object] = {}
+
+    def fake_measure_paired_stream_action_observe_loop(**kwargs):
+        captured.update(kwargs)
+        return {
+            "baseline_samples_ms": [105.0],
+            "variant_samples_ms": [42.0],
+            "baseline_observations": [
+                {
+                    "change_timeout_reached": True,
+                    "benchmark_arm": {
+                        "change_timeout_ms": kwargs["baseline_change_timeout_ms"],
+                    },
+                }
+            ],
+            "variant_observations": [
+                {
+                    "change_timeout_reached": False,
+                    "benchmark_arm": {
+                        "change_timeout_ms": kwargs["variant_change_timeout_ms"],
+                    },
+                }
+            ],
+            "paired_delta_samples_ms": [-63.0],
+            "paired_observations": [],
+        }
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        fake_measure_paired_stream_action_observe_loop,
+    )
+
+    result = observation_surface._run_observation_action_click_paired_timeout_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert captured["baseline_change_timeout_ms"] == 100
+    assert captured["variant_change_timeout_ms"] == 200
+    assert captured["change_detection"] == "auto"
+    assert captured["order_seed"] == observation_surface.PAIRED_TIMEOUT_ORDER_SEED
+    assert result["baseline"]["change_timeout_ms"] == 100
+    assert result["variant"]["change_timeout_ms"] == 200
+    assert result["paired_comparison"]["variant_wins"] == 1
+    assert result["pairing"]["scope"] == (
+        "same sandbox/client path/page/stream, per-command timeout budget"
+    )
+
+
 def test_paired_regional_producer_wait_case_compares_wait_budget(monkeypatch) -> None:
     monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
     captured: dict[str, object] = {}
