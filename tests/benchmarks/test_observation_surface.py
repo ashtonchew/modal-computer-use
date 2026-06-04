@@ -408,6 +408,53 @@ def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None
     assert result["frame_encoding_policy"] == "sdk-default"
 
 
+def test_click_target_state_case_reports_window_state(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    states = iter(
+        [
+            {"available": True, "window_name": "Chromium", "window_width": 1024},
+            {"available": True, "window_name": "Chromium", "pointer_x": 512},
+        ]
+    )
+
+    def fake_measure(**kwargs):
+        captured.update(kwargs)
+        return [1.0], [{"change_detected": False}]
+
+    monkeypatch.setattr(observation_surface, "_measure_stream_action_capture_loop", fake_measure)
+    monkeypatch.setattr(
+        observation_surface,
+        "_open_click_toggle_beacon_page",
+        lambda _client: "token-123",
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_wait_for_click_beacon_count",
+        lambda _client, _beacon_id, *, expected_events: expected_events,
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_target_state",
+        lambda _client: next(states),
+    )
+
+    result = observation_surface._run_observation_action_click_target_state_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=1,
+    )
+
+    assert (
+        captured["name"]
+        == "observation_action_click_act_and_observe_click_target_state_production"
+    )
+    assert result["mutation_kind"] == "stream_action_click_observe_change_click_target_state"
+    assert result["click_target_state_before"]["window_width"] == 1024
+    assert result["click_target_state_after"]["pointer_x"] == 512
+
+
 def test_stream_action_capture_loop_omits_sdk_default_frame_encoding(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -632,6 +679,22 @@ def test_wait_for_click_beacon_count_polls_until_expected(monkeypatch) -> None:
 
     assert count == 3
     assert sleeps == [0.05, 0.05]
+
+
+def test_parse_click_target_state_coerces_booleans_and_ints() -> None:
+    state = observation_surface._parse_click_target_state(
+        "available=true\n"
+        "active_window=123\n"
+        "window_name=Chromium\n"
+        "pointer_x=512\n"
+    )
+
+    assert state == {
+        "available": True,
+        "active_window": 123,
+        "window_name": "Chromium",
+        "pointer_x": 512,
+    }
 
 
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:

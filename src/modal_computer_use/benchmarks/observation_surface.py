@@ -47,6 +47,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_sdk_default_production",
     "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production",
     "observation_action_click_act_and_observe_click_beacon_production",
+    "observation_action_click_act_and_observe_click_target_state_production",
     "observation_action_click_act_and_observe_auto_signal_production",
     "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
     "observation_action_click_act_and_observe_auto_region_production",
@@ -365,6 +366,15 @@ def _observation_case_factories(
         ),
         "observation_action_click_act_and_observe_click_beacon_production": lambda: (
             _run_observation_action_click_beacon_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        "observation_action_click_act_and_observe_click_target_state_production": lambda: (
+            _run_observation_action_click_target_state_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
@@ -1041,11 +1051,15 @@ def _run_observation_action_click_beacon_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int,
+    name: str = "observation_action_click_act_and_observe_click_beacon_production",
+    mutation_kind: str = "stream_action_click_observe_change_click_beacon",
+    state_probe: bool = False,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     beacon_token = _open_click_toggle_beacon_page(client)
+    state_before = _read_click_target_state(client) if state_probe else None
     samples, observations = _measure_stream_action_capture_loop(
-        name="observation_action_click_act_and_observe_click_beacon_production",
+        name=name,
         base_url=base_url,
         token=token,
         iterations=iterations,
@@ -1065,8 +1079,9 @@ def _run_observation_action_click_beacon_benchmark(
         beacon_token,
         expected_events=expected_events,
     )
+    state_after = _read_click_target_state(client) if state_probe else None
     result = _case_result(
-        "observation_action_click_act_and_observe_click_beacon_production",
+        name,
         iterations,
         samples,
         failures,
@@ -1076,7 +1091,7 @@ def _run_observation_action_click_beacon_benchmark(
         {
             "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
             "action_count": 1,
-            "mutation_kind": "stream_action_click_observe_change_click_beacon",
+            "mutation_kind": mutation_kind,
             "change_timeout_ms": 100,
             "poll_interval_ms": 8,
             "poll_strategy": "adaptive",
@@ -1092,6 +1107,32 @@ def _run_observation_action_click_beacon_benchmark(
             "click_beacon_missing_events": max(expected_events - beacon_events, 0),
         }
     )
+    if state_probe:
+        result["_click_target_state_before"] = state_before
+        result["_click_target_state_after"] = state_after
+    return result
+
+
+def _run_observation_action_click_target_state_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    result = _run_observation_action_click_beacon_benchmark(
+        base_url=base_url,
+        token=token,
+        client=client,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        name="observation_action_click_act_and_observe_click_target_state_production",
+        mutation_kind="stream_action_click_observe_change_click_target_state",
+        state_probe=True,
+    )
+    result["click_target_state_before"] = result.pop("_click_target_state_before")
+    result["click_target_state_after"] = result.pop("_click_target_state_after")
     return result
 
 
@@ -3236,6 +3277,52 @@ def _read_click_beacon_count(client: DaemonClient, token: str) -> int:
         return max(int(str(stdout).strip() or "0"), 0)
     except ValueError:
         return 0
+
+
+def _read_click_target_state(client: DaemonClient) -> dict[str, Any]:
+    script = (
+        "set -u; "
+        "if ! command -v xdotool >/dev/null 2>&1; then "
+        "printf 'available=false\\n'; exit 0; fi; "
+        "printf 'available=true\\n'; "
+        "active=$(xdotool getactivewindow 2>/dev/null || true); "
+        "printf 'active_window=%s\\n' \"$active\"; "
+        'if [ -n "$active" ]; then '
+        "name=$(xdotool getwindowname \"$active\" 2>/dev/null || true); "
+        "printf 'window_name=%s\\n' \"$name\"; "
+        "xdotool getwindowgeometry --shell \"$active\" 2>/dev/null "
+        " | sed 's/^/window_/'; "
+        "fi; "
+        "xdotool getmouselocation --shell 2>/dev/null | sed 's/^/pointer_/' || true"
+    )
+    result = client.post_json(
+        "/v1/commands/run",
+        json={"command": ["sh", "-lc", script], "timeout": 5},
+    )
+    output = result.get("output") if isinstance(result, dict) else {}
+    stdout = output.get("stdout") if isinstance(output, dict) else None
+    return _parse_click_target_state(str(stdout or ""))
+
+
+def _parse_click_target_state(stdout: str) -> dict[str, Any]:
+    state: dict[str, Any] = {}
+    for line in stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or not key:
+            continue
+        state[key.lower()] = _parse_click_target_state_value(value)
+    return state
+
+
+def _parse_click_target_state_value(value: str) -> Any:
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        return value
 
 
 def _wait_for_click_beacon_count(
