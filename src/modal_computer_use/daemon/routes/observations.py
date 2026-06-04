@@ -442,6 +442,7 @@ async def _handle_observation_message(
                         "change_detection",
                         "change_signal",
                         "dirty_frame_producer",
+                        "dirty_frame_producer_wait_ms",
                         "full_frame_fallback",
                         "frame_encoding",
                         "change_detection_region",
@@ -524,6 +525,7 @@ async def _handle_observation_message(
                 region_baseline_sha256=region_baseline_sha256,
                 change_signal=change_signal,
                 dirty_producer=dirty_producer,
+                dirty_frame_producer_wait_ms=stream_request.dirty_frame_producer_wait_ms,
                 baseline_source_sha256=baseline_source_sha256,
                 observe_started=observe_started,
                 action_started=action_started,
@@ -742,6 +744,7 @@ async def _send_changed_frame(
     region_baseline_sha256: str | None,
     change_signal: _PreparedChangeSignal,
     dirty_producer: _DirtyFrameProducer | None,
+    dirty_frame_producer_wait_ms: int | None,
     baseline_source_sha256: str | None,
     observe_started: float,
     action_started: float,
@@ -812,6 +815,7 @@ async def _send_changed_frame(
             dirty_producer_wait_budget_ms = _dirty_frame_producer_wait_timeout_ms(
                 timeout_ms,
                 regional_capture=dirty_producer.capture_region is not None,
+                override_ms=dirty_frame_producer_wait_ms,
             )
             producer_wait_started = perf_counter()
             producer_result = await dirty_producer.wait_for_change(
@@ -1411,7 +1415,10 @@ def _dirty_frame_producer_wait_timeout_ms(
     change_timeout_ms: int,
     *,
     regional_capture: bool,
+    override_ms: int | None = None,
 ) -> int:
+    if override_ms is not None:
+        return min(override_ms, change_timeout_ms)
     if change_timeout_ms <= 0:
         return change_timeout_ms
     if not regional_capture and change_timeout_ms <= DIRTY_FRAME_PRODUCER_MAX_WAIT_MS:
