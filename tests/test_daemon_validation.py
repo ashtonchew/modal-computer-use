@@ -6,6 +6,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+import modal_computer_use.daemon.readiness as readiness
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import Point
@@ -825,6 +826,44 @@ def test_screenshot_hot_path_reuses_successful_readiness_probe(tmp_path) -> None
     assert readiness_calls == 1
 
 
+def test_screenshot_success_refreshes_readiness_cache(tmp_path, monkeypatch) -> None:
+    now = 0.0
+
+    class Clock:
+        def monotonic(self) -> float:
+            return now
+
+    monkeypatch.setattr(readiness, "time", Clock())
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            readiness_cache_ttl_ms=100,
+        )
+    )
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    app.state.backend.ready = counted_ready
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/screenshots/full", json={"format": "png"})
+        now += 0.06
+        second = client.post("/v1/screenshots/full", json={"format": "png"})
+        now += 0.06
+        third = client.post("/v1/screenshots/full", json={"format": "png"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert readiness_calls == 1
+
+
 def test_action_hot_path_reuses_successful_readiness_probe(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
@@ -851,6 +890,50 @@ def test_action_hot_path_reuses_successful_readiness_probe(tmp_path) -> None:
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert readiness_calls == 1
+
+
+def test_action_success_refreshes_readiness_cache(tmp_path, monkeypatch) -> None:
+    now = 0.0
+
+    class Clock:
+        def monotonic(self) -> float:
+            return now
+
+    monkeypatch.setattr(readiness, "time", Clock())
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            readiness_cache_ttl_ms=100,
+        )
+    )
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    app.state.backend.ready = counted_ready
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        first = client.post("/v1/actions/run", json={"actions": [{"type": "move", "x": 1, "y": 2}]})
+        now += 0.06
+        second = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "click", "x": 3, "y": 4}]},
+        )
+        now += 0.06
+        third = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "move", "x": 5, "y": 6}]},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
     assert readiness_calls == 1
 
 

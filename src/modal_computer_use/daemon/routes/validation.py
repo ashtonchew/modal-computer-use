@@ -18,6 +18,12 @@ async def backend_readiness(state: Any, *, force: bool = False) -> tuple[bool, l
     return await cache.backend_ready(state.backend, force=force)
 
 
+def mark_desktop_ready(state: Any) -> None:
+    cache = getattr(state, "readiness_cache", None)
+    if cache is not None:
+        cache.mark_ready()
+
+
 async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
     ready, errors = await backend_readiness(request.app.state, force=force)
     if not request.app.state.supervisor.running:

@@ -13,7 +13,7 @@ from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacted_action
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.validation import backend_readiness
+from modal_computer_use.daemon.routes.validation import backend_readiness, mark_desktop_ready
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
     ActionBatchRequest,
@@ -460,6 +460,8 @@ async def _run(
             screenshot=screenshot,
             timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
         )
+        if result.ok:
+            mark_desktop_ready(context.state)
         cache_enabled = context.state.settings.idempotency_cache_max_entries > 0
         if effective_idempotency_key and cache_enabled and not raw_screenshot_after:
             cache[effective_idempotency_key] = {

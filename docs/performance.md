@@ -312,6 +312,12 @@ Use `observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_p
 paired dirty-producer artifact needs full-frame XDamage signal coverage without action-region
 capture.
 
+Capture timing breakdowns split desktop readiness from input-lock wait and backend screenshot
+operation time. Successful screenshot captures and action batches refresh the daemon's positive
+readiness cache, so hot observation loops should not periodically pay a fresh backend readiness
+probe while they are actively proving that the desktop is usable. `/readyz` still forces a fresh
+probe for health checks, and failed operations do not refresh the cache.
+
 Live observation benchmark runs can be narrowed to the cases under investigation:
 
 ```bash
