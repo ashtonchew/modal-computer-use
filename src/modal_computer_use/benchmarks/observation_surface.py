@@ -46,6 +46,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_paired_envelope_ab_production",
     "observation_action_click_act_and_observe_paired_dirty_producer_ab_production",
     "observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production",
+    "observation_action_click_act_and_observe_paired_region_radius_ab_production",
 )
 PAIRED_ENVELOPE_ORDER_SEED = 20260602
 PAIRED_DIRTY_PRODUCER_ORDER_SEED = 20260603
@@ -59,6 +60,10 @@ PAIRED_DIRTY_PRODUCER_XDAMAGE_CASE = (
 PAIRED_FULL_FRAME_FALLBACK_ORDER_SEED = 20260605
 PAIRED_FULL_FRAME_FALLBACK_CASE = (
     "observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production"
+)
+PAIRED_REGION_RADIUS_ORDER_SEED = 20260606
+PAIRED_REGION_RADIUS_CASE = (
+    "observation_action_click_act_and_observe_paired_region_radius_ab_production"
 )
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
@@ -391,6 +396,15 @@ def _observation_case_factories(
         ),
         PAIRED_FULL_FRAME_FALLBACK_CASE: lambda: (
             _run_observation_action_click_paired_full_frame_fallback_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+            )
+        ),
+        PAIRED_REGION_RADIUS_CASE: lambda: (
+            _run_observation_action_click_paired_region_radius_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
@@ -1176,6 +1190,95 @@ def _run_observation_action_click_paired_full_frame_fallback_benchmark(
     return result
 
 
+def _run_observation_action_click_paired_region_radius_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    paired = _measure_paired_stream_action_observe_loop(
+        name=PAIRED_REGION_RADIUS_CASE,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        baseline_frame_encoding="binary-envelope",
+        variant_frame_encoding="binary-envelope",
+        baseline_dirty_frame_producer="auto",
+        variant_dirty_frame_producer="auto",
+        baseline_full_frame_fallback=False,
+        variant_full_frame_fallback=False,
+        baseline_change_region_radius=96,
+        variant_change_region_radius=64,
+        change_detection="auto_region",
+        change_signal="auto",
+        order_seed=PAIRED_REGION_RADIUS_ORDER_SEED,
+    )
+    paired_deltas = paired["paired_delta_samples_ms"]
+    result = _case_result(PAIRED_REGION_RADIUS_CASE, iterations, paired_deltas, failures)
+    result.update(
+        {
+            "metric": "paired_delta_ms",
+            "delta_direction": "variant_minus_baseline",
+            "negative_delta_interpretation": "variant_faster",
+            "baseline": {
+                "label": "region-radius-96",
+                "dirty_frame_producer": "auto",
+                "full_frame_fallback": False,
+                "change_region_radius": 96,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["baseline_samples_ms"],
+                "summary_ms": _summary(paired["baseline_samples_ms"]),
+            },
+            "variant": {
+                "label": "region-radius-64",
+                "dirty_frame_producer": "auto",
+                "full_frame_fallback": False,
+                "change_region_radius": 64,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["variant_samples_ms"],
+                "summary_ms": _summary(paired["variant_samples_ms"]),
+            },
+            "paired_comparison": _paired_ab_comparison(paired_deltas),
+            "paired_observations": paired["paired_observations"],
+            "pair_order_seed": PAIRED_REGION_RADIUS_ORDER_SEED,
+            "pairing": {
+                "scope": "same sandbox/client path/page/stream, per-command auto-region radius",
+                "order_policy": "seeded_random_ab_ba",
+                "reason": "change_region_radius is overridden per action-observe command",
+            },
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change_paired_region_radius_ab",
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto_region",
+            "change_signal": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    )
+    _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_change_stage_timing_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_change_stage_timing_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_action_observe_receive_residual_rollups(
+        result["baseline"],
+        paired.get("baseline_observations", []),
+    )
+    _add_action_observe_receive_residual_rollups(
+        result["variant"],
+        paired.get("variant_observations", []),
+    )
+    return result
+
+
 def _measure_paired_stream_action_observe_loop(
     *,
     name: str,
@@ -1191,6 +1294,8 @@ def _measure_paired_stream_action_observe_loop(
     variant_dirty_frame_producer: Literal["auto", "off"] = "auto",
     baseline_full_frame_fallback: bool | None = None,
     variant_full_frame_fallback: bool | None = None,
+    baseline_change_region_radius: int | None = None,
+    variant_change_region_radius: int | None = None,
     change_detection: str = "auto",
     change_signal: str = "auto",
 ) -> dict[str, Any]:
@@ -1205,11 +1310,13 @@ def _measure_paired_stream_action_observe_loop(
             "frame_encoding": baseline_frame_encoding,
             "dirty_frame_producer": baseline_dirty_frame_producer,
             "full_frame_fallback": baseline_full_frame_fallback,
+            "change_region_radius": baseline_change_region_radius,
         },
         "variant": {
             "frame_encoding": variant_frame_encoding,
             "dirty_frame_producer": variant_dirty_frame_producer,
             "full_frame_fallback": variant_full_frame_fallback,
+            "change_region_radius": variant_change_region_radius,
         },
     }
     try:
@@ -1228,6 +1335,7 @@ def _measure_paired_stream_action_observe_loop(
                             frame_encoding=arms[arm_label]["frame_encoding"],
                             dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
                             full_frame_fallback=arms[arm_label]["full_frame_fallback"],
+                            change_region_radius=arms[arm_label]["change_region_radius"],
                             change_detection=change_detection,
                             change_signal=change_signal,
                         )
@@ -1259,6 +1367,7 @@ def _measure_paired_stream_action_observe_loop(
                             frame_encoding=arms[arm_label]["frame_encoding"],
                             dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
                             full_frame_fallback=arms[arm_label]["full_frame_fallback"],
+                            change_region_radius=arms[arm_label]["change_region_radius"],
                             change_detection=change_detection,
                             change_signal=change_signal,
                         )
@@ -1321,6 +1430,7 @@ def _measure_paired_stream_action_observe_arm(
     frame_encoding: Literal["json-binary", "binary-envelope"],
     dirty_frame_producer: Literal["auto", "off"],
     full_frame_fallback: bool | None,
+    change_region_radius: int | None,
     change_detection: str,
     change_signal: str,
 ) -> dict[str, Any]:
@@ -1334,6 +1444,7 @@ def _measure_paired_stream_action_observe_arm(
         change_signal=change_signal,
         dirty_frame_producer=dirty_frame_producer,
         full_frame_fallback=full_frame_fallback,
+        change_region_radius=change_region_radius,
         frame_encoding_override=frame_encoding,
         causal_action_observe=True,
     )
@@ -1341,6 +1452,7 @@ def _measure_paired_stream_action_observe_arm(
         "frame_encoding": frame_encoding,
         "dirty_frame_producer": dirty_frame_producer,
         "full_frame_fallback": full_frame_fallback,
+        "change_region_radius": change_region_radius,
         "change_detection": change_detection,
         "change_signal": change_signal,
         "pairing": "same_stream_command_override",
@@ -2093,6 +2205,7 @@ def _stream_action_capture_iteration(
     change_signal: str | None,
     dirty_frame_producer: Literal["auto", "off"] = "auto",
     full_frame_fallback: bool | None = None,
+    change_region_radius: int | None = None,
     frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
     causal_action_observe: bool = False,
 ) -> dict[str, Any]:
@@ -2115,6 +2228,8 @@ def _stream_action_capture_iteration(
         payload["dirty_frame_producer"] = dirty_frame_producer
         if full_frame_fallback is not None:
             payload["full_frame_fallback"] = full_frame_fallback
+        if change_region_radius is not None:
+            payload["change_region_radius"] = change_region_radius
         if frame_encoding_override is not None:
             payload["frame_encoding"] = frame_encoding_override
         if causal_action_observe:
