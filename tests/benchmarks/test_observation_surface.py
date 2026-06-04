@@ -368,6 +368,46 @@ def test_action_observe_benchmark_can_override_change_timeout(monkeypatch) -> No
     assert result["change_timeout_ms"] == 200
 
 
+def test_click_beacon_case_reports_missing_dom_click_events(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_measure(**kwargs):
+        captured.update(kwargs)
+        return [1.0, 2.0], [{"change_detected": True}, {"change_detected": False}]
+
+    monkeypatch.setattr(observation_surface, "_measure_stream_action_capture_loop", fake_measure)
+    monkeypatch.setattr(
+        observation_surface,
+        "_open_click_toggle_beacon_page",
+        lambda _client: "token-123",
+    )
+    monkeypatch.setattr(
+        observation_surface,
+        "_wait_for_click_beacon_count",
+        lambda _client, beacon_id, *, expected_events: (
+            2 if beacon_id == "token-123" and expected_events == 3 else 0
+        ),
+    )
+
+    result = observation_surface._run_observation_action_click_beacon_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=2,
+        warmup_iterations=1,
+    )
+
+    assert captured["name"] == "observation_action_click_act_and_observe_click_beacon_production"
+    assert captured["change_detection"] == "auto"
+    assert captured["change_signal"] == "auto"
+    assert captured["transport_timing"] is False
+    assert captured["causal_action_observe"] is True
+    assert result["click_beacon_expected_events"] == 3
+    assert result["click_beacon_events"] == 2
+    assert result["click_beacon_missing_events"] == 1
+    assert result["frame_encoding_policy"] == "sdk-default"
+
+
 def test_stream_action_capture_loop_omits_sdk_default_frame_encoding(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -506,6 +546,92 @@ def test_open_click_toggle_page_settles_after_browser_open(monkeypatch) -> None:
         "sleep",
         observation_surface.CLICK_TOGGLE_PAGE_READY_SETTLE_MS / 1000,
     )
+
+
+def test_open_click_toggle_beacon_page_installs_click_beacon(monkeypatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            calls.append((path, json))
+            return {"ok": True}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_serve_synthetic_page",
+        lambda _client, _body: calls.append(("serve", _body)),
+    )
+    monkeypatch.setattr(
+        observation_surface.time,
+        "sleep",
+        lambda seconds: calls.append(("sleep", seconds)),
+    )
+
+    token = observation_surface._open_click_toggle_beacon_page(FakeClient())  # type: ignore[arg-type]
+
+    assert token
+    serve_path, body = calls[0]
+    assert serve_path == "serve"
+    assert "new Image()" in str(body)
+    assert "window.__clickBeacons.push(img)" in str(body)
+    assert "/click?token=" in str(body)
+    assert token in str(body)
+    open_path, open_payload = calls[1]
+    assert open_path == "/v1/browser/open-url"
+    assert isinstance(open_payload, dict)
+    assert str(open_payload["url"]).startswith(
+        "http://127.0.0.1:8766/index.html?action-observe-beacon="
+    )
+    assert calls[2] == (
+        "sleep",
+        observation_surface.CLICK_TOGGLE_PAGE_READY_SETTLE_MS / 1000,
+    )
+
+
+def test_read_click_beacon_count_parses_command_stdout() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            calls.append((path, json))
+            return {"ok": True, "output": {"stdout": "7\n"}}
+
+    count = observation_surface._read_click_beacon_count(
+        FakeClient(),  # type: ignore[arg-type]
+        "token with spaces",
+    )
+
+    assert count == 7
+    path, payload = calls[0]
+    assert path == "/v1/commands/run"
+    assert isinstance(payload["command"], list)
+    assert "GET /click?token=token%20with%20spaces" in str(payload["command"])
+
+
+def test_wait_for_click_beacon_count_polls_until_expected(monkeypatch) -> None:
+    counts = iter([1, 2, 3])
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_read_click_beacon_count",
+        lambda _client, _beacon_id: next(counts),
+    )
+    monkeypatch.setattr(
+        observation_surface.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    count = observation_surface._wait_for_click_beacon_count(
+        object(),  # type: ignore[arg-type]
+        "beacon-id",
+        expected_events=3,
+        timeout_ms=500,
+    )
+
+    assert count == 3
+    assert sleeps == [0.05, 0.05]
 
 
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
