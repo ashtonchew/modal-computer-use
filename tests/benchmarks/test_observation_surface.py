@@ -768,7 +768,7 @@ def test_open_click_toggle_beacon_page_installs_click_beacon(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         observation_surface,
-        "_wait_for_click_ready_count",
+        "_require_click_ready_count",
         lambda _client, token, *, expected_events, timeout_ms: calls.append(
             ("wait-ready", (token, expected_events, timeout_ms))
         ),
@@ -799,6 +799,22 @@ def test_open_click_toggle_beacon_page_installs_click_beacon(monkeypatch) -> Non
         "wait-ready",
         (token, 1, observation_surface.CLICK_TOGGLE_READY_TIMEOUT_MS),
     )
+
+
+def test_require_click_ready_count_raises_when_page_never_reports_ready(monkeypatch) -> None:
+    monkeypatch.setattr(
+        observation_surface,
+        "_wait_for_click_ready_count",
+        lambda _client, _token, *, expected_events, timeout_ms: expected_events - 1,
+    )
+
+    with pytest.raises(RuntimeError, match="did not report ready"):
+        observation_surface._require_click_ready_count(
+            object(),  # type: ignore[arg-type]
+            "token-123",
+            expected_events=1,
+            timeout_ms=observation_surface.CLICK_TOGGLE_READY_TIMEOUT_MS,
+        )
 
 
 def test_click_beacon_benchmark_reports_setup_step(monkeypatch) -> None:
