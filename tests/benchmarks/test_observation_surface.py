@@ -387,6 +387,10 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
             "variant_observations": [
                 {
                     "dirty_frame_producer": True,
+                    "dirty_frame_producer_used": False,
+                    "dirty_frame_age_ms": 0.2,
+                    "dirty_frame_capture_region_source": "action_region",
+                    "dirty_frame_producer_fallback_reason": "no_changed_frame",
                     "frame_poll_budget_ms": 12.0,
                     "frame_poll_deadline_reason": "after_unchanged_dirty_region_confirmation",
                     "dirty_region_confirmation_result": "unchanged",
@@ -397,13 +401,13 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
                 },
                 {
                     "dirty_frame_producer": True,
-                    "frame_poll_budget_ms": 12.0,
-                    "frame_poll_deadline_reason": "after_unchanged_dirty_region_confirmation",
-                    "dirty_region_confirmation_result": "unchanged",
+                    "dirty_frame_producer_used": True,
+                    "dirty_frame_age_ms": 0.1,
+                    "dirty_frame_capture_region_source": "xdamage_dirty_rect",
                     "change_detected": False,
                     "unchanged": True,
                     "change_timeout_reached": True,
-                    "change_stage_timing_ms": {"frame_poll_ms": 14.0},
+                    "change_stage_timing_ms": {"frame_poll_ms": 0.0},
                 },
             ],
             "paired_delta_samples_ms": [-30.0, 10.0],
@@ -436,12 +440,31 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert result["variant"]["dirty_frame_producer"] == "auto"
     assert result["variant"]["summary_ms"]["p50"] == 115.0
     assert result["variant"]["frame_poll_budget_summary_ms"]["p50"] == 12.0
+    assert result["variant"]["dirty_frame_capture_region_sources"] == [
+        "action_region",
+        "xdamage_dirty_rect",
+    ]
+    action_region_summary = result["variant"]["dirty_frame_capture_region_source_summaries"][
+        "action_region"
+    ]
+    assert action_region_summary["frames"] == 1
+    assert action_region_summary["producer_used_frames"] == 0
+    assert action_region_summary["fallback_reasons"] == ["no_changed_frame"]
+    assert action_region_summary["dirty_region_confirmation_results"] == ["unchanged"]
+    xdamage_summary = result["variant"]["dirty_frame_capture_region_source_summaries"][
+        "xdamage_dirty_rect"
+    ]
+    assert xdamage_summary["frames"] == 1
+    assert xdamage_summary["producer_used_frames"] == 1
+    assert xdamage_summary["changed_frames"] == 0
+    assert xdamage_summary["dirty_frame_age_summary_ms"]["p50"] == 0.1
     deadline_summary = result["variant"]["frame_poll_deadline_reason_summaries"][
         "after_unchanged_dirty_region_confirmation"
     ]
     assert deadline_summary["changed_frames"] == 1
-    assert deadline_summary["unchanged_frames"] == 1
-    assert deadline_summary["frame_poll_summary_ms"]["p50"] == 13.0
+    assert deadline_summary["unchanged_frames"] == 0
+    assert deadline_summary["timeout_frames"] == 0
+    assert deadline_summary["frame_poll_summary_ms"]["p50"] == 12.0
     assert result["paired_comparison"]["variant_wins"] == 1
     assert result["paired_comparison"]["baseline_wins"] == 1
     assert result["pairing"]["order_policy"] == "seeded_random_ab_ba"
@@ -642,6 +665,8 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
             "dirty_frame_producer": True,
             "dirty_frame_producer_used": False,
             "dirty_frame_producer_wait_budget_ms": 20,
+            "dirty_frame_age_ms": 0.3,
+            "dirty_frame_capture_region_source": "action_region",
             "dirty_frame_producer_fallback_reason": "no_changed_frame",
             "frame_poll_budget_ms": 12.0,
             "frame_poll_deadline_reason": "after_unchanged_dirty_region_confirmation",
@@ -688,6 +713,14 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert result["dirty_frame_producer_frames"] == 3
     assert result["dirty_frame_producer_used_frames"] == 1
     assert result["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
+    assert result["dirty_frame_capture_region_sources"] == ["action_region"]
+    source_summary = result["dirty_frame_capture_region_source_summaries"]["action_region"]
+    assert source_summary["frames"] == 1
+    assert source_summary["producer_used_frames"] == 0
+    assert source_summary["changed_frames"] == 1
+    assert source_summary["fallback_reasons"] == ["no_changed_frame"]
+    assert source_summary["dirty_region_confirmation_results"] == ["unchanged"]
+    assert source_summary["dirty_frame_age_summary_ms"]["p50"] == 0.3
     assert result["frame_poll_deadline_reasons"] == [
         "after_unchanged_dirty_region_confirmation"
     ]
@@ -703,7 +736,7 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert deadline_summary["frame_poll_summary_ms"]["p50"] == 13.0
     assert result["dirty_region_confirmation_results"] == ["unchanged"]
     assert result["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 20.0
-    assert result["dirty_frame_age_summary_ms"]["p50"] == 0.1
+    assert result["dirty_frame_age_summary_ms"]["p50"] == 0.2
     assert result["change_stage_timing_summary_ms"]["dirty_producer_wait_ms"]["p50"] == 20.0
     assert (
         result["action_observe_attribution_summary_ms"]["action_end_to_signal_detect_ms"]["p50"]

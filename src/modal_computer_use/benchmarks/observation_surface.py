@@ -959,6 +959,12 @@ def _run_observation_action_click_paired_envelope_benchmark(
         result["baseline"], paired.get("baseline_observations", [])
     )
     _add_frame_poll_deadline_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_dirty_frame_capture_region_source_rollups(
+        result["baseline"], paired.get("baseline_observations", [])
+    )
+    _add_dirty_frame_capture_region_source_rollups(
+        result["variant"], paired.get("variant_observations", [])
+    )
     return result
 
 
@@ -1031,6 +1037,12 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
         result["baseline"], paired.get("baseline_observations", [])
     )
     _add_frame_poll_deadline_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_dirty_frame_capture_region_source_rollups(
+        result["baseline"], paired.get("baseline_observations", [])
+    )
+    _add_dirty_frame_capture_region_source_rollups(
+        result["variant"], paired.get("variant_observations", [])
+    )
     return result
 
 
@@ -2464,6 +2476,7 @@ def _add_frame_observations(
                         )
                     }
                 )
+                _add_dirty_frame_capture_region_source_rollups(result, observations)
                 dirty_frame_age_samples = [
                     item["dirty_frame_age_ms"]
                     for item in observations
@@ -2636,6 +2649,75 @@ def _add_frame_observations(
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
     _add_observation_latency_diagnosis(result)
+
+
+def _add_dirty_frame_capture_region_source_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    sources = sorted(
+        {
+            source
+            for item in observations
+            if isinstance(item, dict)
+            if isinstance(source := item.get("dirty_frame_capture_region_source"), str)
+        }
+    )
+    if not sources:
+        return
+    result["dirty_frame_capture_region_sources"] = sources
+    result["dirty_frame_capture_region_source_summaries"] = {
+        source: _dirty_frame_capture_region_source_summary(observations, source)
+        for source in sources
+    }
+
+
+def _dirty_frame_capture_region_source_summary(
+    observations: list[Any],
+    source: str,
+) -> dict[str, Any]:
+    rows = [
+        item
+        for item in observations
+        if isinstance(item, dict) and item.get("dirty_frame_capture_region_source") == source
+    ]
+    dirty_frame_age_samples = [
+        float(item["dirty_frame_age_ms"])
+        for item in rows
+        if isinstance(item.get("dirty_frame_age_ms"), int | float)
+    ]
+    result: dict[str, Any] = {
+        "frames": len(rows),
+        "producer_used_frames": sum(1 for item in rows if item.get("dirty_frame_producer_used")),
+        "changed_frames": sum(1 for item in rows if item.get("change_detected") is True),
+        "unchanged_frames": sum(1 for item in rows if item.get("unchanged") is True),
+        "timeout_frames": sum(1 for item in rows if item.get("change_timeout_reached") is True),
+        "fallback_reasons": sorted(
+            {
+                reason
+                for item in rows
+                if isinstance(reason := item.get("dirty_frame_producer_fallback_reason"), str)
+            }
+        ),
+        "dirty_region_confirmation_results": sorted(
+            {
+                value
+                for item in rows
+                if isinstance(value := item.get("dirty_region_confirmation_result"), str)
+            }
+        ),
+        "frame_poll_deadline_reasons": sorted(
+            {
+                reason
+                for item in rows
+                if isinstance(reason := item.get("frame_poll_deadline_reason"), str)
+            }
+        ),
+    }
+    if dirty_frame_age_samples:
+        result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
+        result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
+    return result
 
 
 def _add_frame_poll_deadline_rollups(
