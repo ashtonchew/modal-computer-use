@@ -772,6 +772,7 @@ def test_benchmark_modal_colocated_client_observation_profile(monkeypatch, capsy
         "observation_action_click_act_and_observe_sdk_default_production",
         "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production",
         "observation_action_click_act_and_observe_click_beacon_production",
+        "observation_action_click_act_and_observe_click_target_state_production",
         "observation_action_click_act_and_observe_auto_signal_production",
         "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
         "observation_action_click_act_and_observe_auto_region_production",
