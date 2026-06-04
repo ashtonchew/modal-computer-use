@@ -888,6 +888,18 @@ def test_dirty_frame_producer_wait_timeout_reserves_fallback_budget() -> None:
         )
         == 92
     )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            100, regional_capture=True, override_ms=1
+        )
+        == 1
+    )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            3, regional_capture=True, override_ms=10
+        )
+        == 3
+    )
 
 
 def test_observation_stream_run_actions_observe_change_can_detect_region(app) -> None:
@@ -2702,6 +2714,21 @@ def test_observation_client_act_and_observe_respects_explicit_region_radius() ->
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["change_region_radius"] == 144
+
+
+def test_observation_client_act_and_observe_can_override_dirty_producer_wait() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "click", "x": 12, "y": 34}],
+        dirty_frame_producer_wait_ms=1,
+    )
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["dirty_frame_producer_wait_ms"] == 1
 
 
 def test_observation_client_act_and_observe_uses_explicit_region_with_auto_policy() -> None:

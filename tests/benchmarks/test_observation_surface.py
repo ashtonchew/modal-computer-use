@@ -364,6 +364,10 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
         "observation_action_click_act_and_observe_paired_region_radius_ab_production"
         in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
     )
+    assert (
+        "observation_action_click_act_and_observe_paired_regional_producer_wait_ab_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
 
 
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
@@ -801,6 +805,69 @@ def test_paired_region_radius_case_compares_auto_region_radius(monkeypatch) -> N
     assert result["pairing"]["scope"] == (
         "same sandbox/client path/page/stream, per-command auto-region radius"
     )
+
+
+def test_paired_regional_producer_wait_case_compares_wait_budget(monkeypatch) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    captured: dict[str, object] = {}
+
+    def fake_measure_paired_stream_action_observe_loop(**kwargs):
+        captured.update(kwargs)
+        return {
+            "baseline_samples_ms": [12.0],
+            "variant_samples_ms": [10.0],
+            "baseline_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "dirty_frame_producer_wait_budget_ms": 2,
+                    "benchmark_arm": {
+                        "dirty_frame_producer_wait_ms": kwargs[
+                            "baseline_dirty_frame_producer_wait_ms"
+                        ],
+                    },
+                }
+            ],
+            "variant_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "dirty_frame_producer_wait_budget_ms": 1,
+                    "benchmark_arm": {
+                        "dirty_frame_producer_wait_ms": kwargs[
+                            "variant_dirty_frame_producer_wait_ms"
+                        ],
+                    },
+                }
+            ],
+            "paired_delta_samples_ms": [-2.0],
+            "paired_observations": [],
+        }
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        fake_measure_paired_stream_action_observe_loop,
+    )
+
+    result = (
+        observation_surface._run_observation_action_click_paired_regional_producer_wait_benchmark(
+            base_url="http://daemon.test",
+            token=None,
+            client=object(),  # type: ignore[arg-type]
+            iterations=1,
+            warmup_iterations=0,
+        )
+    )
+
+    assert captured["baseline_dirty_frame_producer_wait_ms"] == 2
+    assert captured["variant_dirty_frame_producer_wait_ms"] == 1
+    assert captured["baseline_change_region_radius"] == 64
+    assert captured["variant_change_region_radius"] == 64
+    assert captured["order_seed"] == observation_surface.PAIRED_REGIONAL_PRODUCER_WAIT_ORDER_SEED
+    assert result["baseline"]["dirty_frame_producer_wait_ms"] == 2
+    assert result["variant"]["dirty_frame_producer_wait_ms"] == 1
+    assert result["baseline"]["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 2.0
+    assert result["variant"]["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 1.0
+    assert result["paired_comparison"]["variant_wins"] == 1
 
 
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:

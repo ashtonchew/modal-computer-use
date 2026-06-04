@@ -601,6 +601,11 @@ fallback and confirmation metadata for each arm.
 `full_frame_fallback=false`, and binary-envelope framing. Negative deltas mean the 64 px variant was
 faster. Use this case before changing the SDK auto-region radius so capture-region area summaries
 and confirmation timing are compared within one stream instead of across noisy before/after runs.
+`observation_action_click_act_and_observe_paired_regional_producer_wait_ab_production` compares
+the current 2 ms regional dirty-producer wait against a 1 ms diagnostic override, with 64 px
+auto-region, `full_frame_fallback=false`, and binary-envelope framing. Negative deltas mean the 1 ms
+variant was faster. Use this case before changing the regional producer wait cap; the per-command
+`dirty_frame_producer_wait_ms` override is diagnostic and leaves the default cap unchanged.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,
