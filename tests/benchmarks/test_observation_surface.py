@@ -309,6 +309,10 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
         "observation_action_click_act_and_observe_paired_dirty_producer_ab_production"
         in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
     )
+    assert (
+        "observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production"
+        in observation_surface.CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+    )
 
 
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
@@ -616,6 +620,65 @@ def test_paired_dirty_producer_xdamage_case_uses_xdamage_signal(monkeypatch) -> 
     assert result["variant"]["dirty_frame_producer_frames"] == 1
     assert result["variant"]["dirty_frame_producer_used_frames"] == 0
     assert result["variant"]["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
+
+
+def test_paired_full_frame_fallback_case_compares_fallback_policy(monkeypatch) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    captured: dict[str, object] = {}
+
+    def fake_measure_paired_stream_action_observe_loop(**kwargs):
+        captured.update(kwargs)
+        return {
+            "baseline_samples_ms": [40.0],
+            "variant_samples_ms": [25.0],
+            "baseline_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "full_frame_fallback": True,
+                    "change_stage_timing_ms": {"frame_poll_ms": 8.0},
+                    "benchmark_arm": {
+                        "full_frame_fallback": kwargs["baseline_full_frame_fallback"],
+                    },
+                }
+            ],
+            "variant_observations": [
+                {
+                    "dirty_frame_producer": True,
+                    "full_frame_fallback": False,
+                    "frame_poll_skipped_reason": "dirty_region_confirmation_unchanged",
+                    "change_stage_timing_ms": {"frame_poll_ms": 0.0},
+                    "benchmark_arm": {
+                        "full_frame_fallback": kwargs["variant_full_frame_fallback"],
+                    },
+                }
+            ],
+            "paired_delta_samples_ms": [-15.0],
+            "paired_observations": [],
+        }
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_measure_paired_stream_action_observe_loop",
+        fake_measure_paired_stream_action_observe_loop,
+    )
+
+    result = observation_surface._run_observation_action_click_paired_full_frame_fallback_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert captured["baseline_full_frame_fallback"] is True
+    assert captured["variant_full_frame_fallback"] is False
+    assert captured["order_seed"] == observation_surface.PAIRED_FULL_FRAME_FALLBACK_ORDER_SEED
+    assert result["baseline"]["full_frame_fallback"] is True
+    assert result["variant"]["full_frame_fallback"] is False
+    assert result["variant"]["frame_poll_skipped_reasons"] == [
+        "dirty_region_confirmation_unchanged"
+    ]
+    assert result["paired_comparison"]["variant_wins"] == 1
 
 
 def test_observation_latency_diagnosis_identifies_client_receive_wait() -> None:

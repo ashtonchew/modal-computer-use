@@ -45,6 +45,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_action_click_act_and_observe_auto_region_binary_envelope_production",
     "observation_action_click_act_and_observe_paired_envelope_ab_production",
     "observation_action_click_act_and_observe_paired_dirty_producer_ab_production",
+    "observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production",
 )
 PAIRED_ENVELOPE_ORDER_SEED = 20260602
 PAIRED_DIRTY_PRODUCER_ORDER_SEED = 20260603
@@ -54,6 +55,10 @@ PAIRED_DIRTY_PRODUCER_CASE = (
 )
 PAIRED_DIRTY_PRODUCER_XDAMAGE_CASE = (
     "observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_production"
+)
+PAIRED_FULL_FRAME_FALLBACK_ORDER_SEED = 20260605
+PAIRED_FULL_FRAME_FALLBACK_CASE = (
+    "observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production"
 )
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
@@ -382,6 +387,15 @@ def _observation_case_factories(
                 change_detection="full",
                 change_signal="xdamage",
                 order_seed=PAIRED_DIRTY_PRODUCER_XDAMAGE_ORDER_SEED,
+            )
+        ),
+        PAIRED_FULL_FRAME_FALLBACK_CASE: lambda: (
+            _run_observation_action_click_paired_full_frame_fallback_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
             )
         ),
         "observation_action_click_act_and_observe_auto_signal_production_sync": lambda: (
@@ -1075,6 +1089,93 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
     return result
 
 
+def _run_observation_action_click_paired_full_frame_fallback_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    _open_click_toggle_page(client)
+    paired = _measure_paired_stream_action_observe_loop(
+        name=PAIRED_FULL_FRAME_FALLBACK_CASE,
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        baseline_frame_encoding="binary-envelope",
+        variant_frame_encoding="binary-envelope",
+        baseline_dirty_frame_producer="auto",
+        variant_dirty_frame_producer="auto",
+        baseline_full_frame_fallback=True,
+        variant_full_frame_fallback=False,
+        change_detection="auto",
+        change_signal="auto",
+        order_seed=PAIRED_FULL_FRAME_FALLBACK_ORDER_SEED,
+    )
+    paired_deltas = paired["paired_delta_samples_ms"]
+    result = _case_result(PAIRED_FULL_FRAME_FALLBACK_CASE, iterations, paired_deltas, failures)
+    result.update(
+        {
+            "metric": "paired_delta_ms",
+            "delta_direction": "variant_minus_baseline",
+            "negative_delta_interpretation": "variant_faster",
+            "baseline": {
+                "label": "full-frame-fallback-on",
+                "dirty_frame_producer": "auto",
+                "full_frame_fallback": True,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["baseline_samples_ms"],
+                "summary_ms": _summary(paired["baseline_samples_ms"]),
+            },
+            "variant": {
+                "label": "full-frame-fallback-off",
+                "dirty_frame_producer": "auto",
+                "full_frame_fallback": False,
+                "frame_encoding": "binary-envelope",
+                "samples_ms": paired["variant_samples_ms"],
+                "summary_ms": _summary(paired["variant_samples_ms"]),
+            },
+            "paired_comparison": _paired_ab_comparison(paired_deltas),
+            "paired_observations": paired["paired_observations"],
+            "pair_order_seed": PAIRED_FULL_FRAME_FALLBACK_ORDER_SEED,
+            "pairing": {
+                "scope": (
+                    "same sandbox/client path/page/stream, per-command full-frame fallback policy"
+                ),
+                "order_policy": "seeded_random_ab_ba",
+                "reason": "full_frame_fallback is overridden per action-observe command",
+            },
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change_paired_full_frame_fallback_ab",
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "transport_timing": False,
+            "causal_action_observe": True,
+        }
+    )
+    _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_change_stage_timing_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_change_stage_timing_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_action_observe_receive_residual_rollups(
+        result["baseline"],
+        paired.get("baseline_observations", []),
+    )
+    _add_action_observe_receive_residual_rollups(
+        result["variant"],
+        paired.get("variant_observations", []),
+    )
+    return result
+
+
 def _measure_paired_stream_action_observe_loop(
     *,
     name: str,
@@ -1088,6 +1189,8 @@ def _measure_paired_stream_action_observe_loop(
     order_seed: int,
     baseline_dirty_frame_producer: Literal["auto", "off"] = "auto",
     variant_dirty_frame_producer: Literal["auto", "off"] = "auto",
+    baseline_full_frame_fallback: bool = True,
+    variant_full_frame_fallback: bool = True,
     change_detection: str = "auto",
     change_signal: str = "auto",
 ) -> dict[str, Any]:
@@ -1101,10 +1204,12 @@ def _measure_paired_stream_action_observe_loop(
         "baseline": {
             "frame_encoding": baseline_frame_encoding,
             "dirty_frame_producer": baseline_dirty_frame_producer,
+            "full_frame_fallback": baseline_full_frame_fallback,
         },
         "variant": {
             "frame_encoding": variant_frame_encoding,
             "dirty_frame_producer": variant_dirty_frame_producer,
+            "full_frame_fallback": variant_full_frame_fallback,
         },
     }
     try:
@@ -1122,6 +1227,7 @@ def _measure_paired_stream_action_observe_loop(
                             stream,
                             frame_encoding=arms[arm_label]["frame_encoding"],
                             dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
+                            full_frame_fallback=arms[arm_label]["full_frame_fallback"],
                             change_detection=change_detection,
                             change_signal=change_signal,
                         )
@@ -1152,6 +1258,7 @@ def _measure_paired_stream_action_observe_loop(
                             stream,
                             frame_encoding=arms[arm_label]["frame_encoding"],
                             dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
+                            full_frame_fallback=arms[arm_label]["full_frame_fallback"],
                             change_detection=change_detection,
                             change_signal=change_signal,
                         )
@@ -1213,6 +1320,7 @@ def _measure_paired_stream_action_observe_arm(
     *,
     frame_encoding: Literal["json-binary", "binary-envelope"],
     dirty_frame_producer: Literal["auto", "off"],
+    full_frame_fallback: bool,
     change_detection: str,
     change_signal: str,
 ) -> dict[str, Any]:
@@ -1225,12 +1333,14 @@ def _measure_paired_stream_action_observe_arm(
         change_detection=change_detection,
         change_signal=change_signal,
         dirty_frame_producer=dirty_frame_producer,
+        full_frame_fallback=full_frame_fallback,
         frame_encoding_override=frame_encoding,
         causal_action_observe=True,
     )
     observation["benchmark_arm"] = {
         "frame_encoding": frame_encoding,
         "dirty_frame_producer": dirty_frame_producer,
+        "full_frame_fallback": full_frame_fallback,
         "change_detection": change_detection,
         "change_signal": change_signal,
         "pairing": "same_stream_command_override",
@@ -1859,6 +1969,7 @@ def _measure_stream_action_capture_loop(
     change_detection: str = "full",
     change_signal: str | None = "poll",
     dirty_frame_producer: Literal["auto", "off"] = "auto",
+    full_frame_fallback: bool = True,
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
     transport_timing: bool = True,
     causal_action_observe: bool = False,
@@ -1890,6 +2001,7 @@ def _measure_stream_action_capture_loop(
                         change_detection=change_detection,
                         change_signal=change_signal,
                         dirty_frame_producer=dirty_frame_producer,
+                        full_frame_fallback=full_frame_fallback,
                         causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
@@ -1907,6 +2019,7 @@ def _measure_stream_action_capture_loop(
                         change_detection=change_detection,
                         change_signal=change_signal,
                         dirty_frame_producer=dirty_frame_producer,
+                        full_frame_fallback=full_frame_fallback,
                         causal_action_observe=causal_action_observe,
                     )
                 except Exception as exc:
@@ -1979,6 +2092,7 @@ def _stream_action_capture_iteration(
     change_detection: str,
     change_signal: str | None,
     dirty_frame_producer: Literal["auto", "off"] = "auto",
+    full_frame_fallback: bool = True,
     frame_encoding_override: Literal["json-binary", "binary-envelope"] | None = None,
     causal_action_observe: bool = False,
 ) -> dict[str, Any]:
@@ -1999,6 +2113,7 @@ def _stream_action_capture_iteration(
         if change_signal is not None:
             payload["change_signal"] = change_signal
         payload["dirty_frame_producer"] = dirty_frame_producer
+        payload["full_frame_fallback"] = full_frame_fallback
         if frame_encoding_override is not None:
             payload["frame_encoding"] = frame_encoding_override
         if causal_action_observe:
@@ -2032,6 +2147,7 @@ def _stream_action_capture_iteration(
         "poll_strategy": poll_strategy,
         "change_detection": change_detection,
         "change_signal": change_signal or "default",
+        "full_frame_fallback": full_frame_fallback,
         "causal_action_observe": causal_action_observe,
         "request_frame_ms": request_frame_ms,
         "receive_frame_ms": receive_frame_ms,
@@ -2991,6 +3107,7 @@ def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
         "change_signal_reason": observation.get("change_signal_reason"),
         "change_detection": observation.get("change_detection"),
         "change_detection_region": observation.get("change_detection_region"),
+        "full_frame_fallback": observation.get("full_frame_fallback"),
         "dirty_frame_producer": observation.get("dirty_frame_producer"),
         "dirty_frame_producer_used": observation.get("dirty_frame_producer_used"),
         "dirty_frame_producer_fallback_reason": observation.get(
