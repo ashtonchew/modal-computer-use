@@ -851,6 +851,14 @@ def test_observation_stream_run_actions_observe_change_reports_timeout(app) -> N
     assert second["action_result"]["ok"] is True
 
 
+def test_dirty_frame_producer_wait_timeout_reserves_fallback_budget() -> None:
+    assert observation_routes._dirty_frame_producer_wait_timeout_ms(0) == 0
+    assert observation_routes._dirty_frame_producer_wait_timeout_ms(3) == 3
+    assert observation_routes._dirty_frame_producer_wait_timeout_ms(20) == 20
+    assert observation_routes._dirty_frame_producer_wait_timeout_ms(21) == 13
+    assert observation_routes._dirty_frame_producer_wait_timeout_ms(100) == 20
+
+
 def test_observation_stream_run_actions_observe_change_can_detect_region(app) -> None:
     full_before = _raw_screenshot_bytes("white")
     full_after = _raw_screenshot_with_square()
@@ -938,6 +946,7 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
 
     class FakeXDamageWatcher:
         instances: ClassVar[list[FakeXDamageWatcher]] = []
+        wait_timeouts: ClassVar[list[int]] = []
 
         def __init__(self, *, display: str, rect_hints: bool = False) -> None:
             self.display = display
@@ -950,7 +959,7 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
             self.armed += 1
 
         def wait(self, timeout_ms: int):
-            assert timeout_ms == 100
+            self.wait_timeouts.append(timeout_ms)
             return observation_routes.XDamageWaitResult(
                 available=True,
                 detected=True,
@@ -1027,6 +1036,7 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert FakeXDamageWatcher.instances[0].armed == 0
     assert FakeXDamageWatcher.instances[1].rect_hints is True
     assert FakeXDamageWatcher.instances[1].armed == 1
+    assert FakeXDamageWatcher.wait_timeouts == [20]
     assert FakeXDamageWatcher.instances[0].closed is True
     assert FakeXDamageWatcher.instances[1].closed is True
 
@@ -1240,6 +1250,7 @@ def test_observation_stream_confirms_dirty_region_after_producer_timeout(
             changed.putpixel((x, y), (0, 0, 0))
     capture_images = iter([white, changed])
     capture_regions: list[Region | None] = []
+    wait_timeouts: list[int] = []
 
     async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
         capture_regions.append(region)
@@ -1255,6 +1266,8 @@ def test_observation_stream_confirms_dirty_region_after_producer_timeout(
             pass
 
         def wait(self, timeout_ms: int):
+            wait_timeouts.append(timeout_ms)
+            time.sleep(0.05)
             return observation_routes.XDamageWaitResult(
                 available=True,
                 detected=False,
@@ -1312,11 +1325,13 @@ def test_observation_stream_confirms_dirty_region_after_producer_timeout(
     assert capture_regions[0] is None
     assert capture_regions[1] == Region(x=0, y=0, width=32, height=32)
     assert len(capture_regions) == 2
+    assert wait_timeouts == [20]
     assert second["trigger"] == "run_actions_observe_change"
     assert second["change_detected"] is True
     assert second["dirty_frame_producer"] is True
     assert second["dirty_frame_producer_used"] is False
     assert second["dirty_frame_producer_fallback_reason"] == "no_changed_frame"
+    assert second["dirty_frame_producer_wait_budget_ms"] == 20
     assert second["dirty_region_confirmation_result"] == "changed"
     assert second["frame_poll_skipped_reason"] == "dirty_region_confirmation_changed"
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_ms"] >= 0

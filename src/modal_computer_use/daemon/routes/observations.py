@@ -55,6 +55,8 @@ router = APIRouter(prefix="/v1/observations")
 PROTOCOL = "computer-use.observation-stream.v1"
 FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
 CONTROL_DRAIN_TIMEOUT_S = 0.001
+DIRTY_FRAME_PRODUCER_MAX_WAIT_MS = 20
+DIRTY_FRAME_PRODUCER_FALLBACK_RESERVE_MS = 8
 
 
 @dataclass
@@ -731,6 +733,7 @@ async def _send_changed_frame(
     used_region = region is not None and region_baseline_sha256 is not None
     signal_result: XDamageWaitResult | None = None
     signal_wait_wall_ms = 0.0
+    dirty_producer_wait_budget_ms: int | None = None
     dirty_producer_wait_ms = 0.0
     dirty_producer_capture_ms = 0.0
     dirty_region_reconstruct_ms = 0.0
@@ -761,12 +764,13 @@ async def _send_changed_frame(
     producer_result: _DirtyFrameProducerResult | None = None
     try:
         if dirty_producer is not None:
+            dirty_producer_wait_budget_ms = _dirty_frame_producer_wait_timeout_ms(timeout_ms)
             producer_wait_started = perf_counter()
             producer_result = await dirty_producer.wait_for_change(
                 baseline_source_sha256=region_baseline_sha256
                 if dirty_producer.capture_region is not None
                 else baseline_source_sha256,
-                timeout_ms=timeout_ms,
+                timeout_ms=dirty_producer_wait_budget_ms,
             )
             dirty_producer_wait_ms = _elapsed_ms(producer_wait_started)
             if producer_result is not None:
@@ -1037,6 +1041,7 @@ async def _send_changed_frame(
             "dirty_frame_producer": dirty_producer is not None,
             "dirty_frame_producer_used": dirty_producer_used,
             "dirty_frame_producer_fallback_reason": dirty_producer_fallback_reason,
+            "dirty_frame_producer_wait_budget_ms": dirty_producer_wait_budget_ms,
             "dirty_frame_age_ms": dirty_frame_age_ms,
             "dirty_frame_capture_region": dirty_frame_capture_region.model_dump(mode="json")
             if dirty_frame_capture_region is not None
@@ -1227,7 +1232,7 @@ async def _prepare_dirty_frame_producer(
     try:
         await producer.arm(
             stream_request,
-            timeout_ms=request.change_timeout_ms,
+            timeout_ms=_dirty_frame_producer_wait_timeout_ms(request.change_timeout_ms),
             capture_region=capture_region,
             xdamage_region_frame=_xdamage_region_frame(state, stream_request)
             if capture_region is None
@@ -1252,6 +1257,18 @@ def _dirty_producer_no_change_reason(
     if result.capture_region is not None:
         return "producer_same_region"
     return "producer_same_frame"
+
+
+def _dirty_frame_producer_wait_timeout_ms(change_timeout_ms: int) -> int:
+    if change_timeout_ms <= DIRTY_FRAME_PRODUCER_MAX_WAIT_MS:
+        return change_timeout_ms
+    return max(
+        1,
+        min(
+            DIRTY_FRAME_PRODUCER_MAX_WAIT_MS,
+            change_timeout_ms - DIRTY_FRAME_PRODUCER_FALLBACK_RESERVE_MS,
+        ),
+    )
 
 
 def _dirty_producer_capture_region(
