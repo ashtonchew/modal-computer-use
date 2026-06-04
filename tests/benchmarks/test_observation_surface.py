@@ -378,6 +378,29 @@ def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
     )
 
 
+def test_click_toggle_action_hits_visual_target_region() -> None:
+    action_x = observation_surface.CLICK_TOGGLE_ACTION["x"]
+    action_y = observation_surface.CLICK_TOGGLE_ACTION["y"]
+    left = observation_surface.CLICK_TOGGLE_TARGET_LEFT
+    top = observation_surface.CLICK_TOGGLE_TARGET_TOP
+    right = left + observation_surface.CLICK_TOGGLE_TARGET_WIDTH
+    bottom = top + observation_surface.CLICK_TOGGLE_TARGET_HEIGHT
+
+    assert left <= action_x <= right
+    assert top <= action_y <= bottom
+
+    region_radius = 64
+    region_left = action_x - region_radius
+    region_top = action_y - region_radius
+    region_right = action_x + region_radius
+    region_bottom = action_y + region_radius
+
+    assert region_left < right
+    assert region_right > left
+    assert region_top < bottom
+    assert region_bottom > top
+
+
 def test_paired_ab_comparison_reports_variant_win_rate() -> None:
     result = _paired_ab_comparison([-4.0, 2.0, -1.0, 0.0])
 
