@@ -947,6 +947,12 @@ async def _send_changed_frame(
             frame_poll_deadline = deadline
             if dirty_region_confirmation_result == "unchanged":
                 frame_poll_deadline_reason = "after_unchanged_dirty_region_confirmation"
+            elif dirty_producer_fallback_reason in {
+                "producer_same_frame",
+                "producer_same_region",
+            }:
+                frame_poll_deadline_reason = "after_unchanged_dirty_producer"
+            if frame_poll_deadline_reason is not None:
                 frame_poll_deadline = min(
                     deadline,
                     frame_poll_started
@@ -976,8 +982,7 @@ async def _send_changed_frame(
                 if (
                     change_detected
                     or region_detected
-                    or frame_poll_deadline_reason
-                    == "after_unchanged_dirty_region_confirmation"
+                    or frame_poll_deadline_reason is not None
                     or perf_counter() >= frame_poll_deadline
                 ):
                     break
