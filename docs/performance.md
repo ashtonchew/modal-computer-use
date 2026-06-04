@@ -290,6 +290,9 @@ class, but they cannot prove whether a specific slow iteration came from XDamage
 producer fallback, capture/diff work, WebSocket receive, or browser paint behavior. The rows keep
 timing, dirty-region source, fallback reason, patch, XDamage, and transport metadata; they do not
 store screenshot payload bytes.
+Dirty-producer rollups also include frame-poll deadline reasons, frame-poll budgets, and
+`frame_poll_deadline_reason_summaries` so post-confirmation fallback timing can be compared against
+changed, unchanged, and timeout outcomes without hand-parsing every compact observation row.
 
 Live observation benchmark runs can be narrowed to the cases under investigation:
 
