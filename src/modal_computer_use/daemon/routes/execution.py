@@ -8,7 +8,11 @@ from fastapi import Request
 
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, ready_input_lock
+from modal_computer_use.daemon.routes.validation import (
+    ensure_desktop_ready,
+    mark_desktop_ready,
+    ready_input_lock,
+)
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload
 
@@ -78,6 +82,7 @@ async def run_screenshot_capture_with_timing[T](
         result = await operation()
         operation_ms = (perf_counter() - operation_started) * 1000
         policy.enforce("screenshots", "artifacts")
+        mark_desktop_ready(request.app.state)
     timing = ScreenshotCaptureTiming(
         ready_ms=ready_ms,
         lock_wait_ms=lock_wait_ms,
