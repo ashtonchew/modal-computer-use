@@ -316,7 +316,9 @@ Dirty-producer rollups also include frame-poll deadline reasons, frame-poll budg
 changed, unchanged, and timeout outcomes without hand-parsing every compact observation row.
 They also include dirty-producer hit/fallback rollups and
 `dirty_frame_capture_region_source_summaries` so producer hit rate, fallback reason, and
-confirmation outcomes can be compared by action-region versus XDamage-region hints.
+confirmation outcomes can be compared by action-region versus XDamage-region hints. Capture region
+width, height, and area summaries are emitted both globally and inside each capture-region source
+summary.
 Use `observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_production` when the
 paired dirty-producer artifact needs full-frame XDamage signal coverage without action-region
 capture.

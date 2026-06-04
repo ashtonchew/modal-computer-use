@@ -2756,6 +2756,7 @@ def _add_dirty_frame_producer_rollups(
         for item in observations
         if isinstance(item, dict) and item.get("dirty_frame_capture_region") is not None
     )
+    _add_dirty_frame_capture_region_size_rollups(result, observations)
 
 
 def _add_change_stage_timing_rollups(
@@ -2907,8 +2908,36 @@ def _dirty_frame_capture_region_source_summary(
     if dirty_frame_age_samples:
         result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
         result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
+    _add_dirty_frame_capture_region_size_rollups(result, rows)
     _add_dirty_region_confirmation_capture_timing_rollups(result, rows)
     return result
+
+
+def _add_dirty_frame_capture_region_size_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    widths: list[float] = []
+    heights: list[float] = []
+    areas: list[float] = []
+    for item in observations:
+        if not isinstance(item, dict):
+            continue
+        region = item.get("dirty_frame_capture_region")
+        if not isinstance(region, dict):
+            continue
+        width = region.get("width")
+        height = region.get("height")
+        if not isinstance(width, int | float) or not isinstance(height, int | float):
+            continue
+        widths.append(float(width))
+        heights.append(float(height))
+        areas.append(float(width) * float(height))
+    if not areas:
+        return
+    result["dirty_frame_capture_region_width_summary_px"] = _summary(widths)
+    result["dirty_frame_capture_region_height_summary_px"] = _summary(heights)
+    result["dirty_frame_capture_region_area_summary_px"] = _summary(areas)
 
 
 def _add_frame_poll_deadline_rollups(
