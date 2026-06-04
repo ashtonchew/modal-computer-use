@@ -245,6 +245,55 @@ def test_sdk_default_causal_case_uses_auto_policy(monkeypatch) -> None:
     ]
 
 
+def test_sdk_default_timeout_diagnostic_case_uses_longer_timeout(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    client = object()
+
+    def fake_action_observe_benchmark(**kwargs):
+        calls.append(kwargs)
+        return {"status": "ok", "name": kwargs["name"]}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_run_observation_action_click_observe_change_benchmark",
+        fake_action_observe_benchmark,
+    )
+
+    factories = observation_surface._observation_case_factories(
+        base_url="http://daemon.test",
+        token=None,
+        client=client,  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    result = factories[
+        "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production"
+    ]()
+
+    assert result["status"] == "ok"
+    assert calls == [
+        {
+            "base_url": "http://daemon.test",
+            "token": None,
+            "client": client,
+            "iterations": 1,
+            "warmup_iterations": 0,
+            "name": (
+                "observation_action_click_act_and_observe_sdk_default_"
+                "timeout_200ms_production"
+            ),
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "change_timeout_ms": 200,
+            "transport_timing": False,
+            "causal_action_observe": True,
+            "use_sdk_default_frame_encoding": True,
+        }
+    ]
+
+
 def test_action_observe_benchmark_keeps_raw_json_binary_matrix_explicit(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -294,6 +343,29 @@ def test_action_observe_benchmark_can_measure_sdk_default_frame_encoding(monkeyp
     assert captured["frame_encoding"] is None
     assert result["frame_encoding"] == "binary-envelope"
     assert result["frame_encoding_policy"] == "sdk-default"
+
+
+def test_action_observe_benchmark_can_override_change_timeout(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_measure(**kwargs):
+        captured.update(kwargs)
+        return [1.0], [{"change_timeout_reached": False}]
+
+    monkeypatch.setattr(observation_surface, "_measure_stream_action_capture_loop", fake_measure)
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+
+    result = observation_surface._run_observation_action_click_observe_change_benchmark(
+        base_url="http://daemon.test",
+        token=None,
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+        change_timeout_ms=200,
+    )
+
+    assert captured["change_timeout_ms"] == 200
+    assert result["change_timeout_ms"] == 200
 
 
 def test_stream_action_capture_loop_omits_sdk_default_frame_encoding(monkeypatch) -> None:
