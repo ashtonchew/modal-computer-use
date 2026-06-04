@@ -2319,6 +2319,8 @@ def _frame_observation(frame) -> dict[str, Any]:
             "dirty_frame_producer_wait_budget_ms"
         ),
         "frame_poll_skipped_reason": metadata.get("frame_poll_skipped_reason"),
+        "frame_poll_budget_ms": metadata.get("frame_poll_budget_ms"),
+        "frame_poll_deadline_reason": metadata.get("frame_poll_deadline_reason"),
         "dirty_region_confirmation_result": metadata.get(
             "dirty_region_confirmation_result"
         ),
@@ -2686,6 +2688,8 @@ def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
             "dirty_frame_producer_wait_budget_ms"
         ),
         "frame_poll_skipped_reason": observation.get("frame_poll_skipped_reason"),
+        "frame_poll_budget_ms": observation.get("frame_poll_budget_ms"),
+        "frame_poll_deadline_reason": observation.get("frame_poll_deadline_reason"),
         "dirty_region_confirmation_result": observation.get(
             "dirty_region_confirmation_result"
         ),

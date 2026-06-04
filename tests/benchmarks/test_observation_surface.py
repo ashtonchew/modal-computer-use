@@ -524,6 +524,8 @@ def test_frame_observations_record_per_iteration_diagnostics() -> None:
             "dirty_frame_producer_used": False,
             "dirty_frame_producer_fallback_reason": "no_changed_frame",
             "frame_poll_skipped_reason": "deadline_exhausted_after_region_confirmation",
+            "frame_poll_budget_ms": 12.0,
+            "frame_poll_deadline_reason": "after_unchanged_dirty_region_confirmation",
             "dirty_region_confirmation_result": "unchanged",
             "change_wait_ms": 13.0,
             "benchmark_timing_ms": {"receive_frame_ms": 13.0},
@@ -556,6 +558,10 @@ def test_frame_observations_record_per_iteration_diagnostics() -> None:
     assert first["client_receive_timing_ms"] == {"payload_wait_ms": 1.0}
     assert result["sample_observations"][1]["frame_poll_skipped_reason"] == (
         "deadline_exhausted_after_region_confirmation"
+    )
+    assert result["sample_observations"][1]["frame_poll_budget_ms"] == 12.0
+    assert result["sample_observations"][1]["frame_poll_deadline_reason"] == (
+        "after_unchanged_dirty_region_confirmation"
     )
     assert result["sample_observations"][1]["dirty_region_confirmation_result"] == "unchanged"
 
@@ -639,6 +645,8 @@ def test_frame_observation_preserves_xdamage_dirty_metadata() -> None:
                 "dirty_frame_capture_region": {"x": 32, "y": 32, "width": 16, "height": 16},
                 "dirty_frame_capture_region_source": "xdamage_dirty_rect",
                 "dirty_frame_producer_wait_budget_ms": 20,
+                "frame_poll_budget_ms": 12.0,
+                "frame_poll_deadline_reason": "after_unchanged_dirty_region_confirmation",
                 "xdamage_dirty_rect": {"x": 40, "y": 40, "width": 4, "height": 4},
                 "xdamage_dirty_rects": [{"x": 40, "y": 40, "width": 4, "height": 4}],
                 "xdamage_dirty_ratio": 0.0625,
@@ -654,6 +662,10 @@ def test_frame_observation_preserves_xdamage_dirty_metadata() -> None:
     }
     assert observation["dirty_frame_capture_region_source"] == "xdamage_dirty_rect"
     assert observation["dirty_frame_producer_wait_budget_ms"] == 20
+    assert observation["frame_poll_budget_ms"] == 12.0
+    assert observation["frame_poll_deadline_reason"] == (
+        "after_unchanged_dirty_region_confirmation"
+    )
     assert observation["xdamage_dirty_rect"] == {"x": 40, "y": 40, "width": 4, "height": 4}
     assert observation["xdamage_dirty_rects"] == [
         {"x": 40, "y": 40, "width": 4, "height": 4}
