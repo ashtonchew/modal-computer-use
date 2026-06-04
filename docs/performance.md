@@ -323,7 +323,10 @@ frame-poll fallback. Full-frame producer waits keep the larger budget because fa
 more expensive and has no regional confirmation shortcut.
 Frame-poll fallback timings split the full poll wall time from `frame_poll_capture_*` capture
 timings. If `frame_poll_ms` exceeds its nominal budget, check whether the first full-frame capture
-itself consumed the time before changing poll sleep or deadline policy.
+itself consumed the time before changing poll sleep or deadline policy. Grouped fallback summaries
+also expose `frame_poll_capture_timing_summary_ms` under
+`frame_poll_deadline_reason_summaries`, so post-confirmation and post-producer fallback capture
+costs can be compared without hand-parsing sample rows.
 Paired action-observe cases also summarize `receive_minus_server_pre_emit_*` on both the baseline
 and variant sub-results, alongside `change_stage_timing_summary_ms`. Use those fields when an A/B
 sample is slow end-to-end but the daemon reports a low `server_pre_emit_ms`, which points at tunnel,

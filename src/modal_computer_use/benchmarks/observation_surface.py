@@ -2854,8 +2854,43 @@ def _frame_poll_deadline_reason_summary(
     if frame_poll_samples:
         result["frame_poll_samples_ms"] = frame_poll_samples
         result["frame_poll_summary_ms"] = _summary(frame_poll_samples)
+    _add_frame_poll_capture_timing_rollups(result, rows)
     _add_dirty_region_confirmation_capture_timing_rollups(result, rows)
     return result
+
+
+def _add_frame_poll_capture_timing_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    rows = [
+        item
+        for item in observations
+        if isinstance(item, dict)
+        and isinstance((timing := item.get("change_stage_timing_ms")), dict)
+        and isinstance(timing.get("frame_poll_capture_ms"), int | float)
+        and timing["frame_poll_capture_ms"] > 0
+    ]
+    timing_keys = {
+        "total_ms": "frame_poll_capture_ms",
+        "ready_ms": "frame_poll_capture_ready_ms",
+        "lock_wait_ms": "frame_poll_capture_lock_wait_ms",
+        "operation_ms": "frame_poll_capture_operation_ms",
+    }
+    timing_summary = {
+        summary_name: _summary(samples)
+        for summary_name, timing_name in timing_keys.items()
+        if (
+            samples := [
+                float(timing[timing_name])
+                for item in rows
+                if isinstance((timing := item.get("change_stage_timing_ms")), dict)
+                and isinstance(timing.get(timing_name), int | float)
+            ]
+        )
+    }
+    if timing_summary:
+        result["frame_poll_capture_timing_summary_ms"] = timing_summary
 
 
 def _add_dirty_region_confirmation_capture_timing_rollups(
