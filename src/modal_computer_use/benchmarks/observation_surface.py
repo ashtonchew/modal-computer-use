@@ -32,6 +32,10 @@ from .surface_result import _surface_result
 
 OBSERVATION_SCREENSHOT_OPTIONS = {"format": "png", "show_cursor": False}
 CLICK_TOGGLE_ACTION = {"type": "click", "x": 512, "y": 512, "button": "left"}
+CLICK_TOGGLE_TARGET_LEFT = 0
+CLICK_TOGGLE_TARGET_TOP = 0
+CLICK_TOGGLE_TARGET_WIDTH = 1024
+CLICK_TOGGLE_TARGET_HEIGHT = 768
 CLICK_TOGGLE_SETTLE_MS = 16
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_0b",
@@ -2878,7 +2882,9 @@ def _open_click_toggle_page(client: DaemonClient) -> None:
         "<body style='margin:0;width:100%;height:100%;overflow:hidden;"
         "background:#ffffff;'>"
         "<button id='target' aria-label='toggle' "
-        "style='position:fixed;left:360px;top:240px;width:256px;height:192px;"
+        f"style='position:fixed;left:{CLICK_TOGGLE_TARGET_LEFT}px;"
+        f"top:{CLICK_TOGGLE_TARGET_TOP}px;width:{CLICK_TOGGLE_TARGET_WIDTH}px;"
+        f"height:{CLICK_TOGGLE_TARGET_HEIGHT}px;"
         "border:0;background:#22c55e;color:#111827;font:32px sans-serif;'>0</button>"
         "<script>"
         "let n=0;"
