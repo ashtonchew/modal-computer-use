@@ -327,6 +327,10 @@ def test_modal_colocated_latency_diagnosis_includes_selected_case_stages() -> No
         "bottleneck": "capture_diff_or_encode",
         "reason": "capture-to-delta-ready is material",
     }
+    colocated_case["sample_stability"] = {
+        "status": "outlier_sensitive",
+        "high_outlier_count": 1,
+    }
     colocated_case["change_stage_timing_summary_ms"] = {
         "server_pre_emit_ms": {"p50": 9.0},
         "dirty_producer_wait_ms": {"p50": 2.2},
@@ -335,6 +339,10 @@ def test_modal_colocated_latency_diagnosis_includes_selected_case_stages() -> No
         "dirty_region_confirmation_native_ms": {"p50": 1.2},
         "frame_poll_ms": {"p50": 0.0},
     }
+    colocated_case["dirty_frame_capture_region_sources"] = ["action_region"]
+    colocated_case["dirty_frame_capture_region_width_summary_px"] = {"p50": 256.0}
+    colocated_case["dirty_frame_capture_region_height_summary_px"] = {"p50": 256.0}
+    colocated_case["dirty_frame_capture_region_area_summary_px"] = {"p50": 65536.0}
 
     comparison = colocated.modal_colocated_comparison(external, colocated_result)
 
@@ -342,6 +350,13 @@ def test_modal_colocated_latency_diagnosis_includes_selected_case_stages() -> No
     assert stage["case"] == "observation_action_click_act_and_observe_sdk_default_production"
     assert stage["external"] is None
     assert stage["colocated"]["latency_diagnosis"]["bottleneck"] == "capture_diff_or_encode"
+    assert stage["colocated"]["sample_stability"]["status"] == "outlier_sensitive"
+    assert stage["colocated"]["dirty_frame_capture_region"] == {
+        "width_px": {"p50": 256.0},
+        "height_px": {"p50": 256.0},
+        "area_px": {"p50": 65536.0},
+        "sources": ["action_region"],
+    }
     assert stage["colocated"]["stage_p50_ms"]["dirty_region_confirmation_ms"] == 4.3
     assert stage["colocated"]["dominant_stage"] == {
         "name": "dirty_region_confirmation_ms",

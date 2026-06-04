@@ -794,7 +794,10 @@ observation case as `causal_action_to_frame_p50_ms`. New artifacts prefer
 explicit change-detection region; keyboard-only or global actions stay on full-frame detection. SDK
 auto-region requests default to a 96 px region radius while preserving caller overrides. That
 metric is the better next-step proof than transport floor alone because it includes action
-submission, daemon execution, change detection, and frame receipt.
+submission, daemon execution, change detection, and frame receipt. The causal-stage diagnosis also
+forwards sample-stability metadata and dirty capture region width, height, area, and source
+summaries when the selected case emits them, so before/after runs can separate capture-area changes
+from scheduler or backend capture noise.
 When the `causal-action-observe-diagnostic` profile is selected, the comparison also includes a
 `diagnosis` object that relates transport floor, causal action-observe, and JSON-vs-binary-envelope
 framing. Treat it as a triage aid: a material binary-envelope win points at WebSocket message

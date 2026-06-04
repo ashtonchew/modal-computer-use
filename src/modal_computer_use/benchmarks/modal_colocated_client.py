@@ -605,11 +605,31 @@ def _case_stage_diagnosis(result: dict[str, Any], case_name: str) -> dict[str, A
     if not latency_diagnosis and not stage_p50:
         return None
     dominant_stage = _dominant_stage(stage_p50)
-    return {
+    diagnosis = {
         "latency_diagnosis": latency_diagnosis or None,
         "stage_p50_ms": stage_p50,
         "dominant_stage": dominant_stage,
     }
+    sample_stability = _dict_value(case.get("sample_stability"))
+    if sample_stability:
+        diagnosis["sample_stability"] = sample_stability
+    region_summary = _dirty_frame_capture_region_summary(case)
+    if region_summary:
+        diagnosis["dirty_frame_capture_region"] = region_summary
+    return diagnosis
+
+
+def _dirty_frame_capture_region_summary(case: dict[str, Any]) -> dict[str, Any] | None:
+    summaries = {
+        "width_px": _dict_value(case.get("dirty_frame_capture_region_width_summary_px")),
+        "height_px": _dict_value(case.get("dirty_frame_capture_region_height_summary_px")),
+        "area_px": _dict_value(case.get("dirty_frame_capture_region_area_summary_px")),
+    }
+    compact = {name: summary for name, summary in summaries.items() if summary}
+    sources = case.get("dirty_frame_capture_region_sources")
+    if isinstance(sources, list) and sources:
+        compact["sources"] = sources
+    return compact or None
 
 
 def _dominant_stage(stage_p50: dict[str, float]) -> dict[str, Any] | None:
