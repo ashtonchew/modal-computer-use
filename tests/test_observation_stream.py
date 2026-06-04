@@ -868,19 +868,19 @@ def test_dirty_frame_producer_wait_timeout_reserves_fallback_budget() -> None:
         observation_routes._dirty_frame_producer_wait_timeout_ms(
             20, regional_capture=True
         )
-        == 4
+        == 2
     )
     assert (
         observation_routes._dirty_frame_producer_wait_timeout_ms(
             21, regional_capture=True
         )
-        == 4
+        == 2
     )
     assert (
         observation_routes._dirty_frame_producer_wait_timeout_ms(
             100, regional_capture=True
         )
-        == 4
+        == 2
     )
     assert (
         observation_routes._dirty_frame_producer_wait_timeout_ms(
@@ -1371,13 +1371,13 @@ def test_observation_stream_confirms_dirty_region_after_producer_timeout(
     assert capture_regions[0] is None
     assert capture_regions[1] == Region(x=0, y=0, width=32, height=32)
     assert len(capture_regions) == 2
-    assert wait_timeouts == [4]
+    assert wait_timeouts == [2]
     assert second["trigger"] == "run_actions_observe_change"
     assert second["change_detected"] is True
     assert second["dirty_frame_producer"] is True
     assert second["dirty_frame_producer_used"] is False
     assert second["dirty_frame_producer_fallback_reason"] == "no_changed_frame"
-    assert second["dirty_frame_producer_wait_budget_ms"] == 4
+    assert second["dirty_frame_producer_wait_budget_ms"] == 2
     assert second["dirty_region_confirmation_result"] == "changed"
     assert second["frame_poll_skipped_reason"] == "dirty_region_confirmation_changed"
     assert second["change_stage_timing_ms"]["dirty_region_confirmation_ms"] >= 0
