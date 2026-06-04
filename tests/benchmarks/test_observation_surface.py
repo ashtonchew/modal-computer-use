@@ -502,6 +502,7 @@ def test_frame_observations_record_per_iteration_diagnostics() -> None:
             "frame_encoding": "json-binary",
             "dirty_frame_producer": True,
             "dirty_frame_producer_used": True,
+            "dirty_frame_producer_wait_budget_ms": 20,
             "dirty_frame_capture_region_source": "action_region",
             "dirty_frame_capture_region": {"x": 0, "y": 0, "width": 64, "height": 64},
             "change_stage_timing_ms": {"server_pre_emit_ms": 10.0},
@@ -549,6 +550,7 @@ def test_frame_observations_record_per_iteration_diagnostics() -> None:
     assert first["iteration"] == 0
     assert first["sample_ms"] == 12.0
     assert first["high_outlier"] is False
+    assert first["dirty_frame_producer_wait_budget_ms"] == 20
     assert first["dirty_frame_capture_region_source"] == "action_region"
     assert first["server_emit_timing_ms"] == {"emit_total_ms": 0.5}
     assert first["client_receive_timing_ms"] == {"payload_wait_ms": 1.0}
@@ -576,6 +578,7 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
             "unchanged": False,
             "dirty_frame_producer": True,
             "dirty_frame_producer_used": True,
+            "dirty_frame_producer_wait_budget_ms": 20,
             "dirty_frame_age_ms": 0.1,
             "change_detected": True,
             "change_stage_timing_ms": {
@@ -593,6 +596,7 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
             "unchanged": False,
             "dirty_frame_producer": True,
             "dirty_frame_producer_used": False,
+            "dirty_frame_producer_wait_budget_ms": 20,
             "dirty_frame_producer_fallback_reason": "no_changed_frame",
             "frame_poll_skipped_reason": "dirty_region_confirmation_changed",
             "dirty_region_confirmation_result": "changed",
@@ -616,6 +620,7 @@ def test_frame_observations_summarize_dirty_frame_producer_metadata() -> None:
     assert result["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]
     assert result["frame_poll_skipped_reasons"] == ["dirty_region_confirmation_changed"]
     assert result["dirty_region_confirmation_results"] == ["changed"]
+    assert result["dirty_frame_producer_wait_budget_summary_ms"]["p50"] == 20.0
     assert result["dirty_frame_age_summary_ms"]["p50"] == 0.1
     assert result["change_stage_timing_summary_ms"]["dirty_producer_wait_ms"]["p50"] == 20.0
     assert (
@@ -633,6 +638,7 @@ def test_frame_observation_preserves_xdamage_dirty_metadata() -> None:
             self.metadata = {
                 "dirty_frame_capture_region": {"x": 32, "y": 32, "width": 16, "height": 16},
                 "dirty_frame_capture_region_source": "xdamage_dirty_rect",
+                "dirty_frame_producer_wait_budget_ms": 20,
                 "xdamage_dirty_rect": {"x": 40, "y": 40, "width": 4, "height": 4},
                 "xdamage_dirty_rects": [{"x": 40, "y": 40, "width": 4, "height": 4}],
                 "xdamage_dirty_ratio": 0.0625,
@@ -647,6 +653,7 @@ def test_frame_observation_preserves_xdamage_dirty_metadata() -> None:
         "height": 16,
     }
     assert observation["dirty_frame_capture_region_source"] == "xdamage_dirty_rect"
+    assert observation["dirty_frame_producer_wait_budget_ms"] == 20
     assert observation["xdamage_dirty_rect"] == {"x": 40, "y": 40, "width": 4, "height": 4}
     assert observation["xdamage_dirty_rects"] == [
         {"x": 40, "y": 40, "width": 4, "height": 4}

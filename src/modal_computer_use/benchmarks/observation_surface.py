@@ -2315,6 +2315,9 @@ def _frame_observation(frame) -> dict[str, Any]:
         "dirty_frame_producer_fallback_reason": metadata.get(
             "dirty_frame_producer_fallback_reason"
         ),
+        "dirty_frame_producer_wait_budget_ms": metadata.get(
+            "dirty_frame_producer_wait_budget_ms"
+        ),
         "frame_poll_skipped_reason": metadata.get("frame_poll_skipped_reason"),
         "dirty_region_confirmation_result": metadata.get(
             "dirty_region_confirmation_result"
@@ -2450,6 +2453,20 @@ def _add_frame_observations(
                 if dirty_frame_age_samples:
                     result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
                     result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
+                dirty_frame_producer_wait_budget_samples = [
+                    item["dirty_frame_producer_wait_budget_ms"]
+                    for item in observations
+                    if isinstance(
+                        item.get("dirty_frame_producer_wait_budget_ms"), int | float
+                    )
+                ]
+                if dirty_frame_producer_wait_budget_samples:
+                    result["dirty_frame_producer_wait_budget_samples_ms"] = (
+                        dirty_frame_producer_wait_budget_samples
+                    )
+                    result["dirty_frame_producer_wait_budget_summary_ms"] = _summary(
+                        dirty_frame_producer_wait_budget_samples
+                    )
                 result["dirty_frame_region_capture_frames"] = sum(
                     1 for item in observations if item.get("dirty_frame_capture_region") is not None
                 )
@@ -2664,6 +2681,9 @@ def _compact_observation_sample(observation: dict[str, Any]) -> dict[str, Any]:
         "dirty_frame_producer_used": observation.get("dirty_frame_producer_used"),
         "dirty_frame_producer_fallback_reason": observation.get(
             "dirty_frame_producer_fallback_reason"
+        ),
+        "dirty_frame_producer_wait_budget_ms": observation.get(
+            "dirty_frame_producer_wait_budget_ms"
         ),
         "frame_poll_skipped_reason": observation.get("frame_poll_skipped_reason"),
         "dirty_region_confirmation_result": observation.get(
