@@ -57,6 +57,7 @@ FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
 CONTROL_DRAIN_TIMEOUT_S = 0.001
 DIRTY_FRAME_PRODUCER_MAX_WAIT_MS = 20
 DIRTY_FRAME_PRODUCER_FALLBACK_RESERVE_MS = 8
+DIRTY_REGION_CONFIRMATION_FRAME_POLL_MAX_MS = 12
 
 
 @dataclass
@@ -746,6 +747,8 @@ async def _send_changed_frame(
     dirty_frame_capture_region: Region | None = None
     dirty_frame_capture_region_source: str | None = None
     frame_poll_skipped_reason: str | None = None
+    frame_poll_budget_ms: float | None = None
+    frame_poll_deadline_reason: str | None = None
     xdamage_dirty_rect: XDamageRect | None = None
     xdamage_dirty_rects: tuple[XDamageRect, ...] = ()
     dirty_producer_used = False
@@ -938,6 +941,18 @@ async def _send_changed_frame(
             )
         if not dirty_producer_used and frame_poll_skipped_reason is None:
             frame_poll_started = perf_counter()
+            frame_poll_deadline = deadline
+            if dirty_region_confirmation_result == "unchanged":
+                frame_poll_deadline_reason = "after_unchanged_dirty_region_confirmation"
+                frame_poll_deadline = min(
+                    deadline,
+                    frame_poll_started
+                    + DIRTY_REGION_CONFIRMATION_FRAME_POLL_MAX_MS / 1000,
+                )
+                frame_poll_budget_ms = max(
+                    (frame_poll_deadline - frame_poll_started) * 1000,
+                    0.0,
+                )
             while True:
                 attempts += 1
                 metadata, payload = await _capture_frame(
@@ -955,16 +970,20 @@ async def _send_changed_frame(
                 last_payload = payload
                 delta_ready_at = perf_counter()
                 change_detected = metadata["source_sha256"] != state.last_source_sha256
-                if change_detected or region_detected or perf_counter() >= deadline:
+                if change_detected or region_detected or perf_counter() >= frame_poll_deadline:
                     break
-                await asyncio.sleep(
+                remaining_sleep_ms = max((frame_poll_deadline - perf_counter()) * 1000, 0.0)
+                if remaining_sleep_ms <= 0:
+                    break
+                sleep_ms = min(
                     _change_poll_sleep_ms(
                         attempt=attempts,
                         poll_interval_ms=poll_interval_ms,
                         poll_strategy=poll_strategy,
-                    )
-                    / 1000
+                    ),
+                    remaining_sleep_ms,
                 )
+                await asyncio.sleep(sleep_ms / 1000)
             frame_poll_ms = _elapsed_ms(frame_poll_started)
     except DaemonError as exc:
         await _send_observation_error(
@@ -1048,6 +1067,8 @@ async def _send_changed_frame(
             else extra_metadata.get("dirty_frame_capture_region"),
             "dirty_frame_capture_region_source": dirty_frame_capture_region_source,
             "frame_poll_skipped_reason": frame_poll_skipped_reason,
+            "frame_poll_budget_ms": frame_poll_budget_ms,
+            "frame_poll_deadline_reason": frame_poll_deadline_reason,
             "dirty_region_confirmation_result": dirty_region_confirmation_result,
             "xdamage_dirty_rect": _xdamage_rect_metadata(xdamage_dirty_rect),
             "xdamage_dirty_rects": [_xdamage_rect_metadata(rect) for rect in xdamage_dirty_rects],
