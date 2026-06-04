@@ -456,7 +456,14 @@ def modal_colocated_comparison(
     if observation is not None:
         surfaces["daemon-observation-stream"] = observation
 
+    paired_observation_cases = _paired_observation_case_comparisons(
+        external_result,
+        colocated_result,
+    )
+
     result: dict[str, Any] = {"surfaces": surfaces}
+    if paired_observation_cases:
+        result["paired_observation_cases"] = paired_observation_cases
     if transport is not None:
         result.update(
             {
@@ -494,6 +501,67 @@ def modal_colocated_latency_diagnosis(
         "causal_framing": framing,
         "interpretation": _latency_diagnosis_interpretation(likely_bound),
     }
+
+
+def _paired_observation_case_comparisons(
+    external_result: dict[str, Any],
+    colocated_result: dict[str, Any],
+) -> dict[str, Any]:
+    external_cases = _observation_cases(external_result)
+    colocated_cases = _observation_cases(colocated_result)
+    case_names = sorted(
+        name
+        for name in set(external_cases) | set(colocated_cases)
+        if _dict_value(external_cases.get(name)).get("paired_comparison")
+        or _dict_value(colocated_cases.get(name)).get("paired_comparison")
+    )
+    return {
+        name: {
+            "external": _paired_observation_case_summary(_dict_value(external_cases.get(name))),
+            "colocated": _paired_observation_case_summary(_dict_value(colocated_cases.get(name))),
+        }
+        for name in case_names
+    }
+
+
+def _paired_observation_case_summary(case: dict[str, Any]) -> dict[str, Any] | None:
+    comparison = _dict_value(case.get("paired_comparison"))
+    if not comparison:
+        return None
+    baseline = _dict_value(case.get("baseline"))
+    variant = _dict_value(case.get("variant"))
+    summary: dict[str, Any] = {
+        "metric": case.get("metric"),
+        "delta_direction": case.get("delta_direction"),
+        "negative_delta_interpretation": case.get("negative_delta_interpretation"),
+        "baseline": _paired_observation_arm_summary(baseline),
+        "variant": _paired_observation_arm_summary(variant),
+        "paired_comparison": comparison,
+    }
+    if stability := _dict_value(case.get("sample_stability")):
+        summary["sample_stability"] = stability
+    return summary
+
+
+def _paired_observation_arm_summary(arm: dict[str, Any]) -> dict[str, Any]:
+    summary = {
+        key: arm.get(key)
+        for key in (
+            "label",
+            "frame_encoding",
+            "dirty_frame_producer",
+            "full_frame_fallback",
+            "change_region_radius",
+        )
+        if key in arm
+    }
+    if timing := _dict_value(arm.get("summary_ms")):
+        summary["summary_ms"] = timing
+    if region := _dirty_frame_capture_region_summary(arm):
+        summary["dirty_frame_capture_region"] = region
+    if stages := _stage_p50_summary(arm):
+        summary["stage_p50_ms"] = stages
+    return summary
 
 
 def _metric_comparison(
@@ -588,20 +656,7 @@ def _causal_stage_diagnosis(
 def _case_stage_diagnosis(result: dict[str, Any], case_name: str) -> dict[str, Any] | None:
     case = _dict_value(_observation_cases(result).get(case_name))
     latency_diagnosis = _dict_value(case.get("latency_diagnosis"))
-    stage_summary = _dict_value(case.get("change_stage_timing_summary_ms"))
-    stage_p50 = {
-        name: p50
-        for name in (
-            "server_pre_emit_ms",
-            "dirty_producer_wait_ms",
-            "dirty_region_confirmation_ms",
-            "dirty_region_confirmation_capture_ms",
-            "dirty_region_confirmation_capture_operation_ms",
-            "dirty_region_confirmation_native_ms",
-            "frame_poll_ms",
-        )
-        if (p50 := _summary_p50(_dict_value(stage_summary.get(name)))) is not None
-    }
+    stage_p50 = _stage_p50_summary(case)
     if not latency_diagnosis and not stage_p50:
         return None
     dominant_stage = _dominant_stage(stage_p50)
@@ -630,6 +685,23 @@ def _dirty_frame_capture_region_summary(case: dict[str, Any]) -> dict[str, Any] 
     if isinstance(sources, list) and sources:
         compact["sources"] = sources
     return compact or None
+
+
+def _stage_p50_summary(case: dict[str, Any]) -> dict[str, float]:
+    stage_summary = _dict_value(case.get("change_stage_timing_summary_ms"))
+    return {
+        name: p50
+        for name in (
+            "server_pre_emit_ms",
+            "dirty_producer_wait_ms",
+            "dirty_region_confirmation_ms",
+            "dirty_region_confirmation_capture_ms",
+            "dirty_region_confirmation_capture_operation_ms",
+            "dirty_region_confirmation_native_ms",
+            "frame_poll_ms",
+        )
+        if (p50 := _summary_p50(_dict_value(stage_summary.get(name)))) is not None
+    }
 
 
 def _dominant_stage(stage_p50: dict[str, float]) -> dict[str, Any] | None:
