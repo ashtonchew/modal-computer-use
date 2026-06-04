@@ -148,6 +148,7 @@ class ObservationClient:
         change_signal: Literal["poll", "xdamage", "auto"] = "auto",
         dirty_frame_producer: Literal["auto", "off"] = "auto",
         dirty_frame_producer_wait_ms: int | None = None,
+        dirty_region_confirmation: Literal["auto", "off"] = "auto",
         full_frame_fallback: bool | None = None,
         frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
         change_detection_region: Mapping[str, Any] | None = None,
@@ -178,6 +179,8 @@ class ObservationClient:
         }
         if dirty_frame_producer_wait_ms is not None:
             payload["dirty_frame_producer_wait_ms"] = dirty_frame_producer_wait_ms
+        if dirty_region_confirmation != "auto":
+            payload["dirty_region_confirmation"] = dirty_region_confirmation
         if frame_encoding is not None:
             payload["frame_encoding"] = frame_encoding
         if continue_on_error:

@@ -1702,6 +1702,186 @@ def test_observation_stream_can_skip_full_frame_fallback_after_unchanged_dirty_r
     assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] == 0
 
 
+def test_observation_stream_skips_confirmation_after_unchanged_region_poll(
+    app,
+    monkeypatch,
+) -> None:
+    white = Image.new("RGB", (64, 64), "white")
+    capture_images = iter([white, white, white])
+    capture_regions: list[Region | None] = []
+
+    async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
+        capture_regions.append(region)
+        return _raw_screenshot_from_image(next(capture_images), region=region)
+
+    class FakeXDamageWatcher:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
+            self.display = display
+            self.rect_hints = rect_hints
+            self.failure = None
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=False,
+                wait_ms=float(timeout_ms),
+                reason="timeout",
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "click", "x": 20, "y": 20, "button": "left"}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 50,
+                    "change_detection": "auto_region",
+                    "change_region_radius": 8,
+                    "change_signal": "xdamage",
+                    "dirty_frame_producer": "off",
+                    "full_frame_fallback": False,
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+
+    region = Region(x=12, y=12, width=16, height=16)
+    assert capture_regions == [None, region, region]
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["type"] == "unchanged"
+    assert second["dirty_frame_producer"] is False
+    assert second["dirty_region_confirmation"] == "auto"
+    assert second["dirty_region_confirmation_result"] == "skipped_region_poll_unchanged"
+    assert second["frame_poll_skipped_reason"] == "region_poll_unchanged"
+    assert second["source_hash_kind"] == "tile-fingerprint"
+    assert second["change_stage_timing_ms"]["region_poll_capture_ms"] > 0
+    assert second["change_stage_timing_ms"]["dirty_region_confirmation_capture_ms"] == 0
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
+
+
+def test_observation_stream_can_disable_dirty_region_confirmation(
+    app,
+    monkeypatch,
+) -> None:
+    white = Image.new("RGB", (64, 64), "white")
+    capture_images = iter([white])
+    capture_regions: list[Region | None] = []
+
+    async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
+        capture_regions.append(region)
+        return _raw_screenshot_from_image(next(capture_images), region=region)
+
+    class FakeXDamageWatcher:
+        def __init__(self, *, display: str, rect_hints: bool = False) -> None:
+            self.display = display
+            self.rect_hints = rect_hints
+            self.failure = None
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            return observation_routes.XDamageWaitResult(
+                available=True,
+                detected=False,
+                wait_ms=float(timeout_ms),
+                reason="timeout",
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(observation_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/observations/stream") as websocket,
+    ):
+        assert websocket.receive_json()["type"] == "ready"
+        websocket.send_json(
+            {
+                "id": "1",
+                "op": "start",
+                "payload": {
+                    "format": "png",
+                    "show_cursor": False,
+                    "fps": 1,
+                    "max_frames": 2,
+                    "tile_size": 16,
+                },
+            }
+        )
+        assert websocket.receive_json()["type"] == "started"
+        assert websocket.receive_json()["trigger"] == "start"
+        assert websocket.receive_bytes()
+        websocket.send_json(
+            {
+                "id": "2",
+                "op": "run_actions_observe_change",
+                "payload": {
+                    "actions": [{"type": "click", "x": 20, "y": 20, "button": "left"}],
+                    "change_timeout_ms": 100,
+                    "poll_interval_ms": 50,
+                    "change_detection": "auto_region",
+                    "change_region_radius": 8,
+                    "change_signal": "xdamage",
+                    "dirty_region_confirmation": "off",
+                    "full_frame_fallback": False,
+                    "source": "test",
+                },
+            }
+        )
+        second = websocket.receive_json()
+
+    assert capture_regions == [None]
+    assert second["trigger"] == "run_actions_observe_change"
+    assert second["type"] == "unchanged"
+    assert second["dirty_frame_producer"] is True
+    assert second["dirty_region_confirmation"] == "off"
+    assert second["dirty_region_confirmation_result"] == "disabled"
+    assert second["frame_poll_skipped_reason"] == "dirty_region_confirmation_disabled"
+    assert second["source_hash_kind"] == "tile-fingerprint"
+    assert second["change_stage_timing_ms"]["dirty_region_confirmation_capture_ms"] == 0
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
+
+
 def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_producer(
     app,
     monkeypatch,
@@ -2729,6 +2909,21 @@ def test_observation_client_act_and_observe_can_override_dirty_producer_wait() -
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["dirty_frame_producer_wait_ms"] == 1
+
+
+def test_observation_client_act_and_observe_can_disable_dirty_region_confirmation() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(payload=b"png", metadata={"trigger": "run_actions_observe_change"})
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    client.act_and_observe(
+        actions=[{"type": "click", "x": 12, "y": 34}],
+        dirty_region_confirmation="off",
+    )
+
+    assert transport.change_payload["change_detection"] == "auto_region"
+    assert transport.change_payload["dirty_region_confirmation"] == "off"
 
 
 def test_observation_client_act_and_observe_uses_explicit_region_with_auto_policy() -> None:

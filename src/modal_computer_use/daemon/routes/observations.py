@@ -443,6 +443,7 @@ async def _handle_observation_message(
                         "change_signal",
                         "dirty_frame_producer",
                         "dirty_frame_producer_wait_ms",
+                        "dirty_region_confirmation",
                         "full_frame_fallback",
                         "frame_encoding",
                         "change_detection_region",
@@ -526,6 +527,7 @@ async def _handle_observation_message(
                 change_signal=change_signal,
                 dirty_producer=dirty_producer,
                 dirty_frame_producer_wait_ms=stream_request.dirty_frame_producer_wait_ms,
+                dirty_region_confirmation=stream_request.dirty_region_confirmation,
                 baseline_source_sha256=baseline_source_sha256,
                 observe_started=observe_started,
                 action_started=action_started,
@@ -556,6 +558,7 @@ async def _handle_observation_message(
                     "change_detection": stream_request.change_detection,
                     "change_signal": stream_request.change_signal,
                     "dirty_frame_producer_policy": stream_request.dirty_frame_producer,
+                    "dirty_region_confirmation": stream_request.dirty_region_confirmation,
                     "full_frame_fallback": stream_request.full_frame_fallback,
                     "dirty_frame_capture_region": producer_capture_region.model_dump(mode="json")
                     if producer_capture_region is not None
@@ -745,6 +748,7 @@ async def _send_changed_frame(
     change_signal: _PreparedChangeSignal,
     dirty_producer: _DirtyFrameProducer | None,
     dirty_frame_producer_wait_ms: int | None,
+    dirty_region_confirmation: Literal["auto", "off"],
     baseline_source_sha256: str | None,
     observe_started: float,
     action_started: float,
@@ -795,6 +799,7 @@ async def _send_changed_frame(
     region_poll_capture_ready_ms = 0.0
     region_poll_capture_lock_wait_ms = 0.0
     region_poll_capture_operation_ms = 0.0
+    region_poll_source_sha256: str | None = None
     frame_poll_ms = 0.0
     frame_poll_capture_ms = 0.0
     frame_poll_capture_ready_ms = 0.0
@@ -930,12 +935,18 @@ async def _send_changed_frame(
                 region_sha256, region_poll_capture_timing = (
                     await _capture_region_source_sha256_with_timing(websocket, region=region)
                 )
+                region_poll_source_sha256 = region_sha256
                 region_poll_capture_ms += region_poll_capture_timing.total_ms
                 region_poll_capture_ready_ms += region_poll_capture_timing.ready_ms
                 region_poll_capture_lock_wait_ms += region_poll_capture_timing.lock_wait_ms
                 region_poll_capture_operation_ms += region_poll_capture_timing.operation_ms
                 region_detected = region_sha256 != region_baseline_sha256
-                if region_detected or perf_counter() >= deadline:
+                region_poll_unchanged = (
+                    region_sha256 is not None and region_sha256 == region_baseline_sha256
+                )
+                if region_detected or (not full_frame_fallback and region_poll_unchanged):
+                    break
+                if perf_counter() >= deadline:
                     break
                 await asyncio.sleep(
                     _change_poll_sleep_ms(
@@ -948,53 +959,98 @@ async def _send_changed_frame(
             region_poll_ms = _elapsed_ms(region_poll_started)
         if (
             not dirty_producer_used
+            and used_region
+            and not region_detected
+            and not full_frame_fallback
+            and region_poll_source_sha256 is not None
+            and region_poll_source_sha256 == region_baseline_sha256
+        ):
+            unchanged_frame = _cached_unchanged_delta_frame(
+                state=state,
+                request=request,
+                options=_stream_screenshot_options(request),
+                seq=seq,
+                previous_seq=state.last_frame_seq,
+                stream_id=state.stream_id or "unknown",
+                captured_started=observe_started,
+                timing_label="region_poll_unchanged_ms",
+            )
+            if unchanged_frame is not None:
+                last_metadata, last_payload = unchanged_frame
+                delta_ready_at = perf_counter()
+                change_detected = False
+                dirty_region_confirmation_result = "skipped_region_poll_unchanged"
+                frame_poll_skipped_reason = "region_poll_unchanged"
+        if (
+            not dirty_producer_used
             and not region_detected
             and dirty_producer is not None
             and dirty_producer.capture_region is not None
             and producer_result is None
+            and last_metadata is None
         ):
-            confirmation_started = perf_counter()
-            (
-                confirmation_frame,
-                confirmation_capture_timing,
-                confirmation_native_ms,
-            ) = (
-                await _capture_dirty_region_confirmation_frame(
-                    websocket,
+            if dirty_region_confirmation == "off" and not full_frame_fallback:
+                unchanged_frame = _cached_unchanged_delta_frame(
                     state=state,
                     request=request,
-                    region=dirty_producer.capture_region,
+                    options=_stream_screenshot_options(request),
                     seq=seq,
-                    observe_started=observe_started,
+                    previous_seq=state.last_frame_seq,
+                    stream_id=state.stream_id or "unknown",
+                    captured_started=observe_started,
+                    timing_label="dirty_region_confirmation_disabled_ms",
                 )
-            )
-            dirty_region_confirmation_ms = _elapsed_ms(confirmation_started)
-            dirty_region_confirmation_capture_ms = confirmation_capture_timing.total_ms
-            dirty_region_confirmation_capture_ready_ms = confirmation_capture_timing.ready_ms
-            dirty_region_confirmation_capture_lock_wait_ms = (
-                confirmation_capture_timing.lock_wait_ms
-            )
-            dirty_region_confirmation_capture_operation_ms = (
-                confirmation_capture_timing.operation_ms
-            )
-            dirty_region_confirmation_native_ms = confirmation_native_ms
-            if confirmation_frame is not None:
-                metadata, payload = confirmation_frame
-                last_metadata = metadata
-                last_payload = payload
-                delta_ready_at = perf_counter()
-                change_detected = (
-                    not metadata["unchanged"]
-                    if metadata.get("source_hash_kind") == "tile-fingerprint"
-                    else metadata["source_sha256"] != state.last_source_sha256
+                if unchanged_frame is not None:
+                    last_metadata, last_payload = unchanged_frame
+                    delta_ready_at = perf_counter()
+                    change_detected = False
+                    dirty_region_confirmation_result = "disabled"
+                    frame_poll_skipped_reason = "dirty_region_confirmation_disabled"
+            if last_metadata is None:
+                confirmation_started = perf_counter()
+                (
+                    confirmation_frame,
+                    confirmation_capture_timing,
+                    confirmation_native_ms,
+                ) = (
+                    await _capture_dirty_region_confirmation_frame(
+                        websocket,
+                        state=state,
+                        request=request,
+                        region=dirty_producer.capture_region,
+                        seq=seq,
+                        observe_started=observe_started,
+                    )
                 )
-                dirty_region_confirmation_result = "changed" if change_detected else "unchanged"
-                if change_detected:
-                    frame_poll_skipped_reason = "dirty_region_confirmation_changed"
-                elif not full_frame_fallback:
-                    frame_poll_skipped_reason = "dirty_region_confirmation_unchanged"
-            else:
-                dirty_region_confirmation_result = "unavailable"
+                dirty_region_confirmation_ms = _elapsed_ms(confirmation_started)
+                dirty_region_confirmation_capture_ms = confirmation_capture_timing.total_ms
+                dirty_region_confirmation_capture_ready_ms = confirmation_capture_timing.ready_ms
+                dirty_region_confirmation_capture_lock_wait_ms = (
+                    confirmation_capture_timing.lock_wait_ms
+                )
+                dirty_region_confirmation_capture_operation_ms = (
+                    confirmation_capture_timing.operation_ms
+                )
+                dirty_region_confirmation_native_ms = confirmation_native_ms
+                if confirmation_frame is not None:
+                    metadata, payload = confirmation_frame
+                    last_metadata = metadata
+                    last_payload = payload
+                    delta_ready_at = perf_counter()
+                    change_detected = (
+                        not metadata["unchanged"]
+                        if metadata.get("source_hash_kind") == "tile-fingerprint"
+                        else metadata["source_sha256"] != state.last_source_sha256
+                    )
+                    dirty_region_confirmation_result = (
+                        "changed" if change_detected else "unchanged"
+                    )
+                    if change_detected:
+                        frame_poll_skipped_reason = "dirty_region_confirmation_changed"
+                    elif not full_frame_fallback:
+                        frame_poll_skipped_reason = "dirty_region_confirmation_unchanged"
+                else:
+                    dirty_region_confirmation_result = "unavailable"
         if (
             not dirty_producer_used
             and not full_frame_fallback
@@ -1262,6 +1318,65 @@ async def _capture_dirty_region_confirmation_frame(
         captured_started=observe_started,
     )
     return frame, capture_timing, _elapsed_ms(native_started)
+
+
+def _cached_unchanged_delta_frame(
+    *,
+    state: _StreamState,
+    request: ObservationStreamRequest,
+    options: ScreenshotOptions,
+    seq: int,
+    previous_seq: int | None,
+    stream_id: str,
+    captured_started: float,
+    timing_label: str,
+) -> tuple[dict[str, Any], bytes] | None:
+    previous = state.last_raw_frame
+    previous_tile_hashes = state.last_tile_hashes
+    if previous is None or previous_tile_hashes is None:
+        return None
+    source_fingerprint = _source_fingerprint_from_tile_hashes(
+        previous_tile_hashes,
+        width=previous.width,
+        height=previous.height,
+        tile_size=request.tile_size,
+    )
+    raw = CapturedRawScreenshot(
+        width=previous.width,
+        height=previous.height,
+        rgb=previous.rgb,
+        sha256=source_fingerprint,
+        captured_at=previous.captured_at,
+        coordinate_space=previous.coordinate_space,
+        cursor_visible=previous.cursor_visible,
+        capture_backend=previous.capture_backend,
+        timings_ms=dict(previous.timings_ms),
+    )
+    return _raw_metadata(
+        raw=raw,
+        request=request,
+        options=options,
+        stream_id=stream_id,
+        seq=seq,
+        kind="delta-suppressed",
+        payload=b"",
+        payload_sha256=source_fingerprint,
+        full_size_bytes=None,
+        unchanged=True,
+        dirty_rect=None,
+        dirty_ratio=0.0,
+        previous_seq=previous_seq,
+        timing={
+            "diff_ms": 0.0,
+            "tile_diff_ms": 0.0,
+            timing_label: 0.0,
+        },
+        captured_started=captured_started,
+        current_tile_hashes=previous_tile_hashes,
+        current_raw_frame=previous,
+        current_raw_frame_current=False,
+        source_hash_kind="tile-fingerprint",
+    )
 
 
 def _action_observe_attribution(
