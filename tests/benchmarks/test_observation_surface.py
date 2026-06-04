@@ -377,11 +377,31 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
             "baseline_observations": [
                 {
                     "dirty_frame_producer": False,
-                    "change_stage_timing_ms": {"frame_poll_ms": 100.0},
+                    "benchmark_timing_ms": {
+                        "action_to_frame_ms": 120.0,
+                        "receive_frame_ms": 120.0,
+                    },
+                    "change_stage_timing_ms": {
+                        "frame_poll_ms": 100.0,
+                        "server_pre_emit_ms": 20.0,
+                    },
+                    "observation_transport_timing": {
+                        "server_emit_timing_ms": {"emit_total_ms": 5.0},
+                    },
                 },
                 {
                     "dirty_frame_producer": False,
-                    "change_stage_timing_ms": {"frame_poll_ms": 110.0},
+                    "benchmark_timing_ms": {
+                        "action_to_frame_ms": 130.0,
+                        "receive_frame_ms": 130.0,
+                    },
+                    "change_stage_timing_ms": {
+                        "frame_poll_ms": 110.0,
+                        "server_pre_emit_ms": 30.0,
+                    },
+                    "observation_transport_timing": {
+                        "server_emit_timing_ms": {"emit_total_ms": 5.0},
+                    },
                 },
             ],
             "variant_observations": [
@@ -397,13 +417,21 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
                     "change_detected": True,
                     "unchanged": False,
                     "change_timeout_reached": False,
+                    "benchmark_timing_ms": {
+                        "action_to_frame_ms": 90.0,
+                        "receive_frame_ms": 90.0,
+                    },
                     "change_stage_timing_ms": {
                         "frame_poll_ms": 12.0,
+                        "server_pre_emit_ms": 40.0,
                         "dirty_region_confirmation_capture_ms": 5.0,
                         "dirty_region_confirmation_capture_ready_ms": 0.1,
                         "dirty_region_confirmation_capture_lock_wait_ms": 0.2,
                         "dirty_region_confirmation_capture_operation_ms": 2.0,
                         "dirty_region_confirmation_native_ms": 1.0,
+                    },
+                    "observation_transport_timing": {
+                        "server_emit_timing_ms": {"emit_total_ms": 4.0},
                     },
                 },
                 {
@@ -414,7 +442,17 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
                     "change_detected": False,
                     "unchanged": True,
                     "change_timeout_reached": True,
-                    "change_stage_timing_ms": {"frame_poll_ms": 0.0},
+                    "benchmark_timing_ms": {
+                        "action_to_frame_ms": 140.0,
+                        "receive_frame_ms": 140.0,
+                    },
+                    "change_stage_timing_ms": {
+                        "frame_poll_ms": 0.0,
+                        "server_pre_emit_ms": 80.0,
+                    },
+                    "observation_transport_timing": {
+                        "server_emit_timing_ms": {"emit_total_ms": 5.0},
+                    },
                 },
             ],
             "paired_delta_samples_ms": [-30.0, 10.0],
@@ -444,8 +482,12 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert result["summary_ms"]["p50"] == -10.0
     assert result["baseline"]["dirty_frame_producer"] == "off"
     assert result["baseline"]["summary_ms"]["p50"] == 125.0
+    assert result["baseline"]["receive_minus_server_pre_emit_summary_ms"]["p50"] == 100.0
+    assert result["baseline"]["receive_minus_server_pre_emit_and_send_summary_ms"]["p50"] == 95.0
     assert result["variant"]["dirty_frame_producer"] == "auto"
     assert result["variant"]["summary_ms"]["p50"] == 115.0
+    assert result["variant"]["receive_minus_server_pre_emit_summary_ms"]["p50"] == 55.0
+    assert result["variant"]["receive_minus_server_pre_emit_and_send_summary_ms"]["p50"] == 50.5
     assert result["variant"]["dirty_frame_producer_frames"] == 2
     assert result["variant"]["dirty_frame_producer_used_frames"] == 1
     assert result["variant"]["dirty_frame_producer_fallback_reasons"] == ["no_changed_frame"]

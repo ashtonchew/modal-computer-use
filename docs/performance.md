@@ -317,6 +317,10 @@ operation time. Successful screenshot captures and action batches refresh the da
 readiness cache, so hot observation loops should not periodically pay a fresh backend readiness
 probe while they are actively proving that the desktop is usable. `/readyz` still forces a fresh
 probe for health checks, and failed operations do not refresh the cache.
+Paired action-observe cases also summarize `receive_minus_server_pre_emit_*` on both the baseline
+and variant sub-results. Use those fields when an A/B sample is slow end-to-end but the daemon
+reports a low `server_pre_emit_ms`, which points at tunnel, WebSocket, or client receive scheduling
+rather than daemon-side capture or diff work.
 
 Live observation benchmark runs can be narrowed to the cases under investigation:
 

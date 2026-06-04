@@ -977,6 +977,14 @@ def _run_observation_action_click_paired_envelope_benchmark(
     )
     _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
     _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_action_observe_receive_residual_rollups(
+        result["baseline"],
+        paired.get("baseline_observations", []),
+    )
+    _add_action_observe_receive_residual_rollups(
+        result["variant"],
+        paired.get("variant_observations", []),
+    )
     return result
 
 
@@ -1052,6 +1060,14 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
     )
     _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
     _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
+    _add_action_observe_receive_residual_rollups(
+        result["baseline"],
+        paired.get("baseline_observations", []),
+    )
+    _add_action_observe_receive_residual_rollups(
+        result["variant"],
+        paired.get("variant_observations", []),
+    )
     return result
 
 
@@ -2523,49 +2539,7 @@ def _add_frame_observations(
         nested_key="client_receive_timing_ms",
         result_key="client_receive_timing_summary_ms",
     )
-    action_to_frame_samples = [
-        timing["action_to_frame_ms"]
-        for item in observations
-        if isinstance((timing := item.get("benchmark_timing_ms")), dict)
-        and isinstance(timing.get("action_to_frame_ms"), int | float)
-    ]
-    if action_to_frame_samples:
-        result["action_to_frame_samples_ms"] = action_to_frame_samples
-        result["action_to_frame_summary_ms"] = _summary(action_to_frame_samples)
-
-    receive_minus_pre_emit_samples = [
-        timing["receive_frame_ms"] - stage_timing["server_pre_emit_ms"]
-        for item in observations
-        if isinstance((timing := item.get("benchmark_timing_ms")), dict)
-        and isinstance((stage_timing := item.get("change_stage_timing_ms")), dict)
-        and isinstance(timing.get("receive_frame_ms"), int | float)
-        and isinstance(stage_timing.get("server_pre_emit_ms"), int | float)
-    ]
-    if receive_minus_pre_emit_samples:
-        result["receive_minus_server_pre_emit_samples_ms"] = receive_minus_pre_emit_samples
-        result["receive_minus_server_pre_emit_summary_ms"] = _summary(
-            receive_minus_pre_emit_samples
-        )
-    server_emit_minus_pre_emit_samples = [
-        timing["receive_frame_ms"]
-        - stage_timing["server_pre_emit_ms"]
-        - server_timing["emit_total_ms"]
-        for item in observations
-        if isinstance((timing := item.get("benchmark_timing_ms")), dict)
-        and isinstance((stage_timing := item.get("change_stage_timing_ms")), dict)
-        and isinstance((transport := item.get("observation_transport_timing")), dict)
-        and isinstance((server_timing := transport.get("server_emit_timing_ms")), dict)
-        and isinstance(timing.get("receive_frame_ms"), int | float)
-        and isinstance(stage_timing.get("server_pre_emit_ms"), int | float)
-        and isinstance(server_timing.get("emit_total_ms"), int | float)
-    ]
-    if server_emit_minus_pre_emit_samples:
-        result["receive_minus_server_pre_emit_and_send_samples_ms"] = (
-            server_emit_minus_pre_emit_samples
-        )
-        result["receive_minus_server_pre_emit_and_send_summary_ms"] = _summary(
-            server_emit_minus_pre_emit_samples
-        )
+    _add_action_observe_receive_residual_rollups(result, observations)
     mutation_samples = [
         timing["mutation_ms"]
         for item in observations
@@ -2681,6 +2655,59 @@ def _add_dirty_frame_producer_rollups(
         for item in observations
         if isinstance(item, dict) and item.get("dirty_frame_capture_region") is not None
     )
+
+
+def _add_action_observe_receive_residual_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    action_to_frame_samples = [
+        timing["action_to_frame_ms"]
+        for item in observations
+        if isinstance(item, dict)
+        and isinstance((timing := item.get("benchmark_timing_ms")), dict)
+        and isinstance(timing.get("action_to_frame_ms"), int | float)
+    ]
+    if action_to_frame_samples:
+        result["action_to_frame_samples_ms"] = action_to_frame_samples
+        result["action_to_frame_summary_ms"] = _summary(action_to_frame_samples)
+
+    receive_minus_pre_emit_samples = [
+        timing["receive_frame_ms"] - stage_timing["server_pre_emit_ms"]
+        for item in observations
+        if isinstance(item, dict)
+        and isinstance((timing := item.get("benchmark_timing_ms")), dict)
+        and isinstance((stage_timing := item.get("change_stage_timing_ms")), dict)
+        and isinstance(timing.get("receive_frame_ms"), int | float)
+        and isinstance(stage_timing.get("server_pre_emit_ms"), int | float)
+    ]
+    if receive_minus_pre_emit_samples:
+        result["receive_minus_server_pre_emit_samples_ms"] = receive_minus_pre_emit_samples
+        result["receive_minus_server_pre_emit_summary_ms"] = _summary(
+            receive_minus_pre_emit_samples
+        )
+
+    server_emit_minus_pre_emit_samples = [
+        timing["receive_frame_ms"]
+        - stage_timing["server_pre_emit_ms"]
+        - server_timing["emit_total_ms"]
+        for item in observations
+        if isinstance(item, dict)
+        and isinstance((timing := item.get("benchmark_timing_ms")), dict)
+        and isinstance((stage_timing := item.get("change_stage_timing_ms")), dict)
+        and isinstance((transport := item.get("observation_transport_timing")), dict)
+        and isinstance((server_timing := transport.get("server_emit_timing_ms")), dict)
+        and isinstance(timing.get("receive_frame_ms"), int | float)
+        and isinstance(stage_timing.get("server_pre_emit_ms"), int | float)
+        and isinstance(server_timing.get("emit_total_ms"), int | float)
+    ]
+    if server_emit_minus_pre_emit_samples:
+        result["receive_minus_server_pre_emit_and_send_samples_ms"] = (
+            server_emit_minus_pre_emit_samples
+        )
+        result["receive_minus_server_pre_emit_and_send_summary_ms"] = _summary(
+            server_emit_minus_pre_emit_samples
+        )
 
 
 def _add_dirty_frame_capture_region_source_rollups(
