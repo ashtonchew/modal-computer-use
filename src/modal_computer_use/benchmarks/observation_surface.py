@@ -38,6 +38,7 @@ CLICK_TOGGLE_TARGET_WIDTH = 1024
 CLICK_TOGGLE_TARGET_HEIGHT = 768
 CLICK_TOGGLE_PAGE_READY_SETTLE_MS = 250
 CLICK_TOGGLE_SETTLE_MS = 16
+CLICK_TOGGLE_HTTP_LOG_PATH = "/tmp/modal-computer-use-observation-http.log"  # noqa: S108
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_0b",
     "observation_transport_probe_5kb",
@@ -45,6 +46,7 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_250kb",
     "observation_action_click_act_and_observe_sdk_default_production",
     "observation_action_click_act_and_observe_sdk_default_timeout_200ms_production",
+    "observation_action_click_act_and_observe_click_beacon_production",
     "observation_action_click_act_and_observe_auto_signal_production",
     "observation_action_click_act_and_observe_auto_signal_binary_envelope_production",
     "observation_action_click_act_and_observe_auto_region_production",
@@ -359,6 +361,15 @@ def _observation_case_factories(
                 transport_timing=False,
                 causal_action_observe=True,
                 use_sdk_default_frame_encoding=True,
+            )
+        ),
+        "observation_action_click_act_and_observe_click_beacon_production": lambda: (
+            _run_observation_action_click_beacon_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
             )
         ),
         "observation_action_click_act_and_observe_auto_region_production": lambda: (
@@ -1018,6 +1029,67 @@ def _run_observation_action_click_observe_change_benchmark(
             else "benchmark-explicit",
             "transport_timing": transport_timing,
             "causal_action_observe": causal_action_observe,
+        }
+    )
+    return result
+
+
+def _run_observation_action_click_beacon_benchmark(
+    *,
+    base_url: str,
+    token: str | None,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int,
+) -> dict[str, Any]:
+    failures: list[dict[str, Any]] = []
+    beacon_token = _open_click_toggle_beacon_page(client)
+    samples, observations = _measure_stream_action_capture_loop(
+        name="observation_action_click_act_and_observe_click_beacon_production",
+        base_url=base_url,
+        token=token,
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        failures=failures,
+        capture_delay_ms=0,
+        observe_change=True,
+        poll_strategy="adaptive",
+        change_detection="auto",
+        change_signal="auto",
+        transport_timing=False,
+        causal_action_observe=True,
+    )
+    expected_events = iterations + warmup_iterations
+    beacon_events = _wait_for_click_beacon_count(
+        client,
+        beacon_token,
+        expected_events=expected_events,
+    )
+    result = _case_result(
+        "observation_action_click_act_and_observe_click_beacon_production",
+        iterations,
+        samples,
+        failures,
+    )
+    _add_frame_observations(result, samples, observations)
+    result.update(
+        {
+            "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
+            "action_count": 1,
+            "mutation_kind": "stream_action_click_observe_change_click_beacon",
+            "change_timeout_ms": 100,
+            "poll_interval_ms": 8,
+            "poll_strategy": "adaptive",
+            "change_detection": "auto",
+            "change_signal": "auto",
+            "page": "click-beacon",
+            "frame_encoding": "binary-envelope",
+            "frame_encoding_policy": "sdk-default",
+            "transport_timing": False,
+            "causal_action_observe": True,
+            "click_beacon_expected_events": expected_events,
+            "click_beacon_events": beacon_events,
+            "click_beacon_missing_events": max(expected_events - beacon_events, 0),
         }
     )
     return result
@@ -3043,6 +3115,54 @@ def _open_click_toggle_page(client: DaemonClient) -> None:
     _wait_for_click_toggle_page_ready()
 
 
+def _open_click_toggle_beacon_page(client: DaemonClient) -> str:
+    beacon_token = str(time.monotonic_ns())
+    body = (
+        "<!doctype html>"
+        "<html style='margin:0;width:100%;height:100%;overflow:hidden;'>"
+        "<body style='margin:0;width:100%;height:100%;overflow:hidden;"
+        "background:#ffffff;'>"
+        "<button id='target' aria-label='toggle' "
+        f"style='position:fixed;left:{CLICK_TOGGLE_TARGET_LEFT}px;"
+        f"top:{CLICK_TOGGLE_TARGET_TOP}px;width:{CLICK_TOGGLE_TARGET_WIDTH}px;"
+        f"height:{CLICK_TOGGLE_TARGET_HEIGHT}px;"
+        "border:0;background:#22c55e;color:#111827;font:32px sans-serif;'>0</button>"
+        "<script>"
+        "let n=0;"
+        "const token="
+        f"{json.dumps(beacon_token)};"
+        "const t=document.getElementById('target');"
+        "function paint(){"
+        "t.textContent=String(n);"
+        "t.style.background=(n%2)?'#ef4444':'#22c55e';"
+        "}"
+        "function beacon(){"
+        "window.__clickBeacons=window.__clickBeacons||[];"
+        "const img=new Image();"
+        "img.src='/click?token='+encodeURIComponent(token)+'&n='+n+'&t='+Date.now();"
+        "window.__clickBeacons.push(img);"
+        "}"
+        "document.addEventListener('click',()=>{n++;paint();beacon();});"
+        "paint();"
+        "</script>"
+        "</body></html>"
+    )
+    cache_key = str(time.monotonic_ns())
+    _serve_synthetic_page(client, body)
+    client.post_json(
+        "/v1/browser/open-url",
+        json={
+            "url": (
+                "http://127.0.0.1:8766/index.html?"
+                f"action-observe-beacon={quote(cache_key)}"
+            ),
+            "wait_for_window": True,
+        },
+    )
+    _wait_for_click_toggle_page_ready()
+    return beacon_token
+
+
 def _open_sparse_click_toggle_page(client: DaemonClient) -> None:
     body = (
         "<!doctype html>"
@@ -3095,6 +3215,42 @@ def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
         "/v1/commands/run",
         json={"command": ["sh", "-lc", script], "timeout": 5},
     )
+
+
+def _read_click_beacon_count(client: DaemonClient, token: str) -> int:
+    needle = f"GET /click?token={quote(token, safe='')}"
+    script = (
+        "set -eu; "
+        f"log={shell_quote(CLICK_TOGGLE_HTTP_LOG_PATH)}; "
+        'if [ -f "$log" ]; then '
+        f"grep -F -c {shell_quote(needle)} \"$log\" || true; "
+        "else printf '0\\n'; fi"
+    )
+    result = client.post_json(
+        "/v1/commands/run",
+        json={"command": ["sh", "-lc", script], "timeout": 5},
+    )
+    output = result.get("output") if isinstance(result, dict) else {}
+    stdout = output.get("stdout") if isinstance(output, dict) else None
+    try:
+        return max(int(str(stdout).strip() or "0"), 0)
+    except ValueError:
+        return 0
+
+
+def _wait_for_click_beacon_count(
+    client: DaemonClient,
+    token: str,
+    *,
+    expected_events: int,
+    timeout_ms: int = 500,
+) -> int:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    count = _read_click_beacon_count(client, token)
+    while count < expected_events and time.monotonic() < deadline:
+        time.sleep(0.05)
+        count = _read_click_beacon_count(client, token)
+    return count
 
 
 def _frame_observation(frame) -> dict[str, Any]:
