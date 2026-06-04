@@ -234,6 +234,14 @@ action-region workflows that prefer the verified regional unchanged frame over t
 full-frame truth check. It preserves the default conservative behavior unless explicitly disabled
 and records `frame_poll_skipped_reason="dirty_region_confirmation_unchanged"` or
 `"dirty_producer_same_region"` when it skips the full-frame fallback.
+If the region-poll hash is already unchanged in this no-fallback mode, the daemon can skip the
+second regional confirmation capture and emit a tile-fingerprint unchanged frame with
+`frame_poll_skipped_reason="region_poll_unchanged"`.
+`dirty_region_confirmation="off"` is a narrower diagnostic lower-bound mode for action-derived
+dirty-producer regions: when combined with `full_frame_fallback=false`, a producer miss can emit a
+tile-fingerprint unchanged frame without the regional confirmation capture and records
+`frame_poll_skipped_reason="dirty_region_confirmation_disabled"`. The default remains
+`dirty_region_confirmation="auto"`.
 The raw daemon route default remains conservative, while SDK `act_and_observe()` resolves pointer
 and explicit-region auto-region requests to `full_frame_fallback=false` unless the caller passes an
 explicit override. The raw daemon route keeps the conservative `change_region_radius=192` default;
@@ -606,6 +614,12 @@ the current 2 ms regional dirty-producer wait against a 1 ms diagnostic override
 auto-region, `full_frame_fallback=false`, and binary-envelope framing. Negative deltas mean the 1 ms
 variant was faster. Use this case before changing the regional producer wait cap; the per-command
 `dirty_frame_producer_wait_ms` override is diagnostic and leaves the default cap unchanged.
+`observation_action_click_act_and_observe_paired_dirty_region_confirmation_ab_production`
+compares the default regional confirmation capture against the diagnostic
+`dirty_region_confirmation="off"` lower bound, with 64 px auto-region, `full_frame_fallback=false`,
+and binary-envelope framing. Negative deltas mean the confirmation-disabled variant was faster.
+Use this case to quantify the cost of regional confirmation before considering any default policy
+change.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,

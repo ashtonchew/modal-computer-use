@@ -39,6 +39,7 @@ class ObservationActionObserveChangeRequest(ObservationActionCaptureRequest):
     change_signal: Literal["poll", "xdamage", "auto"] = "auto"
     dirty_frame_producer: Literal["auto", "off"] = "auto"
     dirty_frame_producer_wait_ms: int | None = Field(default=None, ge=0, le=60_000)
+    dirty_region_confirmation: Literal["auto", "off"] = "auto"
     full_frame_fallback: bool = True
     frame_encoding: Literal["json-binary", "binary-envelope"] | None = None
     change_detection_region: Region | None = None
