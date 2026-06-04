@@ -482,10 +482,18 @@ def test_paired_dirty_producer_case_reports_delta_samples(monkeypatch) -> None:
     assert result["summary_ms"]["p50"] == -10.0
     assert result["baseline"]["dirty_frame_producer"] == "off"
     assert result["baseline"]["summary_ms"]["p50"] == 125.0
+    assert result["baseline"]["change_stage_timing_summary_ms"]["frame_poll_ms"]["p50"] == 105.0
     assert result["baseline"]["receive_minus_server_pre_emit_summary_ms"]["p50"] == 100.0
     assert result["baseline"]["receive_minus_server_pre_emit_and_send_summary_ms"]["p50"] == 95.0
     assert result["variant"]["dirty_frame_producer"] == "auto"
     assert result["variant"]["summary_ms"]["p50"] == 115.0
+    assert result["variant"]["change_stage_timing_summary_ms"]["frame_poll_ms"]["p50"] == 6.0
+    assert (
+        result["variant"]["change_stage_timing_summary_ms"][
+            "dirty_region_confirmation_capture_ms"
+        ]["p50"]
+        == 5.0
+    )
     assert result["variant"]["receive_minus_server_pre_emit_summary_ms"]["p50"] == 55.0
     assert result["variant"]["receive_minus_server_pre_emit_and_send_summary_ms"]["p50"] == 50.5
     assert result["variant"]["dirty_frame_producer_frames"] == 2

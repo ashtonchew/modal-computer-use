@@ -322,9 +322,9 @@ confirmation can cheaply verify the action-derived capture region and still leav
 frame-poll fallback. Full-frame producer waits keep the larger budget because fallback capture is
 more expensive and has no regional confirmation shortcut.
 Paired action-observe cases also summarize `receive_minus_server_pre_emit_*` on both the baseline
-and variant sub-results. Use those fields when an A/B sample is slow end-to-end but the daemon
-reports a low `server_pre_emit_ms`, which points at tunnel, WebSocket, or client receive scheduling
-rather than daemon-side capture or diff work.
+and variant sub-results, alongside `change_stage_timing_summary_ms`. Use those fields when an A/B
+sample is slow end-to-end but the daemon reports a low `server_pre_emit_ms`, which points at tunnel,
+WebSocket, or client receive scheduling rather than daemon-side capture or diff work.
 
 Live observation benchmark runs can be narrowed to the cases under investigation:
 
