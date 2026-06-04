@@ -7,7 +7,7 @@ from typing import Any, Literal
 from .models import ScreenshotOptions
 from .transports.observation import ObservationFrame, ObservationStreamTransport
 
-SDK_AUTO_REGION_RADIUS = 96
+SDK_AUTO_REGION_RADIUS = 64
 
 
 @dataclass(frozen=True)

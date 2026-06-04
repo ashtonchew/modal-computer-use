@@ -237,7 +237,7 @@ and records `frame_poll_skipped_reason="dirty_region_confirmation_unchanged"` or
 The raw daemon route default remains conservative, while SDK `act_and_observe()` resolves pointer
 and explicit-region auto-region requests to `full_frame_fallback=false` unless the caller passes an
 explicit override. The raw daemon route keeps the conservative `change_region_radius=192` default;
-SDK auto-region requests use `change_region_radius=96` unless the caller passes an explicit radius.
+SDK auto-region requests use `change_region_radius=64` unless the caller passes an explicit radius.
 Confirmation capture timing is split into ready, input-lock wait, backend operation, total capture,
 and native tile-diff timings so live tails can distinguish scheduler/lock delay from backend
 capture work. Benchmark summaries also expose
