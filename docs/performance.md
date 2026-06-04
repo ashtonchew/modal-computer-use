@@ -212,8 +212,9 @@ observe-change deadline, the daemon preserves the caller's timeout contract and 
 full-frame poll. Those frames are emitted as timeout/unchanged observations with
 `frame_poll_skipped_reason="deadline_exhausted_after_dirty_producer"` and a specific producer
 fallback reason such as `producer_same_region` or `producer_same_frame`. A remaining frame-poll
-fallback means there was still caller budget left, or the route did not have a verified producer
-frame it could safely emit.
+fallback after those verified unchanged producer frames is capped to one short full-frame truth
+check with `frame_poll_deadline_reason="after_unchanged_dirty_producer"`. A longer remaining
+frame-poll fallback means the route did not have a verified producer frame it could safely emit.
 When the dirty producer misses but still has an action-derived capture region, the daemon performs
 one bounded regional confirmation before escalating to full-frame polling. That confirmation uses
 the same native tile-diff gate as producer patches, so it can emit a verified changed patch or a
