@@ -293,8 +293,12 @@ store screenshot payload bytes.
 Dirty-producer rollups also include frame-poll deadline reasons, frame-poll budgets, and
 `frame_poll_deadline_reason_summaries` so post-confirmation fallback timing can be compared against
 changed, unchanged, and timeout outcomes without hand-parsing every compact observation row.
-They also include `dirty_frame_capture_region_source_summaries` so producer hit rate, fallback
-reason, and confirmation outcomes can be compared by action-region versus XDamage-region hints.
+They also include dirty-producer hit/fallback rollups and
+`dirty_frame_capture_region_source_summaries` so producer hit rate, fallback reason, and
+confirmation outcomes can be compared by action-region versus XDamage-region hints.
+Use `observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_production` when the
+paired dirty-producer artifact needs full-frame XDamage signal coverage without action-region
+capture.
 
 Live observation benchmark runs can be narrowed to the cases under investigation:
 

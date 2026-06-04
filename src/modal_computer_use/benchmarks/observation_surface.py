@@ -48,6 +48,13 @@ CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
 )
 PAIRED_ENVELOPE_ORDER_SEED = 20260602
 PAIRED_DIRTY_PRODUCER_ORDER_SEED = 20260603
+PAIRED_DIRTY_PRODUCER_XDAMAGE_ORDER_SEED = 20260604
+PAIRED_DIRTY_PRODUCER_CASE = (
+    "observation_action_click_act_and_observe_paired_dirty_producer_ab_production"
+)
+PAIRED_DIRTY_PRODUCER_XDAMAGE_CASE = (
+    "observation_action_click_act_and_observe_paired_dirty_producer_xdamage_ab_production"
+)
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
@@ -355,13 +362,26 @@ def _observation_case_factories(
                 warmup_iterations=warmup_iterations,
             )
         ),
-        "observation_action_click_act_and_observe_paired_dirty_producer_ab_production": lambda: (
+        PAIRED_DIRTY_PRODUCER_CASE: lambda: (
             _run_observation_action_click_paired_dirty_producer_benchmark(
                 base_url=base_url,
                 token=token,
                 client=client,
                 iterations=iterations,
                 warmup_iterations=warmup_iterations,
+            )
+        ),
+        PAIRED_DIRTY_PRODUCER_XDAMAGE_CASE: lambda: (
+            _run_observation_action_click_paired_dirty_producer_benchmark(
+                base_url=base_url,
+                token=token,
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                name=PAIRED_DIRTY_PRODUCER_XDAMAGE_CASE,
+                change_detection="full",
+                change_signal="xdamage",
+                order_seed=PAIRED_DIRTY_PRODUCER_XDAMAGE_ORDER_SEED,
             )
         ),
         "observation_action_click_act_and_observe_auto_signal_production_sync": lambda: (
@@ -955,16 +975,8 @@ def _run_observation_action_click_paired_envelope_benchmark(
             "causal_action_observe": True,
         }
     )
-    _add_frame_poll_deadline_rollups(
-        result["baseline"], paired.get("baseline_observations", [])
-    )
-    _add_frame_poll_deadline_rollups(result["variant"], paired.get("variant_observations", []))
-    _add_dirty_frame_capture_region_source_rollups(
-        result["baseline"], paired.get("baseline_observations", [])
-    )
-    _add_dirty_frame_capture_region_source_rollups(
-        result["variant"], paired.get("variant_observations", [])
-    )
+    _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
     return result
 
 
@@ -975,7 +987,10 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int,
-    name: str = "observation_action_click_act_and_observe_paired_dirty_producer_ab_production",
+    name: str = PAIRED_DIRTY_PRODUCER_CASE,
+    change_detection: str = "auto",
+    change_signal: str = "auto",
+    order_seed: int = PAIRED_DIRTY_PRODUCER_ORDER_SEED,
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     _open_click_toggle_page(client)
@@ -990,7 +1005,9 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
         variant_frame_encoding="binary-envelope",
         baseline_dirty_frame_producer="off",
         variant_dirty_frame_producer="auto",
-        order_seed=PAIRED_DIRTY_PRODUCER_ORDER_SEED,
+        change_detection=change_detection,
+        change_signal=change_signal,
+        order_seed=order_seed,
     )
     paired_deltas = paired["paired_delta_samples_ms"]
     result = _case_result(name, iterations, paired_deltas, failures)
@@ -1015,7 +1032,7 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
             },
             "paired_comparison": _paired_ab_comparison(paired_deltas),
             "paired_observations": paired["paired_observations"],
-            "pair_order_seed": PAIRED_DIRTY_PRODUCER_ORDER_SEED,
+            "pair_order_seed": order_seed,
             "pairing": {
                 "scope": "same sandbox/client path/page/stream, per-command dirty producer policy",
                 "order_policy": "seeded_random_ab_ba",
@@ -1027,22 +1044,14 @@ def _run_observation_action_click_paired_dirty_producer_benchmark(
             "change_timeout_ms": 100,
             "poll_interval_ms": 8,
             "poll_strategy": "adaptive",
-            "change_detection": "auto",
-            "change_signal": "auto",
+            "change_detection": change_detection,
+            "change_signal": change_signal,
             "transport_timing": False,
             "causal_action_observe": True,
         }
     )
-    _add_frame_poll_deadline_rollups(
-        result["baseline"], paired.get("baseline_observations", [])
-    )
-    _add_frame_poll_deadline_rollups(result["variant"], paired.get("variant_observations", []))
-    _add_dirty_frame_capture_region_source_rollups(
-        result["baseline"], paired.get("baseline_observations", [])
-    )
-    _add_dirty_frame_capture_region_source_rollups(
-        result["variant"], paired.get("variant_observations", [])
-    )
+    _add_dirty_frame_producer_rollups(result["baseline"], paired.get("baseline_observations", []))
+    _add_dirty_frame_producer_rollups(result["variant"], paired.get("variant_observations", []))
     return result
 
 
@@ -1059,6 +1068,8 @@ def _measure_paired_stream_action_observe_loop(
     order_seed: int,
     baseline_dirty_frame_producer: Literal["auto", "off"] = "auto",
     variant_dirty_frame_producer: Literal["auto", "off"] = "auto",
+    change_detection: str = "auto",
+    change_signal: str = "auto",
 ) -> dict[str, Any]:
     baseline_samples: list[float] = []
     variant_samples: list[float] = []
@@ -1091,6 +1102,8 @@ def _measure_paired_stream_action_observe_loop(
                             stream,
                             frame_encoding=arms[arm_label]["frame_encoding"],
                             dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
+                            change_detection=change_detection,
+                            change_signal=change_signal,
                         )
                     except Exception as exc:
                         failures.append(
@@ -1119,6 +1132,8 @@ def _measure_paired_stream_action_observe_loop(
                             stream,
                             frame_encoding=arms[arm_label]["frame_encoding"],
                             dirty_frame_producer=arms[arm_label]["dirty_frame_producer"],
+                            change_detection=change_detection,
+                            change_signal=change_signal,
                         )
                     except Exception as exc:
                         elapsed_ms = (perf_counter() - started) * 1000
@@ -1178,6 +1193,8 @@ def _measure_paired_stream_action_observe_arm(
     *,
     frame_encoding: Literal["json-binary", "binary-envelope"],
     dirty_frame_producer: Literal["auto", "off"],
+    change_detection: str,
+    change_signal: str,
 ) -> dict[str, Any]:
     observation = _stream_action_capture_iteration(
         stream,
@@ -1185,8 +1202,8 @@ def _measure_paired_stream_action_observe_arm(
         capture_delay_ms=0,
         observe_change=True,
         poll_strategy="adaptive",
-        change_detection="auto",
-        change_signal="auto",
+        change_detection=change_detection,
+        change_signal=change_signal,
         dirty_frame_producer=dirty_frame_producer,
         frame_encoding_override=frame_encoding,
         causal_action_observe=True,
@@ -1194,6 +1211,8 @@ def _measure_paired_stream_action_observe_arm(
     observation["benchmark_arm"] = {
         "frame_encoding": frame_encoding,
         "dirty_frame_producer": dirty_frame_producer,
+        "change_detection": change_detection,
+        "change_signal": change_signal,
         "pairing": "same_stream_command_override",
     }
     return observation
@@ -2441,67 +2460,7 @@ def _add_frame_observations(
                 result["change_signal_detected_frames"] = sum(
                     1 for item in observations if item.get("change_signal_detected")
                 )
-            if any(item.get("dirty_frame_producer") is not None for item in observations):
-                result["dirty_frame_producer_frames"] = sum(
-                    1 for item in observations if item.get("dirty_frame_producer")
-                )
-                result["dirty_frame_producer_used_frames"] = sum(
-                    1 for item in observations if item.get("dirty_frame_producer_used")
-                )
-                result["dirty_frame_producer_fallback_reasons"] = sorted(
-                    {
-                        reason
-                        for item in observations
-                        if isinstance(
-                            reason := item.get("dirty_frame_producer_fallback_reason"),
-                            str,
-                        )
-                    }
-                )
-                result["frame_poll_skipped_reasons"] = sorted(
-                    {
-                        reason
-                        for item in observations
-                        if isinstance(reason := item.get("frame_poll_skipped_reason"), str)
-                    }
-                )
-                _add_frame_poll_deadline_rollups(result, observations)
-                result["dirty_region_confirmation_results"] = sorted(
-                    {
-                        reason
-                        for item in observations
-                        if isinstance(
-                            reason := item.get("dirty_region_confirmation_result"),
-                            str,
-                        )
-                    }
-                )
-                _add_dirty_frame_capture_region_source_rollups(result, observations)
-                dirty_frame_age_samples = [
-                    item["dirty_frame_age_ms"]
-                    for item in observations
-                    if isinstance(item.get("dirty_frame_age_ms"), int | float)
-                ]
-                if dirty_frame_age_samples:
-                    result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
-                    result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
-                dirty_frame_producer_wait_budget_samples = [
-                    item["dirty_frame_producer_wait_budget_ms"]
-                    for item in observations
-                    if isinstance(
-                        item.get("dirty_frame_producer_wait_budget_ms"), int | float
-                    )
-                ]
-                if dirty_frame_producer_wait_budget_samples:
-                    result["dirty_frame_producer_wait_budget_samples_ms"] = (
-                        dirty_frame_producer_wait_budget_samples
-                    )
-                    result["dirty_frame_producer_wait_budget_summary_ms"] = _summary(
-                        dirty_frame_producer_wait_budget_samples
-                    )
-                result["dirty_frame_region_capture_frames"] = sum(
-                    1 for item in observations if item.get("dirty_frame_capture_region") is not None
-                )
+            _add_dirty_frame_producer_rollups(result, observations)
             stage_names = sorted(
                 {
                     key
@@ -2649,6 +2608,78 @@ def _add_frame_observations(
         ]
         result["overhead_summary_ms"] = _summary(result["overhead_samples_ms"])
     _add_observation_latency_diagnosis(result)
+
+
+def _add_dirty_frame_producer_rollups(
+    result: dict[str, Any],
+    observations: list[Any],
+) -> None:
+    if not any(
+        isinstance(item, dict) and item.get("dirty_frame_producer") is not None
+        for item in observations
+    ):
+        return
+    result["dirty_frame_producer_frames"] = sum(
+        1 for item in observations if isinstance(item, dict) and item.get("dirty_frame_producer")
+    )
+    result["dirty_frame_producer_used_frames"] = sum(
+        1
+        for item in observations
+        if isinstance(item, dict) and item.get("dirty_frame_producer_used")
+    )
+    result["dirty_frame_producer_fallback_reasons"] = sorted(
+        {
+            reason
+            for item in observations
+            if isinstance(item, dict)
+            if isinstance(reason := item.get("dirty_frame_producer_fallback_reason"), str)
+        }
+    )
+    result["frame_poll_skipped_reasons"] = sorted(
+        {
+            reason
+            for item in observations
+            if isinstance(item, dict)
+            if isinstance(reason := item.get("frame_poll_skipped_reason"), str)
+        }
+    )
+    _add_frame_poll_deadline_rollups(result, observations)
+    result["dirty_region_confirmation_results"] = sorted(
+        {
+            reason
+            for item in observations
+            if isinstance(item, dict)
+            if isinstance(reason := item.get("dirty_region_confirmation_result"), str)
+        }
+    )
+    _add_dirty_frame_capture_region_source_rollups(result, observations)
+    dirty_frame_age_samples = [
+        item["dirty_frame_age_ms"]
+        for item in observations
+        if isinstance(item, dict)
+        if isinstance(item.get("dirty_frame_age_ms"), int | float)
+    ]
+    if dirty_frame_age_samples:
+        result["dirty_frame_age_samples_ms"] = dirty_frame_age_samples
+        result["dirty_frame_age_summary_ms"] = _summary(dirty_frame_age_samples)
+    dirty_frame_producer_wait_budget_samples = [
+        item["dirty_frame_producer_wait_budget_ms"]
+        for item in observations
+        if isinstance(item, dict)
+        if isinstance(item.get("dirty_frame_producer_wait_budget_ms"), int | float)
+    ]
+    if dirty_frame_producer_wait_budget_samples:
+        result["dirty_frame_producer_wait_budget_samples_ms"] = (
+            dirty_frame_producer_wait_budget_samples
+        )
+        result["dirty_frame_producer_wait_budget_summary_ms"] = _summary(
+            dirty_frame_producer_wait_budget_samples
+        )
+    result["dirty_frame_region_capture_frames"] = sum(
+        1
+        for item in observations
+        if isinstance(item, dict) and item.get("dirty_frame_capture_region") is not None
+    )
 
 
 def _add_dirty_frame_capture_region_source_rollups(
