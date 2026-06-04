@@ -2576,7 +2576,7 @@ def test_observation_client_act_and_observe_defaults_pointer_actions_to_auto_reg
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["full_frame_fallback"] is False
-    assert transport.change_payload["change_region_radius"] == 96
+    assert transport.change_payload["change_region_radius"] == 64
 
 
 def test_observation_client_act_and_observe_defaults_drag_actions_to_auto_region() -> None:
@@ -2591,7 +2591,7 @@ def test_observation_client_act_and_observe_defaults_drag_actions_to_auto_region
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["full_frame_fallback"] is False
-    assert transport.change_payload["change_region_radius"] == 96
+    assert transport.change_payload["change_region_radius"] == 64
 
 
 def test_observation_client_act_and_observe_ignores_trailing_wait_for_auto_region() -> None:
@@ -2609,7 +2609,7 @@ def test_observation_client_act_and_observe_ignores_trailing_wait_for_auto_regio
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["full_frame_fallback"] is False
-    assert transport.change_payload["change_region_radius"] == 96
+    assert transport.change_payload["change_region_radius"] == 64
 
 
 def test_observation_client_act_and_observe_uses_full_frame_after_global_action() -> None:
@@ -2686,7 +2686,7 @@ def test_observation_client_act_and_observe_can_force_full_frame_fallback() -> N
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["full_frame_fallback"] is True
-    assert transport.change_payload["change_region_radius"] == 96
+    assert transport.change_payload["change_region_radius"] == 64
 
 
 def test_observation_client_act_and_observe_respects_explicit_region_radius() -> None:
@@ -2717,7 +2717,7 @@ def test_observation_client_act_and_observe_uses_explicit_region_with_auto_polic
 
     assert transport.change_payload["change_detection"] == "auto_region"
     assert transport.change_payload["full_frame_fallback"] is False
-    assert transport.change_payload["change_region_radius"] == 96
+    assert transport.change_payload["change_region_radius"] == 64
     assert transport.change_payload["change_detection_region"] == {
         "x": 10,
         "y": 20,
