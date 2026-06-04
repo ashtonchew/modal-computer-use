@@ -1520,7 +1520,7 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_region(
     monkeypatch,
 ) -> None:
     white = Image.new("RGB", (64, 64), "white")
-    capture_images = iter([white, white, white, white])
+    capture_images = iter([white, white, white, white, white, white])
     capture_regions: list[Region | None] = []
 
     async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
@@ -1592,19 +1592,20 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_region(
 
     assert capture_regions[0] is None
     assert capture_regions[1] == Region(x=0, y=0, width=32, height=32)
-    assert capture_regions == [
+    assert capture_regions[:2] == [
         None,
         Region(x=0, y=0, width=32, height=32),
-        None,
     ]
+    assert len(capture_regions) >= 4
+    assert all(region is None for region in capture_regions[2:])
     assert second["trigger"] == "run_actions_observe_change"
     assert second["type"] == "unchanged"
     assert second["dirty_region_confirmation_result"] == "unchanged"
-    assert second["frame_poll_budget_ms"] <= 12.1
+    assert second["frame_poll_budget_ms"] > 50
     assert second["frame_poll_deadline_reason"] == "after_unchanged_dirty_region_confirmation"
     assert second["change_timeout_reached"] is True
-    assert second["change_wait_ms"] < 80
-    assert second["change_stage_timing_ms"]["frame_poll_ms"] < 30
+    assert second["change_wait_ms"] >= 80
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] >= 50
     assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] > 0
     assert second["change_stage_timing_ms"]["frame_poll_capture_ready_ms"] >= 0
     assert second["change_stage_timing_ms"]["frame_poll_capture_lock_wait_ms"] >= 0
@@ -1616,7 +1617,7 @@ def test_observation_stream_can_skip_full_frame_fallback_after_unchanged_dirty_r
     monkeypatch,
 ) -> None:
     white = Image.new("RGB", (64, 64), "white")
-    capture_images = iter([white, white])
+    capture_images = iter([white, white, white, white, white, white])
     capture_regions: list[Region | None] = []
 
     async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
@@ -1887,7 +1888,7 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_producer(
     monkeypatch,
 ) -> None:
     white = Image.new("RGB", (64, 64), "white")
-    capture_images = iter([white, white, white])
+    capture_images = iter([white, white, white, white, white, white])
     capture_regions: list[Region | None] = []
 
     async def screenshot_raw_pixels(*_args, region=None, **_kwargs):
@@ -1956,21 +1957,22 @@ def test_observation_stream_bounds_frame_poll_after_unchanged_dirty_producer(
         )
         second = websocket.receive_json()
 
-    assert capture_regions == [
+    assert capture_regions[:2] == [
         None,
         Region(x=0, y=0, width=32, height=32),
-        None,
     ]
+    assert len(capture_regions) >= 4
+    assert all(region is None for region in capture_regions[2:])
     assert second["trigger"] == "run_actions_observe_change"
     assert second["type"] == "unchanged"
     assert second["dirty_frame_producer"] is True
     assert second["dirty_frame_producer_used"] is False
     assert second["dirty_frame_producer_fallback_reason"] == "producer_same_region"
-    assert second["frame_poll_budget_ms"] <= 12.1
+    assert second["frame_poll_budget_ms"] > 50
     assert second["frame_poll_deadline_reason"] == "after_unchanged_dirty_producer"
     assert second["change_timeout_reached"] is True
-    assert second["change_wait_ms"] < 80
-    assert second["change_stage_timing_ms"]["frame_poll_ms"] < 30
+    assert second["change_wait_ms"] >= 80
+    assert second["change_stage_timing_ms"]["frame_poll_ms"] >= 50
     assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] > 0
     assert second["change_stage_timing_ms"]["frame_poll_capture_ready_ms"] >= 0
     assert second["change_stage_timing_ms"]["frame_poll_capture_lock_wait_ms"] >= 0
@@ -2767,7 +2769,7 @@ def test_observation_client_act_and_observe_defaults_pointer_actions_to_auto_reg
     client.act_and_observe(actions=[{"type": "click", "x": 12, "y": 34}])
 
     assert transport.change_payload["change_detection"] == "auto_region"
-    assert transport.change_payload["full_frame_fallback"] is False
+    assert transport.change_payload["full_frame_fallback"] is True
     assert transport.change_payload["change_region_radius"] == 64
 
 
@@ -2782,7 +2784,7 @@ def test_observation_client_act_and_observe_defaults_drag_actions_to_auto_region
     )
 
     assert transport.change_payload["change_detection"] == "auto_region"
-    assert transport.change_payload["full_frame_fallback"] is False
+    assert transport.change_payload["full_frame_fallback"] is True
     assert transport.change_payload["change_region_radius"] == 64
 
 
@@ -2800,7 +2802,7 @@ def test_observation_client_act_and_observe_ignores_trailing_wait_for_auto_regio
     )
 
     assert transport.change_payload["change_detection"] == "auto_region"
-    assert transport.change_payload["full_frame_fallback"] is False
+    assert transport.change_payload["full_frame_fallback"] is True
     assert transport.change_payload["change_region_radius"] == 64
 
 
@@ -2938,7 +2940,7 @@ def test_observation_client_act_and_observe_uses_explicit_region_with_auto_polic
     )
 
     assert transport.change_payload["change_detection"] == "auto_region"
-    assert transport.change_payload["full_frame_fallback"] is False
+    assert transport.change_payload["full_frame_fallback"] is True
     assert transport.change_payload["change_region_radius"] == 64
     assert transport.change_payload["change_detection_region"] == {
         "x": 10,

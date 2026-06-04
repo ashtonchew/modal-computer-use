@@ -173,7 +173,6 @@ class ObservationClient:
             "change_signal": change_signal,
             "dirty_frame_producer": dirty_frame_producer,
             "full_frame_fallback": _resolve_full_frame_fallback(
-                resolved_change_detection,
                 requested=full_frame_fallback,
             ),
         }
@@ -276,14 +275,10 @@ def _resolve_action_change_detection(
     return "full"
 
 
-def _resolve_full_frame_fallback(
-    change_detection: Literal["full", "auto_region"],
-    *,
-    requested: bool | None,
-) -> bool:
+def _resolve_full_frame_fallback(*, requested: bool | None) -> bool:
     if requested is not None:
         return requested
-    return change_detection == "full"
+    return True
 
 
 def _resolve_change_region_radius(

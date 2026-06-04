@@ -62,7 +62,6 @@ CONTROL_DRAIN_TIMEOUT_S = 0.001
 DIRTY_FRAME_PRODUCER_MAX_WAIT_MS = 20
 DIRTY_FRAME_REGIONAL_PRODUCER_MAX_WAIT_MS = 2
 DIRTY_FRAME_PRODUCER_FALLBACK_RESERVE_MS = 8
-DIRTY_REGION_CONFIRMATION_FRAME_POLL_MAX_MS = 12
 
 
 @dataclass
@@ -1082,11 +1081,6 @@ async def _send_changed_frame(
             }:
                 frame_poll_deadline_reason = "after_unchanged_dirty_producer"
             if frame_poll_deadline_reason is not None:
-                frame_poll_deadline = min(
-                    deadline,
-                    frame_poll_started
-                    + DIRTY_REGION_CONFIRMATION_FRAME_POLL_MAX_MS / 1000,
-                )
                 frame_poll_budget_ms = max(
                     (frame_poll_deadline - frame_poll_started) * 1000,
                     0.0,
@@ -1115,7 +1109,6 @@ async def _send_changed_frame(
                 if (
                     change_detected
                     or region_detected
-                    or frame_poll_deadline_reason is not None
                     or perf_counter() >= frame_poll_deadline
                 ):
                     break
