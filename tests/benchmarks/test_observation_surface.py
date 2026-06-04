@@ -296,6 +296,53 @@ def test_action_observe_benchmark_can_measure_sdk_default_frame_encoding(monkeyp
     assert result["frame_encoding_policy"] == "sdk-default"
 
 
+def test_stream_action_capture_loop_omits_sdk_default_frame_encoding(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeObservationClient:
+        def __init__(self, _transport, **kwargs):
+            captured.update(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return None
+
+        def start(self, *, drain_initial_frame=False):
+            captured["drain_initial_frame"] = drain_initial_frame
+
+    class FakeObservationStreamTransport:
+        def __init__(self, base_url, *, token=None):
+            captured["base_url"] = base_url
+            captured["token"] = token
+
+    monkeypatch.setattr(observation_surface, "ObservationClient", FakeObservationClient)
+    monkeypatch.setattr(
+        observation_surface,
+        "ObservationStreamTransport",
+        FakeObservationStreamTransport,
+    )
+    failures: list[dict[str, object]] = []
+
+    samples, observations = observation_surface._measure_stream_action_capture_loop(
+        name="sdk-default-frame-encoding",
+        base_url="http://daemon.test",
+        token=None,
+        iterations=0,
+        warmup_iterations=0,
+        failures=failures,
+        capture_delay_ms=0,
+        frame_encoding=None,
+    )
+
+    assert failures == []
+    assert samples == []
+    assert observations == []
+    assert "frame_encoding" not in captured
+    assert captured["drain_initial_frame"] is True
+
+
 def test_causal_action_observe_diagnostic_includes_sdk_default_case() -> None:
     assert (
         "observation_action_click_act_and_observe_sdk_default_production"
