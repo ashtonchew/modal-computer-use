@@ -98,6 +98,13 @@ PAIRED_TIMEOUT_CASE = "observation_action_click_act_and_observe_paired_timeout_a
 ObservationCaseFactory = Callable[[], dict[str, Any]]
 
 
+class _ClickBeaconSetupError(Exception):
+    def __init__(self, step: str, cause: Exception) -> None:
+        super().__init__(f"click beacon setup step failed: {step}")
+        self.step = step
+        self.cause = cause
+
+
 def _run_daemon_observation_surface(
     *,
     base_url: str,
@@ -1070,7 +1077,32 @@ def _run_observation_action_click_beacon_benchmark(
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     action = action or CLICK_TOGGLE_ACTION
-    beacon_token = _open_click_toggle_beacon_page(client)
+    try:
+        beacon_token = _open_click_toggle_beacon_page(client)
+    except _ClickBeaconSetupError as exc:
+        failure = _failure(
+            name,
+            phase=f"setup:{exc.step}",
+            iteration=0,
+            exc=exc.cause,
+        )
+        failure["setup_step"] = exc.step
+        failures.append(failure)
+        result = _case_result(name, iterations, [], failures)
+        result.update(
+            {
+                "actions": [_safe_action_metadata(action)],
+                "action_count": 1,
+                "mutation_kind": mutation_kind,
+                "page": "click-beacon",
+                "setup_step": exc.step,
+                "frame_encoding": "binary-envelope",
+                "frame_encoding_policy": "sdk-default",
+                "transport_timing": False,
+                "causal_action_observe": True,
+            }
+        )
+        return result
     server_probe_before_actions = _probe_click_page_server(client, beacon_token)
     index_events_before_actions = _read_click_index_count(client, beacon_token)
     ready_events_before_actions = _read_click_ready_count(client, beacon_token)
@@ -1158,8 +1190,8 @@ def _run_observation_action_click_target_state_benchmark(
         mutation_kind="stream_action_click_observe_change_click_target_state",
         state_probe=True,
     )
-    result["click_target_state_before"] = result.pop("_click_target_state_before")
-    result["click_target_state_after"] = result.pop("_click_target_state_after")
+    result["click_target_state_before"] = result.pop("_click_target_state_before", None)
+    result["click_target_state_after"] = result.pop("_click_target_state_after", None)
     return result
 
 
@@ -1182,8 +1214,8 @@ def _run_observation_action_lower_click_target_state_benchmark(
         state_probe=True,
         action=CLICK_TOGGLE_LOWER_ACTION,
     )
-    result["click_target_state_before"] = result.pop("_click_target_state_before")
-    result["click_target_state_after"] = result.pop("_click_target_state_after")
+    result["click_target_state_before"] = result.pop("_click_target_state_before", None)
+    result["click_target_state_after"] = result.pop("_click_target_state_after", None)
     return result
 
 
@@ -3248,25 +3280,38 @@ def _open_click_toggle_beacon_page(client: DaemonClient) -> str:
         "</script>"
         "</body></html>"
     )
-    _serve_synthetic_page(client, body)
-    client.post_json(
-        "/v1/browser/open-url",
-        json={
-            "url": (
-                "http://127.0.0.1:8766/index.html?"
-                f"action-observe-beacon={quote(beacon_token)}"
-            ),
-            "wait_for_window": True,
-        },
+    _run_click_beacon_setup_step("serve_page", lambda: _serve_synthetic_page(client, body))
+    _run_click_beacon_setup_step(
+        "open_browser",
+        lambda: client.post_json(
+            "/v1/browser/open-url",
+            json={
+                "url": (
+                    "http://127.0.0.1:8766/index.html?"
+                    f"action-observe-beacon={quote(beacon_token)}"
+                ),
+                "wait_for_window": True,
+            },
+        ),
     )
-    _wait_for_click_toggle_page_ready()
-    _wait_for_click_ready_count(
-        client,
-        beacon_token,
-        expected_events=1,
-        timeout_ms=CLICK_TOGGLE_READY_TIMEOUT_MS,
+    _run_click_beacon_setup_step("settle_page", _wait_for_click_toggle_page_ready)
+    _run_click_beacon_setup_step(
+        "wait_ready",
+        lambda: _wait_for_click_ready_count(
+            client,
+            beacon_token,
+            expected_events=1,
+            timeout_ms=CLICK_TOGGLE_READY_TIMEOUT_MS,
+        ),
     )
     return beacon_token
+
+
+def _run_click_beacon_setup_step(step: str, operation: Callable[[], Any]) -> Any:
+    try:
+        return operation()
+    except Exception as exc:
+        raise _ClickBeaconSetupError(step, exc) from exc
 
 
 def _open_sparse_click_toggle_page(client: DaemonClient) -> None:
@@ -3307,23 +3352,33 @@ def _wait_for_click_toggle_page_ready() -> None:
 
 
 def _serve_synthetic_page(client: DaemonClient, body: str) -> None:
+    body_b64 = base64.b64encode(body.encode()).decode()
     script = (
-        "set -eu; "
-        "dir=/tmp/modal-computer-use-observation; "
-        'mkdir -p "$dir"; '
-        f'printf %s {shell_quote(body)} > "$dir/index.html"; '
-        "if ! python3 -c "
-        "'import socket, sys; "
-        "sock=socket.socket(); sock.settimeout(0.2); "
-        "sys.exit(0 if sock.connect_ex((\"127.0.0.1\", 8766)) == 0 else 1)' "
-        ">/dev/null 2>&1; then "
-        'python3 -m http.server 8766 --bind 127.0.0.1 --directory "$dir" '
-        ">/tmp/modal-computer-use-observation-http.log 2>&1 & "
-        "fi"
+        "import base64, pathlib, socket, subprocess, sys\n"
+        "directory = pathlib.Path('/tmp/modal-computer-use-observation')\n"
+        "directory.mkdir(parents=True, exist_ok=True)\n"
+        "(directory / 'index.html').write_bytes(base64.b64decode(sys.argv[1]))\n"
+        "sock = socket.socket()\n"
+        "sock.settimeout(0.2)\n"
+        "try:\n"
+        "    running = sock.connect_ex(('127.0.0.1', 8766)) == 0\n"
+        "finally:\n"
+        "    sock.close()\n"
+        "if not running:\n"
+        "    log = open('/tmp/modal-computer-use-observation-http.log', 'ab')\n"
+        "    subprocess.Popen(\n"
+        "        [sys.executable, '-m', 'http.server', '8766', '--bind', '127.0.0.1', "
+        "'--directory', str(directory)],\n"
+        "        stdin=subprocess.DEVNULL,\n"
+        "        stdout=log,\n"
+        "        stderr=subprocess.STDOUT,\n"
+        "        start_new_session=True,\n"
+        "        close_fds=True,\n"
+        "    )\n"
     )
     client.post_json(
         "/v1/commands/run",
-        json={"command": ["sh", "-lc", script], "timeout": 5},
+        json={"command": ["python3", "-c", script, body_b64], "timeout": 5},
     )
 
 

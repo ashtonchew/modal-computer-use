@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from modal_computer_use.benchmarks import observation_surface
@@ -717,11 +719,15 @@ def test_serve_synthetic_page_uses_socket_probe_for_http_server_guard() -> None:
     path, payload = calls[0]
     assert path == "/v1/commands/run"
     assert isinstance(payload["command"], list)
+    assert payload["command"][:2] == ["python3", "-c"]
     command = str(payload["command"][2])
     assert "connect_ex" in command
     assert "127.0.0.1" in command
     assert "8766" in command
+    assert "start_new_session=True" in command
+    assert "stdin=subprocess.DEVNULL" in command
     assert "pgrep" not in command
+    assert base64.b64decode(str(payload["command"][3])).decode() == "<!doctype html><html></html>"
 
 
 def test_open_click_toggle_beacon_page_installs_click_beacon(monkeypatch) -> None:
@@ -775,6 +781,70 @@ def test_open_click_toggle_beacon_page_installs_click_beacon(monkeypatch) -> Non
         "wait-ready",
         (token, 1, observation_surface.CLICK_TOGGLE_READY_TIMEOUT_MS),
     )
+
+
+def test_click_beacon_benchmark_reports_setup_step(monkeypatch) -> None:
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            if path == "/v1/browser/open-url":
+                raise TimeoutError("browser open timed out")
+            return {"ok": True}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_serve_synthetic_page",
+        lambda _client, _body: None,
+    )
+
+    result = observation_surface._run_observation_action_click_beacon_benchmark(
+        base_url="http://127.0.0.1:8080",
+        token=None,
+        client=FakeClient(),  # type: ignore[arg-type]
+        iterations=3,
+        warmup_iterations=1,
+    )
+
+    assert result["status"] == "failed"
+    assert result["setup_step"] == "open_browser"
+    failure = result["failures"][0]
+    assert failure["case"] == "observation_action_click_act_and_observe_click_beacon_production"
+    assert failure["phase"] == "setup:open_browser"
+    assert failure["setup_step"] == "open_browser"
+    assert failure["type"] == "TimeoutError"
+    assert failure["message"] == "browser open timed out"
+
+
+def test_lower_click_target_state_benchmark_preserves_setup_failure(monkeypatch) -> None:
+    class FakeClient:
+        def post_json(self, path: str, *, json: dict[str, object]) -> dict[str, object]:
+            if path == "/v1/browser/open-url":
+                raise TimeoutError("browser open timed out")
+            return {"ok": True}
+
+    monkeypatch.setattr(
+        observation_surface,
+        "_serve_synthetic_page",
+        lambda _client, _body: None,
+    )
+
+    result = observation_surface._run_observation_action_lower_click_target_state_benchmark(
+        base_url="http://127.0.0.1:8080",
+        token=None,
+        client=FakeClient(),  # type: ignore[arg-type]
+        iterations=3,
+        warmup_iterations=1,
+    )
+
+    assert result["status"] == "failed"
+    assert result["setup_step"] == "open_browser"
+    assert result["click_target_state_before"] is None
+    assert result["click_target_state_after"] is None
+    failure = result["failures"][0]
+    assert (
+        failure["case"]
+        == "observation_action_click_act_and_observe_lower_click_target_state_production"
+    )
+    assert failure["phase"] == "setup:open_browser"
 
 
 def test_read_click_beacon_count_parses_command_stdout() -> None:
