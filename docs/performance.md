@@ -293,6 +293,8 @@ store screenshot payload bytes.
 Dirty-producer rollups also include frame-poll deadline reasons, frame-poll budgets, and
 `frame_poll_deadline_reason_summaries` so post-confirmation fallback timing can be compared against
 changed, unchanged, and timeout outcomes without hand-parsing every compact observation row.
+They also include `dirty_frame_capture_region_source_summaries` so producer hit rate, fallback
+reason, and confirmation outcomes can be compared by action-region versus XDamage-region hints.
 
 Live observation benchmark runs can be narrowed to the cases under investigation:
 
