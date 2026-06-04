@@ -852,11 +852,42 @@ def test_observation_stream_run_actions_observe_change_reports_timeout(app) -> N
 
 
 def test_dirty_frame_producer_wait_timeout_reserves_fallback_budget() -> None:
-    assert observation_routes._dirty_frame_producer_wait_timeout_ms(0) == 0
-    assert observation_routes._dirty_frame_producer_wait_timeout_ms(3) == 3
-    assert observation_routes._dirty_frame_producer_wait_timeout_ms(20) == 20
-    assert observation_routes._dirty_frame_producer_wait_timeout_ms(21) == 13
-    assert observation_routes._dirty_frame_producer_wait_timeout_ms(100) == 20
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            0, regional_capture=True
+        )
+        == 0
+    )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            3, regional_capture=True
+        )
+        == 3
+    )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            20, regional_capture=True
+        )
+        == 20
+    )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            21, regional_capture=True
+        )
+        == 13
+    )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            100, regional_capture=True
+        )
+        == 20
+    )
+    assert (
+        observation_routes._dirty_frame_producer_wait_timeout_ms(
+            100, regional_capture=False
+        )
+        == 92
+    )
 
 
 def test_observation_stream_run_actions_observe_change_can_detect_region(app) -> None:
@@ -1036,7 +1067,8 @@ def test_observation_stream_run_actions_observe_change_uses_xdamage_signal(
     assert FakeXDamageWatcher.instances[0].armed == 0
     assert FakeXDamageWatcher.instances[1].rect_hints is True
     assert FakeXDamageWatcher.instances[1].armed == 1
-    assert FakeXDamageWatcher.wait_timeouts == [20]
+    assert second["dirty_frame_producer_wait_budget_ms"] == 92
+    assert FakeXDamageWatcher.wait_timeouts == [92]
     assert FakeXDamageWatcher.instances[0].closed is True
     assert FakeXDamageWatcher.instances[1].closed is True
 
