@@ -325,6 +325,9 @@ capture.
 Use `observation_action_click_act_and_observe_paired_full_frame_fallback_ab_production` to compare
 the default conservative full-frame fallback against `full_frame_fallback=false` on the same
 sandbox, stream, and action ordering before changing SDK defaults.
+Use `observation_action_click_act_and_observe_paired_region_radius_ab_production` before changing
+the SDK auto-region radius; it compares 96 px against 64 px with the same stream and randomized
+pair order.
 
 Capture timing breakdowns split desktop readiness from input-lock wait and backend screenshot
 operation time. Successful screenshot captures and action batches refresh the daemon's positive
@@ -593,6 +596,11 @@ paired shape for dirty-frame policy: baseline disables the dirty producer and va
 case before changing dirty producer, XDamage, or regional confirmation policy because it preserves
 the same sandbox, page, stream, encoding, and randomized pair order while recording the producer
 fallback and confirmation metadata for each arm.
+`observation_action_click_act_and_observe_paired_region_radius_ab_production` compares
+`change_region_radius=96` against `change_region_radius=64` with dirty producer enabled,
+`full_frame_fallback=false`, and binary-envelope framing. Negative deltas mean the 64 px variant was
+faster. Use this case before changing the SDK auto-region radius so capture-region area summaries
+and confirmation timing are compared within one stream instead of across noisy before/after runs.
 
 The surface records frame payload bytes, full-frame bytes, daemon capture/diff/encode timing,
 dirty-region metadata, patch counts, source/emit versions, metadata-only unchanged frames,
