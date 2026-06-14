@@ -13,12 +13,27 @@ BenchmarkSurface = Literal[
     "anthropic-adapter",
     "action-executor",
 ]
+ComparisonProvider = Literal[
+    "modal-daemon",
+    "modal-exec",
+    "openai",
+    "anthropic",
+    "generic",
+    "daytona",
+    "e2b",
+]
 FutureBenchmarkStatus = Literal["not_measured", "unsupported"]
 DEFAULT_SDK_BENCHMARK_SURFACES: tuple[BenchmarkSurface, ...] = (
     "daemon-http",
     "openai-adapter",
     "anthropic-adapter",
     "action-executor",
+)
+DEFAULT_COMPARE_PROVIDERS: tuple[ComparisonProvider, ...] = (
+    "modal-daemon",
+    "openai",
+    "anthropic",
+    "generic",
 )
 ACTION_BATCH_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 10, "y": 10},
@@ -46,6 +61,7 @@ TYPE_1000_CHARS_TEXT = "0123456789" * 100
 TYPING_BENCHMARK_METHOD = "xdotool"
 TYPE_1000_CHARS_TIMEOUT_MS = 30_000
 ADAPTER_BENCHMARK_TEXT = TYPING_BENCHMARK_TEXT
+PROVIDER_BENCHMARK_TEXT = TYPING_BENCHMARK_TEXT
 COMMAND_ECHO_COMMAND: tuple[str, ...] = ("sh", "-lc", "printf 42")
 SANDBOX_EXEC_MOVE_CLICK_COMMAND: tuple[str, ...] = (
     "sh",

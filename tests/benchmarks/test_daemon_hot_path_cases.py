@@ -7,7 +7,7 @@ from modal_computer_use.benchmarks import (
     TYPE_1000_CHARS_TEXT,
     TYPE_1000_CHARS_TIMEOUT_MS,
     TYPING_BENCHMARK_TEXT,
-    run_click_screenshot_raw_benchmark,
+    run_click_then_screenshot_benchmark,
     run_move_click_sequence_benchmark,
     run_type_100_chars_benchmark,
     run_type_1000_chars_benchmark,
@@ -247,7 +247,7 @@ def test_move_click_sequence_benchmark_uses_safe_metadata_and_attribution() -> N
     ]
 
 
-def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
+def test_click_then_screenshot_benchmark_uses_fused_binary_endpoint() -> None:
     class Transport:
         last_http_version = "HTTP/2"
 
@@ -275,7 +275,7 @@ def test_click_screenshot_raw_benchmark_uses_fused_binary_endpoint() -> None:
                 "x-computer-use-capture-backend": "mss",
             }
 
-    payload = run_click_screenshot_raw_benchmark(
+    payload = run_click_then_screenshot_benchmark(
         client=TimedClient(),
         iterations=1,
         warmup_iterations=0,

@@ -260,7 +260,19 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     closed: list[str] = []
 
     class CreatedComputer:
-        client = SimpleNamespace(base_url="https://daemon.example.modal.host")
+        class Client:
+            base_url = "https://daemon.example.modal.host"
+
+            def post_bytes_with_headers(self, path, *, json):
+                assert path == "/v1/screenshots/full/raw"
+                assert json == {"format": "png", "show_cursor": False}
+                return b"png", {
+                    "x-computer-use-width": "1024",
+                    "x-computer-use-height": "768",
+                    "x-computer-use-capture-backend": "mss",
+                }
+
+        client = Client()
 
         def metadata(self):
             return SimpleNamespace(sandbox_id="sb-gpu")
@@ -269,11 +281,21 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
             created["terminate_wait"] = wait
             closed.append("terminate")
 
+        def wait_until_ready(self, *, timeout: float) -> None:
+            assert timeout > 0
+
         def detach(self) -> None:
             closed.append("detach")
 
     def fake_create(**kwargs):
         created.update(kwargs)
+        return CreatedComputer()
+
+    def fake_attach(**kwargs):
+        assert kwargs["sandbox_id"] == "sb-gpu"
+        assert kwargs["ingress"] == "attested-tunnel"
+        assert kwargs["http2"] is True
+        assert kwargs["wait"] is True
         return CreatedComputer()
 
     def fake_run_sdk_surface_benchmark(**kwargs):
@@ -306,6 +328,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
         }
 
     monkeypatch.setattr(cli.ComputerSandbox, "create", staticmethod(fake_create))
+    monkeypatch.setattr(cli.ComputerSandbox, "attach", staticmethod(fake_attach))
     monkeypatch.setattr(cli, "run_sdk_surface_benchmark", fake_run_sdk_surface_benchmark)
     monkeypatch.setattr(cli, "new_run_id", lambda: "sdk_surface_test")
 
@@ -373,7 +396,25 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert payload["shared_resource_cost_estimate"]["status"] == "estimated"
     assert payload["cost_status"] == {"shared_resource_estimate": "estimated"}
     assert created["terminate_wait"] is True
-    assert closed == ["terminate", "detach"]
+    assert environment["modal_cold_create_to_ready_definition"].startswith("create wait=False")
+    assert environment["startup_model"] == "modal_sandbox_image_daemon_start"
+    assert environment["uses_snapshot_or_template"] is False
+    assert environment["readiness_contract"].startswith("ComputerSandbox.create")
+    assert environment["setup_included"] is True
+    assert environment["ingress_included"] is True
+    assert environment["first_observation_api"] == "/v1/screenshots/full/raw"
+    assert environment["modal_create_return_ms"] >= 0
+    assert environment["modal_connect_ready_ms"] >= environment["modal_create_return_ms"]
+    assert environment["modal_final_ingress_ready_ms"] >= environment["modal_connect_ready_ms"]
+    assert (
+        environment["modal_first_raw_screenshot_ms"]
+        == environment["modal_cold_create_to_ready_ms"]
+    )
+    assert environment["modal_first_raw_screenshot_size_bytes"] == 3
+    assert environment["modal_first_raw_screenshot_width"] == 1024
+    assert environment["modal_first_raw_screenshot_height"] == 768
+    assert environment["modal_first_raw_screenshot_capture_backend"] == "mss"
+    assert closed == ["detach", "terminate", "detach"]
 
 def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:
     created: dict[str, object] = {}

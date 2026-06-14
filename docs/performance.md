@@ -486,11 +486,11 @@ daemon sample is the sum of daemon timings for the five calls in that measured i
 The current report includes:
 
 - `action_batch`: one five-action batch request compared with five separate action requests.
-- `screenshot_full`: full-screen screenshot latency and provider-returned encoded payload byte
-  size.
-- `screenshot_full_raw`: full-screen screenshot latency through the binary image response path.
-  This avoids JSON/base64 transport overhead and is the fairer comparison to provider SDKs that
-  already return screenshot bytes.
+- `screenshot_full`: full-screen screenshot latency through the canonical binary image response
+  path. This avoids JSON/base64 transport overhead and is the fairer comparison to provider SDKs
+  that already return screenshot bytes.
+- `screenshot_full_structured`: full-screen screenshot latency through the structured JSON
+  compatibility path, including provider-returned encoded payload byte size.
 - `screenshot_compressed`: scaled JPEG screenshot latency and encoded byte size.
 - `move_click`: one deterministic move+click action batch.
 - `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
@@ -566,7 +566,7 @@ uv run computer-use benchmark sdk \
   --iterations 10
 ```
 
-The hot-session surface reports `screenshot_full_raw`, `move_click`, `click_screenshot_raw`, and
+The hot-session surface reports `screenshot_full`, `move_click`, `click_then_screenshot`, and
 `move_click_sequence` over the persistent session. It intentionally does not run in `--mock-local`
 mode because FastAPI's in-process test client is not the SDK's network/WebSocket stack. Use a local
 daemon or a Modal-created sandbox for real transport attribution.
@@ -640,7 +640,7 @@ action-to-frame timing for `capture_now` cases, action daemon timing for click-d
 observe-change stage timing, causal action-observe attribution, derived
 receive-minus-server-pre-emit timing, optional stream transport send/receive timing, and WebSocket
 transport labeling. It is
-intentionally separate from `screenshot_full_raw` because it measures stream startup, sustained
+intentionally separate from `screenshot_full` because it measures stream startup, sustained
 observation behavior, and action-causal capture behavior rather than only a single
 request/response screenshot. The benchmark uses the SDK-default PNG screenshot format. Passive
 stream benchmark wall times include stream setup, frame pacing, and visual mutation settling; use
@@ -970,7 +970,7 @@ Keep SDK benchmark surfaces fair:
 - Compare deterministic SDK primitives before comparing model-driven task completion.
 - Use the binary screenshot path for raw primitive latency comparisons; keep JSON/base64 screenshot
   numbers as backwards-compatible SDK payload overhead.
-- Report `click_screenshot_raw` for the model-loop hot path. It uses one daemon request to run the
+- Report `click_then_screenshot` for the model-loop hot path. It uses one daemon request to run the
   action batch and return the observation as image bytes, so it avoids both a second tunnel round trip
   and JSON/base64 screenshot payload overhead.
 - Treat public-rate `cost_estimate` values as approximate context, not billing truth.
