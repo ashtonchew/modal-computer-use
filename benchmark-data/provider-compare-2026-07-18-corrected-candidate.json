@@ -1,0 +1,2268 @@
+{
+  "base_url": null,
+  "benchmark": "provider-compare",
+  "failures": [],
+  "generated_at": "2026-07-18T22:01:14.940932+00:00",
+  "iterations": 3,
+  "metadata": {
+    "environment": {
+      "browser": "chromium",
+      "daemon_http_version": "1.1",
+      "first_observation_api": "/v1/screenshots/full/raw",
+      "ingress_included": true,
+      "input_rate_limit_per_sec": 0,
+      "modal_app_name": "modal-computer-use",
+      "modal_cold_create_to_ready_definition": "create wait=False to first raw full-screen screenshot over configured ingress",
+      "modal_cold_create_to_ready_ms": 10520.978583022952,
+      "modal_connect_ready_ms": 8168.135500047356,
+      "modal_create_return_ms": 1927.9709170223214,
+      "modal_final_ingress_ready_ms": 9976.759542012587,
+      "modal_first_raw_screenshot_capture_backend": "mss",
+      "modal_first_raw_screenshot_height": 768,
+      "modal_first_raw_screenshot_ms": 10520.733667013701,
+      "modal_first_raw_screenshot_size_bytes": 391571,
+      "modal_first_raw_screenshot_width": 1024,
+      "modal_ingress": "attested-tunnel",
+      "modal_product_create_to_first_screenshot_expected_samples": 3,
+      "modal_product_create_to_first_screenshot_samples_ms": [
+        9591.011415992398,
+        22632.498582999688,
+        10520.978583022952
+      ],
+      "readiness_contract": "ComputerSandbox.create(wait=False) -> daemon /readyz -> configured ingress ready -> first raw full-screen screenshot",
+      "resource_profile": "browser",
+      "setup_included": true,
+      "startup_model": "modal_sandbox_image_daemon_start",
+      "uses_snapshot_or_template": false
+    },
+    "providers": [
+      "modal-daemon",
+      "daytona",
+      "e2b"
+    ]
+  },
+  "mode": "http",
+  "ok": true,
+  "package_version": "1.0.0",
+  "provenance": {
+    "harness_commit": "e0818f14ddd1cda38fcbaf6053801d1800116cde",
+    "harness_diff_sha256": "0e0bcf1ff7d4adb79b271889a7fcbbfa43aded4ed788cc1e17a807dcd0cd3b29",
+    "harness_state": "dirty",
+    "raw_artifact_path": "benchmark-results/candidates/provider-compare-live-20260718-corrected.json",
+    "raw_artifact_sha256": "a93b9b8abaa3ba56fd096fb434c600074106326947714a43f0e30fc0ad0b4912",
+    "raw_artifact_tracked": false,
+    "sanitization": "removed ephemeral base URLs, benchmark run IDs, Modal run IDs, and Modal sandbox IDs",
+    "sanitizer": "modal_computer_use.benchmarks.artifacts",
+    "sanitizer_version": 1,
+    "scope": "provider-default SDK paths at 1024x768, one warmup and three measured iterations",
+    "status": "candidate",
+    "status_reason": "Uncommitted isolated review branch; awaiting user approval."
+  },
+  "providers": {
+    "daytona": {
+      "cases": {
+        "cold_create_to_ready": {
+          "canonical_case": "product_create_to_first_screenshot",
+          "definition": "provider product create call to first successful full-screen screenshot",
+          "deprecated": true,
+          "failures": [],
+          "first_observation_api": "computer_use.screenshot.take_full_screen",
+          "ingress_included": false,
+          "iterations": 3,
+          "last_result": {
+            "computer_use": {
+              "type": "ComputerUseStatusResponse"
+            },
+            "status": "ready"
+          },
+          "name": "cold_create_to_ready",
+          "readiness_contract": "daytona.create -> computer_use.start -> first non-empty full-screen screenshot",
+          "removal_version": "1.2.0",
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            10725.549834023695,
+            10821.036707959138,
+            10878.176625003107
+          ],
+          "setup_included": true,
+          "startup_model": "managed_default_snapshot",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 13526.295884948922,
+            "jitter_ms": 51.42592533957213,
+            "mad": 57.139917043969035,
+            "max": 10878.176625003107,
+            "mean": 10808.254388995314,
+            "mean_p50_delta_ms": -12.782318963823855,
+            "mean_p50_delta_ratio": -0.001181247167789584,
+            "mean_without_high_outliers": 10808.254388995314,
+            "min": 10725.549834023695,
+            "p50": 10821.036707959138,
+            "p95": 10872.46263329871,
+            "trimmed_mean": 10808.254388995314
+          },
+          "uses_snapshot_or_template": true
+        },
+        "command_echo": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "exit_code": 0
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            106.21679102769122,
+            135.58554201154038,
+            122.57795897312462
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 180.43308681139024,
+            "jitter_ms": 11.706824734574184,
+            "mad": 13.00758303841576,
+            "max": 135.58554201154038,
+            "mean": 121.46009733745207,
+            "mean_p50_delta_ms": -1.1178616356725541,
+            "mean_p50_delta_ratio": -0.009119597397747883,
+            "mean_without_high_outliers": 121.46009733745207,
+            "min": 106.21679102769122,
+            "p50": 122.57795897312462,
+            "p95": 134.2847837076988,
+            "trimmed_mean": 121.46009733745207
+          }
+        },
+        "move_click": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "action_count": 2
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            353.1299160094932,
+            388.48566700471565,
+            446.8389169778675
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 545.7409762812662,
+            "jitter_ms": 52.51792497583665,
+            "mad": 35.35575099522248,
+            "max": 446.8389169778675,
+            "mean": 396.15149999735877,
+            "mean_p50_delta_ms": 7.665832992643118,
+            "mean_p50_delta_ratio": 0.01973260185310792,
+            "mean_without_high_outliers": 396.15149999735877,
+            "min": 353.1299160094932,
+            "p50": 388.48566700471565,
+            "p95": 441.0035919805523,
+            "trimmed_mean": 396.15149999735877
+          }
+        },
+        "move_click_sequence": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "action_count": 8
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            1409.0413749800064,
+            1464.8237910005264,
+            1551.624667015858
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 1831.029738750658,
+            "jitter_ms": 78.12078841379844,
+            "mad": 55.78241602052003,
+            "max": 1551.624667015858,
+            "mean": 1475.1632776654635,
+            "mean_p50_delta_ms": 10.339486664937112,
+            "mean_p50_delta_ratio": 0.00705851907134501,
+            "mean_without_high_outliers": 1475.1632776654635,
+            "min": 1409.0413749800064,
+            "p50": 1464.8237910005264,
+            "p95": 1542.9445794143248,
+            "trimmed_mean": 1475.1632776654635
+          }
+        },
+        "product_create_to_first_screenshot": {
+          "definition": "provider product create call to first successful full-screen screenshot",
+          "failures": [],
+          "first_observation_api": "computer_use.screenshot.take_full_screen",
+          "ingress_included": false,
+          "iterations": 3,
+          "last_result": {
+            "computer_use": {
+              "type": "ComputerUseStatusResponse"
+            },
+            "status": "ready"
+          },
+          "readiness_contract": "daytona.create -> computer_use.start -> first non-empty full-screen screenshot",
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            10725.549834023695,
+            10821.036707959138,
+            10878.176625003107
+          ],
+          "setup_included": true,
+          "startup_model": "managed_default_snapshot",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 13526.295884948922,
+            "jitter_ms": 51.42592533957213,
+            "mad": 57.139917043969035,
+            "max": 10878.176625003107,
+            "mean": 10808.254388995314,
+            "mean_p50_delta_ms": -12.782318963823855,
+            "mean_p50_delta_ratio": -0.001181247167789584,
+            "mean_without_high_outliers": 10808.254388995314,
+            "min": 10725.549834023695,
+            "p50": 10821.036707959138,
+            "p95": 10872.46263329871,
+            "trimmed_mean": 10808.254388995314
+          },
+          "uses_snapshot_or_template": true
+        },
+        "screenshot_full": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "payload": {
+              "decoded_size_bytes": 115726,
+              "format": "png",
+              "height": 768,
+              "source": "provider_return_value.screenshot",
+              "transport_encoding": "base64_string",
+              "transport_size_bytes": 154304,
+              "width": 1024
+            },
+            "size_bytes": 115726
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            343.78779196413234,
+            413.1128750159405,
+            451.4670000062324
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 583.7043521477608,
+            "jitter_ms": 34.518712491262704,
+            "mad": 38.35412499029189,
+            "max": 451.4670000062324,
+            "mean": 402.7892223287684,
+            "mean_p50_delta_ms": -10.323652687172114,
+            "mean_p50_delta_ratio": -0.0249899078714837,
+            "mean_without_high_outliers": 402.7892223287684,
+            "min": 343.78779196413234,
+            "p50": 413.1128750159405,
+            "p95": 447.6315875072032,
+            "trimmed_mean": 402.7892223287684
+          }
+        },
+        "type_1000_chars": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "character_count": 1000,
+            "method": "provider_default"
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            5399.750499986112,
+            5331.588540982921,
+            5339.132292021532
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 6673.9153650269145,
+            "jitter_ms": 54.556387168122455,
+            "mad": 7.543751038610935,
+            "max": 5399.750499986112,
+            "mean": 5356.8237776635215,
+            "mean_p50_delta_ms": 17.691485641989857,
+            "mean_p50_delta_ratio": 0.0033135507184242122,
+            "mean_without_high_outliers": 5356.8237776635215,
+            "min": 5331.588540982921,
+            "p50": 5339.132292021532,
+            "p95": 5393.688679189654,
+            "trimmed_mean": 5356.8237776635215
+          }
+        },
+        "type_100_chars": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "character_count": 100,
+            "method": "provider_default"
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            711.2791670369916,
+            614.8381250095554,
+            632.3852500063367
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 790.4815625079209,
+            "jitter_ms": 71.00452532758936,
+            "mad": 17.54712499678135,
+            "max": 711.2791670369916,
+            "mean": 652.8341806842946,
+            "mean_p50_delta_ms": 20.448930677957833,
+            "mean_p50_delta_ratio": 0.032336191708698024,
+            "mean_without_high_outliers": 652.8341806842946,
+            "min": 614.8381250095554,
+            "p50": 632.3852500063367,
+            "p95": 703.3897753339261,
+            "trimmed_mean": 652.8341806842946
+          }
+        }
+      },
+      "cost_estimate": {
+        "components": [
+          {
+            "amount": 0.0012979385924256639,
+            "quantity": 92.709899458976,
+            "quantity_unit": "vCPU_seconds",
+            "rate": 1.4e-05,
+            "rate_unit": "USD_per_vCPU_second",
+            "resource": "cpu",
+            "source": "public_pricing_docs"
+          },
+          {
+            "amount": 0.00041719454756539197,
+            "quantity": 92.709899458976,
+            "quantity_unit": "GiB_seconds",
+            "rate": 4.5e-06,
+            "rate_unit": "USD_per_GiB_second",
+            "resource": "memory",
+            "source": "public_pricing_docs"
+          },
+          {
+            "amount": 8.343890951307839e-06,
+            "quantity": 278.129698376928,
+            "quantity_unit": "GiB_seconds",
+            "rate": 3e-08,
+            "rate_unit": "USD_per_GiB_second",
+            "resource": "storage",
+            "source": "public_pricing_docs"
+          }
+        ],
+        "confidence": "estimated",
+        "currency": "USD",
+        "duration_policy": "measured_billable_resource_lifetime_including_cleanup",
+        "inputs": {
+          "cpu_count": 1.0,
+          "duration_seconds": 92.709899458976,
+          "memory_gib": 1.0,
+          "storage_gib": 3.0
+        },
+        "notes": [],
+        "pricing": {
+          "retrieved_date": "2026-05-12",
+          "source_url": "https://www.daytona.io/pricing"
+        },
+        "status": "estimated",
+        "total": {
+          "amount": 0.0017234770309423636,
+          "unit": "run"
+        }
+      },
+      "failures": [],
+      "metadata": {
+        "api_url": null,
+        "cpu_count": 1.0,
+        "cpu_count_source": "provider_sandbox_metadata",
+        "first_observation_api": "computer_use.screenshot.take_full_screen",
+        "ingress_included": false,
+        "memory_gib": 1.0,
+        "memory_gib_source": "provider_sandbox_metadata",
+        "readiness_contract": "daytona.create -> computer_use.start -> first non-empty full-screen screenshot",
+        "sandbox_source": "default_snapshot",
+        "sdk_package": "daytona",
+        "sdk_version": "0.175.0",
+        "setup_included": true,
+        "snapshot": null,
+        "startup_model": "managed_default_snapshot",
+        "storage_gib": 3.0,
+        "storage_gib_source": "provider_sandbox_metadata",
+        "target": null,
+        "target_kind": "product",
+        "uses_snapshot_or_template": true
+      },
+      "provider": "daytona",
+      "status": "ok",
+      "verification": {
+        "cursor_position": {
+          "expected": {
+            "x": 16,
+            "y": 128
+          },
+          "method": "computer_use.mouse.get_position",
+          "observed": {
+            "x": 16,
+            "y": 128
+          },
+          "status": "ok"
+        },
+        "type_text": {
+          "expected": {
+            "minimum_keypress_count": 23
+          },
+          "observed": {
+            "keypress_count": 23
+          },
+          "status": "ok"
+        }
+      }
+    },
+    "e2b": {
+      "cases": {
+        "cold_create_to_ready": {
+          "canonical_case": "product_create_to_first_screenshot",
+          "definition": "provider product create call to first successful full-screen screenshot",
+          "deprecated": true,
+          "failures": [],
+          "first_observation_api": "Sandbox.screenshot",
+          "ingress_included": false,
+          "iterations": 3,
+          "last_result": {
+            "status": "ready"
+          },
+          "name": "cold_create_to_ready",
+          "readiness_contract": "Sandbox.create -> first non-empty screenshot",
+          "removal_version": "1.2.0",
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            1296.1672079982236,
+            1337.4887090176344,
+            1273.822542047128
+          ],
+          "setup_included": true,
+          "startup_model": "desktop_template_snapshot",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 1620.2090099977795,
+            "jitter_ms": 37.18935091746971,
+            "mad": 22.34466595109552,
+            "max": 1337.4887090176344,
+            "mean": 1302.492819687662,
+            "mean_p50_delta_ms": 6.325611689438347,
+            "mean_p50_delta_ratio": 0.004880243575369803,
+            "mean_without_high_outliers": 1302.492819687662,
+            "min": 1273.822542047128,
+            "p50": 1296.1672079982236,
+            "p95": 1333.3565589156933,
+            "trimmed_mean": 1302.492819687662
+          },
+          "uses_snapshot_or_template": true
+        },
+        "command_echo": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "exit_code": 0
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            56.44012498669326,
+            58.99587500607595,
+            58.28191700857133
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 72.85239626071416,
+            "jitter_ms": 0.6425621977541596,
+            "mad": 0.7139579975046217,
+            "max": 58.99587500607595,
+            "mean": 57.90597233378018,
+            "mean_p50_delta_ms": -0.3759446747911497,
+            "mean_p50_delta_ratio": -0.006450451427942234,
+            "mean_without_high_outliers": 57.90597233378018,
+            "min": 56.44012498669326,
+            "p50": 58.28191700857133,
+            "p95": 58.924479206325486,
+            "trimmed_mean": 57.90597233378018
+          }
+        },
+        "move_click": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "action_count": 2
+          },
+          "sample_stability": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              2
+            ],
+            "mean_delta_ratio": 0.11763102068349583,
+            "mean_without_high_outliers": 214.99672898789868,
+            "reason": "mean changes by at least 5% after removing high outliers",
+            "status": "outlier_sensitive"
+          },
+          "samples_ms": [
+            212.5431249733083,
+            217.45033300248906,
+            290.867583011277
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              2
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 271.8129162531113,
+            "jitter_ms": 66.07552500790916,
+            "mad": 4.907208029180765,
+            "max": 290.867583011277,
+            "mean": 240.28701366235813,
+            "mean_p50_delta_ms": 22.836680659869074,
+            "mean_p50_delta_ratio": 0.10502021470625972,
+            "mean_without_high_outliers": 214.99672898789868,
+            "min": 212.5431249733083,
+            "p50": 217.45033300248906,
+            "p95": 283.5258580103982,
+            "trimmed_mean": 240.28701366235813
+          }
+        },
+        "move_click_sequence": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "action_count": 8
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            940.7844580127858,
+            1162.7374169765972,
+            941.0797500167973
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 1176.3496875209967,
+            "jitter_ms": 199.49190026381984,
+            "mad": 0.2952920040115714,
+            "max": 1162.7374169765972,
+            "mean": 1014.8672083353935,
+            "mean_p50_delta_ms": 73.78745831859612,
+            "mean_p50_delta_ratio": 0.07840723203031315,
+            "mean_without_high_outliers": 1014.8672083353935,
+            "min": 940.7844580127858,
+            "p50": 941.0797500167973,
+            "p95": 1140.5716502806172,
+            "trimmed_mean": 1014.8672083353935
+          }
+        },
+        "product_create_to_first_screenshot": {
+          "definition": "provider product create call to first successful full-screen screenshot",
+          "failures": [],
+          "first_observation_api": "Sandbox.screenshot",
+          "ingress_included": false,
+          "iterations": 3,
+          "last_result": {
+            "status": "ready"
+          },
+          "readiness_contract": "Sandbox.create -> first non-empty screenshot",
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            1296.1672079982236,
+            1337.4887090176344,
+            1273.822542047128
+          ],
+          "setup_included": true,
+          "startup_model": "desktop_template_snapshot",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 1620.2090099977795,
+            "jitter_ms": 37.18935091746971,
+            "mad": 22.34466595109552,
+            "max": 1337.4887090176344,
+            "mean": 1302.492819687662,
+            "mean_p50_delta_ms": 6.325611689438347,
+            "mean_p50_delta_ratio": 0.004880243575369803,
+            "mean_without_high_outliers": 1302.492819687662,
+            "min": 1273.822542047128,
+            "p50": 1296.1672079982236,
+            "p95": 1333.3565589156933,
+            "trimmed_mean": 1302.492819687662
+          },
+          "uses_snapshot_or_template": true
+        },
+        "screenshot_full": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "payload": {
+              "decoded_size_bytes": 15308,
+              "format": "png",
+              "height": 768,
+              "source": "provider_return_value",
+              "transport_encoding": "raw_bytes",
+              "transport_size_bytes": 15308,
+              "width": 1024
+            },
+            "size_bytes": 15308
+          },
+          "sample_stability": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              2
+            ],
+            "mean_delta_ratio": 0.13283035832890452,
+            "mean_without_high_outliers": 187.20870852121152,
+            "reason": "mean changes by at least 5% after removing high outliers",
+            "status": "outlier_sensitive"
+          },
+          "samples_ms": [
+            183.73425002209842,
+            190.68316702032462,
+            261.80970802670345
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              2
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 238.35395877540577,
+            "jitter_ms": 64.01388690574095,
+            "mad": 6.948916998226196,
+            "max": 261.80970802670345,
+            "mean": 212.0757083563755,
+            "mean_p50_delta_ms": 21.39254133605087,
+            "mean_p50_delta_ratio": 0.11218893450500889,
+            "mean_without_high_outliers": 187.20870852121152,
+            "min": 183.73425002209842,
+            "p50": 190.68316702032462,
+            "p95": 254.69705392606556,
+            "trimmed_mean": 212.0757083563755
+          }
+        },
+        "type_1000_chars": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "character_count": 1000,
+            "method": "provider_default"
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            41963.94333301578,
+            41921.634250029456,
+            41942.806042032316
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 52428.507552540395,
+            "jitter_ms": 19.02356188511476,
+            "mad": 21.137290983460844,
+            "max": 41963.94333301578,
+            "mean": 41942.794541692514,
+            "mean_p50_delta_ms": -0.011500339802296367,
+            "mean_p50_delta_ratio": -2.7419099692022237e-07,
+            "mean_without_high_outliers": 41942.794541692514,
+            "min": 41921.634250029456,
+            "p50": 41942.806042032316,
+            "p95": 41961.82960391743,
+            "trimmed_mean": 41942.794541692514
+          }
+        },
+        "type_100_chars": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "character_count": 100,
+            "method": "provider_default"
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            4067.989332950674,
+            4057.906083005946,
+            4091.2040830007754
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 5084.9866661883425,
+            "jitter_ms": 20.893275045091286,
+            "mad": 10.083249944727868,
+            "max": 4091.2040830007754,
+            "mean": 4072.3664996524653,
+            "mean_p50_delta_ms": 4.377166701791339,
+            "mean_p50_delta_ratio": 0.0010760025023508128,
+            "mean_without_high_outliers": 4072.3664996524653,
+            "min": 4057.906083005946,
+            "p50": 4067.989332950674,
+            "p95": 4088.8826079957653,
+            "trimmed_mean": 4072.3664996524653
+          }
+        }
+      },
+      "cost_estimate": {
+        "components": [
+          {
+            "amount": 0.005572162108380114,
+            "quantity": 398.0115791700082,
+            "quantity_unit": "vCPU_seconds",
+            "rate": 1.4e-05,
+            "rate_unit": "USD_per_vCPU_second",
+            "resource": "cpu",
+            "source": "public_pricing_docs"
+          },
+          {
+            "amount": 0.0008955260531325185,
+            "quantity": 199.0057895850041,
+            "quantity_unit": "GiB_seconds",
+            "rate": 4.5e-06,
+            "rate_unit": "USD_per_GiB_second",
+            "resource": "memory",
+            "source": "public_pricing_docs"
+          }
+        ],
+        "confidence": "estimated",
+        "currency": "USD",
+        "duration_policy": "measured_billable_resource_lifetime_including_cleanup",
+        "inputs": {
+          "cpu_count": 2.0,
+          "duration_seconds": 199.0057895850041,
+          "memory_gib": 1.0,
+          "storage_gib": null
+        },
+        "notes": [],
+        "pricing": {
+          "retrieved_date": "2026-05-12",
+          "source_url": "https://e2b.dev/pricing"
+        },
+        "status": "estimated",
+        "total": {
+          "amount": 0.006467688161512632,
+          "unit": "run"
+        }
+      },
+      "failures": [],
+      "metadata": {
+        "cpu_count": 2,
+        "cpu_count_source": "public_default_desktop_pricing",
+        "display": ":0",
+        "dpi": 96,
+        "first_observation_api": "Sandbox.screenshot",
+        "ingress_included": false,
+        "memory_gib": 1,
+        "memory_gib_source": "public_default_desktop_pricing",
+        "readiness_contract": "Sandbox.create -> first non-empty screenshot",
+        "resolution": "1024x768",
+        "sdk_package": "e2b-desktop",
+        "sdk_version": "2.3.1",
+        "setup_included": true,
+        "startup_model": "desktop_template_snapshot",
+        "target_kind": "product",
+        "template": null,
+        "template_source": "default_desktop",
+        "uses_snapshot_or_template": true
+      },
+      "provider": "e2b",
+      "status": "ok",
+      "verification": {
+        "cursor_position": {
+          "expected": {
+            "x": 16,
+            "y": 128
+          },
+          "observed": {
+            "x": 16,
+            "y": 128
+          },
+          "status": "ok"
+        },
+        "type_text": {
+          "expected": {
+            "minimum_keypress_count": 23
+          },
+          "observed": {
+            "keypress_count": 23
+          },
+          "status": "ok"
+        }
+      }
+    },
+    "modal-daemon": {
+      "cases": {
+        "action_batch": {
+          "action_count": 5,
+          "actions": [
+            {
+              "type": "move"
+            },
+            {
+              "type": "cursor_position"
+            },
+            {
+              "type": "wait"
+            },
+            {
+              "type": "move"
+            },
+            {
+              "type": "cursor_position"
+            }
+          ],
+          "cases": {
+            "batch_5_actions": {
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                68.44009900000003,
+                70.975185,
+                68.78898899999975
+              ],
+              "daemon_summary_ms": {
+                "high_outlier_count": 0,
+                "high_outlier_indices": [],
+                "high_outlier_ratio": 0.0,
+                "high_outlier_threshold": 85.98623624999968,
+                "jitter_ms": 1.967576400000226,
+                "mad": 0.34888999999971304,
+                "max": 70.975185,
+                "mean": 69.40142433333325,
+                "mean_p50_delta_ms": 0.612435333333508,
+                "mean_p50_delta_ratio": 0.008903101241006904,
+                "mean_without_high_outliers": 69.40142433333325,
+                "min": 68.44009900000003,
+                "p50": 68.78898899999975,
+                "p95": 70.75656539999997,
+                "trimmed_mean": 69.40142433333325
+              },
+              "failures": [],
+              "input_backends": [
+                "xtest"
+              ],
+              "iterations": 3,
+              "overhead_samples_ms": [
+                75.12594202067646,
+                74.35285698097438,
+                151.99780299330536
+              ],
+              "overhead_summary_ms": {
+                "high_outlier_count": 1,
+                "high_outlier_indices": [
+                  2
+                ],
+                "high_outlier_ratio": 0.3333333333333333,
+                "high_outlier_threshold": 93.90742752584558,
+                "jitter_ms": 69.184674875366,
+                "mad": 0.7730850397020816,
+                "max": 151.99780299330536,
+                "mean": 100.49220066498539,
+                "mean_p50_delta_ms": 25.366258644308928,
+                "mean_p50_delta_ratio": 0.3376497912974925,
+                "mean_without_high_outliers": 74.73939950082541,
+                "min": 74.35285698097438,
+                "p50": 75.12594202067646,
+                "p95": 144.31061689604246,
+                "trimmed_mean": 100.49220066498539
+              },
+              "sample_stability": {
+                "high_outlier_count": 1,
+                "high_outlier_indices": [
+                  2
+                ],
+                "mean_delta_ratio": 0.17616548759392758,
+                "mean_without_high_outliers": 144.44704150082543,
+                "reason": "mean changes by at least 5% after removing high outliers",
+                "status": "outlier_sensitive"
+              },
+              "samples_ms": [
+                143.5660410206765,
+                145.32804198097438,
+                220.7867919933051
+              ],
+              "status": "ok",
+              "successful_iterations": 3,
+              "summary_ms": {
+                "high_outlier_count": 1,
+                "high_outlier_indices": [
+                  2
+                ],
+                "high_outlier_ratio": 0.3333333333333333,
+                "high_outlier_threshold": 181.66005247621797,
+                "jitter_ms": 67.91287501109761,
+                "mad": 1.7620009602978826,
+                "max": 220.7867919933051,
+                "mean": 169.89362499831864,
+                "mean_p50_delta_ms": 24.565583017344267,
+                "mean_p50_delta_ratio": 0.16903539525125008,
+                "mean_without_high_outliers": 144.44704150082543,
+                "min": 143.5660410206765,
+                "p50": 145.32804198097438,
+                "p95": 213.240916992072,
+                "trimmed_mean": 169.89362499831864
+              },
+              "transport_http_versions": [
+                "HTTP/1.1"
+              ]
+            },
+            "sandbox_exec": {
+              "reason": "Sandbox.exec comparison is unsupported in this benchmark pass",
+              "status": "not_measured"
+            },
+            "separate_5_actions": {
+              "attribution": {
+                "reason": null,
+                "status": "measured"
+              },
+              "daemon_samples_ms": [
+                57.83838500000016,
+                55.68078800000009,
+                57.5527150000017
+              ],
+              "daemon_summary_ms": {
+                "high_outlier_count": 0,
+                "high_outlier_indices": [],
+                "high_outlier_ratio": 0.0,
+                "high_outlier_threshold": 71.94089375000212,
+                "jitter_ms": 0.2571029999986152,
+                "mad": 0.2856699999984613,
+                "max": 57.83838500000016,
+                "mean": 57.02396266666731,
+                "mean_p50_delta_ms": -0.5287523333343884,
+                "mean_p50_delta_ratio": -0.009187270024261633,
+                "mean_without_high_outliers": 57.02396266666731,
+                "min": 55.68078800000009,
+                "p50": 57.5527150000017,
+                "p95": 57.80981800000031,
+                "trimmed_mean": 57.02396266666731
+              },
+              "failures": [],
+              "input_backends": [],
+              "iterations": 3,
+              "overhead_samples_ms": [
+                373.55519801414164,
+                458.6343370085792,
+                411.53749399329166
+              ],
+              "overhead_summary_ms": {
+                "high_outlier_count": 0,
+                "high_outlier_indices": [],
+                "high_outlier_ratio": 0.0,
+                "high_outlier_threshold": 580.4751500493551,
+                "jitter_ms": 42.387158713758765,
+                "mad": 37.982295979150024,
+                "max": 458.6343370085792,
+                "mean": 414.5756763386708,
+                "mean_p50_delta_ms": 3.0381823453791412,
+                "mean_p50_delta_ratio": 0.007382516513619694,
+                "mean_without_high_outliers": 414.5756763386708,
+                "min": 373.55519801414164,
+                "p50": 411.53749399329166,
+                "p95": 453.9246527070504,
+                "trimmed_mean": 414.5756763386708
+              },
+              "sample_stability": {
+                "high_outlier_count": 0,
+                "reason": "mean is not materially changed by high-outlier filtering",
+                "status": "stable"
+              },
+              "samples_ms": [
+                431.39358301414177,
+                514.3151250085793,
+                469.09020899329334
+              ],
+              "status": "ok",
+              "successful_iterations": 3,
+              "summary_ms": {
+                "high_outlier_count": 0,
+                "high_outlier_indices": [],
+                "high_outlier_ratio": 0.0,
+                "high_outlier_threshold": 636.7572620233638,
+                "jitter_ms": 40.7024244137574,
+                "mad": 37.69662597915158,
+                "max": 514.3151250085793,
+                "mean": 471.59963900533813,
+                "mean_p50_delta_ms": 2.5094300120447883,
+                "mean_p50_delta_ratio": 0.005349568087192087,
+                "mean_without_high_outliers": 471.59963900533813,
+                "min": 431.39358301414177,
+                "p50": 469.09020899329334,
+                "p95": 509.79263340705074,
+                "trimmed_mean": 471.59963900533813
+              },
+              "transport_http_versions": [
+                "HTTP/1.1"
+              ]
+            }
+          },
+          "comparison": {
+            "batch_faster": true,
+            "batch_vs_separate_speedup": 2.775852472451543,
+            "mean_delta_ms": 301.70601400701946,
+            "status": "measured"
+          },
+          "failures": [],
+          "status": "ok"
+        },
+        "browser_render_metrics": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "gpu_mode": "auto",
+            "metrics": {
+              "bodyTextLength": 129,
+              "navigation": {
+                "decodedBodySize": 559,
+                "domContentLoadedEventEnd": 149.3000000000029,
+                "duration": 159.5,
+                "loadEventEnd": 159.5,
+                "responseStart": 139,
+                "transferSize": 618
+              },
+              "paint": [
+                {
+                  "name": "first-paint",
+                  "startTime": 172
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "startTime": 172
+                }
+              ],
+              "readyState": "complete",
+              "title": "Example Domain",
+              "url": "https://example.com/",
+              "webgl": null
+            },
+            "ok": true,
+            "profile_dir": "/home/desktop/.cache/modal-computer-use/browser-profile-render-probe-45761",
+            "wall_ms": 2035.3480779999984
+          },
+          "samples_ms": [
+            1921.648666029796,
+            2154.4692919705994,
+            2130.362250027247
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 2662.9528125340585,
+            "jitter_ms": 21.696337749017403,
+            "mad": 24.10704194335267,
+            "max": 2154.4692919705994,
+            "mean": 2068.826736009214,
+            "mean_p50_delta_ms": -61.5355140180327,
+            "mean_p50_delta_ratio": -0.028885000199963963,
+            "mean_without_high_outliers": 2068.826736009214,
+            "min": 1921.648666029796,
+            "p50": 2130.362250027247,
+            "p95": 2152.058587776264,
+            "trimmed_mean": 2068.826736009214
+          },
+          "url": "https://example.com"
+        },
+        "click_then_screenshot": {
+          "action_count": 2,
+          "actions": [
+            {
+              "type": "move"
+            },
+            {
+              "button": "left",
+              "type": "click"
+            }
+          ],
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            25.528682000000913,
+            25.09145299999993,
+            25.40952200000035
+          ],
+          "daemon_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 31.76190250000044,
+            "jitter_ms": 0.10724400000050593,
+            "mad": 0.11916000000056215,
+            "max": 25.528682000000913,
+            "mean": 25.3432190000004,
+            "mean_p50_delta_ms": -0.0663029999999516,
+            "mean_p50_delta_ratio": -0.0026093761228546796,
+            "mean_without_high_outliers": 25.3432190000004,
+            "min": 25.09145299999993,
+            "p50": 25.40952200000035,
+            "p95": 25.516766000000857,
+            "trimmed_mean": 25.3432190000004
+          },
+          "failures": [],
+          "input_backends": [
+            "xtest"
+          ],
+          "iterations": 3,
+          "last_result": {
+            "action_result": {
+              "call_id": "call_59421c8dfada",
+              "ok": true,
+              "result_count": 2,
+              "timing": {
+                "daemon_ms": 25.40952200000035
+              }
+            },
+            "artifact_backed": false,
+            "capture_backend": "mss",
+            "cursor_visible": false,
+            "daemon_ms": 25.40952200000035,
+            "format": "png",
+            "height": 768,
+            "input_backend": "xtest",
+            "screenshot_daemon_timing_ms": {
+              "capture_ms": 1.0397990000008406,
+              "encode_ms": 22.158925999999468,
+              "total_ms": 23.244914999999367
+            },
+            "size_bytes": 343396,
+            "storage": "inline",
+            "transport_http_version": "HTTP/1.1",
+            "width": 1024
+          },
+          "overhead_samples_ms": [
+            123.76027599675865,
+            108.04604702998866,
+            117.4685609883177
+          ],
+          "overhead_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 146.83570123539712,
+            "jitter_ms": 5.662543507596851,
+            "mad": 6.291715008440946,
+            "max": 123.76027599675865,
+            "mean": 116.424961338355,
+            "mean_p50_delta_ms": -1.043599649962701,
+            "mean_p50_delta_ratio": -0.008884076225863423,
+            "mean_without_high_outliers": 116.424961338355,
+            "min": 108.04604702998866,
+            "p50": 117.4685609883177,
+            "p95": 123.13110449591456,
+            "trimmed_mean": 116.424961338355
+          },
+          "request": {
+            "format": "png",
+            "show_cursor": false
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_bytes": [
+            343396,
+            343396,
+            343396
+          ],
+          "samples_ms": [
+            149.28895799675956,
+            133.1375000299886,
+            142.87808298831806
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_bytes": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 429245.0,
+            "jitter_ms": 0.0,
+            "mad": 0.0,
+            "max": 343396.0,
+            "mean": 343396.0,
+            "mean_p50_delta_ms": 0.0,
+            "mean_p50_delta_ratio": 0.0,
+            "mean_without_high_outliers": 343396.0,
+            "min": 343396.0,
+            "p50": 343396.0,
+            "p95": 343396.0,
+            "trimmed_mean": 343396.0
+          },
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 178.59760373539757,
+            "jitter_ms": 5.769787507597357,
+            "mad": 6.410875008441508,
+            "max": 149.28895799675956,
+            "mean": 141.7681803383554,
+            "mean_p50_delta_ms": -1.1099026499626632,
+            "mean_p50_delta_ratio": -0.007768179882798474,
+            "mean_without_high_outliers": 141.7681803383554,
+            "min": 133.1375000299886,
+            "p50": 142.87808298831806,
+            "p95": 148.6478704959154,
+            "trimmed_mean": 141.7681803383554
+          },
+          "transport_encoding": "binary",
+          "transport_http_versions": [
+            "HTTP/1.1"
+          ]
+        },
+        "cold_create_to_ready": {
+          "canonical_case": "product_create_to_first_screenshot",
+          "definition": "create wait=False to first raw full-screen screenshot over configured ingress",
+          "deprecated": true,
+          "failures": [],
+          "first_observation_api": "/v1/screenshots/full/raw",
+          "ingress_included": true,
+          "iterations": 3,
+          "name": "cold_create_to_ready",
+          "readiness_contract": "ComputerSandbox.create(wait=False) -> daemon /readyz -> configured ingress ready -> first raw full-screen screenshot",
+          "removal_version": "1.2.0",
+          "sample_stability": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "mean_delta_ratio": 0.41688245284223446,
+            "mean_without_high_outliers": 10055.994999507675,
+            "reason": "mean changes by at least 5% after removing high outliers",
+            "status": "outlier_sensitive"
+          },
+          "samples_ms": [
+            9591.011415992398,
+            22632.498582999688,
+            10520.978583022952
+          ],
+          "setup_included": true,
+          "source": "live_orchestration_metadata",
+          "startup_model": "modal_sandbox_image_daemon_start",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 14657.286548541451,
+            "jitter_ms": 10900.367999979058,
+            "mad": 929.9671670305543,
+            "max": 22632.498582999688,
+            "mean": 14248.162860671679,
+            "mean_p50_delta_ms": 3727.1842776487265,
+            "mean_p50_delta_ratio": 0.3542621295383161,
+            "mean_without_high_outliers": 10055.994999507675,
+            "min": 9591.011415992398,
+            "p50": 10520.978583022952,
+            "p95": 21421.34658300201,
+            "trimmed_mean": 14248.162860671679
+          },
+          "uses_snapshot_or_template": false
+        },
+        "command_echo": {
+          "command": {
+            "argv": [
+              "sh",
+              "-lc",
+              "printf 42"
+            ],
+            "timeout_seconds": 30
+          },
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "exit_code": 0
+          },
+          "sample_stability": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "mean_delta_ratio": 0.18862889086072085,
+            "mean_without_high_outliers": 102.4265004962217,
+            "reason": "mean changes by at least 5% after removing high outliers",
+            "status": "outlier_sensitive"
+          },
+          "samples_ms": [
+            103.86166698299348,
+            160.3882920462638,
+            100.99133400944993
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 129.82708372874185,
+            "jitter_ms": 50.87396255694327,
+            "mad": 2.8703329735435545,
+            "max": 160.3882920462638,
+            "mean": 121.74709767956908,
+            "mean_p50_delta_ms": 17.885430696575597,
+            "mean_p50_delta_ratio": 0.17220434849658434,
+            "mean_without_high_outliers": 102.4265004962217,
+            "min": 100.99133400944993,
+            "p50": 103.86166698299348,
+            "p95": 154.73562953993675,
+            "trimmed_mean": 121.74709767956908
+          }
+        },
+        "move_click": {
+          "action_count": 2,
+          "actions": [
+            {
+              "type": "move"
+            },
+            {
+              "button": "left",
+              "type": "click"
+            }
+          ],
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            1.1603979999996739,
+            1.4273980000005793,
+            1.1655489999995439
+          ],
+          "daemon_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 2.165548999999544,
+            "jitter_ms": 0.23566410000093163,
+            "mad": 0.0051509999998700096,
+            "max": 1.4273980000005793,
+            "mean": 1.2511149999999323,
+            "mean_p50_delta_ms": 0.08556600000038839,
+            "mean_p50_delta_ratio": 0.07341261499981715,
+            "mean_without_high_outliers": 1.2511149999999323,
+            "min": 1.1603979999996739,
+            "p50": 1.1655489999995439,
+            "p95": 1.4012131000004755,
+            "trimmed_mean": 1.2511149999999323
+          },
+          "failures": [],
+          "input_backends": [
+            "xtest"
+          ],
+          "iterations": 3,
+          "overhead_samples_ms": [
+            75.99422703256309,
+            74.06039297851308,
+            75.0970759925238
+          ],
+          "overhead_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 93.87134499065475,
+            "jitter_ms": 0.8074359360353753,
+            "mad": 0.8971510400392901,
+            "max": 75.99422703256309,
+            "mean": 75.05056533453332,
+            "mean_p50_delta_ms": -0.04651065799048126,
+            "mean_p50_delta_ratio": -0.0006193404653346501,
+            "mean_without_high_outliers": 75.05056533453332,
+            "min": 74.06039297851308,
+            "p50": 75.0970759925238,
+            "p95": 75.90451192855917,
+            "trimmed_mean": 75.05056533453332
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            77.15462503256276,
+            75.48779097851366,
+            76.26262499252334
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 95.32828124065418,
+            "jitter_ms": 0.8028000360354781,
+            "mad": 0.7748340140096843,
+            "max": 77.15462503256276,
+            "mean": 76.30168033453326,
+            "mean_p50_delta_ms": 0.03905534200991667,
+            "mean_p50_delta_ratio": 0.0005121164136921014,
+            "mean_without_high_outliers": 76.30168033453326,
+            "min": 75.48779097851366,
+            "p50": 76.26262499252334,
+            "p95": 77.06542502855882,
+            "trimmed_mean": 76.30168033453326
+          },
+          "transport_http_versions": [
+            "HTTP/1.1"
+          ]
+        },
+        "move_click_sequence": {
+          "action_count": 8,
+          "actions": [
+            {
+              "type": "move"
+            },
+            {
+              "button": "left",
+              "type": "click"
+            },
+            {
+              "type": "move"
+            },
+            {
+              "button": "left",
+              "type": "click"
+            },
+            {
+              "type": "move"
+            },
+            {
+              "button": "left",
+              "type": "click"
+            },
+            {
+              "type": "move"
+            },
+            {
+              "button": "left",
+              "type": "click"
+            }
+          ],
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            4.198123000000109,
+            4.1139839999999595,
+            4.444483000000332
+          ],
+          "daemon_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 5.247653750000136,
+            "jitter_ms": 0.22172400000020076,
+            "mad": 0.08413900000014962,
+            "max": 4.444483000000332,
+            "mean": 4.2521966666668005,
+            "mean_p50_delta_ms": 0.054073666666691445,
+            "mean_p50_delta_ratio": 0.012880438869154152,
+            "mean_without_high_outliers": 4.2521966666668005,
+            "min": 4.1139839999999595,
+            "p50": 4.198123000000109,
+            "p95": 4.41984700000031,
+            "trimmed_mean": 4.2521966666668005
+          },
+          "failures": [],
+          "input_backends": [
+            "xtest"
+          ],
+          "iterations": 3,
+          "overhead_samples_ms": [
+            131.1775430246289,
+            75.44405799445997,
+            75.08855897872024
+          ],
+          "overhead_summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              0
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 94.30507249307496,
+            "jitter_ms": 50.16013652715205,
+            "mad": 0.3554990157397242,
+            "max": 131.1775430246289,
+            "mean": 93.90338666593637,
+            "mean_p50_delta_ms": 18.4593286714764,
+            "mean_p50_delta_ratio": 0.24467571286836015,
+            "mean_without_high_outliers": 75.2663084865901,
+            "min": 75.08855897872024,
+            "p50": 75.44405799445997,
+            "p95": 125.60419452161202,
+            "trimmed_mean": 93.90338666593637
+          },
+          "sample_stability": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              0
+            ],
+            "mean_delta_ratio": 0.23395454831585902,
+            "mean_without_high_outliers": 79.54554198659025,
+            "reason": "mean changes by at least 5% after removing high outliers",
+            "status": "outlier_sensitive"
+          },
+          "samples_ms": [
+            135.37566602462903,
+            79.55804199445993,
+            79.53304197872058
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              0
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 99.44755249307491,
+            "jitter_ms": 50.23586162715219,
+            "mad": 0.02500001573935151,
+            "max": 135.37566602462903,
+            "mean": 98.15558333260317,
+            "mean_p50_delta_ms": 18.597541338143245,
+            "mean_p50_delta_ratio": 0.23376067172993392,
+            "mean_without_high_outliers": 79.54554198659025,
+            "min": 79.53304197872058,
+            "p50": 79.55804199445993,
+            "p95": 129.79390362161212,
+            "trimmed_mean": 98.15558333260317
+          },
+          "transport_http_versions": [
+            "HTTP/1.1"
+          ]
+        },
+        "product_create_to_first_screenshot": {
+          "definition": "create wait=False to first raw full-screen screenshot over configured ingress",
+          "failures": [],
+          "first_observation_api": "/v1/screenshots/full/raw",
+          "ingress_included": true,
+          "iterations": 3,
+          "readiness_contract": "ComputerSandbox.create(wait=False) -> daemon /readyz -> configured ingress ready -> first raw full-screen screenshot",
+          "sample_stability": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "mean_delta_ratio": 0.41688245284223446,
+            "mean_without_high_outliers": 10055.994999507675,
+            "reason": "mean changes by at least 5% after removing high outliers",
+            "status": "outlier_sensitive"
+          },
+          "samples_ms": [
+            9591.011415992398,
+            22632.498582999688,
+            10520.978583022952
+          ],
+          "setup_included": true,
+          "source": "live_orchestration_metadata",
+          "startup_model": "modal_sandbox_image_daemon_start",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 14657.286548541451,
+            "jitter_ms": 10900.367999979058,
+            "mad": 929.9671670305543,
+            "max": 22632.498582999688,
+            "mean": 14248.162860671679,
+            "mean_p50_delta_ms": 3727.1842776487265,
+            "mean_p50_delta_ratio": 0.3542621295383161,
+            "mean_without_high_outliers": 10055.994999507675,
+            "min": 9591.011415992398,
+            "p50": 10520.978583022952,
+            "p95": 21421.34658300201,
+            "trimmed_mean": 14248.162860671679
+          },
+          "uses_snapshot_or_template": false
+        },
+        "recording_start_stop": {
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "artifact_backed": true,
+            "duration_seconds": 0.557145,
+            "format": "mp4",
+            "fps": 5,
+            "return_code": 0,
+            "size_bytes": 262,
+            "status": "stopped",
+            "stop_method": "stdin_q"
+          },
+          "request": {
+            "format": "mp4",
+            "fps": 5
+          },
+          "start_samples_ms": [
+            290.6469170120545,
+            75.01024997327477,
+            300.3355829860084
+          ],
+          "start_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 363.3086462650681,
+            "jitter_ms": 8.719799376558512,
+            "mad": 9.688665973953903,
+            "max": 300.3355829860084,
+            "mean": 221.9975833237792,
+            "mean_p50_delta_ms": -68.64933368827528,
+            "mean_p50_delta_ratio": -0.2361949488197326,
+            "mean_without_high_outliers": 221.9975833237792,
+            "min": 75.01024997327477,
+            "p50": 290.6469170120545,
+            "p95": 299.366716388613,
+            "trimmed_mean": 221.9975833237792
+          },
+          "status": "ok",
+          "stop_samples_ms": [
+            548.0902080307715,
+            543.6498339986429,
+            543.2543340139091
+          ],
+          "stop_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 679.5622924983036,
+            "jitter_ms": 3.996336628915742,
+            "mad": 0.39549998473376036,
+            "max": 548.0902080307715,
+            "mean": 544.9981253477745,
+            "mean_p50_delta_ms": 1.348291349131614,
+            "mean_p50_delta_ratio": 0.0024800731368106693,
+            "mean_without_high_outliers": 544.9981253477745,
+            "min": 543.2543340139091,
+            "p50": 543.6498339986429,
+            "p95": 547.6461706275586,
+            "trimmed_mean": 544.9981253477745
+          },
+          "successful_iterations": 3
+        },
+        "screenshot_full": {
+          "comparison_role": "canonical_fast_path",
+          "daemon_samples_ms": [
+            24.967213000000044,
+            25.249222999999432,
+            24.730922999999905
+          ],
+          "daemon_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 31.209016250000055,
+            "jitter_ms": 0.2538089999994497,
+            "mad": 0.2362900000001389,
+            "max": 25.249222999999432,
+            "mean": 24.982452999999794,
+            "mean_p50_delta_ms": 0.015239999999749898,
+            "mean_p50_delta_ratio": 0.0006104005280745541,
+            "mean_without_high_outliers": 24.982452999999794,
+            "min": 24.730922999999905,
+            "p50": 24.967213000000044,
+            "p95": 25.221021999999493,
+            "trimmed_mean": 24.982452999999794
+          },
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "artifact_backed": false,
+            "capture_backend": "mss",
+            "cursor_visible": false,
+            "daemon_ms": 24.730922999999905,
+            "daemon_timing_ms": {
+              "capture_ms": 0.7895490000002781,
+              "encode_ms": 23.891624999999195,
+              "total_ms": 24.730922999999905
+            },
+            "format": "png",
+            "height": 768,
+            "size_bytes": 391579,
+            "storage": "inline",
+            "transport_http_version": "HTTP/1.1",
+            "width": 1024
+          },
+          "overhead_samples_ms": [
+            107.71028701978125,
+            106.65177698610151,
+            100.12457700565136
+          ],
+          "overhead_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 133.31472123262688,
+            "jitter_ms": 0.9526590303117644,
+            "mad": 1.0585100336797382,
+            "max": 107.71028701978125,
+            "mean": 104.82888033717803,
+            "mean_p50_delta_ms": -1.822896648923475,
+            "mean_p50_delta_ratio": -0.01709204197470642,
+            "mean_without_high_outliers": 104.82888033717803,
+            "min": 100.12457700565136,
+            "p50": 106.65177698610151,
+            "p95": 107.60443601641327,
+            "trimmed_mean": 104.82888033717803
+          },
+          "request": {
+            "format": "png",
+            "show_cursor": false
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_bytes": [
+            391579,
+            391579,
+            391579
+          ],
+          "samples_ms": [
+            132.6775000197813,
+            131.90099998610094,
+            124.85550000565127
+          ],
+          "screenshot_api": "raw_bytes",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_bytes": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 489473.75,
+            "jitter_ms": 0.0,
+            "mad": 0.0,
+            "max": 391579.0,
+            "mean": 391579.0,
+            "mean_p50_delta_ms": 0.0,
+            "mean_p50_delta_ratio": 0.0,
+            "mean_without_high_outliers": 391579.0,
+            "min": 391579.0,
+            "p50": 391579.0,
+            "p95": 391579.0,
+            "trimmed_mean": 391579.0
+          },
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 164.87624998262618,
+            "jitter_ms": 0.6988500303123146,
+            "mad": 0.7765000336803496,
+            "max": 132.6775000197813,
+            "mean": 129.81133333717784,
+            "mean_p50_delta_ms": -2.0896666489230995,
+            "mean_p50_delta_ratio": -0.015842689965529434,
+            "mean_without_high_outliers": 129.81133333717784,
+            "min": 124.85550000565127,
+            "p50": 131.90099998610094,
+            "p95": 132.59985001641326,
+            "trimmed_mean": 129.81133333717784
+          },
+          "transport_encoding": "binary",
+          "transport_http_versions": [
+            "HTTP/1.1"
+          ]
+        },
+        "screenshot_full_structured": {
+          "comparison_role": "structured_compatibility_path",
+          "failures": [],
+          "iterations": 3,
+          "last_result": {
+            "artifact_backed": false,
+            "cursor_visible": false,
+            "format": "png",
+            "height": 768,
+            "size_bytes": 258099,
+            "storage": "inline",
+            "width": 1024
+          },
+          "request": {
+            "format": "png",
+            "show_cursor": false,
+            "storage": "inline"
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_bytes": [
+            258068,
+            258099,
+            258099
+          ],
+          "samples_ms": [
+            288.57575001893565,
+            241.95154197514057,
+            262.91029195999727
+          ],
+          "screenshot_api": "structured_json",
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_bytes": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 322623.75,
+            "jitter_ms": 0.0,
+            "mad": 0.0,
+            "max": 258099.0,
+            "mean": 258088.66666666666,
+            "mean_p50_delta_ms": -10.333333333343035,
+            "mean_p50_delta_ratio": -4.003631681387001e-05,
+            "mean_without_high_outliers": 258088.66666666666,
+            "min": 258068.0,
+            "p50": 258099.0,
+            "p95": 258099.0,
+            "trimmed_mean": 258088.66666666666
+          },
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 356.1306201426429,
+            "jitter_ms": 23.098912253044546,
+            "mad": 20.958749984856695,
+            "max": 288.57575001893565,
+            "mean": 264.47919465135783,
+            "mean_p50_delta_ms": 1.568902691360563,
+            "mean_p50_delta_ratio": 0.005967444939733577,
+            "mean_without_high_outliers": 264.47919465135783,
+            "min": 241.95154197514057,
+            "p50": 262.91029195999727,
+            "p95": 286.0092042130418,
+            "trimmed_mean": 264.47919465135783
+          },
+          "transport_encoding": "json_base64",
+          "transport_http_versions": []
+        },
+        "type_1000_chars": {
+          "action_count": 1,
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            6387.8590829999985,
+            6372.977175000003,
+            6368.583512999997
+          ],
+          "daemon_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 7966.221468750004,
+            "jitter_ms": 13.39371719999599,
+            "mad": 4.393662000005861,
+            "max": 6387.8590829999985,
+            "mean": 6376.473256999999,
+            "mean_p50_delta_ms": 3.496081999996022,
+            "mean_p50_delta_ratio": 0.000548579086978453,
+            "mean_without_high_outliers": 6376.473256999999,
+            "min": 6368.583512999997,
+            "p50": 6372.977175000003,
+            "p95": 6386.370892199999,
+            "trimmed_mean": 6376.473256999999
+          },
+          "failures": [],
+          "input_backends": [],
+          "iterations": 3,
+          "overhead_samples_ms": [
+            73.89391698140116,
+            116.70190898480814,
+            74.9310289556679
+          ],
+          "overhead_summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              1
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 93.66378619458487,
+            "jitter_ms": 37.59379202622621,
+            "mad": 1.037111974266736,
+            "max": 116.70190898480814,
+            "mean": 88.50895164062574,
+            "mean_p50_delta_ms": 13.57792268495784,
+            "mean_p50_delta_ratio": 0.18120560833337904,
+            "mean_without_high_outliers": 74.41247296853453,
+            "min": 73.89391698140116,
+            "p50": 74.9310289556679,
+            "p95": 112.52482098189411,
+            "trimmed_mean": 88.50895164062574
+          },
+          "request": {
+            "character_count": 1000,
+            "method": "xdotool",
+            "timeout_ms": 30000
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            6461.7529999814,
+            6489.679083984811,
+            6443.514541955665
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 8077.1912499767495,
+            "jitter_ms": 25.13347560307011,
+            "mad": 18.23845802573487,
+            "max": 6489.679083984811,
+            "mean": 6464.982208640625,
+            "mean_p50_delta_ms": 3.2292086592251508,
+            "mean_p50_delta_ratio": 0.000499741890356138,
+            "mean_without_high_outliers": 6464.982208640625,
+            "min": 6443.514541955665,
+            "p50": 6461.7529999814,
+            "p95": 6486.88647558447,
+            "trimmed_mean": 6464.982208640625
+          },
+          "transport_http_versions": [
+            "HTTP/1.1"
+          ]
+        },
+        "type_100_chars": {
+          "action_count": 1,
+          "attribution": {
+            "reason": null,
+            "status": "measured"
+          },
+          "daemon_samples_ms": [
+            665.272959000001,
+            665.4744529999998,
+            662.8851760000014
+          ],
+          "daemon_summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 831.5911987500012,
+            "jitter_ms": 0.18134459999885166,
+            "mad": 0.2014939999987746,
+            "max": 665.4744529999998,
+            "mean": 664.5441960000007,
+            "mean_p50_delta_ms": -0.7287630000002991,
+            "mean_p50_delta_ratio": -0.0010954345733452514,
+            "mean_without_high_outliers": 664.5441960000007,
+            "min": 662.8851760000014,
+            "p50": 665.272959000001,
+            "p95": 665.4543035999999,
+            "trimmed_mean": 664.5441960000007
+          },
+          "failures": [],
+          "input_backends": [],
+          "iterations": 3,
+          "overhead_samples_ms": [
+            78.06416599355794,
+            74.61733796901808,
+            112.14911502944074
+          ],
+          "overhead_summary_ms": {
+            "high_outlier_count": 1,
+            "high_outlier_indices": [
+              2
+            ],
+            "high_outlier_ratio": 0.3333333333333333,
+            "high_outlier_threshold": 97.58020749194742,
+            "jitter_ms": 30.67645413229451,
+            "mad": 3.4468280245398546,
+            "max": 112.14911502944074,
+            "mean": 88.27687299733891,
+            "mean_p50_delta_ms": 10.212707003780977,
+            "mean_p50_delta_ratio": 0.13082451946804577,
+            "mean_without_high_outliers": 76.34075198128801,
+            "min": 74.61733796901808,
+            "p50": 78.06416599355794,
+            "p95": 108.74062012585244,
+            "trimmed_mean": 88.27687299733891
+          },
+          "request": {
+            "character_count": 100,
+            "method": "xdotool"
+          },
+          "sample_stability": {
+            "high_outlier_count": 0,
+            "reason": "mean is not materially changed by high-outlier filtering",
+            "status": "stable"
+          },
+          "samples_ms": [
+            743.337124993559,
+            740.0917909690179,
+            775.0342910294421
+          ],
+          "status": "ok",
+          "successful_iterations": 3,
+          "summary_ms": {
+            "high_outlier_count": 0,
+            "high_outlier_indices": [],
+            "high_outlier_ratio": 0.0,
+            "high_outlier_threshold": 929.1714062419487,
+            "jitter_ms": 28.527449432294816,
+            "mad": 3.24533402454108,
+            "max": 775.0342910294421,
+            "mean": 752.8210689973397,
+            "mean_p50_delta_ms": 9.48394400378072,
+            "mean_p50_delta_ratio": 0.012758603983169681,
+            "mean_without_high_outliers": 752.8210689973397,
+            "min": 740.0917909690179,
+            "p50": 743.337124993559,
+            "p95": 771.8645744258538,
+            "trimmed_mean": 752.8210689973397
+          },
+          "transport_http_versions": [
+            "HTTP/1.1"
+          ]
+        },
+        "warm_attach_to_health": {
+          "reason": "warm attach requires Modal orchestration metadata",
+          "status": "not_measured"
+        }
+      },
+      "cost_estimate": {
+        "components": [],
+        "confidence": "partial",
+        "currency": "USD",
+        "duration_policy": "measured_billable_resource_lifetime_including_cleanup",
+        "inputs": {
+          "cpu_count": null,
+          "duration_seconds": 102.70874162507243,
+          "memory_gib": null,
+          "storage_gib": null
+        },
+        "notes": [
+          "cpu allocation was unavailable",
+          "memory allocation was unavailable"
+        ],
+        "pricing": {
+          "retrieved_date": "2026-05-12",
+          "source_url": "https://modal.com/products/sandboxes"
+        },
+        "status": "partial",
+        "total": null
+      },
+      "failures": [],
+      "metadata": {
+        "base_url": null,
+        "browser": {
+          "configured_browser": "chromium",
+          "gpu_mode": "auto",
+          "launch_args": [],
+          "open_url_on_start": null,
+          "prewarm": false,
+          "prewarm_result": null,
+          "profile_dir": "/home/desktop/.cache/modal-computer-use/browser-profile",
+          "windows": 4
+        },
+        "canonical_name": "modal-daemon-attested-tunnel",
+        "canonical_source": "benchmark sdk surface",
+        "environment": {
+          "browser": "chromium",
+          "daemon_http_version": "1.1",
+          "first_observation_api": "/v1/screenshots/full/raw",
+          "ingress_included": true,
+          "input_rate_limit_per_sec": 0,
+          "measured_resource_runtime_seconds": 102.70874162507243,
+          "modal_app_name": "modal-computer-use",
+          "modal_cold_create_to_ready_definition": "create wait=False to first raw full-screen screenshot over configured ingress",
+          "modal_cold_create_to_ready_ms": 10520.978583022952,
+          "modal_connect_ready_ms": 8168.135500047356,
+          "modal_create_return_ms": 1927.9709170223214,
+          "modal_final_ingress_ready_ms": 9976.759542012587,
+          "modal_first_raw_screenshot_capture_backend": "mss",
+          "modal_first_raw_screenshot_height": 768,
+          "modal_first_raw_screenshot_ms": 10520.733667013701,
+          "modal_first_raw_screenshot_size_bytes": 391571,
+          "modal_first_raw_screenshot_width": 1024,
+          "modal_ingress": "attested-tunnel",
+          "modal_product_create_to_first_screenshot_expected_samples": 3,
+          "modal_product_create_to_first_screenshot_samples_ms": [
+            9591.011415992398,
+            22632.498582999688,
+            10520.978583022952
+          ],
+          "readiness_contract": "ComputerSandbox.create(wait=False) -> daemon /readyz -> configured ingress ready -> first raw full-screen screenshot",
+          "resource_profile": "browser",
+          "setup_included": true,
+          "startup_model": "modal_sandbox_image_daemon_start",
+          "uses_snapshot_or_template": false
+        },
+        "ingress": {
+          "auth": "Modal Connect Token attestation plus short-lived daemon bearer token",
+          "canonical_name": "modal-daemon-attested-tunnel",
+          "description": "Modal Connect-authenticated token exchange followed by encrypted tunnel ingress",
+          "kind": "modal-attested-encrypted-tunnel"
+        },
+        "provider_surface": "daemon-http",
+        "target_kind": "product",
+        "transport": "daemon-http"
+      },
+      "provider": "modal-daemon",
+      "status": "ok",
+      "verification": {
+        "cursor_position": {
+          "expected": {
+            "x": 16,
+            "y": 128
+          },
+          "observed": {
+            "x": 16,
+            "y": 128
+          },
+          "status": "ok"
+        },
+        "type_text": {
+          "expected": {
+            "minimum_keypress_count": 23
+          },
+          "method": "daemon_action_type",
+          "observed": {
+            "keypress_count": 23
+          },
+          "status": "ok"
+        }
+      }
+    }
+  },
+  "warmup_iterations": 1
+}

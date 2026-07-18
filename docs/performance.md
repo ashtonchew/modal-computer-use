@@ -511,7 +511,8 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
-- [Current provider benchmark reference, 2026-07-18](benchmark-results-2026-07-18.md)
+- [Corrected provider benchmark candidate, 2026-07-18](benchmark-results-2026-07-18-corrected-candidate.md)
+- [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
 - [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
 - [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
 
@@ -904,13 +905,15 @@ This baseline attaches to an existing sandbox and runs a small `xdotool` command
 `Sandbox.exec`. It is useful as a transport comparison, but the daemon HTTP surface is the SDK's
 normal primitive path.
 
-Visual screenshot comparisons are split into three tiers. `screenshot_full` is a provider-default
-idle diagnostic and is not a fair screenshot-path ranking because each provider starts with different
-desktop content. `synthetic_canvas_screenshot` and `synthetic_canvas_sequence` are the canonical
-visual cases: the benchmark writes a deterministic 1024x768 canvas fixture, launches a browser with a
-clean temporary profile, excludes that setup from warm timings, and then measures screenshot or
-coordinate-click-plus-screenshot latency. `browser_page_screenshot` and `browser_page_sequence` keep
-a secondary realistic browser-rendered page workload for text/CSS/window-manager behavior.
+Visual screenshot comparisons are split into three tiers. `screenshot_full` is the canonical binary
+fast path and supports provider-default API latency claims only; it is not an identical-pixel visual
+ranking because each provider starts with different desktop content. `screenshot_full_structured`
+is retained only as the Modal JSON/base64 compatibility path. `synthetic_canvas_screenshot` and
+`synthetic_canvas_sequence` are the canonical identical-content visual cases: the benchmark writes a
+deterministic 1024x768 canvas fixture, launches a browser with a clean temporary profile, excludes
+that setup from warm timings, and then measures screenshot or coordinate-click-plus-screenshot
+latency. `browser_page_screenshot` and `browser_page_sequence` keep a secondary realistic
+browser-rendered page workload for text/CSS/window-manager behavior.
 
 Benchmark-created Modal sandboxes disable browser prewarm even when `--browser` is set, so measured
 visual setup is explicit and comparable to Daytona/E2B fixture setup. Production SDK users can still
@@ -922,7 +925,46 @@ exist and falling back to X11 command probes for daemon-compatible desktops. Typ
 a controlled `xev` target as a detached process and verifies that keypress events reached that target
 without serializing the typed text. The typing actuation step uses the same provider or daemon
 computer-use primitive being benchmarked. Providers without the required desktop readback tools
-report `unsupported` or `failed` verification while keeping the primitive timing cases separate.
+report `unsupported` or `failed` verification while retaining primitive timing observations. A
+`failed` readback makes both the provider and top-level comparison status fail; `unsupported` remains
+explicit without invalidating timings.
+
+Provider lifecycle comparisons use one warmup plus three independent measured
+`product_create_to_first_screenshot` resources per provider. Cleanup occurs after each timing sample
+and is excluded from that sample. For Modal, only the final measured sandbox is retained for warm
+cases; all other lifecycle resources are terminated and detached first. The deprecated
+`cold_create_to_ready` JSON alias remains through 1.1.x and is removed in 1.2.0. It is excluded from
+status and failure aggregation so canonical failures are counted once.
+
+The comparison profile in this PR is `provider-default`: a neutral external-caller correctness and
+provenance foundation, not a platform-optimized Modal result. A separate stacked follow-up may add
+`modal-platform-optimized` without changing `provider-default`. That future profile is reserved for
+a same-region separate Modal runner, direct Connect endpoint, persistent hot-session action control,
+and binary-envelope causal observation; its broker may handle allocation, authentication, placement,
+and cleanup, but never action or frame data. `target-loopback` remains a separately labeled
+same-container lower-bound diagnostic, not either provider profile. Future comparison artifacts must
+record caller path, region, ingress, action and observation transport, browser prewarm,
+named-image/snapshot/pool policy, resources, SDK versions, harness commit, verification, and billed
+cost. No optimized profile is implemented by this PR.
+
+Tracked provider artifacts are sanitized deterministic JSON with explicit provenance and status.
+Generate or drift-check a fresh artifact from its untracked raw result with:
+
+```bash
+uv run python scripts/sanitize_provider_benchmark.py \
+  benchmark-results/candidates/provider-compare-live.json \
+  benchmark-data/provider-compare-YYYY-MM-DD.json \
+  --raw-artifact-path benchmark-results/candidates/provider-compare-live.json \
+  --harness-commit "$(git rev-parse HEAD)" \
+  --status current_reference \
+  --scope "provider-default SDK paths at 1024x768, three measured iterations"
+```
+
+Add `--check` when the raw artifact is available in review to fail on drift. The generator strips ephemeral ingress and Modal
+resource identifiers, rejects secret-bearing keys or credentialed URLs, records the raw SHA-256,
+and emits sorted JSON. Raw credentialed artifacts remain untracked. Runs from an uncommitted review
+tree use `--status candidate --harness-diff-sha256 <digest>` so they cannot be mistaken for results
+from the recorded base commit alone.
 
 Daemon HTTP entries may also include `verification` readbacks. Cursor readback checks the final
 cursor position after the deterministic move/click sequence. Typing readback starts a controlled

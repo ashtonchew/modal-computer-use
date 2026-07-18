@@ -2193,12 +2193,15 @@
   },
   "warmup_iterations": 1,
   "provenance": {
-    "status": "current_reference",
+    "status": "rejected",
     "scope": "provider-default SDK paths at 1024x768, three measured iterations",
     "harness_commit": "86c15252cc5be188f2b79fddad98a438a0331e85",
     "raw_artifact_path": "benchmark-results/candidates/provider-compare-live-20260718-v3.json",
     "raw_artifact_sha256": "1cb34cfe01c5eea1b341e583fcbb9de8c8854019a577475b37ba01c7ac437fc0",
     "raw_artifact_tracked": false,
+    "status_reason": "External-provider lifecycle samples included teardown latency, and Daytona screenshot bytes measured base64 transport length rather than decoded image bytes.",
+    "sanitizer": "manual_legacy",
+    "sanitizer_version": 0,
     "sanitization": "removed ephemeral base URLs, Modal run IDs, and Modal sandbox IDs"
   }
 }

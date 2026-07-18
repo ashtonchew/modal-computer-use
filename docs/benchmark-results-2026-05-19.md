@@ -2,8 +2,9 @@
 
 > **Historical visual diagnostic.** This report preserves the browser-page and synthetic-canvas
 > investigations under their original definitions. Its use of "canonical" is local to those visual
-> workloads, not a claim that it is the current provider-default reference. See the
-> [2026-07-18 reference run](benchmark-results-2026-07-18.md) for current provider-default results.
+> workloads, not a claim that it is the current provider-default reference. The later
+> [2026-07-18 run](benchmark-results-2026-07-18.md) was rejected during review and is not a current
+> provider reference.
 
 This run was focused on screenshot payload accounting for Daytona and E2B after adding provider
 payload metadata instrumentation. It used the provider benchmark worktree on

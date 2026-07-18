@@ -1,10 +1,10 @@
 # Provider Benchmark Results, 2026-05-17
 
-> **Historical diagnostic.** Superseded for current provider claims by the
-> [2026-07-18 reference run](benchmark-results-2026-07-18.md). Keep this report only for its original
+> **Historical diagnostic.** The later
+> [2026-07-18 run](benchmark-results-2026-07-18.md) was rejected during review. Keep this report only for its original
 > ingress, payload-debugging, and 10-iteration context; do not combine its rows with current results.
 
-These results capture the current provider comparison after normalizing the Modal daemon benchmark to
+These results captured the then-current provider comparison after normalizing the Modal daemon benchmark to
 `1024x768 @ 96 DPI` with `post_action_delay_ms=0`.
 
 ## Artifacts

@@ -1,8 +1,14 @@
-# Provider Benchmark Results, 2026-07-18
+# Rejected Provider Benchmark Diagnostic, 2026-07-18
 
-This is the current reference run for the provider-default SDK comparison defined by commit
-`86c15252cc5be188f2b79fddad98a438a0331e85`. "Current reference" means the newest accepted run for
-this exact benchmark definition. It is not a permanent or cross-workload claim of canonicality.
+This run is rejected and is not a current provider reference. Review found that external-provider
+create-to-first-screenshot samples included teardown latency, while Modal samples did not, and the
+Daytona screenshot payload size represented base64 transport text rather than decoded PNG bytes.
+The artifact remains tracked as provenance for the rejected result; do not use its ratios or payload
+sizes for product claims.
+
+See the [corrected candidate run](benchmark-results-2026-07-18-corrected-candidate.md) for the
+successful rerun from the isolated review branch. It remains a candidate until the harness is
+approved and committed.
 
 ## Provenance
 
@@ -10,13 +16,16 @@ this exact benchmark definition. It is not a permanent or cross-workload claim o
 - Raw local report: `benchmark-results/candidates/provider-compare-live-20260718-v3.json`
 - Raw report SHA-256: `1cb34cfe01c5eea1b341e583fcbb9de8c8854019a577475b37ba01c7ac437fc0`
 - Harness commit: `86c15252cc5be188f2b79fddad98a438a0331e85`
-- Result: `ok=true`; zero top-level or provider failures
-- Sampling: one warmup and three measured iterations; three fresh product lifecycles per provider
+- Artifact status: `rejected`; the original harness emitted `ok=true`, but review invalidated the
+  cross-provider lifecycle and screenshot-payload claims
+- Sampling as emitted: one warmup and three measured iterations; external teardown was incorrectly
+  included in lifecycle timing
 - Desktop: `1024x768`; Modal used Chromium, the browser resource profile, HTTP/1.1, and the
   attested encrypted tunnel
 
 The tracked report removes ephemeral ingress URLs, Modal run IDs, and Modal sandbox IDs. It keeps
-all timing samples, summaries, provider metadata, case definitions, and verification results.
+all timing samples, summaries, provider metadata, case definitions, verification results, raw
+artifact hash, harness commit, rejection reason, and legacy sanitizer provenance.
 
 The command was:
 
@@ -35,10 +44,11 @@ uv run computer-use benchmark compare \
   --json
 ```
 
-## Results
+## Rejected Observations
 
-Headline values use p50 because the sample count is three. Ratios greater than `1.00x` in the last
-two columns mean Modal is faster; values below `1.00x` mean the other provider is faster.
+The following values are retained only to explain the rejected artifact. They must not be cited as a
+provider ranking. Lifecycle rows are asymmetric because teardown was included only for external
+providers; Daytona payload accounting also used transport text length rather than decoded bytes.
 
 | Case | Modal p50 | Daytona p50 | E2B p50 | Modal vs Daytona | Modal vs E2B |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -50,24 +60,23 @@ two columns mean Modal is faster; values below `1.00x` mean the other provider i
 | Type 1000 characters | 6735.2 ms | 5355.3 ms | 42087.7 ms | 0.80x | **6.25x** |
 | Command echo | 144.8 ms | 118.7 ms | 61.0 ms | 0.82x | 0.42x |
 
-Modal's strongest result is action transport. Four move/click pairs cost only 5.6 ms more than one
+The emitted warm action data suggested that four move/click pairs cost only 5.6 ms more than one
 move/click at p50 because the daemon accepts the sequence as one batch. The equivalent public SDK
 sequence is 18.64x slower on Daytona and 13.54x slower on E2B.
 
-Modal's fused click-and-screenshot path is also stable at 118.1 ms p50. It has no directly equivalent
+The emitted fused click-and-screenshot path was 118.1 ms p50. It has no directly equivalent
 fused case in this provider-default report, so it is recorded as a Modal capability rather than a
 cross-provider win.
 
-Typing is mixed. Modal is 5.35x to 6.25x faster than E2B's default GUI typing path, but Daytona is
-about 1.23x faster for 100 characters and 1.26x faster for 1000 characters. E2B wins command echo.
+Typing and command observations remain historical diagnostics only; rerun the corrected harness
+before making comparative claims.
 
 ## Screenshot Scope
 
 `screenshot_full` is the canonical binary screenshot API path for the Modal SDK. It is not a
-normalized-pixel visual benchmark. The final payloads were approximately 392 KB for Modal, 154 KB
-for Daytona, and 15 KB for E2B, reflecting different provider-default desktop content and PNG
-entropy. The latency row therefore answers "how long does each product's default screenshot API
-take now?", not "which encoder is fastest for identical pixels?"
+normalized-pixel visual benchmark. The reported Daytona payload size is invalid because it counted
+base64 transport text instead of decoded PNG bytes. Even after that correction, provider-default
+screenshots support API-latency claims only, not identical-pixel encoder or visual claims.
 
 Within Modal, the binary path was 120.7 ms p50 while the structured JSON/base64 compatibility path
 was 252.8 ms p50, making the binary path 2.09x faster. The daemon itself spent 22.7 ms p50 capturing
@@ -79,8 +88,8 @@ provider-default report.
 
 ## Startup Scope
 
-The lifecycle case now has three fresh samples for every provider. Modal and Daytona are effectively
-tied at p50: Daytona is only 0.5% faster. E2B is 7.59x faster than Modal.
+The artifact contains three fresh lifecycle attempts per provider, but external samples included
+cleanup latency and are therefore not comparable to Modal. The emitted lifecycle ranking is rejected.
 
 That result is fair as a product-level "create to first successful screenshot" metric, but it is
 not a normalized infrastructure boot comparison:
@@ -99,7 +108,7 @@ desktop images or snapshots on all providers.
 
 | Result | Status | Reason |
 | --- | --- | --- |
-| 2026-07-18 v3 | Current reference | Committed harness, symmetric 3x lifecycle sampling, all gates passed |
+| 2026-07-18 v3 | Rejected | External lifecycle samples included teardown; Daytona bytes used base64 transport length |
 | 2026-07-18 v2 | Superseded candidate | Correct behavior, but run from an uncommitted harness tree |
 | 2026-07-18 v1 | Rejected | Modal lifecycle had one sample while Daytona and E2B had three |
 | 2026-05-13 provider compare | Superseded | One iteration, old cold definition, and ambiguous screenshot path |
