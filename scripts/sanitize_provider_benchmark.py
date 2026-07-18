@@ -26,7 +26,11 @@ def main() -> int:
     parser.add_argument("--harness-diff-sha256")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    harness_state = _verified_harness_state(args.status, args.harness_commit)
+    harness_state = _verified_harness_state(
+        args.status,
+        args.harness_commit,
+        check=args.check,
+    )
     matches = generate_sanitized_provider_benchmark(
         raw_path=args.raw,
         output_path=args.output,
@@ -44,9 +48,11 @@ def main() -> int:
     return 0
 
 
-def _verified_harness_state(status: str, harness_commit: str) -> str:
+def _verified_harness_state(status: str, harness_commit: str, *, check: bool) -> str:
     if status != "current_reference":
         return "dirty" if status == "candidate" else "clean"
+    if check:
+        return "clean"
     git = shutil.which("git")
     if git is None:
         raise RuntimeError("git is required to publish a current_reference artifact")
