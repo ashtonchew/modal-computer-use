@@ -6,9 +6,8 @@ Daytona screenshot payload size represented base64 transport text rather than de
 The artifact remains tracked as provenance for the rejected result; do not use its ratios or payload
 sizes for product claims.
 
-See the [corrected candidate run](benchmark-results-2026-07-18-corrected-candidate.md) for the
-successful rerun from the isolated review branch. It remains a candidate until the harness is
-approved and committed.
+See the [current corrected reference](benchmark-results-2026-07-18-current.md) for the successful
+rerun from the committed harness. This rejected artifact remains only as historical provenance.
 
 ## Provenance
 

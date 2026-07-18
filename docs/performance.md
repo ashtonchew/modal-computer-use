@@ -511,7 +511,7 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
-- [Corrected provider benchmark candidate, 2026-07-18](benchmark-results-2026-07-18-corrected-candidate.md)
+- [Current corrected provider benchmark reference, 2026-07-18](benchmark-results-2026-07-18-current.md)
 - [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
 - [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
 - [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
