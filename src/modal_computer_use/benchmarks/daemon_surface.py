@@ -247,8 +247,6 @@ def _modal_product_readiness_cases(
     environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     result = _modal_product_create_to_first_screenshot_case(environment_metadata)
-    if result.get("status") == "not_measured":
-        return {"product_create_to_first_screenshot": result, "cold_create_to_ready": result}
     return {
         "product_create_to_first_screenshot": result,
         "cold_create_to_ready": {
@@ -256,6 +254,7 @@ def _modal_product_readiness_cases(
             "name": "cold_create_to_ready",
             "canonical_case": "product_create_to_first_screenshot",
             "deprecated": True,
+            "removal_version": "1.2.0",
         },
     }
 
@@ -263,7 +262,27 @@ def _modal_product_readiness_cases(
 def _modal_product_create_to_first_screenshot_case(
     environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    samples = _modal_product_readiness_samples(environment_metadata)
+    samples, sample_error = _modal_product_readiness_samples(environment_metadata)
+    expected_iterations = _expected_modal_product_samples(environment_metadata)
+    if sample_error is not None:
+        failures = [
+            core._failure(
+                "product_create_to_first_screenshot",
+                phase="setup",
+                iteration=0,
+                exc=ValueError(sample_error),
+            )
+        ]
+        result = core._case_result(
+            "product_create_to_first_screenshot",
+            expected_iterations or len(samples) or 1,
+            samples,
+            failures,
+        )
+        result["definition"] = (
+            "provider product create call to first successful screenshot"
+        )
+        return result
     if not samples:
         result = core._future_benchmark(
             "not_measured",
@@ -273,7 +292,10 @@ def _modal_product_create_to_first_screenshot_case(
         result["definition"] = "provider product create call to first successful screenshot"
         return result
     result = core._case_result(
-        "product_create_to_first_screenshot", len(samples), samples, []
+        "product_create_to_first_screenshot",
+        len(samples),
+        samples,
+        [],
     )
     definition = (
         None
@@ -300,19 +322,38 @@ def _modal_product_create_to_first_screenshot_case(
 
 def _modal_product_readiness_samples(
     environment_metadata: dict[str, Any] | None,
-) -> list[float]:
+) -> tuple[list[float], str | None]:
     if not environment_metadata:
-        return []
+        return [], None
     values = environment_metadata.get("modal_product_create_to_first_screenshot_samples_ms")
+    expected_iterations = _expected_modal_product_samples(environment_metadata)
     if isinstance(values, list):
-        samples = [
-            float(value)
-            for value in values
-            if not isinstance(value, bool) and isinstance(value, int | float) and value > 0
-        ]
-        if samples:
-            return samples
+        samples = []
+        invalid_count = 0
+        for value in values:
+            if not isinstance(value, bool) and isinstance(value, int | float) and value > 0:
+                samples.append(float(value))
+            else:
+                invalid_count += 1
+        if invalid_count:
+            return samples, f"lifecycle metadata contained {invalid_count} invalid samples"
+        if expected_iterations is not None and len(samples) != expected_iterations:
+            return samples, (
+                f"expected {expected_iterations} lifecycle samples, received {len(samples)}"
+            )
+        return samples, None
     value = environment_metadata.get("modal_cold_create_to_ready_ms")
     if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
-        return []
-    return [float(value)]
+        return [], None
+    return [float(value)], None
+
+
+def _expected_modal_product_samples(
+    environment_metadata: dict[str, Any] | None,
+) -> int | None:
+    if not environment_metadata:
+        return None
+    value = environment_metadata.get("modal_product_create_to_first_screenshot_expected_samples")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value

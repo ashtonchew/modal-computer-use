@@ -132,10 +132,19 @@ def run_benchmark_report(
         "type_1000_chars": type_1000_chars,
         "recording_start_stop": recording_start_stop,
         "sandbox_exec": sandbox_exec,
-        "cold_create_to_ready": _future_benchmark(
+        "product_create_to_first_screenshot": _future_benchmark(
             "not_measured",
             "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
         ),
+        "cold_create_to_ready": {
+            **_future_benchmark(
+                "not_measured",
+                "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
+            ),
+            "canonical_case": "product_create_to_first_screenshot",
+            "deprecated": True,
+            "removal_version": "1.2.0",
+        },
         "warm_attach_to_health": _future_benchmark(
             "not_measured",
             "warm attach requires Modal orchestration and is outside this report mode",

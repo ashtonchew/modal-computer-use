@@ -1,21 +1,29 @@
 from __future__ import annotations
 
+import base64
 import os
 import re
 import shlex
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from importlib import metadata as importlib_metadata
+from io import BytesIO
 from typing import Any, Literal
+
+from PIL import Image
 
 from . import benchmarks as core
 from ._version import __version__
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.generic import ActionExecutor
 from .adapters.openai import OpenAIAdapter
-from .benchmark_costs import estimate_provider_cost
 from .benchmarks import ComparisonProvider
+from .benchmarks.costs import estimate_provider_cost
+from .benchmarks.lifecycle import (
+    CleanupError,
+    cleanup_lifecycle_resource,
+    measure_create_to_first_observation,
+)
 from .benchmarks.surfaces import run_sdk_surface_benchmark
 from .client import DaemonClient
 from .models import ActionBatchResult, ActionItemResult
@@ -40,6 +48,7 @@ def run_provider_comparison(
     sandbox_exec_runner: Any = None,
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
+    precomputed_provider_results: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -48,38 +57,41 @@ def run_provider_comparison(
     failures: list[dict[str, Any]] = []
     provider_results: dict[str, Any] = {}
     for provider in selected:
-        try:
-            result = _run_provider(
-                provider,
-                client=client,
-                mode=mode,
-                base_url=base_url,
-                iterations=iterations,
-                warmup_iterations=warmup_iterations,
-                sandbox_exec_runner=sandbox_exec_runner,
-                sandbox_exec_setup_failure=sandbox_exec_setup_failure,
-                environment_metadata=environment_metadata,
-            )
-        except Exception as exc:
-            result = _provider_result(
-                provider,
-                cases={
-                    "setup": core._case_result(
-                        "setup",
-                        iterations,
-                        [],
-                        [
-                            core._failure(
-                                "setup",
-                                phase="setup",
-                                iteration=0,
-                                exc=exc,
-                                redacted_text=core.PROVIDER_BENCHMARK_TEXT,
-                            )
-                        ],
-                    )
-                },
-            )
+        if precomputed_provider_results and provider in precomputed_provider_results:
+            result = precomputed_provider_results[provider]
+        else:
+            try:
+                result = _run_provider(
+                    provider,
+                    client=client,
+                    mode=mode,
+                    base_url=base_url,
+                    iterations=iterations,
+                    warmup_iterations=warmup_iterations,
+                    sandbox_exec_runner=sandbox_exec_runner,
+                    sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+                    environment_metadata=environment_metadata,
+                )
+            except Exception as exc:
+                result = _provider_result(
+                    provider,
+                    cases={
+                        "setup": core._case_result(
+                            "setup",
+                            iterations,
+                            [],
+                            [
+                                core._failure(
+                                    "setup",
+                                    phase="setup",
+                                    iteration=0,
+                                    exc=exc,
+                                    redacted_text=core.PROVIDER_BENCHMARK_TEXT,
+                                )
+                            ],
+                        )
+                    },
+                )
         provider_results[provider] = result
         failures.extend(core._benchmark_failures(provider, result.get("failures", [])))
     return {
@@ -194,6 +206,7 @@ def _provider_from_surface(provider: str, surface: dict[str, Any]) -> dict[str, 
             **_dict_value(surface.get("metadata")),
             "canonical_source": "benchmark sdk surface",
             "provider_surface": surface.get("surface"),
+            "target_kind": "product" if provider == "modal-daemon" else "transport_baseline",
         },
         "cases": _dict_value(surface.get("cases")),
         "failures": list(surface.get("failures", [])),
@@ -201,7 +214,7 @@ def _provider_from_surface(provider: str, surface: dict[str, Any]) -> dict[str, 
     for key in ("verification", "billing_reconciliation", "cost_estimate"):
         if key in surface:
             result[key] = surface[key]
-    return result
+    return _apply_verification_status(result)
 
 
 def _dict_value(value: Any) -> dict[str, Any]:
@@ -294,10 +307,19 @@ class _AdapterProviderBenchmark:
                 "adapter": "AnthropicAdapter",
                 "tool_version": "computer_20250124",
                 "provider_api_calls": False,
+                "target_kind": "adapter",
             }
         if self.provider == "openai":
-            return {"adapter": "OpenAIAdapter", "provider_api_calls": False}
-        return {"adapter": "ActionExecutor", "provider_api_calls": False}
+            return {
+                "adapter": "OpenAIAdapter",
+                "provider_api_calls": False,
+                "target_kind": "adapter",
+            }
+        return {
+            "adapter": "ActionExecutor",
+            "provider_api_calls": False,
+            "target_kind": "adapter",
+        }
 
 
 class _BenchmarkRecordingActions:
@@ -367,6 +389,7 @@ def _run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[st
         "setup_included": True,
         "ingress_included": False,
         "first_observation_api": "computer_use.screenshot.take_full_screen",
+        "target_kind": "product",
     }
     if not snapshot:
         metadata.update(_daytona_default_resource_metadata())
@@ -417,6 +440,7 @@ def _run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, A
         "setup_included": True,
         "ingress_included": False,
         "first_observation_api": "Sandbox.screenshot",
+        "target_kind": "product",
         "resolution": "1024x768",
         "dpi": 96,
         "display": ":0",
@@ -456,7 +480,6 @@ class _DaytonaLiveBenchmark:
     ) -> None:
         self._module = daytona_module
         self._snapshot = snapshot
-        self.cleanup_errors: list[tuple[str, Exception]] = []
         config_cls = getattr(daytona_module, "DaytonaConfig", None)
         client_cls = daytona_module.Daytona
         if config_cls is None:
@@ -469,49 +492,45 @@ class _DaytonaLiveBenchmark:
                 config_kwargs["target"] = target
             self._client = client_cls(config_cls(**config_kwargs))
 
-    def cold_create_to_ready(self) -> dict[str, Any]:
-        sandbox = self.create_ready_session()
-        try:
-            return self._status(sandbox)
-        finally:
-            self.cleanup_session(sandbox)
+    def create_lifecycle_session(self) -> Any:
+        return self._create_sandbox()
 
-    def create_ready_session(self) -> Any:
-        sandbox = self._create_sandbox()
-        try:
-            computer_use = _computer_use(sandbox)
-            _call_first_available(computer_use, ("start",))
-            _wait_for_provider_screenshot_ready(self.screenshot_full, sandbox)
-            return sandbox
-        except Exception:
-            self.cleanup_session(sandbox)
-            raise
+    def observe_first_screenshot(self, sandbox: Any) -> dict[str, Any]:
+        computer_use = _computer_use(sandbox)
+        _call_first_available(computer_use, ("start",))
+        _wait_for_provider_screenshot_ready(self.screenshot_full, sandbox)
+        return self._status(sandbox)
 
-    def cleanup_session(self, sandbox: Any) -> None:
-        with suppress(Exception):
+    def cleanup_session(self, sandbox: Any) -> list[CleanupError]:
+        stop_error: Exception | None = None
+        try:
             computer_use = _computer_use(sandbox)
             _call_first_available(computer_use, ("stop",))
+        except Exception as exc:
+            stop_error = exc
         client_delete_error: Exception | None = None
         try:
             self._client.delete(sandbox)
-            return
+            return []
         except Exception as exc:
             client_delete_error = exc
         cleanup_errors = _cleanup_provider_sandbox(sandbox)
-        if cleanup_errors:
-            if client_delete_error is not None:
-                self.cleanup_errors.append(("client.delete", client_delete_error))
-            self.cleanup_errors.extend(cleanup_errors)
+        if cleanup_errors and client_delete_error is not None:
+            cleanup_errors.insert(0, ("client.delete", client_delete_error))
+        if cleanup_errors and stop_error is not None:
+            cleanup_errors.insert(0, ("computer_use.stop", stop_error))
+        return cleanup_errors
 
     def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
         screenshot = _call_first_available(
             _computer_use(sandbox).screenshot,
             ("take_full_screen", "full_screen", "take"),
         )
-        size_bytes = _provider_payload_size(screenshot)
+        payload = _provider_payload_metadata(screenshot)
+        size_bytes = payload.get("decoded_size_bytes") or payload.get("transport_size_bytes") or 0
         if size_bytes <= 0:
             raise RuntimeError("Daytona screenshot was empty")
-        return {"size_bytes": size_bytes}
+        return {"size_bytes": size_bytes, "payload": payload}
 
     def move_click(self, sandbox: Any) -> dict[str, Any]:
         mouse = _computer_use(sandbox).mouse
@@ -629,34 +648,25 @@ class _E2BLiveBenchmark:
     def __init__(self, e2b_module: Any, *, template: str | None) -> None:
         self._sandbox_cls = e2b_module.Sandbox
         self._template = template
-        self.cleanup_errors: list[tuple[str, Exception]] = []
         self._move_click_count = 0
 
-    def cold_create_to_ready(self) -> dict[str, Any]:
-        sandbox = self.create_ready_session()
-        try:
-            return {"status": "ready"}
-        finally:
-            self.cleanup_session(sandbox)
+    def create_lifecycle_session(self) -> Any:
+        return self._create_sandbox()
 
-    def create_ready_session(self) -> Any:
-        sandbox = self._create_sandbox()
-        try:
-            _wait_for_provider_screenshot_ready(self.screenshot_full, sandbox)
-            return sandbox
-        except Exception:
-            self.cleanup_session(sandbox)
-            raise
+    def observe_first_screenshot(self, sandbox: Any) -> dict[str, Any]:
+        _wait_for_provider_screenshot_ready(self.screenshot_full, sandbox)
+        return {"status": "ready"}
 
-    def cleanup_session(self, sandbox: Any) -> None:
-        self.cleanup_errors.extend(_cleanup_provider_sandbox(sandbox))
+    def cleanup_session(self, sandbox: Any) -> list[CleanupError]:
+        return _cleanup_provider_sandbox(sandbox)
 
     def screenshot_full(self, sandbox: Any) -> dict[str, Any]:
         screenshot = sandbox.screenshot()
-        size_bytes = _provider_payload_size(screenshot)
+        payload = _provider_payload_metadata(screenshot)
+        size_bytes = payload.get("decoded_size_bytes") or payload.get("transport_size_bytes") or 0
         if size_bytes <= 0:
             raise RuntimeError("E2B screenshot was empty")
-        return {"size_bytes": size_bytes}
+        return {"size_bytes": size_bytes, "payload": payload}
 
     def move_click(self, sandbox: Any) -> dict[str, Any]:
         offset = self._move_click_count % 2
@@ -762,27 +772,30 @@ def _run_live_provider_cases(
     warmup_iterations: int,
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    failures: list[dict[str, Any]] = []
+    cleanup_errors: list[CleanupError] = []
     results: dict[str, Any] = {}
     measured_runtime_seconds = 0.0
-    warm_cleanup_failed = False
     verification: dict[str, Any] | None = None
     for case in cold_cases:
-        operation = getattr(benchmark, case)
         result_name = _provider_cold_case_name(case)
-        case_start = time.perf_counter()
-        samples, observations = core._measure_observed_case(
+        lifecycle = measure_create_to_first_observation(
             name=result_name,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
-            operation=operation,
-            failures=failures,
+            create=benchmark.create_lifecycle_session,
+            observe=benchmark.observe_first_screenshot,
+            cleanup=benchmark.cleanup_session,
             redacted_text=_provider_case_redacted_text(result_name),
         )
-        measured_runtime_seconds += time.perf_counter() - case_start
-        result = core._case_result(result_name, iterations, samples, failures)
+        cleanup_errors.extend(lifecycle.cleanup_errors)
+        measured_runtime_seconds += lifecycle.completed_runtime_seconds
+        result = core._case_result(
+            result_name, iterations, lifecycle.samples_ms, lifecycle.failures
+        )
         result["last_result"] = (
-            _safe_provider_observation(observations[-1]) if observations else None
+            _safe_provider_observation(lifecycle.observations[-1])
+            if lifecycle.observations
+            else None
         )
         _annotate_product_readiness_case(result, metadata)
         results[result_name] = result
@@ -792,13 +805,19 @@ def _run_live_provider_cases(
                 "name": case,
                 "canonical_case": result_name,
                 "deprecated": True,
+                "removal_version": "1.2.0",
             }
     if warm_cases:
         sandbox: Any | None = None
         warm_start = time.perf_counter()
         try:
-            sandbox = benchmark.create_ready_session()
+            sandbox = benchmark.create_lifecycle_session()
+            benchmark.observe_first_screenshot(sandbox)
         except Exception as exc:
+            if sandbox is not None:
+                cleanup_errors.extend(
+                    cleanup_lifecycle_resource(benchmark.cleanup_session, sandbox)
+                )
             measured_runtime_seconds += time.perf_counter() - warm_start
             for case in warm_cases:
                 failure = core._failure(
@@ -818,15 +837,16 @@ def _run_live_provider_cases(
                     )
                 for case in warm_cases:
                     operation = getattr(benchmark, case)
+                    case_failures: list[dict[str, Any]] = []
                     samples, observations = core._measure_observed_case(
                         name=case,
                         iterations=iterations,
                         warmup_iterations=warmup_iterations,
                         operation=_bind_provider_operation(operation, sandbox),
-                        failures=failures,
+                        failures=case_failures,
                         redacted_text=_provider_case_redacted_text(case),
                     )
-                    result = core._case_result(case, iterations, samples, failures)
+                    result = core._case_result(case, iterations, samples, case_failures)
                     result["last_result"] = (
                         _safe_provider_observation(observations[-1]) if observations else None
                     )
@@ -841,16 +861,13 @@ def _run_live_provider_cases(
                             "status": "failed",
                             "message": core._redact_text(str(exc), TYPE_READBACK_TEXT),
                         }
-                before_cleanup_errors = len(getattr(benchmark, "cleanup_errors", []))
-                benchmark.cleanup_session(sandbox)
-                warm_cleanup_failed = (
-                    len(getattr(benchmark, "cleanup_errors", [])) > before_cleanup_errors
-                )
+                warm_errors = cleanup_lifecycle_resource(benchmark.cleanup_session, sandbox)
+                cleanup_errors.extend(warm_errors)
                 measured_runtime_seconds += time.perf_counter() - warm_start
-    cleanup_case = _provider_cleanup_case(benchmark)
+    cleanup_case = _provider_cleanup_case(cleanup_errors)
     if cleanup_case is not None:
         results["cleanup"] = cleanup_case
-    if warm_cleanup_failed:
+    if cleanup_errors:
         metadata = dict(metadata)
         metadata["cost_notes"] = ["cleanup failed; leaked resources may incur unmeasured cost"]
     return _provider_result(
@@ -904,6 +921,8 @@ def _provider_result(
     for case_name, case in cases.items():
         if not isinstance(case, dict):
             continue
+        if case.get("deprecated") is True:
+            continue
         failures.extend(core._benchmark_failures(case_name, case.get("failures", [])))
         status = case.get("status")
         failed = failed or status == "failed"
@@ -933,7 +952,90 @@ def _provider_result(
         runtime_seconds=runtime_seconds,
         metadata=safe_metadata,
     )
+    return _apply_verification_status(result)
+
+
+def finalize_provider_runtime(
+    payload: dict[str, Any],
+    *,
+    provider: str,
+    runtime_seconds: float,
+) -> None:
+    provider_result = _dict_value(_dict_value(payload.get("providers")).get(provider))
+    metadata = _dict_value(provider_result.get("metadata"))
+    environment = _dict_value(metadata.get("environment"))
+    environment["measured_resource_runtime_seconds"] = runtime_seconds
+    metadata["environment"] = environment
+    provider_result["metadata"] = metadata
+    provider_result["cost_estimate"] = estimate_provider_cost(
+        provider,
+        provider_status=str(provider_result.get("status", "not_measured")),
+        runtime_seconds=runtime_seconds,
+        metadata=metadata,
+    )
+
+
+def add_provider_cleanup_errors(
+    payload: dict[str, Any],
+    *,
+    provider: str,
+    errors: list[CleanupError],
+) -> None:
+    if not errors:
+        return
+    provider_result = _dict_value(_dict_value(payload.get("providers")).get(provider))
+    cleanup_case = _provider_cleanup_case(errors)
+    if cleanup_case is None:
+        return
+    cases = _dict_value(provider_result.get("cases"))
+    cases["cleanup"] = cleanup_case
+    provider_result["cases"] = cases
+    provider_result["status"] = "failed"
+    provider_result["failures"] = [
+        *list(provider_result.get("failures", [])),
+        *core._benchmark_failures("cleanup", cleanup_case.get("failures", [])),
+    ]
+    _refresh_comparison_failures(payload)
+
+
+def _refresh_comparison_failures(payload: dict[str, Any]) -> None:
+    failures: list[dict[str, Any]] = []
+    for provider, result in _dict_value(payload.get("providers")).items():
+        if isinstance(result, dict):
+            failures.extend(core._benchmark_failures(provider, result.get("failures", [])))
+    payload["failures"] = failures
+    payload["ok"] = not failures
+
+
+def _apply_verification_status(result: dict[str, Any]) -> dict[str, Any]:
+    verification = result.get("verification")
+    verification_failures = _verification_failures(verification)
+    if not verification_failures:
+        return result
+    result["status"] = "failed"
+    result["failures"] = [*list(result.get("failures", [])), *verification_failures]
     return result
+
+
+def _verification_failures(value: Any, *, path: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return []
+    if value.get("status") == "failed":
+        case = ".".join(("verification", *path))
+        return [
+            {
+                "case": case,
+                "phase": "verification",
+                "iteration": 0,
+                "type": "VerificationFailed",
+                "message": str(value.get("message") or "readback verification failed"),
+            }
+        ]
+    failures: list[dict[str, Any]] = []
+    for key, item in value.items():
+        if isinstance(item, dict):
+            failures.extend(_verification_failures(item, path=(*path, str(key))))
+    return failures
 
 
 def _verify_daytona_cursor_position(sandbox: Any) -> dict[str, Any]:
@@ -1292,8 +1394,7 @@ def _cleanup_provider_sandbox(sandbox: Any) -> list[tuple[str, Exception]]:
     return errors
 
 
-def _provider_cleanup_case(benchmark: Any) -> dict[str, Any] | None:
-    errors = getattr(benchmark, "cleanup_errors", [])
+def _provider_cleanup_case(errors: list[CleanupError]) -> dict[str, Any] | None:
     if not errors:
         return None
     failures = []
@@ -1327,45 +1428,81 @@ def _call_first_available(target: Any, names: tuple[str, ...], *args: Any) -> An
     raise RuntimeError(f"provider object did not expose any of: {', '.join(names)}")
 
 
-def _provider_payload_size(value: Any) -> int:
+def _provider_payload_metadata(value: Any) -> dict[str, Any]:
+    return _provider_payload_metadata_at(value, source="provider_return_value")
+
+
+def _provider_payload_metadata_at(value: Any, *, source: str) -> dict[str, Any]:
     if value is None:
-        return 0
+        return {"source": source, "transport_size_bytes": 0, "decoded_size_bytes": 0}
     if isinstance(value, bytes | bytearray):
-        return len(value)
+        payload = bytes(value)
+        return {
+            "source": source,
+            "transport_encoding": "raw_bytes",
+            "transport_size_bytes": len(payload),
+            "decoded_size_bytes": len(payload),
+            **_image_payload_metadata(payload),
+        }
     if isinstance(value, str):
-        return len(value.encode("utf-8"))
-    if hasattr(value, "read"):
-        current = value.read()
-        return _provider_payload_size(current)
-    if hasattr(value, "size_bytes"):
-        size = value.size_bytes
-        if size is not None:
-            return int(size) if isinstance(size, int | float) else 0
-    if hasattr(value, "bytes"):
-        payload = value.bytes
+        encoded = value.encode("utf-8")
+        decoded = _decode_base64_payload(value)
+        return {
+            "source": source,
+            "transport_encoding": "base64_string" if decoded is not None else "text",
+            "transport_size_bytes": len(encoded),
+            "decoded_size_bytes": len(decoded) if decoded is not None else None,
+            **(_image_payload_metadata(decoded) if decoded is not None else {}),
+        }
+    read = getattr(value, "read", None)
+    if callable(read):
+        return _provider_payload_metadata_at(read(), source=f"{source}.read()")
+
+    provider_reported_size = getattr(value, "size_bytes", None)
+    for attribute in (
+        "bytes",
+        "data",
+        "image",
+        "screenshot",
+        "image_base64",
+        "base64_string",
+        "base64",
+    ):
+        payload = getattr(value, attribute, None)
         if payload is not None:
-            return _provider_payload_size(payload)
-    if hasattr(value, "data"):
-        payload = value.data
-        if payload is not None:
-            return _provider_payload_size(payload)
-    if hasattr(value, "image"):
-        payload = value.image
-        if payload is not None:
-            return _provider_payload_size(payload)
-    if hasattr(value, "screenshot"):
-        payload = value.screenshot
-        if payload is not None:
-            return _provider_payload_size(payload)
-    if hasattr(value, "image_base64"):
-        payload = value.image_base64
-        if payload is not None:
-            return _provider_payload_size(payload)
-    if hasattr(value, "base64"):
-        payload = value.base64
-        if payload is not None:
-            return _provider_payload_size(payload)
-    return 0
+            metadata = _provider_payload_metadata_at(payload, source=f"{source}.{attribute}")
+            if isinstance(provider_reported_size, int | float):
+                metadata["provider_reported_size_bytes"] = int(provider_reported_size)
+            return metadata
+    return {
+        "source": source,
+        "transport_size_bytes": 0,
+        "decoded_size_bytes": 0,
+        "provider_reported_size_bytes": (
+            int(provider_reported_size)
+            if isinstance(provider_reported_size, int | float)
+            else None
+        ),
+    }
+
+
+def _decode_base64_payload(value: str) -> bytes | None:
+    try:
+        return base64.b64decode(value, validate=True)
+    except ValueError:
+        return None
+
+
+def _image_payload_metadata(payload: bytes) -> dict[str, Any]:
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            return {
+                "format": image.format.lower() if image.format else None,
+                "width": image.width,
+                "height": image.height,
+            }
+    except Exception:
+        return {}
 
 
 def _provider_exit_code(result: Any) -> int | None:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
-from modal_computer_use import cli
+from modal_computer_use import benchmark_comparison, cli
 from modal_computer_use.benchmark_comparison import run_provider_comparison
 from modal_computer_use.benchmarks import daemon_surface
+from modal_computer_use.benchmarks import lifecycle as benchmark_lifecycle
 
 
 def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
@@ -195,7 +198,21 @@ def test_created_modal_comparison_collects_one_cold_sample_per_iteration(monkeyp
 
     def fake_run_provider_comparison(**kwargs):
         seen_metadata.update(kwargs["environment_metadata"])
-        return {"ok": True}
+        assert kwargs["client"] is computers[-1].client
+        assert [computer.terminate_calls for computer in computers] == [1, 1, 1, 0]
+        assert [computer.detach_calls for computer in computers] == [1, 1, 1, 0]
+        return {
+            "ok": True,
+            "providers": {
+                "modal-daemon": {
+                    "status": "ok",
+                    "metadata": {"environment": dict(kwargs["environment_metadata"])},
+                    "cases": {},
+                    "failures": [],
+                }
+            },
+            "failures": [],
+        }
 
     monkeypatch.setattr(cli, "new_run_id", lambda: f"run-{len(computers)}")
     monkeypatch.setattr(cli, "_modal_benchmark_config", lambda *args, **kwargs: object())
@@ -209,15 +226,16 @@ def test_created_modal_comparison_collects_one_cold_sample_per_iteration(monkeyp
         sandbox_exec_setup_failure=None,
     )
 
-    assert result == {"ok": True}
-    assert seen_metadata["modal_product_create_to_first_screenshot_samples_ms"] == [
-        1000.0,
-        1001.0,
-        1002.0,
-    ]
-    assert len(computers) == 3
-    assert [computer.terminate_calls for computer in computers] == [1, 1, 1]
-    assert [computer.detach_calls for computer in computers] == [1, 1, 1]
+    assert result["ok"] is True
+    assert len(seen_metadata["modal_product_create_to_first_screenshot_samples_ms"]) == 3
+    assert seen_metadata["modal_product_create_to_first_screenshot_expected_samples"] == 3
+    assert len(computers) == 4
+    assert [computer.terminate_calls for computer in computers] == [1, 1, 1, 1]
+    assert [computer.detach_calls for computer in computers] == [1, 1, 1, 1]
+    assert (
+        result["providers"]["modal-daemon"]["cost_estimate"]["inputs"]["duration_seconds"]
+        > 0
+    )
 
 
 def test_provider_compare_modal_exec_uses_sdk_sandbox_exec_surface() -> None:
@@ -265,3 +283,185 @@ def test_benchmark_compare_env_file_must_exist(capsys) -> None:
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
     assert "--env-file must point to an existing file" in captured.err
+
+
+def test_lifecycle_measurement_excludes_cleanup_time(monkeypatch) -> None:
+    ticks = iter([0.0, 1.0, 11.0])
+    cleaned = []
+    monkeypatch.setattr(benchmark_lifecycle.time, "perf_counter", lambda: next(ticks))
+
+    measurement = benchmark_lifecycle.measure_create_to_first_observation(
+        name="product_create_to_first_screenshot",
+        iterations=1,
+        warmup_iterations=0,
+        create=lambda: "sandbox",
+        observe=lambda sandbox: {"sandbox": sandbox},
+        cleanup=lambda sandbox: cleaned.append(sandbox) or [],
+    )
+
+    assert measurement.samples_ms == [1000.0]
+    assert measurement.completed_runtime_seconds == 11.0
+    assert cleaned == ["sandbox"]
+
+
+def test_lifecycle_cleanup_runs_after_observation_failure() -> None:
+    cleaned = []
+
+    measurement = benchmark_lifecycle.measure_create_to_first_observation(
+        name="product_create_to_first_screenshot",
+        iterations=1,
+        warmup_iterations=0,
+        create=lambda: "sandbox",
+        observe=lambda _sandbox: (_ for _ in ()).throw(RuntimeError("not ready")),
+        cleanup=lambda sandbox: cleaned.append(sandbox) or [],
+    )
+
+    assert measurement.samples_ms == []
+    assert measurement.failures[0]["message"] == "not ready"
+    assert cleaned == ["sandbox"]
+
+
+def test_lifecycle_cleanup_exception_is_recorded_without_replacing_timing() -> None:
+    measurement = benchmark_lifecycle.measure_create_to_first_observation(
+        name="product_create_to_first_screenshot",
+        iterations=1,
+        warmup_iterations=0,
+        create=lambda: "sandbox",
+        observe=lambda _sandbox: {"status": "ready"},
+        cleanup=lambda _sandbox: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
+    )
+
+    assert len(measurement.samples_ms) == 1
+    assert measurement.failures == []
+    assert measurement.cleanup_errors[0][0] == "cleanup"
+
+
+def test_provider_case_failures_are_not_copied_to_later_cases() -> None:
+    class Benchmark:
+        def create_lifecycle_session(self):
+            return object()
+
+        def observe_first_screenshot(self, _sandbox):
+            return {"status": "ready"}
+
+        def cleanup_session(self, _sandbox):
+            return []
+
+        def first(self, _sandbox):
+            raise RuntimeError("first failed")
+
+        def second(self, _sandbox):
+            return {"status": "ok"}
+
+    result = benchmark_comparison._run_live_provider_cases(
+        provider="daytona",
+        benchmark=Benchmark(),
+        cold_cases=(),
+        warm_cases=("first", "second"),
+        iterations=1,
+        warmup_iterations=0,
+        metadata={},
+    )
+
+    assert result["cases"]["first"]["status"] == "failed"
+    assert result["cases"]["second"]["status"] == "ok"
+    assert result["cases"]["second"]["failures"] == []
+    assert len(result["failures"]) == 1
+
+
+def test_modal_cleanup_detaches_even_when_terminate_fails() -> None:
+    calls = []
+
+    class Client:
+        def close(self) -> None:
+            calls.append("close")
+
+    class Computer:
+        client = Client()
+
+        def terminate(self) -> None:
+            calls.append("terminate")
+            raise RuntimeError("terminate failed")
+
+        def detach(self) -> None:
+            calls.append("detach")
+
+    errors = cli._cleanup_modal_benchmark_computer(Computer())
+
+    assert calls == ["terminate", "detach", "close"]
+    assert [method for method, _exc in errors] == ["terminate"]
+
+
+def test_provider_verification_failure_fails_provider_and_top_level(monkeypatch) -> None:
+    def fake_provider(*args, **kwargs):
+        return benchmark_comparison._provider_result(
+            "daytona",
+            cases={"screenshot_full": {"status": "ok", "failures": []}},
+            verification={"cursor_position": {"status": "failed"}},
+        )
+
+    monkeypatch.setattr(benchmark_comparison, "_run_provider", fake_provider)
+
+    payload = run_provider_comparison(providers=["daytona"], iterations=1)
+
+    assert payload["ok"] is False
+    assert payload["providers"]["daytona"]["status"] == "failed"
+    assert payload["failures"][0]["case"] == "verification.cursor_position"
+
+
+def test_deprecated_cold_alias_does_not_duplicate_failures() -> None:
+    failure = {
+        "case": "product_create_to_first_screenshot",
+        "phase": "measure",
+        "iteration": 0,
+        "type": "RuntimeError",
+        "message": "failed",
+    }
+    canonical = {"status": "failed", "failures": [failure]}
+    alias = {
+        **canonical,
+        "deprecated": True,
+        "canonical_case": "product_create_to_first_screenshot",
+    }
+
+    result = benchmark_comparison._provider_result(
+        "daytona",
+        cases={
+            "product_create_to_first_screenshot": canonical,
+            "cold_create_to_ready": alias,
+        },
+    )
+
+    assert len(result["failures"]) == 1
+
+
+def test_provider_payload_metadata_distinguishes_base64_transport_from_png_bytes() -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (2, 3), color="red").save(buffer, format="PNG")
+    png = buffer.getvalue()
+    response = SimpleNamespace(
+        screenshot=SimpleNamespace(base64_string=__import__("base64").b64encode(png).decode())
+    )
+
+    metadata = benchmark_comparison._provider_payload_metadata(response)
+
+    assert metadata["source"].endswith("screenshot.base64_string")
+    assert metadata["transport_encoding"] == "base64_string"
+    assert metadata["transport_size_bytes"] > metadata["decoded_size_bytes"]
+    assert metadata["decoded_size_bytes"] == len(png)
+    assert metadata["format"] == "png"
+    assert metadata["width"] == 2
+    assert metadata["height"] == 3
+
+
+def test_modal_product_readiness_rejects_partial_sample_metadata() -> None:
+    case = daemon_surface._modal_product_create_to_first_screenshot_case(
+        {
+            "modal_product_create_to_first_screenshot_samples_ms": [1000.0, 900.0],
+            "modal_product_create_to_first_screenshot_expected_samples": 3,
+        },
+    )
+
+    assert case["status"] == "failed"
+    assert case["successful_iterations"] == 2
+    assert "expected 3 lifecycle samples" in case["failures"][0]["message"]

@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .benchmark_comparison import run_provider_comparison
+from .benchmark_comparison import (
+    add_provider_cleanup_errors,
+    finalize_provider_runtime,
+    run_provider_comparison,
+)
 from .benchmarks import (
     DEFAULT_COMPARE_PROVIDERS,
     DEFAULT_SDK_BENCHMARK_SURFACES,
@@ -20,6 +24,7 @@ from .benchmarks import (
 )
 from .benchmarks.billing import modal_billing_reconciliation_request
 from .benchmarks.costs import estimate_surface_cost
+from .benchmarks.lifecycle import CleanupError, measure_create_to_first_observation
 from .benchmarks.mock_local import _with_mock_local_client
 from .benchmarks.modal_colocated_client import (
     DEFAULT_MODAL_COLOCATED_RUNNER_PATHS,
@@ -816,6 +821,7 @@ def _benchmark_sdk_created_modal_sandbox(
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     run_id = new_run_id()
     config = _modal_benchmark_config(args, run_id=run_id)
     app_tags = {"benchmark": "sdk-surfaces", "benchmark_run_id": run_id}
@@ -839,13 +845,14 @@ def _benchmark_sdk_created_modal_sandbox(
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
         )
-    finally:
-        try:
-            computer.terminate(wait=True)
-        finally:
-            resource_lifetime_ms = (time.perf_counter() - started) * 1000
-            computer.detach()
+    except Exception as exc:
+        cleanup_errors = _cleanup_modal_benchmark_computer(computer)
+        _add_cleanup_note(exc, cleanup_errors)
+        raise
+    cleanup_errors = _cleanup_modal_benchmark_computer(computer)
+    resource_lifetime_ms = (time.perf_counter() - started) * 1000
     _record_modal_resource_lifetime(result, metadata, resource_lifetime_ms)
+    _raise_modal_cleanup_errors(cleanup_errors)
     return result
 
 
@@ -920,10 +927,22 @@ def _benchmark_compare_created_modal_sandbox(
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    computer = None
-    metadata = None
-    cold_samples_ms: list[float] = []
-    for iteration in range(args.iterations):
+    import time
+
+    other_providers = [provider for provider in providers if provider != "modal-daemon"]
+    precomputed_results: dict[str, dict[str, Any]] = {}
+    if other_providers:
+        precomputed = run_provider_comparison(
+            providers=other_providers,
+            mode="provider-live",
+            iterations=args.iterations,
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+            environment_metadata=_benchmark_environment_metadata(args),
+        )
+        precomputed_results = _dict_value(precomputed.get("providers"))
+
+    def create_lifecycle() -> tuple[ComputerSandbox, dict[str, Any]]:
         run_id = new_run_id()
         config = _modal_benchmark_config(args, run_id=run_id)
         app_tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id}
@@ -932,7 +951,7 @@ def _benchmark_compare_created_modal_sandbox(
             "benchmark_run_id": run_id,
             "provider": "modal-daemon",
         }
-        current_computer, current_metadata = _create_modal_benchmark_computer(
+        return _create_modal_benchmark_computer(
             args,
             config=config,
             app_name=args.app_name,
@@ -940,19 +959,33 @@ def _benchmark_compare_created_modal_sandbox(
             app_tags=app_tags,
             tags=tags,
         )
-        cold_samples_ms.append(float(current_metadata["modal_cold_create_to_ready_ms"]))
-        if iteration < args.iterations - 1:
-            current_computer.terminate()
-            current_computer.detach()
-        else:
-            computer = current_computer
-            metadata = current_metadata
 
-    if computer is None or metadata is None:
+    lifecycle = measure_create_to_first_observation(
+        name="product_create_to_first_screenshot",
+        iterations=args.iterations,
+        warmup_iterations=1,
+        create=create_lifecycle,
+        observe=lambda created: created[1],
+        cleanup=lambda created: _cleanup_modal_benchmark_computer(created[0]),
+        retain_final_measured_resource=True,
+    )
+    retained = lifecycle.retained_resource
+    if retained is None or lifecycle.retained_started_at is None:
+        _raise_modal_lifecycle_failures(lifecycle.failures, lifecycle.cleanup_errors)
         raise RuntimeError("Modal provider comparison did not create a benchmark sandbox")
-    metadata["modal_product_create_to_first_screenshot_samples_ms"] = cold_samples_ms
+    computer, metadata = retained
+    metadata["modal_product_create_to_first_screenshot_samples_ms"] = lifecycle.samples_ms
+    metadata["modal_product_create_to_first_screenshot_expected_samples"] = args.iterations
+    if lifecycle.samples_ms:
+        metadata["modal_cold_create_to_ready_ms"] = lifecycle.samples_ms[-1]
+    if lifecycle.cleanup_errors:
+        metadata["cost_notes"] = [
+            "one or more lifecycle cleanup attempts failed; resource cost may be incomplete"
+        ]
+    result: dict[str, Any] | None = None
+    final_cleanup_errors: list[CleanupError] = []
     try:
-        return run_provider_comparison(
+        result = run_provider_comparison(
             providers=providers,
             client=computer.client,
             mode="http",
@@ -961,10 +994,27 @@ def _benchmark_compare_created_modal_sandbox(
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
+            precomputed_provider_results=precomputed_results,
         )
-    finally:
-        computer.terminate()
-        computer.detach()
+    except Exception as exc:
+        final_cleanup_errors = _cleanup_modal_benchmark_computer(computer)
+        retained_runtime_seconds = time.perf_counter() - lifecycle.retained_started_at
+        _add_cleanup_note(exc, [*lifecycle.cleanup_errors, *final_cleanup_errors])
+        raise
+    final_cleanup_errors = _cleanup_modal_benchmark_computer(computer)
+    retained_runtime_seconds = time.perf_counter() - lifecycle.retained_started_at
+    runtime_seconds = lifecycle.completed_runtime_seconds + retained_runtime_seconds
+    finalize_provider_runtime(
+        result,
+        provider="modal-daemon",
+        runtime_seconds=runtime_seconds,
+    )
+    add_provider_cleanup_errors(
+        result,
+        provider="modal-daemon",
+        errors=[*lifecycle.cleanup_errors, *final_cleanup_errors],
+    )
+    return result
 
 
 def _create_modal_benchmark_computer(
@@ -1003,7 +1053,7 @@ def _create_modal_benchmark_computer(
                 wait=True,
                 readiness_timeout=config.runtime.readiness_timeout_seconds,
             )
-            computer.detach()
+            _raise_modal_cleanup_errors(_detach_modal_benchmark_computer(computer))
             final_ingress_ready_ms = (time.perf_counter() - started) * 1000
         first_screenshot = _modal_first_raw_screenshot_metadata(final_computer.client)
         first_screenshot_ms = (time.perf_counter() - started) * 1000
@@ -1038,11 +1088,15 @@ def _create_modal_benchmark_computer(
             ),
         }
         return final_computer, metadata
-    except Exception:
-        final_computer.terminate()
-        final_computer.detach()
+    except Exception as exc:
+        cleanup_errors = _cleanup_modal_benchmark_computer(final_computer)
         if final_computer is not computer:
-            computer.detach()
+            cleanup_errors.extend(_detach_modal_benchmark_computer(computer))
+        if cleanup_errors:
+            exc.add_note(
+                "Modal benchmark setup failed and cleanup also failed: "
+                + ", ".join(method for method, _exc in cleanup_errors)
+            )
         raise
 
 
@@ -1051,6 +1105,8 @@ def _modal_first_raw_screenshot_metadata(client: DaemonClient) -> dict[str, Any]
         "/v1/screenshots/full/raw",
         json={"format": "png", "show_cursor": False},
     )
+    if not payload:
+        raise RuntimeError("Modal raw screenshot was empty")
     return {
         "modal_first_raw_screenshot_size_bytes": len(payload),
         "modal_first_raw_screenshot_width": _int_header(headers, "x-computer-use-width"),
@@ -1071,6 +1127,57 @@ def _int_header(headers: Any, name: str) -> int | None:
 def _str_header(headers: Any, name: str) -> str | None:
     value = headers.get(name) if hasattr(headers, "get") else None
     return value if isinstance(value, str) and value else None
+
+
+def _cleanup_modal_benchmark_computer(computer: ComputerSandbox) -> list[CleanupError]:
+    errors: list[CleanupError] = []
+    try:
+        computer.terminate(wait=True)
+    except Exception as exc:
+        errors.append(("terminate", exc))
+    errors.extend(_detach_modal_benchmark_computer(computer))
+    return errors
+
+
+def _detach_modal_benchmark_computer(computer: ComputerSandbox) -> list[CleanupError]:
+    errors: list[CleanupError] = []
+    try:
+        computer.detach()
+    except Exception as exc:
+        errors.append(("detach", exc))
+    finally:
+        close = getattr(computer.client, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:
+                errors.append(("client.close", exc))
+    return errors
+
+
+def _raise_modal_cleanup_errors(errors: list[CleanupError]) -> None:
+    if errors:
+        raise RuntimeError(
+            "Modal benchmark cleanup failed: "
+            + ", ".join(method for method, _exc in errors)
+        )
+
+
+def _add_cleanup_note(exc: Exception, errors: list[CleanupError]) -> None:
+    if errors:
+        exc.add_note(
+            "Modal benchmark cleanup also failed: "
+            + ", ".join(method for method, _cleanup_exc in errors)
+        )
+
+
+def _raise_modal_lifecycle_failures(
+    failures: list[dict[str, Any]], cleanup_errors: list[CleanupError]
+) -> None:
+    if failures or cleanup_errors:
+        details = [str(failure.get("phase", "measure")) for failure in failures]
+        details.extend(method for method, _exc in cleanup_errors)
+        raise RuntimeError("Modal lifecycle sampling failed: " + ", ".join(details))
 
 
 def _benchmark_modal_ingress_ab(args: argparse.Namespace) -> int:
