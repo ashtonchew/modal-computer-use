@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from modal_computer_use import cli
 from modal_computer_use.benchmark_comparison import run_provider_comparison
+from modal_computer_use.benchmarks import daemon_surface
 
 
 def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
@@ -155,6 +157,67 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
     assert product_case["first_observation_api"] == "computer_use.screenshot.take_full_screen"
     assert cases["cold_create_to_ready"]["canonical_case"] == "product_create_to_first_screenshot"
     assert cases["cold_create_to_ready"]["deprecated"] is True
+
+
+def test_modal_product_readiness_uses_all_orchestration_samples() -> None:
+    case = daemon_surface._modal_product_create_to_first_screenshot_case(
+        {
+            "modal_product_create_to_first_screenshot_samples_ms": [1200.0, 1100.0, 1000.0]
+        }
+    )
+
+    assert case["iterations"] == 3
+    assert case["successful_iterations"] == 3
+    assert case["samples_ms"] == [1200.0, 1100.0, 1000.0]
+
+
+def test_created_modal_comparison_collects_one_cold_sample_per_iteration(monkeypatch) -> None:
+    computers = []
+    seen_metadata = {}
+
+    class FakeComputer:
+        def __init__(self, index: int) -> None:
+            self.index = index
+            self.client = SimpleNamespace(base_url="https://example.invalid")
+            self.terminate_calls = 0
+            self.detach_calls = 0
+
+        def terminate(self) -> None:
+            self.terminate_calls += 1
+
+        def detach(self) -> None:
+            self.detach_calls += 1
+
+    def fake_create(*args, **kwargs):
+        computer = FakeComputer(len(computers))
+        computers.append(computer)
+        return computer, {"modal_cold_create_to_ready_ms": 1000.0 + computer.index}
+
+    def fake_run_provider_comparison(**kwargs):
+        seen_metadata.update(kwargs["environment_metadata"])
+        return {"ok": True}
+
+    monkeypatch.setattr(cli, "new_run_id", lambda: f"run-{len(computers)}")
+    monkeypatch.setattr(cli, "_modal_benchmark_config", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "_create_modal_benchmark_computer", fake_create)
+    monkeypatch.setattr(cli, "run_provider_comparison", fake_run_provider_comparison)
+
+    result = cli._benchmark_compare_created_modal_sandbox(
+        SimpleNamespace(iterations=3, app_name="test-app", name=None),
+        providers=["modal-daemon"],
+        sandbox_exec_runner=None,
+        sandbox_exec_setup_failure=None,
+    )
+
+    assert result == {"ok": True}
+    assert seen_metadata["modal_product_create_to_first_screenshot_samples_ms"] == [
+        1000.0,
+        1001.0,
+        1002.0,
+    ]
+    assert len(computers) == 3
+    assert [computer.terminate_calls for computer in computers] == [1, 1, 1]
+    assert [computer.detach_calls for computer in computers] == [1, 1, 1]
 
 
 def test_provider_compare_modal_exec_uses_sdk_sandbox_exec_surface() -> None:

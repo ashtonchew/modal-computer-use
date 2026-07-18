@@ -263,12 +263,8 @@ def _modal_product_readiness_cases(
 def _modal_product_create_to_first_screenshot_case(
     environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    value = (
-        None
-        if not environment_metadata
-        else environment_metadata.get("modal_cold_create_to_ready_ms")
-    )
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+    samples = _modal_product_readiness_samples(environment_metadata)
+    if not samples:
         result = core._future_benchmark(
             "not_measured",
             "cold Modal Sandbox creation is measured by a live orchestration runner, "
@@ -276,7 +272,9 @@ def _modal_product_create_to_first_screenshot_case(
         )
         result["definition"] = "provider product create call to first successful screenshot"
         return result
-    result = core._case_result("product_create_to_first_screenshot", 1, [float(value)], [])
+    result = core._case_result(
+        "product_create_to_first_screenshot", len(samples), samples, []
+    )
     definition = (
         None
         if not environment_metadata
@@ -298,3 +296,23 @@ def _modal_product_create_to_first_screenshot_case(
     result["ingress_included"] = True
     result["first_observation_api"] = "/v1/screenshots/full/raw"
     return result
+
+
+def _modal_product_readiness_samples(
+    environment_metadata: dict[str, Any] | None,
+) -> list[float]:
+    if not environment_metadata:
+        return []
+    values = environment_metadata.get("modal_product_create_to_first_screenshot_samples_ms")
+    if isinstance(values, list):
+        samples = [
+            float(value)
+            for value in values
+            if not isinstance(value, bool) and isinstance(value, int | float) and value > 0
+        ]
+        if samples:
+            return samples
+    value = environment_metadata.get("modal_cold_create_to_ready_ms")
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        return []
+    return [float(value)]

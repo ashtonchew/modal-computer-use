@@ -920,18 +920,37 @@ def _benchmark_compare_created_modal_sandbox(
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    run_id = new_run_id()
-    config = _modal_benchmark_config(args, run_id=run_id)
-    app_tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id}
-    tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id, "provider": "modal-daemon"}
-    computer, metadata = _create_modal_benchmark_computer(
-        args,
-        config=config,
-        app_name=args.app_name,
-        name=args.name,
-        app_tags=app_tags,
-        tags=tags,
-    )
+    computer = None
+    metadata = None
+    cold_samples_ms: list[float] = []
+    for iteration in range(args.iterations):
+        run_id = new_run_id()
+        config = _modal_benchmark_config(args, run_id=run_id)
+        app_tags = {"benchmark": "provider-compare", "benchmark_run_id": run_id}
+        tags = {
+            "benchmark": "provider-compare",
+            "benchmark_run_id": run_id,
+            "provider": "modal-daemon",
+        }
+        current_computer, current_metadata = _create_modal_benchmark_computer(
+            args,
+            config=config,
+            app_name=args.app_name,
+            name=args.name,
+            app_tags=app_tags,
+            tags=tags,
+        )
+        cold_samples_ms.append(float(current_metadata["modal_cold_create_to_ready_ms"]))
+        if iteration < args.iterations - 1:
+            current_computer.terminate()
+            current_computer.detach()
+        else:
+            computer = current_computer
+            metadata = current_metadata
+
+    if computer is None or metadata is None:
+        raise RuntimeError("Modal provider comparison did not create a benchmark sandbox")
+    metadata["modal_product_create_to_first_screenshot_samples_ms"] = cold_samples_ms
     try:
         return run_provider_comparison(
             providers=providers,
