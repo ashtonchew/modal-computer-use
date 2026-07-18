@@ -11,6 +11,7 @@ from modal_computer_use import benchmark_comparison, cli
 from modal_computer_use.benchmark_comparison import run_provider_comparison
 from modal_computer_use.benchmarks import daemon_surface
 from modal_computer_use.benchmarks import lifecycle as benchmark_lifecycle
+from modal_computer_use.benchmarks.provider_comparison import comparison, daytona
 
 
 def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
@@ -63,6 +64,32 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     assert "0123456789" not in captured.out
     assert '"text"' not in captured.out
     assert "Bearer" not in captured.out
+
+
+def test_adapter_providers_project_sdk_surfaces_to_provider_schema() -> None:
+    payload = run_provider_comparison(
+        providers=["openai", "anthropic", "generic"],
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    expected_adapters = {
+        "openai": "OpenAIAdapter",
+        "anthropic": "AnthropicAdapter",
+        "generic": "ActionExecutor",
+    }
+    for provider_name, adapter_name in expected_adapters.items():
+        provider = payload["providers"][provider_name]
+        assert provider["provider"] == provider_name
+        assert "surface" not in provider
+        assert provider["status"] == "ok"
+        assert provider["metadata"]["adapter"] == adapter_name
+        assert provider["metadata"]["target_kind"] == "adapter"
+        assert provider["cases"]["adapter_matrix"]["status"] == "ok"
+        assert "name" not in provider["cases"]["adapter_matrix"]
+        assert provider["cost_estimate"]["notes"] == [
+            "provider comparison does not create billable provider resources"
+        ]
 
 
 def test_benchmark_compare_external_providers_skip_without_credentials(
@@ -141,7 +168,8 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
 
     monkeypatch.setenv("DAYTONA_API_KEY", "test")
     monkeypatch.setattr(
-        "modal_computer_use.benchmark_comparison._import_provider_module",
+        daytona,
+        "import_provider_module",
         lambda *args: FakeModule,
     )
 
@@ -369,6 +397,130 @@ def test_provider_case_failures_are_not_copied_to_later_cases() -> None:
     assert len(result["failures"]) == 1
 
 
+def test_live_provider_runs_verification_before_cleanup_after_case_failure() -> None:
+    events: list[str] = []
+
+    class Benchmark:
+        def create_lifecycle_session(self):
+            events.append("create")
+            return object()
+
+        def observe_first_screenshot(self, _sandbox):
+            events.append("observe")
+            return {"status": "ready"}
+
+        def first(self, _sandbox):
+            events.append("first")
+            raise RuntimeError("first failed")
+
+        def second(self, _sandbox):
+            events.append("second")
+            return {"status": "ok"}
+
+        def verify_readbacks(self, _sandbox):
+            events.append("verify")
+            return {"cursor_position": {"status": "ok"}}
+
+        def cleanup_session(self, _sandbox):
+            events.append("cleanup")
+            return []
+
+    result = benchmark_comparison._run_live_provider_cases(
+        provider="daytona",
+        benchmark=Benchmark(),
+        cold_cases=(),
+        warm_cases=("first", "second"),
+        iterations=1,
+        warmup_iterations=0,
+        metadata={},
+    )
+
+    assert events == ["create", "observe", "first", "second", "verify", "cleanup"]
+    assert result["cases"]["first"]["status"] == "failed"
+    assert result["cases"]["second"]["status"] == "ok"
+    assert result["verification"]["cursor_position"]["status"] == "ok"
+
+
+def test_provider_cleanup_tries_force_before_next_method() -> None:
+    calls: list[tuple[str, bool]] = []
+
+    class Sandbox:
+        def delete(self, *, force: bool = False) -> None:
+            calls.append(("delete", force))
+            raise RuntimeError("delete failed")
+
+        def kill(self, *, force: bool = False) -> None:
+            calls.append(("kill", force))
+            if not force:
+                raise RuntimeError("kill failed")
+
+    errors = benchmark_comparison._cleanup_provider_sandbox(Sandbox())
+
+    assert errors == []
+    assert calls == [
+        ("delete", False),
+        ("delete", True),
+        ("kill", False),
+        ("kill", True),
+    ]
+
+
+def test_provider_runtime_and_cleanup_postprocessing_updates_comparison() -> None:
+    payload = {
+        "ok": True,
+        "providers": {
+            "modal-daemon": {
+                "status": "ok",
+                "metadata": {"environment": {"cpu": 2.0, "memory_mib": 2048}},
+                "cases": {},
+                "failures": [],
+            }
+        },
+        "failures": [],
+    }
+
+    benchmark_comparison.finalize_provider_runtime(
+        payload,
+        provider="modal-daemon",
+        runtime_seconds=12.5,
+    )
+    benchmark_comparison.add_provider_cleanup_errors(
+        payload,
+        provider="modal-daemon",
+        errors=[("terminate", RuntimeError("cleanup failed"))],
+    )
+
+    provider = payload["providers"]["modal-daemon"]
+    assert provider["metadata"]["environment"]["measured_resource_runtime_seconds"] == 12.5
+    assert provider["cost_estimate"]["inputs"]["duration_seconds"] == 12.5
+    assert provider["status"] == "failed"
+    assert provider["cases"]["cleanup"]["status"] == "failed"
+    assert payload["ok"] is False
+    assert payload["failures"][0]["benchmark"] == "modal-daemon"
+
+
+def test_provider_observation_redacts_nested_secrets_and_preserves_safe_shape() -> None:
+    observation = {
+        "status": "ready",
+        "nested": {
+            "accessToken": "credential-value",
+            "endpointUrl": "https://user:password@example.com/path?token=secret",
+            "count": 3,
+        },
+    }
+
+    safe = benchmark_comparison._safe_provider_observation(observation)
+
+    assert safe == {
+        "status": "ready",
+        "nested": {
+            "accessToken": {"redacted": True, "length": 16},
+            "endpointUrl": {"redacted": True, "length": 51},
+            "count": 3,
+        },
+    }
+
+
 def test_modal_cleanup_detaches_even_when_terminate_fails() -> None:
     calls = []
 
@@ -400,7 +552,7 @@ def test_provider_verification_failure_fails_provider_and_top_level(monkeypatch)
             verification={"cursor_position": {"status": "failed"}},
         )
 
-    monkeypatch.setattr(benchmark_comparison, "_run_provider", fake_provider)
+    monkeypatch.setattr(comparison, "run_provider", fake_provider)
 
     payload = run_provider_comparison(providers=["daytona"], iterations=1)
 
