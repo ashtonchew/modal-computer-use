@@ -45,6 +45,7 @@ def sanitize_provider_benchmark(
     raw_bytes: bytes,
     raw_artifact_path: str,
     harness_commit: str,
+    harness_state: str,
     status: str,
     scope: str,
     status_reason: str | None = None,
@@ -53,6 +54,7 @@ def sanitize_provider_benchmark(
     _validate_provenance_inputs(
         raw_artifact_path=raw_artifact_path,
         harness_commit=harness_commit,
+        harness_state=harness_state,
         status=status,
         scope=scope,
         status_reason=status_reason,
@@ -71,6 +73,7 @@ def sanitize_provider_benchmark(
         "raw_artifact_tracked": False,
         "sanitizer": "modal_computer_use.benchmarks.artifacts",
         "sanitizer_version": SANITIZER_VERSION,
+        "harness_state": harness_state,
         "sanitization": (
             "removed ephemeral base URLs, benchmark run IDs, Modal run IDs, "
             "and Modal sandbox IDs"
@@ -80,7 +83,6 @@ def sanitize_provider_benchmark(
         provenance["status_reason"] = status_reason
     if harness_diff_sha256 is not None:
         provenance["harness_diff_sha256"] = harness_diff_sha256
-        provenance["harness_state"] = "dirty"
     payload["provenance"] = provenance
     validate_sanitized_provider_benchmark(payload)
     return payload
@@ -96,6 +98,7 @@ def generate_sanitized_provider_benchmark(
     output_path: Path,
     raw_artifact_path: str,
     harness_commit: str,
+    harness_state: str,
     status: str,
     scope: str,
     status_reason: str | None = None,
@@ -111,6 +114,7 @@ def generate_sanitized_provider_benchmark(
         raw_bytes=raw_bytes,
         raw_artifact_path=raw_artifact_path,
         harness_commit=harness_commit,
+        harness_state=harness_state,
         status=status,
         scope=scope,
         status_reason=status_reason,
@@ -171,6 +175,10 @@ def validate_sanitized_provider_benchmark(payload: dict[str, Any]) -> None:
             raise ValueError("provenance harness_state must be dirty when a digest is present")
     elif status == "candidate":
         raise ValueError("candidate provenance requires harness_diff_sha256")
+    elif harness_state not in {None, "clean"}:
+        raise ValueError("provenance harness_state must be clean when no digest is present")
+    if status == "current_reference" and (diff_digest is not None or harness_state != "clean"):
+        raise ValueError("current_reference provenance requires a clean harness")
 
 
 def _sanitize_value(value: Any) -> Any:
@@ -221,6 +229,7 @@ def _validate_provenance_inputs(
     *,
     raw_artifact_path: str,
     harness_commit: str,
+    harness_state: str,
     status: str,
     scope: str,
     status_reason: str | None,
@@ -232,6 +241,8 @@ def _validate_provenance_inputs(
         raise ValueError("harness_commit must be a full Git commit")
     if status not in ARTIFACT_STATUSES:
         raise ValueError("unsupported provenance status")
+    if harness_state not in {"clean", "dirty"}:
+        raise ValueError("harness_state must be clean or dirty")
     if not scope.strip():
         raise ValueError("scope must not be empty")
     if status in {"rejected", "superseded"} and not (status_reason or "").strip():
@@ -240,6 +251,12 @@ def _validate_provenance_inputs(
         raise ValueError("harness_diff_sha256 must be a SHA-256 digest")
     if status == "candidate" and harness_diff_sha256 is None:
         raise ValueError("candidate provenance requires harness_diff_sha256")
+    if harness_state == "dirty" and harness_diff_sha256 is None:
+        raise ValueError("dirty harness provenance requires harness_diff_sha256")
+    if harness_state == "clean" and harness_diff_sha256 is not None:
+        raise ValueError("clean harness provenance must not include harness_diff_sha256")
+    if status == "current_reference" and harness_state != "clean":
+        raise ValueError("current_reference provenance requires a clean harness")
 
 
 def _is_safe_relative_path(value: str) -> bool:
