@@ -511,9 +511,9 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
-- [Provider benchmark results interpretation](benchmark-results-interpretation.md)
-- [Provider benchmark results, 2026-05-13](benchmark-results-2026-05-13.md)
+- [Current provider benchmark reference, 2026-07-18](benchmark-results-2026-07-18.md)
 - [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
+- [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
 
 ## Benchmark action batching
 
