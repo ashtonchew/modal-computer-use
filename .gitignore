@@ -11,4 +11,6 @@ build/
 .DS_Store
 htmlcov/
 .coverage
-benchmark-results/
+# Local raw, candidate, rejected, and replayable benchmark evidence.
+benchmark-results/*
+!benchmark-results/README.md
