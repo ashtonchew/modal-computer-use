@@ -205,6 +205,7 @@ def test_preregistration_freezes_commands_policies_and_dependency() -> None:
     config = ModalOptimizationConfig(region="us-west", image_revision="a" * 40)
     commands = {
         "provider_default": "uv run computer-use benchmark compare --iterations 3",
+        "provider_default_normalize": "uv run python scripts/sanitize_provider_benchmark.py",
         "region_selection": "uv run computer-use benchmark modal-region-ab --iterations 30",
         "publish_image": "uv run python scripts/publish_modal_images.py --revision " + "a" * 40,
         "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run",

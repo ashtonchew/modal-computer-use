@@ -95,6 +95,7 @@ def build_preregistration(
         raise ValueError("source and dependency SHAs must be full Git SHAs")
     required_commands = {
         "provider_default",
+        "provider_default_normalize",
         "region_selection",
         "publish_image",
         "benchmark",
@@ -103,7 +104,7 @@ def build_preregistration(
     if set(commands) != required_commands or any(
         not _nonempty_text(command) for command in commands.values()
     ):
-        raise ValueError("commands must contain the five exact benchmark commands")
+        raise ValueError("commands must contain the six exact benchmark commands")
     return {
         "schema_version": 1,
         "benchmark": "modal-optimization-preregistration",
@@ -466,6 +467,8 @@ def extract_provider_default_profile(payload: dict[str, Any]) -> dict[str, Any]:
         "results": results,
         "attempts_per_provider": payload.get("iterations"),
         "raw_artifact_sha256": provenance.get("raw_artifact_sha256"),
+        "execution_source_sha": provenance.get("harness_commit"),
+        "artifact_status": provenance.get("status"),
     }
 
 

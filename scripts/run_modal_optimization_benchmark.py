@@ -66,6 +66,7 @@ def _add_common_arguments(parser: argparse.ArgumentParser, *, region_default: st
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--dependency-sha", default=DEPENDENCY_SHA)
     parser.add_argument("--region-selection-source-sha")
+    parser.add_argument("--provider-default-source-sha")
     parser.add_argument("--region", required=region_default is None, default=region_default)
     parser.add_argument("--image-revision")
     parser.add_argument("--cold-attempts", type=int, default=30)
@@ -91,9 +92,11 @@ def _preregister(args: argparse.Namespace) -> int:
     _require_dependency(args.source_sha, args.dependency_sha, require_clean=False)
     config = _config(args)
     region_selection_source_sha = args.region_selection_source_sha or args.source_sha
+    provider_default_source_sha = args.provider_default_source_sha or args.source_sha
     commands = _commands(
         args.source_sha,
         region_selection_source_sha=region_selection_source_sha,
+        provider_default_source_sha=provider_default_source_sha,
     )
     payload = build_preregistration(
         config,
@@ -115,6 +118,7 @@ def _preregister(args: argparse.Namespace) -> int:
         commands=commands,
     )
     payload["region_selection_evidence_source_sha"] = region_selection_source_sha
+    payload["provider_default_evidence_source_sha"] = provider_default_source_sha
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     print(json.dumps({"status": "preregistered", "output": str(args.output)}))
@@ -124,9 +128,15 @@ def _preregister(args: argparse.Namespace) -> int:
 def _run(args: argparse.Namespace) -> int:
     _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
     region_selection_source_sha = args.region_selection_source_sha or args.source_sha
+    provider_default_source_sha = args.provider_default_source_sha or args.source_sha
     _require_dependency(
         args.source_sha,
         region_selection_source_sha,
+        require_clean=True,
+    )
+    _require_dependency(
+        args.source_sha,
+        provider_default_source_sha,
         require_clean=True,
     )
     selected_region, region_selection = _select_region(args.region_selection)
@@ -145,6 +155,8 @@ def _run(args: argparse.Namespace) -> int:
     if not isinstance(provider_default, dict):
         raise ValueError("provider-default artifact must be a JSON object")
     validate_sanitized_provider_benchmark(provider_default)
+    if provider_default.get("provenance", {}).get("harness_commit") != provider_default_source_sha:
+        raise RuntimeError("provider-default source SHA does not match its provenance")
 
     progress = _progress
     cold_attempts = run_independent_cold_attempts(config, progress=progress)
@@ -171,7 +183,12 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _commands(source_sha: str, *, region_selection_source_sha: str) -> dict[str, str]:
+def _commands(
+    source_sha: str,
+    *,
+    region_selection_source_sha: str,
+    provider_default_source_sha: str,
+) -> dict[str, str]:
     root = "benchmark-results/modal-optimization-2026-07-19"
     return {
         "region_selection": (
@@ -189,6 +206,14 @@ def _commands(source_sha: str, *, region_selection_source_sha: str) -> dict[str,
             "/Users/ashtonchew/projects/modal-computer-use/.env "
             f"--output {root}/provider-default-raw.json --json"
         ),
+        "provider_default_normalize": (
+            "uv run python scripts/sanitize_provider_benchmark.py "
+            f"{root}/provider-default-raw.json {root}/provider-default-sanitized.json "
+            f"--raw-artifact-path {root}/provider-default-raw.json "
+            f"--harness-commit {provider_default_source_sha} --status current_reference "
+            "--scope \"provider-default verification for Modal, Daytona, and E2B "
+            "without warm pools\""
+        ),
         "publish_image": (
             f"uv run python scripts/publish_modal_images.py --revision {source_sha}"
         ),
@@ -196,6 +221,7 @@ def _commands(source_sha: str, *, region_selection_source_sha: str) -> dict[str,
             "uv run python scripts/run_modal_optimization_benchmark.py run "
             f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
             f"--region-selection-source-sha {region_selection_source_sha} "
+            f"--provider-default-source-sha {provider_default_source_sha} "
             f"--region-selection {root}/region-selection.json "
             f"--provider-default {root}/provider-default-sanitized.json "
             f"--preregistration {root}/preregistration.json --output {root}/raw.json"
