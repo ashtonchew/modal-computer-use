@@ -14,6 +14,7 @@ import pytest
 from modal_computer_use.benchmarks.modal_optimization import (
     OPTIMIZED_ACTION_CASE,
     PROFILE_MODAL_ON_DEMAND,
+    PROFILE_MODAL_V2,
     PROFILE_MODAL_WARM_AVAILABILITY,
     PROFILE_PROVIDER_DEFAULT,
     ModalOptimizationConfig,
@@ -88,7 +89,7 @@ def _artifact() -> dict[str, object]:
                     "idle_hold_seconds_per_batch": 30.0,
                 },
             },
-            "modal-v2-ab": {
+            PROFILE_MODAL_V2: {
                 "status": "not_run",
                 "reason": "Connect Tokens are unsupported by Modal V2 in Modal 1.5.2",
                 "source_url": "https://modal.com/docs/guide/sandbox-v2",
@@ -264,6 +265,7 @@ def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() 
     )
     preregistration_bytes = json.dumps(preregistration, sort_keys=True).encode()
     raw = _artifact()
+    raw["profiles"]["modal-v2-ab"] = raw["profiles"].pop(PROFILE_MODAL_V2)
     raw["provenance"]["preregistration_sha256"] = hashlib.sha256(
         preregistration_bytes
     ).hexdigest()
@@ -430,11 +432,14 @@ def test_sanitizer_merges_preregistered_v2_encrypted_tunnel_profile() -> None:
         normalizer_commit="e" * 40,
     )
 
-    v2 = sanitized["profiles"]["modal-v2-ab"]
+    v2 = sanitized["profiles"][PROFILE_MODAL_V2]
     assert v2["status"] == "measured"
     assert v2["cold_summary"]["valid"] == 30
     assert v2["warm_action_summary"]["p95_status"] == "reported"
     assert v2["connect_token_parity"] is False
+    assert v2["comparison_eligibility"] == "descriptive-candidate-only"
+    assert v2["backend_causal_ratio_eligible"] is False
+    assert "modal-v2-ab" not in sanitized["profiles"]
     assert v2["provenance"]["source_sha"] == "d" * 40
     assert v2["provenance"]["modal_sdk_version"] == "1.5.2+fixture"
     assert sanitized["v2_measurement_manifest"]["authentication"]["target_loopback"] is False
@@ -1064,14 +1069,14 @@ def test_v2_warm_action_uses_inherited_encrypted_tunnel_endpoint() -> None:
         config,
         create_computer=create_computer,
         runner_benchmark=runner,
-        profile="modal-v2-ab",
+        profile=PROFILE_MODAL_V2,
         runner_path="inherited",
         progress_label="v2_warm_action",
     )
 
     assert [attempt["status"] for attempt in attempts] == ["valid", "valid"]
     assert runner_paths == ["inherited"]
-    assert target_tags == [{"benchmark": "modal-v2-ab", "role": "warm-action-target"}]
+    assert target_tags == [{"benchmark": PROFILE_MODAL_V2, "role": "warm-action-target"}]
     assert metadata["runner_path"] == "same-region-separate-modal-runner:inherited"
     assert metadata["target_loopback"] is False
 

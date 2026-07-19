@@ -16,7 +16,19 @@ from .measurement import _percentile
 PROFILE_PROVIDER_DEFAULT = "provider-default"
 PROFILE_MODAL_ON_DEMAND = "modal-platform-optimized-on-demand"
 PROFILE_MODAL_WARM_AVAILABILITY = "modal-warm-availability"
-PROFILE_MODAL_V2 = "modal-v2-ab"
+PROFILE_MODAL_V2 = "modal-v2-encrypted-tunnel-candidate"
+LEGACY_PROFILE_MODAL_V2 = "modal-v2-ab"
+V2_COMPARISON_SCOPE = "modal-v1-optimized-on-demand-context-only"
+V2_COMPARISON_ELIGIBILITY = "descriptive-candidate-only"
+V2_CANDIDATE_LIMITATIONS = (
+    "no Connect Token or attested-tunnel lifecycle parity",
+    "encrypted tunnel uses daemon-managed bearer authentication",
+    "beta V2 backend is not a production default",
+    "V1 and V2 executions were not randomized or interleaved",
+    "V1 and V2 used different named image revisions",
+    "requested us-west placement produced different actual placement distributions",
+    "the separate runner actual placement and cloud were not observed",
+)
 MINIMUM_P95_SAMPLES = 20
 OPTIMIZED_ACTION_CASE = (
     "observation_action_click_act_and_observe_auto_signal_binary_envelope_production"
@@ -524,7 +536,9 @@ def build_modal_v2_profile_artifact(
         "generated_at": generated_at,
         "profile": {
             "status": "measured",
-            "comparison_scope": "modal-v1-optimized-on-demand-only",
+            "comparison_scope": V2_COMPARISON_SCOPE,
+            "comparison_eligibility": V2_COMPARISON_ELIGIBILITY,
+            "backend_causal_ratio_eligible": False,
             "v2_is_default": False,
             "connect_token_parity": False,
             "authentication_path": "encrypted-tunnel-application-bearer",
@@ -541,11 +555,7 @@ def build_modal_v2_profile_artifact(
                 requested_region=config.region,
                 includes_runner=False,
             ),
-            "limitations": [
-                "no Connect Token or attested-tunnel lifecycle parity",
-                "encrypted tunnel uses daemon-managed bearer authentication",
-                "beta V2 backend is not a production default",
-            ],
+            "limitations": list(V2_CANDIDATE_LIMITATIONS),
             "source_urls": [
                 "https://modal.com/docs/guide/sandbox-v2",
                 "https://modal.com/docs/guide/sandbox-networking",
@@ -893,8 +903,12 @@ def validate_modal_optimization_artifact(payload: dict[str, Any]) -> None:
         ):
             raise ValueError("Modal V2 not_run result requires a reason and official source URL")
     elif v2.get("status") == "measured":
-        if v2.get("comparison_scope") != "modal-v1-optimized-on-demand-only":
-            raise ValueError("Modal V2 must compare only with Modal V1 optimized on-demand")
+        if v2.get("comparison_scope") != V2_COMPARISON_SCOPE:
+            raise ValueError("Modal V2 candidate must remain descriptive V1 context only")
+        if v2.get("comparison_eligibility") != V2_COMPARISON_ELIGIBILITY:
+            raise ValueError("Modal V2 candidate comparison eligibility is invalid")
+        if v2.get("backend_causal_ratio_eligible") is not False:
+            raise ValueError("Modal V2 candidate must reject backend-causal ratios")
         if v2.get("connect_token_parity") is not False or v2.get("v2_is_default") is not False:
             raise ValueError("Modal V2 must not claim Connect Token parity or default status")
         if v2.get("authentication_path") != "encrypted-tunnel-application-bearer":
@@ -951,6 +965,10 @@ def sanitize_modal_optimization_benchmark(
     _reject_forbidden_fields(raw_payload)
     _validate_safe_value(raw_payload)
     payload = copy.deepcopy(raw_payload)
+    profiles = _mapping(payload.get("profiles"), "profiles")
+    legacy_v2 = profiles.pop(LEGACY_PROFILE_MODAL_V2, None)
+    if PROFILE_MODAL_V2 not in profiles and legacy_v2 is not None:
+        profiles[PROFILE_MODAL_V2] = legacy_v2
     if v2_raw_payload is not None:
         _merge_modal_v2_profile(
             payload,
@@ -1100,6 +1118,10 @@ def _merge_modal_v2_profile(
         if v2_provenance.get(key) != expected:
             raise ValueError(f"V2 raw {key} differs from preregistration")
     profile = copy.deepcopy(_mapping(v2_raw_payload.get("profile"), "V2 profile"))
+    profile["comparison_scope"] = V2_COMPARISON_SCOPE
+    profile["comparison_eligibility"] = V2_COMPARISON_ELIGIBILITY
+    profile["backend_causal_ratio_eligible"] = False
+    profile["limitations"] = list(V2_CANDIDATE_LIMITATIONS)
     sample_policy = _mapping(
         v2_preregistration_payload.get("sample_policy"),
         "V2 sample policy",
