@@ -1,17 +1,17 @@
 {
   "benchmark": "modal-optimization-results",
   "command_manifest": {
-    "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run --source-sha 7707edff8270aa0d66cef65d72ef44a6c99f8a0f --dependency-sha 37f977f80de93800c005caeec7ead5222b00b040 --region-selection-source-sha 182bc259105d3d5a77f3da11464d76e6672fc90f --provider-default-source-sha 7d4ff14337ccf6846e821f30c8045ca73819c190 --region-selection benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --provider-default benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --output benchmark-results/modal-optimization-2026-07-19/raw.json",
-    "normalize": "uv run python scripts/sanitize_modal_optimization_benchmark.py benchmark-results/modal-optimization-2026-07-19/raw.json benchmark-data/modal-optimization-results-2026-07-19.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/raw.json --harness-commit 7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run --source-sha ef23b3f04151e7ccf6308d129c7f00297d3edbc0 --dependency-sha 37f977f80de93800c005caeec7ead5222b00b040 --region-selection-source-sha ef23b3f04151e7ccf6308d129c7f00297d3edbc0 --provider-default-source-sha 7d4ff14337ccf6846e821f30c8045ca73819c190 --region-selection benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --provider-default benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --output benchmark-results/modal-optimization-2026-07-19/raw.json",
+    "normalize": "uv run python scripts/sanitize_modal_optimization_benchmark.py benchmark-results/modal-optimization-2026-07-19/raw.json benchmark-data/modal-optimization-results-2026-07-19.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/raw.json --harness-commit ef23b3f04151e7ccf6308d129c7f00297d3edbc0 --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --region-evidence benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json",
     "provider_default": "uv run computer-use benchmark compare --create-modal-sandbox --provider modal-daemon --provider daytona --provider e2b --modal-ingress attested-tunnel --resource-profile browser --browser chromium --iterations 3 --env-file .env --output benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json --json",
     "provider_default_normalize": "uv run python scripts/sanitize_provider_benchmark.py benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json --harness-commit 7d4ff14337ccf6846e821f30c8045ca73819c190 --status current_reference --scope \"provider-default verification for Modal, Daytona, and E2B without warm pools\"",
-    "publish_image": "uv run python scripts/publish_modal_images.py --revision 7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "publish_image": "uv run python scripts/publish_modal_images.py --revision ef23b3f04151e7ccf6308d129c7f00297d3edbc0",
     "region_selection": "uv run computer-use benchmark modal-region-ab --modal-region default --modal-region us-west --modal-region us-east --modal-ingress attested-tunnel --caller-region-label local-macos-arm64-America-Los_Angeles --resource-profile browser --browser chromium --modal-cpu 4 --modal-memory-mib 8192 --iterations 30 --output benchmark-results/modal-optimization-2026-07-19/region-selection.json",
-    "region_selection_attest": "uv run python scripts/run_modal_optimization_benchmark.py attest-region benchmark-results/modal-optimization-2026-07-19/region-selection.json benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --source-sha 182bc259105d3d5a77f3da11464d76e6672fc90f --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/region-selection.json"
+    "region_selection_attest": "uv run python scripts/run_modal_optimization_benchmark.py attest-region benchmark-results/modal-optimization-2026-07-19/region-selection.json benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --source-sha ef23b3f04151e7ccf6308d129c7f00297d3edbc0 --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/region-selection.json"
   },
   "command_manifest_sanitization": "Normalized the runner-specific credential file path to repository-relative .env. Added the digest-bound region attestation command when the execution-time preregistration did not contain that later provenance step. Updated the published replay command to consume the attested region evidence.",
   "environment_manifest": {
-    "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "image_identity": "modal-computer-use-chromium:ef23b3f04151e7ccf6308d129c7f00297d3edbc0",
     "ingress": "attested-tunnel",
     "region_policy": "Select the fastest valid explicit narrow region from the preregistered us-west and us-east probes by transport p50. Treat a difference within 5 percent as a tie, then select the lower cold create-to-ready p50.",
     "requested_region": "selection-pending",
@@ -29,7 +29,7 @@
     }
   },
   "failures": [],
-  "generated_at": "2026-07-19T07:38:09.177037Z",
+  "generated_at": "2026-07-19T08:45:32.126980Z",
   "measurement_manifest": {
     "artifact_policy": {
       "failed_samples_retained": true,
@@ -94,33 +94,33 @@
     "modal-platform-optimized-on-demand": {
       "cold_attempts": [
         {
-          "actual_placement": "westus3",
+          "actual_placement": "us-phoenix-1",
           "attempt": 0,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 11674.552042037249,
+          "elapsed_ms": 10129.937749996316,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 11.765824459027499,
+          "resource_duration_seconds": 10.205889832985122,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 10666.030708001927,
+              "elapsed_ms": 9312.379875045735,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 11355.536625022069,
+              "elapsed_ms": 9892.31079100864,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 10408.987792034168,
+              "elapsed_ms": 9033.383833011612,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 9752.013500023168,
+              "elapsed_ms": 8507.766041031573,
               "status": "observed"
             },
             "daemon_started": {
@@ -129,19 +129,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 11674.552042037249,
+              "elapsed_ms": 10129.937749996316,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.12333301128819585,
+              "elapsed_ms": 0.1356659922748804,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 536.5699580288492,
+              "elapsed_ms": 1365.124583011493,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1378.1827079947107,
+              "elapsed_ms": 2256.818583002314,
               "status": "observed"
             },
             "scheduled": {
@@ -150,44 +150,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 9643.983207992278,
+              "elapsed_ms": 8334.967666014563,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 11151.597624993883,
+              "elapsed_ms": 9776.661915995646,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "LAX2",
+          "actual_placement": "us-phoenix-1",
           "attempt": 1,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 7658.501875004731,
+          "elapsed_ms": 8769.869082956575,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 7.716485249984544,
+          "resource_duration_seconds": 8.854882666026242,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7088.223833008669,
+              "elapsed_ms": 8035.720957966987,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 7476.569874968845,
+              "elapsed_ms": 8546.879458008334,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 6882.213082979433,
+              "elapsed_ms": 7777.143832994625,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6549.88341697026,
+              "elapsed_ms": 7258.19733296521,
               "status": "observed"
             },
             "daemon_started": {
@@ -196,19 +196,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 7658.501875004731,
+              "elapsed_ms": 8769.869082956575,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 1.2418749975040555,
+              "elapsed_ms": 0.4232079954817891,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 292.3476669820957,
+              "elapsed_ms": 303.07083297520876,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1260.5473329895176,
+              "elapsed_ms": 1151.2204579776153,
               "status": "observed"
             },
             "scheduled": {
@@ -217,44 +217,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6448.7722080084495,
+              "elapsed_ms": 7153.8737079827115,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 7392.597666999791,
+              "elapsed_ms": 8422.05162497703,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "westus3",
+          "actual_placement": "us-west3",
           "attempt": 2,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 12238.95479197381,
+          "elapsed_ms": 15209.397958999034,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 12.329259291989729,
+          "resource_duration_seconds": 15.31295912497444,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 11063.810999970883,
+              "elapsed_ms": 13589.599958970211,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 11882.06029200228,
+              "elapsed_ms": 14645.37670899881,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 10749.774166964926,
+              "elapsed_ms": 13300.249708991032,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 10105.213709000964,
+              "elapsed_ms": 12605.61379196588,
               "status": "observed"
             },
             "daemon_started": {
@@ -263,19 +263,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 12238.95479197381,
+              "elapsed_ms": 15209.397958999034,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.17337495228275657,
+              "elapsed_ms": 0.39895897498354316,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 273.60095898620784,
+              "elapsed_ms": 289.018124982249,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1170.448166958522,
+              "elapsed_ms": 967.7500000107102,
               "status": "observed"
             },
             "scheduled": {
@@ -284,11 +284,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 9920.016333984677,
+              "elapsed_ms": 12495.43241696665,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 11690.520500007551,
+              "elapsed_ms": 14331.454499973916,
               "status": "observed"
             }
           },
@@ -302,26 +302,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 9097.01520903036,
+          "elapsed_ms": 8485.517791006714,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 9.237057125021238,
+          "resource_duration_seconds": 8.558672084007412,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8296.598709013779,
+              "elapsed_ms": 7817.78854096774,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8824.210749997292,
+              "elapsed_ms": 8286.255582992453,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7972.346334019676,
+              "elapsed_ms": 7516.686332994141,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7415.0190420332365,
+              "elapsed_ms": 7060.857790987939,
               "status": "observed"
             },
             "daemon_started": {
@@ -330,19 +330,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 9097.01520903036,
+              "elapsed_ms": 8485.517791006714,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.38991699693724513,
+              "elapsed_ms": 0.6537080043926835,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 324.94495902210474,
+              "elapsed_ms": 352.23991598468274,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1209.6469170064665,
+              "elapsed_ms": 1255.4923329735175,
               "status": "observed"
             },
             "scheduled": {
@@ -351,11 +351,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7315.642792033032,
+              "elapsed_ms": 6952.169249998406,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8712.680333992466,
+              "elapsed_ms": 8178.950125002302,
               "status": "observed"
             }
           },
@@ -369,26 +369,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8853.133708005771,
+          "elapsed_ms": 7853.325208008755,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.963516041985713,
+          "resource_duration_seconds": 7.92516720801359,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8145.951125014108,
+              "elapsed_ms": 7164.688583055977,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8635.573790990748,
+              "elapsed_ms": 7644.2286660312675,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7882.8653750242665,
+              "elapsed_ms": 6911.288208037149,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7287.64295799192,
+              "elapsed_ms": 6403.977458016016,
               "status": "observed"
             },
             "daemon_started": {
@@ -397,19 +397,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8853.133708005771,
+              "elapsed_ms": 7853.325208008755,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.37958298344165087,
+              "elapsed_ms": 0.34866604255512357,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 284.19529099483043,
+              "elapsed_ms": 280.72845801943913,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1160.937250009738,
+              "elapsed_ms": 1070.069625042379,
               "status": "observed"
             },
             "scheduled": {
@@ -418,44 +418,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7188.285041018389,
+              "elapsed_ms": 6298.147333029192,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8519.345791020896,
+              "elapsed_ms": 7532.594250049442,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "LAX2",
+          "actual_placement": "us-phoenix-1",
           "attempt": 5,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 7667.793333006557,
+          "elapsed_ms": 8779.076042002998,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 7.7243279999820516,
+          "resource_duration_seconds": 8.856500792026054,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7128.084541007411,
+              "elapsed_ms": 8078.62629200099,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 7507.108582998626,
+              "elapsed_ms": 8560.30708400067,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 6896.2186250137165,
+              "elapsed_ms": 7809.226666984614,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6552.098833024502,
+              "elapsed_ms": 7302.520208992064,
               "status": "observed"
             },
             "daemon_started": {
@@ -464,19 +464,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 7667.793333006557,
+              "elapsed_ms": 8779.076042002998,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 2.991124987602234,
+              "elapsed_ms": 1.8638749606907368,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 293.0082500097342,
+              "elapsed_ms": 298.00087498733774,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1114.7387499804609,
+              "elapsed_ms": 1199.6153749641962,
               "status": "observed"
             },
             "scheduled": {
@@ -485,11 +485,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6449.514665990137,
+              "elapsed_ms": 7195.322791987564,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 7430.57308299467,
+              "elapsed_ms": 8445.118542003911,
               "status": "observed"
             }
           },
@@ -503,26 +503,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 11262.754291994497,
+          "elapsed_ms": 11932.295083010104,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 11.35184295795625,
+          "resource_duration_seconds": 12.070558083010837,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 10182.023625005968,
+              "elapsed_ms": 10836.295665998477,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 10903.084833989851,
+              "elapsed_ms": 11606.218666012865,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 9921.78083397448,
+              "elapsed_ms": 10587.140874995384,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 9282.66608400736,
+              "elapsed_ms": 9952.417791006155,
               "status": "observed"
             },
             "daemon_started": {
@@ -531,19 +531,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 11262.754291994497,
+              "elapsed_ms": 11932.295083010104,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.396709016058594,
+              "elapsed_ms": 0.383333011996001,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 280.5313339922577,
+              "elapsed_ms": 285.6769579811953,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1094.948249985464,
+              "elapsed_ms": 1268.581832991913,
               "status": "observed"
             },
             "scheduled": {
@@ -552,44 +552,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 9178.830124961678,
+              "elapsed_ms": 9835.120083007496,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 10714.349167014007,
+              "elapsed_ms": 11406.996415986214,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "us-west4",
+          "actual_placement": "us-phoenix-1",
           "attempt": 7,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 10946.095167018939,
+          "elapsed_ms": 8488.049250037875,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 11.045533458003774,
+          "resource_duration_seconds": 8.55769375001546,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 10046.125792025123,
+              "elapsed_ms": 7786.861916014459,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 10668.942583026364,
+              "elapsed_ms": 8273.939375008922,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 9808.26124997111,
+              "elapsed_ms": 7522.768333030399,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 9185.777749982662,
+              "elapsed_ms": 6997.371540986933,
               "status": "observed"
             },
             "daemon_started": {
@@ -598,19 +598,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 10946.095167018939,
+              "elapsed_ms": 8488.049250037875,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.43166702380403876,
+              "elapsed_ms": 0.4722499870695174,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 278.8906670175493,
+              "elapsed_ms": 285.10258300229907,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1221.794957993552,
+              "elapsed_ms": 1171.2421250413172,
               "status": "observed"
             },
             "scheduled": {
@@ -619,11 +619,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 9084.92724999087,
+              "elapsed_ms": 6893.8234160305,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 10481.455541972537,
+              "elapsed_ms": 8163.860291009769,
               "status": "observed"
             }
           },
@@ -637,26 +637,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8399.87362496322,
+          "elapsed_ms": 9703.736459021457,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.484526874963194,
+          "resource_duration_seconds": 9.785186207969673,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7688.682042004075,
+              "elapsed_ms": 8915.661834005732,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8189.596582960803,
+              "elapsed_ms": 9456.748917000368,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7413.563207956031,
+              "elapsed_ms": 8644.087749999017,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6893.371791986283,
+              "elapsed_ms": 8093.440750031732,
               "status": "observed"
             },
             "daemon_started": {
@@ -665,19 +665,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8399.87362496322,
+              "elapsed_ms": 9703.736459021457,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.359416997525841,
+              "elapsed_ms": 0.16412499826401472,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 280.37791699171066,
+              "elapsed_ms": 286.4991669775918,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1105.102541972883,
+              "elapsed_ms": 994.8659170186147,
               "status": "observed"
             },
             "scheduled": {
@@ -686,11 +686,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6788.025124988053,
+              "elapsed_ms": 7979.665749997366,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8075.636374996975,
+              "elapsed_ms": 9311.682416999247,
               "status": "observed"
             }
           },
@@ -704,26 +704,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 13006.455958005972,
+          "elapsed_ms": 12028.400209033862,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 13.17398266599048,
+          "resource_duration_seconds": 12.116896374966018,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 11872.81295802677,
+              "elapsed_ms": 10998.778917011805,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 12648.046041023917,
+              "elapsed_ms": 11725.71287502069,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 11600.226833019406,
+              "elapsed_ms": 10730.889792030212,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 10833.188958000392,
+              "elapsed_ms": 9974.96670903638,
               "status": "observed"
             },
             "daemon_started": {
@@ -732,19 +732,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 13006.455958005972,
+              "elapsed_ms": 12028.400209033862,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.43829099740833044,
+              "elapsed_ms": 0.36266702227294445,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 275.23379103513435,
+              "elapsed_ms": 283.05100003490224,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1163.4268750203773,
+              "elapsed_ms": 1127.9432920273393,
               "status": "observed"
             },
             "scheduled": {
@@ -753,11 +753,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 10730.146375019103,
+              "elapsed_ms": 9852.932209032588,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 12386.52825000463,
+              "elapsed_ms": 11532.14783401927,
               "status": "observed"
             }
           },
@@ -771,26 +771,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 9351.629875018261,
+          "elapsed_ms": 8865.684667020105,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 9.426158457994461,
+          "resource_duration_seconds": 8.944192875002045,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8548.669583979063,
+              "elapsed_ms": 8164.022332988679,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 9046.31841700757,
+              "elapsed_ms": 8656.137000012677,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 8191.282459010836,
+              "elapsed_ms": 7913.222458038945,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7576.337958977092,
+              "elapsed_ms": 7438.575000036508,
               "status": "observed"
             },
             "daemon_started": {
@@ -799,19 +799,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 9351.629875018261,
+              "elapsed_ms": 8865.684667020105,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.3635419998317957,
+              "elapsed_ms": 0.4028750117868185,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 289.41062500234693,
+              "elapsed_ms": 295.8547080052085,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1362.6950840116479,
+              "elapsed_ms": 1160.547667008359,
               "status": "observed"
             },
             "scheduled": {
@@ -820,11 +820,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7473.585500032641,
+              "elapsed_ms": 7336.6136670229025,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8922.223250032403,
+              "elapsed_ms": 8527.750374982134,
               "status": "observed"
             }
           },
@@ -838,26 +838,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8461.415208003018,
+          "elapsed_ms": 14990.046833991073,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.537814416980837,
+          "resource_duration_seconds": 15.098205375019461,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7726.872583036311,
+              "elapsed_ms": 13541.180624975823,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8229.15908304276,
+              "elapsed_ms": 14526.66816697456,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7452.592333022039,
+              "elapsed_ms": 13229.853291995823,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6957.358292012941,
+              "elapsed_ms": 12403.59320899006,
               "status": "observed"
             },
             "daemon_started": {
@@ -866,19 +866,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8461.415208003018,
+              "elapsed_ms": 14990.046833991073,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.4502920201048255,
+              "elapsed_ms": 0.36370899761095643,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 273.82195804966614,
+              "elapsed_ms": 298.536708985921,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1137.8722080262378,
+              "elapsed_ms": 1120.046124968212,
               "status": "observed"
             },
             "scheduled": {
@@ -887,11 +887,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6854.523167014122,
+              "elapsed_ms": 12300.361333996989,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8101.862625044305,
+              "elapsed_ms": 14207.31316698948,
               "status": "observed"
             }
           },
@@ -905,26 +905,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 16062.681666982826,
+          "elapsed_ms": 8468.962750048377,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 16.161808540986385,
+          "resource_duration_seconds": 8.553696667018812,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 14426.893625000957,
+              "elapsed_ms": 7618.570749997161,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 15522.29220897425,
+              "elapsed_ms": 8246.079500007909,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 14117.041166988201,
+              "elapsed_ms": 7347.889333032072,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 13166.924458986614,
+              "elapsed_ms": 6864.302208006848,
               "status": "observed"
             },
             "daemon_started": {
@@ -933,19 +933,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 16062.681666982826,
+              "elapsed_ms": 8468.962750048377,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.41866698302328587,
+              "elapsed_ms": 0.4024580121040344,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 274.7950420016423,
+              "elapsed_ms": 291.24200000660494,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1028.4813339821994,
+              "elapsed_ms": 1069.860042014625,
               "status": "observed"
             },
             "scheduled": {
@@ -954,11 +954,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 13063.971499970648,
+              "elapsed_ms": 6748.932707996573,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 15112.967249995563,
+              "elapsed_ms": 8133.886875002645,
               "status": "observed"
             }
           },
@@ -972,26 +972,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8865.867707994767,
+          "elapsed_ms": 8862.937333993614,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.949761333002243,
+          "resource_duration_seconds": 8.944745749991853,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8062.5742499832995,
+              "elapsed_ms": 8066.387208993547,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8606.75816697767,
+              "elapsed_ms": 8610.499625036027,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7780.472124984954,
+              "elapsed_ms": 7778.200625034515,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7153.199583000969,
+              "elapsed_ms": 7179.25629200181,
               "status": "observed"
             },
             "daemon_started": {
@@ -1000,19 +1000,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8865.867707994767,
+              "elapsed_ms": 8862.937333993614,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.31287496676668525,
+              "elapsed_ms": 0.37650001468136907,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 294.2950829747133,
+              "elapsed_ms": 393.27816700097173,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1019.8041669791564,
+              "elapsed_ms": 1453.2280000275932,
               "status": "observed"
             },
             "scheduled": {
@@ -1021,44 +1021,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7050.770707952324,
+              "elapsed_ms": 7066.943417012226,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8459.595999971498,
+              "elapsed_ms": 8468.528209021315,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "us-west-2",
+          "actual_placement": "us-phoenix-1",
           "attempt": 14,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 10997.501708043274,
+          "elapsed_ms": 10642.72483397508,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 11.07282858301187,
+          "resource_duration_seconds": 10.722076916019432,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 9910.02525005024,
+              "elapsed_ms": 9785.092749982141,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 10619.408500031568,
+              "elapsed_ms": 10362.571334000677,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 9624.040417023934,
+              "elapsed_ms": 9493.890042009298,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 8905.421125004068,
+              "elapsed_ms": 8926.627209002618,
               "status": "observed"
             },
             "daemon_started": {
@@ -1067,19 +1067,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 10997.501708043274,
+              "elapsed_ms": 10642.72483397508,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.3607080434449017,
+              "elapsed_ms": 0.7249169866554439,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 274.1489170002751,
+              "elapsed_ms": 295.6218339968473,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1097.617125022225,
+              "elapsed_ms": 1187.7437090151943,
               "status": "observed"
             },
             "scheduled": {
@@ -1088,11 +1088,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 8804.150333045982,
+              "elapsed_ms": 8823.217666998971,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 10441.820167005062,
+              "elapsed_ms": 10202.22370896954,
               "status": "observed"
             }
           },
@@ -1106,26 +1106,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8312.447500007693,
+          "elapsed_ms": 8458.393707987852,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.385324500035495,
+          "resource_duration_seconds": 8.534029125003144,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7598.8760410109535,
+              "elapsed_ms": 7717.758832965046,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8096.18449996924,
+              "elapsed_ms": 8229.17712497292,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7333.771041012369,
+              "elapsed_ms": 7464.009457966313,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6858.741874981206,
+              "elapsed_ms": 6859.353166015353,
               "status": "observed"
             },
             "daemon_started": {
@@ -1134,19 +1134,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8312.447500007693,
+              "elapsed_ms": 8458.393707987852,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.4000829649157822,
+              "elapsed_ms": 0.32762496266514063,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 285.6612909818068,
+              "elapsed_ms": 291.41170799266547,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1158.843832963612,
+              "elapsed_ms": 1109.6931250067428,
               "status": "observed"
             },
             "scheduled": {
@@ -1155,11 +1155,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6758.485957980156,
+              "elapsed_ms": 6737.573499965947,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 7981.570457981434,
+              "elapsed_ms": 8110.064374981448,
               "status": "observed"
             }
           },
@@ -1173,26 +1173,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8737.099833029788,
+          "elapsed_ms": 8645.793833013158,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.891207166016102,
+          "resource_duration_seconds": 8.727965541998856,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7950.871166016441,
+              "elapsed_ms": 7919.996707991231,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8509.688666032162,
+              "elapsed_ms": 8420.836916018743,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7504.372041032184,
+              "elapsed_ms": 7641.6932080173865,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6991.909291013144,
+              "elapsed_ms": 7101.167666027322,
               "status": "observed"
             },
             "daemon_started": {
@@ -1201,19 +1201,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8737.099833029788,
+              "elapsed_ms": 8645.793833013158,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.8975000237114727,
+              "elapsed_ms": 0.381499994546175,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 280.14074999373406,
+              "elapsed_ms": 292.96633298508823,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1063.9805000391789,
+              "elapsed_ms": 1182.0951660047285,
               "status": "observed"
             },
             "scheduled": {
@@ -1222,44 +1222,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6891.654375009239,
+              "elapsed_ms": 6995.990000024904,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8400.507291022222,
+              "elapsed_ms": 8296.500458032824,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "westus3",
+          "actual_placement": "us-phoenix-1",
           "attempt": 17,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 12302.387915959116,
+          "elapsed_ms": 14611.937707988545,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 12.393702957953792,
+          "resource_duration_seconds": 14.699042042018846,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 11284.852874989156,
+              "elapsed_ms": 13048.061082954518,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 11996.149332961068,
+              "elapsed_ms": 14058.702541980892,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 11021.952832990792,
+              "elapsed_ms": 12727.28037496563,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 10392.61366595747,
+              "elapsed_ms": 11981.290958006866,
               "status": "observed"
             },
             "daemon_started": {
@@ -1268,19 +1268,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 12302.387915959116,
+              "elapsed_ms": 14611.937707988545,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.44795795110985637,
+              "elapsed_ms": 0.2013749908655882,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 323.85245797922835,
+              "elapsed_ms": 286.3560419646092,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1175.5017910036258,
+              "elapsed_ms": 1191.211957950145,
               "status": "observed"
             },
             "scheduled": {
@@ -1289,11 +1289,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 10292.66616597306,
+              "elapsed_ms": 11879.834457999095,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 11781.944999995176,
+              "elapsed_ms": 13748.771999962628,
               "status": "observed"
             }
           },
@@ -1307,26 +1307,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8304.832707974128,
+          "elapsed_ms": 8740.055207978003,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.384457665961236,
+          "resource_duration_seconds": 8.813813250046223,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7587.5996249960735,
+              "elapsed_ms": 8054.091790982056,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8084.902582981158,
+              "elapsed_ms": 8534.364582970738,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7313.4961249888875,
+              "elapsed_ms": 7779.598499997519,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6858.716625021771,
+              "elapsed_ms": 7204.955624998547,
               "status": "observed"
             },
             "daemon_started": {
@@ -1335,19 +1335,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8304.832707974128,
+              "elapsed_ms": 8740.055207978003,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.34683296689763665,
+              "elapsed_ms": 0.4131249734200537,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 269.65245796600357,
+              "elapsed_ms": 294.02891598874703,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1156.3017920125276,
+              "elapsed_ms": 1158.2639999687672,
               "status": "observed"
             },
             "scheduled": {
@@ -1356,11 +1356,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6757.337999995798,
+              "elapsed_ms": 7099.028791009914,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 7970.402417005971,
+              "elapsed_ms": 8421.510957996361,
               "status": "observed"
             }
           },
@@ -1374,26 +1374,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8428.444084012881,
+          "elapsed_ms": 17502.626542001963,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.505793834046926,
+          "resource_duration_seconds": 17.586768500041217,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7706.221458967775,
+              "elapsed_ms": 16741.927541967016,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8206.039667013101,
+              "elapsed_ms": 17281.556958972942,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7419.102750020102,
+              "elapsed_ms": 16484.27320900373,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6899.127000011504,
+              "elapsed_ms": 15972.568249970209,
               "status": "observed"
             },
             "daemon_started": {
@@ -1402,19 +1402,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8428.444084012881,
+              "elapsed_ms": 17502.626542001963,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.324334017932415,
+              "elapsed_ms": 0.3712920006364584,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 268.6813339823857,
+              "elapsed_ms": 293.56633400311694,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 974.5303749805316,
+              "elapsed_ms": 9670.679041999392,
               "status": "observed"
             },
             "scheduled": {
@@ -1423,11 +1423,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6791.299499978777,
+              "elapsed_ms": 15869.545124995057,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8088.4073749766685,
+              "elapsed_ms": 17156.002959003672,
               "status": "observed"
             }
           },
@@ -1441,26 +1441,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8292.579250002746,
+          "elapsed_ms": 16169.780041964259,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.375740916992072,
+          "resource_duration_seconds": 16.289135583036114,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7583.138083980884,
+              "elapsed_ms": 14379.03687497601,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8064.5299589959905,
+              "elapsed_ms": 15602.518124971539,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7317.683917004615,
+              "elapsed_ms": 14049.27466699155,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 6860.091542010196,
+              "elapsed_ms": 13262.001541967038,
               "status": "observed"
             },
             "daemon_started": {
@@ -1469,19 +1469,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8292.579250002746,
+              "elapsed_ms": 16169.780041964259,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.3658339846879244,
+              "elapsed_ms": 0.3482920001260936,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 278.88079197146,
+              "elapsed_ms": 368.0125829996541,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1179.8033749801107,
+              "elapsed_ms": 1168.7802079832181,
               "status": "observed"
             },
             "scheduled": {
@@ -1490,11 +1490,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6756.723792001139,
+              "elapsed_ms": 13151.99629199924,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 7952.037459006533,
+              "elapsed_ms": 15088.47329200944,
               "status": "observed"
             }
           },
@@ -1508,26 +1508,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8744.846209010575,
+          "elapsed_ms": 8871.184000046924,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.829080541967414,
+          "resource_duration_seconds": 8.948133125028107,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7901.217084028758,
+              "elapsed_ms": 8153.02258299198,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8453.999124991242,
+              "elapsed_ms": 8654.132499999832,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7636.531500029378,
+              "elapsed_ms": 7874.400500033516,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7140.834374993574,
+              "elapsed_ms": 7307.8163750469685,
               "status": "observed"
             },
             "daemon_started": {
@@ -1536,19 +1536,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8744.846209010575,
+              "elapsed_ms": 8871.184000046924,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.5162919987924397,
+              "elapsed_ms": 0.2812080201692879,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 284.2297090101056,
+              "elapsed_ms": 293.25737501494586,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1679.5302090467885,
+              "elapsed_ms": 1165.4680410283618,
               "status": "observed"
             },
             "scheduled": {
@@ -1557,11 +1557,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7037.805625004694,
+              "elapsed_ms": 7205.07579104742,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8297.332084039226,
+              "elapsed_ms": 8533.022958028596,
               "status": "observed"
             }
           },
@@ -1575,26 +1575,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 9054.14970900165,
+          "elapsed_ms": 8252.64858402079,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 9.129783417040017,
+          "resource_duration_seconds": 8.329043375037145,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8357.81895898981,
+              "elapsed_ms": 7550.690459029283,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8837.30229199864,
+              "elapsed_ms": 8042.664542037528,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 8079.57612501923,
+              "elapsed_ms": 7275.962834013626,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7618.755458970554,
+              "elapsed_ms": 6795.503125002142,
               "status": "observed"
             },
             "daemon_started": {
@@ -1603,19 +1603,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 9054.14970900165,
+              "elapsed_ms": 8252.64858402079,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.35191699862480164,
+              "elapsed_ms": 0.20441703964024782,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 308.26525000156835,
+              "elapsed_ms": 302.29812499601394,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1105.5240419809707,
+              "elapsed_ms": 1223.9272920414805,
               "status": "observed"
             },
             "scheduled": {
@@ -1624,11 +1624,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7506.421209021937,
+              "elapsed_ms": 6686.637542035896,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8715.756958990823,
+              "elapsed_ms": 7929.041834024247,
               "status": "observed"
             }
           },
@@ -1642,26 +1642,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 13824.250000005122,
+          "elapsed_ms": 8776.85945801204,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 13.92462974996306,
+          "resource_duration_seconds": 8.850292290968355,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 12350.061042001471,
+              "elapsed_ms": 8047.005500004161,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 13300.038208020851,
+              "elapsed_ms": 8563.36937501328,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 12042.009500029963,
+              "elapsed_ms": 7760.314750019461,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 11157.008167007007,
+              "elapsed_ms": 7264.300375012681,
               "status": "observed"
             },
             "daemon_started": {
@@ -1670,19 +1670,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 13824.250000005122,
+              "elapsed_ms": 8776.85945801204,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.345708045642823,
+              "elapsed_ms": 0.38470799336209893,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 270.8664580131881,
+              "elapsed_ms": 298.9992080256343,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1081.5162500366569,
+              "elapsed_ms": 1143.6532079824246,
               "status": "observed"
             },
             "scheduled": {
@@ -1691,11 +1691,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 11049.465332995169,
+              "elapsed_ms": 7157.163999974728,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 13091.416375013068,
+              "elapsed_ms": 8432.800624985248,
               "status": "observed"
             }
           },
@@ -1709,26 +1709,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 9027.031250006985,
+          "elapsed_ms": 8219.629250001162,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 9.113432416983414,
+          "resource_duration_seconds": 8.298859916976653,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8281.344125047326,
+              "elapsed_ms": 7523.486917023547,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8801.254292018712,
+              "elapsed_ms": 8010.352874989621,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 8023.98075000383,
+              "elapsed_ms": 7243.787583021913,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7546.734584029764,
+              "elapsed_ms": 6736.920416995417,
               "status": "observed"
             },
             "daemon_started": {
@@ -1737,19 +1737,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 9027.031250006985,
+              "elapsed_ms": 8219.629250001162,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.3637500340119004,
+              "elapsed_ms": 0.4397500306367874,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 377.8992500156164,
+              "elapsed_ms": 297.0643329899758,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1243.2410000474192,
+              "elapsed_ms": 1239.3452080432326,
               "status": "observed"
             },
             "scheduled": {
@@ -1758,44 +1758,44 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7446.023084048647,
+              "elapsed_ms": 6630.962792027276,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8679.482000006828,
+              "elapsed_ms": 7897.776083031204,
               "status": "observed"
             }
           },
           "status": "valid"
         },
         {
-          "actual_placement": "us-phoenix-1",
+          "actual_placement": "westus3",
           "attempt": 25,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 20581.368583021685,
+          "elapsed_ms": 11923.150416987482,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 20.672975125024095,
+          "resource_duration_seconds": 12.1015583340195,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 19137.424667016603,
+              "elapsed_ms": 10832.204917038325,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 20212.457000045106,
+              "elapsed_ms": 11609.010791988112,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 18838.92404200742,
+              "elapsed_ms": 10529.83904199209,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 16794.711458031088,
+              "elapsed_ms": 9822.0650840085,
               "status": "observed"
             },
             "daemon_started": {
@@ -1804,19 +1804,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 20581.368583021685,
+              "elapsed_ms": 11923.150416987482,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.3255000337958336,
+              "elapsed_ms": 0.38045900873839855,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 276.76045801490545,
+              "elapsed_ms": 293.3087089913897,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1153.768292046152,
+              "elapsed_ms": 1165.131209010724,
               "status": "observed"
             },
             "scheduled": {
@@ -1825,11 +1825,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 16693.74391704332,
+              "elapsed_ms": 9715.81054199487,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 19964.53100000508,
+              "elapsed_ms": 11432.486334000714,
               "status": "observed"
             }
           },
@@ -1843,26 +1843,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 11644.684500002768,
+          "elapsed_ms": 8406.430917035323,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 11.725974750006571,
+          "resource_duration_seconds": 8.487860709021334,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 10803.10062499484,
+              "elapsed_ms": 7693.977584014647,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 11384.890125016682,
+              "elapsed_ms": 8192.982584005222,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 10519.188667007256,
+              "elapsed_ms": 7429.234500043094,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 9982.711334014311,
+              "elapsed_ms": 6948.722375032958,
               "status": "observed"
             },
             "daemon_started": {
@@ -1871,19 +1871,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 11644.684500002768,
+              "elapsed_ms": 8406.430917035323,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.37887500366196036,
+              "elapsed_ms": 0.37029205122962594,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 288.9202919905074,
+              "elapsed_ms": 330.0625000265427,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1095.4317499999888,
+              "elapsed_ms": 1333.4202920086682,
               "status": "observed"
             },
             "scheduled": {
@@ -1892,11 +1892,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 9878.684499999508,
+              "elapsed_ms": 6836.678875028156,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 11260.592084028758,
+              "elapsed_ms": 8074.628625006881,
               "status": "observed"
             }
           },
@@ -1910,26 +1910,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8544.936541002244,
+          "elapsed_ms": 14615.367082995363,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 8.621214125014376,
+          "resource_duration_seconds": 14.749775208998471,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 7819.345833035186,
+              "elapsed_ms": 13262.631250021514,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8325.014541042037,
+              "elapsed_ms": 14153.631417022552,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7559.936708013993,
+              "elapsed_ms": 12969.76279199589,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7040.137083036825,
+              "elapsed_ms": 12190.129208029248,
               "status": "observed"
             },
             "daemon_started": {
@@ -1938,19 +1938,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8544.936541002244,
+              "elapsed_ms": 14615.367082995363,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.40195800829678774,
+              "elapsed_ms": 0.8368330309167504,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 294.86620804527774,
+              "elapsed_ms": 292.73208300583065,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1167.2741660149768,
+              "elapsed_ms": 1160.9313749941066,
               "status": "observed"
             },
             "scheduled": {
@@ -1959,11 +1959,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 6938.046500028577,
+              "elapsed_ms": 12073.793667019345,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8207.091415999457,
+              "elapsed_ms": 13918.063500022981,
               "status": "observed"
             }
           },
@@ -1977,26 +1977,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 8941.161499998998,
+          "elapsed_ms": 9681.516624987125,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 9.042837666987907,
+          "resource_duration_seconds": 9.760399332968518,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 8035.6728750048205,
+              "elapsed_ms": 8965.349209029227,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 8631.92070799414,
+              "elapsed_ms": 9463.887666992377,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 7776.956957997754,
+              "elapsed_ms": 8684.433999995235,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 7187.258124991786,
+              "elapsed_ms": 7882.923084020149,
               "status": "observed"
             },
             "daemon_started": {
@@ -2005,19 +2005,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 8941.161499998998,
+              "elapsed_ms": 9681.516624987125,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.3445830079726875,
+              "elapsed_ms": 0.24633400607854128,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 287.32945799129084,
+              "elapsed_ms": 291.2165420129895,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1149.7028750018217,
+              "elapsed_ms": 1160.9952499857172,
               "status": "observed"
             },
             "scheduled": {
@@ -2026,11 +2026,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 7088.629416015465,
+              "elapsed_ms": 7762.479208991863,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 8494.177000015043,
+              "elapsed_ms": 9342.532666982152,
               "status": "observed"
             }
           },
@@ -2044,26 +2044,26 @@
             "error_type": null,
             "succeeded": true
           },
-          "elapsed_ms": 12135.050042008515,
+          "elapsed_ms": 8460.275915975217,
           "failure": null,
           "requested_placement": "us-west",
-          "resource_duration_seconds": 12.28731758298818,
+          "resource_duration_seconds": 8.536270292010158,
           "retry_count": 0,
           "stages": {
             "attestation_ready": {
-              "elapsed_ms": 11143.41149997199,
+              "elapsed_ms": 7740.455040999223,
               "status": "observed"
             },
             "browser_ready": {
-              "elapsed_ms": 11768.722167005762,
+              "elapsed_ms": 8242.62108298717,
               "status": "observed"
             },
             "connect_ready": {
-              "elapsed_ms": 10843.303833971731,
+              "elapsed_ms": 7461.901416012552,
               "status": "observed"
             },
             "connect_token_ready": {
-              "elapsed_ms": 9994.115917012095,
+              "elapsed_ms": 6954.456540988758,
               "status": "observed"
             },
             "daemon_started": {
@@ -2072,19 +2072,19 @@
               "status": "unsupported"
             },
             "first_valid_frame": {
-              "elapsed_ms": 12135.050042008515,
+              "elapsed_ms": 8460.275915975217,
               "status": "observed"
             },
             "request_received": {
-              "elapsed_ms": 0.4045839887112379,
+              "elapsed_ms": 0.3714159829542041,
               "status": "observed"
             },
             "sandbox_create_started": {
-              "elapsed_ms": 278.25279196258634,
+              "elapsed_ms": 295.3549160156399,
               "status": "observed"
             },
             "sandbox_registered": {
-              "elapsed_ms": 1222.8928749682382,
+              "elapsed_ms": 1128.3457499812357,
               "status": "observed"
             },
             "scheduled": {
@@ -2093,11 +2093,11 @@
               "status": "unsupported"
             },
             "tcp_ready": {
-              "elapsed_ms": 9818.639250006527,
+              "elapsed_ms": 6847.532041021623,
               "status": "observed"
             },
             "tunnel_ready": {
-              "elapsed_ms": 11604.414041968994,
+              "elapsed_ms": 8126.301166019402,
               "status": "observed"
             }
           },
@@ -2109,8 +2109,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 8288.971417030552,
-          "p95_ms": 13492.318962651183,
+          "p50_ms": 8115.824437496485,
+          "p95_ms": 14023.790262773397,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2120,8 +2120,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 8812.732521008002,
-          "p95_ms": 14522.277908545215,
+          "p50_ms": 8632.31606251793,
+          "p95_ms": 15171.80448778381,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2131,8 +2131,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 7998.163542011753,
-          "p95_ms": 13183.276916856988,
+          "p50_ms": 7841.813583509065,
+          "p95_ms": 13712.213435891315,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2142,8 +2142,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 7480.8768130315,
-          "p95_ms": 12262.462127595785,
+          "p50_ms": 7305.168292019516,
+          "p95_ms": 12966.627054466515,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2159,8 +2159,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 9040.590479504317,
-          "p95_ms": 15055.387416842852,
+          "p50_ms": 8864.31100050686,
+          "p95_ms": 15737.608104629906,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2170,8 +2170,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 0.3792289935518056,
-          "p95_ms": 1.0869062592973924,
+          "p50_ms": 0.3784795117098838,
+          "p95_ms": 0.7864708109991622,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2181,8 +2181,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 282.3633124935441,
-          "p95_ms": 354.069819068536,
+          "p50_ms": 293.797624995932,
+          "p95_ms": 381.90865420037875,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2192,8 +2192,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 1157.5728124880698,
-          "p95_ms": 1371.2132772023324,
+          "p50_ms": 1165.2996250195429,
+          "p95_ms": 1895.2028206636874,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2209,8 +2209,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 7380.8329380408395,
-          "p95_ms": 12157.443724831677,
+          "p50_ms": 7200.199291517492,
+          "p95_ms": 12856.542548234573,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2220,8 +2220,8 @@
           "attempted": 30,
           "failed": 0,
           "minimum_p95_samples": 20,
-          "p50_ms": 8696.081166999647,
-          "p95_ms": 14203.269356253433,
+          "p50_ms": 8498.139292001724,
+          "p95_ms": 14747.81483559345,
           "p95_status": "reported",
           "status": "observed",
           "timeout": 0,
@@ -2232,16 +2232,16 @@
         "attempted": 30,
         "failed": 0,
         "minimum_p95_samples": 20,
-        "p50_ms": 9040.590479504317,
-        "p95_ms": 15055.387416842852,
+        "p50_ms": 8864.31100050686,
+        "p95_ms": 15737.608104629906,
         "p95_status": "reported",
         "timeout": 0,
         "valid": 30
       },
       "comparison_scope": "modal-provider-native-on-demand",
       "estimated_billed_cost": {
-        "duration_seconds": 330.85897428984754,
-        "estimated_usd": 0.12219283638472649,
+        "duration_seconds": 333.65213512524497,
+        "estimated_usd": 0.12322440654445545,
         "excluded": [
           "runner_compute",
           "control_plane",
@@ -2273,7 +2273,7 @@
           "succeeded": true
         },
         "target_loopback": false,
-        "target_resource_duration_seconds": 16.634774415986612
+        "target_resource_duration_seconds": 16.431864791025873
       },
       "warm_action_attempts": [
         {
@@ -2285,7 +2285,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 14.38679200000026,
+          "elapsed_ms": 41.160644000000076,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2300,7 +2300,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 31.330715999999814,
+          "elapsed_ms": 32.18151399999991,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2315,7 +2315,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 19.96311999999989,
+          "elapsed_ms": 35.954099000000014,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2330,7 +2330,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 29.65245999999988,
+          "elapsed_ms": 31.35399800000016,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2345,7 +2345,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 29.398833999999763,
+          "elapsed_ms": 9.531675000000295,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2360,7 +2360,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 20.492142999999796,
+          "elapsed_ms": 32.52264300000007,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2375,7 +2375,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 33.19126100000025,
+          "elapsed_ms": 19.946587000000182,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2390,7 +2390,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 40.05673200000004,
+          "elapsed_ms": 30.66638899999985,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2405,7 +2405,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 32.99497099999993,
+          "elapsed_ms": 29.811164999999917,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2420,7 +2420,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 30.132504000000004,
+          "elapsed_ms": 43.986065999999994,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2435,7 +2435,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 36.33274900000005,
+          "elapsed_ms": 28.5862429999999,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2450,7 +2450,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 33.48879599999988,
+          "elapsed_ms": 40.90941800000003,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2465,7 +2465,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 33.265865000000176,
+          "elapsed_ms": 33.32745500000023,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2480,7 +2480,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 29.793367999999987,
+          "elapsed_ms": 32.83745100000024,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2495,7 +2495,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 36.9772049999999,
+          "elapsed_ms": 32.11651999999976,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2510,7 +2510,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 31.175230999999748,
+          "elapsed_ms": 32.36458999999936,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2525,7 +2525,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 37.08806899999972,
+          "elapsed_ms": 32.8133949999998,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2540,7 +2540,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 33.86840000000024,
+          "elapsed_ms": 36.0253359999998,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2555,7 +2555,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 32.345675000000185,
+          "elapsed_ms": 30.65673099999966,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2570,7 +2570,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 32.90463600000049,
+          "elapsed_ms": 33.090621000000375,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2585,7 +2585,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 32.41086099999979,
+          "elapsed_ms": 31.81996999999992,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2600,7 +2600,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 35.957140999999915,
+          "elapsed_ms": 29.630843999999712,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2615,7 +2615,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 31.93719400000017,
+          "elapsed_ms": 40.81252699999993,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2630,7 +2630,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 31.637594999999408,
+          "elapsed_ms": 31.387191000000314,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2645,7 +2645,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 33.265904999999485,
+          "elapsed_ms": 29.243802999999957,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2660,7 +2660,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 30.67761800000035,
+          "elapsed_ms": 36.53616999999976,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2675,7 +2675,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 38.56668000000063,
+          "elapsed_ms": 36.07869299999944,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2690,7 +2690,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 47.75764999999943,
+          "elapsed_ms": 38.74011500000041,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2705,7 +2705,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 31.11801000000014,
+          "elapsed_ms": 41.744834000000175,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2720,7 +2720,7 @@
             "reason": "persistent target cleanup is recorded at profile scope",
             "succeeded": null
           },
-          "elapsed_ms": 36.44609699999979,
+          "elapsed_ms": 30.357457000000032,
           "failure": null,
           "requested_placement": "us-west",
           "retry_count": 0,
@@ -2731,8 +2731,8 @@
         "attempted": 30,
         "failed": 0,
         "minimum_p95_samples": 20,
-        "p50_ms": 32.65774850000014,
-        "p95_ms": 39.3862086000003,
+        "p50_ms": 32.44361649999972,
+        "p95_ms": 41.48194850000013,
         "p95_status": "reported",
         "timeout": 0,
         "valid": 30
@@ -2750,8 +2750,8 @@
         "attempted": 30,
         "failed": 0,
         "minimum_p95_samples": 20,
-        "p50_ms": 3023.5807709686924,
-        "p95_ms": 3375.2928037865786,
+        "p50_ms": 2698.0085209652316,
+        "p95_ms": 2940.5987980862847,
         "p95_status": "reported",
         "timeout": 0,
         "valid": 30
@@ -2760,23 +2760,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 0,
-          "claim_elapsed_ms": 2831.541749997996,
+          "claim_elapsed_ms": 2421.6595420148224,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 1964.5599169889465,
-          "estimated_idle_cost_usd": 0.01964895485784,
+          "elapsed_ms": 1672.6577499648556,
+          "estimated_idle_cost_usd": 0.018560322112080002,
           "failure": null,
-          "idle_resource_seconds": 53.203062,
+          "idle_resource_seconds": 50.255394,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 823.392484,
-          "request_to_authenticated_ms": 1683.9428329840302,
+          "remaining_lifetime_seconds": 825.671259,
+          "request_to_authenticated_ms": 1505.4777499753982,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2784,23 +2784,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 1,
-          "claim_elapsed_ms": 2941.5573330479674,
+          "claim_elapsed_ms": 2477.4949160055257,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2167.5815830240026,
-          "estimated_idle_cost_usd": 0.016767343313559998,
+          "elapsed_ms": 1752.7871659840457,
+          "estimated_idle_cost_usd": 0.01649281261544,
           "failure": null,
-          "idle_resource_seconds": 45.400583,
+          "idle_resource_seconds": 44.657242,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 828.048692,
-          "request_to_authenticated_ms": 1938.5411660186946,
+          "remaining_lifetime_seconds": 831.951783,
+          "request_to_authenticated_ms": 1573.7642080057412,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2808,23 +2808,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 2,
-          "claim_elapsed_ms": 2616.7449579807,
+          "claim_elapsed_ms": 2564.055291994009,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 1907.2666250285693,
-          "estimated_idle_cost_usd": 0.0149500809864,
+          "elapsed_ms": 1826.2619170127437,
+          "estimated_idle_cost_usd": 0.0144073523202,
           "failure": null,
-          "idle_resource_seconds": 40.48002,
+          "idle_resource_seconds": 39.010485,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 836.038832,
-          "request_to_authenticated_ms": 1690.2858330286108,
+          "remaining_lifetime_seconds": 837.271337,
+          "request_to_authenticated_ms": 1652.8487500036135,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2832,23 +2832,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 3,
-          "claim_elapsed_ms": 2915.483541029971,
+          "claim_elapsed_ms": 2832.791958004236,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 1911.7722079972737,
-          "estimated_idle_cost_usd": 0.01830182654972,
+          "elapsed_ms": 2071.3000830146484,
+          "estimated_idle_cost_usd": 0.021313460154560003,
           "failure": null,
-          "idle_resource_seconds": 49.555471,
+          "idle_resource_seconds": 57.710008,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 826.449032,
-          "request_to_authenticated_ms": 1651.4205830171704,
+          "remaining_lifetime_seconds": 808.225031,
+          "request_to_authenticated_ms": 1839.8095830343664,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2856,23 +2856,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 4,
-          "claim_elapsed_ms": 3102.706041012425,
+          "claim_elapsed_ms": 2693.4215829824097,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2140.48158301739,
-          "estimated_idle_cost_usd": 0.01663164628188,
+          "elapsed_ms": 1936.299916007556,
+          "estimated_idle_cost_usd": 0.0175500974796,
           "failure": null,
-          "idle_resource_seconds": 45.033159,
+          "idle_resource_seconds": 47.52003,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 831.703521,
-          "request_to_authenticated_ms": 1914.7917079972103,
+          "remaining_lifetime_seconds": 823.674934,
+          "request_to_authenticated_ms": 1726.7997079761699,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2880,23 +2880,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 5,
-          "claim_elapsed_ms": 2945.0386249809526,
+          "claim_elapsed_ms": 2904.595416970551,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2132.4121250072494,
-          "estimated_idle_cost_usd": 0.015035944562519998,
+          "elapsed_ms": 2107.0153749897145,
+          "estimated_idle_cost_usd": 0.01500461440828,
           "failure": null,
-          "idle_resource_seconds": 40.712511,
+          "idle_resource_seconds": 40.627679,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 836.136471,
-          "request_to_authenticated_ms": 1896.4592500124127,
+          "remaining_lifetime_seconds": 833.818482,
+          "request_to_authenticated_ms": 1898.1877919868566,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2904,71 +2904,71 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 6,
-          "claim_elapsed_ms": 2926.8155000172555,
+          "claim_elapsed_ms": 2536.4965830231085,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 1986.6992920287885,
-          "estimated_idle_cost_usd": 0.0195088691966,
+          "elapsed_ms": 1763.3434580056928,
+          "estimated_idle_cost_usd": 0.02124180875068,
           "failure": null,
-          "idle_resource_seconds": 52.823755,
+          "idle_resource_seconds": 57.515999,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 823.879702,
-          "request_to_authenticated_ms": 1789.6403340273537,
+          "remaining_lifetime_seconds": 818.66036,
+          "request_to_authenticated_ms": 1570.7357079954818,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
-          "actual_placement": "us-phoenix-1",
+          "actual_placement": "us-west-2",
           "attempt": 7,
-          "claim_elapsed_ms": 3325.922374962829,
+          "claim_elapsed_ms": 2835.6404580408707,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2351.735624950379,
-          "estimated_idle_cost_usd": 0.01688506147832,
+          "elapsed_ms": 2024.1639580344781,
+          "estimated_idle_cost_usd": 0.017679409707119998,
           "failure": null,
-          "idle_resource_seconds": 45.719326,
+          "idle_resource_seconds": 47.870166,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 828.230501,
-          "request_to_authenticated_ms": 2083.7236249935813,
+          "remaining_lifetime_seconds": 823.978845,
+          "request_to_authenticated_ms": 1805.6300000171177,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
-          "actual_placement": "us-phoenix-1",
+          "actual_placement": "westus3",
           "attempt": 8,
-          "claim_elapsed_ms": 3042.167374980636,
+          "claim_elapsed_ms": 2864.4419169868343,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2140.234375023283,
-          "estimated_idle_cost_usd": 0.015188386193679997,
+          "elapsed_ms": 2097.489667008631,
+          "estimated_idle_cost_usd": 0.014860188129079998,
           "failure": null,
-          "idle_resource_seconds": 41.125274,
+          "idle_resource_seconds": 40.236619,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 835.26698,
-          "request_to_authenticated_ms": 1890.0919160223566,
+          "remaining_lifetime_seconds": 833.415091,
+          "request_to_authenticated_ms": 1906.191999965813,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -2976,23 +2976,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 9,
-          "claim_elapsed_ms": 2606.4910830464214,
+          "claim_elapsed_ms": 2427.341625036206,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 1664.9283750448376,
-          "estimated_idle_cost_usd": 0.01949895960236,
+          "elapsed_ms": 1658.5915830219164,
+          "estimated_idle_cost_usd": 0.02078579161932,
           "failure": null,
-          "idle_resource_seconds": 52.796923,
+          "idle_resource_seconds": 56.281251,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 823.860763,
-          "request_to_authenticated_ms": 1483.6099999956787,
+          "remaining_lifetime_seconds": 819.848143,
+          "request_to_authenticated_ms": 1476.6185830230825,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3000,71 +3000,71 @@
         {
           "actual_placement": "westus3",
           "attempt": 10,
-          "claim_elapsed_ms": 2887.898041983135,
+          "claim_elapsed_ms": 2913.1876659812406,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2098.3087500208057,
-          "estimated_idle_cost_usd": 0.016627180833759997,
+          "elapsed_ms": 2086.8772079702467,
+          "estimated_idle_cost_usd": 0.01778084566104,
           "failure": null,
-          "idle_resource_seconds": 45.021068,
+          "idle_resource_seconds": 48.144822,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 828.544822,
-          "request_to_authenticated_ms": 1814.49858302949,
-          "requested_placement": "us-west",
-          "retry_count": 0,
-          "status": "valid"
-        },
-        {
-          "actual_placement": "us-phoenix-1",
-          "attempt": 11,
-          "claim_elapsed_ms": 3083.37816700805,
-          "cleanup": {
-            "attempted": true,
-            "error_type": null,
-            "succeeded": true
-          },
-          "cold_fallback": false,
-          "elapsed_ms": 2106.6777919768356,
-          "estimated_idle_cost_usd": 0.014926792405839998,
-          "failure": null,
-          "idle_resource_seconds": 40.416962,
-          "miss_reason": null,
-          "pool_hit": true,
-          "pool_miss": false,
-          "rejection_reasons": [],
-          "remaining_lifetime_seconds": 836.078704,
-          "request_to_authenticated_ms": 1908.211417030543,
+          "remaining_lifetime_seconds": 825.285367,
+          "request_to_authenticated_ms": 1875.4383329651318,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
           "actual_placement": "westus3",
-          "attempt": 12,
-          "claim_elapsed_ms": 3290.128041000571,
+          "attempt": 11,
+          "claim_elapsed_ms": 2939.0131249674596,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2397.063749958761,
-          "estimated_idle_cost_usd": 0.022880572812719997,
+          "elapsed_ms": 2195.701124961488,
+          "estimated_idle_cost_usd": 0.01490734844648,
           "failure": null,
-          "idle_resource_seconds": 61.953246,
+          "idle_resource_seconds": 40.364314,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 811.013477,
-          "request_to_authenticated_ms": 2157.5471659889445,
+          "remaining_lifetime_seconds": 832.933686,
+          "request_to_authenticated_ms": 2004.0929589886218,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-west-2",
+          "attempt": 12,
+          "claim_elapsed_ms": 2754.6485839993693,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1946.0591250099242,
+          "estimated_idle_cost_usd": 0.019171871713679997,
+          "failure": null,
+          "idle_resource_seconds": 51.911274,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 822.087067,
+          "request_to_authenticated_ms": 1725.385624973569,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3072,47 +3072,47 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 13,
-          "claim_elapsed_ms": 3615.0015000021085,
+          "claim_elapsed_ms": 2579.320207994897,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2575.7553330040537,
-          "estimated_idle_cost_usd": 0.018249999874119998,
+          "elapsed_ms": 1806.868083018344,
+          "estimated_idle_cost_usd": 0.01656286671032,
           "failure": null,
-          "idle_resource_seconds": 49.415141,
+          "idle_resource_seconds": 44.846926,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 818.830481,
-          "request_to_authenticated_ms": 2257.701416965574,
+          "remaining_lifetime_seconds": 829.863293,
+          "request_to_authenticated_ms": 1616.0041670082137,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
-          "actual_placement": "westus3",
+          "actual_placement": "us-phoenix-1",
           "attempt": 14,
-          "claim_elapsed_ms": 3255.498834012542,
+          "claim_elapsed_ms": 2644.66262498172,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2428.9440420106985,
-          "estimated_idle_cost_usd": 0.01571652598124,
+          "elapsed_ms": 1866.1276249913499,
+          "estimated_idle_cost_usd": 0.014676933022359999,
           "failure": null,
-          "idle_resource_seconds": 42.555307,
+          "idle_resource_seconds": 39.740423,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 830.795142,
-          "request_to_authenticated_ms": 2128.8292090175673,
+          "remaining_lifetime_seconds": 836.875772,
+          "request_to_authenticated_ms": 1685.4845419875346,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3120,23 +3120,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 15,
-          "claim_elapsed_ms": 3033.68029196281,
+          "claim_elapsed_ms": 2504.6931249671616,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2063.282707997132,
-          "estimated_idle_cost_usd": 0.022790757512599995,
+          "elapsed_ms": 1750.0302089611068,
+          "estimated_idle_cost_usd": 0.021133570291680004,
           "failure": null,
-          "idle_resource_seconds": 61.710055,
+          "idle_resource_seconds": 57.222924,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 814.559431,
-          "request_to_authenticated_ms": 1867.388916958589,
+          "remaining_lifetime_seconds": 819.534952,
+          "request_to_authenticated_ms": 1553.9074589614756,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3144,23 +3144,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 16,
-          "claim_elapsed_ms": 3259.4604159821756,
+          "claim_elapsed_ms": 2507.794249977451,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2306.8734999978915,
-          "estimated_idle_cost_usd": 0.019465628472359997,
+          "elapsed_ms": 1768.645000003744,
+          "estimated_idle_cost_usd": 0.01908344727268,
           "failure": null,
-          "idle_resource_seconds": 52.706673,
+          "idle_resource_seconds": 51.671849,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 819.423247,
-          "request_to_authenticated_ms": 1987.277708016336,
+          "remaining_lifetime_seconds": 824.701706,
+          "request_to_authenticated_ms": 1586.0475410008803,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3168,47 +3168,47 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 17,
-          "claim_elapsed_ms": 3164.3753750249743,
+          "claim_elapsed_ms": 3141.4601250435226,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2329.9064590246417,
-          "estimated_idle_cost_usd": 0.01524827512488,
+          "elapsed_ms": 2286.198875051923,
+          "estimated_idle_cost_usd": 0.01467335578884,
           "failure": null,
-          "idle_resource_seconds": 41.287434,
+          "idle_resource_seconds": 39.730737,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 828.139823,
-          "request_to_authenticated_ms": 2061.0621250234544,
+          "remaining_lifetime_seconds": 829.752065,
+          "request_to_authenticated_ms": 2060.78029202763,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
-          "actual_placement": "westus3",
+          "actual_placement": "us-phoenix-1",
           "attempt": 18,
-          "claim_elapsed_ms": 3013.481249974575,
+          "claim_elapsed_ms": 2501.718749990687,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2256.9410409778357,
-          "estimated_idle_cost_usd": 0.021006976998,
+          "elapsed_ms": 1743.2017920073122,
+          "estimated_idle_cost_usd": 0.021402233233640003,
           "failure": null,
-          "idle_resource_seconds": 56.88015,
+          "idle_resource_seconds": 57.950377,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 815.993487,
-          "request_to_authenticated_ms": 1960.8261659741402,
+          "remaining_lifetime_seconds": 817.215024,
+          "request_to_authenticated_ms": 1548.801333992742,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3216,119 +3216,119 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 19,
-          "claim_elapsed_ms": 2831.8036669516005,
+          "claim_elapsed_ms": 2883.7602920248173,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2085.331166977994,
-          "estimated_idle_cost_usd": 0.01681108114252,
+          "elapsed_ms": 2104.5663750264794,
+          "estimated_idle_cost_usd": 0.017674417608679997,
           "failure": null,
-          "idle_resource_seconds": 45.519011,
+          "idle_resource_seconds": 47.856649,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 824.431844,
-          "request_to_authenticated_ms": 1889.7152089630254,
-          "requested_placement": "us-west",
-          "retry_count": 0,
-          "status": "valid"
-        },
-        {
-          "actual_placement": "us-phoenix-1",
-          "attempt": 20,
-          "claim_elapsed_ms": 2671.1049579898827,
-          "cleanup": {
-            "attempted": true,
-            "error_type": null,
-            "succeeded": true
-          },
-          "cold_fallback": false,
-          "elapsed_ms": 1905.0125409848988,
-          "estimated_idle_cost_usd": 0.015108230827480001,
-          "failure": null,
-          "idle_resource_seconds": 40.908239,
-          "miss_reason": null,
-          "pool_hit": true,
-          "pool_miss": false,
-          "rejection_reasons": [],
-          "remaining_lifetime_seconds": 835.736867,
-          "request_to_authenticated_ms": 1711.1311659682542,
-          "requested_placement": "us-west",
-          "retry_count": 0,
-          "status": "valid"
-        },
-        {
-          "actual_placement": "us-phoenix-1",
-          "attempt": 21,
-          "claim_elapsed_ms": 2716.270542005077,
-          "cleanup": {
-            "attempted": true,
-            "error_type": null,
-            "succeeded": true
-          },
-          "cold_fallback": false,
-          "elapsed_ms": 1949.0287089720368,
-          "estimated_idle_cost_usd": 0.020588839541760003,
-          "failure": null,
-          "idle_resource_seconds": 55.747968,
-          "miss_reason": null,
-          "pool_hit": true,
-          "pool_miss": false,
-          "rejection_reasons": [],
-          "remaining_lifetime_seconds": 820.700687,
-          "request_to_authenticated_ms": 1775.683666986879,
-          "requested_placement": "us-west",
-          "retry_count": 0,
-          "status": "valid"
-        },
-        {
-          "actual_placement": "us-west-2",
-          "attempt": 22,
-          "claim_elapsed_ms": 2942.994000040926,
-          "cleanup": {
-            "attempted": true,
-            "error_type": null,
-            "succeeded": true
-          },
-          "cold_fallback": false,
-          "elapsed_ms": 2134.3897079932503,
-          "estimated_idle_cost_usd": 0.0177869700946,
-          "failure": null,
-          "idle_resource_seconds": 48.161405,
-          "miss_reason": null,
-          "pool_hit": true,
-          "pool_miss": false,
-          "rejection_reasons": [],
-          "remaining_lifetime_seconds": 825.724797,
-          "request_to_authenticated_ms": 1858.5988330305554,
+          "remaining_lifetime_seconds": 823.651455,
+          "request_to_authenticated_ms": 1790.8978749765083,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
           "actual_placement": "westus3",
-          "attempt": 23,
-          "claim_elapsed_ms": 2892.8714590147138,
+          "attempt": 20,
+          "claim_elapsed_ms": 2941.896167001687,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2178.1435839948244,
-          "estimated_idle_cost_usd": 0.014980286561240001,
+          "elapsed_ms": 2206.3075419864617,
+          "estimated_idle_cost_usd": 0.014989819079759999,
           "failure": null,
-          "idle_resource_seconds": 40.561807,
+          "idle_resource_seconds": 40.587618,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 832.955874,
-          "request_to_authenticated_ms": 1973.59679202782,
+          "remaining_lifetime_seconds": 833.06067,
+          "request_to_authenticated_ms": 2002.9643750167452,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 21,
+          "claim_elapsed_ms": 2841.766875004396,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2099.2025829618797,
+          "estimated_idle_cost_usd": 0.01993295085824,
+          "failure": null,
+          "idle_resource_seconds": 53.972032,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 819.302791,
+          "request_to_authenticated_ms": 1904.2831659899093,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 22,
+          "claim_elapsed_ms": 2719.827249995433,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1988.501166983042,
+          "estimated_idle_cost_usd": 0.01668786934276,
+          "failure": null,
+          "idle_resource_seconds": 45.185393,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 827.6667,
+          "request_to_authenticated_ms": 1787.4566669925116,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 23,
+          "claim_elapsed_ms": 2538.189000042621,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1806.6391670145094,
+          "estimated_idle_cost_usd": 0.014823501726879998,
+          "failure": null,
+          "idle_resource_seconds": 40.137284,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 836.47717,
+          "request_to_authenticated_ms": 1634.0450000134297,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3336,23 +3336,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 24,
-          "claim_elapsed_ms": 3041.9055419624783,
+          "claim_elapsed_ms": 2502.694958006032,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2054.6949169947766,
-          "estimated_idle_cost_usd": 0.020785006444999997,
+          "elapsed_ms": 1746.256624988746,
+          "estimated_idle_cost_usd": 0.02103012671424,
           "failure": null,
-          "idle_resource_seconds": 56.279125,
+          "idle_resource_seconds": 56.942832,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 820.662218,
-          "request_to_authenticated_ms": 1789.7512089693919,
+          "remaining_lifetime_seconds": 818.891814,
+          "request_to_authenticated_ms": 1527.9148750123568,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3360,47 +3360,47 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 25,
-          "claim_elapsed_ms": 3100.9362500044517,
+          "claim_elapsed_ms": 2630.3075840114616,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2161.09129198594,
-          "estimated_idle_cost_usd": 0.018954417574959997,
+          "elapsed_ms": 1877.2776669939049,
+          "estimated_idle_cost_usd": 0.016844157072399998,
           "failure": null,
-          "idle_resource_seconds": 51.322478,
+          "idle_resource_seconds": 45.60857,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 824.951708,
-          "request_to_authenticated_ms": 1962.0904169860296,
+          "remaining_lifetime_seconds": 824.858949,
+          "request_to_authenticated_ms": 1668.7431249883957,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
         },
         {
-          "actual_placement": "us-west3",
+          "actual_placement": "us-phoenix-1",
           "attempt": 26,
-          "claim_elapsed_ms": 3415.68679100601,
+          "claim_elapsed_ms": 2644.6798749966547,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2606.5637079882436,
-          "estimated_idle_cost_usd": 0.0152853109038,
+          "elapsed_ms": 1898.4448330011219,
+          "estimated_idle_cost_usd": 0.014652043070279999,
           "failure": null,
-          "idle_resource_seconds": 41.387715,
+          "idle_resource_seconds": 39.673029,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 829.322996,
-          "request_to_authenticated_ms": 2359.0964999748394,
+          "remaining_lifetime_seconds": 835.98653,
+          "request_to_authenticated_ms": 1710.0150419864804,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3408,23 +3408,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 27,
-          "claim_elapsed_ms": 2945.937250042334,
+          "claim_elapsed_ms": 2702.5954589480534,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 1978.1292920233682,
-          "estimated_idle_cost_usd": 0.01847402236904,
+          "elapsed_ms": 1880.8054169639945,
+          "estimated_idle_cost_usd": 0.02123908833956,
           "failure": null,
-          "idle_resource_seconds": 50.021722,
+          "idle_resource_seconds": 57.508633,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 826.169967,
-          "request_to_authenticated_ms": 1795.5632919911295,
+          "remaining_lifetime_seconds": 819.43441,
+          "request_to_authenticated_ms": 1689.8745839716867,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3432,23 +3432,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 28,
-          "claim_elapsed_ms": 3054.7937499941327,
+          "claim_elapsed_ms": 2868.0839580483735,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2079.565999971237,
-          "estimated_idle_cost_usd": 0.01680386462972,
+          "elapsed_ms": 1990.2179160271771,
+          "estimated_idle_cost_usd": 0.016786801307079997,
           "failure": null,
-          "idle_resource_seconds": 45.499471,
+          "idle_resource_seconds": 45.453269,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 831.252878,
-          "request_to_authenticated_ms": 1905.2424999536015,
+          "remaining_lifetime_seconds": 824.115692,
+          "request_to_authenticated_ms": 1791.4721250417642,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3456,23 +3456,23 @@
         {
           "actual_placement": "us-phoenix-1",
           "attempt": 29,
-          "claim_elapsed_ms": 3175.292208965402,
+          "claim_elapsed_ms": 2878.2423330121674,
           "cleanup": {
             "attempted": true,
             "error_type": null,
             "succeeded": true
           },
           "cold_fallback": false,
-          "elapsed_ms": 2367.038791999221,
-          "estimated_idle_cost_usd": 0.01512756029764,
+          "elapsed_ms": 2043.335082998965,
+          "estimated_idle_cost_usd": 0.01485971539948,
           "failure": null,
-          "idle_resource_seconds": 40.960577,
+          "idle_resource_seconds": 40.235339,
           "miss_reason": null,
           "pool_hit": true,
           "pool_miss": false,
           "rejection_reasons": [],
-          "remaining_lifetime_seconds": 835.424653,
-          "request_to_authenticated_ms": 2102.0210839924403,
+          "remaining_lifetime_seconds": 835.925948,
+          "request_to_authenticated_ms": 1860.4635420488194,
           "requested_placement": "us-west",
           "retry_count": 0,
           "status": "valid"
@@ -3482,8 +3482,8 @@
         "attempted": 30,
         "failed": 0,
         "minimum_p95_samples": 20,
-        "p50_ms": 2133.40091650025,
-        "p95_ms": 2509.6902520570434,
+        "p50_ms": 1917.372374504339,
+        "p95_ms": 2201.5346543252235,
         "p95_status": "reported",
         "timeout": 0,
         "valid": 30
@@ -3493,7 +3493,7 @@
       "comparison_scope": "modal-on-demand-only",
       "cross_provider_default_comparison": false,
       "estimated_billed_cost": {
-        "estimated_idle_usd": 0.53003537342616,
+        "estimated_idle_usd": 0.52680881995644,
         "excluded": [
           "pool_startup_compute",
           "claimed_session_compute",
@@ -3514,10 +3514,10 @@
           "terminated": 0
         },
         "idle_hold_seconds_per_batch": 30.0,
-        "pool_name_hash": "50ab1d227f8aa8e0",
+        "pool_name_hash": "ce830376089863ea",
         "pool_target_size": 3
       },
-      "idle_resource_seconds": 1435.165638,
+      "idle_resource_seconds": 1426.429167,
       "pool_hit_count": 30,
       "pool_hit_rate": 1.0,
       "pool_miss_count": 0,
@@ -3526,8 +3526,8 @@
         "attempted": 30,
         "failed": 0,
         "minimum_p95_samples": 20,
-        "p50_ms": 1900.850874983007,
-        "p95_ms": 2212.6320040260907,
+        "p50_ms": 1717.7003334800247,
+        "p95_ms": 2003.5850962012773,
         "p95_status": "reported",
         "timeout": 0,
         "valid": 30
@@ -3536,8 +3536,8 @@
         "attempted": 30,
         "failed": 0,
         "minimum_p95_samples": 20,
-        "p50_ms": 2133.40091650025,
-        "p95_ms": 2509.6902520570434,
+        "p50_ms": 1917.372374504339,
+        "p95_ms": 2201.5346543252235,
         "p95_status": "reported",
         "timeout": 0,
         "valid": 30
@@ -3602,45 +3602,46 @@
       "state": "open_unmerged"
     },
     "execution_date_utc": "2026-07-19",
-    "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "image_identity": "modal-computer-use-chromium:ef23b3f04151e7ccf6308d129c7f00297d3edbc0",
     "modal_sdk_version": "1.5.2",
-    "normalizer_sha": "2bc533c16781eeb0f68b53aca0989b3db278b9d2",
-    "preregistration_sha256": "1d16e694984ccafe02cbccadb34513112b7c0f4adbffd3908ae7356a72836bbf",
+    "normalizer_sha": "ef23b3f04151e7ccf6308d129c7f00297d3edbc0",
+    "preregistration_sha256": "6c18be434e90b0bcf4433e10ba685c3db7f734abb6e6861d736caaa6f45e959e",
     "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
-    "raw_artifact_sha256": "4646f2aa8f78c0bdc8f611e157fa2c728cd76aff3b79cd7f7bd0f5b3aa8ce879",
+    "raw_artifact_sha256": "27cba7f2d3626e86a487fb36d8033e8bd11d05a186659ffe2be9d085c1f85b12",
     "raw_artifact_tracked": false,
     "region_selection": {
-      "artifact_sha256": "e4aef4fd67defeccd9881c5da28237512d44e656c8c2076e11f11137073172d9",
+      "artifact_sha256": "3e0cb292665497762d4b8cf3772da350594c239591de8aec09a3d6874cc2eac2",
       "candidate_failures_retained": true,
       "candidates": {
         "us-east": {
-          "cold_create_to_ready_ms": 8293.25416701613,
-          "failure_count": 1,
-          "ok": false,
-          "transport_p50_ms": 66.84581248555332
-        },
-        "us-west": {
-          "cold_create_to_ready_ms": 7198.738917009905,
+          "cold_create_to_ready_ms": 11945.342125021853,
           "failure_count": 0,
           "ok": true,
-          "transport_p50_ms": 32.00862498488277
+          "transport_p50_ms": 73.82402051007375
+        },
+        "us-west": {
+          "cold_create_to_ready_ms": 13924.534999998286,
+          "failure_count": 0,
+          "ok": true,
+          "transport_p50_ms": 34.809500008122995
         }
       },
       "default_region_excluded_from_optimized_placement": true,
-      "execution_source_sha": "182bc259105d3d5a77f3da11464d76e6672fc90f",
+      "evidence_envelope_sha256": "0e18d796b6af25a2d24227a09611b9197c3f9b2e2e73616290963142b59923d6",
+      "execution_source_sha": "ef23b3f04151e7ccf6308d129c7f00297d3edbc0",
       "rule": "transport p50; within 5 percent use lower cold create-to-ready",
       "selected": "us-west"
     },
     "region_selection_attestation": {
-      "evidence_envelope_sha256": "fcf2890fcf737f9c8d5d4049ffa8e4887e593fc0b834326b615d5339668daaf7",
-      "execution_source_sha": "182bc259105d3d5a77f3da11464d76e6672fc90f",
-      "raw_artifact_sha256": "e4aef4fd67defeccd9881c5da28237512d44e656c8c2076e11f11137073172d9",
+      "evidence_envelope_sha256": "0e18d796b6af25a2d24227a09611b9197c3f9b2e2e73616290963142b59923d6",
+      "execution_source_sha": "ef23b3f04151e7ccf6308d129c7f00297d3edbc0",
+      "raw_artifact_sha256": "3e0cb292665497762d4b8cf3772da350594c239591de8aec09a3d6874cc2eac2",
       "status": "validated"
     },
     "requested_region": "us-west",
     "sanitizer": "modal_computer_use.benchmarks.modal_optimization",
     "sanitizer_version": 1,
-    "source_sha": "7707edff8270aa0d66cef65d72ef44a6c99f8a0f"
+    "source_sha": "ef23b3f04151e7ccf6308d129c7f00297d3edbc0"
   },
   "schema_version": 1
 }
