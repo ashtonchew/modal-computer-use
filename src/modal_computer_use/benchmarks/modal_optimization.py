@@ -772,11 +772,18 @@ def sanitize_modal_optimization_benchmark(
         )
         if existing_digest != preregistration_digest:
             raise ValueError("preregistration digest does not match the raw artifact")
-        payload["command_manifest"] = _portable_command_manifest(
+        command_manifest = _portable_command_manifest(
             _mapping(preregistration_payload.get("commands"), "commands")
         )
+        _add_region_attestation_command(
+            command_manifest,
+            region_evidence_payload=region_evidence_payload,
+        )
+        payload["command_manifest"] = command_manifest
         payload["command_manifest_sanitization"] = (
-            "Normalized the runner-specific credential file path to repository-relative .env."
+            "Normalized the runner-specific credential file path to repository-relative .env. "
+            "Added the digest-bound region attestation command when the execution-time "
+            "preregistration did not contain that later provenance step."
         )
         payload["environment_manifest"] = copy.deepcopy(
             _mapping(preregistration_payload.get("environment"), "environment")
@@ -962,6 +969,32 @@ def _portable_command_manifest(commands: dict[str, Any]) -> dict[str, str]:
             str(command),
         )
     return output
+
+
+def _add_region_attestation_command(
+    commands: dict[str, str],
+    *,
+    region_evidence_payload: dict[str, Any] | None,
+) -> None:
+    if "region_selection_attest" in commands or region_evidence_payload is None:
+        return
+    provenance = _mapping(
+        region_evidence_payload.get("provenance"),
+        "region evidence provenance",
+    )
+    raw_path = provenance.get("raw_artifact_path")
+    source_sha = provenance.get("execution_source_sha")
+    if not isinstance(raw_path, str) or not _safe_relative_path(raw_path):
+        raise ValueError("region evidence raw path must be repository-relative")
+    if not _is_hex(source_sha, 40):
+        raise ValueError("region evidence source must be a full Git SHA")
+    raw = Path(raw_path)
+    attested = raw.with_name(f"{raw.stem}-attested{raw.suffix}")
+    commands["region_selection_attest"] = (
+        "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
+        f"{raw.as_posix()} {attested.as_posix()} --source-sha {source_sha} "
+        f"--raw-artifact-path {raw.as_posix()}"
+    )
 
 
 def _summary_from_attempt_field(

@@ -26,6 +26,9 @@ from modal_computer_use.benchmarks.modal_optimization import (
     validate_modal_optimization_artifact,
     validate_preregistered_config,
 )
+from modal_computer_use.benchmarks.modal_optimization import (
+    _add_region_attestation_command as add_region_attestation_command,
+)
 from modal_computer_use.benchmarks.modal_optimization_execution import (
     run_independent_cold_attempts,
     run_warm_action_attempts,
@@ -268,6 +271,33 @@ def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() 
     assert warm["request_to_authenticated_summary"]["valid"] == 30
     assert warm["request_to_first_frame_summary"]["p95_status"] == "reported"
     assert sanitized["provenance"]["normalizer_sha"] == "c" * 40
+
+
+def test_sanitizer_adds_post_execution_region_attestation_command() -> None:
+    commands = {
+        "region_selection": "region command",
+    }
+    region_evidence = {
+        "benchmark": "modal-region-selection-evidence",
+        "payload": {},
+        "provenance": {
+            "execution_source_sha": "d" * 40,
+            "raw_artifact_path": "benchmark-results/run/region-selection.json",
+        },
+    }
+
+    add_region_attestation_command(
+        commands,
+        region_evidence_payload=region_evidence,
+    )
+
+    assert commands["region_selection_attest"] == (
+        "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
+        "benchmark-results/run/region-selection.json "
+        "benchmark-results/run/region-selection-attested.json --source-sha "
+        + "d" * 40
+        + " --raw-artifact-path benchmark-results/run/region-selection.json"
+    )
 
 
 def test_preregistration_freezes_commands_policies_and_dependency() -> None:
