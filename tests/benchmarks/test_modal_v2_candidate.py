@@ -35,7 +35,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
 
 class _FakeRunner:
     def __init__(self) -> None:
-        self.placement = {"cloud": "aws", "region": "us-west-2"}
+        self.placement = {"cloud": "CLOUD_PROVIDER_AZURE", "region": "westus3"}
         self.terminated = False
 
     def terminate(self) -> bool:
@@ -43,16 +43,13 @@ class _FakeRunner:
         return True
 
 
-def test_config_freezes_sample_concurrency_and_supported_cloud_policy() -> None:
+def test_config_freezes_sample_concurrency_and_live_probed_cloud_policy() -> None:
     config = ModalV2CandidateConfig(image_revision="a" * 40)
 
     assert config.pilot_samples_per_arm == 5
     assert config.full_samples_per_arm == 30
     assert config.throughput_concurrency == (1, 5, 20)
-    assert config.cloud == "aws"
-
-    with pytest.raises(ValueError, match="azure is not an officially supported"):
-        ModalV2CandidateConfig(image_revision="a" * 40, cloud="azure")
+    assert config.cloud == "azure"
     with pytest.raises(ValueError, match="pilot requires exactly 5"):
         ModalV2CandidateConfig(image_revision="a" * 40, pilot_samples_per_arm=4)
     with pytest.raises(ValueError, match="throughput concurrency"):
@@ -272,12 +269,14 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
             "concurrency": concurrency,
             "status": "valid",
             "cleanup_succeeded": True,
+            "requested_cloud": "azure",
+            "requested_region": "us-west",
             "attempts": [
                 {
                     "status": "valid",
                     "cleanup_succeeded": True,
-                    "actual_cloud": "aws",
-                    "actual_region": "us-west-2",
+                    "actual_cloud": "CLOUD_PROVIDER_AZURE",
+                    "actual_region": "westus3",
                 }
                 for _ in range(concurrency)
             ],
@@ -386,7 +385,7 @@ def _trials(phase: str, count: int) -> list[dict]:
                         "ingress": ingress,
                         "action_transport": "persistent-hot-session",
                         "observation_transport": "binary-envelope",
-                        "cloud": "aws",
+                        "cloud": "azure",
                         "region": "us-west",
                         "cpu": 4.0,
                         "memory_mib": 8192,
@@ -401,10 +400,10 @@ def _trials(phase: str, count: int) -> list[dict]:
                         "cleanup_policy": "terminate-target-runner-and-detach-target",
                     },
                     "actual": {
-                        "target_cloud": "aws",
-                        "target_region": "us-west-2",
-                        "runner_cloud": "aws",
-                        "runner_region": "us-west-2",
+                        "target_cloud": "CLOUD_PROVIDER_AZURE",
+                        "target_region": "westus3",
+                        "runner_cloud": "CLOUD_PROVIDER_AZURE",
+                        "runner_region": "westus3",
                     },
                     "verification": {
                         "healthz": True,

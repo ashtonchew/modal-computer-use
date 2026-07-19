@@ -64,7 +64,7 @@ _FORBIDDEN_KEYS = {
 @dataclass(frozen=True, slots=True)
 class ModalV2CandidateConfig:
     image_revision: str
-    cloud: str = "aws"
+    cloud: str = "azure"
     region: str = "us-west"
     cpu: float = 4.0
     memory_mib: int = 8192
@@ -89,8 +89,6 @@ class ModalV2CandidateConfig:
         for name, value in (("cloud", self.cloud), ("region", self.region)):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be explicit")
-        if self.cloud == "azure":
-            raise ValueError("azure is not an officially supported Modal runtime cloud")
         if not _positive_number(self.cpu):
             raise ValueError("cpu must be positive")
         positive_integers = (
@@ -304,8 +302,12 @@ def build_preregistration(
             "requested_region": config.region,
             "clean_source_verified": True,
             "azure_support_decision": (
-                "not selected: current official Modal environment documentation lists AWS, GCP, "
-                "and OCI runtime providers, not Azure"
+                "selected after a live Modal 1.5.2 V2 capability probe accepted cloud=azure and "
+                "region=us-west, then reported CLOUD_PROVIDER_AZURE and westus3"
+            ),
+            "placement_match_policy": (
+                "actual cloud provider must match the requested provider; the requested broad "
+                "region may resolve to a concrete provider region but must be identical across arms"
             ),
         },
         "capabilities": {
@@ -439,6 +441,8 @@ def evaluate_pilot_gates(
             reasons.append("requested workload, image, resource, or placement controls differed")
         if any(not _actual_placement_observed(trial) for trial in rows):
             reasons.append("actual target or runner cloud/region was not observed")
+        if any(not _actual_cloud_matches_requested(trial) for trial in rows):
+            reasons.append("actual target or runner cloud did not match the requested provider")
         if len({_placement_signature(trial) for trial in rows}) != 1:
             reasons.append("actual target or runner placement varied within the arm")
         arm_results[arm] = {"eligible": not reasons, "reasons": reasons}
@@ -632,7 +636,13 @@ def validate_phase_checkpoint(
     phase = payload.get("phase")
     if phase not in {"pilot", "full"}:
         raise ValueError("checkpoint phase is invalid")
-    if payload.get("state") not in {"running", "complete", "interrupted", "failed"}:
+    if payload.get("state") not in {
+        "starting",
+        "running",
+        "complete",
+        "interrupted",
+        "failed",
+    }:
         raise ValueError("checkpoint state is invalid")
     schedule_total = payload.get("schedule_total")
     completed = payload.get("completed_attempts")
@@ -812,6 +822,7 @@ def _full_backend_comparison_eligible(
         or not _cleanup_passed(trial.get("cleanup"))
         or bool(_trial_control_mismatches(trial, configuration, image_identity))
         or not _actual_placement_observed(trial)
+        or not _actual_cloud_matches_requested(trial)
         for trial in rows
     ):
         return False
@@ -861,6 +872,10 @@ def _validate_promotion_gates(
                 raise ValueError(f"promotion requires matched {phase} controls for {arm}")
             if any(not _actual_placement_observed(trial) for trial in rows):
                 raise ValueError(f"promotion requires observed {phase} placement for {arm}")
+            if any(not _actual_cloud_matches_requested(trial) for trial in rows):
+                raise ValueError(
+                    f"promotion requires requested/actual {phase} cloud agreement for {arm}"
+                )
     if len({_placement_signature(trial) for trial in trials}) != 1:
         raise ValueError("promotion requires identical target and runner placement across trials")
     if not require_throughput:
@@ -892,6 +907,9 @@ def _validate_promotion_gates(
                 and bool(attempt["actual_cloud"].strip())
                 and isinstance(attempt.get("actual_region"), str)
                 and bool(attempt["actual_region"].strip())
+                and _cloud_value_matches(
+                    row.get("requested_cloud"), attempt.get("actual_cloud")
+                )
                 for attempt in attempts
             )
         )
@@ -993,6 +1011,27 @@ def _actual_placement_observed(trial: dict[str, Any]) -> bool:
         isinstance(actual.get(key), str) and bool(actual[key].strip())
         for key in ("target_cloud", "target_region", "runner_cloud", "runner_region")
     )
+
+
+def _actual_cloud_matches_requested(trial: dict[str, Any]) -> bool:
+    requested = trial.get("requested")
+    actual = trial.get("actual")
+    if not isinstance(requested, dict) or not isinstance(actual, dict):
+        return False
+    return all(
+        _cloud_value_matches(requested.get("cloud"), actual.get(key))
+        for key in ("target_cloud", "runner_cloud")
+    )
+
+
+def _cloud_value_matches(requested: Any, actual: Any) -> bool:
+    expected = {
+        "azure": {"azure", "CLOUD_PROVIDER_AZURE"},
+        "aws": {"aws", "CLOUD_PROVIDER_AWS"},
+        "gcp": {"gcp", "CLOUD_PROVIDER_GCP"},
+        "oci": {"oci", "CLOUD_PROVIDER_OCI"},
+    }.get(requested)
+    return expected is not None and actual in expected
 
 
 def _placement_signature(trial: dict[str, Any]) -> tuple[Any, ...]:

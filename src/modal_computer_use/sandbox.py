@@ -235,6 +235,62 @@ class ModalCandidateAllocationContext:
         }
 
 
+def cleanup_modal_candidate_run(
+    *,
+    app_name: str,
+    run_id: str,
+    modal_runtime: object | None = None,
+) -> dict[str, Any]:
+    """Terminate only candidate Sandboxes carrying the exact benchmark run ID."""
+    if not run_id:
+        raise ValueError("candidate cleanup requires an exact run ID")
+    if modal_runtime is None:
+        try:
+            import modal as modal_runtime
+        except ImportError as exc:
+            raise ModalNotInstalledError(
+                "Modal candidate cleanup requires the modal extra"
+            ) from exc
+    runtime: Any = modal_runtime
+    app = runtime.App.lookup(app_name, create_if_missing=False)
+    matched = []
+    for sandbox in runtime.Sandbox.list(app_id=app.app_id):
+        tags = sandbox.get_tags()
+        target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
+        runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
+        if runner_run_id == run_id or (
+            isinstance(target_run_id, str)
+            and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
+        ):
+            matched.append(sandbox)
+    terminated = 0
+    failed = 0
+    for sandbox in matched:
+        try:
+            sandbox.terminate(wait=True)
+        except Exception:
+            failed += 1
+        else:
+            terminated += 1
+    remaining = 0
+    for sandbox in runtime.Sandbox.list(app_id=app.app_id):
+        tags = sandbox.get_tags()
+        target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
+        runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
+        if runner_run_id == run_id or (
+            isinstance(target_run_id, str)
+            and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
+        ):
+            remaining += 1
+    return {
+        "matched_sandboxes": len(matched),
+        "terminated_sandboxes": terminated,
+        "termination_failures": failed,
+        "remaining_sandboxes": remaining,
+        "cleanup_succeeded": failed == 0 and remaining == 0,
+    }
+
+
 class _TimedModalRuntime:
     def __init__(self, runtime: object, timing: SessionStartupTiming) -> None:
         self._runtime = runtime
@@ -1391,7 +1447,7 @@ def create_modal_candidate_computer(
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
             timing.mark("authenticated_daemon_ready")
         return computer
-    except Exception:
+    except BaseException:
         if client is not None:
             client.close()
         _terminate_failed_sandbox(sandbox)

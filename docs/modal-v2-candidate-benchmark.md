@@ -32,7 +32,7 @@ Every target arm requests:
 
 - one exact named Chromium image revision;
 - 4 CPU cores and 8192 MiB memory;
-- cloud `aws` and region `us-west`;
+- cloud `azure` and broad region `us-west`;
 - Chromium prewarm enabled;
 - a 1024x768, 96 DPI desktop;
 - the same daemon, browser, readiness, click, frame, timeout, retry, and cleanup semantics;
@@ -42,9 +42,12 @@ The persistent runner is V2, i6pn-enabled, uses the same named image revision, r
 1024 MiB, and is reused across the randomized phase. Reusing it keeps runner allocation outside
 target lifecycle and warm action boundaries. Its actual cloud and region must be observed.
 
-The benchmark does not request `cloud="azure"`. Modal's current environment documentation lists AWS,
-GCP, and OCI runtime providers but not Azure. Both requested and actual target and runner placement
-remain in the artifact. Exact actual placement disagreement fails causal eligibility.
+A live Modal 1.5.2 V2 capability probe accepted `cloud="azure", region="us-west"` and reported actual
+placement `CLOUD_PROVIDER_AZURE/westus3`, establishing support despite the public provider-list gap.
+Both requested and actual target and runner placement are retained. Actual cloud must resolve to
+Azure, while the broad requested region may resolve to a concrete provider region only if that
+actual region is observed and identical across arms. Missing or mismatched placement fails causal
+eligibility.
 
 ## Measured Boundaries
 

@@ -29,6 +29,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     run_candidate_phase,
     run_candidate_throughput,
 )
+from modal_computer_use.sandbox import cleanup_modal_candidate_run
 
 DEFAULT_ROOT = Path("benchmark-results/modal-v2-candidate-2026-07-19")
 
@@ -69,7 +70,7 @@ def main() -> int:
 
 def _add_configuration_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--image-revision")
-    parser.add_argument("--cloud", default="aws")
+    parser.add_argument("--cloud", default="azure")
     parser.add_argument("--region", default="us-west")
     parser.add_argument("--cpu", type=float, default=4.0)
     parser.add_argument("--memory-mib", type=int, default=8192)
@@ -483,6 +484,14 @@ def _write_interrupted_result(
     prior_trials: list[dict[str, Any]] | None = None,
     prior_execution: dict[str, Any] | None = None,
 ) -> int:
+    _seal_checkpoint_after_cleanup(
+        args=args,
+        preregistration=preregistration,
+        phase=phase,
+        checkpoint_state=checkpoint_state,
+        state="interrupted",
+        error_type="KeyboardInterrupt",
+    )
     retained = copy.deepcopy(checkpoint_state.get("trials") or [])
     trials = [*(prior_trials or []), *retained]
     execution = dict(prior_execution or {})
@@ -517,6 +526,14 @@ def _write_failed_phase_result(
     prior_trials: list[dict[str, Any]] | None = None,
     prior_execution: dict[str, Any] | None = None,
 ) -> int:
+    _seal_checkpoint_after_cleanup(
+        args=args,
+        preregistration=preregistration,
+        phase=phase,
+        checkpoint_state=checkpoint_state,
+        state="failed",
+        error_type=error_type,
+    )
     retained = copy.deepcopy(checkpoint_state.get("trials") or [])
     trials = [*(prior_trials or []), *retained]
     execution = dict(prior_execution or {})
@@ -537,6 +554,57 @@ def _write_failed_phase_result(
     _write_new(output, payload)
     print(json.dumps({"status": "rejected", "output": str(output), "reason": reason}))
     return 2
+
+
+def _seal_checkpoint_after_cleanup(
+    *,
+    args: argparse.Namespace,
+    preregistration: dict[str, Any],
+    phase: str,
+    checkpoint_state: dict[str, Any],
+    state: str,
+    error_type: str,
+) -> None:
+    execution = copy.deepcopy(checkpoint_state.get("execution") or {})
+    run_id = execution.get("run_id")
+    app_name = execution.get("app_name")
+    if isinstance(run_id, str) and run_id and isinstance(app_name, str) and app_name:
+        cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+    else:
+        cleanup = {
+            "matched_sandboxes": 0,
+            "terminated_sandboxes": 0,
+            "termination_failures": 0,
+            "remaining_sandboxes": None,
+            "cleanup_succeeded": False,
+            "reason": "checkpoint did not retain a run ID and App name",
+        }
+    execution.update(
+        {
+            "state": state,
+            "error_type": error_type,
+            "post_failure_cleanup": cleanup,
+            "runner_cleanup_succeeded": cleanup.get("cleanup_succeeded") is True,
+        }
+    )
+    trials = copy.deepcopy(checkpoint_state.get("trials") or [])
+    if cleanup.get("cleanup_succeeded") is True:
+        for trial in trials:
+            trial_cleanup = trial.get("cleanup")
+            if isinstance(trial_cleanup, dict):
+                trial_cleanup["runner_terminated"] = True
+    payload = {
+        **copy.deepcopy(checkpoint_state),
+        "generated_at": _utc_now(),
+        "state": state,
+        "completed_attempts": len(trials),
+        "trials": trials,
+        "execution": execution,
+    }
+    validate_phase_checkpoint(payload, preregistration=preregistration)
+    _write_atomic(_checkpoint_path(args.output, phase=phase), payload)
+    checkpoint_state.clear()
+    checkpoint_state.update(copy.deepcopy(payload))
 
 
 def _write_atomic(path: Path, payload: dict[str, Any]) -> None:

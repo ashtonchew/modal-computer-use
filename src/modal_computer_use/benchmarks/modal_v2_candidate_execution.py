@@ -50,13 +50,25 @@ def run_candidate_phase(
     runner_cleanup = False
     phase_error_type: str | None = None
     try:
+        if checkpoint is not None:
+            checkpoint(
+                trials,
+                _phase_execution(
+                    config,
+                    None,
+                    run_id=run_id,
+                    app_name=app_name,
+                    runner_cleanup=None,
+                    state="starting",
+                ),
+            )
         runner = runner_factory(
             app_name=app_name,
             cloud=config.cloud,
             region=config.region,
             image_revision=config.image_revision,
             app_tags={"benchmark": "modal-v2-candidate"},
-            tags={"benchmark_run": run_id[:16]},
+            tags={"benchmark_run": run_id},
         )
         for item in schedule:
             trial = run_candidate_trial(
@@ -70,7 +82,14 @@ def run_candidate_phase(
             if checkpoint is not None:
                 checkpoint(
                     trials,
-                    _phase_execution(config, runner, runner_cleanup=None, state="running"),
+                    _phase_execution(
+                        config,
+                        runner,
+                        run_id=run_id,
+                        app_name=app_name,
+                        runner_cleanup=None,
+                        state="running",
+                    ),
                 )
             if progress is not None:
                 failure = trial.get("failure")
@@ -105,6 +124,8 @@ def run_candidate_phase(
                 _phase_execution(
                     config,
                     runner,
+                    run_id=run_id,
+                    app_name=app_name,
                     runner_cleanup=runner_cleanup,
                     state=state,
                     error_type=phase_error_type,
@@ -113,6 +134,8 @@ def run_candidate_phase(
     return trials, _phase_execution(
         config,
         runner,
+        run_id=run_id,
+        app_name=app_name,
         runner_cleanup=runner_cleanup,
         state="complete",
     )
@@ -122,6 +145,8 @@ def _phase_execution(
     config: ModalV2CandidateConfig,
     runner: ModalCandidateRunner | None,
     *,
+    run_id: str,
+    app_name: str,
     runner_cleanup: bool | None,
     state: str,
     error_type: str | None = None,
@@ -129,6 +154,8 @@ def _phase_execution(
     return {
         "state": state,
         "error_type": error_type,
+        "run_id": run_id,
+        "app_name": app_name,
         "runner_backend": "v2",
         "runner_i6pn_enabled": True,
         "runner_resources": {"cpu": 1.0, "memory_mib": 1024},

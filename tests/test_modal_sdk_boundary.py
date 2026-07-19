@@ -25,6 +25,7 @@ from modal_computer_use.sandbox import (
     MODAL_SNAPSHOT_RETENTION_SECONDS,
     ModalVolumeMount,
     _connect_token_parts,
+    cleanup_modal_candidate_run,
     create_modal_candidate_computer,
     create_modal_candidate_runner,
     create_modal_v2_tunnel_computer,
@@ -69,6 +70,7 @@ class FakeApp:
 class FakeAppObject:
     def __init__(self, app_name: str) -> None:
         self.app_name = app_name
+        self.app_id = f"ap-{app_name}"
         self._tags = {"existing": "app-tag"}
         self.set_tags_calls: list[dict[str, str]] = []
 
@@ -214,9 +216,14 @@ class FakeSandbox:
         return FakeSandboxObject()
 
     @classmethod
-    def list(cls, *, tags: dict[str, str] | None = None) -> list[FakeSandboxObject]:
-        cls.list_calls.append(tags)
-        return cls.listed
+    def list(
+        cls,
+        *,
+        tags: dict[str, str] | None = None,
+        app_id: str | None = None,
+    ) -> list[FakeSandboxObject]:
+        cls.list_calls.append(tags if app_id is None else {"app_id": app_id})
+        return [sandbox for sandbox in cls.listed if not sandbox.terminated]
 
 
 def fake_modal() -> SimpleNamespace:
@@ -449,6 +456,67 @@ def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> No
     assert FakeSandbox.created.wait_until_ready_calls == []
     assert runner.placement == {"cloud": "aws", "region": "us-west-2"}
     assert runner.terminate() is True
+
+
+def test_candidate_constructor_terminates_target_on_keyboard_interrupt(monkeypatch) -> None:
+    runtime = fake_modal()
+    monkeypatch.setattr(
+        FakeSandboxObject,
+        "wait_until_ready",
+        lambda _self, *, timeout: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+    config = ComputerConfig(
+        run_id="candidate-interrupt",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="tunnel",
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        create_modal_candidate_computer(
+            config=config,
+            backend="v1",
+            transport="encrypted-tunnel",
+            cloud="aws",
+            image=object(),
+            wait=True,
+            modal_runtime=runtime,
+        )
+
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.terminated is True
+    assert FakeSandbox.created.terminate_wait_calls == [True]
+
+
+def test_candidate_run_cleanup_terminates_only_exact_run_tags() -> None:
+    runtime = fake_modal()
+    target = FakeSandboxObject(tags={"computer-use.run_id": "run_exact-pilot-001"})
+    runner = FakeSandboxObject(tags={"benchmark_run": "run_exact"})
+    unrelated = FakeSandboxObject(tags={"computer-use.run_id": "run_other-pilot-001"})
+    FakeSandbox.listed = [target, runner, unrelated]
+
+    result = cleanup_modal_candidate_run(
+        app_name="candidate-app",
+        run_id="run_exact",
+        modal_runtime=runtime,
+    )
+
+    assert result == {
+        "matched_sandboxes": 2,
+        "terminated_sandboxes": 2,
+        "termination_failures": 0,
+        "remaining_sandboxes": 0,
+        "cleanup_succeeded": True,
+    }
+    assert target.terminated is True
+    assert runner.terminated is True
+    assert unrelated.terminated is False
+    assert FakeSandbox.list_calls == [
+        {"app_id": "ap-candidate-app"},
+        {"app_id": "ap-candidate-app"},
+    ]
 
 
 def test_create_forwards_current_network_allowlist_arguments(monkeypatch) -> None:
