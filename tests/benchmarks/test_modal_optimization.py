@@ -27,6 +27,7 @@ from modal_computer_use.benchmarks.modal_optimization import (
 from modal_computer_use.benchmarks.modal_optimization_execution import (
     run_independent_cold_attempts,
     run_warm_action_attempts,
+    run_warm_claim_attempts,
 )
 
 
@@ -296,6 +297,54 @@ def test_preregistration_freezes_commands_policies_and_dependency() -> None:
         "provider_sdk_internal_retries": "not_observable",
     }
     assert preregistration["commands"] == commands
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["cold_attempts", "warm_action_attempts", "warm_claim_attempts", "warm_pool_target"],
+)
+def test_config_rejects_fractional_attempt_and_pool_counts(field: str) -> None:
+    with pytest.raises(ValueError, match="counts must be positive"):
+        ModalOptimizationConfig(
+            region="us-west",
+            image_revision="a" * 40,
+            **{field: 1.5},
+        )
+
+
+def test_warm_claim_interruption_always_cleans_created_pool_slots() -> None:
+    terminated: list[bool] = []
+
+    class Sandbox:
+        def terminate(self, *, wait: bool) -> None:
+            terminated.append(wait)
+
+    class Registry:
+        def list_sandboxes_with_refs(self, *, tags):
+            assert tags["computer-use.pool"].startswith("modal-opt-")
+            return [(Sandbox(), object())]
+
+    class Manager:
+        registry = Registry()
+
+        def fill_warm_pool(self, **_kwargs) -> None:
+            pass
+
+    config = ModalOptimizationConfig(
+        region="us-west",
+        image_revision="a" * 40,
+        warm_claim_attempts=1,
+        warm_pool_target=1,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        run_warm_claim_attempts(
+            config,
+            manager=Manager(),
+            sleep=lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()),
+        )
+
+    assert terminated == [True]
 
 
 def test_action_attempt_rows_preserve_measured_failures_and_timeouts() -> None:

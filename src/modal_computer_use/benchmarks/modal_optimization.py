@@ -76,7 +76,10 @@ class ModalOptimizationConfig:
             self.warm_claim_attempts,
             self.warm_pool_target,
         )
-        if any(isinstance(value, bool) or value < 1 for value in counts):
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in counts
+        ):
             raise ValueError("attempt and pool counts must be positive")
         if self.warm_idle_seconds < 0:
             raise ValueError("warm_idle_seconds must be nonnegative")

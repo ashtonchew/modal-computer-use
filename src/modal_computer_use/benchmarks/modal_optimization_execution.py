@@ -212,73 +212,76 @@ def run_warm_claim_attempts(
     )
     attempts: list[dict[str, Any]] = []
     fill_failures: list[dict[str, Any]] = []
-    while len(attempts) < config.warm_claim_attempts:
-        try:
-            pool_manager.fill_warm_pool(config=computer_config, policy=policy)
-        except Exception as exc:
-            fill_failures.append(
-                {"phase": "pool_fill", "error_type": type(exc).__name__}
-            )
-        sleep(config.warm_idle_seconds)
-        batch = min(
-            config.warm_pool_target,
-            config.warm_claim_attempts - len(attempts),
-        )
-        for _ in range(batch):
-            index = len(attempts)
-            claim: Any | None = None
+    cleanup: dict[str, Any]
+    try:
+        while len(attempts) < config.warm_claim_attempts:
             try:
-                claim = pool_manager.claim_warm_pool(config=computer_config, policy=policy)
-                metrics = claim.metrics
-                elapsed = metrics.request_to_first_frame_ms
-                if not _is_nonnegative_finite(elapsed):
-                    raise ValueError("warm claim did not report a valid first-frame boundary")
-                attempt = _attempt_row(index, status="valid", elapsed_ms=float(elapsed))
-                cost = metrics.cost_accounting or {}
-                attempt.update(
-                    {
-                        "request_to_authenticated_ms": metrics.request_to_authenticated_ms,
-                        "claim_elapsed_ms": metrics.claim_elapsed_ms,
-                        "pool_hit": metrics.hit,
-                        "pool_miss": not metrics.hit,
-                        "cold_fallback": metrics.cold_fallback,
-                        "miss_reason": metrics.miss_reason,
-                        "rejection_reasons": list(metrics.rejection_reasons),
-                        "requested_placement": metrics.requested_region,
-                        "actual_placement": metrics.actual_region,
-                        "remaining_lifetime_seconds": metrics.remaining_lifetime_seconds,
-                        "idle_resource_seconds": cost.get("idle_resource_seconds"),
-                        "estimated_idle_cost_usd": _nested_number(
-                            cost,
-                            "estimated_cost",
-                            "total",
-                        ),
-                    }
-                )
+                pool_manager.fill_warm_pool(config=computer_config, policy=policy)
             except Exception as exc:
-                status = "timeout" if isinstance(exc, TimeoutError) else "failed"
-                attempt = _attempt_row(
-                    index,
-                    status=status,
-                    failure={"phase": "warm_claim", "error_type": type(exc).__name__},
+                fill_failures.append(
+                    {"phase": "pool_fill", "error_type": type(exc).__name__}
                 )
-                attempt.update(
-                    {
-                        "pool_hit": False,
-                        "pool_miss": False,
-                        "cold_fallback": False,
-                        "rejection_reasons": [],
-                        "requested_placement": config.region,
-                        "actual_placement": None,
-                        "idle_resource_seconds": None,
-                        "estimated_idle_cost_usd": None,
-                    }
-                )
-            attempt["cleanup"] = _close_claim(claim)
-            attempts.append(attempt)
-            if progress is not None:
-                progress("warm_claim", len(attempts), config.warm_claim_attempts)
-    cleanup = _cleanup_pool(pool_manager, pool_name=pool_name)
+            sleep(config.warm_idle_seconds)
+            batch = min(
+                config.warm_pool_target,
+                config.warm_claim_attempts - len(attempts),
+            )
+            for _ in range(batch):
+                index = len(attempts)
+                claim: Any | None = None
+                try:
+                    claim = pool_manager.claim_warm_pool(config=computer_config, policy=policy)
+                    metrics = claim.metrics
+                    elapsed = metrics.request_to_first_frame_ms
+                    if not _is_nonnegative_finite(elapsed):
+                        raise ValueError("warm claim did not report a valid first-frame boundary")
+                    attempt = _attempt_row(index, status="valid", elapsed_ms=float(elapsed))
+                    cost = metrics.cost_accounting or {}
+                    attempt.update(
+                        {
+                            "request_to_authenticated_ms": metrics.request_to_authenticated_ms,
+                            "claim_elapsed_ms": metrics.claim_elapsed_ms,
+                            "pool_hit": metrics.hit,
+                            "pool_miss": not metrics.hit,
+                            "cold_fallback": metrics.cold_fallback,
+                            "miss_reason": metrics.miss_reason,
+                            "rejection_reasons": list(metrics.rejection_reasons),
+                            "requested_placement": metrics.requested_region,
+                            "actual_placement": metrics.actual_region,
+                            "remaining_lifetime_seconds": metrics.remaining_lifetime_seconds,
+                            "idle_resource_seconds": cost.get("idle_resource_seconds"),
+                            "estimated_idle_cost_usd": _nested_number(
+                                cost,
+                                "estimated_cost",
+                                "total",
+                            ),
+                        }
+                    )
+                except Exception as exc:
+                    status = "timeout" if isinstance(exc, TimeoutError) else "failed"
+                    attempt = _attempt_row(
+                        index,
+                        status=status,
+                        failure={"phase": "warm_claim", "error_type": type(exc).__name__},
+                    )
+                    attempt.update(
+                        {
+                            "pool_hit": False,
+                            "pool_miss": False,
+                            "cold_fallback": False,
+                            "rejection_reasons": [],
+                            "requested_placement": config.region,
+                            "actual_placement": None,
+                            "idle_resource_seconds": None,
+                            "estimated_idle_cost_usd": None,
+                        }
+                    )
+                attempt["cleanup"] = _close_claim(claim)
+                attempts.append(attempt)
+                if progress is not None:
+                    progress("warm_claim", len(attempts), config.warm_claim_attempts)
+    finally:
+        cleanup = _cleanup_pool(pool_manager, pool_name=pool_name)
     return attempts, {
         "pool_name_hash": hashlib.sha256(pool_name.encode()).hexdigest()[:16],
         "pool_target_size": config.warm_pool_target,
