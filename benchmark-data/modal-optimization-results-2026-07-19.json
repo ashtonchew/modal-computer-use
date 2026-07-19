@@ -1,7 +1,7 @@
 {
   "benchmark": "modal-optimization-results",
   "command_manifest": {
-    "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run --source-sha 7707edff8270aa0d66cef65d72ef44a6c99f8a0f --dependency-sha 37f977f80de93800c005caeec7ead5222b00b040 --region-selection-source-sha 182bc259105d3d5a77f3da11464d76e6672fc90f --provider-default-source-sha 7d4ff14337ccf6846e821f30c8045ca73819c190 --region-selection benchmark-results/modal-optimization-2026-07-19/region-selection.json --provider-default benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --output benchmark-results/modal-optimization-2026-07-19/raw.json",
+    "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run --source-sha 7707edff8270aa0d66cef65d72ef44a6c99f8a0f --dependency-sha 37f977f80de93800c005caeec7ead5222b00b040 --region-selection-source-sha 182bc259105d3d5a77f3da11464d76e6672fc90f --provider-default-source-sha 7d4ff14337ccf6846e821f30c8045ca73819c190 --region-selection benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --provider-default benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --output benchmark-results/modal-optimization-2026-07-19/raw.json",
     "normalize": "uv run python scripts/sanitize_modal_optimization_benchmark.py benchmark-results/modal-optimization-2026-07-19/raw.json benchmark-data/modal-optimization-results-2026-07-19.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/raw.json --harness-commit 7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
     "provider_default": "uv run computer-use benchmark compare --create-modal-sandbox --provider modal-daemon --provider daytona --provider e2b --modal-ingress attested-tunnel --resource-profile browser --browser chromium --iterations 3 --env-file .env --output benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json --json",
     "provider_default_normalize": "uv run python scripts/sanitize_provider_benchmark.py benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json --harness-commit 7d4ff14337ccf6846e821f30c8045ca73819c190 --status current_reference --scope \"provider-default verification for Modal, Daytona, and E2B without warm pools\"",
@@ -9,7 +9,7 @@
     "region_selection": "uv run computer-use benchmark modal-region-ab --modal-region default --modal-region us-west --modal-region us-east --modal-ingress attested-tunnel --caller-region-label local-macos-arm64-America-Los_Angeles --resource-profile browser --browser chromium --modal-cpu 4 --modal-memory-mib 8192 --iterations 30 --output benchmark-results/modal-optimization-2026-07-19/region-selection.json",
     "region_selection_attest": "uv run python scripts/run_modal_optimization_benchmark.py attest-region benchmark-results/modal-optimization-2026-07-19/region-selection.json benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --source-sha 182bc259105d3d5a77f3da11464d76e6672fc90f --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/region-selection.json"
   },
-  "command_manifest_sanitization": "Normalized the runner-specific credential file path to repository-relative .env. Added the digest-bound region attestation command when the execution-time preregistration did not contain that later provenance step.",
+  "command_manifest_sanitization": "Normalized the runner-specific credential file path to repository-relative .env. Added the digest-bound region attestation command when the execution-time preregistration did not contain that later provenance step. Updated the published replay command to consume the attested region evidence.",
   "environment_manifest": {
     "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
     "ingress": "attested-tunnel",
@@ -3604,7 +3604,7 @@
     "execution_date_utc": "2026-07-19",
     "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
     "modal_sdk_version": "1.5.2",
-    "normalizer_sha": "f074afa2877b014635923be64453e87c0640cf8a",
+    "normalizer_sha": "59ccc8ef83a218f47d1b738a2364c0b80518719f",
     "preregistration_sha256": "1d16e694984ccafe02cbccadb34513112b7c0f4adbffd3908ae7356a72836bbf",
     "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
     "raw_artifact_sha256": "4646f2aa8f78c0bdc8f611e157fa2c728cd76aff3b79cd7f7bd0f5b3aa8ce879",
