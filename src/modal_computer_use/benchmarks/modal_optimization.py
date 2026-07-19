@@ -595,6 +595,8 @@ def build_modal_region_evidence_envelope(
         raise ValueError("region evidence raw path must be repository-relative")
     if not _is_hex(execution_source_sha, 40):
         raise ValueError("region evidence source must be a full Git SHA")
+    if payload.get("execution_source_sha") != execution_source_sha:
+        raise ValueError("region evidence producer source differs from attestation source")
     return {
         "schema_version": 1,
         "benchmark": "modal-region-selection-evidence",

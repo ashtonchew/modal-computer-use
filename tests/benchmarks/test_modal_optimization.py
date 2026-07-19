@@ -595,6 +595,7 @@ def test_provider_default_extraction_keeps_only_safe_summary_fields() -> None:
 def test_region_selection_applies_preregistered_tie_break_and_records_digest() -> None:
     payload = {
         "benchmark": "modal-region-ab",
+        "execution_source_sha": "a" * 40,
         "iterations": 30,
         "comparison": {
             "regions": {
@@ -657,6 +658,7 @@ def test_region_selection_retains_failed_candidate_without_replacing_evidence() 
 def test_region_evidence_envelope_binds_payload_to_source_revision() -> None:
     payload = {
         "benchmark": "modal-region-ab",
+        "execution_source_sha": "a" * 40,
         "iterations": 30,
         "comparison": {
             "regions": {
@@ -709,6 +711,16 @@ def test_region_evidence_envelope_binds_payload_to_source_revision() -> None:
             envelope,
             raw_bytes=envelope_bytes,
             expected_source_sha="b" * 40,
+        )
+
+    mismatched_source = copy.deepcopy(payload)
+    mismatched_source["execution_source_sha"] = "b" * 40
+    with pytest.raises(ValueError, match="producer source"):
+        build_modal_region_evidence_envelope(
+            mismatched_source,
+            raw_bytes=json.dumps(mismatched_source).encode(),
+            raw_artifact_path="benchmark-results/modal-optimization/region.json",
+            execution_source_sha="a" * 40,
         )
 
 

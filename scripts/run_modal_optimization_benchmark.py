@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import shutil
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
@@ -44,6 +46,14 @@ def main() -> int:
         default=DEFAULT_RAW_ROOT / "preregistration.json",
     )
 
+    region = subparsers.add_parser("region")
+    region.add_argument("--source-sha", required=True)
+    region.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "region-selection.json",
+    )
+
     attest_region = subparsers.add_parser("attest-region")
     attest_region.add_argument("raw", type=Path)
     attest_region.add_argument("output", type=Path)
@@ -67,6 +77,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "preregister":
         return _preregister(args)
+    if args.command == "region":
+        return _run_region(args)
     if args.command == "attest-region":
         return _attest_region(args)
     return _run(args)
@@ -99,7 +111,7 @@ def _config(args: argparse.Namespace) -> ModalOptimizationConfig:
 
 
 def _preregister(args: argparse.Namespace) -> int:
-    _require_dependency(args.source_sha, args.dependency_sha, require_clean=False)
+    _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
     config = _config(args)
     region_selection_source_sha = args.region_selection_source_sha or args.source_sha
     provider_default_source_sha = args.provider_default_source_sha or args.source_sha
@@ -132,6 +144,68 @@ def _preregister(args: argparse.Namespace) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     print(json.dumps({"status": "preregistered", "output": str(args.output)}))
+    return 0
+
+
+def _run_region(args: argparse.Namespace) -> int:
+    _require_dependency(args.source_sha, DEPENDENCY_SHA, require_clean=True)
+    if args.output.exists():
+        raise RuntimeError("region output already exists; refusing stale evidence")
+    executable = shutil.which("computer-use")
+    if executable is None:
+        raise RuntimeError("computer-use is required for region evidence")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        dir=args.output.parent,
+        prefix=".region-selection-",
+        suffix=".json",
+    )
+    os.close(file_descriptor)
+    temporary = Path(temporary_name)
+    try:
+        subprocess.run(  # noqa: S603
+            [
+                executable,
+                "benchmark",
+                "modal-region-ab",
+                "--modal-region",
+                "default",
+                "--modal-region",
+                "us-west",
+                "--modal-region",
+                "us-east",
+                "--modal-ingress",
+                "attested-tunnel",
+                "--caller-region-label",
+                "local-macos-arm64-America-Los_Angeles",
+                "--resource-profile",
+                "browser",
+                "--browser",
+                "chromium",
+                "--modal-cpu",
+                "4",
+                "--modal-memory-mib",
+                "8192",
+                "--iterations",
+                "30",
+                "--output",
+                str(temporary),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        payload = json.loads(temporary.read_bytes())
+        if not isinstance(payload, dict) or payload.get("benchmark") != "modal-region-ab":
+            raise ValueError("region runner did not produce modal-region-ab evidence")
+        payload["execution_source_sha"] = args.source_sha
+        args.output.write_text(
+            f"{json.dumps(payload, indent=2, sort_keys=True)}\n",
+            encoding="utf-8",
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
+    print(json.dumps({"status": "complete", "output": str(args.output)}))
     return 0
 
 
@@ -236,11 +310,9 @@ def _commands(
     root = "benchmark-results/modal-optimization-2026-07-19"
     return {
         "region_selection": (
-            "uv run computer-use benchmark modal-region-ab --modal-region default "
-            "--modal-region us-west --modal-region us-east --modal-ingress attested-tunnel "
-            "--caller-region-label local-macos-arm64-America-Los_Angeles "
-            "--resource-profile browser --browser chromium --modal-cpu 4 "
-            f"--modal-memory-mib 8192 --iterations 30 --output {root}/region-selection.json"
+            "uv run python scripts/run_modal_optimization_benchmark.py region "
+            f"--source-sha {region_selection_source_sha} "
+            f"--output {root}/region-selection.json"
         ),
         "region_selection_attest": (
             "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
