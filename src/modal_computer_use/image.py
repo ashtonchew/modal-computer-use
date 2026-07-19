@@ -214,7 +214,7 @@ def _named_image_recipe(
                 "COMPUTER_USE_BROWSER": browser or "",
             }
         )
-        .add_local_python_source("modal_computer_use")
+        .add_local_python_source("modal_computer_use", copy=True)
     )
 
 

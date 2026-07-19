@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from modal_computer_use.benchmarks.provenance import benchmark_provenance
 from modal_computer_use.config import ComputerConfig, ImageConfig, NetworkConfig
 from modal_computer_use.image import (
+    _named_image_recipe,
     _published_named_image_identities,
     named_image,
     named_image_name,
@@ -184,6 +185,38 @@ def test_publish_named_images_refuses_existing_revision_tag(monkeypatch) -> None
 
     with pytest.raises(ValueError, match="refusing to replace existing named Image"):
         publish_named_images(revision=REVISION)
+
+
+def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class FakeRecipe:
+        def apt_install(self, *packages: str) -> FakeRecipe:
+            calls.append(("apt_install", packages))
+            return self
+
+        def pip_install_from_pyproject(self, path: str) -> FakeRecipe:
+            calls.append(("pip_install_from_pyproject", path))
+            return self
+
+        def env(self, values: dict[str, str]) -> FakeRecipe:
+            calls.append(("env", values))
+            return self
+
+        def add_local_python_source(self, module: str, *, copy: bool) -> FakeRecipe:
+            calls.append(("add_local_python_source", (module, copy)))
+            return self
+
+    recipe = FakeRecipe()
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: SimpleNamespace(
+            Image=SimpleNamespace(debian_slim=lambda python_version: recipe),
+        ),
+    )
+
+    assert _named_image_recipe(variant="standard", window_manager="xfce") is recipe
+    assert ("add_local_python_source", ("modal_computer_use", True)) in calls
 
 
 def test_named_image_publication_preflight_uses_modal_cli_and_fails_closed(monkeypatch) -> None:
