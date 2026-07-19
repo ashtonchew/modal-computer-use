@@ -24,6 +24,11 @@ def main() -> int:
         type=Path,
         help="preregistration manifest; defaults to preregistration.json beside raw",
     )
+    parser.add_argument(
+        "--region-evidence",
+        type=Path,
+        help="source-bound region evidence; defaults beside raw",
+    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
@@ -39,6 +44,10 @@ def main() -> int:
         harness_commit=args.harness_commit,
         preregistration_path=(
             args.preregistration or args.raw.parent / "preregistration.json"
+        ),
+        region_evidence_path=(
+            args.region_evidence
+            or args.raw.parent / "region-selection-attested.json"
         ),
         normalizer_commit=normalizer_commit,
         check=args.check,

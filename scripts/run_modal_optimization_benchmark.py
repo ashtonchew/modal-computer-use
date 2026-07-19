@@ -15,8 +15,10 @@ from modal_computer_use.benchmarks.artifacts import validate_sanitized_provider_
 from modal_computer_use.benchmarks.modal_optimization import (
     ModalOptimizationConfig,
     build_modal_optimization_artifact,
+    build_modal_region_evidence_envelope,
     build_preregistration,
     select_modal_optimization_region,
+    validate_preregistered_config,
 )
 from modal_computer_use.benchmarks.modal_optimization_execution import (
     run_independent_cold_attempts,
@@ -42,6 +44,12 @@ def main() -> int:
         default=DEFAULT_RAW_ROOT / "preregistration.json",
     )
 
+    attest_region = subparsers.add_parser("attest-region")
+    attest_region.add_argument("raw", type=Path)
+    attest_region.add_argument("output", type=Path)
+    attest_region.add_argument("--source-sha", required=True)
+    attest_region.add_argument("--raw-artifact-path", required=True)
+
     run = subparsers.add_parser("run")
     _add_common_arguments(run, region_default="selection-pending")
     run.add_argument("--provider-default", type=Path, required=True)
@@ -59,6 +67,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "preregister":
         return _preregister(args)
+    if args.command == "attest-region":
+        return _attest_region(args)
     return _run(args)
 
 
@@ -139,8 +149,10 @@ def _run(args: argparse.Namespace) -> int:
         provider_default_source_sha,
         require_clean=True,
     )
-    selected_region, region_selection = _select_region(args.region_selection)
-    region_selection["execution_source_sha"] = region_selection_source_sha
+    selected_region, region_selection = _select_region(
+        args.region_selection,
+        expected_source_sha=region_selection_source_sha,
+    )
     if args.region not in {"selection-pending", selected_region}:
         raise RuntimeError("explicit region does not match preregistered selection evidence")
     args.region = selected_region
@@ -151,6 +163,17 @@ def _run(args: argparse.Namespace) -> int:
         raise RuntimeError("preregistration source SHA does not match the benchmark harness")
     if preregistration.get("dependency", {}).get("head_sha") != args.dependency_sha:
         raise RuntimeError("preregistration dependency SHA does not match PR #114")
+    validate_preregistered_config(config, preregistration)
+    if (
+        preregistration.get("region_selection_evidence_source_sha")
+        != region_selection_source_sha
+    ):
+        raise RuntimeError("region evidence source SHA differs from preregistration")
+    if (
+        preregistration.get("provider_default_evidence_source_sha")
+        != provider_default_source_sha
+    ):
+        raise RuntimeError("provider evidence source SHA differs from preregistration")
     provider_default = json.loads(args.provider_default.read_bytes())
     if not isinstance(provider_default, dict):
         raise ValueError("provider-default artifact must be a JSON object")
@@ -183,6 +206,26 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _attest_region(args: argparse.Namespace) -> int:
+    raw_bytes = args.raw.read_bytes()
+    payload = json.loads(raw_bytes)
+    if not isinstance(payload, dict):
+        raise ValueError("region evidence input must be a JSON object")
+    envelope = build_modal_region_evidence_envelope(
+        payload,
+        raw_bytes=raw_bytes,
+        raw_artifact_path=args.raw_artifact_path,
+        execution_source_sha=args.source_sha,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        f"{json.dumps(envelope, indent=2, sort_keys=True)}\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({"status": "attested", "output": str(args.output)}))
+    return 0
+
+
 def _commands(
     source_sha: str,
     *,
@@ -197,6 +240,12 @@ def _commands(
             "--caller-region-label local-macos-arm64-America-Los_Angeles "
             "--resource-profile browser --browser chromium --modal-cpu 4 "
             f"--modal-memory-mib 8192 --iterations 30 --output {root}/region-selection.json"
+        ),
+        "region_selection_attest": (
+            "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
+            f"{root}/region-selection.json {root}/region-selection-attested.json "
+            f"--source-sha {region_selection_source_sha} "
+            f"--raw-artifact-path {root}/region-selection.json"
         ),
         "provider_default": (
             "uv run computer-use benchmark compare --create-modal-sandbox "
@@ -222,14 +271,16 @@ def _commands(
             f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
             f"--region-selection-source-sha {region_selection_source_sha} "
             f"--provider-default-source-sha {provider_default_source_sha} "
-            f"--region-selection {root}/region-selection.json "
+            f"--region-selection {root}/region-selection-attested.json "
             f"--provider-default {root}/provider-default-sanitized.json "
             f"--preregistration {root}/preregistration.json --output {root}/raw.json"
         ),
         "normalize": (
             "uv run python scripts/sanitize_modal_optimization_benchmark.py "
             f"{root}/raw.json benchmark-data/modal-optimization-results-2026-07-19.json "
-            f"--raw-artifact-path {root}/raw.json --harness-commit {source_sha}"
+            f"--raw-artifact-path {root}/raw.json --harness-commit {source_sha} "
+            f"--preregistration {root}/preregistration.json "
+            f"--region-evidence {root}/region-selection-attested.json"
         ),
     }
 
@@ -252,12 +303,20 @@ def _require_dependency(source_sha: str, dependency_sha: str, *, require_clean: 
         raise RuntimeError("credentialed benchmark execution requires a clean tracked worktree")
 
 
-def _select_region(path: Path) -> tuple[str, dict[str, Any]]:
+def _select_region(
+    path: Path,
+    *,
+    expected_source_sha: str,
+) -> tuple[str, dict[str, Any]]:
     raw_bytes = path.read_bytes()
     payload = json.loads(raw_bytes)
     if not isinstance(payload, dict):
         raise ValueError("region selection artifact must be a JSON object")
-    return select_modal_optimization_region(payload, raw_bytes=raw_bytes)
+    return select_modal_optimization_region(
+        payload,
+        raw_bytes=raw_bytes,
+        expected_source_sha=expected_source_sha,
+    )
 
 
 def _git_output(git: str, *args: str) -> str:

@@ -15,6 +15,7 @@ from modal_computer_use.benchmarks.modal_optimization import (
     ModalOptimizationConfig,
     action_attempts_from_case,
     build_modal_optimization_artifact,
+    build_modal_region_evidence_envelope,
     build_preregistration,
     estimate_resource_cost,
     extract_provider_default_profile,
@@ -23,6 +24,7 @@ from modal_computer_use.benchmarks.modal_optimization import (
     serialize_modal_optimization_benchmark,
     summarize_attempts,
     validate_modal_optimization_artifact,
+    validate_preregistered_config,
 )
 from modal_computer_use.benchmarks.modal_optimization_execution import (
     run_independent_cold_attempts,
@@ -140,7 +142,18 @@ def test_artifact_validation_rejects_dropped_attempts() -> None:
         "timeout": 0,
     }
 
-    with pytest.raises(ValueError, match="summary attempted count"):
+    with pytest.raises(ValueError, match="summary does not match"):
+        validate_modal_optimization_artifact(artifact)
+
+
+def test_artifact_validation_rejects_forged_summary_percentiles() -> None:
+    artifact = _artifact()
+    artifact["profiles"][PROFILE_MODAL_ON_DEMAND]["cold_summary"] = summarize_attempts(
+        artifact["profiles"][PROFILE_MODAL_ON_DEMAND]["cold_attempts"]
+    )
+    artifact["profiles"][PROFILE_MODAL_ON_DEMAND]["cold_summary"]["p50_ms"] = 0.01
+
+    with pytest.raises(ValueError, match="summary does not match"):
         validate_modal_optimization_artifact(artifact)
 
 
@@ -211,6 +224,7 @@ def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() 
         ),
         "provider_default_normalize": "provider normalize command",
         "region_selection": "region command",
+        "region_selection_attest": "region attest command",
         "publish_image": "publish command",
         "benchmark": "benchmark command",
         "normalize": "normalize command",
@@ -262,6 +276,9 @@ def test_preregistration_freezes_commands_policies_and_dependency() -> None:
         "provider_default": "uv run computer-use benchmark compare --iterations 3",
         "provider_default_normalize": "uv run python scripts/sanitize_provider_benchmark.py",
         "region_selection": "uv run computer-use benchmark modal-region-ab --iterations 30",
+        "region_selection_attest": (
+            "uv run python scripts/run_modal_optimization_benchmark.py attest-region"
+        ),
         "publish_image": "uv run python scripts/publish_modal_images.py --revision " + "a" * 40,
         "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run",
         "normalize": "uv run python scripts/sanitize_modal_optimization_benchmark.py",
@@ -297,6 +314,15 @@ def test_preregistration_freezes_commands_policies_and_dependency() -> None:
         "provider_sdk_internal_retries": "not_observable",
     }
     assert preregistration["commands"] == commands
+    validate_preregistered_config(config, preregistration)
+
+    changed = ModalOptimizationConfig(
+        region="us-west",
+        image_revision="a" * 40,
+        cold_attempts=29,
+    )
+    with pytest.raises(ValueError, match="differs from preregistration"):
+        validate_preregistered_config(changed, preregistration)
 
 
 @pytest.mark.parametrize(
@@ -491,6 +517,64 @@ def test_region_selection_retains_failed_candidate_without_replacing_evidence() 
     assert evidence["candidates"]["us-east"]["ok"] is False
     assert evidence["candidates"]["us-east"]["failure_count"] == 1
     assert evidence["candidate_failures_retained"] is True
+
+
+def test_region_evidence_envelope_binds_payload_to_source_revision() -> None:
+    payload = {
+        "benchmark": "modal-region-ab",
+        "iterations": 30,
+        "comparison": {
+            "regions": {
+                "us-west": {"fastest_floor_p50_ms": 30.0},
+                "us-east": {"fastest_floor_p50_ms": 60.0},
+            }
+        },
+        "runs": {
+            region: {
+                "ok": True,
+                "failures": [],
+                "metadata": {
+                    "environment": {"modal_cold_create_to_ready_ms": cold_ms}
+                },
+            }
+            for region, cold_ms in (("us-west", 7_000.0), ("us-east", 8_000.0))
+        },
+    }
+    raw_bytes = json.dumps(payload, indent=2, sort_keys=True).encode()
+    envelope = build_modal_region_evidence_envelope(
+        payload,
+        raw_bytes=raw_bytes,
+        raw_artifact_path="benchmark-results/modal-optimization/region.json",
+        execution_source_sha="a" * 40,
+    )
+    envelope_bytes = json.dumps(envelope, indent=2, sort_keys=True).encode()
+
+    region, evidence = select_modal_optimization_region(
+        envelope,
+        raw_bytes=envelope_bytes,
+        expected_source_sha="a" * 40,
+    )
+
+    assert region == "us-west"
+    assert evidence["execution_source_sha"] == "a" * 40
+    assert evidence["artifact_sha256"] == hashlib.sha256(raw_bytes).hexdigest()
+
+    tampered = copy.deepcopy(envelope)
+    tampered["payload"]["comparison"]["regions"]["us-west"][
+        "fastest_floor_p50_ms"
+    ] = 1.0
+    with pytest.raises(ValueError, match="payload digest"):
+        select_modal_optimization_region(
+            tampered,
+            raw_bytes=json.dumps(tampered).encode(),
+            expected_source_sha="a" * 40,
+        )
+    with pytest.raises(ValueError, match="source SHA"):
+        select_modal_optimization_region(
+            envelope,
+            raw_bytes=envelope_bytes,
+            expected_source_sha="b" * 40,
+        )
 
 
 def test_independent_cold_attempts_validate_frame_and_record_cleanup() -> None:

@@ -101,6 +101,7 @@ def build_preregistration(
         "provider_default",
         "provider_default_normalize",
         "region_selection",
+        "region_selection_attest",
         "publish_image",
         "benchmark",
         "normalize",
@@ -108,7 +109,7 @@ def build_preregistration(
     if set(commands) != required_commands or any(
         not _nonempty_text(command) for command in commands.values()
     ):
-        raise ValueError("commands must contain the six exact benchmark commands")
+        raise ValueError("commands must contain the seven exact benchmark commands")
     return {
         "schema_version": 1,
         "benchmark": "modal-optimization-preregistration",
@@ -204,6 +205,22 @@ def build_preregistration(
         },
         "commands": dict(commands),
     }
+
+
+def validate_preregistered_config(
+    config: ModalOptimizationConfig,
+    preregistration: dict[str, Any],
+) -> None:
+    frozen = copy.deepcopy(
+        _mapping(preregistration.get("configuration"), "preregistration configuration")
+    )
+    effective = asdict(config)
+    frozen_region = frozen.pop("region", None)
+    effective.pop("region", None)
+    if frozen_region not in {"selection-pending", config.region}:
+        raise ValueError("effective region differs from preregistration")
+    if frozen != effective:
+        raise ValueError("effective benchmark configuration differs from preregistration")
 
 
 def action_attempts_from_case(
@@ -480,7 +497,31 @@ def select_modal_optimization_region(
     payload: dict[str, Any],
     *,
     raw_bytes: bytes,
+    expected_source_sha: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    artifact_digest = hashlib.sha256(raw_bytes).hexdigest()
+    envelope_digest: str | None = None
+    execution_source_sha: str | None = None
+    if payload.get("benchmark") == "modal-region-selection-evidence":
+        envelope_digest = artifact_digest
+        provenance = _mapping(payload.get("provenance"), "region evidence provenance")
+        execution_source_sha = provenance.get("execution_source_sha")
+        if not _is_hex(execution_source_sha, 40):
+            raise ValueError("region evidence execution source must be a full Git SHA")
+        if expected_source_sha is not None and execution_source_sha != expected_source_sha:
+            raise ValueError("region evidence source SHA does not match the requested revision")
+        measured_payload = _mapping(payload.get("payload"), "region evidence payload")
+        canonical_digest = hashlib.sha256(
+            json.dumps(measured_payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if provenance.get("payload_sha256") != canonical_digest:
+            raise ValueError("region evidence payload digest does not match its envelope")
+        artifact_digest = str(provenance.get("raw_artifact_sha256"))
+        if not _is_hex(artifact_digest, 64):
+            raise ValueError("region evidence raw artifact digest must be SHA-256")
+        payload = measured_payload
+    elif expected_source_sha is not None:
+        raise ValueError("region selection requires a source-bound evidence envelope")
     if payload.get("benchmark") != "modal-region-ab":
         raise ValueError("region selection artifact must be a modal-region-ab result")
     if payload.get("iterations") != 30:
@@ -530,12 +571,43 @@ def select_modal_optimization_region(
             key=lambda region: candidates[region]["transport_p50_ms"],
         )
     return selected, {
-        "artifact_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "artifact_sha256": artifact_digest,
+        "evidence_envelope_sha256": envelope_digest,
+        "execution_source_sha": execution_source_sha,
         "candidates": candidates,
         "selected": selected,
         "rule": "transport p50; within 5 percent use lower cold create-to-ready",
         "default_region_excluded_from_optimized_placement": True,
         "candidate_failures_retained": True,
+    }
+
+
+def build_modal_region_evidence_envelope(
+    payload: dict[str, Any],
+    *,
+    raw_bytes: bytes,
+    raw_artifact_path: str,
+    execution_source_sha: str,
+) -> dict[str, Any]:
+    if payload.get("benchmark") != "modal-region-ab":
+        raise ValueError("region evidence input must be a modal-region-ab result")
+    if not _safe_relative_path(raw_artifact_path):
+        raise ValueError("region evidence raw path must be repository-relative")
+    if not _is_hex(execution_source_sha, 40):
+        raise ValueError("region evidence source must be a full Git SHA")
+    return {
+        "schema_version": 1,
+        "benchmark": "modal-region-selection-evidence",
+        "payload": copy.deepcopy(payload),
+        "provenance": {
+            "execution_source_sha": execution_source_sha,
+            "raw_artifact_path": raw_artifact_path,
+            "raw_artifact_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "payload_sha256": hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+            "raw_artifact_tracked": False,
+        },
     }
 
 
@@ -677,6 +749,8 @@ def sanitize_modal_optimization_benchmark(
     harness_commit: str,
     preregistration_payload: dict[str, Any] | None = None,
     preregistration_bytes: bytes | None = None,
+    region_evidence_payload: dict[str, Any] | None = None,
+    region_evidence_bytes: bytes | None = None,
     normalizer_commit: str | None = None,
 ) -> dict[str, Any]:
     if not _is_hex(harness_commit, 40):
@@ -719,6 +793,31 @@ def sanitize_modal_optimization_benchmark(
                 "artifact_policy",
             )
         }
+    region_attestation: dict[str, Any] | None = None
+    if region_evidence_payload is not None:
+        if region_evidence_bytes is None:
+            raise ValueError("region_evidence_bytes are required with region evidence")
+        raw_region = _mapping(
+            _mapping(payload.get("provenance", {}), "provenance").get("region_selection"),
+            "raw region selection",
+        )
+        expected_source = raw_region.get("execution_source_sha")
+        selected, evidence = select_modal_optimization_region(
+            region_evidence_payload,
+            raw_bytes=region_evidence_bytes,
+            expected_source_sha=expected_source,
+        )
+        for key in ("artifact_sha256", "candidates"):
+            if evidence.get(key) != raw_region.get(key):
+                raise ValueError("source-bound region evidence differs from the raw artifact")
+        if selected != raw_region.get("selected"):
+            raise ValueError("source-bound region selection differs from the raw artifact")
+        region_attestation = {
+            "status": "validated",
+            "execution_source_sha": expected_source,
+            "evidence_envelope_sha256": hashlib.sha256(region_evidence_bytes).hexdigest(),
+            "raw_artifact_sha256": evidence["artifact_sha256"],
+        }
     normalizer = normalizer_commit or harness_commit
     if not _is_hex(normalizer, 40):
         raise ValueError("normalizer_commit must be a full Git SHA")
@@ -732,6 +831,8 @@ def sanitize_modal_optimization_benchmark(
         "sanitizer_version": 1,
         "normalizer_sha": normalizer,
     }
+    if region_attestation is not None:
+        payload["provenance"]["region_selection_attestation"] = region_attestation
     _reject_forbidden_fields(payload)
     _validate_safe_value(payload)
     validate_modal_optimization_artifact(payload)
@@ -750,6 +851,7 @@ def generate_sanitized_modal_optimization_benchmark(
     raw_artifact_path: str,
     harness_commit: str,
     preregistration_path: Path,
+    region_evidence_path: Path,
     normalizer_commit: str,
     check: bool = False,
 ) -> bool:
@@ -761,6 +863,10 @@ def generate_sanitized_modal_optimization_benchmark(
     preregistration_payload = json.loads(preregistration_bytes)
     if not isinstance(preregistration_payload, dict):
         raise ValueError("preregistration payload must be a JSON object")
+    region_evidence_bytes = region_evidence_path.read_bytes()
+    region_evidence_payload = json.loads(region_evidence_bytes)
+    if not isinstance(region_evidence_payload, dict):
+        raise ValueError("region evidence payload must be a JSON object")
     sanitized = sanitize_modal_optimization_benchmark(
         raw_payload,
         raw_bytes=raw_bytes,
@@ -768,6 +874,8 @@ def generate_sanitized_modal_optimization_benchmark(
         harness_commit=harness_commit,
         preregistration_payload=preregistration_payload,
         preregistration_bytes=preregistration_bytes,
+        region_evidence_payload=region_evidence_payload,
+        region_evidence_bytes=region_evidence_bytes,
         normalizer_commit=normalizer_commit,
     )
     rendered = serialize_modal_optimization_benchmark(sanitized)
@@ -782,6 +890,12 @@ def _add_derived_summaries(payload: dict[str, Any]) -> None:
     profiles = _mapping(payload.get("profiles"), "profiles")
     on_demand = _mapping(profiles.get(PROFILE_MODAL_ON_DEMAND), PROFILE_MODAL_ON_DEMAND)
     cold = _list_of_mappings(on_demand.get("cold_attempts"), "cold_attempts")
+    on_demand["cold_summary"] = summarize_attempts(cold)
+    warm_actions = _list_of_mappings(
+        on_demand.get("warm_action_attempts"),
+        "warm_action_attempts",
+    )
+    on_demand["warm_action_summary"] = summarize_attempts(warm_actions)
     stage_names = sorted(
         {
             str(stage)
@@ -822,6 +936,7 @@ def _add_derived_summaries(payload: dict[str, Any]) -> None:
         PROFILE_MODAL_WARM_AVAILABILITY,
     )
     claims = _list_of_mappings(warm.get("claim_attempts"), "claim_attempts")
+    warm["claim_summary"] = summarize_attempts(claims)
     warm["request_to_authenticated_summary"] = _summary_from_attempt_field(
         claims,
         "request_to_authenticated_ms",
@@ -904,9 +1019,18 @@ def _validate_optional_summary(
         return
     summary = _mapping(raw_summary, f"{prefix}_summary")
     expected = summarize_attempts(attempts)
-    for key in ("attempted", "valid", "failed", "timeout"):
+    for key in (
+        "attempted",
+        "valid",
+        "failed",
+        "timeout",
+        "p50_ms",
+        "p95_ms",
+        "p95_status",
+        "minimum_p95_samples",
+    ):
         if summary.get(key) != expected[key]:
-            raise ValueError(f"{prefix} summary attempted count does not match attempt rows")
+            raise ValueError(f"{prefix} summary does not match attempt rows")
 
 
 def _reject_forbidden_fields(value: Any) -> None:
