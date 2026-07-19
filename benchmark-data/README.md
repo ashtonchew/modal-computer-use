@@ -8,3 +8,5 @@ This directory contains tracked, sanitized, normalized benchmark references.
 - Modal V2 candidate evidence is promotable only through
   `scripts/sanitize_modal_v2_candidate_benchmark.py`; pilot failures, rejected runs, and partial
   full runs remain ignored under `benchmark-results/modal-v2-candidate-2026-07-19/`.
+- A placement matrix with `measurement_performed: false` may be tracked as descriptive capability
+  evidence. It is not a candidate performance result and cannot contain latency or ratio claims.

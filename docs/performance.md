@@ -953,10 +953,12 @@ bootstrap confidence intervals, and ECDF-ready rows. Allocation throughput at co
 See [Modal V2 Candidate Benchmark Methodology](modal-v2-candidate-benchmark.md) and
 [Modal V2 Candidate Result, 2026-07-19](benchmark-results-2026-07-19-modal-v2-candidate.md).
 
-The 2026-07-19 live candidate was rejected before measurement. Its V2 runner requested
-`aws/us-west` but reported `CLOUD_PROVIDER_AZURE/westus3`; V1 separately rejected an explicit Azure
-request. The harness retained zero trials, emitted no ratios, cleaned all benchmark Sandboxes, and
-did not run full lifecycle or throughput phases. No Modal V2 artifact was promoted.
+The corrected 2026-07-19 capability matrix was descriptive-only and stopped before measurement.
+Across `auto`, `aws`, `gcp`, and `oci` requests, all three V2 roles consistently landed on
+`CLOUD_PROVIDER_AZURE/westus3`; V1 landed on OCI by default and honored each explicit supported
+provider request. No exact common placement existed, so the harness created no preregistration,
+retained no trials, emitted no ratios, and did not run lifecycle or throughput phases. The complete
+sanitized matrix is tracked as `benchmark-data/modal-v2-placement-capability-2026-07-19.json`.
 
 The earlier provider comparison profile remains `provider-default`: a neutral external-caller
 correctness and provenance foundation, not a platform-optimized Modal result. This Modal V2

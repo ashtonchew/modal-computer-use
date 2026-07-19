@@ -2,63 +2,65 @@
 
 ## Status
 
-**Rejected before measurement.** The clean harness and named image revision were
-`2749f72c9201a8a34bbce0bcf91f504069a3401a`. The final preregistered pilot requested the common
-placement `aws/us-west`; its persistent V2 runner reported `CLOUD_PROVIDER_AZURE/westus3`.
-The placement preflight stopped before the first target, retained zero trials, emitted no ratios,
-and completed its run-ID-scoped cleanup with zero remaining Sandboxes.
+**Descriptive placement-capability result; performance comparison ineligible.** The corrected clean
+harness and named image revision were `ccf756154c8d7aa157ca6844b80d3042ea718df4`.
+An unmeasured matrix evaluated `auto`, `aws`, `gcp`, and `oci` requests across a V1 target, V2
+encrypted-tunnel target, V2 i6pn target, and separate V2 i6pn runner. It found no request where all
+four roles shared one exact observed cloud and concrete region.
 
-Exact result reason: `pilot placement preflight failed before measurement: requested runner cloud
-aws; observed CLOUD_PROVIDER_AZURE`.
+The preregistration gate therefore stopped the workflow before all latency measurement. No pilot,
+full lifecycle, throughput, ratio, winner, default, or Connect-parity result exists.
 
-An additional capability probe found that V2 accepts `azure/us-west`, but V1 rejects Azure as an
-unknown cloud provider. A common explicit requested and actual provider therefore was not
-established for the required V1/V2 arms. No V2 default, winner, Connect-parity, backend-causal, or
-asymmetric performance claim is made.
+## Placement Matrix
 
-## Classification
+| Cloud request | V1 target | All three V2 roles | Exact common placement | Decision |
+| --- | --- | --- | --- | --- |
+| `auto` | OCI `us-phoenix-1` | Azure `westus3` | No | Descriptive only |
+| `aws` | AWS `us-west-2` | Azure `westus3` | No; V2 did not honor request | Descriptive only |
+| `gcp` | GCP `us-west3` | Azure `westus3` | No; V2 did not honor request | Descriptive only |
+| `oci` | OCI `us-phoenix-1` | Azure `westus3` | No; V2 did not honor request | Descriptive only |
 
-| Arm | Evidence class | Comparable use |
-| --- | --- | --- |
-| `v1-connect-product` | Public product path | User-available Connect endpoint distribution |
-| `v1-encrypted-tunnel` | Matched backend arm | V1 side of transport-matched generation evidence |
-| `v2-encrypted-tunnel` | Matched backend arm | V2 side of transport-matched generation evidence |
-| `v2-i6pn-direct-optimized` | Asymmetric candidate | Workspace-private optimized distribution only |
+All 16 probes created their Sandbox, observed runtime placement, and passed run-scoped cleanup.
+Both i6pn roles also verified an i6pn address. The capability matrix explicitly records
+`measurement_performed: false`.
 
-See [the methodology](modal-v2-candidate-benchmark.md) for frozen controls, boundaries, schedules,
-decision gates, statistics, provenance, and reproduction commands.
+## Performance Table
 
-## Result Table
-
-| Arm | Pilot | Full | Allocation p50/p95 | Browser-ready p50/p95 | Warm action p50/p95 | Eligibility |
+| Arm | Pilot | Full | Allocation | First valid frame | Warm action | Eligibility |
 | --- | --- | --- | --- | --- | --- | --- |
-| `v1-connect-product` | 0, preflight stop | Not run | Not measured | Not measured | Not measured | Rejected |
-| `v1-encrypted-tunnel` | 0, preflight stop | Not run | Not measured | Not measured | Not measured | Rejected |
-| `v2-encrypted-tunnel` | 0, preflight stop | Not run | Not measured | Not measured | Not measured | Rejected |
-| `v2-i6pn-direct-optimized` | 0, preflight stop | Not run | Not measured | Not measured | Not measured | Rejected |
+| `v1-connect-product` | Not run | Not run | Not measured | Not measured | Not measured | Ineligible |
+| `v1-encrypted-tunnel` | Not run | Not run | Not measured | Not measured | Not measured | Ineligible |
+| `v2-encrypted-tunnel` | Not run | Not run | Not measured | Not measured | Not measured | Ineligible |
+| `v2-i6pn-direct-optimized` | Not run | Not run | Not measured | Not measured | Not measured | Ineligible |
 
-Full lifecycle and throughput phases were ineligible and were not run. No sanitized artifact was
-promoted to `benchmark-data/`.
+There is consequently no defensible V1-versus-V2 speedup number. The earlier approximately 15 ms
+V2 screenshot observation remains lower-bound evidence from a different, non-comparable path; this
+matrix neither validates nor contradicts that latency.
+
+## Conclusion
+
+V2 is a promising optimized candidate, but this account's current V2 placement behavior prevents a
+causal V1/V2 backend comparison. The V2 tunnel, V2 i6pn target, and V2 runner consistently colocated
+on Azure `westus3`, which is useful for a V2-only optimized-path experiment. It cannot be compared
+as a backend-generation ratio against V1 until Modal exposes a common placement or V1 supports that
+same Azure stratum.
+
+The correct next options are:
+
+1. Ask Modal to enable or document a common V1/V2 provider-region placement for this workspace.
+2. Report a separately labeled V2-only optimized distribution on Azure `westus3`, with no V1 ratio.
+3. Rerun this capability gate after a Modal SDK or backend placement change before attempting the
+   four-arm benchmark.
 
 ## Provenance
 
-- Preregistration SHA-256: `cac19aa0d594ea47a91d979fa00c8b67445b5b25d83beaf7861e7d9c2238c765`
-- Rejected result SHA-256: `fefe0742228e1c316d1d49aa1e45d1763c69bf57f56fbf9fb09f606312fc0216`
-- Final checkpoint SHA-256: `145e02169bb46fbcf6de39259a0c19189f74edeb10217b7858db5042bbbd1b4f`
-- Cloud compatibility diagnostic SHA-256:
-  `4f5ecdf0919f159fe570196460f3dd1c1aa55288169221c573daa5433139ae52`
-- Raw paths: `benchmark-results/modal-v2-candidate-2026-07-19/preregistration.json`,
-  `benchmark-results/modal-v2-candidate-2026-07-19/rejected/pilot.json`, and
-  `benchmark-results/modal-v2-candidate-2026-07-19/checkpoints/pilot.json`
-- Cleanup evidence: zero matched leftovers, zero termination failures, zero remaining Sandboxes;
-  the benchmark App reported zero tasks after verification.
+- Source and image revision: `ccf756154c8d7aa157ca6844b80d3042ea718df4`
+- Capability artifact SHA-256: `d5ee2b31d70e924bdd9b24c55c4361e0adee1234c18246b245d0568b8aa89244`
+- Tracked artifact: `benchmark-data/modal-v2-placement-capability-2026-07-19.json`
+- Raw artifact: `benchmark-results/modal-v2-candidate-2026-07-19/diagnostics/placement-capability.json`
+- Cleanup: 16 of 16 probes reported successful run-scoped cleanup
+- Modal SDK: `1.5.2`
+- Billed cost: not reconciled
 
-## Cost And Limitations
-
-The preregistered public-rate ceiling was `$10.00`. No target was created, so the artifact's partial
-target CPU/memory estimate is `$0.00`. Persistent-runner compute, capability probes, control-plane
-work, and billing adjustments are not included. Modal billed cost remains unreconciled.
-
-V2 is Beta, V2 Connect Tokens are unsupported in Modal SDK 1.5.2, i6pn is workspace-private and
-region-scoped, and the observed V2 provider did not honor the explicit common AWS request. This is a
-placement-compatibility rejection, not a performance result.
+See [the methodology](modal-v2-candidate-benchmark.md) for boundaries, gates, classifications, and
+reproduction commands.
