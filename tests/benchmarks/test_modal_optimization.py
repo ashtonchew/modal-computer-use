@@ -203,8 +203,8 @@ def test_artifact_failed_claims_do_not_count_as_pool_misses() -> None:
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("token", "secret-token"),
-        ("base_url", "https://example.test/path?credential=value"),
+        ("token", "test-token"),
+        ("base_url", "https://example.test/path?credential=test-token"),
         ("typed_text", "private payload"),
         ("clipboard", "private clipboard"),
         ("screenshot_bytes", "iVBORw0KGgo="),
