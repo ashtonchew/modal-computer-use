@@ -1,0 +1,3638 @@
+{
+  "benchmark": "modal-optimization-results",
+  "command_manifest": {
+    "benchmark": "uv run python scripts/run_modal_optimization_benchmark.py run --source-sha 7707edff8270aa0d66cef65d72ef44a6c99f8a0f --dependency-sha 37f977f80de93800c005caeec7ead5222b00b040 --region-selection-source-sha 182bc259105d3d5a77f3da11464d76e6672fc90f --provider-default-source-sha 7d4ff14337ccf6846e821f30c8045ca73819c190 --region-selection benchmark-results/modal-optimization-2026-07-19/region-selection.json --provider-default benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --output benchmark-results/modal-optimization-2026-07-19/raw.json",
+    "normalize": "uv run python scripts/sanitize_modal_optimization_benchmark.py benchmark-results/modal-optimization-2026-07-19/raw.json benchmark-data/modal-optimization-results-2026-07-19.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/raw.json --harness-commit 7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "provider_default": "uv run computer-use benchmark compare --create-modal-sandbox --provider modal-daemon --provider daytona --provider e2b --modal-ingress attested-tunnel --resource-profile browser --browser chromium --iterations 3 --env-file /Users/ashtonchew/projects/modal-computer-use/.env --output benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json --json",
+    "provider_default_normalize": "uv run python scripts/sanitize_provider_benchmark.py benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json benchmark-results/modal-optimization-2026-07-19/provider-default-sanitized.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/provider-default-raw.json --harness-commit 7d4ff14337ccf6846e821f30c8045ca73819c190 --status current_reference --scope \"provider-default verification for Modal, Daytona, and E2B without warm pools\"",
+    "publish_image": "uv run python scripts/publish_modal_images.py --revision 7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "region_selection": "uv run computer-use benchmark modal-region-ab --modal-region default --modal-region us-west --modal-region us-east --modal-ingress attested-tunnel --caller-region-label local-macos-arm64-America-Los_Angeles --resource-profile browser --browser chromium --modal-cpu 4 --modal-memory-mib 8192 --iterations 30 --output benchmark-results/modal-optimization-2026-07-19/region-selection.json"
+  },
+  "environment_manifest": {
+    "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "ingress": "attested-tunnel",
+    "region_policy": "Select the fastest valid explicit narrow region from the preregistered us-west and us-east probes by transport p50. Treat a difference within 5 percent as a tie, then select the lower cold create-to-ready p50.",
+    "requested_region": "selection-pending",
+    "runner": {
+      "architecture": "arm64",
+      "kind": "local",
+      "location_label": "local-macos-arm64-America-Los_Angeles",
+      "operating_system": "Darwin",
+      "timezone": "America/Los_Angeles"
+    },
+    "sdk_versions": {
+      "daytona": "0.175.0",
+      "e2b-desktop": "2.3.1",
+      "modal": "1.5.2"
+    }
+  },
+  "failures": [],
+  "generated_at": "2026-07-19T07:38:09.177037Z",
+  "measurement_manifest": {
+    "artifact_policy": {
+      "failed_samples_retained": true,
+      "minimum_p95_samples": 20,
+      "raw": "ignored and local",
+      "raw_digest": "sha256",
+      "tracked": "sanitized normalized JSON only"
+    },
+    "cost_policy": {
+      "completeness": "partial target-only lower bound",
+      "excluded": [
+        "runner_compute",
+        "control_plane",
+        "billing_adjustments"
+      ],
+      "formula": "duration_seconds * (cpu * 0.00003942 + memory_gib * 0.00000667) * regional_multiplier",
+      "regional_multiplier": null,
+      "source_urls": [
+        "https://modal.com/products/sandboxes",
+        "https://modal.com/docs/guide/sandbox-resources",
+        "https://modal.com/docs/guide/region-selection"
+      ]
+    },
+    "failure_policy": {
+      "cleanup_recorded_per_attempt": true,
+      "drop_failed_attempts": false,
+      "drop_timed_out_attempts": false,
+      "inspect_every_failure": true,
+      "valid_sample_exclusions": [
+        "failed final authentication",
+        "invalid or undecodable frame",
+        "noncausal action observation"
+      ]
+    },
+    "metric_boundaries": {
+      "cold_request_to_first_valid_authenticated_frame": "Immediately before ComputerSandbox.create until a protected screenshot decodes to a supported format with positive dimensions.",
+      "daemon_started": "not observable; report N/A",
+      "scheduled": "not observable; report N/A",
+      "warm_action_to_causal_frame": "Immediately before the correlated action dispatch until the first valid observation with matching identifiers, causal=true, action success, a changed frame, and a reconstructable image.",
+      "warm_claim_request_to_authenticated": "Immediately before the nonblocking queue claim until the claimed or cold fallback session passes protected browser readiness.",
+      "warm_claim_request_to_first_valid_frame": "Immediately before the nonblocking queue claim until the claimed or cold fallback session returns a valid protected screenshot."
+    },
+    "retry_policy": {
+      "harness_retries": 0,
+      "provider_sdk_internal_retries": "not_observable",
+      "replacement_samples": false
+    },
+    "sample_policy": {
+      "independent_cold_attempts": 30,
+      "warm_action_attempts": 30,
+      "warm_claim_attempts": 30,
+      "warm_idle_seconds": 30.0,
+      "warm_pool_target": 3
+    },
+    "timeout_policy": {
+      "readiness_seconds": 120.0,
+      "sandbox_seconds": 900,
+      "timed_out_attempt_status": "timeout"
+    }
+  },
+  "profiles": {
+    "modal-platform-optimized-on-demand": {
+      "cold_attempts": [
+        {
+          "actual_placement": "westus3",
+          "attempt": 0,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11674.552042037249,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.765824459027499,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 10666.030708001927,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 11355.536625022069,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 10408.987792034168,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 9752.013500023168,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11674.552042037249,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.12333301128819585,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 536.5699580288492,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1378.1827079947107,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9643.983207992278,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 11151.597624993883,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "LAX2",
+          "attempt": 1,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 7658.501875004731,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 7.716485249984544,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7088.223833008669,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 7476.569874968845,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 6882.213082979433,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6549.88341697026,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 7658.501875004731,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 1.2418749975040555,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 292.3476669820957,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1260.5473329895176,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6448.7722080084495,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 7392.597666999791,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 2,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12238.95479197381,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.329259291989729,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 11063.810999970883,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 11882.06029200228,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 10749.774166964926,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 10105.213709000964,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12238.95479197381,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.17337495228275657,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 273.60095898620784,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1170.448166958522,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9920.016333984677,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 11690.520500007551,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 3,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 9097.01520903036,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 9.237057125021238,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8296.598709013779,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8824.210749997292,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7972.346334019676,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7415.0190420332365,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 9097.01520903036,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.38991699693724513,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 324.94495902210474,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1209.6469170064665,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7315.642792033032,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8712.680333992466,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 4,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8853.133708005771,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.963516041985713,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8145.951125014108,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8635.573790990748,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7882.8653750242665,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7287.64295799192,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8853.133708005771,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.37958298344165087,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 284.19529099483043,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1160.937250009738,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7188.285041018389,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8519.345791020896,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "LAX2",
+          "attempt": 5,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 7667.793333006557,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 7.7243279999820516,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7128.084541007411,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 7507.108582998626,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 6896.2186250137165,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6552.098833024502,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 7667.793333006557,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 2.991124987602234,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 293.0082500097342,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1114.7387499804609,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6449.514665990137,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 7430.57308299467,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 6,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11262.754291994497,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.35184295795625,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 10182.023625005968,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10903.084833989851,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 9921.78083397448,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 9282.66608400736,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11262.754291994497,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.396709016058594,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 280.5313339922577,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1094.948249985464,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9178.830124961678,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 10714.349167014007,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-west4",
+          "attempt": 7,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10946.095167018939,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.045533458003774,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 10046.125792025123,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10668.942583026364,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 9808.26124997111,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 9185.777749982662,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10946.095167018939,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.43166702380403876,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 278.8906670175493,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1221.794957993552,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9084.92724999087,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 10481.455541972537,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 8,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8399.87362496322,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.484526874963194,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7688.682042004075,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8189.596582960803,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7413.563207956031,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6893.371791986283,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8399.87362496322,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.359416997525841,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 280.37791699171066,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1105.102541972883,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6788.025124988053,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8075.636374996975,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 9,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 13006.455958005972,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 13.17398266599048,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 11872.81295802677,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 12648.046041023917,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 11600.226833019406,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 10833.188958000392,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 13006.455958005972,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.43829099740833044,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 275.23379103513435,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1163.4268750203773,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 10730.146375019103,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 12386.52825000463,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 10,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 9351.629875018261,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 9.426158457994461,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8548.669583979063,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 9046.31841700757,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 8191.282459010836,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7576.337958977092,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 9351.629875018261,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3635419998317957,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 289.41062500234693,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1362.6950840116479,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7473.585500032641,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8922.223250032403,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 11,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8461.415208003018,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.537814416980837,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7726.872583036311,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8229.15908304276,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7452.592333022039,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6957.358292012941,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8461.415208003018,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.4502920201048255,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 273.82195804966614,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1137.8722080262378,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6854.523167014122,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8101.862625044305,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 12,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 16062.681666982826,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 16.161808540986385,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 14426.893625000957,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 15522.29220897425,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 14117.041166988201,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 13166.924458986614,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 16062.681666982826,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.41866698302328587,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 274.7950420016423,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1028.4813339821994,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 13063.971499970648,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 15112.967249995563,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 13,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8865.867707994767,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.949761333002243,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8062.5742499832995,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8606.75816697767,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7780.472124984954,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7153.199583000969,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8865.867707994767,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.31287496676668525,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 294.2950829747133,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1019.8041669791564,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7050.770707952324,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8459.595999971498,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-west-2",
+          "attempt": 14,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10997.501708043274,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.07282858301187,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 9910.02525005024,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10619.408500031568,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 9624.040417023934,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 8905.421125004068,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10997.501708043274,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3607080434449017,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 274.1489170002751,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1097.617125022225,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 8804.150333045982,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 10441.820167005062,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 15,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8312.447500007693,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.385324500035495,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7598.8760410109535,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8096.18449996924,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7333.771041012369,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6858.741874981206,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8312.447500007693,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.4000829649157822,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 285.6612909818068,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1158.843832963612,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6758.485957980156,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 7981.570457981434,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 16,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8737.099833029788,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.891207166016102,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7950.871166016441,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8509.688666032162,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7504.372041032184,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6991.909291013144,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8737.099833029788,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.8975000237114727,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 280.14074999373406,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1063.9805000391789,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6891.654375009239,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8400.507291022222,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 17,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12302.387915959116,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.393702957953792,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 11284.852874989156,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 11996.149332961068,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 11021.952832990792,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 10392.61366595747,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12302.387915959116,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.44795795110985637,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 323.85245797922835,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1175.5017910036258,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 10292.66616597306,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 11781.944999995176,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 18,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8304.832707974128,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.384457665961236,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7587.5996249960735,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8084.902582981158,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7313.4961249888875,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6858.716625021771,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8304.832707974128,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.34683296689763665,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 269.65245796600357,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1156.3017920125276,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6757.337999995798,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 7970.402417005971,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 19,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8428.444084012881,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.505793834046926,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7706.221458967775,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8206.039667013101,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7419.102750020102,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6899.127000011504,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8428.444084012881,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.324334017932415,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 268.6813339823857,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 974.5303749805316,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6791.299499978777,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8088.4073749766685,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 20,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8292.579250002746,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.375740916992072,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7583.138083980884,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8064.5299589959905,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7317.683917004615,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 6860.091542010196,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8292.579250002746,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3658339846879244,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 278.88079197146,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1179.8033749801107,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6756.723792001139,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 7952.037459006533,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 21,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8744.846209010575,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.829080541967414,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7901.217084028758,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8453.999124991242,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7636.531500029378,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7140.834374993574,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8744.846209010575,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.5162919987924397,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 284.2297090101056,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1679.5302090467885,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7037.805625004694,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8297.332084039226,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 22,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 9054.14970900165,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 9.129783417040017,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8357.81895898981,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8837.30229199864,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 8079.57612501923,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7618.755458970554,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 9054.14970900165,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.35191699862480164,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 308.26525000156835,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1105.5240419809707,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7506.421209021937,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8715.756958990823,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 23,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 13824.250000005122,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 13.92462974996306,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 12350.061042001471,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 13300.038208020851,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 12042.009500029963,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 11157.008167007007,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 13824.250000005122,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.345708045642823,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 270.8664580131881,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1081.5162500366569,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 11049.465332995169,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 13091.416375013068,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 24,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 9027.031250006985,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 9.113432416983414,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8281.344125047326,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8801.254292018712,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 8023.98075000383,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7546.734584029764,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 9027.031250006985,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3637500340119004,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 377.8992500156164,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1243.2410000474192,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7446.023084048647,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8679.482000006828,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 25,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 20581.368583021685,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 20.672975125024095,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 19137.424667016603,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 20212.457000045106,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 18838.92404200742,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 16794.711458031088,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 20581.368583021685,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3255000337958336,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 276.76045801490545,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1153.768292046152,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 16693.74391704332,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 19964.53100000508,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 26,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11644.684500002768,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.725974750006571,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 10803.10062499484,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 11384.890125016682,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 10519.188667007256,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 9982.711334014311,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11644.684500002768,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.37887500366196036,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 288.9202919905074,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1095.4317499999888,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9878.684499999508,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 11260.592084028758,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 27,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8544.936541002244,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 8.621214125014376,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 7819.345833035186,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8325.014541042037,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7559.936708013993,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7040.137083036825,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8544.936541002244,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.40195800829678774,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 294.86620804527774,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1167.2741660149768,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 6938.046500028577,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8207.091415999457,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 28,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 8941.161499998998,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 9.042837666987907,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 8035.6728750048205,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 8631.92070799414,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 7776.956957997754,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 7187.258124991786,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 8941.161499998998,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3445830079726875,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 287.32945799129084,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1149.7028750018217,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 7088.629416015465,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 8494.177000015043,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 29,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12135.050042008515,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.28731758298818,
+          "retry_count": 0,
+          "stages": {
+            "attestation_ready": {
+              "elapsed_ms": 11143.41149997199,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 11768.722167005762,
+              "status": "observed"
+            },
+            "connect_ready": {
+              "elapsed_ms": 10843.303833971731,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": 9994.115917012095,
+              "status": "observed"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12135.050042008515,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.4045839887112379,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 278.25279196258634,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1222.8928749682382,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V1 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9818.639250006527,
+              "status": "observed"
+            },
+            "tunnel_ready": {
+              "elapsed_ms": 11604.414041968994,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        }
+      ],
+      "cold_stage_summaries": {
+        "attestation_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 8288.971417030552,
+          "p95_ms": 13492.318962651183,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "browser_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 8812.732521008002,
+          "p95_ms": 14522.277908545215,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "connect_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 7998.163542011753,
+          "p95_ms": 13183.276916856988,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "connect_token_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 7480.8768130315,
+          "p95_ms": 12262.462127595785,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "daemon_started": {
+          "reasons": [
+            "the daemon process does not yet emit an attested startup timestamp"
+          ],
+          "status": "unsupported"
+        },
+        "first_valid_frame": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 9040.590479504317,
+          "p95_ms": 15055.387416842852,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "request_received": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 0.3792289935518056,
+          "p95_ms": 1.0869062592973924,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "sandbox_create_started": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 282.3633124935441,
+          "p95_ms": 354.069819068536,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "sandbox_registered": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 1157.5728124880698,
+          "p95_ms": 1371.2132772023324,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "scheduled": {
+          "reasons": [
+            "Modal V1 does not expose a supported scheduling timestamp"
+          ],
+          "status": "unsupported"
+        },
+        "tcp_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 7380.8329380408395,
+          "p95_ms": 12157.443724831677,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "tunnel_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 8696.081166999647,
+          "p95_ms": 14203.269356253433,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        }
+      },
+      "cold_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 9040.590479504317,
+        "p95_ms": 15055.387416842852,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      },
+      "comparison_scope": "modal-provider-native-on-demand",
+      "estimated_billed_cost": {
+        "duration_seconds": 330.85897428984754,
+        "estimated_usd": 0.12219283638472649,
+        "excluded": [
+          "runner_compute",
+          "control_plane",
+          "billing_adjustments"
+        ],
+        "included": [
+          "target_cpu",
+          "target_memory"
+        ],
+        "rates": {
+          "cpu_usd_per_core_second": 3.942e-05,
+          "memory_usd_per_gib_second": 6.67e-06
+        },
+        "region_multiplier": 1.75,
+        "source_urls": [
+          "https://modal.com/products/sandboxes",
+          "https://modal.com/docs/guide/sandbox-resources",
+          "https://modal.com/docs/guide/region-selection"
+        ],
+        "status": "partial"
+      },
+      "execution": {
+        "action_transport": "persistent-hot-session",
+        "observation_transport": "binary-envelope-causal-observation",
+        "runner_path": "same-region-separate-modal-runner:connect",
+        "target_cleanup": {
+          "attempted": true,
+          "error_type": null,
+          "succeeded": true
+        },
+        "target_loopback": false,
+        "target_resource_duration_seconds": 16.634774415986612
+      },
+      "warm_action_attempts": [
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 0,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 14.38679200000026,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 1,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 31.330715999999814,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 2,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 19.96311999999989,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 3,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 29.65245999999988,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 4,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 29.398833999999763,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 5,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 20.492142999999796,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 6,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 33.19126100000025,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 7,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 40.05673200000004,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 8,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 32.99497099999993,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 9,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 30.132504000000004,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 10,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 36.33274900000005,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 11,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 33.48879599999988,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 12,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 33.265865000000176,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 13,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 29.793367999999987,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 14,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 36.9772049999999,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 15,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 31.175230999999748,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 16,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 37.08806899999972,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 17,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 33.86840000000024,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 18,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 32.345675000000185,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 19,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 32.90463600000049,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 20,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 32.41086099999979,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 21,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 35.957140999999915,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 22,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 31.93719400000017,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 23,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 31.637594999999408,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 24,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 33.265904999999485,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 25,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 30.67761800000035,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 26,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 38.56668000000063,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 27,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 47.75764999999943,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 28,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 31.11801000000014,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 29,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 36.44609699999979,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        }
+      ],
+      "warm_action_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 32.65774850000014,
+        "p95_ms": 39.3862086000003,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      },
+      "warm_capacity_enabled": false
+    },
+    "modal-v2-ab": {
+      "reason": "Modal V2 documentation and the pinned Modal 1.5.2 SDK show that Sandbox Connect Tokens are unavailable. The canonical authenticated path requires create_connect_token(), so lifecycle parity is unavailable.",
+      "source_url": "https://modal.com/docs/guide/sandbox-v2",
+      "status": "not_run",
+      "v2_is_default": false
+    },
+    "modal-warm-availability": {
+      "claim_acquisition_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 3023.5807709686924,
+        "p95_ms": 3375.2928037865786,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      },
+      "claim_attempts": [
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 0,
+          "claim_elapsed_ms": 2831.541749997996,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1964.5599169889465,
+          "estimated_idle_cost_usd": 0.01964895485784,
+          "failure": null,
+          "idle_resource_seconds": 53.203062,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 823.392484,
+          "request_to_authenticated_ms": 1683.9428329840302,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 1,
+          "claim_elapsed_ms": 2941.5573330479674,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2167.5815830240026,
+          "estimated_idle_cost_usd": 0.016767343313559998,
+          "failure": null,
+          "idle_resource_seconds": 45.400583,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 828.048692,
+          "request_to_authenticated_ms": 1938.5411660186946,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 2,
+          "claim_elapsed_ms": 2616.7449579807,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1907.2666250285693,
+          "estimated_idle_cost_usd": 0.0149500809864,
+          "failure": null,
+          "idle_resource_seconds": 40.48002,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 836.038832,
+          "request_to_authenticated_ms": 1690.2858330286108,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 3,
+          "claim_elapsed_ms": 2915.483541029971,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1911.7722079972737,
+          "estimated_idle_cost_usd": 0.01830182654972,
+          "failure": null,
+          "idle_resource_seconds": 49.555471,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 826.449032,
+          "request_to_authenticated_ms": 1651.4205830171704,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 4,
+          "claim_elapsed_ms": 3102.706041012425,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2140.48158301739,
+          "estimated_idle_cost_usd": 0.01663164628188,
+          "failure": null,
+          "idle_resource_seconds": 45.033159,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 831.703521,
+          "request_to_authenticated_ms": 1914.7917079972103,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 5,
+          "claim_elapsed_ms": 2945.0386249809526,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2132.4121250072494,
+          "estimated_idle_cost_usd": 0.015035944562519998,
+          "failure": null,
+          "idle_resource_seconds": 40.712511,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 836.136471,
+          "request_to_authenticated_ms": 1896.4592500124127,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 6,
+          "claim_elapsed_ms": 2926.8155000172555,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1986.6992920287885,
+          "estimated_idle_cost_usd": 0.0195088691966,
+          "failure": null,
+          "idle_resource_seconds": 52.823755,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 823.879702,
+          "request_to_authenticated_ms": 1789.6403340273537,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 7,
+          "claim_elapsed_ms": 3325.922374962829,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2351.735624950379,
+          "estimated_idle_cost_usd": 0.01688506147832,
+          "failure": null,
+          "idle_resource_seconds": 45.719326,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 828.230501,
+          "request_to_authenticated_ms": 2083.7236249935813,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 8,
+          "claim_elapsed_ms": 3042.167374980636,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2140.234375023283,
+          "estimated_idle_cost_usd": 0.015188386193679997,
+          "failure": null,
+          "idle_resource_seconds": 41.125274,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 835.26698,
+          "request_to_authenticated_ms": 1890.0919160223566,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 9,
+          "claim_elapsed_ms": 2606.4910830464214,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1664.9283750448376,
+          "estimated_idle_cost_usd": 0.01949895960236,
+          "failure": null,
+          "idle_resource_seconds": 52.796923,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 823.860763,
+          "request_to_authenticated_ms": 1483.6099999956787,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 10,
+          "claim_elapsed_ms": 2887.898041983135,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2098.3087500208057,
+          "estimated_idle_cost_usd": 0.016627180833759997,
+          "failure": null,
+          "idle_resource_seconds": 45.021068,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 828.544822,
+          "request_to_authenticated_ms": 1814.49858302949,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 11,
+          "claim_elapsed_ms": 3083.37816700805,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2106.6777919768356,
+          "estimated_idle_cost_usd": 0.014926792405839998,
+          "failure": null,
+          "idle_resource_seconds": 40.416962,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 836.078704,
+          "request_to_authenticated_ms": 1908.211417030543,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 12,
+          "claim_elapsed_ms": 3290.128041000571,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2397.063749958761,
+          "estimated_idle_cost_usd": 0.022880572812719997,
+          "failure": null,
+          "idle_resource_seconds": 61.953246,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 811.013477,
+          "request_to_authenticated_ms": 2157.5471659889445,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 13,
+          "claim_elapsed_ms": 3615.0015000021085,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2575.7553330040537,
+          "estimated_idle_cost_usd": 0.018249999874119998,
+          "failure": null,
+          "idle_resource_seconds": 49.415141,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 818.830481,
+          "request_to_authenticated_ms": 2257.701416965574,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 14,
+          "claim_elapsed_ms": 3255.498834012542,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2428.9440420106985,
+          "estimated_idle_cost_usd": 0.01571652598124,
+          "failure": null,
+          "idle_resource_seconds": 42.555307,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 830.795142,
+          "request_to_authenticated_ms": 2128.8292090175673,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 15,
+          "claim_elapsed_ms": 3033.68029196281,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2063.282707997132,
+          "estimated_idle_cost_usd": 0.022790757512599995,
+          "failure": null,
+          "idle_resource_seconds": 61.710055,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 814.559431,
+          "request_to_authenticated_ms": 1867.388916958589,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 16,
+          "claim_elapsed_ms": 3259.4604159821756,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2306.8734999978915,
+          "estimated_idle_cost_usd": 0.019465628472359997,
+          "failure": null,
+          "idle_resource_seconds": 52.706673,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 819.423247,
+          "request_to_authenticated_ms": 1987.277708016336,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 17,
+          "claim_elapsed_ms": 3164.3753750249743,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2329.9064590246417,
+          "estimated_idle_cost_usd": 0.01524827512488,
+          "failure": null,
+          "idle_resource_seconds": 41.287434,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 828.139823,
+          "request_to_authenticated_ms": 2061.0621250234544,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 18,
+          "claim_elapsed_ms": 3013.481249974575,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2256.9410409778357,
+          "estimated_idle_cost_usd": 0.021006976998,
+          "failure": null,
+          "idle_resource_seconds": 56.88015,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 815.993487,
+          "request_to_authenticated_ms": 1960.8261659741402,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 19,
+          "claim_elapsed_ms": 2831.8036669516005,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2085.331166977994,
+          "estimated_idle_cost_usd": 0.01681108114252,
+          "failure": null,
+          "idle_resource_seconds": 45.519011,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 824.431844,
+          "request_to_authenticated_ms": 1889.7152089630254,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 20,
+          "claim_elapsed_ms": 2671.1049579898827,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1905.0125409848988,
+          "estimated_idle_cost_usd": 0.015108230827480001,
+          "failure": null,
+          "idle_resource_seconds": 40.908239,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 835.736867,
+          "request_to_authenticated_ms": 1711.1311659682542,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 21,
+          "claim_elapsed_ms": 2716.270542005077,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1949.0287089720368,
+          "estimated_idle_cost_usd": 0.020588839541760003,
+          "failure": null,
+          "idle_resource_seconds": 55.747968,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 820.700687,
+          "request_to_authenticated_ms": 1775.683666986879,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-west-2",
+          "attempt": 22,
+          "claim_elapsed_ms": 2942.994000040926,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2134.3897079932503,
+          "estimated_idle_cost_usd": 0.0177869700946,
+          "failure": null,
+          "idle_resource_seconds": 48.161405,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 825.724797,
+          "request_to_authenticated_ms": 1858.5988330305554,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 23,
+          "claim_elapsed_ms": 2892.8714590147138,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2178.1435839948244,
+          "estimated_idle_cost_usd": 0.014980286561240001,
+          "failure": null,
+          "idle_resource_seconds": 40.561807,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 832.955874,
+          "request_to_authenticated_ms": 1973.59679202782,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 24,
+          "claim_elapsed_ms": 3041.9055419624783,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2054.6949169947766,
+          "estimated_idle_cost_usd": 0.020785006444999997,
+          "failure": null,
+          "idle_resource_seconds": 56.279125,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 820.662218,
+          "request_to_authenticated_ms": 1789.7512089693919,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 25,
+          "claim_elapsed_ms": 3100.9362500044517,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2161.09129198594,
+          "estimated_idle_cost_usd": 0.018954417574959997,
+          "failure": null,
+          "idle_resource_seconds": 51.322478,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 824.951708,
+          "request_to_authenticated_ms": 1962.0904169860296,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-west3",
+          "attempt": 26,
+          "claim_elapsed_ms": 3415.68679100601,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2606.5637079882436,
+          "estimated_idle_cost_usd": 0.0152853109038,
+          "failure": null,
+          "idle_resource_seconds": 41.387715,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 829.322996,
+          "request_to_authenticated_ms": 2359.0964999748394,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 27,
+          "claim_elapsed_ms": 2945.937250042334,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 1978.1292920233682,
+          "estimated_idle_cost_usd": 0.01847402236904,
+          "failure": null,
+          "idle_resource_seconds": 50.021722,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 826.169967,
+          "request_to_authenticated_ms": 1795.5632919911295,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 28,
+          "claim_elapsed_ms": 3054.7937499941327,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2079.565999971237,
+          "estimated_idle_cost_usd": 0.01680386462972,
+          "failure": null,
+          "idle_resource_seconds": 45.499471,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 831.252878,
+          "request_to_authenticated_ms": 1905.2424999536015,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "us-phoenix-1",
+          "attempt": 29,
+          "claim_elapsed_ms": 3175.292208965402,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "cold_fallback": false,
+          "elapsed_ms": 2367.038791999221,
+          "estimated_idle_cost_usd": 0.01512756029764,
+          "failure": null,
+          "idle_resource_seconds": 40.960577,
+          "miss_reason": null,
+          "pool_hit": true,
+          "pool_miss": false,
+          "rejection_reasons": [],
+          "remaining_lifetime_seconds": 835.424653,
+          "request_to_authenticated_ms": 2102.0210839924403,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        }
+      ],
+      "claim_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 2133.40091650025,
+        "p95_ms": 2509.6902520570434,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      },
+      "cold_fallback_count": 0,
+      "cold_fallback_rate": 0.0,
+      "comparison_scope": "modal-on-demand-only",
+      "cross_provider_default_comparison": false,
+      "estimated_billed_cost": {
+        "estimated_idle_usd": 0.53003537342616,
+        "excluded": [
+          "pool_startup_compute",
+          "claimed_session_compute",
+          "control_plane",
+          "billing_adjustments"
+        ],
+        "source_urls": [
+          "https://modal.com/products/sandboxes",
+          "https://modal.com/docs/guide/region-selection"
+        ],
+        "status": "partial"
+      },
+      "execution": {
+        "fill_failures": [],
+        "final_cleanup": {
+          "failure_types": [],
+          "inspected": 0,
+          "terminated": 0
+        },
+        "idle_hold_seconds_per_batch": 30.0,
+        "pool_name_hash": "50ab1d227f8aa8e0",
+        "pool_target_size": 3
+      },
+      "idle_resource_seconds": 1435.165638,
+      "pool_hit_count": 30,
+      "pool_hit_rate": 1.0,
+      "pool_miss_count": 0,
+      "pool_miss_rate": 0.0,
+      "request_to_authenticated_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 1900.850874983007,
+        "p95_ms": 2212.6320040260907,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      },
+      "request_to_first_frame_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 2133.40091650025,
+        "p95_ms": 2509.6902520570434,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      }
+    },
+    "provider-default": {
+      "artifact_status": "current_reference",
+      "attempts_per_provider": 3,
+      "comparison_scope": "cross-provider-default-only",
+      "execution_source_sha": "7d4ff14337ccf6846e821f30c8045ca73819c190",
+      "providers": [
+        "modal",
+        "daytona",
+        "e2b"
+      ],
+      "raw_artifact_sha256": "e56804d3093ea4dd64f3a5dacdca50c03f92a6374856d730a8f9ca0df36d37df",
+      "results": {
+        "daytona": {
+          "cold_attempted": 3,
+          "cold_request_to_first_frame_p50_ms": 10644.070375012234,
+          "cold_request_to_first_frame_p95_ms": 10827.163187228143,
+          "cold_valid": 3,
+          "failure_count": 0,
+          "status": "ok",
+          "warm_action_attempted": 3,
+          "warm_action_move_click_p50_ms": 357.0881659979932,
+          "warm_action_move_click_p95_ms": 599.8887791356537,
+          "warm_action_valid": 3
+        },
+        "e2b": {
+          "cold_attempted": 3,
+          "cold_request_to_first_frame_p50_ms": 1201.709375018254,
+          "cold_request_to_first_frame_p95_ms": 1208.721049973974,
+          "cold_valid": 3,
+          "failure_count": 0,
+          "status": "ok",
+          "warm_action_attempted": 3,
+          "warm_action_move_click_p50_ms": 213.92154198838398,
+          "warm_action_move_click_p95_ms": 213.94914139527828,
+          "warm_action_valid": 3
+        },
+        "modal": {
+          "cold_attempted": 3,
+          "cold_request_to_first_frame_p50_ms": 11046.501207980327,
+          "cold_request_to_first_frame_p95_ms": 12377.331621083431,
+          "cold_valid": 3,
+          "failure_count": 0,
+          "status": "ok",
+          "warm_action_attempted": 3,
+          "warm_action_move_click_p50_ms": 74.923874984961,
+          "warm_action_move_click_p95_ms": 75.65114967292175,
+          "warm_action_valid": 3
+        }
+      }
+    }
+  },
+  "provenance": {
+    "branch": "feat/modal-optimization-benchmark-results",
+    "dependency": {
+      "head_sha": "37f977f80de93800c005caeec7ead5222b00b040",
+      "pull_request": 114,
+      "state": "open_unmerged"
+    },
+    "execution_date_utc": "2026-07-19",
+    "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
+    "modal_sdk_version": "1.5.2",
+    "normalizer_sha": "01eb2b42df5c02ad18f41697a39848efc34a7d6b",
+    "preregistration_sha256": "1d16e694984ccafe02cbccadb34513112b7c0f4adbffd3908ae7356a72836bbf",
+    "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
+    "raw_artifact_sha256": "4646f2aa8f78c0bdc8f611e157fa2c728cd76aff3b79cd7f7bd0f5b3aa8ce879",
+    "raw_artifact_tracked": false,
+    "region_selection": {
+      "artifact_sha256": "e4aef4fd67defeccd9881c5da28237512d44e656c8c2076e11f11137073172d9",
+      "candidate_failures_retained": true,
+      "candidates": {
+        "us-east": {
+          "cold_create_to_ready_ms": 8293.25416701613,
+          "failure_count": 1,
+          "ok": false,
+          "transport_p50_ms": 66.84581248555332
+        },
+        "us-west": {
+          "cold_create_to_ready_ms": 7198.738917009905,
+          "failure_count": 0,
+          "ok": true,
+          "transport_p50_ms": 32.00862498488277
+        }
+      },
+      "default_region_excluded_from_optimized_placement": true,
+      "execution_source_sha": "182bc259105d3d5a77f3da11464d76e6672fc90f",
+      "rule": "transport p50; within 5 percent use lower cold create-to-ready",
+      "selected": "us-west"
+    },
+    "requested_region": "us-west",
+    "sanitizer": "modal_computer_use.benchmarks.modal_optimization",
+    "sanitizer_version": 1,
+    "source_sha": "7707edff8270aa0d66cef65d72ef44a6c99f8a0f"
+  },
+  "schema_version": 1
+}
