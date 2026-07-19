@@ -12,6 +12,15 @@ The daemon listens on port `8080`. Modal waits for the port to accept connection
 
 The image launch command stays `python -m modal_computer_use.daemon`. Local repo work uses `uv run computer-use-daemon`. They differ because Modal installs the package into the image runtime; `uv run` is for the editable repo checkout.
 
+Pass `SessionStartupTiming` to `ComputerSandbox.create(timing=...)` to record the observable cold
+path. The SDK records request receipt, create start and return, TCP readiness, Connect token
+creation, Connect `/readyz`, tunnel attestation, and final tunnel `/readyz`. Modal V1 does not expose
+a supported scheduling timestamp. The SDK reports scheduling and daemon process start as
+`unsupported` instead of inventing values. Call `ensure_browser_ready(..., timing=...)`, start the
+observation stream with `timing=...`, and call `first_valid_frame(..., timing=...)` to extend the
+same timeline through browser readiness, baseline consumption, and a decoded frame with the
+configured geometry.
+
 ## Sandbox configuration
 
 Per current Modal docs, configure the Sandbox with:
@@ -38,8 +47,9 @@ Per current Modal docs, configure the Sandbox with:
 The SDK passes the complete reserved and caller tag set during Sandbox creation. Built-in tags are
 string-only and limited to safe
 operational metadata such as `computer-use.run_id`, `computer-use.owner`,
-`computer-use.created_at`, `computer-use.config_hash`, `computer-use.window_manager`, and
-`computer-use.artifacts_dir`.
+`computer-use.created_at`, `computer-use.config_hash`, and `computer-use.artifacts_dir`.
+The resolved set is validated against Modal's 10-tag Sandbox limit before allocation. The desktop
+window manager remains part of the configuration hash instead of consuming a separate tag.
 
 The inline Image builder is the default rollback path. `ImageConfig(source="named",
 revision="<full-git-sha>")` selects a revision-tagged standard, Firefox, or Chromium Image through
@@ -111,8 +121,15 @@ then starts a second runner Sandbox in the same Modal region. The runner receive
 daemon connection details through its environment, talks directly to the target daemon, and is
 terminated after the workload. See `examples/modal_colocated_runner.py`.
 
-Use `run_modal_daemon_command()` when application code needs this shape without rebuilding endpoint
-selection. It supports three explicit paths:
+Use `run_modal_daemon_command_with_fallback()` for the production path. It creates a fresh Connect
+Token, runs the workload in the explicitly measured Modal region, and falls back to the current
+external attested endpoint only when the caller supplies an explicit `external_runner` and Connect
+preparation fails before dispatch. Without that callable, preparation errors propagate. Once runner
+dispatch starts, errors propagate and the helper never repeats the command. The command owns the persistent
+hot session and observation stream. A broker does not proxy action or frame bytes. The helper
+requires a region and has no built-in region default.
+
+Use `run_modal_daemon_command()` for explicit diagnostics. It supports three paths:
 
 | Path | Execution location | Daemon endpoint | Use when |
 | --- | --- | --- | --- |
@@ -124,6 +141,47 @@ The helper injects `COMPUTER_USE_DAEMON_BASE_URL`, `COMPUTER_USE_DAEMON_RUNNER_P
 `COMPUTER_USE_DAEMON_TOKEN` when present, and `COMPUTER_USE_TARGET_SANDBOX_ID` when available. User
 environment values cannot override those reserved keys. `target-loopback` is intentionally not a
 same-region runner: `127.0.0.1` only reaches the target daemon from inside the target sandbox.
+
+## Warm capacity
+
+`ComputerSandboxManager.fill_warm_pool()` maintains a bounded set of fixed named slots. It enqueues
+a slot only after Modal TCP readiness, daemon readiness, browser prewarm, and a decoded first frame.
+Before it counts capacity, it removes incompatible, invalid, near-expiry, abandoned, and
+out-of-capacity slots. Claimed slots remain owned by their consumers.
+[Modal requires Sandbox names to be unique within an App](https://modal.com/docs/sdk/py/latest/modal.Sandbox),
+so each fixed name is also the provider-side provisioning reservation. If concurrent fillers race,
+the loser accepts the winner only after a registry read confirms the same compatible reserved slot.
+`claim_warm_pool()` uses a non-blocking Modal Queue dequeue as the atomic claim point. A claim rejects
+an incompatible, invalid, finished, unready, or near-expiry Sandbox, terminates it with
+`wait=True`, and scans a bounded number of entries. A miss records the failed claim time and creates
+the normal cold fallback. Claimed capacity is one-shot and must be closed; it is never requeued.
+
+Each Modal App and pool pair receives a distinct Queue. Each fixed slot uses its own partition.
+`fill_warm_pool()` rebuilds that partition from the Sandbox's durable lifecycle tags, because
+[Modal Queue partitions](https://modal.com/docs/sdk/py/latest/modal.Queue)
+are cleared after 24 hours without a put and when their App stops. A fresh queue identity is written to the Sandbox before enqueue.
+Claims compare that identity twice, so stale or concurrent duplicate entries cannot claim a slot.
+Refill and the final claim transition also take a non-blocking file lock inside the target Sandbox.
+The lock prevents a stale registry snapshot from restoring a slot after another consumer claims it.
+
+Warm configs cannot set `idle_timeout_seconds` because Modal does not expose the remaining idle
+lifetime. They also cannot set an explicit `vnc_password`, because that credential is fixed when
+the Sandbox starts and must not cross claims. Expiry is conservative: it starts before the create
+request and subtracts a configured skew. Pool tags record stable configuration identity, fixed slot, requested and actual region,
+ready time, expiry, CPU, and memory. `reconcile_warm_pool()` removes near-expiry, incompatible, and
+abandoned provisioning slots. Queue entries can outlive a terminated slot; the claim path rejects
+those stale entries and preserves the cold fallback.
+
+Claim metrics report pool hit or miss, every rejection reason, claim latency, total
+request-to-first-frame latency, remaining lifetime, configured pool size, idle resource-seconds,
+CPU core-seconds, memory GiB-seconds, public-rate estimated cost, and pending billed-cost status.
+Public-rate estimates apply Modal's documented 1.5x broad-region or 1.75x narrow-region multiplier
+when a container region is requested. Missing resource values keep both slot and aggregate estimates
+partial.
+Use the Workspace or Environment billing report after its data becomes available for reconciled
+cost. Compare Modal warm capacity only with the same Modal config created on demand. Keep normal
+provider-default warm actions for Daytona and E2B. Do not compare Modal warm claims with competitor
+cold creation.
 
 This is a data-plane optimization, not a new daemon primitive. Keep user/model code in the runner
 or application layer; core SDK modules should only provide generic Sandbox orchestration helpers.

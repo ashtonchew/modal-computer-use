@@ -24,11 +24,19 @@ def test_run_colocated_command_delegates_to_sdk_runner_helper(monkeypatch) -> No
     calls: list[dict[str, object]] = []
     computer = SimpleNamespace()
 
-    def fake_run_modal_daemon_command(active_computer, command, **kwargs):
+    def fake_run_modal_daemon_command_with_fallback(active_computer, command, **kwargs):
         calls.append({"computer": active_computer, "command": command, **kwargs})
-        return SimpleNamespace(sandbox_id="sb-runner", returncode=0, stdout="ok", stderr="")
+        return SimpleNamespace(
+            result=SimpleNamespace(sandbox_id="sb-runner", returncode=0, stdout="ok", stderr=""),
+            selected_path="same-region-connect",
+            fallback_used=False,
+        )
 
-    monkeypatch.setattr(example, "run_modal_daemon_command", fake_run_modal_daemon_command)
+    monkeypatch.setattr(
+        example,
+        "run_modal_daemon_command_with_fallback",
+        fake_run_modal_daemon_command_with_fallback,
+    )
 
     result = example.run_colocated_command(
         ["python", "-m", "worker"],
@@ -36,19 +44,17 @@ def test_run_colocated_command_delegates_to_sdk_runner_helper(monkeypatch) -> No
         app_name="app",
         runner_name="runner",
         modal_region="us-west",
-        path="target-loopback",
         env={"WORKLOAD": "benchmark"},
         runner_cpu=1.0,
         runner_memory_mib=1024,
         exec_timeout_seconds=60,
     )
 
-    assert result.sandbox_id == "sb-runner"
+    assert result.result.sandbox_id == "sb-runner"
     assert calls == [
         {
             "computer": computer,
             "command": ("python", "-m", "worker"),
-            "path": "target-loopback",
             "app_name": "app",
             "modal_region": "us-west",
             "runner_name": "runner",
@@ -56,5 +62,6 @@ def test_run_colocated_command_delegates_to_sdk_runner_helper(monkeypatch) -> No
             "runner_cpu": 1.0,
             "runner_memory_mib": 1024,
             "exec_timeout_seconds": 60,
+            "external_runner": None,
         }
     ]

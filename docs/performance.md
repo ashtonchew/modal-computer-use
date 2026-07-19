@@ -187,6 +187,14 @@ clicks, moves, and drags use `auto_region`, and explicit `change_detection_regio
 region detection. Keyboard-only and global actions stay on full-frame detection unless the caller
 opts into a region.
 
+`act_and_observe()` starts its warm latency timer immediately before the single correlated
+action-observe message and stops it after the correlated frame arrives. The returned
+`ActionObservationResult.elapsed_ms` is this action-to-frame boundary. For a visual-mutation
+measurement, call `require_valid_frame(require_change=True)`. It requires matching request and
+action IDs, a successful action, `causal_frame=true`, `change_detected=true`, no change timeout,
+and a reconstructable image with declared geometry and format. A causal unchanged or timeout frame
+remains valid protocol output, but it does not count as a changed-frame latency success.
+
 Observe-change frames include `change_stage_timing_ms` for attribution. It records daemon-side
 signal preparation, region baseline capture, action batch wall time, explicit capture delay, signal
 wait, region polling, final frame polling/capture, and total server time before the frame is
