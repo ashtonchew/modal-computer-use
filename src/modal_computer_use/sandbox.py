@@ -1049,7 +1049,6 @@ def create_modal_v2_tunnel_computer(
         "image": image,
         "cpu": config.resources.cpu,
         "memory": config.resources.memory_mib,
-        "gpu": config.resources.gpu,
         "encrypted_ports": [8080],
         "timeout": config.runtime.timeout_seconds,
         "idle_timeout": config.runtime.idle_timeout_seconds,

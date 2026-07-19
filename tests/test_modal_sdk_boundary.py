@@ -766,6 +766,7 @@ def test_v2_benchmark_create_uses_encrypted_tunnel_and_application_auth(monkeypa
     args, kwargs = FakeSandbox.experimental_create_calls[0]
     assert args == ("python", "-m", "modal_computer_use.daemon")
     assert kwargs["encrypted_ports"] == [8080]
+    assert "gpu" not in kwargs
     assert kwargs["region"] == "us-west"
     assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
     assert kwargs["tags"]["computer-use.modal_backend"] == "v2"
