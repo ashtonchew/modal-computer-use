@@ -4,7 +4,7 @@ from typing import Any
 
 PricingRate = dict[str, Any]
 
-PRICING_RETRIEVED_DATE = "2026-05-12"
+PRICING_RETRIEVED_DATE = "2026-07-18"
 PRICING_SOURCES = {
     "modal": "https://modal.com/products/sandboxes",
 }
@@ -17,7 +17,7 @@ PUBLIC_RATE_CATALOG: dict[str, dict[str, PricingRate]] = {
             "quantity_unit": "core_seconds",
         },
         "memory": {
-            "rate": 0.00000672,
+            "rate": 0.00000667,
             "rate_unit": "USD_per_GiB_second",
             "quantity_unit": "GiB_seconds",
         },
@@ -94,7 +94,15 @@ def estimate_surface_cost(
             "memory_gib": resources.get("memory_gib"),
             "storage_gib": resources.get("storage_gib"),
         },
-        "duration_policy": "measured_wall_time_including_warmup",
+        "duration_policy": safe_metadata.get(
+            "cost_duration_policy",
+            (
+                safe_metadata.get("environment", {}).get("cost_duration_policy")
+                if isinstance(safe_metadata.get("environment"), dict)
+                else None
+            ),
+        )
+        or "caller_supplied_measured_runtime",
         "confidence": "estimated" if complete else "partial",
         "notes": notes,
         "pricing": {

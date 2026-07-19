@@ -234,7 +234,7 @@ def _safe_browser_status_metadata(client: DaemonClient) -> dict[str, Any]:
 def _modal_surface_runtime_seconds(environment_metadata: dict[str, Any] | None) -> float | None:
     if not environment_metadata:
         return None
-    value = environment_metadata.get("modal_cold_create_to_ready_ms")
+    value = environment_metadata.get("modal_resource_lifetime_ms")
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int | float):

@@ -15,6 +15,7 @@ from .benchmarks import (
     run_benchmark_report_mock_local,
 )
 from .benchmarks.billing import modal_billing_reconciliation_request
+from .benchmarks.costs import estimate_surface_cost
 from .benchmarks.modal_colocated_client import (
     DEFAULT_MODAL_COLOCATED_RUNNER_PATHS,
     DEFAULT_MODAL_COLOCATED_SURFACES,
@@ -29,6 +30,7 @@ from .benchmarks.modal_region_ab import (
     modal_region_ab_markdown_summary,
 )
 from .benchmarks.observation_surface import CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+from .benchmarks.provenance import benchmark_provenance
 from .benchmarks.surfaces import (
     run_sdk_surface_benchmark,
     run_sdk_surface_benchmark_mock_local,
@@ -207,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="tag name to request from Modal billing reports; repeatable",
+    )
+    sdk_parser.add_argument(
+        "--modal-billing-environment",
+        help="scope Modal billing reconciliation to this Environment; defaults to Workspace",
     )
     sdk_parser.add_argument("--json", action="store_true", default=True)
 
@@ -688,7 +694,7 @@ def _benchmark_sdk_created_modal_sandbox(
         ),
     }
     try:
-        return run_sdk_surface_benchmark(
+        result = run_sdk_surface_benchmark(
             surfaces=surfaces,
             client=computer.client,
             mode="http",
@@ -699,8 +705,13 @@ def _benchmark_sdk_created_modal_sandbox(
             environment_metadata=metadata,
         )
     finally:
-        computer.terminate()
-        computer.detach()
+        try:
+            computer.terminate()
+        finally:
+            resource_lifetime_ms = (time.perf_counter() - started) * 1000
+            computer.detach()
+    _record_modal_resource_lifetime(result, metadata, resource_lifetime_ms)
+    return result
 
 
 def _benchmark_modal_ingress_ab(args: argparse.Namespace) -> int:
@@ -1237,15 +1248,33 @@ def _sandbox_exec_setup_failure(exc: Exception) -> dict[str, Any]:
 
 
 def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    resource_profile = getattr(args, "resource_profile", None)
+    browser = getattr(args, "browser", None)
+    benchmark_command = getattr(args, "benchmark_command", None)
+    creates_modal_resource = bool(getattr(args, "create_modal_sandbox", False)) or (
+        benchmark_command in {"modal-ingress-ab", "modal-region-ab", "modal-colocated-client"}
+    )
+    if creates_modal_resource:
+        image_identity = f"inline:{browser or resource_profile or 'standard'}"
+    else:
+        image_identity = f"attached:{getattr(args, 'image_profile', None) or 'unavailable'}"
     metadata: dict[str, Any] = {
-        "modal_region": args.modal_region,
+        "modal_region": getattr(args, "modal_region", None),
         "modal_ingress": getattr(args, "modal_ingress", None),
         "daemon_http_version": getattr(args, "daemon_http_version", None),
-        "resource_profile": args.resource_profile,
-        "browser": args.browser,
-        "gpu": args.gpu,
+        "resource_profile": resource_profile,
+        "browser": browser,
+        "gpu": getattr(args, "gpu", None),
         "input_rate_limit_per_sec": getattr(args, "input_rate_limit_per_sec", None),
-        "image_profile": args.image_profile,
+        "image_profile": getattr(args, "image_profile", None),
+        "provenance": benchmark_provenance(
+            caller_path="external-caller",
+            modal_region=getattr(args, "modal_region", None),
+            image_identity=image_identity,
+            cpu=getattr(args, "modal_cpu", None),
+            memory_mib=getattr(args, "modal_memory_mib", None),
+            gpu=getattr(args, "gpu", None),
+        ),
     }
     if getattr(args, "modal_billing_reconcile", False):
         metadata["modal_billing_reconciliation"] = modal_billing_reconciliation_request(
@@ -1255,8 +1284,46 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
             buffer_seconds=args.modal_billing_buffer_seconds,
             required_tags=_parse_key_value_pairs(args.modal_billing_tag),
             tag_names=args.modal_billing_tag_name or None,
+            environment_name=args.modal_billing_environment,
         )
     return metadata
+
+
+def _record_modal_resource_lifetime(
+    result: dict[str, Any],
+    environment_metadata: dict[str, Any],
+    resource_lifetime_ms: float,
+) -> None:
+    environment_metadata["modal_resource_lifetime_ms"] = resource_lifetime_ms
+    environment_metadata["cost_duration_policy"] = (
+        "measured_resource_lifetime_including_creation_benchmark_and_teardown"
+    )
+    top_environment = result.setdefault("metadata", {}).setdefault("environment", {})
+    if isinstance(top_environment, dict):
+        top_environment.update(environment_metadata)
+    surfaces = result.get("surfaces")
+    if not isinstance(surfaces, dict):
+        return
+    for surface_name, raw_surface in surfaces.items():
+        if not isinstance(raw_surface, dict):
+            continue
+        surface_metadata = raw_surface.setdefault("metadata", {})
+        if not isinstance(surface_metadata, dict):
+            continue
+        surface_environment = surface_metadata.setdefault("environment", {})
+        if isinstance(surface_environment, dict):
+            surface_environment.update(environment_metadata)
+        estimate = estimate_surface_cost(
+            str(surface_name),
+            surface_status=str(raw_surface.get("status", "unknown")),
+            runtime_seconds=resource_lifetime_ms / 1000,
+            metadata=surface_metadata,
+        )
+        raw_surface["cost_estimate"] = estimate
+        cost_status = raw_surface.setdefault("cost_status", {})
+        if isinstance(cost_status, dict):
+            cost_status["estimate"] = estimate["status"]
+            cost_status.setdefault("billing_reconciliation", "not_requested")
 
 
 def _parse_cli_datetime(

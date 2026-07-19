@@ -157,6 +157,10 @@ def test_daemon_http_surface_attaches_billing_reconciliation_separately(monkeypa
     surface = payload["surfaces"]["daemon-http"]
     assert surface["billing_reconciliation"] == reconciliation
     assert surface["cost_estimate"]["status"] == "unknown"
+    assert surface["cost_status"] == {
+        "estimate": "unknown",
+        "billing_reconciliation": "matched",
+    }
 
 def test_benchmark_sdk_invalid_comma_surface_uses_argparse_error(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
@@ -355,6 +359,11 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert environment["modal_memory_gib"] == 4
     assert environment["modal_sandbox_id"] == "sb-gpu"
     assert environment["modal_cold_create_to_ready_ms"] > 0
+    assert environment["modal_resource_lifetime_ms"] > 0
+    assert environment["cost_duration_policy"] == (
+        "measured_resource_lifetime_including_creation_benchmark_and_teardown"
+    )
+    assert payload["surfaces"]["daemon-http"]["cost_status"]["estimate"] == "estimated"
     assert closed == ["terminate", "detach"]
 
 def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:

@@ -3,13 +3,20 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
 from ..errors import ModalNotInstalledError
 
-MODAL_BILLING_SOURCE = "modal.billing.workspace_billing_report"
-MODAL_BILLING_DOC_URL = "https://modal.com/docs/reference/modal.billing"
+MODAL_WORKSPACE_BILLING_SOURCE = "modal.Workspace.billing.report"
+MODAL_ENVIRONMENT_BILLING_SOURCE = "modal.Environment.billing.report"
+MODAL_WORKSPACE_BILLING_DOC_URL = (
+    "https://modal.com/docs/sdk/py/latest/modal.Workspace#billingreport"
+)
+MODAL_ENVIRONMENT_BILLING_DOC_URL = (
+    "https://modal.com/docs/sdk/py/latest/modal.Environment#billingreport"
+)
 MODAL_BILLING_DEFAULT_RESOLUTION = "h"
 MODAL_BILLING_TAG_NAMES = ("benchmark", "benchmark_run_id", "surface")
 
@@ -39,6 +46,7 @@ def modal_billing_reconciliation_request(
     tag_names: list[str] | None = None,
     resolution: str = MODAL_BILLING_DEFAULT_RESOLUTION,
     buffer_seconds: int = 0,
+    environment_name: str | None = None,
 ) -> dict[str, Any]:
     safe_required_tags = _safe_tags(required_tags)
     safe_tag_names = _safe_tag_names(tag_names or list(MODAL_BILLING_TAG_NAMES))
@@ -50,6 +58,7 @@ def modal_billing_reconciliation_request(
         "tag_names": safe_tag_names,
         "required_tags": safe_required_tags,
         "buffer_seconds": max(0, int(buffer_seconds)),
+        "environment_name": environment_name.strip() if environment_name else None,
     }
 
 
@@ -79,10 +88,22 @@ def reconcile_modal_billing(
     resolution = _safe_resolution(request.get("resolution"))
     tag_names = _safe_tag_names(request.get("tag_names"))
     required_tags = _safe_tags(request.get("required_tags"))
+    environment_name = _optional_string(request.get("environment_name"))
+    source = (
+        MODAL_ENVIRONMENT_BILLING_SOURCE
+        if environment_name is not None
+        else MODAL_WORKSPACE_BILLING_SOURCE
+    )
+    source_url = (
+        MODAL_ENVIRONMENT_BILLING_DOC_URL
+        if environment_name is not None
+        else MODAL_WORKSPACE_BILLING_DOC_URL
+    )
 
     base = {
-        "source": MODAL_BILLING_SOURCE,
-        "source_url": MODAL_BILLING_DOC_URL,
+        "source": source,
+        "source_url": source_url,
+        "environment_name": environment_name,
         "currency": "USD",
         "start": _utc_iso(start) if start is not None else None,
         "end": _utc_iso(end),
@@ -109,7 +130,10 @@ def reconcile_modal_billing(
             "reason": "billing reconciliation end must be after start",
         }
 
-    loader = report_loader or _load_modal_billing_report
+    loader = report_loader or partial(
+        _load_modal_billing_report,
+        environment_name=environment_name,
+    )
     try:
         rows = list(loader(start, end, resolution, tag_names or None))
     except (ImportError, ModalNotInstalledError):
@@ -142,6 +166,10 @@ def reconcile_modal_billing(
         }
 
     total = sum((row["cost"] for row in matched_rows), Decimal("0"))
+    cost_by_resource: dict[str, Decimal] = {}
+    for row in matched_rows:
+        for resource, cost in row["cost_by_resource"].items():
+            cost_by_resource[resource] = cost_by_resource.get(resource, Decimal("0")) + cost
     intervals = sorted({row["interval_start"] for row in matched_rows if row["interval_start"]})
     return {
         **base,
@@ -149,6 +177,9 @@ def reconcile_modal_billing(
         "matched_row_count": len(matched_rows),
         "row_count": len(rows),
         "total": {"amount": float(total), "unit": "report_window"},
+        "cost_by_resource": {
+            resource: float(cost) for resource, cost in sorted(cost_by_resource.items())
+        },
         "interval_starts": intervals,
     }
 
@@ -158,14 +189,17 @@ def _load_modal_billing_report(
     end: datetime,
     resolution: str,
     tag_names: list[str] | None,
+    *,
+    environment_name: str | None,
 ) -> Iterable[Any]:
-    from ..sandbox import modal_workspace_billing_report
+    from ..sandbox import modal_billing_report
 
-    return modal_workspace_billing_report(
+    return modal_billing_report(
         start=start,
         end=end,
         resolution=resolution,
         tag_names=tag_names,
+        environment_name=environment_name,
     )
 
 
@@ -177,6 +211,7 @@ def _row_matches(row: Any, required_tags: dict[str, str]) -> bool:
 def _row_summary(row: Any) -> dict[str, Any]:
     return {
         "cost": _decimal_or_zero(_row_value(row, "cost")),
+        "cost_by_resource": _safe_cost_by_resource(_row_value(row, "cost_by_resource")),
         "interval_start": _utc_iso(_row_value(row, "interval_start")),
     }
 
@@ -200,6 +235,23 @@ def _decimal_or_zero(value: Any) -> Decimal:
         except InvalidOperation:
             return Decimal("0")
     return Decimal("0")
+
+
+def _safe_cost_by_resource(value: Any) -> dict[str, Decimal]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(resource): _decimal_or_zero(cost)
+        for resource, cost in value.items()
+        if str(resource).strip()
+    }
+
+
+def _optional_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _parse_datetime(value: Any) -> datetime | None:

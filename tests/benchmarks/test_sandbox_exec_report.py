@@ -179,11 +179,13 @@ def test_benchmark_report_live_sandbox_exec_setup_failure_is_reported(monkeypatc
     assert payload["benchmarks"]["sandbox_exec"]["status"] == "failed"
     assert payload["benchmarks"]["sandbox_exec"]["failures"][0]["code"] == "modal_not_installed"
     assert payload["failures"][-1]["benchmark"] == "sandbox_exec"
-    assert payload["metadata"]["environment"] == {
-        "browser": "chromium",
-        "image_profile": "browser",
-        "modal_region": "us-east-1",
-    }
+    environment = payload["metadata"]["environment"]
+    assert environment["browser"] == "chromium"
+    assert environment["image_profile"] == "browser"
+    assert environment["modal_region"] == "us-east-1"
+    assert environment["provenance"]["caller_path"] == "external-caller"
+    assert environment["provenance"]["image_identity"] == "attached:browser"
+    assert environment["provenance"]["region"] == "us-east-1"
     assert "dev-token" not in captured.out
     assert "Bearer" not in captured.out
     assert "novnc" not in captured.out.lower()

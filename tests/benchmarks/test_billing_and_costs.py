@@ -59,6 +59,10 @@ def test_modal_billing_reconciliation_filters_and_sums_tagged_rows() -> None:
         return [
             {
                 "cost": Decimal("0.12"),
+                "cost_by_resource": {
+                    "cpu": Decimal("0.08"),
+                    "memory": Decimal("0.04"),
+                },
                 "interval_start": datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
                 "tags": {
                     "benchmark": "sdk-surfaces",
@@ -85,7 +89,25 @@ def test_modal_billing_reconciliation_filters_and_sums_tagged_rows() -> None:
     assert result["matched_row_count"] == 1
     assert result["row_count"] == 2
     assert result["total"]["amount"] == pytest.approx(0.12)
+    assert result["cost_by_resource"] == {"cpu": 0.08, "memory": 0.04}
     assert "secret-object-id" not in serialized
+
+
+def test_modal_billing_request_can_scope_to_environment() -> None:
+    request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+        end=datetime(2026, 5, 13, 2, 0, tzinfo=UTC),
+        required_tags={"benchmark_run_id": "sdk_surface_test"},
+        environment_name="prod",
+    )
+
+    result = benchmark_billing.reconcile_modal_billing(
+        request,
+        report_loader=lambda *args: [],
+    )
+
+    assert result["source"] == "modal.Environment.billing.report"
+    assert result["environment_name"] == "prod"
 
 def test_modal_billing_reconciliation_handles_unavailable_and_pending() -> None:
     request = benchmark_billing.modal_billing_reconciliation_request(

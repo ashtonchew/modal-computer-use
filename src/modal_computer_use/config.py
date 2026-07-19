@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+import re
 import warnings
 from typing import Literal
 
@@ -55,20 +57,78 @@ class ResourceConfig(StrictBaseModel):
     gpu: str | None = None
 
 
+class ImageConfig(StrictBaseModel):
+    source: Literal["inline", "named"] = "inline"
+    revision: str | None = None
+    environment_name: str | None = None
+
+    @model_validator(mode="after")
+    def _valid_named_image(self) -> ImageConfig:
+        if self.source == "named":
+            if self.revision is None or re.fullmatch(r"[0-9a-f]{40}", self.revision) is None:
+                raise ValueError("named images require a full 40-character Git revision")
+        elif self.revision is not None or self.environment_name is not None:
+            raise ValueError(
+                "image.revision and image.environment_name are only valid when "
+                "image.source is named"
+            )
+        if self.environment_name is not None and not self.environment_name.strip():
+            raise ValueError("image.environment_name must be non-empty when set")
+        return self
+
+
 class NetworkConfig(StrictBaseModel):
     block_all: bool = Field(default=False, validation_alias=AliasChoices("block_all", "blocked"))
     daemon_http_version: Literal["1.1", "2"] = "1.1"
-    cidr_allowlist: list[str] | None = Field(
+    outbound_cidr_allowlist: list[str] | None = Field(
         default=None,
-        validation_alias=AliasChoices("cidr_allowlist", "allowlist"),
+        validation_alias=AliasChoices(
+            "outbound_cidr_allowlist",
+            "cidr_allowlist",
+            "allowlist",
+        ),
     )
+    outbound_domain_allowlist: list[str] | None = None
+    inbound_cidr_allowlist: list[str] | None = None
 
-    @field_validator("cidr_allowlist")
+    @field_validator("outbound_cidr_allowlist", "inbound_cidr_allowlist")
     @classmethod
-    def _no_empty_cidrs(cls, value: list[str] | None) -> list[str] | None:
-        if value is not None and any(not item.strip() for item in value):
-            raise ValueError("cidr_allowlist entries must be non-empty")
+    def _valid_cidrs(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if any(not item.strip() for item in value):
+            raise ValueError("CIDR allowlist entries must be non-empty")
+        for item in value:
+            try:
+                ipaddress.ip_network(item, strict=False)
+            except ValueError as exc:
+                raise ValueError("CIDR allowlist entries must be valid CIDR ranges") from exc
         return value
+
+    @field_validator("outbound_domain_allowlist")
+    @classmethod
+    def _valid_domains(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError("outbound_domain_allowlist entries must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def _valid_network_policy(self) -> NetworkConfig:
+        if self.block_all and any(
+            allowlist is not None
+            for allowlist in (
+                self.outbound_cidr_allowlist,
+                self.outbound_domain_allowlist,
+                self.inbound_cidr_allowlist,
+            )
+        ):
+            raise ValueError("block_all cannot be combined with network allowlists")
+        return self
+
+    @property
+    def cidr_allowlist(self) -> list[str] | None:
+        """Compatibility alias for the deprecated outbound CIDR field name."""
+        return self.outbound_cidr_allowlist
 
 
 class StorageConfig(StrictBaseModel):
@@ -135,6 +195,7 @@ class ComputerConfig(StrictBaseModel):
     desktop: DesktopConfig = Field(default_factory=DesktopConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
+    image: ImageConfig = Field(default_factory=ImageConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     browser: BrowserConfig | None = None
@@ -160,6 +221,17 @@ class ComputerConfig(StrictBaseModel):
                 stacklevel=2,
             )
             object.__setattr__(self, "run_id", self.request_id)
+        if self.network.block_all and (
+            self.ingress != "connect" or normalize_vnc_mode(self.expose_vnc) != "off"
+        ):
+            raise ValueError("network.block_all requires connect ingress with noVNC disabled")
+        if self.image.source == "named":
+            if self.resources.profile == "custom":
+                raise ValueError("named images do not support the custom resource profile")
+            if self.resources.profile in ("browser", "browser-gpu") and (
+                self.browser is None or self.browser.kind is None
+            ):
+                raise ValueError("named image selection requires browser.kind")
         return self
 
 

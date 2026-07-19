@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
+import pytest
+
 from modal_computer_use import (
     ComputerConfig,
     ComputerSandbox,
@@ -20,6 +22,8 @@ from modal_computer_use.errors import (
 )
 from modal_computer_use.registry import SandboxRegistry
 from modal_computer_use.sandbox import (
+    MODAL_SNAPSHOT_RETENTION_SECONDS,
+    ModalVolumeMount,
     _connect_token_parts,
     modal_daemon_endpoint,
     modal_daemon_env,
@@ -95,6 +99,9 @@ class FakeSandboxObject:
         self.set_tags_calls: list[dict[str, str]] = []
         self.wait_until_ready_calls: list[int] = []
         self.mount_image_calls: list[tuple[str, object]] = []
+        self.snapshot_filesystem_calls: list[dict[str, object]] = []
+        self.snapshot_directory_calls: list[dict[str, object]] = []
+        self.reload_volumes_calls: list[int] = []
         self.exec_calls: list[dict[str, object]] = []
         self.terminated = False
 
@@ -130,11 +137,16 @@ class FakeSandboxObject:
             8080: SimpleNamespace(url="https://daemon.example.modal.host"),
         }
 
-    def snapshot_filesystem(self) -> object:
+    def snapshot_filesystem(self, timeout: int, *, ttl: int | None) -> object:
+        self.snapshot_filesystem_calls.append({"timeout": timeout, "ttl": ttl})
         return SimpleNamespace(object_id="im-snapshot")
 
-    def snapshot_directory(self, path: str) -> object:
+    def snapshot_directory(self, path: str, *, timeout: int, ttl: int | None) -> object:
+        self.snapshot_directory_calls.append({"path": path, "timeout": timeout, "ttl": ttl})
         return SimpleNamespace(object_id="im-dir-snapshot", path=path)
+
+    def reload_volumes(self, *, timeout: int) -> None:
+        self.reload_volumes_calls.append(timeout)
 
     def mount_image(self, path: str, image: object) -> None:
         self.mount_image_calls.append((path, image))
@@ -155,7 +167,11 @@ class FakeSandbox:
     def create(cls, *args: str, **kwargs: object) -> FakeSandboxObject:
         cls.create_calls.append((args, kwargs))
         name = kwargs.get("name")
-        cls.created = FakeSandboxObject(name=name if isinstance(name, str) else None)
+        tags = kwargs.get("tags")
+        cls.created = FakeSandboxObject(
+            name=name if isinstance(name, str) else None,
+            tags=tags if isinstance(tags, dict) else None,
+        )
         return cls.created
 
     @classmethod
@@ -269,18 +285,16 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert "h2_ports" not in kwargs
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs
-    assert "tags" not in kwargs
+    assert kwargs["tags"]["computer-use.run_id"] == "run-123"
+    assert kwargs["tags"]["computer-use.owner"] == "alice"
+    assert kwargs["tags"]["computer-use.artifacts_dir"] == "/home/desktop/artifacts"
+    assert "computer-use.created_at" in kwargs["tags"]
+    assert kwargs["tags"]["custom"] == "tag"
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.wait_until_ready_calls == [120]
     assert readiness_calls == [120, 120]
     assert computer.client.base_url == "https://daemon.example.modal.host"
-    assert FakeSandbox.created.set_tags_calls[0]["computer-use.run_id"] == "run-123"
-    assert FakeSandbox.created.set_tags_calls[0]["computer-use.owner"] == "alice"
-    assert FakeSandbox.created.set_tags_calls[0]["computer-use.artifacts_dir"] == (
-        "/home/desktop/artifacts"
-    )
-    assert "computer-use.created_at" in FakeSandbox.created.set_tags_calls[0]
-    assert FakeSandbox.created.set_tags_calls[0]["custom"] == "tag"
+    assert FakeSandbox.created.set_tags_calls == []
     assert FakeApp.objects[0].set_tags_calls == [
         {"existing": "app-tag", "benchmark": "sdk-surfaces"}
     ]
@@ -307,6 +321,64 @@ def test_create_omits_modal_region_by_default(monkeypatch) -> None:
     assert "region" not in kwargs
 
 
+def test_create_forwards_current_network_allowlist_arguments(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(
+        run_id="run-123",
+        network={
+            "outbound_cidr_allowlist": ["10.0.0.0/8"],
+            "outbound_domain_allowlist": ["api.openai.com"],
+            "inbound_cidr_allowlist": ["203.0.113.0/24"],
+        },
+    )
+
+    ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["outbound_cidr_allowlist"] == ["10.0.0.0/8"]
+    assert kwargs["outbound_domain_allowlist"] == ["api.openai.com"]
+    assert kwargs["inbound_cidr_allowlist"] == ["203.0.113.0/24"]
+    assert "cidr_allowlist" not in kwargs
+
+
+def test_create_selects_named_image_without_inline_fallback(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    selected: list[dict[str, object]] = []
+
+    def fake_named_image(**kwargs: object) -> object:
+        selected.append(kwargs)
+        return "named-image"
+
+    monkeypatch.setattr("modal_computer_use.sandbox.named_image", fake_named_image)
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.default_image",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("inline fallback was used")),
+    )
+    config = ComputerConfig(
+        run_id="run-123",
+        resources={"profile": "browser"},
+        browser={"kind": "chromium"},
+        image={"source": "named", "revision": revision, "environment_name": "prod"},
+    )
+
+    ComputerSandbox.create(config=config, wait=False)
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["image"] == "named-image"
+    assert kwargs["tags"]["computer-use.image_identity"] == (
+        f"modal-computer-use-chromium:{revision}"
+    )
+    assert selected == [
+        {
+            "revision": revision,
+            "profile": "browser",
+            "browser": "chromium",
+            "environment_name": "prod",
+        }
+    ]
+
+
 def test_create_preserves_reserved_computer_use_tags(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(run_id="run-123")
@@ -323,7 +395,8 @@ def test_create_preserves_reserved_computer_use_tags(monkeypatch) -> None:
     )
 
     assert FakeSandbox.created is not None
-    applied_tags = FakeSandbox.created.set_tags_calls[0]
+    _, create_kwargs = FakeSandbox.create_calls[0]
+    applied_tags = create_kwargs["tags"]
     assert applied_tags["computer-use.run_id"] == "run-123"
     assert applied_tags["computer-use.config_hash"] == compute_config_hash(config)
     assert applied_tags["custom"] == "tag"
@@ -871,8 +944,9 @@ def test_modal_sandbox_exec_once_creates_ephemeral_runner(monkeypatch) -> None:
     assert kwargs["encrypted_ports"] == []
     assert kwargs["cpu"] == 0.5
     assert kwargs["memory"] == 512
+    assert kwargs["tags"] == {"role": "runner"}
     assert FakeSandbox.created is not None
-    assert FakeSandbox.created.set_tags_calls == [{"role": "runner"}]
+    assert FakeSandbox.created.set_tags_calls == []
     assert FakeSandbox.created.exec_calls == [
         {
             "args": ("python", "-c", "print('ok')"),
@@ -1073,6 +1147,10 @@ def test_snapshot_filesystem_delegates_to_modal_sandbox(monkeypatch) -> None:
     snapshot = computer.snapshot_filesystem()
 
     assert snapshot.object_id == "im-snapshot"
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.snapshot_filesystem_calls == [
+        {"timeout": 55, "ttl": MODAL_SNAPSHOT_RETENTION_SECONDS}
+    ]
 
 
 def test_snapshot_filesystem_requires_modal_backing() -> None:
@@ -1095,7 +1173,11 @@ def test_snapshot_directory_and_mount_image_delegate_to_modal_sandbox(monkeypatc
         wait=False,
     )
 
-    snapshot = computer.snapshot_directory("/home/desktop/artifacts/snapshots")
+    snapshot = computer.snapshot_directory(
+        "/home/desktop/artifacts/snapshots",
+        timeout=90,
+        ttl=None,
+    )
     computer.mount_image("/home/desktop/artifacts/snapshots", snapshot)
 
     assert snapshot.object_id == "im-dir-snapshot"
@@ -1104,6 +1186,95 @@ def test_snapshot_directory_and_mount_image_delegate_to_modal_sandbox(monkeypatc
     assert FakeSandbox.created.mount_image_calls == [
         ("/home/desktop/artifacts/snapshots", snapshot)
     ]
+    assert FakeSandbox.created.snapshot_directory_calls == [
+        {
+            "path": "/home/desktop/artifacts/snapshots",
+            "timeout": 90,
+            "ttl": None,
+        }
+    ]
+
+
+def test_snapshot_and_volume_reload_reject_invalid_timeouts(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"),
+        image=object(),
+        wait=False,
+    )
+
+    for operation in (
+        lambda: computer.snapshot_filesystem(timeout=0),
+        lambda: computer.snapshot_directory("/project", timeout=0),
+        lambda: computer.reload_volumes(timeout=0),
+    ):
+        with pytest.raises(ValueError, match="timeout must be positive"):
+            operation()
+    with pytest.raises(ValueError, match="ttl must be positive"):
+        computer.snapshot_filesystem(ttl=0)
+
+
+def test_reload_volumes_blocks_with_explicit_timeout(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"),
+        image=object(),
+        wait=False,
+    )
+
+    computer.reload_volumes(timeout=75)
+
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.reload_volumes_calls == [75]
+
+
+def test_reload_volumes_requires_modal_backing() -> None:
+    computer = ComputerSandbox.local(token="dev")
+
+    with pytest.raises(SandboxUnavailableError, match="Volume reload requires"):
+        computer.reload_volumes()
+
+
+def test_modal_volume_mount_applies_opt_in_options(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    class FakeVolume:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def with_mount_options(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+            return "configured-volume"
+
+    volume = FakeVolume()
+    ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"),
+        image=object(),
+        volumes={
+            "/data": ModalVolumeMount(
+                volume=volume,
+                read_only=True,
+                sub_path="/users/alice",
+            )
+        },
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["volumes"] == {"/data": "configured-volume"}
+    assert volume.calls == [{"read_only": True, "sub_path": "/users/alice"}]
+
+
+def test_modal_volume_mount_rejects_unsupported_volume_options(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    with pytest.raises(ConfigConflictError, match=r"Volume\.with_mount_options"):
+        ComputerSandbox.create(
+            config=ComputerConfig(run_id="run-123"),
+            image=object(),
+            volumes={"/data": ModalVolumeMount(volume=object(), read_only=True)},
+            wait=False,
+        )
 
 
 def test_snapshot_directory_requires_modal_backing() -> None:
