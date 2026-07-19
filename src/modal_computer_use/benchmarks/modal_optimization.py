@@ -481,11 +481,11 @@ def select_modal_optimization_region(
     comparison = _mapping(payload.get("comparison"), "region comparison")
     runs = _mapping(payload.get("runs"), "region runs")
     rows = _mapping(comparison.get("regions"), "region rows")
-    candidates: dict[str, dict[str, float]] = {}
+    candidates: dict[str, dict[str, Any]] = {}
     for region in ("us-west", "us-east"):
         row = rows.get(region)
         run = runs.get(region)
-        if not isinstance(row, dict) or not isinstance(run, dict) or run.get("ok") is not True:
+        if not isinstance(row, dict) or not isinstance(run, dict):
             continue
         transport = row.get("fastest_floor_p50_ms")
         metadata = run.get("metadata")
@@ -499,6 +499,8 @@ def select_modal_optimization_region(
             candidates[region] = {
                 "transport_p50_ms": float(transport),
                 "cold_create_to_ready_ms": float(cold),
+                "ok": run.get("ok") is True,
+                "failure_count": len(run.get("failures", [])),
             }
     if set(candidates) != {"us-west", "us-east"}:
         raise ValueError("both explicit region candidates must have valid evidence")
@@ -512,12 +514,21 @@ def select_modal_optimization_region(
         if tied
         else fastest
     )
+    if candidates[selected]["ok"] is not True:
+        successful = [region for region, row in candidates.items() if row["ok"] is True]
+        if not successful:
+            raise ValueError("region selection has no clean explicit candidate")
+        selected = min(
+            successful,
+            key=lambda region: candidates[region]["transport_p50_ms"],
+        )
     return selected, {
         "artifact_sha256": hashlib.sha256(raw_bytes).hexdigest(),
         "candidates": candidates,
         "selected": selected,
         "rule": "transport p50; within 5 percent use lower cold create-to-ready",
         "default_region_excluded_from_optimized_placement": True,
+        "candidate_failures_retained": True,
     }
 
 

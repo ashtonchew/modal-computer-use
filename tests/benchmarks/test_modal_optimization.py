@@ -357,6 +357,38 @@ def test_region_selection_applies_preregistered_tie_break_and_records_digest() -
     assert len(evidence["artifact_sha256"]) == 64
 
 
+def test_region_selection_retains_failed_candidate_without_replacing_evidence() -> None:
+    payload = {
+        "benchmark": "modal-region-ab",
+        "iterations": 30,
+        "comparison": {
+            "regions": {
+                "us-west": {"fastest_floor_p50_ms": 32.0},
+                "us-east": {"fastest_floor_p50_ms": 66.0},
+            }
+        },
+        "runs": {
+            "us-west": {
+                "ok": True,
+                "failures": [],
+                "metadata": {"environment": {"modal_cold_create_to_ready_ms": 10_000.0}},
+            },
+            "us-east": {
+                "ok": False,
+                "failures": [{"type": "RemoteProtocolError"}],
+                "metadata": {"environment": {"modal_cold_create_to_ready_ms": 9_000.0}},
+            },
+        },
+    }
+
+    region, evidence = select_modal_optimization_region(payload, raw_bytes=b"failed-candidate")
+
+    assert region == "us-west"
+    assert evidence["candidates"]["us-east"]["ok"] is False
+    assert evidence["candidates"]["us-east"]["failure_count"] == 1
+    assert evidence["candidate_failures_retained"] is True
+
+
 def test_independent_cold_attempts_validate_frame_and_record_cleanup() -> None:
     closed: list[str] = []
 

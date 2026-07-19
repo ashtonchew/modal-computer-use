@@ -65,6 +65,7 @@ def main() -> int:
 def _add_common_arguments(parser: argparse.ArgumentParser, *, region_default: str | None) -> None:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--dependency-sha", default=DEPENDENCY_SHA)
+    parser.add_argument("--region-selection-source-sha")
     parser.add_argument("--region", required=region_default is None, default=region_default)
     parser.add_argument("--image-revision")
     parser.add_argument("--cold-attempts", type=int, default=30)
@@ -89,7 +90,11 @@ def _config(args: argparse.Namespace) -> ModalOptimizationConfig:
 def _preregister(args: argparse.Namespace) -> int:
     _require_dependency(args.source_sha, args.dependency_sha, require_clean=False)
     config = _config(args)
-    commands = _commands(args.source_sha)
+    region_selection_source_sha = args.region_selection_source_sha or args.source_sha
+    commands = _commands(
+        args.source_sha,
+        region_selection_source_sha=region_selection_source_sha,
+    )
     payload = build_preregistration(
         config,
         source_sha=args.source_sha,
@@ -109,6 +114,7 @@ def _preregister(args: argparse.Namespace) -> int:
         },
         commands=commands,
     )
+    payload["region_selection_evidence_source_sha"] = region_selection_source_sha
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     print(json.dumps({"status": "preregistered", "output": str(args.output)}))
@@ -117,7 +123,14 @@ def _preregister(args: argparse.Namespace) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
+    region_selection_source_sha = args.region_selection_source_sha or args.source_sha
+    _require_dependency(
+        args.source_sha,
+        region_selection_source_sha,
+        require_clean=True,
+    )
     selected_region, region_selection = _select_region(args.region_selection)
+    region_selection["execution_source_sha"] = region_selection_source_sha
     if args.region not in {"selection-pending", selected_region}:
         raise RuntimeError("explicit region does not match preregistered selection evidence")
     args.region = selected_region
@@ -158,7 +171,7 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _commands(source_sha: str) -> dict[str, str]:
+def _commands(source_sha: str, *, region_selection_source_sha: str) -> dict[str, str]:
     root = "benchmark-results/modal-optimization-2026-07-19"
     return {
         "region_selection": (
@@ -182,6 +195,7 @@ def _commands(source_sha: str) -> dict[str, str]:
         "benchmark": (
             "uv run python scripts/run_modal_optimization_benchmark.py run "
             f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
+            f"--region-selection-source-sha {region_selection_source_sha} "
             f"--region-selection {root}/region-selection.json "
             f"--provider-default {root}/provider-default-sanitized.json "
             f"--preregistration {root}/preregistration.json --output {root}/raw.json"
