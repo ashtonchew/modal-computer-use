@@ -1166,7 +1166,7 @@ def test_claim_warm_pool_miss_records_claim_time_and_cold_fallback(monkeypatch) 
     queue = FakeQueue()
     cold = FakeComputer("sb-cold")
     monkeypatch.setattr("modal_computer_use.manager.ComputerSandbox.create", lambda **kwargs: cold)
-    ticks = iter((10.0, 10.025, 10.2))
+    ticks = iter((10.0, 10.025, 10.15, 10.2))
     claim = manager.claim_warm_pool(
         config=_pool_config(),
         policy=WarmPoolPolicy(pool_name="prod", capacity=2),
@@ -1178,9 +1178,51 @@ def test_claim_warm_pool_miss_records_claim_time_and_cold_fallback(monkeypatch) 
     assert claim.metrics.miss_reason == "empty"
     assert claim.metrics.cold_fallback is True
     assert claim.metrics.claim_elapsed_ms == pytest.approx(25.0)
+    assert claim.metrics.request_to_authenticated_ms == pytest.approx(150.0)
     assert claim.metrics.request_to_first_frame_ms == pytest.approx(200.0)
     assert claim.metrics.actual_region == "us-east-1"
     assert claim.computer is cold
+
+
+def test_claim_warm_pool_hit_records_auth_and_frame_before_claim_mutation(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    entry = WarmPoolEntry(
+        sandbox_id="sb-warm",
+        slot_name="prod-000",
+        pool_name="prod",
+        app_name="computer-app",
+        config_identity=pool_config_identity(config),
+        queue_identity="queue-warm",
+        created_at=now - timedelta(seconds=20),
+        ready_at=now - timedelta(seconds=10),
+        expires_at=now + timedelta(seconds=500),
+        requested_region="us-east",
+        actual_region="us-east-1",
+        cpu=4,
+        memory_mib=8192,
+    )
+    warm = FakeComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    ticks = iter((10.0, 10.02, 10.05, 10.08))
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue([entry.as_dict()]),
+        now=lambda: now,
+        monotonic_clock=lambda: next(ticks),
+    )
+
+    assert claim.metrics.hit is True
+    assert claim.metrics.request_to_authenticated_ms == pytest.approx(20.0)
+    assert claim.metrics.request_to_first_frame_ms == pytest.approx(50.0)
+    assert claim.metrics.claim_elapsed_ms == pytest.approx(80.0)
+    assert warm.remote_tags["computer-use.pool_state"] == "claimed"
 
 
 def test_claim_warm_pool_invalid_entry_is_counted_before_cold_fallback(monkeypatch) -> None:

@@ -395,7 +395,9 @@ class ComputerSandboxManager:
                 if computer.poll() is not None:
                     raise RuntimeError("warm Sandbox has already finished")
                 computer.ensure_browser_ready(config)
+                request_to_authenticated_ms = (monotonic_clock() - started) * 1000.0
                 computer.first_valid_frame(config)
+                request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
                 claimed_at = _as_utc(now())
                 post_validation_reason = policy.rejection_reason(
                     entry,
@@ -447,6 +449,7 @@ class ComputerSandboxManager:
                             hit=True,
                             claim_elapsed_ms=(monotonic_clock() - started) * 1000.0,
                             cold_fallback=False,
+                            request_to_authenticated_ms=request_to_authenticated_ms,
                             rejection_reasons=tuple(rejection_reasons),
                             remaining_lifetime_seconds=remaining,
                             cost_accounting=estimate_warm_idle_cost(
@@ -454,7 +457,7 @@ class ComputerSandboxManager:
                                 claimed_at=claimed_at,
                                 configured_pool_size=policy.capacity,
                             ),
-                            request_to_first_frame_ms=(monotonic_clock() - started) * 1000.0,
+                            request_to_first_frame_ms=request_to_first_frame_ms,
                         ),
                     )
             except Exception:
@@ -474,7 +477,9 @@ class ComputerSandboxManager:
         )
         try:
             cold.ensure_browser_ready(config)
+            request_to_authenticated_ms = (monotonic_clock() - started) * 1000.0
             cold.first_valid_frame(config)
+            request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
             actual_region = cold.runtime_region()
         except Exception:
             try:
@@ -493,9 +498,10 @@ class ComputerSandboxManager:
                 hit=False,
                 claim_elapsed_ms=claim_elapsed_ms,
                 cold_fallback=True,
+                request_to_authenticated_ms=request_to_authenticated_ms,
                 miss_reason="empty" if not rejection_reasons else "rejected",
                 rejection_reasons=tuple(rejection_reasons),
-                request_to_first_frame_ms=(monotonic_clock() - started) * 1000.0,
+                request_to_first_frame_ms=request_to_first_frame_ms,
             ),
         )
 

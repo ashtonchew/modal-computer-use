@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import platform
+import shutil
+import subprocess
+from datetime import UTC, datetime
+from importlib.metadata import version
+from pathlib import Path
+from typing import Any
+
+from modal_computer_use.benchmarks.artifacts import validate_sanitized_provider_benchmark
+from modal_computer_use.benchmarks.modal_optimization import (
+    ModalOptimizationConfig,
+    build_modal_optimization_artifact,
+    build_preregistration,
+    select_modal_optimization_region,
+)
+from modal_computer_use.benchmarks.modal_optimization_execution import (
+    run_independent_cold_attempts,
+    run_warm_action_attempts,
+    run_warm_claim_attempts,
+)
+
+DEPENDENCY_SHA = "37f977f80de93800c005caeec7ead5222b00b040"
+DEFAULT_RAW_ROOT = Path("benchmark-results/modal-optimization-2026-07-19")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the preregistered post-optimization Modal benchmark"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    preregister = subparsers.add_parser("preregister")
+    _add_common_arguments(preregister, region_default="selection-pending")
+    preregister.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "preregistration.json",
+    )
+
+    run = subparsers.add_parser("run")
+    _add_common_arguments(run, region_default="selection-pending")
+    run.add_argument("--provider-default", type=Path, required=True)
+    run.add_argument("--region-selection", type=Path, required=True)
+    run.add_argument(
+        "--preregistration",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "preregistration.json",
+    )
+    run.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "raw.json",
+    )
+    args = parser.parse_args()
+    if args.command == "preregister":
+        return _preregister(args)
+    return _run(args)
+
+
+def _add_common_arguments(parser: argparse.ArgumentParser, *, region_default: str | None) -> None:
+    parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--dependency-sha", default=DEPENDENCY_SHA)
+    parser.add_argument("--region", required=region_default is None, default=region_default)
+    parser.add_argument("--image-revision")
+    parser.add_argument("--cold-attempts", type=int, default=30)
+    parser.add_argument("--warm-action-attempts", type=int, default=30)
+    parser.add_argument("--warm-claim-attempts", type=int, default=30)
+    parser.add_argument("--warm-pool-target", type=int, default=3)
+    parser.add_argument("--warm-idle-seconds", type=float, default=30.0)
+
+
+def _config(args: argparse.Namespace) -> ModalOptimizationConfig:
+    return ModalOptimizationConfig(
+        region=args.region,
+        image_revision=args.image_revision or args.source_sha,
+        cold_attempts=args.cold_attempts,
+        warm_action_attempts=args.warm_action_attempts,
+        warm_claim_attempts=args.warm_claim_attempts,
+        warm_pool_target=args.warm_pool_target,
+        warm_idle_seconds=args.warm_idle_seconds,
+    )
+
+
+def _preregister(args: argparse.Namespace) -> int:
+    _require_dependency(args.source_sha, args.dependency_sha, require_clean=False)
+    config = _config(args)
+    commands = _commands(args.source_sha)
+    payload = build_preregistration(
+        config,
+        source_sha=args.source_sha,
+        dependency_sha=args.dependency_sha,
+        generated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        runner_identity={
+            "kind": "local",
+            "operating_system": platform.system(),
+            "architecture": platform.machine(),
+            "timezone": "America/Los_Angeles",
+            "location_label": "local-macos-arm64-America-Los_Angeles",
+        },
+        sdk_versions={
+            "modal": version("modal"),
+            "daytona": version("daytona-sdk"),
+            "e2b-desktop": version("e2b-desktop"),
+        },
+        commands=commands,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
+    print(json.dumps({"status": "preregistered", "output": str(args.output)}))
+    return 0
+
+
+def _run(args: argparse.Namespace) -> int:
+    _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
+    selected_region, region_selection = _select_region(args.region_selection)
+    if args.region not in {"selection-pending", selected_region}:
+        raise RuntimeError("explicit region does not match preregistered selection evidence")
+    args.region = selected_region
+    config = _config(args)
+    preregistration_bytes = args.preregistration.read_bytes()
+    preregistration = json.loads(preregistration_bytes)
+    if preregistration.get("source_sha") != args.source_sha:
+        raise RuntimeError("preregistration source SHA does not match the benchmark harness")
+    if preregistration.get("dependency", {}).get("head_sha") != args.dependency_sha:
+        raise RuntimeError("preregistration dependency SHA does not match PR #114")
+    provider_default = json.loads(args.provider_default.read_bytes())
+    if not isinstance(provider_default, dict):
+        raise ValueError("provider-default artifact must be a JSON object")
+    validate_sanitized_provider_benchmark(provider_default)
+
+    progress = _progress
+    cold_attempts = run_independent_cold_attempts(config, progress=progress)
+    warm_attempts, warm_metadata = run_warm_action_attempts(config, progress=progress)
+    claim_attempts, claim_metadata = run_warm_claim_attempts(config, progress=progress)
+    generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    payload = build_modal_optimization_artifact(
+        config,
+        source_sha=args.source_sha,
+        dependency_sha=args.dependency_sha,
+        generated_at=generated_at,
+        preregistration_sha256=hashlib.sha256(preregistration_bytes).hexdigest(),
+        provider_default_payload=provider_default,
+        cold_attempts=cold_attempts,
+        warm_action_attempts=warm_attempts,
+        warm_action_metadata=warm_metadata,
+        claim_attempts=claim_attempts,
+        claim_metadata=claim_metadata,
+        region_selection=region_selection,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
+    print(json.dumps({"status": "complete", "output": str(args.output)}))
+    return 0
+
+
+def _commands(source_sha: str) -> dict[str, str]:
+    root = "benchmark-results/modal-optimization-2026-07-19"
+    return {
+        "region_selection": (
+            "uv run computer-use benchmark modal-region-ab --modal-region default "
+            "--modal-region us-west --modal-region us-east --modal-ingress attested-tunnel "
+            "--caller-region-label local-macos-arm64-America-Los_Angeles "
+            "--resource-profile browser --browser chromium --modal-cpu 4 "
+            f"--modal-memory-mib 8192 --iterations 30 --output {root}/region-selection.json"
+        ),
+        "provider_default": (
+            "uv run computer-use benchmark compare --create-modal-sandbox "
+            "--provider modal-daemon --provider daytona --provider e2b "
+            "--modal-ingress attested-tunnel --resource-profile browser "
+            "--browser chromium --iterations 3 --env-file "
+            "/Users/ashtonchew/projects/modal-computer-use/.env "
+            f"--output {root}/provider-default-raw.json --json"
+        ),
+        "publish_image": (
+            f"uv run python scripts/publish_modal_images.py --revision {source_sha}"
+        ),
+        "benchmark": (
+            "uv run python scripts/run_modal_optimization_benchmark.py run "
+            f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
+            f"--region-selection {root}/region-selection.json "
+            f"--provider-default {root}/provider-default-sanitized.json "
+            f"--preregistration {root}/preregistration.json --output {root}/raw.json"
+        ),
+        "normalize": (
+            "uv run python scripts/sanitize_modal_optimization_benchmark.py "
+            f"{root}/raw.json benchmark-data/modal-optimization-results-2026-07-19.json "
+            f"--raw-artifact-path {root}/raw.json --harness-commit {source_sha}"
+        ),
+    }
+
+
+def _require_dependency(source_sha: str, dependency_sha: str, *, require_clean: bool) -> None:
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("git is required for benchmark provenance")
+    if _git_output(git, "rev-parse", "HEAD") != source_sha:
+        raise RuntimeError("source SHA does not match HEAD")
+    result = subprocess.run(  # noqa: S603
+        [git, "merge-base", "--is-ancestor", dependency_sha, source_sha],
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("PR #114 dependency is not an ancestor of the benchmark harness")
+    if require_clean and _git_output(git, "status", "--porcelain", "--untracked-files=no"):
+        raise RuntimeError("credentialed benchmark execution requires a clean tracked worktree")
+
+
+def _select_region(path: Path) -> tuple[str, dict[str, Any]]:
+    raw_bytes = path.read_bytes()
+    payload = json.loads(raw_bytes)
+    if not isinstance(payload, dict):
+        raise ValueError("region selection artifact must be a JSON object")
+    return select_modal_optimization_region(payload, raw_bytes=raw_bytes)
+
+
+def _git_output(git: str, *args: str) -> str:
+    result = subprocess.run(  # noqa: S603
+        [git, *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.stdout.strip()
+
+
+def _progress(profile: str, completed: int, attempted: int) -> None:
+    print(
+        json.dumps(
+            {
+                "status": "progress",
+                "profile": profile,
+                "completed": completed,
+                "attempted": attempted,
+            }
+        ),
+        flush=True,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

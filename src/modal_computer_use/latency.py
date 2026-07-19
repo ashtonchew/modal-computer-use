@@ -183,6 +183,7 @@ class WarmPoolClaimMetrics:
     hit: bool
     claim_elapsed_ms: float
     cold_fallback: bool
+    request_to_authenticated_ms: float
     miss_reason: str | None = None
     rejection_reasons: tuple[str, ...] = ()
     remaining_lifetime_seconds: float | None = None
