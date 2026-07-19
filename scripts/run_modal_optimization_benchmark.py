@@ -15,10 +15,13 @@ from typing import Any
 
 from modal_computer_use.benchmarks.artifacts import validate_sanitized_provider_benchmark
 from modal_computer_use.benchmarks.modal_optimization import (
+    PROFILE_MODAL_V2,
     ModalOptimizationConfig,
     build_modal_optimization_artifact,
     build_modal_region_evidence_envelope,
+    build_modal_v2_profile_artifact,
     build_preregistration,
+    build_v2_preregistration,
     select_modal_optimization_region,
     validate_preregistered_config,
 )
@@ -27,8 +30,10 @@ from modal_computer_use.benchmarks.modal_optimization_execution import (
     run_warm_action_attempts,
     run_warm_claim_attempts,
 )
+from modal_computer_use.sandbox import create_modal_v2_tunnel_computer
 
 DEPENDENCY_SHA = "37f977f80de93800c005caeec7ead5222b00b040"
+BASE_BENCHMARK_SOURCE_SHA = "8c21cf1338fd747dca57bca6941c307270069712"
 DEFAULT_RAW_ROOT = Path("benchmark-results/modal-optimization-2026-07-19")
 
 
@@ -74,6 +79,27 @@ def main() -> int:
         type=Path,
         default=DEFAULT_RAW_ROOT / "raw.json",
     )
+
+    preregister_v2 = subparsers.add_parser("preregister-v2")
+    _add_v2_arguments(preregister_v2)
+    preregister_v2.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "v2-preregistration.json",
+    )
+
+    run_v2 = subparsers.add_parser("run-v2")
+    _add_v2_arguments(run_v2)
+    run_v2.add_argument(
+        "--preregistration",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "v2-preregistration.json",
+    )
+    run_v2.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_RAW_ROOT / "v2-raw.json",
+    )
     args = parser.parse_args()
     if args.command == "preregister":
         return _preregister(args)
@@ -81,6 +107,10 @@ def main() -> int:
         return _run_region(args)
     if args.command == "attest-region":
         return _attest_region(args)
+    if args.command == "preregister-v2":
+        return _preregister_v2(args)
+    if args.command == "run-v2":
+        return _run_v2(args)
     return _run(args)
 
 
@@ -98,6 +128,16 @@ def _add_common_arguments(parser: argparse.ArgumentParser, *, region_default: st
     parser.add_argument("--warm-idle-seconds", type=float, default=30.0)
 
 
+def _add_v2_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--dependency-sha", default=DEPENDENCY_SHA)
+    parser.add_argument("--base-benchmark-source-sha", default=BASE_BENCHMARK_SOURCE_SHA)
+    parser.add_argument("--region", default="us-west")
+    parser.add_argument("--image-revision")
+    parser.add_argument("--cold-attempts", type=int, default=30)
+    parser.add_argument("--warm-action-attempts", type=int, default=30)
+
+
 def _config(args: argparse.Namespace) -> ModalOptimizationConfig:
     return ModalOptimizationConfig(
         region=args.region,
@@ -107,6 +147,19 @@ def _config(args: argparse.Namespace) -> ModalOptimizationConfig:
         warm_claim_attempts=args.warm_claim_attempts,
         warm_pool_target=args.warm_pool_target,
         warm_idle_seconds=args.warm_idle_seconds,
+    )
+
+
+def _v2_config(args: argparse.Namespace) -> ModalOptimizationConfig:
+    return ModalOptimizationConfig(
+        region=args.region,
+        image_revision=args.image_revision or args.source_sha,
+        cold_attempts=args.cold_attempts,
+        warm_action_attempts=args.warm_action_attempts,
+        warm_claim_attempts=1,
+        warm_pool_target=1,
+        warm_idle_seconds=0.0,
+        ingress="tunnel",
     )
 
 
@@ -205,6 +258,100 @@ def _run_region(args: argparse.Namespace) -> int:
         )
     finally:
         temporary.unlink(missing_ok=True)
+    print(json.dumps({"status": "complete", "output": str(args.output)}))
+    return 0
+
+
+def _preregister_v2(args: argparse.Namespace) -> int:
+    _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
+    _require_dependency(
+        args.source_sha,
+        args.base_benchmark_source_sha,
+        require_clean=True,
+    )
+    config = _v2_config(args)
+    payload = build_v2_preregistration(
+        config,
+        source_sha=args.source_sha,
+        dependency_sha=args.dependency_sha,
+        base_benchmark_source_sha=args.base_benchmark_source_sha,
+        generated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        runner_identity={
+            "kind": "local",
+            "operating_system": platform.system(),
+            "architecture": platform.machine(),
+            "timezone": "America/Los_Angeles",
+            "location_label": "local-macos-arm64-America-Los_Angeles",
+        },
+        sdk_versions={"modal": version("modal")},
+        commands=_v2_commands(
+            args.source_sha,
+            base_benchmark_source_sha=args.base_benchmark_source_sha,
+        ),
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
+    print(json.dumps({"status": "preregistered", "output": str(args.output)}))
+    return 0
+
+
+def _run_v2(args: argparse.Namespace) -> int:
+    _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
+    _require_dependency(
+        args.source_sha,
+        args.base_benchmark_source_sha,
+        require_clean=True,
+    )
+    config = _v2_config(args)
+    preregistration_bytes = args.preregistration.read_bytes()
+    preregistration = json.loads(preregistration_bytes)
+    if preregistration.get("source_sha") != args.source_sha:
+        raise RuntimeError("V2 preregistration source differs from the harness")
+    if preregistration.get("base_benchmark_source_sha") != args.base_benchmark_source_sha:
+        raise RuntimeError("V2 preregistration targets a different base benchmark")
+    if preregistration.get("dependency", {}).get("head_sha") != args.dependency_sha:
+        raise RuntimeError("V2 preregistration dependency differs from PR #114")
+    frozen = preregistration.get("configuration")
+    expected = {
+        "region": config.region,
+        "image_revision": config.image_revision,
+        "browser": config.browser,
+        "ingress": config.ingress,
+        "cpu": config.cpu,
+        "memory_mib": config.memory_mib,
+        "sandbox_timeout_seconds": config.sandbox_timeout_seconds,
+        "readiness_timeout_seconds": config.readiness_timeout_seconds,
+    }
+    if frozen != expected:
+        raise RuntimeError("V2 effective configuration differs from preregistration")
+    cold_attempts = run_independent_cold_attempts(
+        config,
+        create_computer=create_modal_v2_tunnel_computer,
+        progress=_progress,
+        profile=PROFILE_MODAL_V2,
+        progress_label="v2_cold",
+    )
+    warm_attempts, warm_metadata = run_warm_action_attempts(
+        config,
+        create_computer=create_modal_v2_tunnel_computer,
+        progress=_progress,
+        profile=PROFILE_MODAL_V2,
+        runner_path="inherited",
+        progress_label="v2_warm_action",
+    )
+    payload = build_modal_v2_profile_artifact(
+        config,
+        source_sha=args.source_sha,
+        dependency_sha=args.dependency_sha,
+        base_benchmark_source_sha=args.base_benchmark_source_sha,
+        generated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        preregistration_sha256=hashlib.sha256(preregistration_bytes).hexdigest(),
+        cold_attempts=cold_attempts,
+        warm_action_attempts=warm_attempts,
+        warm_action_metadata=warm_metadata,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     print(json.dumps({"status": "complete", "output": str(args.output)}))
     return 0
 
@@ -354,6 +501,37 @@ def _commands(
             f"--raw-artifact-path {root}/raw.json --harness-commit {source_sha} "
             f"--preregistration {root}/preregistration.json "
             f"--region-evidence {root}/region-selection-attested.json"
+        ),
+    }
+
+
+def _v2_commands(
+    source_sha: str,
+    *,
+    base_benchmark_source_sha: str,
+) -> dict[str, str]:
+    root = "benchmark-results/modal-optimization-2026-07-19"
+    return {
+        "publish_image": (
+            f"uv run python scripts/publish_modal_images.py --revision {source_sha}"
+        ),
+        "benchmark_v2": (
+            "uv run python scripts/run_modal_optimization_benchmark.py run-v2 "
+            f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
+            f"--base-benchmark-source-sha {base_benchmark_source_sha} "
+            f"--preregistration {root}/v2-preregistration.json "
+            f"--output {root}/v2-raw.json"
+        ),
+        "normalize": (
+            "uv run python scripts/sanitize_modal_optimization_benchmark.py "
+            f"{root}/raw.json benchmark-data/modal-optimization-results-2026-07-19.json "
+            f"--raw-artifact-path {root}/raw.json "
+            f"--harness-commit {base_benchmark_source_sha} "
+            f"--preregistration {root}/preregistration.json "
+            f"--region-evidence {root}/region-selection-attested.json "
+            f"--v2-raw {root}/v2-raw.json "
+            f"--v2-raw-artifact-path {root}/v2-raw.json "
+            f"--v2-preregistration {root}/v2-preregistration.json"
         ),
     }
 

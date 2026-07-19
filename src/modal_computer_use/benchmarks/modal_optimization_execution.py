@@ -18,6 +18,7 @@ from ..sandbox import ComputerSandbox
 from ..state import new_run_id
 from .modal_colocated_client import (
     ModalColocatedClientBenchmarkConfig,
+    ModalColocatedRunnerPath,
     run_modal_colocated_runner_benchmark,
 )
 from .modal_optimization import (
@@ -38,6 +39,8 @@ def run_independent_cold_attempts(
     create_computer: Any = ComputerSandbox.create,
     clock: Any = time.perf_counter,
     progress: Any | None = None,
+    profile: str = PROFILE_MODAL_ON_DEMAND,
+    progress_label: str = "cold",
 ) -> list[dict[str, Any]]:
     attempts: list[dict[str, Any]] = []
     for index in range(config.cold_attempts):
@@ -52,8 +55,8 @@ def run_independent_cold_attempts(
             computer = create_computer(
                 config=computer_config,
                 app_name="modal-computer-use",
-                app_tags={"benchmark": PROFILE_MODAL_ON_DEMAND},
-                tags={"benchmark": PROFILE_MODAL_ON_DEMAND, "role": "cold-target"},
+                app_tags={"benchmark": profile},
+                tags={"benchmark": profile, "role": "cold-target"},
                 wait=True,
                 timing=timing,
             )
@@ -89,7 +92,7 @@ def run_independent_cold_attempts(
         attempt["cleanup"] = _cleanup_computer(computer)
         attempts.append(attempt)
         if progress is not None:
-            progress("cold", len(attempts), config.cold_attempts)
+            progress(progress_label, len(attempts), config.cold_attempts)
     return attempts
 
 
@@ -100,6 +103,9 @@ def run_warm_action_attempts(
     runner_benchmark: Any = run_modal_colocated_runner_benchmark,
     clock: Any = time.perf_counter,
     progress: Any | None = None,
+    profile: str = PROFILE_MODAL_ON_DEMAND,
+    runner_path: ModalColocatedRunnerPath = "connect",
+    progress_label: str = "warm_action",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     run_id = new_run_id()
     computer_config = modal_optimization_computer_config(
@@ -113,9 +119,9 @@ def run_warm_action_attempts(
         computer = create_computer(
             config=computer_config,
             app_name="modal-computer-use",
-            app_tags={"benchmark": PROFILE_MODAL_ON_DEMAND, "benchmark_run_id": run_id},
+            app_tags={"benchmark": profile, "benchmark_run_id": run_id},
             tags={
-                "benchmark": PROFILE_MODAL_ON_DEMAND,
+                "benchmark": profile,
                 "benchmark_run_id": run_id,
                 "role": "warm-action-target",
             },
@@ -145,13 +151,13 @@ def run_warm_action_attempts(
             image_profile=f"named:{config.image_revision}",
             surfaces=["daemon-observation-stream"],
             observation_cases=[OPTIMIZED_ACTION_CASE],
-            runner_paths=["connect"],
+            runner_paths=[runner_path],
             iterations=config.warm_action_attempts,
         )
         result = runner_benchmark(
             runner_config,
             run_id=run_id,
-            runner_path="connect",
+            runner_path=runner_path,
             computer=computer,
             target_sandbox_id=target_id,
         )
@@ -185,11 +191,11 @@ def run_warm_action_attempts(
             "reason": "persistent target cleanup is recorded at profile scope",
         }
     if progress is not None:
-        progress("warm_action", len(attempts), config.warm_action_attempts)
+        progress(progress_label, len(attempts), config.warm_action_attempts)
     return attempts, {
         "target_cleanup": cleanup,
         "target_resource_duration_seconds": duration,
-        "runner_path": "same-region-separate-modal-runner:connect",
+        "runner_path": f"same-region-separate-modal-runner:{runner_path}",
         "target_loopback": False,
         "action_transport": "persistent-hot-session",
         "observation_transport": "binary-envelope-causal-observation",

@@ -971,6 +971,138 @@ def modal_daemon_endpoint(
     raise ValueError("path must be inherited, connect, or target-loopback")
 
 
+def create_modal_v2_tunnel_computer(
+    *,
+    config: ComputerConfig,
+    app_name: str = "modal-computer-use",
+    name: str | None = None,
+    image: object | None = None,
+    tags: dict[str, str] | None = None,
+    app_tags: dict[str, str] | None = None,
+    wait: bool = True,
+    timing: SessionStartupTiming | None = None,
+    modal_runtime: object | None = None,
+    client_factory: Callable[..., DaemonClient] = DaemonClient,
+) -> ComputerSandbox:
+    """Create the benchmark-only V2 encrypted-tunnel target.
+
+    V2 does not support Connect Tokens in Modal 1.5.2. This path exposes only the
+    encrypted daemon port and authenticates every daemon request with an
+    application bearer token. It is intentionally separate from the default
+    ComputerSandbox.create lifecycle.
+    """
+    timing = timing or SessionStartupTiming()
+    timing.mark("request_received")
+    timing.unsupported("scheduled", "Modal V2 does not expose a supported scheduling timestamp")
+    timing.unsupported(
+        "daemon_started",
+        "the daemon process does not yet emit an attested startup timestamp",
+    )
+    timing.unsupported(
+        "connect_token_ready",
+        "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+    )
+    if config.ingress != "tunnel":
+        raise ConfigConflictError("the V2 benchmark path requires encrypted tunnel ingress")
+    if config.image.source != "named":
+        raise ConfigConflictError("the V2 benchmark path requires an exact named image")
+    if config.storage.persist_artifacts:
+        raise ConfigConflictError("the V2 benchmark path does not mount artifact storage")
+    if modal_runtime is None:
+        try:
+            import modal as modal_runtime
+        except ImportError as exc:
+            raise ModalNotInstalledError(
+                "Modal V2 benchmark execution requires the modal extra"
+            ) from exc
+    runtime: Any = modal_runtime
+    if not config.run_id:
+        config.run_id = new_run_id()
+    browser_kind = config.browser.kind if config.browser else None
+    if image is None:
+        image = named_image(
+            revision=config.image.revision or "",
+            profile=config.resources.profile,
+            browser=browser_kind,
+            environment_name=config.image.environment_name,
+        )
+    app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
+    if config.image.environment_name is not None:
+        app_lookup_kwargs["environment_name"] = config.image.environment_name
+    app = runtime.App.lookup(app_name, **app_lookup_kwargs)
+    if app_tags:
+        _set_modal_object_tags(app, app_tags)
+    tunnel_token = _secrets.token_urlsafe(32)
+    env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
+    env["COMPUTER_USE_TUNNEL_TOKEN"] = tunnel_token
+    sandbox_tags = {**(tags or {}), **default_tags(config)}
+    sandbox_tags["computer-use.image_identity"] = selected_image_identity(
+        source=config.image.source,
+        revision=config.image.revision,
+        profile=config.resources.profile,
+        browser=browser_kind,
+    )
+    sandbox_tags["computer-use.modal_backend"] = "v2"
+    _validate_sandbox_tags(sandbox_tags)
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image,
+        "cpu": config.resources.cpu,
+        "memory": config.resources.memory_mib,
+        "gpu": config.resources.gpu,
+        "encrypted_ports": [8080],
+        "timeout": config.runtime.timeout_seconds,
+        "idle_timeout": config.runtime.idle_timeout_seconds,
+        "env": env,
+        "block_network": config.network.block_all,
+        "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
+        "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
+        "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
+        "name": name,
+        "tags": sandbox_tags,
+    }
+    if config.runtime.modal_region:
+        create_kwargs["region"] = config.runtime.modal_region
+    readiness_probe = _readiness_probe(runtime)
+    if readiness_probe is not None:
+        create_kwargs["readiness_probe"] = readiness_probe
+    create = runtime.Sandbox._experimental_create
+    timing.mark("sandbox_create_started")
+    sandbox = create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
+    timing.mark("sandbox_registered")
+    client: DaemonClient | None = None
+    try:
+        if wait and hasattr(sandbox, "wait_until_ready"):
+            sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            timing.mark("tcp_ready")
+        base_url = _tunnel_url(sandbox, 8080)
+        timing.mark("encrypted_tunnel_ready")
+        client = client_factory(base_url=base_url, token=tunnel_token, http2=False)
+        metadata = SandboxRef(
+            sandbox_id=getattr(sandbox, "object_id", "unknown"),
+            app_name=app_name,
+            name=name,
+            run_id=config.run_id,
+            owner=sandbox_tags.get("computer-use.owner"),
+            created_at=_created_at_from_tags(sandbox_tags),
+            config_hash=compute_config_hash(config),
+            status="started",
+            tags=sandbox_tags,
+            vnc_url=None,
+            artifacts_dir=config.storage.artifacts_dir,
+        )
+        computer = ComputerSandbox(client, sandbox=sandbox, metadata=metadata)
+        if wait:
+            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            timing.mark("authenticated_tunnel_ready")
+        return computer
+    except Exception:
+        if client is not None:
+            client.close()
+        _terminate_failed_sandbox(sandbox)
+        raise
+
+
 def modal_daemon_env(
     endpoint: ModalDaemonEndpoint,
     env: dict[str, str] | None = None,

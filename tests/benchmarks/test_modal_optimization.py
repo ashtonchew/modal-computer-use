@@ -18,7 +18,9 @@ from modal_computer_use.benchmarks.modal_optimization import (
     action_attempts_from_case,
     build_modal_optimization_artifact,
     build_modal_region_evidence_envelope,
+    build_modal_v2_profile_artifact,
     build_preregistration,
+    build_v2_preregistration,
     estimate_resource_cost,
     extract_provider_default_profile,
     sanitize_modal_optimization_benchmark,
@@ -326,6 +328,112 @@ def test_sanitizer_rejects_result_count_that_differs_from_preregistration() -> N
             preregistration_bytes=preregistration_bytes,
             normalizer_commit="c" * 40,
         )
+
+
+def test_sanitizer_merges_preregistered_v2_encrypted_tunnel_profile() -> None:
+    canonical_commands = {
+        "provider_default": "provider command",
+        "provider_default_normalize": "provider normalize command",
+        "region_selection": "region command",
+        "region_selection_attest": "region attest command",
+        "publish_image": "publish command",
+        "benchmark": "benchmark command",
+        "normalize": "normalize command",
+    }
+    canonical_config = ModalOptimizationConfig(region="us-west", image_revision="a" * 40)
+    canonical_preregistration = build_preregistration(
+        canonical_config,
+        source_sha="a" * 40,
+        dependency_sha="b" * 40,
+        generated_at="2026-07-19T00:00:00Z",
+        runner_identity={"kind": "local"},
+        sdk_versions={"modal": "1.5.2"},
+        commands=canonical_commands,
+    )
+    canonical_preregistration_bytes = json.dumps(
+        canonical_preregistration,
+        sort_keys=True,
+    ).encode()
+    raw = _artifact()
+    raw["provenance"]["preregistration_sha256"] = hashlib.sha256(
+        canonical_preregistration_bytes
+    ).hexdigest()
+
+    v2_config = ModalOptimizationConfig(
+        region="us-west",
+        image_revision="d" * 40,
+        ingress="tunnel",
+    )
+    v2_commands = {
+        "publish_image": "publish v2",
+        "benchmark_v2": "benchmark v2",
+        "normalize": "normalize v2",
+    }
+    v2_preregistration = build_v2_preregistration(
+        v2_config,
+        source_sha="d" * 40,
+        dependency_sha="b" * 40,
+        base_benchmark_source_sha="a" * 40,
+        generated_at="2026-07-19T01:00:00Z",
+        runner_identity={"kind": "local"},
+        sdk_versions={"modal": "1.5.2"},
+        commands=v2_commands,
+    )
+    v2_preregistration_bytes = json.dumps(v2_preregistration, sort_keys=True).encode()
+    v2_attempts = [
+        {
+            **_attempt(index, elapsed_ms=float(index + 1)),
+            "requested_placement": "us-west",
+            "actual_placement": "us-west-2",
+            "resource_duration_seconds": 1.0,
+            "stages": {
+                "first_valid_frame": {
+                    "status": "observed",
+                    "elapsed_ms": float(index + 1),
+                }
+            },
+        }
+        for index in range(30)
+    ]
+    v2_raw = build_modal_v2_profile_artifact(
+        v2_config,
+        source_sha="d" * 40,
+        dependency_sha="b" * 40,
+        base_benchmark_source_sha="a" * 40,
+        generated_at="2026-07-19T02:00:00Z",
+        preregistration_sha256=hashlib.sha256(v2_preregistration_bytes).hexdigest(),
+        cold_attempts=copy.deepcopy(v2_attempts),
+        warm_action_attempts=copy.deepcopy(v2_attempts),
+        warm_action_metadata={
+            "target_resource_duration_seconds": 1.0,
+            "runner_path": "same-region-separate-modal-runner:inherited",
+            "target_loopback": False,
+        },
+    )
+    v2_raw_bytes = json.dumps(v2_raw, sort_keys=True).encode()
+
+    sanitized = sanitize_modal_optimization_benchmark(
+        raw,
+        raw_bytes=json.dumps(raw).encode(),
+        raw_artifact_path="benchmark-results/modal-optimization/raw.json",
+        harness_commit="a" * 40,
+        preregistration_payload=canonical_preregistration,
+        preregistration_bytes=canonical_preregistration_bytes,
+        v2_raw_payload=v2_raw,
+        v2_raw_bytes=v2_raw_bytes,
+        v2_raw_artifact_path="benchmark-results/modal-optimization/v2-raw.json",
+        v2_preregistration_payload=v2_preregistration,
+        v2_preregistration_bytes=v2_preregistration_bytes,
+        normalizer_commit="e" * 40,
+    )
+
+    v2 = sanitized["profiles"]["modal-v2-ab"]
+    assert v2["status"] == "measured"
+    assert v2["cold_summary"]["valid"] == 30
+    assert v2["warm_action_summary"]["p95_status"] == "reported"
+    assert v2["connect_token_parity"] is False
+    assert v2["provenance"]["source_sha"] == "d" * 40
+    assert sanitized["v2_measurement_manifest"]["authentication"]["target_loopback"] is False
 
 
 def test_sanitizer_adds_post_execution_region_attestation_command() -> None:
@@ -846,6 +954,64 @@ def test_warm_action_uses_separate_connect_runner_and_retains_timeout() -> None:
     assert [attempt["status"] for attempt in attempts] == ["valid", "timeout"]
     assert runner_paths == ["connect"]
     assert metadata["runner_path"] == "same-region-separate-modal-runner:connect"
+    assert metadata["target_loopback"] is False
+
+
+def test_v2_warm_action_uses_inherited_encrypted_tunnel_endpoint() -> None:
+    runner_paths: list[str] = []
+
+    class Computer:
+        def ensure_browser_ready(self, _config) -> None:
+            pass
+
+        def first_valid_frame(self, _config) -> bytes:
+            return b"validated"
+
+        def runtime_region(self) -> str:
+            return "us-west-2"
+
+        def metadata(self):
+            return SimpleNamespace(sandbox_id="sb-redacted-before-artifact")
+
+        def terminate(self, *, wait: bool) -> None:
+            assert wait is True
+
+        def detach(self) -> None:
+            pass
+
+    def runner(_config, **kwargs):
+        runner_paths.append(kwargs["runner_path"])
+        return {
+            "surfaces": {
+                "daemon-observation-stream": {
+                    "cases": {
+                        OPTIMIZED_ACTION_CASE: {
+                            "action_to_frame_samples_ms": [10.0, 11.0],
+                            "failures": [],
+                        }
+                    }
+                }
+            }
+        }
+
+    config = ModalOptimizationConfig(
+        region="us-west",
+        image_revision="a" * 40,
+        ingress="tunnel",
+        warm_action_attempts=2,
+    )
+    attempts, metadata = run_warm_action_attempts(
+        config,
+        create_computer=lambda **_kwargs: Computer(),
+        runner_benchmark=runner,
+        profile="modal-v2-ab",
+        runner_path="inherited",
+        progress_label="v2_warm_action",
+    )
+
+    assert [attempt["status"] for attempt in attempts] == ["valid", "valid"]
+    assert runner_paths == ["inherited"]
+    assert metadata["runner_path"] == "same-region-separate-modal-runner:inherited"
     assert metadata["target_loopback"] is False
 
 

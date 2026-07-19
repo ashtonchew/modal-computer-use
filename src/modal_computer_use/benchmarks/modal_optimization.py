@@ -207,6 +207,91 @@ def build_preregistration(
     }
 
 
+def build_v2_preregistration(
+    config: ModalOptimizationConfig,
+    *,
+    source_sha: str,
+    dependency_sha: str,
+    base_benchmark_source_sha: str,
+    generated_at: str,
+    runner_identity: dict[str, Any],
+    sdk_versions: dict[str, str],
+    commands: dict[str, str],
+) -> dict[str, Any]:
+    if config.ingress != "tunnel":
+        raise ValueError("Modal V2 preregistration requires encrypted tunnel ingress")
+    if not all(
+        _is_hex(value, 40)
+        for value in (source_sha, dependency_sha, base_benchmark_source_sha)
+    ):
+        raise ValueError("V2 source and dependency SHAs must be full Git SHAs")
+    if set(commands) != {"publish_image", "benchmark_v2", "normalize"} or any(
+        not _nonempty_text(command) for command in commands.values()
+    ):
+        raise ValueError("V2 commands must contain the three exact execution commands")
+    return {
+        "schema_version": 1,
+        "benchmark": "modal-v2-encrypted-tunnel-preregistration",
+        "generated_at": generated_at,
+        "source_sha": source_sha,
+        "base_benchmark_source_sha": base_benchmark_source_sha,
+        "dependency": {
+            "pull_request": 114,
+            "head_sha": dependency_sha,
+            "state": "open_unmerged",
+        },
+        "configuration": {
+            "region": config.region,
+            "image_revision": config.image_revision,
+            "browser": config.browser,
+            "ingress": config.ingress,
+            "cpu": config.cpu,
+            "memory_mib": config.memory_mib,
+            "sandbox_timeout_seconds": config.sandbox_timeout_seconds,
+            "readiness_timeout_seconds": config.readiness_timeout_seconds,
+        },
+        "environment": {
+            "runner": copy.deepcopy(runner_identity),
+            "sdk_versions": dict(sorted(sdk_versions.items())),
+            "image_identity": f"modal-computer-use-{config.browser}:{config.image_revision}",
+            "requested_region": config.region,
+        },
+        "sample_policy": {
+            "independent_cold_attempts": config.cold_attempts,
+            "warm_action_attempts": config.warm_action_attempts,
+        },
+        "metric_boundaries": {
+            "cold_request_to_first_valid_authenticated_frame": (
+                "Immediately before Sandbox._experimental_create until a protected "
+                "screenshot over the encrypted tunnel passes bearer authentication and "
+                "decodes to the expected dimensions."
+            ),
+            "warm_action_to_causal_frame": (
+                "Immediately before same-region action dispatch over the persistent "
+                "encrypted-tunnel session until the first matching causal valid frame."
+            ),
+            "connect_token_ready": "not applicable; V2 Connect Tokens are unsupported",
+        },
+        "authentication": {
+            "transport": "modal-v2-encrypted-tunnel",
+            "application_authentication": "daemon-bearer-token",
+            "connect_token_parity": False,
+            "target_loopback": False,
+        },
+        "retry_policy": {"harness_retries": 0, "replacement_samples": False},
+        "failure_policy": {
+            "drop_failed_attempts": False,
+            "drop_timed_out_attempts": False,
+            "inspect_every_failure": True,
+        },
+        "source_urls": [
+            "https://modal.com/docs/guide/sandbox-v2",
+            "https://modal.com/docs/guide/sandbox-networking",
+        ],
+        "commands": dict(commands),
+    }
+
+
 def validate_preregistered_config(
     config: ModalOptimizationConfig,
     preregistration: dict[str, Any],
@@ -404,6 +489,84 @@ def build_modal_optimization_artifact(
             "preregistration_sha256": preregistration_sha256,
             "raw_artifact_sha256": "0" * 64,
             "raw_artifact_path": "benchmark-results/modal-optimization/raw.json",
+        },
+    }
+
+
+def build_modal_v2_profile_artifact(
+    config: ModalOptimizationConfig,
+    *,
+    source_sha: str,
+    dependency_sha: str,
+    base_benchmark_source_sha: str,
+    generated_at: str,
+    preregistration_sha256: str,
+    cold_attempts: list[dict[str, Any]],
+    warm_action_attempts: list[dict[str, Any]],
+    warm_action_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    cold_seconds = sum(
+        float(item.get("resource_duration_seconds", 0.0)) for item in cold_attempts
+    )
+    duration = cold_seconds + float(
+        warm_action_metadata.get("target_resource_duration_seconds", 0.0)
+    )
+    failures = [
+        {"profile": PROFILE_MODAL_V2, "attempt": item["attempt"], **item["failure"]}
+        for attempts in (cold_attempts, warm_action_attempts)
+        for item in attempts
+        if isinstance(item.get("failure"), dict)
+    ]
+    return {
+        "schema_version": 1,
+        "benchmark": "modal-v2-encrypted-tunnel-results",
+        "generated_at": generated_at,
+        "profile": {
+            "status": "measured",
+            "comparison_scope": "modal-v1-optimized-on-demand-only",
+            "v2_is_default": False,
+            "connect_token_parity": False,
+            "authentication_path": "encrypted-tunnel-application-bearer",
+            "target_loopback": False,
+            "cold_attempts": cold_attempts,
+            "cold_summary": summarize_attempts(cold_attempts),
+            "warm_action_attempts": warm_action_attempts,
+            "warm_action_summary": summarize_attempts(warm_action_attempts),
+            "execution": warm_action_metadata,
+            "estimated_billed_cost": estimate_resource_cost(
+                duration_seconds=duration,
+                cpu=config.cpu,
+                memory_mib=config.memory_mib,
+                requested_region=config.region,
+                includes_runner=False,
+            ),
+            "limitations": [
+                "no Connect Token or attested-tunnel lifecycle parity",
+                "encrypted tunnel uses daemon-managed bearer authentication",
+                "beta V2 backend is not a production default",
+            ],
+            "source_urls": [
+                "https://modal.com/docs/guide/sandbox-v2",
+                "https://modal.com/docs/guide/sandbox-networking",
+            ],
+        },
+        "failures": failures,
+        "provenance": {
+            "source_sha": source_sha,
+            "base_benchmark_source_sha": base_benchmark_source_sha,
+            "dependency": {
+                "pull_request": 114,
+                "head_sha": dependency_sha,
+                "state": "open_unmerged",
+            },
+            "branch": "feat/modal-optimization-benchmark-results",
+            "execution_date_utc": generated_at[:10],
+            "modal_sdk_version": "1.5.2",
+            "image_identity": f"modal-computer-use-{config.browser}:{config.image_revision}",
+            "requested_region": config.region,
+            "preregistration_sha256": preregistration_sha256,
+            "raw_artifact_sha256": "0" * 64,
+            "raw_artifact_path": "benchmark-results/modal-optimization/v2-raw.json",
         },
     }
 
@@ -723,10 +886,30 @@ def validate_modal_optimization_artifact(payload: dict[str, Any]) -> None:
     _validate_optional_summary(warm, "claim", claims)
 
     v2 = _mapping(profiles[PROFILE_MODAL_V2], PROFILE_MODAL_V2)
-    if v2.get("status") != "not_run":
-        raise ValueError("Modal V2 must remain not_run without Connect Token parity")
-    if not _nonempty_text(v2.get("reason")) or not _nonempty_text(v2.get("source_url")):
-        raise ValueError("Modal V2 not_run result requires a reason and official source URL")
+    if v2.get("status") == "not_run":
+        if not _nonempty_text(v2.get("reason")) or not _nonempty_text(
+            v2.get("source_url")
+        ):
+            raise ValueError("Modal V2 not_run result requires a reason and official source URL")
+    elif v2.get("status") == "measured":
+        if v2.get("comparison_scope") != "modal-v1-optimized-on-demand-only":
+            raise ValueError("Modal V2 must compare only with Modal V1 optimized on-demand")
+        if v2.get("connect_token_parity") is not False or v2.get("v2_is_default") is not False:
+            raise ValueError("Modal V2 must not claim Connect Token parity or default status")
+        if v2.get("authentication_path") != "encrypted-tunnel-application-bearer":
+            raise ValueError("Modal V2 requires the preregistered encrypted-tunnel auth path")
+        if v2.get("target_loopback") is not False:
+            raise ValueError("Modal V2 target-loopback results are not publishable")
+        _validate_attempt_collection(v2, "cold")
+        _validate_attempt_collection(v2, "warm_action")
+        v2_provenance = _mapping(v2.get("provenance"), "Modal V2 provenance")
+        for key, length in (("source_sha", 40), ("raw_artifact_sha256", 64)):
+            if not _is_hex(v2_provenance.get(key), length):
+                raise ValueError(f"Modal V2 {key} is invalid")
+        if not isinstance(v2.get("source_urls"), list) or len(v2["source_urls"]) < 2:
+            raise ValueError("Modal V2 measured results require official source URLs")
+    else:
+        raise ValueError("Modal V2 status must be measured or not_run")
 
     failures = payload.get("failures")
     if not isinstance(failures, list):
@@ -753,6 +936,11 @@ def sanitize_modal_optimization_benchmark(
     preregistration_bytes: bytes | None = None,
     region_evidence_payload: dict[str, Any] | None = None,
     region_evidence_bytes: bytes | None = None,
+    v2_raw_payload: dict[str, Any] | None = None,
+    v2_raw_bytes: bytes | None = None,
+    v2_raw_artifact_path: str | None = None,
+    v2_preregistration_payload: dict[str, Any] | None = None,
+    v2_preregistration_bytes: bytes | None = None,
     normalizer_commit: str | None = None,
 ) -> dict[str, Any]:
     if not _is_hex(harness_commit, 40):
@@ -762,6 +950,16 @@ def sanitize_modal_optimization_benchmark(
     _reject_forbidden_fields(raw_payload)
     _validate_safe_value(raw_payload)
     payload = copy.deepcopy(raw_payload)
+    if v2_raw_payload is not None:
+        _merge_modal_v2_profile(
+            payload,
+            v2_raw_payload=v2_raw_payload,
+            v2_raw_bytes=v2_raw_bytes,
+            v2_raw_artifact_path=v2_raw_artifact_path,
+            v2_preregistration_payload=v2_preregistration_payload,
+            v2_preregistration_bytes=v2_preregistration_bytes,
+            base_benchmark_source_sha=harness_commit,
+        )
     _add_derived_summaries(payload)
     if preregistration_payload is not None:
         if preregistration_bytes is None:
@@ -850,6 +1048,103 @@ def sanitize_modal_optimization_benchmark(
     return payload
 
 
+def _merge_modal_v2_profile(
+    payload: dict[str, Any],
+    *,
+    v2_raw_payload: dict[str, Any],
+    v2_raw_bytes: bytes | None,
+    v2_raw_artifact_path: str | None,
+    v2_preregistration_payload: dict[str, Any] | None,
+    v2_preregistration_bytes: bytes | None,
+    base_benchmark_source_sha: str,
+) -> None:
+    if (
+        v2_raw_bytes is None
+        or v2_raw_artifact_path is None
+        or v2_preregistration_payload is None
+        or v2_preregistration_bytes is None
+    ):
+        raise ValueError("V2 raw evidence requires bytes, path, and preregistration")
+    if not _safe_relative_path(v2_raw_artifact_path):
+        raise ValueError("V2 raw artifact path must be repository-relative")
+    _reject_forbidden_fields(v2_raw_payload)
+    _validate_safe_value(v2_raw_payload)
+    if v2_raw_payload.get("benchmark") != "modal-v2-encrypted-tunnel-results":
+        raise ValueError("V2 raw evidence has the wrong benchmark name")
+    v2_provenance = _mapping(v2_raw_payload.get("provenance"), "V2 provenance")
+    source_sha = v2_provenance.get("source_sha")
+    if source_sha != v2_preregistration_payload.get("source_sha"):
+        raise ValueError("V2 raw source differs from preregistration")
+    if v2_provenance.get("base_benchmark_source_sha") != base_benchmark_source_sha:
+        raise ValueError("V2 raw evidence targets a different base benchmark")
+    if (
+        v2_preregistration_payload.get("base_benchmark_source_sha")
+        != base_benchmark_source_sha
+    ):
+        raise ValueError("V2 preregistration targets a different base benchmark")
+    if v2_provenance.get("dependency") != v2_preregistration_payload.get("dependency"):
+        raise ValueError("V2 dependency differs from preregistration")
+    preregistration_digest = hashlib.sha256(v2_preregistration_bytes).hexdigest()
+    if v2_provenance.get("preregistration_sha256") != preregistration_digest:
+        raise ValueError("V2 preregistration digest differs from raw evidence")
+    environment = _mapping(
+        v2_preregistration_payload.get("environment"),
+        "V2 preregistration environment",
+    )
+    for key, expected in (
+        ("modal_sdk_version", _mapping(environment.get("sdk_versions"), "V2 SDKs").get("modal")),
+        ("image_identity", environment.get("image_identity")),
+        ("requested_region", environment.get("requested_region")),
+    ):
+        if v2_provenance.get(key) != expected:
+            raise ValueError(f"V2 raw {key} differs from preregistration")
+    profile = copy.deepcopy(_mapping(v2_raw_payload.get("profile"), "V2 profile"))
+    sample_policy = _mapping(
+        v2_preregistration_payload.get("sample_policy"),
+        "V2 sample policy",
+    )
+    for policy_name, collection_name in (
+        ("independent_cold_attempts", "cold_attempts"),
+        ("warm_action_attempts", "warm_action_attempts"),
+    ):
+        attempts = _list_of_mappings(profile.get(collection_name), collection_name)
+        expected = sample_policy.get(policy_name)
+        if isinstance(expected, bool) or not isinstance(expected, int) or len(attempts) != expected:
+            raise ValueError(f"V2 {policy_name} differs from preregistration")
+        if any(
+            attempt.get("requested_placement") != v2_provenance.get("requested_region")
+            for attempt in attempts
+        ):
+            raise ValueError("V2 attempt placement differs from preregistration")
+    profile["provenance"] = {
+        **copy.deepcopy(v2_provenance),
+        "raw_artifact_path": v2_raw_artifact_path,
+        "raw_artifact_sha256": hashlib.sha256(v2_raw_bytes).hexdigest(),
+        "raw_artifact_tracked": False,
+        "preregistration_sha256": preregistration_digest,
+    }
+    _mapping(payload.get("profiles"), "profiles")[PROFILE_MODAL_V2] = profile
+    failures = payload.get("failures")
+    v2_failures = v2_raw_payload.get("failures")
+    if not isinstance(failures, list) or not isinstance(v2_failures, list):
+        raise ValueError("V2 and canonical failures must be lists")
+    failures.extend(copy.deepcopy(v2_failures))
+    payload["v2_command_manifest"] = _portable_command_manifest(
+        _mapping(v2_preregistration_payload.get("commands"), "V2 commands")
+    )
+    payload["v2_measurement_manifest"] = {
+        key: copy.deepcopy(v2_preregistration_payload[key])
+        for key in (
+            "sample_policy",
+            "metric_boundaries",
+            "authentication",
+            "retry_policy",
+            "failure_policy",
+            "source_urls",
+        )
+    }
+
+
 def serialize_modal_optimization_benchmark(payload: dict[str, Any]) -> str:
     validate_modal_optimization_artifact(payload)
     return f"{json.dumps(payload, indent=2, sort_keys=True)}\n"
@@ -864,6 +1159,9 @@ def generate_sanitized_modal_optimization_benchmark(
     preregistration_path: Path,
     region_evidence_path: Path,
     normalizer_commit: str,
+    v2_raw_path: Path | None = None,
+    v2_raw_artifact_path: str | None = None,
+    v2_preregistration_path: Path | None = None,
     check: bool = False,
 ) -> bool:
     raw_bytes = raw_path.read_bytes()
@@ -878,6 +1176,23 @@ def generate_sanitized_modal_optimization_benchmark(
     region_evidence_payload = json.loads(region_evidence_bytes)
     if not isinstance(region_evidence_payload, dict):
         raise ValueError("region evidence payload must be a JSON object")
+    v2_raw_bytes: bytes | None = None
+    v2_raw_payload: dict[str, Any] | None = None
+    v2_preregistration_bytes: bytes | None = None
+    v2_preregistration_payload: dict[str, Any] | None = None
+    if v2_raw_path is not None or v2_preregistration_path is not None:
+        if v2_raw_path is None or v2_preregistration_path is None:
+            raise ValueError("V2 raw and preregistration paths must be provided together")
+        v2_raw_bytes = v2_raw_path.read_bytes()
+        loaded_v2_raw = json.loads(v2_raw_bytes)
+        if not isinstance(loaded_v2_raw, dict):
+            raise ValueError("V2 raw payload must be a JSON object")
+        v2_raw_payload = loaded_v2_raw
+        v2_preregistration_bytes = v2_preregistration_path.read_bytes()
+        loaded_v2_preregistration = json.loads(v2_preregistration_bytes)
+        if not isinstance(loaded_v2_preregistration, dict):
+            raise ValueError("V2 preregistration must be a JSON object")
+        v2_preregistration_payload = loaded_v2_preregistration
     sanitized = sanitize_modal_optimization_benchmark(
         raw_payload,
         raw_bytes=raw_bytes,
@@ -887,6 +1202,11 @@ def generate_sanitized_modal_optimization_benchmark(
         preregistration_bytes=preregistration_bytes,
         region_evidence_payload=region_evidence_payload,
         region_evidence_bytes=region_evidence_bytes,
+        v2_raw_payload=v2_raw_payload,
+        v2_raw_bytes=v2_raw_bytes,
+        v2_raw_artifact_path=v2_raw_artifact_path,
+        v2_preregistration_payload=v2_preregistration_payload,
+        v2_preregistration_bytes=v2_preregistration_bytes,
         normalizer_commit=normalizer_commit,
     )
     rendered = serialize_modal_optimization_benchmark(sanitized)
@@ -907,40 +1227,7 @@ def _add_derived_summaries(payload: dict[str, Any]) -> None:
         "warm_action_attempts",
     )
     on_demand["warm_action_summary"] = summarize_attempts(warm_actions)
-    stage_names = sorted(
-        {
-            str(stage)
-            for attempt in cold
-            for stage in _mapping(attempt.get("stages", {}), "stages")
-        }
-    )
-    stage_summaries: dict[str, Any] = {}
-    for stage in stage_names:
-        observed = []
-        unsupported_reasons: set[str] = set()
-        for attempt in cold:
-            stage_value = _mapping(attempt.get("stages", {}), "stages").get(stage)
-            if not isinstance(stage_value, dict):
-                continue
-            if stage_value.get("status") == "observed" and _is_nonnegative_finite(
-                stage_value.get("elapsed_ms")
-            ):
-                observed.append(float(stage_value["elapsed_ms"]))
-            elif stage_value.get("status") == "unsupported" and _nonempty_text(
-                stage_value.get("reason")
-            ):
-                unsupported_reasons.add(str(stage_value["reason"]))
-        if observed:
-            stage_summaries[stage] = {
-                "status": "observed",
-                **_summary_from_values(observed),
-            }
-        else:
-            stage_summaries[stage] = {
-                "status": "unsupported",
-                "reasons": sorted(unsupported_reasons),
-            }
-    on_demand["cold_stage_summaries"] = stage_summaries
+    on_demand["cold_stage_summaries"] = _attempt_stage_summaries(cold)
 
     warm = _mapping(
         profiles.get(PROFILE_MODAL_WARM_AVAILABILITY),
@@ -960,6 +1247,50 @@ def _add_derived_summaries(payload: dict[str, Any]) -> None:
         claims,
         "claim_elapsed_ms",
     )
+    v2 = _mapping(profiles.get(PROFILE_MODAL_V2), PROFILE_MODAL_V2)
+    if v2.get("status") == "measured":
+        v2_cold = _list_of_mappings(v2.get("cold_attempts"), "V2 cold_attempts")
+        v2_warm = _list_of_mappings(
+            v2.get("warm_action_attempts"),
+            "V2 warm_action_attempts",
+        )
+        v2["cold_summary"] = summarize_attempts(v2_cold)
+        v2["warm_action_summary"] = summarize_attempts(v2_warm)
+        v2["cold_stage_summaries"] = _attempt_stage_summaries(v2_cold)
+
+
+def _attempt_stage_summaries(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    stage_names = sorted(
+        {
+            str(stage)
+            for attempt in attempts
+            for stage in _mapping(attempt.get("stages", {}), "stages")
+        }
+    )
+    summaries: dict[str, Any] = {}
+    for stage in stage_names:
+        observed: list[float] = []
+        unsupported_reasons: set[str] = set()
+        for attempt in attempts:
+            stage_value = _mapping(attempt.get("stages", {}), "stages").get(stage)
+            if not isinstance(stage_value, dict):
+                continue
+            if stage_value.get("status") == "observed" and _is_nonnegative_finite(
+                stage_value.get("elapsed_ms")
+            ):
+                observed.append(float(stage_value["elapsed_ms"]))
+            elif stage_value.get("status") == "unsupported" and _nonempty_text(
+                stage_value.get("reason")
+            ):
+                unsupported_reasons.add(str(stage_value["reason"]))
+        if observed:
+            summaries[stage] = {"status": "observed", **_summary_from_values(observed)}
+        else:
+            summaries[stage] = {
+                "status": "unsupported",
+                "reasons": sorted(unsupported_reasons),
+            }
+    return summaries
 
 
 def _portable_command_manifest(commands: dict[str, Any]) -> dict[str, str]:

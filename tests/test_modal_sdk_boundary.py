@@ -25,6 +25,7 @@ from modal_computer_use.sandbox import (
     MODAL_SNAPSHOT_RETENTION_SECONDS,
     ModalVolumeMount,
     _connect_token_parts,
+    create_modal_v2_tunnel_computer,
     modal_daemon_endpoint,
     modal_daemon_env,
     modal_sandbox_exec_once,
@@ -162,6 +163,7 @@ class FakeSandboxObject:
 
 class FakeSandbox:
     create_calls: ClassVar[list[tuple[tuple[str, ...], dict[str, object]]]] = []
+    experimental_create_calls: ClassVar[list[tuple[tuple[str, ...], dict[str, object]]]] = []
     from_name_calls: ClassVar[list[tuple[str, str]]] = []
     from_id_calls: ClassVar[list[str]] = []
     list_calls: ClassVar[list[dict[str, str] | None]] = []
@@ -174,6 +176,17 @@ class FakeSandbox:
     @classmethod
     def create(cls, *args: str, **kwargs: object) -> FakeSandboxObject:
         cls.create_calls.append((args, kwargs))
+        name = kwargs.get("name")
+        tags = kwargs.get("tags")
+        cls.created = FakeSandboxObject(
+            name=name if isinstance(name, str) else None,
+            tags=tags if isinstance(tags, dict) else None,
+        )
+        return cls.created
+
+    @classmethod
+    def _experimental_create(cls, *args: str, **kwargs: object) -> FakeSandboxObject:
+        cls.experimental_create_calls.append((args, kwargs))
         name = kwargs.get("name")
         tags = kwargs.get("tags")
         cls.created = FakeSandboxObject(
@@ -209,6 +222,7 @@ def fake_modal() -> SimpleNamespace:
     FakeApp.lookups = []
     FakeApp.objects = []
     FakeSandbox.create_calls = []
+    FakeSandbox.experimental_create_calls = []
     FakeSandbox.from_name_calls = []
     FakeSandbox.from_id_calls = []
     FakeSandbox.list_calls = []
@@ -719,6 +733,42 @@ def test_create_tunnel_ingress_uses_static_daemon_token(monkeypatch) -> None:
     _, kwargs = FakeSandbox.create_calls[0]
     assert kwargs["encrypted_ports"] == [8080]
     assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
+    assert computer.client.base_url == "https://daemon.example.modal.host"
+
+
+def test_v2_benchmark_create_uses_encrypted_tunnel_and_application_auth(monkeypatch) -> None:
+    runtime = fake_modal()
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+    config = ComputerConfig(
+        run_id="v2-run",
+        ingress="tunnel",
+        image={"source": "named", "revision": "a" * 40},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        runtime={"modal_region": "us-west", "timeout_seconds": 900},
+        browser={"kind": "chromium"},
+    )
+    client = SimpleNamespace(
+        base_url="https://daemon.example.modal.host",
+        transport=SimpleNamespace(token="application-token"),
+        close=lambda: None,
+    )
+
+    computer = create_modal_v2_tunnel_computer(
+        config=config,
+        image=object(),
+        wait=False,
+        modal_runtime=runtime,
+        client_factory=lambda **_kwargs: client,
+    )
+
+    assert FakeSandbox.create_calls == []
+    assert len(FakeSandbox.experimental_create_calls) == 1
+    args, kwargs = FakeSandbox.experimental_create_calls[0]
+    assert args == ("python", "-m", "modal_computer_use.daemon")
+    assert kwargs["encrypted_ports"] == [8080]
+    assert kwargs["region"] == "us-west"
+    assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
+    assert kwargs["tags"]["computer-use.modal_backend"] == "v2"
     assert computer.client.base_url == "https://daemon.example.modal.host"
 
 

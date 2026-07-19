@@ -29,6 +29,9 @@ def main() -> int:
         type=Path,
         help="source-bound region evidence; defaults beside raw",
     )
+    parser.add_argument("--v2-raw", type=Path)
+    parser.add_argument("--v2-raw-artifact-path")
+    parser.add_argument("--v2-preregistration", type=Path)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
@@ -50,6 +53,9 @@ def main() -> int:
             or args.raw.parent / "region-selection-attested.json"
         ),
         normalizer_commit=normalizer_commit,
+        v2_raw_path=args.v2_raw,
+        v2_raw_artifact_path=args.v2_raw_artifact_path,
+        v2_preregistration_path=args.v2_preregistration,
         check=args.check,
     )
     if args.check and not matches:
