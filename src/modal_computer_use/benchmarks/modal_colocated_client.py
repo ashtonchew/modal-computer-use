@@ -17,6 +17,7 @@ from ..sandbox import (
 )
 from ..state import new_run_id
 from .constants import BenchmarkSurface
+from .provenance import benchmark_provenance
 from .surfaces import run_sdk_surface_benchmark
 
 ModalColocatedRunnerPath = Literal["inherited", "connect", "target-loopback"]
@@ -862,6 +863,7 @@ def _summary_p50(value: object) -> float | None:
 def _modal_colocated_environment_metadata(
     config: ModalColocatedClientBenchmarkConfig,
 ) -> dict[str, Any]:
+    image_identity = f"inline:{config.browser or config.resource_profile or 'standard'}"
     return {
         "caller_region_label": config.caller_region_label,
         "modal_region": config.modal_region,
@@ -872,6 +874,14 @@ def _modal_colocated_environment_metadata(
         "gpu": config.gpu,
         "input_rate_limit_per_sec": config.input_rate_limit_per_sec,
         "image_profile": config.image_profile,
+        "provenance": benchmark_provenance(
+            caller_path="modal-colocated-client",
+            modal_region=config.modal_region,
+            image_identity=image_identity,
+            cpu=config.modal_cpu,
+            memory_mib=config.modal_memory_mib,
+            gpu=config.gpu,
+        ),
     }
 
 

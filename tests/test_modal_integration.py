@@ -312,8 +312,14 @@ def test_modal_volume_artifact_sync_smoke() -> None:
         version=api_pb2.VolumeFsVersion.Value("VOLUME_FS_VERSION_V2"),
     ).hydrate()
     computer = None
+    reader = None
 
     try:
+        reader = ComputerSandbox.create(
+            config=ComputerConfig(run_id=f"mcu-v1-volume-reader-{suffix}"),
+            volumes={"/home/desktop/artifacts": volume},
+            tags={"computer-use.smoke": "v1-volume-reader"},
+        )
         computer = ComputerSandbox.create(
             config=ComputerConfig(
                 run_id=f"mcu-v1-volume-{suffix}",
@@ -328,6 +334,8 @@ def test_modal_volume_artifact_sync_smoke() -> None:
         assert sync.persistent is True
         assert sync.synced_paths == ["artifact-root"]
         assert "v2" in (sync.message or "")
+        reader.reload_volumes(timeout=55)
+        assert reader.artifacts.read_bytes(proof_path) == proof
         computer.terminate()
         computer.detach()
         computer = None
@@ -336,6 +344,9 @@ def test_modal_volume_artifact_sync_smoke() -> None:
         if computer is not None:
             computer.terminate()
             computer.detach()
+        if reader is not None:
+            reader.terminate()
+            reader.detach()
         modal.Volume.objects.delete(volume_name, allow_missing=True)
 
 
@@ -407,6 +418,30 @@ def test_modal_browser_profile_open_url_screenshot_smoke() -> None:
         assert screenshot.height > 0
         assert screenshot.size_bytes > 0
         assert screenshot.sha256
+    finally:
+        computer.terminate()
+        computer.detach()
+
+
+@pytest.mark.modal
+def test_modal_named_image_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+    revision = os.getenv("MODAL_COMPUTER_USE_NAMED_IMAGE_REVISION")
+    if not revision:
+        pytest.skip("Set MODAL_COMPUTER_USE_NAMED_IMAGE_REVISION to test a published Image")
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox, ImageConfig
+
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(
+            run_id=f"mcu-v1-named-{uuid.uuid4().hex[:10]}",
+            image=ImageConfig(source="named", revision=revision),
+        ),
+        tags={"computer-use.smoke": "v1-named-image"},
+    )
+    try:
+        assert computer.status().ready is True
     finally:
         computer.terminate()
         computer.detach()

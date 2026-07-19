@@ -909,8 +909,9 @@ instead of a fake zero-cost total. Adapter-only and `sandbox-exec` surfaces retu
 
 Modal runs can also attach a separate `billing_reconciliation` object when the billed Modal
 object is tagged and the caller provides a Modal billing report window. This uses
-`modal.billing.workspace_billing_report` with requested tag names, filters rows by required benchmark
-tags, and sums only matched row costs. It intentionally does not overwrite `cost_estimate`: the
+`modal.Workspace.billing.report()` or `modal.Environment.billing.report()` with requested tag
+names, filters rows by required benchmark tags, and sums only matched row costs and resource
+breakdowns. It intentionally does not overwrite `cost_estimate`: the
 estimate is immediate public-rate context, while reconciliation is delayed Modal-reported
 billing telemetry for the tag/window. Reconciliation can return `matched`, `not_available_yet`,
 `no_matching_tags`, `not_measured`, `unavailable`, or `failed`. Short benchmark runs often need a
@@ -919,6 +920,12 @@ partial `start` values down to the interval boundary and excludes partial `end` 
 tag keys can be absent when they were not in use, and tag changes apply to the whole reported
 interval. Saved reconciliation metadata omits raw billing rows, object ids, URLs, tokens,
 stdout/stderr, and daemon payloads.
+
+When one created Modal Sandbox runs multiple benchmark surfaces, the report records one
+`shared_resource_cost_estimate` for the full create-to-terminate lifetime. It does not copy that
+shared cost into every surface. Surface estimates keep their own measured runtime or remain
+`unknown` when a fair allocation is unavailable.
+
 For strongest attribution, run the benchmark in an isolated Modal App and pass the benchmark tags as
 `app_tags` to `ComputerSandbox.create(...)`, because Modal billing reports surface tags from the
 billed Modal object. Sandbox tags remain useful for operational lookup/debugging, but they should not

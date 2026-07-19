@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any, Literal
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
@@ -19,7 +20,7 @@ from .errors import (
     SandboxUnavailableError,
 )
 from .hot_session import HotSessionClient
-from .image import default_image
+from .image import default_image, named_image, selected_image_identity
 from .models import ComputerStatus, DebugUrls, SandboxRef
 from .namespaces import (
     ActionsNamespace,
@@ -47,6 +48,8 @@ from .transports import HotSessionTransport, ObservationStreamTransport
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
 ModalDaemonEndpointPath = Literal["inherited", "connect", "target-loopback"]
+MODAL_OPERATION_TIMEOUT_SECONDS = 55
+MODAL_SNAPSHOT_RETENTION_SECONDS = 30 * 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,23 @@ class ModalSandboxExecResult:
     returncode: int | None
     stdout: str
     stderr: str
+
+
+@dataclass(frozen=True)
+class ModalVolumeMount:
+    """Opt-in Modal Volume mount options while preserving raw Volume support."""
+
+    volume: object
+    read_only: bool = False
+    sub_path: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.sub_path is None:
+            return
+        if not self.sub_path.strip() or "\x00" in self.sub_path:
+            raise ValueError("Volume sub_path must be a non-empty POSIX path")
+        if ".." in PurePosixPath(self.sub_path).parts:
+            raise ValueError("Volume sub_path must not contain parent traversal")
 
 
 def modal_sandbox_exec_runner_from_id(sandbox_id: str):
@@ -121,13 +141,12 @@ def modal_sandbox_exec_once(
         "timeout": timeout_seconds,
         "idle_timeout": idle_timeout_seconds,
         "name": name,
+        "tags": tags,
     }
     if region:
         create_kwargs["region"] = region
     runner = modal.Sandbox.create("sleep", "infinity", **create_kwargs)
     try:
-        if tags and hasattr(runner, "set_tags"):
-            _set_modal_object_tags(runner, tags)
         process = runner.exec(*command, timeout=exec_timeout_seconds, env=env or {})
         stdout = _read_modal_process_stream(getattr(process, "stdout", ""))
         stderr = _read_modal_process_stream(getattr(process, "stderr", ""))
@@ -181,15 +200,16 @@ def _modal_process_returncode(process: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def modal_workspace_billing_report(
+def modal_billing_report(
     *,
     start: datetime,
     end: datetime | None,
     resolution: str,
     tag_names: list[str] | None,
+    environment_name: str | None = None,
 ) -> list[object]:
     try:
-        import modal.billing
+        import modal
     except ImportError as exc:
         raise ModalNotInstalledError(
             "Modal billing reconciliation requires the modal extra, for example "
@@ -197,13 +217,29 @@ def modal_workspace_billing_report(
             "`uv add 'modal-computer-use[modal]'` downstream"
         ) from exc
 
+    scope = (
+        modal.Environment.from_name(environment_name)
+        if environment_name is not None
+        else modal.Workspace.from_context()
+    )
     return list(
-        modal.billing.workspace_billing_report(
-            start=start,
-            end=end,
-            resolution=resolution,
-            tag_names=tag_names,
-        )
+        scope.billing.report(start=start, end=end, resolution=resolution, tag_names=tag_names)
+    )
+
+
+def modal_workspace_billing_report(
+    *,
+    start: datetime,
+    end: datetime | None,
+    resolution: str,
+    tag_names: list[str] | None,
+) -> list[object]:
+    """Compatibility wrapper for callers of the previous workspace-only adapter."""
+    return modal_billing_report(
+        start=start,
+        end=end,
+        resolution=resolution,
+        tag_names=tag_names,
     )
 
 
@@ -275,7 +311,7 @@ class ComputerSandbox:
         config = config or ComputerConfig()
         if not config.run_id:
             config.run_id = new_run_id()
-        volumes = volumes or {}
+        volumes = _prepare_volume_mounts(volumes or {})
         artifact_volume_mounted = _has_artifact_volume_mount(
             volumes, config.storage.artifacts_dir
         )
@@ -285,13 +321,26 @@ class ComputerSandbox:
                 "or one of its parent directories"
             )
         vnc_mode = normalize_vnc_mode(expose_vnc if expose_vnc is not None else config.expose_vnc)
-        image = image or default_image(
-            profile=config.resources.profile,
-            browser=config.browser.kind if config.browser else None,
-            window_manager=config.desktop.window_manager,
-            browser_prewarm=config.browser.prewarm if config.browser else False,
-        )
-        app = modal.App.lookup(app_name, create_if_missing=True)
+        custom_image_supplied = image is not None
+        browser_kind = config.browser.kind if config.browser else None
+        if image is None and config.image.source == "named":
+            image = named_image(
+                revision=config.image.revision or "",
+                profile=config.resources.profile,
+                browser=browser_kind,
+                environment_name=config.image.environment_name,
+            )
+        elif image is None:
+            image = default_image(
+                profile=config.resources.profile,
+                browser=browser_kind,
+                window_manager=config.desktop.window_manager,
+                browser_prewarm=config.browser.prewarm if config.browser else False,
+            )
+        app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
+        if config.image.source == "named" and config.image.environment_name is not None:
+            app_lookup_kwargs["environment_name"] = config.image.environment_name
+        app = modal.App.lookup(app_name, **app_lookup_kwargs)
         if app_tags:
             _set_modal_object_tags(app, app_tags)
         env = _daemon_environment(
@@ -300,6 +349,16 @@ class ComputerSandbox:
             artifact_volume_mounted=artifact_volume_mounted,
         )
         sandbox_tags = {**(tags or {}), **default_tags(config, owner=owner)}
+        sandbox_tags["computer-use.image_identity"] = (
+            "custom"
+            if custom_image_supplied
+            else selected_image_identity(
+                source=config.image.source,
+                revision=config.image.revision,
+                profile=config.resources.profile,
+                browser=browser_kind,
+            )
+        )
         http2 = config.network.daemon_http_version == "2"
         ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
         h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
@@ -319,8 +378,11 @@ class ComputerSandbox:
             "volumes": volumes,
             "env": env,
             "block_network": config.network.block_all,
-            "cidr_allowlist": config.network.cidr_allowlist,
+            "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
+            "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
+            "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
             "name": name,
+            "tags": sandbox_tags,
             **sandbox_kwargs,
         }
         if h2_ports:
@@ -331,8 +393,6 @@ class ComputerSandbox:
         if readiness_probe is not None:
             create_kwargs["readiness_probe"] = readiness_probe
         sandbox = modal.Sandbox.create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
-        if hasattr(sandbox, "set_tags"):
-            _set_modal_object_tags(sandbox, sandbox_tags)
         if wait and hasattr(sandbox, "wait_until_ready"):
             sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         token_info = sandbox.create_connect_token(
@@ -543,9 +603,12 @@ class ComputerSandbox:
                 )
             time.sleep(interval)
 
-    def terminate(self) -> None:
+    def terminate(self, *, wait: bool = False) -> None:
         if self._sandbox is not None and hasattr(self._sandbox, "terminate"):
-            self._sandbox.terminate()
+            if wait:
+                self._sandbox.terminate(wait=True)
+            else:
+                self._sandbox.terminate()
         else:
             self.stop()
 
@@ -619,7 +682,12 @@ class ComputerSandbox:
             frame_encoding=frame_encoding,
         )
 
-    def snapshot_filesystem(self) -> object:
+    def snapshot_filesystem(
+        self,
+        timeout: int = MODAL_OPERATION_TIMEOUT_SECONDS,
+        *,
+        ttl: int | None = MODAL_SNAPSHOT_RETENTION_SECONDS,
+    ) -> object:
         """Create a Modal filesystem snapshot image for this sandbox.
 
         This is an orchestration helper over Modal's Sandbox API. It snapshots
@@ -631,9 +699,16 @@ class ComputerSandbox:
                 "filesystem snapshots require a Modal-backed sandbox with "
                 "Sandbox.snapshot_filesystem support"
             )
-        return self._sandbox.snapshot_filesystem()
+        _validate_modal_operation_policy(timeout=timeout, ttl=ttl)
+        return self._sandbox.snapshot_filesystem(timeout, ttl=ttl)
 
-    def snapshot_directory(self, path: str = "/home/desktop/artifacts") -> object:
+    def snapshot_directory(
+        self,
+        path: str = "/home/desktop/artifacts",
+        *,
+        timeout: int = MODAL_OPERATION_TIMEOUT_SECONDS,
+        ttl: int | None = MODAL_SNAPSHOT_RETENTION_SECONDS,
+    ) -> object:
         """Snapshot a directory from a Modal-backed sandbox as a Modal Image.
 
         Modal's current documented restore path for Sandbox directory snapshots is
@@ -646,7 +721,18 @@ class ComputerSandbox:
                 "directory snapshots require a Modal-backed sandbox with "
                 "Sandbox.snapshot_directory support"
             )
-        return self._sandbox.snapshot_directory(path)
+        _validate_modal_operation_policy(timeout=timeout, ttl=ttl)
+        return self._sandbox.snapshot_directory(path, timeout=timeout, ttl=ttl)
+
+    def reload_volumes(self, *, timeout: int = MODAL_OPERATION_TIMEOUT_SECONDS) -> None:
+        """Block until every mounted Modal Volume has reloaded or the timeout expires."""
+        if self._sandbox is None or not hasattr(self._sandbox, "reload_volumes"):
+            raise SandboxUnavailableError(
+                "Volume reload requires a Modal-backed sandbox with "
+                "Sandbox.reload_volumes support"
+            )
+        _validate_modal_operation_policy(timeout=timeout, ttl=None)
+        self._sandbox.reload_volumes(timeout=timeout)
 
     def mount_image(self, path: str, image: object) -> None:
         """Mount a Modal Image into a running Modal-backed sandbox."""
@@ -844,6 +930,34 @@ def _has_artifact_volume_mount(volumes: dict[str, object], artifacts_dir: str) -
         if artifact_path == mount or artifact_path.startswith(f"{mount}/"):
             return True
     return False
+
+
+def _prepare_volume_mounts(volumes: dict[str, object]) -> dict[str, object]:
+    prepared: dict[str, object] = {}
+    for mount_path, value in volumes.items():
+        if not isinstance(value, ModalVolumeMount):
+            prepared[mount_path] = value
+            continue
+        if not value.read_only and value.sub_path is None:
+            prepared[mount_path] = value.volume
+            continue
+        with_mount_options = getattr(value.volume, "with_mount_options", None)
+        if not callable(with_mount_options):
+            raise ConfigConflictError(
+                "read-only and subpath Volume controls require Volume.with_mount_options"
+            )
+        prepared[mount_path] = with_mount_options(
+            read_only=True if value.read_only else None,
+            sub_path=value.sub_path,
+        )
+    return prepared
+
+
+def _validate_modal_operation_policy(*, timeout: int, ttl: int | None) -> None:
+    if timeout <= 0:
+        raise ValueError("Modal operation timeout must be positive")
+    if ttl is not None and ttl <= 0:
+        raise ValueError("Modal snapshot ttl must be positive or None")
 
 
 def _normalize_mount_path(path: str) -> str:

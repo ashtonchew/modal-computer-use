@@ -157,6 +157,10 @@ def test_daemon_http_surface_attaches_billing_reconciliation_separately(monkeypa
     surface = payload["surfaces"]["daemon-http"]
     assert surface["billing_reconciliation"] == reconciliation
     assert surface["cost_estimate"]["status"] == "unknown"
+    assert surface["cost_status"] == {
+        "estimate": "unknown",
+        "billing_reconciliation": "matched",
+    }
 
 def test_benchmark_sdk_invalid_comma_surface_uses_argparse_error(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
@@ -261,7 +265,8 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
         def metadata(self):
             return SimpleNamespace(sandbox_id="sb-gpu")
 
-        def terminate(self) -> None:
+        def terminate(self, *, wait: bool = False) -> None:
+            created["terminate_wait"] = wait
             closed.append("terminate")
 
         def detach(self) -> None:
@@ -287,10 +292,15 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
                             "kind": "modal-attested-encrypted-h2-tunnel",
                         },
                     },
-                    "status": "ok",
-                    "cases": {},
-                    "failures": [],
-                }
+                        "status": "ok",
+                        "cases": {},
+                        "failures": [],
+                        "cost_estimate": {"status": "unknown"},
+                        "cost_status": {
+                            "estimate": "unknown",
+                            "billing_reconciliation": "not_requested",
+                        },
+                    }
             },
             "failures": [],
         }
@@ -355,6 +365,14 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert environment["modal_memory_gib"] == 4
     assert environment["modal_sandbox_id"] == "sb-gpu"
     assert environment["modal_cold_create_to_ready_ms"] > 0
+    assert environment["modal_resource_lifetime_ms"] > 0
+    assert environment["cost_duration_policy"] == (
+        "measured_resource_lifetime_including_creation_benchmark_and_teardown"
+    )
+    assert payload["surfaces"]["daemon-http"]["cost_status"]["estimate"] == "unknown"
+    assert payload["shared_resource_cost_estimate"]["status"] == "estimated"
+    assert payload["cost_status"] == {"shared_resource_estimate": "estimated"}
+    assert created["terminate_wait"] is True
     assert closed == ["terminate", "detach"]
 
 def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:

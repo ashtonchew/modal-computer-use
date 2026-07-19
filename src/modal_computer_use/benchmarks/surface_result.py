@@ -44,12 +44,21 @@ def _surface_result(
         result["verification"] = verification
     if billing_reconciliation is not None:
         result["billing_reconciliation"] = billing_reconciliation
-    result["cost_estimate"] = estimate_surface_cost(
+    cost_estimate = estimate_surface_cost(
         surface,
         surface_status=status,
         runtime_seconds=runtime_seconds,
         metadata=safe_metadata,
     )
+    result["cost_estimate"] = cost_estimate
+    result["cost_status"] = {
+        "estimate": cost_estimate["status"],
+        "billing_reconciliation": (
+            billing_reconciliation.get("status", "unknown")
+            if isinstance(billing_reconciliation, dict)
+            else "not_requested"
+        ),
+    }
     return result
 
 def _surface_not_measured(surface: str, reason: str) -> dict[str, Any]:
