@@ -987,6 +987,7 @@ def test_warm_action_uses_separate_connect_runner_and_retains_timeout() -> None:
 
 def test_v2_warm_action_uses_inherited_encrypted_tunnel_endpoint() -> None:
     runner_paths: list[str] = []
+    target_tags: list[dict[str, str]] = []
 
     class Computer:
         def ensure_browser_ready(self, _config) -> None:
@@ -1028,9 +1029,14 @@ def test_v2_warm_action_uses_inherited_encrypted_tunnel_endpoint() -> None:
         ingress="tunnel",
         warm_action_attempts=2,
     )
+
+    def create_computer(**kwargs):
+        target_tags.append(kwargs["tags"])
+        return Computer()
+
     attempts, metadata = run_warm_action_attempts(
         config,
-        create_computer=lambda **_kwargs: Computer(),
+        create_computer=create_computer,
         runner_benchmark=runner,
         profile="modal-v2-ab",
         runner_path="inherited",
@@ -1039,6 +1045,7 @@ def test_v2_warm_action_uses_inherited_encrypted_tunnel_endpoint() -> None:
 
     assert [attempt["status"] for attempt in attempts] == ["valid", "valid"]
     assert runner_paths == ["inherited"]
+    assert target_tags == [{"benchmark": "modal-v2-ab", "role": "warm-action-target"}]
     assert metadata["runner_path"] == "same-region-separate-modal-runner:inherited"
     assert metadata["target_loopback"] is False
 

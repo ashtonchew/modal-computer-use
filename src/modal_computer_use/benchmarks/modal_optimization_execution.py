@@ -24,6 +24,7 @@ from .modal_colocated_client import (
 from .modal_optimization import (
     OPTIMIZED_ACTION_CASE,
     PROFILE_MODAL_ON_DEMAND,
+    PROFILE_MODAL_V2,
     ModalOptimizationConfig,
     _attempt_row,
     _is_nonnegative_finite,
@@ -116,15 +117,17 @@ def run_warm_action_attempts(
     started = clock()
     cleanup: dict[str, Any]
     try:
+        target_tags = {
+            "benchmark": profile,
+            "role": "warm-action-target",
+        }
+        if profile != PROFILE_MODAL_V2:
+            target_tags["benchmark_run_id"] = run_id
         computer = create_computer(
             config=computer_config,
             app_name="modal-computer-use",
             app_tags={"benchmark": profile, "benchmark_run_id": run_id},
-            tags={
-                "benchmark": profile,
-                "benchmark_run_id": run_id,
-                "role": "warm-action-target",
-            },
+            tags=target_tags,
             wait=True,
         )
         computer.ensure_browser_ready(computer_config)
