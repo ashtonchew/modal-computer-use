@@ -2740,10 +2740,2577 @@
       "warm_capacity_enabled": false
     },
     "modal-v2-ab": {
-      "reason": "Modal V2 documentation and the pinned Modal 1.5.2 SDK show that Sandbox Connect Tokens are unavailable. The canonical authenticated path requires create_connect_token(), so lifecycle parity is unavailable.",
-      "source_url": "https://modal.com/docs/guide/sandbox-v2",
-      "status": "not_run",
-      "v2_is_default": false
+      "authentication_path": "encrypted-tunnel-application-bearer",
+      "cold_attempts": [
+        {
+          "actual_placement": "westus3",
+          "attempt": 0,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 13071.838292002212,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 13.166947958990932,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 12193.648125045002,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 12484.077709028497,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 11501.79383403156,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 13071.838292002212,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.1400840119458735,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 797.0693749957718,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 1209.2727920389734,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 11501.376750005875,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 1,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 16503.72979103122,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 16.68127383402316,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 15386.077166011091,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 15840.519916033372,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 14442.705499997828,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 16503.72979103122,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.32616598764434457,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 313.9933330239728,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 655.8347080135718,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 14442.244415986352,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 2,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10895.337374997325,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.9840131670353,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10262.485290993936,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10524.66120797908,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 8943.59641597839,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10895.337374997325,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.13366597704589367,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 345.3751659835689,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 599.4477499625646,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 8943.013415962923,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 3,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 19630.39166701492,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 19.715044417011086,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 18699.726499966346,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 18937.168208009098,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 15546.416124969255,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 19630.39166701492,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3232499584555626,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 295.5749169923365,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 579.0645419619977,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 15546.06037499616,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 4,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11077.160207962152,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.1718877920066,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10152.178541989997,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10484.252499998547,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9551.373124995735,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11077.160207962152,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.44670799979940057,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 378.0745000112802,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 666.8204999878071,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9550.81208300544,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 5,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12813.753166992683,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.922848083951976,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 12058.519957994577,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 12363.535583019257,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 10950.198707985692,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12813.753166992683,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.31641701934859157,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 358.9150420157239,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 683.6188330198638,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 10949.240875022952,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 6,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12762.31000002008,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.89332154096337,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 11868.601333000697,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 12206.584875006229,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 11203.093749994878,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12762.31000002008,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.11449999874457717,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 309.7720420337282,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 592.8379999822937,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 11202.533083036542,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 7,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 16031.50475001894,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 16.16852549999021,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 14802.941750036553,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 15244.694332999643,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 13920.888792024925,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 16031.50475001894,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.36383303813636303,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 309.41475002327934,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 610.6394579983316,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 13920.255958044436,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 8,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11343.695832998492,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.474100500054192,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10593.797540990636,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10949.859165993985,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9806.989290984347,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11343.695832998492,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.6335409707389772,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 346.99808299774304,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 621.4563749963418,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9806.756415986456,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 9,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10878.171625023242,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.021097916993313,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10119.866624998394,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10468.763458018657,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9526.935458008666,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10878.171625023242,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.2483749995008111,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 298.91416599275544,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 646.3159999693744,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9526.446958014276,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 10,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10483.657709031831,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.57960350002395,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 9691.301959042903,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 9996.66350003099,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9011.234250036068,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10483.657709031831,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.46845903852954507,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 358.40370901860297,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 658.3433340420015,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9010.68225002382,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 11,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 19842.938375019003,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 19.9523540000082,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 18843.111125053838,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 19302.27600003127,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 18192.075124999974,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 19842.938375019003,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.358375022187829,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 7149.705375020858,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 7409.102917008568,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 18191.580042010173,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 12,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10817.325874988455,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.936151041998528,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10026.141625014134,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10353.733750001993,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9402.290750003885,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10817.325874988455,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.2525000018067658,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 327.5502499891445,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 595.4731670208275,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9401.197707979009,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 13,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12776.555291959085,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.865510957955848,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 11723.59220898943,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 12237.710541987326,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 11030.83645895822,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12776.555291959085,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3432919620536268,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 389.6145839826204,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 708.5106250015087,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 11030.63008398749,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 14,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10502.19562498387,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.601281583018135,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 9677.392624958884,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10058.114749961533,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9040.021082968451,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10502.19562498387,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.20329095423221588,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 302.9992909869179,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 561.224915960338,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9039.49879098218,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 15,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 13943.221249966882,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 14.161312500014901,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 12647.56608294556,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 13222.451957990415,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 11868.453624949325,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 13943.221249966882,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.13370794476941228,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 294.6102079586126,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 542.8657079464756,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 11868.266207980923,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 16,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 15124.243166006636,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 15.221865792002063,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 14292.318708030507,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 14568.916750024073,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 13592.34779101098,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 15124.243166006636,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.0957080046646297,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 285.549083026126,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 553.4654579823837,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 13591.993250011,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 17,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10848.17983303219,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.97907237499021,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10096.484458015766,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10402.373958029784,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9444.783833052497,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10848.17983303219,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.09758304804563522,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 322.4537500063889,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 573.6177920480259,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9442.452958028298,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 18,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11031.915125029627,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.18006504100049,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10168.841666018125,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10529.398915998172,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9428.963583020959,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11031.915125029627,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.37175003672018647,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 357.92116599623114,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 744.0102079999633,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9428.776041022502,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 19,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10999.565250007436,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.089262540976051,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10139.048874960281,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10453.380166960414,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9539.053582993802,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10999.565250007436,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.1377919688820839,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 317.4828329938464,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 622.0530419959687,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9538.876957958564,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 20,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10535.585457982961,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.676724833028857,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 9600.199958018493,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 9923.66920801578,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 8859.145166003145,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10535.585457982961,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.2654999843798578,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 359.0459580300376,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 688.555583008565,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 8858.868458017241,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 21,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10284.614207979757,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.476754542032722,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 9505.275874980725,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 9847.745999984909,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 8902.789791987743,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10284.614207979757,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.1515419571660459,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 294.04608299955726,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 554.5455829706043,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 8902.3050419637,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 22,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 12756.765959027689,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 12.878118332999293,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 11815.307834011037,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 12234.202667023055,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 11031.229000014719,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 12756.765959027689,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.12454198440536857,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 473.9249169942923,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 823.2551669934765,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 11030.841875006445,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 23,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11054.02287497418,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.140699125011452,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10373.964999977034,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10665.136832976714,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9665.4122909531,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11054.02287497418,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.10012497659772635,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 293.2244580006227,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 548.624999995809,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9665.210374980234,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 24,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10783.44491700409,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.9214483750402,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10105.624000017997,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10388.594457996078,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9370.800208009314,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10783.44491700409,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.1080420333892107,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 281.032667029649,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 547.6258749840781,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9370.610792015214,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 25,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10240.845958993305,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.39112116699107,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 9448.98225000361,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 9766.787750006188,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 8810.731792007573,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10240.845958993305,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.20691700046882033,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 284.1172919725068,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 566.8008750071749,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 8810.519541963004,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 26,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 14316.703249991406,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 14.409801542002242,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 13461.759916972369,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 13792.719416960608,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 12857.731874973979,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 14316.703249991406,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.07995800115168095,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 347.4769169697538,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 659.5994999515824,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 12857.470499991905,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 27,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 10621.578124992084,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 10.70917216700036,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 9905.763707996812,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10210.643416969106,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9364.422583021224,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 10621.578124992084,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.0892080133780837,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 380.61345799360424,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 644.0843329764903,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9364.239000016823,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 28,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11300.205208011903,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.403194917016663,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10358.114707982168,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10780.347207968589,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9735.385124979075,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11300.205208011903,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.18004101002588868,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 312.03849997837096,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 556.787625013385,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9735.20070797531,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 29,
+          "cleanup": {
+            "attempted": true,
+            "error_type": null,
+            "succeeded": true
+          },
+          "elapsed_ms": 11448.943666997366,
+          "failure": null,
+          "requested_placement": "us-west",
+          "resource_duration_seconds": 11.558893667010125,
+          "retry_count": 0,
+          "stages": {
+            "authenticated_tunnel_ready": {
+              "elapsed_ms": 10484.784958011005,
+              "status": "observed"
+            },
+            "browser_ready": {
+              "elapsed_ms": 10900.810082966927,
+              "status": "observed"
+            },
+            "connect_token_ready": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
+              "status": "unsupported"
+            },
+            "daemon_started": {
+              "elapsed_ms": null,
+              "reason": "the daemon process does not yet emit an attested startup timestamp",
+              "status": "unsupported"
+            },
+            "encrypted_tunnel_ready": {
+              "elapsed_ms": 9867.183332971763,
+              "status": "observed"
+            },
+            "first_valid_frame": {
+              "elapsed_ms": 11448.943666997366,
+              "status": "observed"
+            },
+            "request_received": {
+              "elapsed_ms": 0.3326250007376075,
+              "status": "observed"
+            },
+            "sandbox_create_started": {
+              "elapsed_ms": 404.17741698911414,
+              "status": "observed"
+            },
+            "sandbox_registered": {
+              "elapsed_ms": 672.0277079730295,
+              "status": "observed"
+            },
+            "scheduled": {
+              "elapsed_ms": null,
+              "reason": "Modal V2 does not expose a supported scheduling timestamp",
+              "status": "unsupported"
+            },
+            "tcp_ready": {
+              "elapsed_ms": 9866.882250003982,
+              "status": "observed"
+            }
+          },
+          "status": "valid"
+        }
+      ],
+      "cold_stage_summaries": {
+        "authenticated_tunnel_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 10366.0398539796,
+          "p95_ms": 17208.584299686474,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "browser_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 10722.742020472651,
+          "p95_ms": 17543.676476620014,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "connect_token_ready": {
+          "reasons": [
+            "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2"
+          ],
+          "status": "unsupported"
+        },
+        "daemon_started": {
+          "reasons": [
+            "the daemon process does not yet emit an attested startup timestamp"
+          ],
+          "status": "unsupported"
+        },
+        "encrypted_tunnel_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 9700.398707966087,
+          "p95_ms": 15049.74634373211,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "first_valid_frame": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 11188.682707987027,
+          "p95_ms": 18223.393822822247,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "request_received": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 0.2051039773505181,
+          "p95_ms": 0.45867107110098,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "sandbox_create_started": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 325.0019999977667,
+          "p95_ms": 651.6543688951051,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "sandbox_registered": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 621.7547084961552,
+          "p95_ms": 1035.5648607684986,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        },
+        "scheduled": {
+          "reasons": [
+            "Modal V2 does not expose a supported scheduling timestamp"
+          ],
+          "status": "unsupported"
+        },
+        "tcp_ready": {
+          "attempted": 30,
+          "failed": 0,
+          "minimum_p95_samples": 20,
+          "p50_ms": 9700.205541477771,
+          "p95_ms": 15049.343193441742,
+          "p95_status": "reported",
+          "status": "observed",
+          "timeout": 0,
+          "valid": 30
+        }
+      },
+      "cold_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 11188.682707987027,
+        "p95_ms": 18223.393822822247,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      },
+      "comparison_scope": "modal-v1-optimized-on-demand-only",
+      "connect_token_parity": false,
+      "estimated_billed_cost": {
+        "duration_seconds": 400.9753097111243,
+        "estimated_usd": 0.1480882013825124,
+        "excluded": [
+          "runner_compute",
+          "control_plane",
+          "billing_adjustments"
+        ],
+        "included": [
+          "target_cpu",
+          "target_memory"
+        ],
+        "rates": {
+          "cpu_usd_per_core_second": 3.942e-05,
+          "memory_usd_per_gib_second": 6.67e-06
+        },
+        "region_multiplier": 1.75,
+        "source_urls": [
+          "https://modal.com/products/sandboxes",
+          "https://modal.com/docs/guide/sandbox-resources",
+          "https://modal.com/docs/guide/region-selection"
+        ],
+        "status": "partial"
+      },
+      "execution": {
+        "action_transport": "persistent-hot-session",
+        "observation_transport": "binary-envelope-causal-observation",
+        "runner_path": "same-region-separate-modal-runner:inherited",
+        "target_cleanup": {
+          "attempted": true,
+          "error_type": null,
+          "succeeded": true
+        },
+        "target_loopback": false,
+        "target_resource_duration_seconds": 22.643840999982785
+      },
+      "limitations": [
+        "no Connect Token or attested-tunnel lifecycle parity",
+        "encrypted tunnel uses daemon-managed bearer authentication",
+        "beta V2 backend is not a production default"
+      ],
+      "provenance": {
+        "base_benchmark_source_sha": "8c21cf1338fd747dca57bca6941c307270069712",
+        "branch": "feat/modal-optimization-benchmark-results",
+        "dependency": {
+          "head_sha": "37f977f80de93800c005caeec7ead5222b00b040",
+          "pull_request": 114,
+          "state": "open_unmerged"
+        },
+        "execution_date_utc": "2026-07-19",
+        "image_identity": "modal-computer-use-chromium:7d27c195ab0c42cc16454faf4bd799ff578beecd",
+        "modal_sdk_version": "1.5.2",
+        "preregistration_sha256": "2febb153d11673b48fdc4ec66ca73e975f9324fce32bc9f451aca0ffee8c6ff5",
+        "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/v2-raw.json",
+        "raw_artifact_sha256": "bff6ff39aadf25f360374c8f4420805081ee2fa2fa6ebaf369f3d6587ab1f47b",
+        "raw_artifact_tracked": false,
+        "requested_region": "us-west",
+        "source_sha": "7d27c195ab0c42cc16454faf4bd799ff578beecd"
+      },
+      "source_urls": [
+        "https://modal.com/docs/guide/sandbox-v2",
+        "https://modal.com/docs/guide/sandbox-networking"
+      ],
+      "status": "measured",
+      "target_loopback": false,
+      "v2_is_default": false,
+      "warm_action_attempts": [
+        {
+          "actual_placement": "westus3",
+          "attempt": 0,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 28.872285000000275,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 1,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 36.75656600000021,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 2,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 15.017484000000358,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 3,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 34.62530599999969,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 4,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 39.36324899999999,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 5,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 18.187818000000355,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 6,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 28.348737000000845,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 7,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 45.92172300000019,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 8,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 35.648576999999904,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 9,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 34.1273150000001,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 10,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 30.642600000000186,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 11,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 36.76876100000026,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 12,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 53.96637500000079,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 13,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 56.534470999999975,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 14,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 41.62463200000044,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 15,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 55.63059199999998,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 16,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 49.305141000000496,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 17,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 50.67067199999986,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 18,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 47.25758000000013,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 19,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 49.29783600000004,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 20,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 52.80657600000005,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 21,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 40.95842300000019,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 22,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 34.62082300000002,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 23,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 37.373616,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 24,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 49.545054999999394,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 25,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 45.7561670000004,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 26,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 58.116641999999885,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 27,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 79.29270999999983,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 28,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 45.998888000000626,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        },
+        {
+          "actual_placement": "westus3",
+          "attempt": 29,
+          "cleanup": {
+            "attempted": false,
+            "error_type": null,
+            "reason": "persistent target cleanup is recorded at profile scope",
+            "succeeded": null
+          },
+          "elapsed_ms": 52.15116799999997,
+          "failure": null,
+          "requested_placement": "us-west",
+          "retry_count": 0,
+          "status": "valid"
+        }
+      ],
+      "warm_action_summary": {
+        "attempted": 30,
+        "failed": 0,
+        "minimum_p95_samples": 20,
+        "p50_ms": 43.690399500000424,
+        "p95_ms": 57.40466504999992,
+        "p95_status": "reported",
+        "timeout": 0,
+        "valid": 30
+      }
     },
     "modal-warm-availability": {
       "claim_acquisition_summary": {
@@ -3604,7 +6171,7 @@
     "execution_date_utc": "2026-07-19",
     "image_identity": "modal-computer-use-chromium:8c21cf1338fd747dca57bca6941c307270069712",
     "modal_sdk_version": "1.5.2",
-    "normalizer_sha": "8c21cf1338fd747dca57bca6941c307270069712",
+    "normalizer_sha": "7d27c195ab0c42cc16454faf4bd799ff578beecd",
     "preregistration_sha256": "d25ca8fc7b89a42ab863a6724bdbdd1e53aaa13261a5e9c1043a7841575289e2",
     "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
     "raw_artifact_sha256": "bc8b7fa9cc111ce5df52d36b64608caacdfe974a8f15d96878f90439d54bbb3a",
@@ -3643,5 +6210,40 @@
     "sanitizer_version": 1,
     "source_sha": "8c21cf1338fd747dca57bca6941c307270069712"
   },
-  "schema_version": 1
+  "schema_version": 1,
+  "v2_command_manifest": {
+    "benchmark_v2": "uv run python scripts/run_modal_optimization_benchmark.py run-v2 --source-sha 7d27c195ab0c42cc16454faf4bd799ff578beecd --dependency-sha 37f977f80de93800c005caeec7ead5222b00b040 --base-benchmark-source-sha 8c21cf1338fd747dca57bca6941c307270069712 --region us-west --image-revision 7d27c195ab0c42cc16454faf4bd799ff578beecd --cold-attempts 30 --warm-action-attempts 30 --preregistration benchmark-results/modal-optimization-2026-07-19/v2-preregistration.json --output benchmark-results/modal-optimization-2026-07-19/v2-raw.json",
+    "normalize": "uv run python scripts/sanitize_modal_optimization_benchmark.py benchmark-results/modal-optimization-2026-07-19/raw.json benchmark-data/modal-optimization-results-2026-07-19.json --raw-artifact-path benchmark-results/modal-optimization-2026-07-19/raw.json --harness-commit 8c21cf1338fd747dca57bca6941c307270069712 --preregistration benchmark-results/modal-optimization-2026-07-19/preregistration.json --region-evidence benchmark-results/modal-optimization-2026-07-19/region-selection-attested.json --v2-raw benchmark-results/modal-optimization-2026-07-19/v2-raw.json --v2-raw-artifact-path benchmark-results/modal-optimization-2026-07-19/v2-raw.json --v2-preregistration benchmark-results/modal-optimization-2026-07-19/v2-preregistration.json",
+    "publish_image": "uv run python scripts/publish_modal_images.py --revision 7d27c195ab0c42cc16454faf4bd799ff578beecd"
+  },
+  "v2_measurement_manifest": {
+    "authentication": {
+      "application_authentication": "daemon-bearer-token",
+      "connect_token_parity": false,
+      "target_loopback": false,
+      "transport": "modal-v2-encrypted-tunnel"
+    },
+    "failure_policy": {
+      "drop_failed_attempts": false,
+      "drop_timed_out_attempts": false,
+      "inspect_every_failure": true
+    },
+    "metric_boundaries": {
+      "cold_request_to_first_valid_authenticated_frame": "Immediately before Sandbox._experimental_create until a protected screenshot over the encrypted tunnel passes bearer authentication and decodes to the expected dimensions.",
+      "connect_token_ready": "not applicable; V2 Connect Tokens are unsupported",
+      "warm_action_to_causal_frame": "Immediately before same-region action dispatch over the persistent encrypted-tunnel session until the first matching causal valid frame."
+    },
+    "retry_policy": {
+      "harness_retries": 0,
+      "replacement_samples": false
+    },
+    "sample_policy": {
+      "independent_cold_attempts": 30,
+      "warm_action_attempts": 30
+    },
+    "source_urls": [
+      "https://modal.com/docs/guide/sandbox-v2",
+      "https://modal.com/docs/guide/sandbox-networking"
+    ]
+  }
 }
