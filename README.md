@@ -18,6 +18,8 @@ For Modal creation APIs:
 uv sync --extra modal
 ```
 
+The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later.
+
 Downstream projects can install the published package with `uv add modal-computer-use`.
 
 ## Local Daemon Quickstart
@@ -213,6 +215,17 @@ measurement shows rendering is the bottleneck. Browser GPU launch stays in autod
 default; use `BrowserConfig(gpu_mode="chromium-vulkan" | "off")` only when benchmarking driver
 behavior. See `examples/browser_profile.py`.
 
+The inline Image builder remains the default. To publish revision-tagged standard, Firefox, and
+Chromium Images from a clean commit, run:
+
+```bash
+uv run python scripts/publish_modal_images.py --environment prod
+```
+
+Select a published Image with `ImageConfig(source="named", revision="<full-git-sha>")`. Named
+selection never falls back to an inline build. Select a prior revision or restore the default
+`ImageConfig()` to roll back.
+
 To reuse an existing run-scoped sandbox, use an explicit reuse policy:
 
 ```python
@@ -233,6 +246,10 @@ For Volume-backed artifacts, mount a Modal Volume v2 at `storage.artifacts_dir` 
 termination. Already-mounted Modal readers must reload their Volume view before observing
 committed changes, and concurrent writes to the same paths should be avoided. Modal Volume v1 is
 not a supported immediate-sync target for this package.
+
+Wrap a raw Volume in `ModalVolumeMount` to opt into `read_only=True` or a Volume `sub_path` for one
+mount. Raw Volume values retain their existing behavior. Call `computer.reload_volumes(timeout=55)`
+to block until every mounted Volume reloads or Modal raises a timeout.
 
 For owner-scoped listing and conservative stale-sandbox cleanup, use the optional manager:
 

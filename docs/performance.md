@@ -909,8 +909,9 @@ instead of a fake zero-cost total. Adapter-only and `sandbox-exec` surfaces retu
 
 Modal runs can also attach a separate `billing_reconciliation` object when the billed Modal
 object is tagged and the caller provides a Modal billing report window. This uses
-`modal.billing.workspace_billing_report` with requested tag names, filters rows by required benchmark
-tags, and sums only matched row costs. It intentionally does not overwrite `cost_estimate`: the
+`modal.Workspace.billing.report()` or `modal.Environment.billing.report()` with requested tag
+names, filters rows by required benchmark tags, and sums only matched row costs and resource
+breakdowns. It intentionally does not overwrite `cost_estimate`: the
 estimate is immediate public-rate context, while reconciliation is delayed Modal-reported
 billing telemetry for the tag/window. Reconciliation can return `matched`, `not_available_yet`,
 `no_matching_tags`, `not_measured`, `unavailable`, or `failed`. Short benchmark runs often need a

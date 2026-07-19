@@ -34,10 +34,15 @@ MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
 Expected state on May 12, 2026: live manager attach/reuse/config-conflict/cleanup passes; multiple
 owned test sandboxes clean up by owner; attach by sandbox ID works from a separate Python process;
 Volume v2 artifact sync commits with `sync <artifacts_dir>` and is visible through
-`Volume.read_file` after sandbox termination; directory snapshot restore uses Modal's documented
+`Volume.read_file` after sandbox termination and through a blocking `Sandbox.reload_volumes()` in
+an already-mounted reader; directory snapshot restore uses Modal's documented
 `snapshot_directory` plus `mount_image` flow and preserves nested files; browser profile smoke
 opens a URL and captures a screenshot; live daemon rate limiting returns structured `rate_limited`
 results.
+
+To include the named Image canary, publish the three Images from a clean commit and set
+`MODAL_COMPUTER_USE_NAMED_IMAGE_REVISION` to that full Git revision before the protected run. The
+canary remains skipped when no published revision is supplied.
 
 The GitHub Actions workflow also has a protected manual `modal-smoke` job. Run it with
 `workflow_dispatch` and `run_modal_smoke=true` only from a protected environment with

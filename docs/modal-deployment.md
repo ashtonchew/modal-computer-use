@@ -17,7 +17,9 @@ The image launch command stays `python -m modal_computer_use.daemon`. Local repo
 Per current Modal docs, configure the Sandbox with:
 
 - **Connect Tokens** authenticate HTTP and WebSocket requests to the daemon on port `8080`. See [security.md](security.md).
-- **Network restrictions** use `block_network` and `cidr_allowlist` to limit outbound traffic.
+- **Network restrictions** use `block_network`, `outbound_cidr_allowlist`,
+  `outbound_domain_allowlist`, and `inbound_cidr_allowlist`. All allowlists default to `None`, so
+  general browser egress remains unrestricted unless a caller opts into a policy.
 - **Daemon ingress** defaults to an attested encrypted tunnel: Modal Connect authenticates the
   bootstrap request, then the daemon mints a short-lived bearer token for low-latency tunnel calls
   on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
@@ -30,13 +32,20 @@ Per current Modal docs, configure the Sandbox with:
   part of `ComputerConfig`, so attach-or-create reuse with config-hash checks will not silently
   reuse a sandbox created for a different region.
 - **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
-- **Tags** are applied after creation with `Sandbox.set_tags()` and used for `Sandbox.list(tags=...)` attach and recovery flows.
+- **Tags** are passed to `Sandbox.create(tags=...)` and used for `Sandbox.list(tags=...)` attach and
+  recovery flows.
 
-The SDK does not pass tags into `Sandbox.create()`. It applies tags after creation so it works
-with the current Modal Sandbox contract. Built-in tags are string-only and limited to safe
+The SDK passes the complete reserved and caller tag set during Sandbox creation. Built-in tags are
+string-only and limited to safe
 operational metadata such as `computer-use.run_id`, `computer-use.owner`,
 `computer-use.created_at`, `computer-use.config_hash`, `computer-use.window_manager`, and
 `computer-use.artifacts_dir`.
+
+The inline Image builder is the default rollback path. `ImageConfig(source="named",
+revision="<full-git-sha>")` selects a revision-tagged standard, Firefox, or Chromium Image through
+`Image.from_name()`. Run `scripts/publish_modal_images.py` from a clean commit to build and publish
+all three variants. Modal Image tags are mutable, so repository policy treats a full Git SHA tag as
+write-once.
 
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes
 in user configuration or examples. For immediate visibility before sandbox termination, use a
@@ -44,7 +53,8 @@ Modal Volume v2 mount and set `StorageConfig(persist_artifacts=True)`;
 `computer.artifacts.sync()` then runs Modal's documented `sync <artifacts_dir>` mountpoint commit
 inside the sandbox. Modal Volume v1 is not a supported immediate-sync target for this package.
 Readers already running with the same Volume still need `Volume.reload()` or
-`Sandbox.reload_volumes()` before they can observe committed changes.
+`Sandbox.reload_volumes()` before they can observe committed changes. The SDK exposes
+`computer.reload_volumes(timeout=55)`, which uses Modal 1.5.2 blocking reload behavior.
 
 Browser profiles are explicit. Use `ResourceConfig(profile="browser")` plus
 `BrowserConfig(kind="firefox" | "chromium", prewarm=True)` when browser startup dominates the
@@ -56,10 +66,9 @@ daemon environment so `/v1/capabilities` and `/v1/computer/status` can report th
 `Sandbox.snapshot_directory(path)` API for a Modal-backed sandbox. Restore by creating a fresh
 normal computer-use sandbox and calling `computer.mount_image(path, snapshot_image)`, matching
 Modal's `mount_image` pattern. Do not use a directory snapshot as the whole desktop base image:
-live smoke on May 12, 2026 found that path did not reach desktop readiness. Directory snapshots
-are documented by Modal as 30-day images after last creation or use; store durable artifacts in a
-Volume or external system instead. `snapshot_filesystem()` remains a compatibility helper for
-SDKs exposing that older method.
+live smoke on May 12, 2026 found that path did not reach desktop readiness. Both snapshot helpers
+pass an explicit 30-day TTL and a 55-second timeout. Callers can override either value or pass
+`ttl=None` for indefinite retention. Store durable artifacts in a Volume or external system.
 
 ## Attach and recovery
 
