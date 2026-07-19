@@ -464,6 +464,30 @@ def test_v2_command_manifest_replays_effective_configuration() -> None:
     assert "--warm-action-attempts 32" in command
 
 
+def test_v2_runner_rejects_sample_counts_that_differ_from_preregistration() -> None:
+    script = runpy.run_path(
+        str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
+    )
+    config = ModalOptimizationConfig(
+        region="us-west",
+        image_revision="c" * 40,
+        cold_attempts=30,
+        warm_action_attempts=30,
+        ingress="tunnel",
+    )
+
+    with pytest.raises(RuntimeError, match="sample counts differ"):
+        script["_validate_v2_sample_policy"](
+            {
+                "sample_policy": {
+                    "independent_cold_attempts": 1,
+                    "warm_action_attempts": 1,
+                }
+            },
+            config,
+        )
+
+
 def test_sanitizer_adds_post_execution_region_attestation_command() -> None:
     commands = {
         "region_selection": "region command",

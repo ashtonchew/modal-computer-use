@@ -334,6 +334,7 @@ def _run_v2(args: argparse.Namespace) -> int:
     }
     if frozen != expected:
         raise RuntimeError("V2 effective configuration differs from preregistration")
+    _validate_v2_sample_policy(preregistration, config)
     cold_attempts = run_independent_cold_attempts(
         config,
         create_computer=create_modal_v2_tunnel_computer,
@@ -549,6 +550,18 @@ def _v2_commands(
             f"--v2-preregistration {root}/v2-preregistration.json"
         ),
     }
+
+
+def _validate_v2_sample_policy(
+    preregistration: dict[str, Any],
+    config: ModalOptimizationConfig,
+) -> None:
+    expected = {
+        "independent_cold_attempts": config.cold_attempts,
+        "warm_action_attempts": config.warm_action_attempts,
+    }
+    if preregistration.get("sample_policy") != expected:
+        raise RuntimeError("V2 sample counts differ from preregistration")
 
 
 def _require_dependency(source_sha: str, dependency_sha: str, *, require_clean: bool) -> None:
