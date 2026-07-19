@@ -220,7 +220,8 @@ def test_created_modal_comparison_collects_one_cold_sample_per_iteration(monkeyp
             self.terminate_calls = 0
             self.detach_calls = 0
 
-        def terminate(self) -> None:
+        def terminate(self, *, wait: bool = False) -> None:
+            assert wait is True
             self.terminate_calls += 1
 
         def detach(self) -> None:
@@ -538,7 +539,8 @@ def test_modal_cleanup_detaches_even_when_terminate_fails() -> None:
     class Computer:
         client = Client()
 
-        def terminate(self) -> None:
+        def terminate(self, *, wait: bool = False) -> None:
+            assert wait is True
             calls.append("terminate")
             raise RuntimeError("terminate failed")
 

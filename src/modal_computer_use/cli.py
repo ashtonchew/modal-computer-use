@@ -821,6 +821,8 @@ def _benchmark_sdk_created_modal_sandbox(
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    import time
+
     started = time.perf_counter()
     run_id = new_run_id()
     config = _modal_benchmark_config(args, run_id=run_id)
