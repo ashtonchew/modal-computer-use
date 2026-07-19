@@ -265,7 +265,8 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
         def metadata(self):
             return SimpleNamespace(sandbox_id="sb-gpu")
 
-        def terminate(self) -> None:
+        def terminate(self, *, wait: bool = False) -> None:
+            created["terminate_wait"] = wait
             closed.append("terminate")
 
         def detach(self) -> None:
@@ -371,6 +372,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert payload["surfaces"]["daemon-http"]["cost_status"]["estimate"] == "unknown"
     assert payload["shared_resource_cost_estimate"]["status"] == "estimated"
     assert payload["cost_status"] == {"shared_resource_estimate": "estimated"}
+    assert created["terminate_wait"] is True
     assert closed == ["terminate", "detach"]
 
 def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:

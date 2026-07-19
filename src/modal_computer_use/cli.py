@@ -706,7 +706,7 @@ def _benchmark_sdk_created_modal_sandbox(
         )
     finally:
         try:
-            computer.terminate()
+            computer.terminate(wait=True)
         finally:
             resource_lifetime_ms = (time.perf_counter() - started) * 1000
             computer.detach()

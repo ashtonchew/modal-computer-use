@@ -600,9 +600,12 @@ class ComputerSandbox:
                 )
             time.sleep(interval)
 
-    def terminate(self) -> None:
+    def terminate(self, *, wait: bool = False) -> None:
         if self._sandbox is not None and hasattr(self._sandbox, "terminate"):
-            self._sandbox.terminate()
+            if wait:
+                self._sandbox.terminate(wait=True)
+            else:
+                self._sandbox.terminate()
         else:
             self.stop()
 

@@ -102,6 +102,7 @@ class FakeSandboxObject:
         self.snapshot_filesystem_calls: list[dict[str, object]] = []
         self.snapshot_directory_calls: list[dict[str, object]] = []
         self.reload_volumes_calls: list[int] = []
+        self.terminate_wait_calls: list[bool] = []
         self.exec_calls: list[dict[str, object]] = []
         self.terminated = False
 
@@ -128,7 +129,8 @@ class FakeSandboxObject:
         self.exec_calls.append({"args": args, "timeout": timeout, "env": env})
         return SimpleNamespace(args=args, timeout=timeout, env=env, returncode=0)
 
-    def terminate(self) -> None:
+    def terminate(self, *, wait: bool = False) -> None:
+        self.terminate_wait_calls.append(wait)
         self.terminated = True
 
     def tunnels(self) -> dict[int, object]:
@@ -1233,6 +1235,20 @@ def test_reload_volumes_requires_modal_backing() -> None:
 
     with pytest.raises(SandboxUnavailableError, match="Volume reload requires"):
         computer.reload_volumes()
+
+
+def test_terminate_can_wait_for_modal_shutdown(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"),
+        image=object(),
+        wait=False,
+    )
+
+    computer.terminate(wait=True)
+
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.terminate_wait_calls == [True]
 
 
 def test_modal_volume_mount_applies_opt_in_options(monkeypatch) -> None:
