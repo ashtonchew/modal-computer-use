@@ -1032,9 +1032,9 @@ def create_modal_v2_tunnel_computer(
     app = runtime.App.lookup(app_name, **app_lookup_kwargs)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
-    tunnel_token = _secrets.token_urlsafe(32)
+    tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
-    env["COMPUTER_USE_TUNNEL_TOKEN"] = tunnel_token
+    env.update(tunnel_auth)
     sandbox_tags = {**(tags or {}), **default_tags(config)}
     sandbox_tags["computer-use.image_identity"] = selected_image_identity(
         source=config.image.source,
@@ -1077,7 +1077,11 @@ def create_modal_v2_tunnel_computer(
             timing.mark("tcp_ready")
         base_url = _tunnel_url(sandbox, 8080)
         timing.mark("encrypted_tunnel_ready")
-        client = client_factory(base_url=base_url, token=tunnel_token, http2=False)
+        client = client_factory(
+            base_url=base_url,
+            token=next(iter(tunnel_auth.values())),
+            http2=False,
+        )
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
             app_name=app_name,
