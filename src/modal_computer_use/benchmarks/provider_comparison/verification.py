@@ -6,7 +6,7 @@ from typing import Any
 
 from ..constants import MOVE_CLICK_SEQUENCE_ACTIONS
 from ..safety import _redact_text
-from .sdk_support import call_first_available, provider_computer_use
+from .provider_sdk import call_first_available, provider_computer_use
 
 TYPE_READBACK_TEXT = "mcu-readback-0123456789"
 TYPE_READBACK_FILE = "/tmp/modal-computer-use-type-readback-xev.log"  # noqa: S108

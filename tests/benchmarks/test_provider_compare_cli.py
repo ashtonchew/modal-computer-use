@@ -7,11 +7,18 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from modal_computer_use import benchmark_comparison, cli
+from modal_computer_use import cli
 from modal_computer_use.benchmark_comparison import run_provider_comparison
 from modal_computer_use.benchmarks import daemon_surface
 from modal_computer_use.benchmarks import lifecycle as benchmark_lifecycle
-from modal_computer_use.benchmarks.provider_comparison import comparison, daytona
+from modal_computer_use.benchmarks.provider_comparison import (
+    comparison,
+    daytona,
+    live,
+    payloads,
+    provider_sdk,
+    results,
+)
 
 
 def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
@@ -381,9 +388,9 @@ def test_provider_case_failures_are_not_copied_to_later_cases() -> None:
         def second(self, _sandbox):
             return {"status": "ok"}
 
-    result = benchmark_comparison._run_live_provider_cases(
+    result = live.run_product_provider_cases(
         provider="daytona",
-        benchmark=Benchmark(),
+        driver=Benchmark(),
         cold_cases=(),
         warm_cases=("first", "second"),
         iterations=1,
@@ -425,9 +432,9 @@ def test_live_provider_runs_verification_before_cleanup_after_case_failure() -> 
             events.append("cleanup")
             return []
 
-    result = benchmark_comparison._run_live_provider_cases(
+    result = live.run_product_provider_cases(
         provider="daytona",
-        benchmark=Benchmark(),
+        driver=Benchmark(),
         cold_cases=(),
         warm_cases=("first", "second"),
         iterations=1,
@@ -454,7 +461,7 @@ def test_provider_cleanup_tries_force_before_next_method() -> None:
             if not force:
                 raise RuntimeError("kill failed")
 
-    errors = benchmark_comparison._cleanup_provider_sandbox(Sandbox())
+    errors = live.cleanup_provider_sandbox(Sandbox())
 
     assert errors == []
     assert calls == [
@@ -479,12 +486,12 @@ def test_provider_runtime_and_cleanup_postprocessing_updates_comparison() -> Non
         "failures": [],
     }
 
-    benchmark_comparison.finalize_provider_runtime(
+    results.record_provider_runtime(
         payload,
         provider="modal-daemon",
         runtime_seconds=12.5,
     )
-    benchmark_comparison.add_provider_cleanup_errors(
+    results.record_provider_cleanup_errors(
         payload,
         provider="modal-daemon",
         errors=[("terminate", RuntimeError("cleanup failed"))],
@@ -509,7 +516,7 @@ def test_provider_observation_redacts_nested_secrets_and_preserves_safe_shape() 
         },
     }
 
-    safe = benchmark_comparison._safe_provider_observation(observation)
+    safe = provider_sdk.sanitize_provider_observation(observation)
 
     assert safe == {
         "status": "ready",
@@ -546,7 +553,7 @@ def test_modal_cleanup_detaches_even_when_terminate_fails() -> None:
 
 def test_provider_verification_failure_fails_provider_and_top_level(monkeypatch) -> None:
     def fake_provider(*args, **kwargs):
-        return benchmark_comparison._provider_result(
+        return results.build_provider_result(
             "daytona",
             cases={"screenshot_full": {"status": "ok", "failures": []}},
             verification={"cursor_position": {"status": "failed"}},
@@ -576,7 +583,7 @@ def test_deprecated_cold_alias_does_not_duplicate_failures() -> None:
         "canonical_case": "product_create_to_first_screenshot",
     }
 
-    result = benchmark_comparison._provider_result(
+    result = results.build_provider_result(
         "daytona",
         cases={
             "product_create_to_first_screenshot": canonical,
@@ -595,7 +602,7 @@ def test_provider_payload_metadata_distinguishes_base64_transport_from_png_bytes
         screenshot=SimpleNamespace(base64_string=__import__("base64").b64encode(png).decode())
     )
 
-    metadata = benchmark_comparison._provider_payload_metadata(response)
+    metadata = payloads.describe_screenshot_payload(response)
 
     assert metadata["source"].endswith("screenshot.base64_string")
     assert metadata["transport_encoding"] == "base64_string"

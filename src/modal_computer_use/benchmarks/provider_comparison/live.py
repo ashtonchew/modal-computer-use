@@ -12,8 +12,8 @@ from ..lifecycle import (
 )
 from ..measurement import _case_result, _measure_observed_case
 from ..safety import _failure, _redact_text
+from .provider_sdk import sanitize_provider_observation
 from .results import build_provider_cleanup_case, build_provider_result
-from .sdk_support import sanitize_provider_observation
 from .verification import TYPE_READBACK_TEXT
 
 
