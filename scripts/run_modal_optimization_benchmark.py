@@ -290,6 +290,7 @@ def _preregister_v2(args: argparse.Namespace) -> int:
         commands=_v2_commands(
             args.source_sha,
             base_benchmark_source_sha=args.base_benchmark_source_sha,
+            config=config,
         ),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -519,6 +520,7 @@ def _v2_commands(
     source_sha: str,
     *,
     base_benchmark_source_sha: str,
+    config: ModalOptimizationConfig,
 ) -> dict[str, str]:
     root = "benchmark-results/modal-optimization-2026-07-19"
     return {
@@ -529,6 +531,9 @@ def _v2_commands(
             "uv run python scripts/run_modal_optimization_benchmark.py run-v2 "
             f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
             f"--base-benchmark-source-sha {base_benchmark_source_sha} "
+            f"--region {config.region} --image-revision {config.image_revision} "
+            f"--cold-attempts {config.cold_attempts} "
+            f"--warm-action-attempts {config.warm_action_attempts} "
             f"--preregistration {root}/v2-preregistration.json "
             f"--output {root}/v2-raw.json"
         ),

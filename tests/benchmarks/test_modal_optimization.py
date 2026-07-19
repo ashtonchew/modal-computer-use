@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import runpy
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -436,6 +438,30 @@ def test_sanitizer_merges_preregistered_v2_encrypted_tunnel_profile() -> None:
     assert v2["provenance"]["source_sha"] == "d" * 40
     assert v2["provenance"]["modal_sdk_version"] == "1.5.2+fixture"
     assert sanitized["v2_measurement_manifest"]["authentication"]["target_loopback"] is False
+
+
+def test_v2_command_manifest_replays_effective_configuration() -> None:
+    config = ModalOptimizationConfig(
+        region="us-east",
+        image_revision="c" * 40,
+        cold_attempts=31,
+        warm_action_attempts=32,
+        ingress="tunnel",
+    )
+
+    script = runpy.run_path(
+        str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
+    )
+    command = script["_v2_commands"](
+        "d" * 40,
+        base_benchmark_source_sha="a" * 40,
+        config=config,
+    )["benchmark_v2"]
+
+    assert "--region us-east" in command
+    assert f"--image-revision {'c' * 40}" in command
+    assert "--cold-attempts 31" in command
+    assert "--warm-action-attempts 32" in command
 
 
 def test_sanitizer_adds_post_execution_region_attestation_command() -> None:
