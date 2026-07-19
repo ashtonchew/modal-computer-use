@@ -3603,7 +3603,7 @@
     "execution_date_utc": "2026-07-19",
     "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
     "modal_sdk_version": "1.5.2",
-    "normalizer_sha": "7f7ab82fcbdd47a346399a4dc8745446bf2f88db",
+    "normalizer_sha": "d8e2d7c699b7458bffa3ae73b15aa8dde99b644f",
     "preregistration_sha256": "1d16e694984ccafe02cbccadb34513112b7c0f4adbffd3908ae7356a72836bbf",
     "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
     "raw_artifact_sha256": "4646f2aa8f78c0bdc8f611e157fa2c728cd76aff3b79cd7f7bd0f5b3aa8ce879",
@@ -3629,6 +3629,12 @@
       "execution_source_sha": "182bc259105d3d5a77f3da11464d76e6672fc90f",
       "rule": "transport p50; within 5 percent use lower cold create-to-ready",
       "selected": "us-west"
+    },
+    "region_selection_attestation": {
+      "evidence_envelope_sha256": "fcf2890fcf737f9c8d5d4049ffa8e4887e593fc0b834326b615d5339668daaf7",
+      "execution_source_sha": "182bc259105d3d5a77f3da11464d76e6672fc90f",
+      "raw_artifact_sha256": "e4aef4fd67defeccd9881c5da28237512d44e656c8c2076e11f11137073172d9",
+      "status": "validated"
     },
     "requested_region": "us-west",
     "sanitizer": "modal_computer_use.benchmarks.modal_optimization",
