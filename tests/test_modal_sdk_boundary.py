@@ -749,7 +749,7 @@ def test_v2_benchmark_create_uses_encrypted_tunnel_and_application_auth(monkeypa
     )
     client = SimpleNamespace(
         base_url="https://daemon.example.modal.host",
-        transport=SimpleNamespace(token="application-token"),
+        transport=SimpleNamespace(token=None),
         close=lambda: None,
     )
 
