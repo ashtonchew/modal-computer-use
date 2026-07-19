@@ -454,11 +454,13 @@ def test_v2_command_manifest_replays_effective_configuration() -> None:
     )
     command = script["_v2_commands"](
         "d" * 40,
+        dependency_sha="b" * 40,
         base_benchmark_source_sha="a" * 40,
         config=config,
     )["benchmark_v2"]
 
     assert "--region us-east" in command
+    assert f"--dependency-sha {'b' * 40}" in command
     assert f"--image-revision {'c' * 40}" in command
     assert "--cold-attempts 31" in command
     assert "--warm-action-attempts 32" in command

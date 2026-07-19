@@ -289,6 +289,7 @@ def _preregister_v2(args: argparse.Namespace) -> int:
         sdk_versions={"modal": modal_sdk_version},
         commands=_v2_commands(
             args.source_sha,
+            dependency_sha=args.dependency_sha,
             base_benchmark_source_sha=args.base_benchmark_source_sha,
             config=config,
         ),
@@ -520,6 +521,7 @@ def _commands(
 def _v2_commands(
     source_sha: str,
     *,
+    dependency_sha: str,
     base_benchmark_source_sha: str,
     config: ModalOptimizationConfig,
 ) -> dict[str, str]:
@@ -530,7 +532,7 @@ def _v2_commands(
         ),
         "benchmark_v2": (
             "uv run python scripts/run_modal_optimization_benchmark.py run-v2 "
-            f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
+            f"--source-sha {source_sha} --dependency-sha {dependency_sha} "
             f"--base-benchmark-source-sha {base_benchmark_source_sha} "
             f"--region {config.region} --image-revision {config.image_revision} "
             f"--cold-attempts {config.cold_attempts} "
