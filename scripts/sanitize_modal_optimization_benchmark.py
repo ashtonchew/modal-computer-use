@@ -19,6 +19,11 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     parser.add_argument("--raw-artifact-path", required=True)
     parser.add_argument("--harness-commit", required=True)
+    parser.add_argument(
+        "--preregistration",
+        type=Path,
+        help="preregistration manifest; defaults to preregistration.json beside raw",
+    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
@@ -32,7 +37,9 @@ def main() -> int:
         output_path=args.output,
         raw_artifact_path=args.raw_artifact_path,
         harness_commit=args.harness_commit,
-        preregistration_path=args.raw.parent / "preregistration.json",
+        preregistration_path=(
+            args.preregistration or args.raw.parent / "preregistration.json"
+        ),
         normalizer_commit=normalizer_commit,
         check=args.check,
     )

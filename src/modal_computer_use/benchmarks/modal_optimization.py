@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import math
+import re
 import statistics
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -694,8 +695,11 @@ def sanitize_modal_optimization_benchmark(
         )
         if existing_digest != preregistration_digest:
             raise ValueError("preregistration digest does not match the raw artifact")
-        payload["command_manifest"] = copy.deepcopy(
+        payload["command_manifest"] = _portable_command_manifest(
             _mapping(preregistration_payload.get("commands"), "commands")
+        )
+        payload["command_manifest_sanitization"] = (
+            "Normalized the runner-specific credential file path to repository-relative .env."
         )
         payload["environment_manifest"] = copy.deepcopy(
             _mapping(preregistration_payload.get("environment"), "environment")
@@ -827,6 +831,19 @@ def _add_derived_summaries(payload: dict[str, Any]) -> None:
         claims,
         "claim_elapsed_ms",
     )
+
+
+def _portable_command_manifest(commands: dict[str, Any]) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for name, command in commands.items():
+        if not _nonempty_text(command):
+            raise ValueError("command manifest values must be nonempty strings")
+        output[str(name)] = re.sub(
+            r"--env-file\s+(?:\"[^\"]+\"|'[^']+'|\S+)",
+            "--env-file .env",
+            str(command),
+        )
+    return output
 
 
 def _summary_from_attempt_field(

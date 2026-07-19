@@ -205,7 +205,9 @@ def test_sanitized_serialization_is_deterministic() -> None:
 
 def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() -> None:
     commands = {
-        "provider_default": "provider command",
+        "provider_default": (
+            "provider command --env-file /Users/example/private-repository/.env"
+        ),
         "provider_default_normalize": "provider normalize command",
         "region_selection": "region command",
         "publish_image": "publish command",
@@ -240,7 +242,11 @@ def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() 
         normalizer_commit="c" * 40,
     )
 
-    assert sanitized["command_manifest"] == commands
+    assert sanitized["command_manifest"]["provider_default"] == (
+        "provider command --env-file .env"
+    )
+    assert "/Users/" not in json.dumps(sanitized["command_manifest"])
+    assert "runner-specific" in sanitized["command_manifest_sanitization"]
     assert sanitized["environment_manifest"]["sdk_versions"] == {"modal": "1.5.2"}
     assert sanitized["measurement_manifest"]["retry_policy"]["replacement_samples"] is False
     warm = sanitized["profiles"][PROFILE_MODAL_WARM_AVAILABILITY]
