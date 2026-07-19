@@ -75,8 +75,8 @@ when faster.
 
 The preregistration freezes both schedules before credentialed execution:
 
-- pilot: 5 lifecycle samples per arm, randomized and interleaved with seed `20260719`;
-- full: 30 lifecycle samples per eligible arm, randomized and interleaved with seed `20260720`;
+- pilot: 5 lifecycle samples per arm, randomized in four-arm blocks with seed `20260719`;
+- full: 30 lifecycle samples per eligible arm, randomized in four-arm blocks with seed `20260720`;
 - harness retries: 0;
 - replacement samples: disabled;
 - failures and timeouts: retained at their original schedule positions.

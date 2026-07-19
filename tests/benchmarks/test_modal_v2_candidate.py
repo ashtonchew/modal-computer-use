@@ -55,6 +55,11 @@ def test_trial_schedule_is_deterministic_randomized_and_balanced() -> None:
     assert {arm: sum(row["arm"] == arm for row in first) for arm in CANONICAL_ARMS} == {
         arm: 5 for arm in CANONICAL_ARMS
     }
+    assert all(
+        {row["arm"] for row in first[offset : offset + len(CANONICAL_ARMS)]}
+        == set(CANONICAL_ARMS)
+        for offset in range(0, len(first), len(CANONICAL_ARMS))
+    )
     assert {row["sequence"] for row in first} == set(range(20))
 
 

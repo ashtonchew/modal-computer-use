@@ -183,12 +183,12 @@ def build_trial_schedule(
     expected = 5 if phase == "pilot" else 30
     if samples_per_arm != expected:
         raise ValueError(f"{phase} schedule requires exactly {expected} samples per arm")
-    rows = [
-        {"arm": arm, "lifecycle_index": lifecycle_index}
-        for lifecycle_index in range(samples_per_arm)
-        for arm in CANONICAL_ARMS
-    ]
-    random.Random(seed).shuffle(rows)  # noqa: S311 - preregistered trial randomization.
+    rng = random.Random(seed)  # noqa: S311 - preregistered trial randomization.
+    rows: list[dict[str, Any]] = []
+    for lifecycle_index in range(samples_per_arm):
+        block = list(CANONICAL_ARMS)
+        rng.shuffle(block)
+        rows.extend({"arm": arm, "lifecycle_index": lifecycle_index} for arm in block)
     return [{"sequence": sequence, "phase": phase, **row} for sequence, row in enumerate(rows)]
 
 
