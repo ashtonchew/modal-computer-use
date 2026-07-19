@@ -107,11 +107,13 @@ uv run computer-use benchmark sdk \
   --iterations 5
 ```
 
-Creation mode measures `cold_create_to_ready`, runs the warm daemon benchmark through the selected
-Modal ingress, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a generated
-`benchmark_run_id`, then terminates and detaches the sandbox. The report records the canonical
-ingress label in metadata. Passing `--gpu` defaults the created resource profile to `browser-gpu`
-unless `--resource-profile` is supplied.
+Creation mode measures `product_create_to_first_screenshot`, runs the warm daemon benchmark through
+the selected Modal ingress, tags the Modal app and sandbox with `benchmark=sdk-surfaces` plus a
+generated `benchmark_run_id`, then terminates and detaches the sandbox. The deprecated
+`cold_create_to_ready` JSON alias remains through the 1.1.x minor release and is removed in 1.2.0;
+consumers should migrate to the canonical case now. The report records the canonical ingress label
+in metadata. Passing `--gpu` defaults the created resource profile to `browser-gpu` unless
+`--resource-profile` is supplied.
 Use `--modal-region` to pin placement for created benchmark sandboxes when measuring latency from a
 known caller location. The same creation knob is available in SDK code as
 `ComputerConfig(runtime={"modal_region": "us-west"})`; leaving it unset preserves Modal's default

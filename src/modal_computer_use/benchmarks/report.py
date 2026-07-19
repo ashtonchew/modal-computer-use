@@ -59,6 +59,14 @@ def run_benchmark_report(
     screenshot_full = run_screenshot_benchmark(
         client=client,
         name="screenshot_full",
+        request={"format": "png", "show_cursor": False},
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        raw=True,
+    )
+    screenshot_full_structured = run_screenshot_benchmark(
+        client=client,
+        name="screenshot_full_structured",
         request={"format": "png", "storage": "inline", "show_cursor": False},
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -116,6 +124,7 @@ def run_benchmark_report(
     benchmarks = {
         "action_batch": _report_action_batch(action_batch),
         "screenshot_full": screenshot_full,
+        "screenshot_full_structured": screenshot_full_structured,
         "screenshot_compressed": screenshot_compressed,
         "move_click": move_click,
         "move_click_sequence": move_click_sequence,
@@ -123,10 +132,19 @@ def run_benchmark_report(
         "type_1000_chars": type_1000_chars,
         "recording_start_stop": recording_start_stop,
         "sandbox_exec": sandbox_exec,
-        "cold_create_to_ready": _future_benchmark(
+        "product_create_to_first_screenshot": _future_benchmark(
             "not_measured",
             "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
         ),
+        "cold_create_to_ready": {
+            **_future_benchmark(
+                "not_measured",
+                "cold Modal Sandbox creation is outside mock-local and live-daemon benchmark modes",
+            ),
+            "canonical_case": "product_create_to_first_screenshot",
+            "deprecated": True,
+            "removal_version": "1.2.0",
+        },
         "warm_attach_to_health": _future_benchmark(
             "not_measured",
             "warm attach requires Modal orchestration and is outside this report mode",
@@ -134,6 +152,12 @@ def run_benchmark_report(
     }
     failures.extend(_benchmark_failures("action_batch", action_batch.get("failures", [])))
     failures.extend(_benchmark_failures("screenshot_full", screenshot_full.get("failures", [])))
+    failures.extend(
+        _benchmark_failures(
+            "screenshot_full_structured",
+            screenshot_full_structured.get("failures", []),
+        )
+    )
     failures.extend(
         _benchmark_failures("screenshot_compressed", screenshot_compressed.get("failures", []))
     )

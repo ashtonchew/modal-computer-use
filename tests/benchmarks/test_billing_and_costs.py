@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 import modal_computer_use.benchmarks.billing as benchmark_billing
-from modal_computer_use.benchmarks.costs import estimate_surface_cost
+from modal_computer_use.benchmarks.costs import estimate_provider_cost, estimate_surface_cost
 from modal_computer_use.errors import ModalNotInstalledError
 
 
@@ -39,6 +39,30 @@ def test_modal_cost_estimate_requires_explicit_resources() -> None:
     assert estimated["total"]["amount"] == pytest.approx(
         sum(component["amount"] for component in estimated["components"])
     )
+    assert estimated["duration_policy"] == "measured_wall_time_including_warmup"
+
+
+def test_provider_cost_estimate_uses_provider_resources_and_runtime() -> None:
+    estimate = estimate_provider_cost(
+        "daytona",
+        provider_status="ok",
+        runtime_seconds=12.0,
+        metadata={"cpu_count": 1, "memory_gib": 1, "storage_gib": 3},
+    )
+
+    assert estimate["status"] == "estimated"
+    assert estimate["inputs"] == {
+        "duration_seconds": 12.0,
+        "cpu_count": 1.0,
+        "memory_gib": 1.0,
+        "storage_gib": 3.0,
+    }
+    assert estimate["pricing"]["source_url"] == "https://www.daytona.io/pricing"
+    assert (
+        estimate["duration_policy"]
+        == "measured_billable_resource_lifetime_including_cleanup"
+    )
+
 
 def test_modal_billing_reconciliation_filters_and_sums_tagged_rows() -> None:
     request = benchmark_billing.modal_billing_reconciliation_request(

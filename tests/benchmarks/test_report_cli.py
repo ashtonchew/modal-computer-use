@@ -203,6 +203,11 @@ def test_benchmark_report_screenshot_failure_is_structured() -> None:
                 return {"status": "stopped", "format": "mp4", "size_bytes": 100}
             raise AssertionError(path)
 
+        def post_bytes_with_headers(self, path: str, *, json=None, headers=None):
+            if path == "/v1/screenshots/full/raw":
+                raise RuntimeError("raw screenshot failed")
+            raise AssertionError(path)
+
     payload = run_benchmark_report(
         client=FailingClient(),
         mode="mock-local",
@@ -237,6 +242,15 @@ def test_benchmark_report_redacts_reported_base_url_credentials() -> None:
                 return {"id": self.recording_id}
             if path == f"/v1/recordings/{self.recording_id}/stop":
                 return {"status": "stopped", "format": "mp4", "size_bytes": 100}
+            raise AssertionError(path)
+
+        def post_bytes_with_headers(self, path: str, *, json=None, headers=None):
+            if path == "/v1/screenshots/full/raw":
+                return b"png-bytes", {
+                    "x-computer-use-width": "10",
+                    "x-computer-use-height": "10",
+                    "x-computer-use-timing-ms": '{"total_ms":1.0}',
+                }
             raise AssertionError(path)
 
     payload = run_benchmark_report(
@@ -277,6 +291,15 @@ def test_benchmark_report_move_click_failure_is_structured() -> None:
                 return {"status": "stopped", "format": "mp4", "size_bytes": 100}
             raise AssertionError(path)
 
+        def post_bytes_with_headers(self, path: str, *, json=None, headers=None):
+            if path == "/v1/screenshots/full/raw":
+                return b"png-bytes", {
+                    "x-computer-use-width": "10",
+                    "x-computer-use-height": "10",
+                    "x-computer-use-timing-ms": '{"total_ms":1.0}',
+                }
+            raise AssertionError(path)
+
     payload = run_benchmark_report(
         client=FailingMoveClient(),
         mode="mock-local",
@@ -309,6 +332,15 @@ def test_benchmark_report_recording_failure_is_structured() -> None:
                 return {"id": "rec_test"}
             if path == "/v1/recordings/rec_test/stop":
                 return {"status": "failed", "format": "mp4", "size_bytes": 0}
+            raise AssertionError(path)
+
+        def post_bytes_with_headers(self, path: str, *, json=None, headers=None):
+            if path == "/v1/screenshots/full/raw":
+                return b"png-bytes", {
+                    "x-computer-use-width": "10",
+                    "x-computer-use-height": "10",
+                    "x-computer-use-timing-ms": '{"total_ms":1.0}',
+                }
             raise AssertionError(path)
 
     payload = run_benchmark_report(

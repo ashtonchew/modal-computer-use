@@ -57,6 +57,10 @@ def run_screenshot_benchmark(
         {
             "request": _safe_screenshot_request(request),
             "transport_encoding": "binary" if raw else "json_base64",
+            "screenshot_api": "raw_bytes" if raw else "structured_json",
+            "comparison_role": (
+                "canonical_fast_path" if raw else "structured_compatibility_path"
+            ),
             "samples_bytes": [
                 item["size_bytes"] for item in observations if item.get("size_bytes") is not None
             ],
@@ -149,7 +153,7 @@ def run_move_click_sequence_benchmark(
     )
     return result
 
-def run_click_screenshot_raw_benchmark(
+def run_click_then_screenshot_benchmark(
     *,
     client: DaemonClient,
     iterations: int,
@@ -162,14 +166,14 @@ def run_click_screenshot_raw_benchmark(
     request = {"format": "png", "show_cursor": False}
     benchmark = _ClickScreenshotRawBenchmark(client, request)
     samples, observations = _measure_observed_case(
-        name="click_screenshot_raw",
+        name="click_then_screenshot",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         operation=benchmark.run,
         failures=failures,
     )
     result = _attributed_case_result(
-        "click_screenshot_raw",
+        "click_then_screenshot",
         iterations,
         samples,
         observations,

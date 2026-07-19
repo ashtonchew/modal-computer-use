@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 
 
@@ -10,6 +11,29 @@ def test_core_import_does_not_import_providers() -> None:
 
     assert "openai" not in sys.modules
     assert "anthropic" not in sys.modules
+
+
+def test_cli_import_does_not_require_optional_provider_packages() -> None:
+    code = """
+import importlib.abc
+import sys
+
+blocked = {"modal", "openai", "anthropic", "daytona", "e2b_desktop"}
+
+class Blocker(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname.split('.', 1)[0] in blocked:
+            raise ImportError(f"blocked optional dependency: {fullname}")
+        return None
+
+sys.meta_path.insert(0, Blocker())
+import modal_computer_use.cli
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_no_network_filesystem_usage() -> None:

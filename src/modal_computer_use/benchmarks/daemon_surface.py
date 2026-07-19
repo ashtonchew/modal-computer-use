@@ -39,16 +39,16 @@ def _run_daemon_http_surface(
     )
     cases = {
         "action_batch": core._report_action_batch(action_batch),
-        "screenshot_full": core.run_screenshot_benchmark(
+        "screenshot_full_structured": core.run_screenshot_benchmark(
             client=client,
-            name="screenshot_full",
+            name="screenshot_full_structured",
             request={"format": "png", "storage": "inline", "show_cursor": False},
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "screenshot_full_raw": core.run_screenshot_benchmark(
+        "screenshot_full": core.run_screenshot_benchmark(
             client=client,
-            name="screenshot_full_raw",
+            name="screenshot_full",
             request={"format": "png", "show_cursor": False},
             iterations=iterations,
             warmup_iterations=warmup_iterations,
@@ -59,7 +59,7 @@ def _run_daemon_http_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "click_screenshot_raw": core.run_click_screenshot_raw_benchmark(
+        "click_then_screenshot": core.run_click_then_screenshot_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
@@ -89,7 +89,7 @@ def _run_daemon_http_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "cold_create_to_ready": _modal_cold_create_to_ready_case(environment_metadata),
+        **_modal_product_readiness_cases(environment_metadata),
         "warm_attach_to_health": core._future_benchmark(
             "not_measured",
             "warm attach requires Modal orchestration metadata",
@@ -243,18 +243,117 @@ def _modal_surface_runtime_seconds(environment_metadata: dict[str, Any] | None) 
         return None
     return float(value) / 1000.0
 
-def _modal_cold_create_to_ready_case(environment_metadata: dict[str, Any] | None) -> dict[str, Any]:
-    value = (
-        None
-        if not environment_metadata
-        else environment_metadata.get("modal_cold_create_to_ready_ms")
-    )
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
-        return core._future_benchmark(
+def _modal_product_readiness_cases(
+    environment_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result = _modal_product_create_to_first_screenshot_case(environment_metadata)
+    return {
+        "product_create_to_first_screenshot": result,
+        "cold_create_to_ready": {
+            **result,
+            "name": "cold_create_to_ready",
+            "canonical_case": "product_create_to_first_screenshot",
+            "deprecated": True,
+            "removal_version": "1.2.0",
+        },
+    }
+
+
+def _modal_product_create_to_first_screenshot_case(
+    environment_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    samples, sample_error = _modal_product_readiness_samples(environment_metadata)
+    expected_iterations = _expected_modal_product_samples(environment_metadata)
+    if sample_error is not None:
+        failures = [
+            core._failure(
+                "product_create_to_first_screenshot",
+                phase="setup",
+                iteration=0,
+                exc=ValueError(sample_error),
+            )
+        ]
+        result = core._case_result(
+            "product_create_to_first_screenshot",
+            expected_iterations or len(samples) or 1,
+            samples,
+            failures,
+        )
+        result["definition"] = (
+            "provider product create call to first successful screenshot"
+        )
+        return result
+    if not samples:
+        result = core._future_benchmark(
             "not_measured",
             "cold Modal Sandbox creation is measured by a live orchestration runner, "
             "not this daemon target",
         )
-    result = core._case_result("cold_create_to_ready", 1, [float(value)], [])
+        result["definition"] = "provider product create call to first successful screenshot"
+        return result
+    result = core._case_result(
+        "product_create_to_first_screenshot",
+        len(samples),
+        samples,
+        [],
+    )
+    definition = (
+        None
+        if not environment_metadata
+        else environment_metadata.get("modal_cold_create_to_ready_definition")
+    )
     result["source"] = "live_orchestration_metadata"
+    result["definition"] = (
+        definition
+        if isinstance(definition, str) and definition
+        else "create to first raw full-screen screenshot over configured Modal SDK ingress"
+    )
+    result["startup_model"] = "modal_sandbox_image_daemon_start"
+    result["uses_snapshot_or_template"] = False
+    result["readiness_contract"] = (
+        "ComputerSandbox.create(wait=False) -> daemon /readyz -> configured ingress ready "
+        "-> first raw full-screen screenshot"
+    )
+    result["setup_included"] = True
+    result["ingress_included"] = True
+    result["first_observation_api"] = "/v1/screenshots/full/raw"
     return result
+
+
+def _modal_product_readiness_samples(
+    environment_metadata: dict[str, Any] | None,
+) -> tuple[list[float], str | None]:
+    if not environment_metadata:
+        return [], None
+    values = environment_metadata.get("modal_product_create_to_first_screenshot_samples_ms")
+    expected_iterations = _expected_modal_product_samples(environment_metadata)
+    if isinstance(values, list):
+        samples = []
+        invalid_count = 0
+        for value in values:
+            if not isinstance(value, bool) and isinstance(value, int | float) and value > 0:
+                samples.append(float(value))
+            else:
+                invalid_count += 1
+        if invalid_count:
+            return samples, f"lifecycle metadata contained {invalid_count} invalid samples"
+        if expected_iterations is not None and len(samples) != expected_iterations:
+            return samples, (
+                f"expected {expected_iterations} lifecycle samples, received {len(samples)}"
+            )
+        return samples, None
+    value = environment_metadata.get("modal_cold_create_to_ready_ms")
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        return [], None
+    return [float(value)], None
+
+
+def _expected_modal_product_samples(
+    environment_metadata: dict[str, Any] | None,
+) -> int | None:
+    if not environment_metadata:
+        return None
+    value = environment_metadata.get("modal_product_create_to_first_screenshot_expected_samples")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value

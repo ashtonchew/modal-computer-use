@@ -20,7 +20,7 @@ def _run_daemon_hot_session_surface(
     environment_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     cases = {
-        "screenshot_full_raw": _run_hot_screenshot_raw_benchmark(
+        "screenshot_full": _run_hot_screenshot_benchmark(
             hot_session=hot_session,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
@@ -30,7 +30,7 @@ def _run_daemon_hot_session_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
-        "click_screenshot_raw": _run_hot_click_screenshot_raw_benchmark(
+        "click_then_screenshot": _run_hot_click_then_screenshot_benchmark(
             hot_session=hot_session,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
@@ -111,7 +111,7 @@ def _run_hot_move_click_sequence_benchmark(
     return result
 
 
-def _run_hot_click_screenshot_raw_benchmark(
+def _run_hot_click_then_screenshot_benchmark(
     *,
     hot_session: HotSessionClient,
     iterations: int,
@@ -119,14 +119,14 @@ def _run_hot_click_screenshot_raw_benchmark(
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     samples, observations = _measure_observed_case(
-        name="click_screenshot_raw",
+        name="click_then_screenshot",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         operation=lambda: _run_hot_action_screenshot(hot_session),
         failures=failures,
     )
     result = _attributed_case_result(
-        "click_screenshot_raw", iterations, samples, observations, failures
+        "click_then_screenshot", iterations, samples, observations, failures
     )
     result.update(
         {
@@ -149,7 +149,7 @@ def _run_hot_click_screenshot_raw_benchmark(
     return result
 
 
-def _run_hot_screenshot_raw_benchmark(
+def _run_hot_screenshot_benchmark(
     *,
     hot_session: HotSessionClient,
     iterations: int,
@@ -157,13 +157,13 @@ def _run_hot_screenshot_raw_benchmark(
 ) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     samples, observations = _measure_observed_case(
-        name="screenshot_full_raw",
+        name="screenshot_full",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         operation=lambda: _run_hot_screenshot(hot_session),
         failures=failures,
     )
-    result = _case_result("screenshot_full_raw", iterations, samples, failures)
+    result = _case_result("screenshot_full", iterations, samples, failures)
     result.update(
         {
             "request": {"format": "png", "show_cursor": False},

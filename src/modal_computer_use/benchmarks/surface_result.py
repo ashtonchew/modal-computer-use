@@ -21,6 +21,8 @@ def _surface_result(
     for case_name, case in cases.items():
         if not isinstance(case, dict):
             continue
+        if case.get("deprecated") is True:
+            continue
         failures.extend(core._benchmark_failures(case_name, case.get("failures", [])))
         status = case.get("status")
         failed = failed or status == "failed"
