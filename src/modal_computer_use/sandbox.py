@@ -200,9 +200,8 @@ class ModalCandidateAllocationContext:
             cleanup = False
             error_type: str | None = None
             try:
-                await sandbox.wait_until_ready.aio(timeout=timeout_seconds)
-                ready = True
                 placement = await _sandbox_runtime_placement_async(sandbox)
+                ready = True
             except Exception as exc:
                 error_type = type(exc).__name__
             finally:
@@ -474,7 +473,6 @@ def create_modal_candidate_runner(
         },
     )
     try:
-        sandbox.wait_until_ready(timeout=180)
         placement = _sandbox_runtime_placement(sandbox)
     except Exception:
         _terminate_failed_sandbox(sandbox)

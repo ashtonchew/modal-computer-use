@@ -445,6 +445,8 @@ def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> No
     assert kwargs["image"] == "named-image"
     assert kwargs["i6pn"] is True
     assert kwargs["cloud"] == "aws"
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.wait_until_ready_calls == []
     assert runner.placement == {"cloud": "aws", "region": "us-west-2"}
     assert runner.terminate() is True
 

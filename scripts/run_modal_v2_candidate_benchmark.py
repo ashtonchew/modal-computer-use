@@ -125,11 +125,28 @@ def _pilot(args: argparse.Namespace) -> int:
     _require_clean_source(args.source_sha)
     preregistration = _read_preregistration(args.preregistration, source_sha=args.source_sha)
     config = _config_from_preregistration(preregistration)
-    trials, execution = run_candidate_phase(
-        config,
-        schedule=list(preregistration["pilot_schedule"]),
-        progress=_progress,
-    )
+    try:
+        trials, execution = run_candidate_phase(
+            config,
+            schedule=list(preregistration["pilot_schedule"]),
+            progress=_progress,
+        )
+    except Exception as exc:
+        reason = f"pilot runner setup failed before measurement: {type(exc).__name__}"
+        payload = build_result_artifact(
+            source_sha=args.source_sha,
+            generated_at=_utc_now(),
+            preregistration=preregistration,
+            trials=[],
+            throughput=[],
+            execution_status="rejected",
+            status_reason=reason,
+            execution={"pilot_setup": {"error_type": type(exc).__name__}},
+        )
+        output = Path(classified_raw_artifact_path(args.output.as_posix(), status="rejected"))
+        _write_new(output, payload)
+        print(json.dumps({"status": "rejected", "output": str(output), "reason": reason}))
+        return 2
     provisional = build_result_artifact(
         source_sha=args.source_sha,
         generated_at=_utc_now(),
