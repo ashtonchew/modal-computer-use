@@ -104,7 +104,7 @@ def _preregister(args: argparse.Namespace) -> int:
         },
         sdk_versions={
             "modal": version("modal"),
-            "daytona": version("daytona-sdk"),
+            "daytona": version("daytona"),
             "e2b-desktop": version("e2b-desktop"),
         },
         commands=commands,
