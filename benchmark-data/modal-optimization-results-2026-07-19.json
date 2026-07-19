@@ -3604,7 +3604,7 @@
     "execution_date_utc": "2026-07-19",
     "image_identity": "modal-computer-use-chromium:7707edff8270aa0d66cef65d72ef44a6c99f8a0f",
     "modal_sdk_version": "1.5.2",
-    "normalizer_sha": "59ccc8ef83a218f47d1b738a2364c0b80518719f",
+    "normalizer_sha": "2bc533c16781eeb0f68b53aca0989b3db278b9d2",
     "preregistration_sha256": "1d16e694984ccafe02cbccadb34513112b7c0f4adbffd3908ae7356a72836bbf",
     "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
     "raw_artifact_sha256": "4646f2aa8f78c0bdc8f611e157fa2c728cd76aff3b79cd7f7bd0f5b3aa8ce879",
