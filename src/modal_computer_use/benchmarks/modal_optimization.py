@@ -783,7 +783,8 @@ def sanitize_modal_optimization_benchmark(
         payload["command_manifest_sanitization"] = (
             "Normalized the runner-specific credential file path to repository-relative .env. "
             "Added the digest-bound region attestation command when the execution-time "
-            "preregistration did not contain that later provenance step."
+            "preregistration did not contain that later provenance step. Updated the "
+            "published replay command to consume the attested region evidence."
         )
         payload["environment_manifest"] = copy.deepcopy(
             _mapping(preregistration_payload.get("environment"), "environment")
@@ -964,7 +965,7 @@ def _portable_command_manifest(commands: dict[str, Any]) -> dict[str, str]:
         if not _nonempty_text(command):
             raise ValueError("command manifest values must be nonempty strings")
         output[str(name)] = re.sub(
-            r"--env-file\s+(?:\"[^\"]+\"|'[^']+'|\S+)",
+            r"--env-file(?:=|\s+)(?:\"[^\"]+\"|'[^']+'|\S+)",
             "--env-file .env",
             str(command),
         )
@@ -976,7 +977,7 @@ def _add_region_attestation_command(
     *,
     region_evidence_payload: dict[str, Any] | None,
 ) -> None:
-    if "region_selection_attest" in commands or region_evidence_payload is None:
+    if region_evidence_payload is None:
         return
     provenance = _mapping(
         region_evidence_payload.get("provenance"),
@@ -990,11 +991,19 @@ def _add_region_attestation_command(
         raise ValueError("region evidence source must be a full Git SHA")
     raw = Path(raw_path)
     attested = raw.with_name(f"{raw.stem}-attested{raw.suffix}")
-    commands["region_selection_attest"] = (
-        "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
-        f"{raw.as_posix()} {attested.as_posix()} --source-sha {source_sha} "
-        f"--raw-artifact-path {raw.as_posix()}"
-    )
+    if "region_selection_attest" not in commands:
+        commands["region_selection_attest"] = (
+            "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
+            f"{raw.as_posix()} {attested.as_posix()} --source-sha {source_sha} "
+            f"--raw-artifact-path {raw.as_posix()}"
+        )
+    benchmark = commands.get("benchmark")
+    if benchmark is not None:
+        commands["benchmark"] = re.sub(
+            r"--region-selection(?:=|\s+)(?:\"[^\"]+\"|'[^']+'|\S+)",
+            f"--region-selection {attested.as_posix()}",
+            benchmark,
+        )
 
 
 def _summary_from_attempt_field(

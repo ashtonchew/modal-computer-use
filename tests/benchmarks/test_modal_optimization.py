@@ -276,6 +276,10 @@ def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() 
 def test_sanitizer_adds_post_execution_region_attestation_command() -> None:
     commands = {
         "region_selection": "region command",
+        "benchmark": (
+            "benchmark command --region-selection "
+            "benchmark-results/run/region-selection.json"
+        ),
     }
     region_evidence = {
         "benchmark": "modal-region-selection-evidence",
@@ -297,6 +301,52 @@ def test_sanitizer_adds_post_execution_region_attestation_command() -> None:
         "benchmark-results/run/region-selection-attested.json --source-sha "
         + "d" * 40
         + " --raw-artifact-path benchmark-results/run/region-selection.json"
+    )
+    assert commands["benchmark"] == (
+        "benchmark command --region-selection "
+        "benchmark-results/run/region-selection-attested.json"
+    )
+
+
+def test_sanitizer_normalizes_equals_form_credential_file_path() -> None:
+    commands = {
+        "provider_default": (
+            "provider command --env-file=/Users/example/private-repository/.env"
+        ),
+        "provider_default_normalize": "provider normalize command",
+        "region_selection": "region command",
+        "region_selection_attest": "region attest command",
+        "publish_image": "publish command",
+        "benchmark": "benchmark command",
+        "normalize": "normalize command",
+    }
+    preregistration = build_preregistration(
+        ModalOptimizationConfig(region="us-west", image_revision="a" * 40),
+        source_sha="a" * 40,
+        dependency_sha="b" * 40,
+        generated_at="2026-07-19T00:00:00Z",
+        runner_identity={"kind": "local"},
+        sdk_versions={"modal": "1.5.2"},
+        commands=commands,
+    )
+    preregistration_bytes = json.dumps(preregistration, sort_keys=True).encode()
+    raw = _artifact()
+    raw["provenance"]["preregistration_sha256"] = hashlib.sha256(
+        preregistration_bytes
+    ).hexdigest()
+
+    sanitized = sanitize_modal_optimization_benchmark(
+        raw,
+        raw_bytes=json.dumps(raw).encode(),
+        raw_artifact_path="benchmark-results/modal-optimization/raw.json",
+        harness_commit="a" * 40,
+        preregistration_payload=preregistration,
+        preregistration_bytes=preregistration_bytes,
+        normalizer_commit="c" * 40,
+    )
+
+    assert sanitized["command_manifest"]["provider_default"] == (
+        "provider command --env-file .env"
     )
 
 
