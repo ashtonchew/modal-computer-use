@@ -395,6 +395,20 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
         execution_status="complete",
         status_reason="all gates passed",
         execution={
+            "pilot": {
+                "run_cleanup": {
+                    "cleanup_succeeded": True,
+                    "remaining_sandboxes": 0,
+                    "termination_failures": 0,
+                }
+            },
+            "full": {
+                "run_cleanup": {
+                    "cleanup_succeeded": True,
+                    "remaining_sandboxes": 0,
+                    "termination_failures": 0,
+                }
+            },
             "throughput_cleanup": {
                 "cleanup_succeeded": True,
                 "remaining_sandboxes": 0,
@@ -431,6 +445,17 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
         sanitize_result_artifact(
             missing_sweep,
             raw_bytes=json.dumps(missing_sweep).encode(),
+            raw_artifact_path="benchmark-results/modal-v2-candidate/candidates/full.json",
+            preregistration=preregistration,
+            normalizer_sha="b" * 40,
+        )
+
+    missing_lifecycle_sweep = copy.deepcopy(raw)
+    missing_lifecycle_sweep["execution"]["pilot"].pop("run_cleanup")
+    with pytest.raises(ValueError, match="pilot run cleanup"):
+        sanitize_result_artifact(
+            missing_lifecycle_sweep,
+            raw_bytes=json.dumps(missing_lifecycle_sweep).encode(),
             raw_artifact_path="benchmark-results/modal-v2-candidate/candidates/full.json",
             preregistration=preregistration,
             normalizer_sha="b" * 40,

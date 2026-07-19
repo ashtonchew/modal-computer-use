@@ -5,7 +5,7 @@ import hashlib
 import json
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from modal_computer_use.sandbox import (
@@ -204,8 +204,8 @@ def validate_placement_capability_matrix(payload: dict[str, Any]) -> None:
     source_sha = payload.get("source_sha")
     if not isinstance(source_sha, str) or len(source_sha) != 40 or not _is_hex(source_sha):
         raise ValueError("placement capability matrix requires a full source SHA")
-    requested_region = payload.get("requested_region")
-    if not isinstance(requested_region, str) or not requested_region.strip():
+    matrix_region = payload.get("requested_region")
+    if not isinstance(matrix_region, str) or not matrix_region.strip():
         raise ValueError("placement capability matrix requires an explicit region")
     image_identity = payload.get("image_identity")
     if not isinstance(image_identity, str) or not image_identity.startswith(
@@ -240,13 +240,11 @@ def validate_placement_capability_matrix(payload: dict[str, Any]) -> None:
         if not isinstance(candidate, dict):
             raise ValueError("placement capability candidate must be an object")
         requested_cloud = candidate.get("requested_cloud")
-        requested_region = candidate.get("requested_region")
+        candidate_region = candidate.get("requested_region")
         observations = candidate.get("observations")
         if requested_cloud not in {None, "aws", "gcp", "oci"}:
             raise ValueError("placement capability candidate cloud is unsupported")
-        if candidate.get("requested_region") != requested_region or not isinstance(
-            observations, dict
-        ):
+        if candidate_region != matrix_region or not isinstance(observations, dict):
             raise ValueError("placement capability candidate is incomplete")
         try:
             typed_observations = {
@@ -268,12 +266,12 @@ def validate_placement_capability_matrix(payload: dict[str, Any]) -> None:
                 or observation.backend != backend
                 or observation.i6pn_enabled is not i6pn
                 or observation.requested_cloud != requested_cloud
-                or observation.requested_region != requested_region
+                or observation.requested_region != matrix_region
             ):
                 raise ValueError("placement capability observation contract is invalid")
         expected = evaluate_placement_candidate(
             requested_cloud=requested_cloud,
-            requested_region=requested_region,
+            requested_region=matrix_region,
             observations=typed_observations,
         )
         if candidate != expected:
@@ -315,6 +313,26 @@ def validate_placement_artifact_path(artifact_path: str) -> PurePosixPath:
         or ".." in path.parts
     ):
         raise ValueError("placement capability artifact must be under benchmark-results")
+    return path
+
+
+def validate_placement_output_path(
+    path: Path,
+    *,
+    benchmark_root: Path = Path("benchmark-results"),
+) -> Path:
+    validate_placement_artifact_path(path.as_posix())
+    if benchmark_root.is_symlink():
+        raise ValueError("placement capability output root cannot be a symlink")
+    current = Path(path.parts[0])
+    for part in path.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            raise ValueError("placement capability output cannot traverse a symlink")
+    root = benchmark_root.resolve(strict=False)
+    resolved = path.resolve(strict=False)
+    if resolved != root and root not in resolved.parents:
+        raise ValueError("placement capability output escapes benchmark-results")
     return path
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,7 @@ from modal_computer_use.benchmarks.modal_v2_placement import (
     serialize_placement_capability,
     validate_placement_artifact_path,
     validate_placement_capability_matrix,
+    validate_placement_output_path,
 )
 from modal_computer_use.sandbox import ModalCandidatePlacementProbe
 
@@ -98,6 +100,26 @@ def test_capability_matrix_selects_unconstrained_exact_common_placement() -> Non
         assert "does not match its observations" in str(exc)
     else:
         raise AssertionError("placement eligibility must be recomputed from observations")
+
+    tampered_region = copy.deepcopy(payload)
+    tampered_region["candidates"][0]["requested_region"] = "us-east"
+    with pytest.raises(ValueError, match="candidate is incomplete"):
+        validate_placement_capability_matrix(tampered_region)
+
+
+def test_placement_output_path_rejects_symlink_escape(tmp_path, monkeypatch) -> None:
+    benchmark_root = tmp_path / "benchmark-results"
+    benchmark_root.mkdir()
+    outside = tmp_path / "docs"
+    outside.mkdir()
+    (benchmark_root / "link").symlink_to(outside, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError, match="symlink"):
+        validate_placement_output_path(
+            Path("benchmark-results/link/capability.json"),
+            benchmark_root=Path("benchmark-results"),
+        )
 
 
 def test_capability_matrix_rejects_cross_cloud_targets_without_ratios() -> None:

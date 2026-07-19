@@ -14,6 +14,7 @@ from modal_computer_use.benchmarks.modal_v2_placement import (
     run_placement_capability_matrix,
     serialize_placement_capability,
     validate_placement_artifact_path,
+    validate_placement_output_path,
 )
 
 DEFAULT_OUTPUT = Path(
@@ -103,6 +104,7 @@ def _git_output(git: str, *args: str) -> str:
 def _require_benchmark_results_path(path: Path) -> None:
     try:
         validate_placement_artifact_path(path.as_posix())
+        validate_placement_output_path(path)
     except ValueError as exc:
         raise ValueError("placement-probe output must be under benchmark-results") from exc
 

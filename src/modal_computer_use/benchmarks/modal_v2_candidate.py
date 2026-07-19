@@ -1034,6 +1034,18 @@ def _validate_promotion_gates(
         raise ValueError("promotion requires identical target and runner placement across trials")
     if any(not _target_runner_colocated(trial) for trial in trials):
         raise ValueError("promotion requires exact target and runner colocation")
+    execution = _mapping(payload.get("execution"), "execution")
+    for phase in ("pilot", "full"):
+        phase_cleanup = _mapping(
+            _mapping(execution.get(phase), f"{phase} execution").get("run_cleanup"),
+            f"{phase} run cleanup",
+        )
+        if (
+            phase_cleanup.get("cleanup_succeeded") is not True
+            or phase_cleanup.get("remaining_sandboxes") != 0
+            or phase_cleanup.get("termination_failures") != 0
+        ):
+            raise ValueError(f"promotion requires a successful {phase} run-scoped cleanup sweep")
     if not require_throughput:
         return
     throughput = payload.get("throughput")
@@ -1112,7 +1124,7 @@ def _validate_promotion_gates(
     if throughput_placements != lifecycle_target_placements:
         raise ValueError("promotion requires throughput and lifecycle target placement to match")
     throughput_cleanup = _mapping(
-        _mapping(payload.get("execution"), "execution").get("throughput_cleanup"),
+        execution.get("throughput_cleanup"),
         "throughput cleanup",
     )
     if (
