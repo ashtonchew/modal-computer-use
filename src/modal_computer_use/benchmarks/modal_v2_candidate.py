@@ -64,7 +64,7 @@ _FORBIDDEN_KEYS = {
 @dataclass(frozen=True, slots=True)
 class ModalV2CandidateConfig:
     image_revision: str
-    cloud: str = "azure"
+    cloud: str = "aws"
     region: str = "us-west"
     cpu: float = 4.0
     memory_mib: int = 8192
@@ -89,6 +89,8 @@ class ModalV2CandidateConfig:
         for name, value in (("cloud", self.cloud), ("region", self.region)):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be explicit")
+        if self.cloud == "azure":
+            raise ValueError("azure is unsupported by the required Modal V1 benchmark arms")
         if not _positive_number(self.cpu):
             raise ValueError("cpu must be positive")
         positive_integers = (
@@ -302,8 +304,12 @@ def build_preregistration(
             "requested_region": config.region,
             "clean_source_verified": True,
             "azure_support_decision": (
-                "selected after a live Modal 1.5.2 V2 capability probe accepted cloud=azure and "
-                "region=us-west, then reported CLOUD_PROVIDER_AZURE and westus3"
+                "not selected: a live Modal 1.5.2 V2 probe accepted azure/us-west and reported "
+                "CLOUD_PROVIDER_AZURE/westus3, but V1 rejected azure as an unknown cloud provider"
+            ),
+            "v2_aws_placement_probe": (
+                "a prior V2 runner requested as aws/us-west reported "
+                "CLOUD_PROVIDER_AZURE/westus3; live preflight must reject that mismatch"
             ),
             "placement_match_policy": (
                 "actual cloud provider must match the requested provider; the requested broad "
@@ -638,6 +644,7 @@ def validate_phase_checkpoint(
         raise ValueError("checkpoint phase is invalid")
     if payload.get("state") not in {
         "starting",
+        "preflight",
         "running",
         "complete",
         "interrupted",
@@ -907,7 +914,7 @@ def _validate_promotion_gates(
                 and bool(attempt["actual_cloud"].strip())
                 and isinstance(attempt.get("actual_region"), str)
                 and bool(attempt["actual_region"].strip())
-                and _cloud_value_matches(
+                and modal_cloud_matches(
                     row.get("requested_cloud"), attempt.get("actual_cloud")
                 )
                 for attempt in attempts
@@ -1019,12 +1026,12 @@ def _actual_cloud_matches_requested(trial: dict[str, Any]) -> bool:
     if not isinstance(requested, dict) or not isinstance(actual, dict):
         return False
     return all(
-        _cloud_value_matches(requested.get("cloud"), actual.get(key))
+        modal_cloud_matches(requested.get("cloud"), actual.get(key))
         for key in ("target_cloud", "runner_cloud")
     )
 
 
-def _cloud_value_matches(requested: Any, actual: Any) -> bool:
+def modal_cloud_matches(requested: Any, actual: Any) -> bool:
     expected = {
         "azure": {"azure", "CLOUD_PROVIDER_AZURE"},
         "aws": {"aws", "CLOUD_PROVIDER_AWS"},

@@ -28,6 +28,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate import (
 from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     CANDIDATE_RESULT_END,
     CANDIDATE_RESULT_START,
+    CandidatePlacementMismatchError,
     extract_candidate_runner_result,
     run_candidate_phase,
 )
@@ -35,7 +36,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
 
 class _FakeRunner:
     def __init__(self) -> None:
-        self.placement = {"cloud": "CLOUD_PROVIDER_AZURE", "region": "westus3"}
+        self.placement = {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"}
         self.terminated = False
 
     def terminate(self) -> bool:
@@ -43,13 +44,16 @@ class _FakeRunner:
         return True
 
 
-def test_config_freezes_sample_concurrency_and_live_probed_cloud_policy() -> None:
+def test_config_freezes_sample_concurrency_and_common_cloud_policy() -> None:
     config = ModalV2CandidateConfig(image_revision="a" * 40)
 
     assert config.pilot_samples_per_arm == 5
     assert config.full_samples_per_arm == 30
     assert config.throughput_concurrency == (1, 5, 20)
-    assert config.cloud == "azure"
+    assert config.cloud == "aws"
+
+    with pytest.raises(ValueError, match="unsupported by the required Modal V1"):
+        ModalV2CandidateConfig(image_revision="a" * 40, cloud="azure")
     with pytest.raises(ValueError, match="pilot requires exactly 5"):
         ModalV2CandidateConfig(image_revision="a" * 40, pilot_samples_per_arm=4)
     with pytest.raises(ValueError, match="throughput concurrency"):
@@ -217,6 +221,43 @@ def test_candidate_phase_checkpoints_after_cleanup_on_interrupt(monkeypatch) -> 
     assert runner.terminated is True
 
 
+def test_candidate_phase_rejects_runner_cloud_mismatch_before_trials(monkeypatch) -> None:
+    config = ModalV2CandidateConfig(image_revision="a" * 40, bootstrap_resamples=100)
+    runner = _FakeRunner()
+    runner.placement = {"cloud": "CLOUD_PROVIDER_AZURE", "region": "westus3"}
+    monkeypatch.setattr(
+        candidate_execution,
+        "run_candidate_trial",
+        lambda *_args, **_kwargs: pytest.fail("placement mismatch must fail before trials"),
+    )
+    checkpoints: list[tuple[list[dict], dict]] = []
+
+    with pytest.raises(CandidatePlacementMismatchError, match="requested runner cloud aws"):
+        run_candidate_phase(
+            config,
+            schedule=build_trial_schedule(
+                phase="pilot", samples_per_arm=5, seed=20260719
+            ),
+            runner_factory=lambda **_kwargs: runner,
+            checkpoint=lambda trials, execution: checkpoints.append(
+                (copy.deepcopy(trials), copy.deepcopy(execution))
+            ),
+        )
+
+    assert checkpoints[-1][0] == []
+    assert checkpoints[-1][1]["state"] == "failed"
+    assert checkpoints[-1][1]["placement_preflight"] == {
+        "requested_cloud": "aws",
+        "requested_region": "us-west",
+        "actual_cloud": "CLOUD_PROVIDER_AZURE",
+        "actual_region": "westus3",
+        "eligible": False,
+        "reason": "requested runner cloud aws; observed CLOUD_PROVIDER_AZURE",
+    }
+    assert checkpoints[-1][1]["runner_cleanup_succeeded"] is True
+    assert runner.terminated is True
+
+
 def test_result_validator_rejects_aliases_winner_claims_and_ineligible_ratios() -> None:
     preregistration = _preregistration()
     payload = build_result_artifact(
@@ -269,14 +310,14 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
             "concurrency": concurrency,
             "status": "valid",
             "cleanup_succeeded": True,
-            "requested_cloud": "azure",
+            "requested_cloud": "aws",
             "requested_region": "us-west",
             "attempts": [
                 {
                     "status": "valid",
                     "cleanup_succeeded": True,
-                    "actual_cloud": "CLOUD_PROVIDER_AZURE",
-                    "actual_region": "westus3",
+                    "actual_cloud": "CLOUD_PROVIDER_AWS",
+                    "actual_region": "us-west-2",
                 }
                 for _ in range(concurrency)
             ],
@@ -385,7 +426,7 @@ def _trials(phase: str, count: int) -> list[dict]:
                         "ingress": ingress,
                         "action_transport": "persistent-hot-session",
                         "observation_transport": "binary-envelope",
-                        "cloud": "azure",
+                        "cloud": "aws",
                         "region": "us-west",
                         "cpu": 4.0,
                         "memory_mib": 8192,
@@ -400,10 +441,10 @@ def _trials(phase: str, count: int) -> list[dict]:
                         "cleanup_policy": "terminate-target-runner-and-detach-target",
                     },
                     "actual": {
-                        "target_cloud": "CLOUD_PROVIDER_AZURE",
-                        "target_region": "westus3",
-                        "runner_cloud": "CLOUD_PROVIDER_AZURE",
-                        "runner_region": "westus3",
+                        "target_cloud": "CLOUD_PROVIDER_AWS",
+                        "target_region": "us-west-2",
+                        "runner_cloud": "CLOUD_PROVIDER_AWS",
+                        "runner_region": "us-west-2",
                     },
                     "verification": {
                         "healthz": True,

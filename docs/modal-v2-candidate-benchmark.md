@@ -32,7 +32,7 @@ Every target arm requests:
 
 - one exact named Chromium image revision;
 - 4 CPU cores and 8192 MiB memory;
-- cloud `azure` and broad region `us-west`;
+- cloud `aws` and broad region `us-west`;
 - Chromium prewarm enabled;
 - a 1024x768, 96 DPI desktop;
 - the same daemon, browser, readiness, click, frame, timeout, retry, and cleanup semantics;
@@ -43,11 +43,12 @@ The persistent runner is V2, i6pn-enabled, uses the same named image revision, r
 target lifecycle and warm action boundaries. Its actual cloud and region must be observed.
 
 A live Modal 1.5.2 V2 capability probe accepted `cloud="azure", region="us-west"` and reported actual
-placement `CLOUD_PROVIDER_AZURE/westus3`, establishing support despite the public provider-list gap.
-Both requested and actual target and runner placement are retained. Actual cloud must resolve to
-Azure, while the broad requested region may resolve to a concrete provider region only if that
-actual region is observed and identical across arms. Missing or mismatched placement fails causal
-eligibility.
+placement `CLOUD_PROVIDER_AZURE/westus3`, but V1 rejected Azure as an unknown cloud provider. Azure
+therefore cannot be the common matched request. The harness requests `aws/us-west` and performs a
+runner placement preflight before the first target. A prior V2 runner requested as AWS reported
+`CLOUD_PROVIDER_AZURE/westus3`; if that recurs, the pilot is rejected with zero measured attempts.
+Any later target placement must also resolve to the requested provider, and concrete actual regions
+must be observed and identical across arms.
 
 ## Measured Boundaries
 

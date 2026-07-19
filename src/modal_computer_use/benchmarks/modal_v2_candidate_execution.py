@@ -29,10 +29,15 @@ from .modal_v2_candidate import (
     ARM_V2_TUNNEL,
     ModalV2CandidateConfig,
     arm_definitions,
+    modal_cloud_matches,
 )
 
 CANDIDATE_RESULT_START = "__MODAL_V2_CANDIDATE_RESULT_START__"
 CANDIDATE_RESULT_END = "__MODAL_V2_CANDIDATE_RESULT_END__"
+
+
+class CandidatePlacementMismatchError(RuntimeError):
+    pass
 
 
 def run_candidate_phase(
@@ -70,6 +75,20 @@ def run_candidate_phase(
             app_tags={"benchmark": "modal-v2-candidate"},
             tags={"benchmark_run": run_id},
         )
+        preflight = _phase_execution(
+            config,
+            runner,
+            run_id=run_id,
+            app_name=app_name,
+            runner_cleanup=None,
+            state="preflight",
+        )
+        if checkpoint is not None:
+            checkpoint(trials, preflight)
+        if preflight["placement_preflight"]["eligible"] is not True:
+            raise CandidatePlacementMismatchError(
+                str(preflight["placement_preflight"]["reason"])
+            )
         for item in schedule:
             trial = run_candidate_trial(
                 config,
@@ -151,11 +170,30 @@ def _phase_execution(
     state: str,
     error_type: str | None = None,
 ) -> dict[str, Any]:
+    actual_cloud = None if runner is None else runner.placement.get("cloud")
+    placement_eligible = (
+        None if runner is None else modal_cloud_matches(config.cloud, actual_cloud)
+    )
+    placement_reason = (
+        "runner placement has not been observed"
+        if runner is None
+        else None
+        if placement_eligible
+        else f"requested runner cloud {config.cloud}; observed {actual_cloud or 'unobserved'}"
+    )
     return {
         "state": state,
         "error_type": error_type,
         "run_id": run_id,
         "app_name": app_name,
+        "placement_preflight": {
+            "requested_cloud": config.cloud,
+            "requested_region": config.region,
+            "actual_cloud": actual_cloud,
+            "actual_region": None if runner is None else runner.placement.get("region"),
+            "eligible": placement_eligible,
+            "reason": placement_reason,
+        },
         "runner_backend": "v2",
         "runner_i6pn_enabled": True,
         "runner_resources": {"cpu": 1.0, "memory_mib": 1024},

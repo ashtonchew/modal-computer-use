@@ -70,7 +70,7 @@ def main() -> int:
 
 def _add_configuration_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--image-revision")
-    parser.add_argument("--cloud", default="azure")
+    parser.add_argument("--cloud", default="aws")
     parser.add_argument("--region", default="us-west")
     parser.add_argument("--cpu", type=float, default=4.0)
     parser.add_argument("--memory-mib", type=int, default=8192)
@@ -539,7 +539,15 @@ def _write_failed_phase_result(
     execution = dict(prior_execution or {})
     execution[phase] = copy.deepcopy(checkpoint_state.get("execution") or {})
     execution[f"{phase}_failure"] = {"error_type": error_type}
-    reason = f"{phase} execution failed after {len(retained)} retained attempts: {error_type}"
+    preflight = execution[phase].get("placement_preflight")
+    preflight_reason = preflight.get("reason") if isinstance(preflight, dict) else None
+    reason = (
+        f"{phase} placement preflight failed before measurement: {preflight_reason}"
+        if error_type == "CandidatePlacementMismatchError"
+        and isinstance(preflight_reason, str)
+        and preflight_reason
+        else f"{phase} execution failed after {len(retained)} retained attempts: {error_type}"
+    )
     payload = build_result_artifact(
         source_sha=args.source_sha,
         generated_at=_utc_now(),
@@ -569,7 +577,17 @@ def _seal_checkpoint_after_cleanup(
     run_id = execution.get("run_id")
     app_name = execution.get("app_name")
     if isinstance(run_id, str) and run_id and isinstance(app_name, str) and app_name:
-        cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+        try:
+            cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+        except Exception as exc:
+            cleanup = {
+                "matched_sandboxes": None,
+                "terminated_sandboxes": 0,
+                "termination_failures": None,
+                "remaining_sandboxes": None,
+                "cleanup_succeeded": False,
+                "error_type": type(exc).__name__,
+            }
     else:
         cleanup = {
             "matched_sandboxes": 0,
