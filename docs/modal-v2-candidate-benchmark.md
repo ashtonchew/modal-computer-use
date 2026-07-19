@@ -32,7 +32,7 @@ Every target arm requests:
 
 - one exact named Chromium image revision;
 - 4 CPU cores and 8192 MiB memory;
-- cloud `aws` and broad region `us-west`;
+- the cloud request selected by the placement-capability matrix and broad region `us-west`;
 - Chromium prewarm enabled;
 - a 1024x768, 96 DPI desktop;
 - the same daemon, browser, readiness, click, frame, timeout, retry, and cleanup semantics;
@@ -42,13 +42,21 @@ The persistent runner is V2, i6pn-enabled, uses the same named image revision, r
 1024 MiB, and is reused across the randomized phase. Reusing it keeps runner allocation outside
 target lifecycle and warm action boundaries. Its actual cloud and region must be observed.
 
-A live Modal 1.5.2 V2 capability probe accepted `cloud="azure", region="us-west"` and reported actual
-placement `CLOUD_PROVIDER_AZURE/westus3`, but V1 rejected Azure as an unknown cloud provider. Azure
-therefore cannot be the common matched request. The harness requests `aws/us-west` and performs a
-runner placement preflight before the first target. A prior V2 runner requested as AWS reported
-`CLOUD_PROVIDER_AZURE/westus3`; if that recurs, the pilot is rejected with zero measured attempts.
-Any later target placement must also resolve to the requested provider, and concrete actual regions
-must be observed and identical across arms.
+Modal's documented `us-west` selector is a broad Modal region label, not a concrete AWS region.
+Before preregistration, an unmeasured capability matrix evaluates `auto`, `aws`, `gcp`, and `oci`
+requests for four roles: V1 target, V2 tunnel target, V2 i6pn target, and V2 i6pn runner. Each probe
+uses the exact named image and role resources, records the runtime `MODAL_CLOUD_PROVIDER` and
+`MODAL_REGION`, verifies i6pn where required, and performs run-scoped cleanup. The first request
+whose four roles share one exact observed cloud and concrete region is eligible; an explicit cloud
+request must also be honored.
+
+The matrix performs no latency measurement. Its path, SHA-256, run ID, source commit, image
+identity, resources, selected request, and observed placement are bound into preregistration.
+Preregistration fails when the matrix is descriptive-only or differs from the harness configuration.
+The pilot independently rechecks runner and target placement and suppresses all causal ratios if
+placement drifts. This makes the comparison stratum observed and auditable instead of inferred from
+requested placement. Azure is not a matrix request because Modal's documented runtime providers are
+AWS, GCP, and OCI and the current V1 API rejected the earlier observed V2 Azure placement.
 
 ## Measured Boundaries
 
@@ -77,7 +85,8 @@ when faster.
 
 ## Sampling And Gates
 
-The preregistration freezes both schedules before credentialed execution:
+After an eligible placement matrix is bound, preregistration freezes both schedules before measured
+credentialed execution:
 
 - pilot: 5 lifecycle samples per arm, randomized in four-arm blocks with seed `20260719`;
 - full: 30 lifecycle samples per eligible arm, randomized in four-arm blocks with seed `20260720`;
@@ -104,7 +113,9 @@ After full lifecycle gates pass, a separately labeled minimal-container allocati
 V1 and V2 at concurrency 1, 5, and 20. It caches one App and named Image handle and uses Modal's async
 create API. Concurrency 50 is disabled unless both the explicit flag and preregistered cost ceiling
 allow it. Every allocation is cleaned and records actual placement. Throughput rows never substitute
-for the independent lifecycle distributions.
+for the independent lifecycle distributions. The current harness preregisters a `$20.00`
+worst-case public-rate ceiling for the required 1, 5, and 20 batches, tags every allocation with an
+exact run ID, and requires a final run-scoped cleanup sweep before promotion.
 
 ## Provenance And Artifacts
 
@@ -112,6 +123,7 @@ Raw credentialed evidence remains ignored:
 
 ```text
 benchmark-results/modal-v2-candidate-2026-07-19/preregistration.json
+benchmark-results/modal-v2-candidate-2026-07-19/diagnostics/placement-capability.json
 benchmark-results/modal-v2-candidate-2026-07-19/candidates/pilot.json
 benchmark-results/modal-v2-candidate-2026-07-19/candidates/full.json
 benchmark-results/modal-v2-candidate-2026-07-19/rejected/pilot.json
@@ -148,8 +160,13 @@ SOURCE_SHA="$(git rev-parse HEAD)"
 
 uv run python scripts/publish_modal_images.py --revision "$SOURCE_SHA"
 
-uv run python scripts/run_modal_v2_candidate_benchmark.py preregister \
+uv run python scripts/probe_modal_v2_candidate_placement.py \
   --source-sha "$SOURCE_SHA" --image-revision "$SOURCE_SHA"
+
+uv run python scripts/run_modal_v2_candidate_benchmark.py preregister \
+  --source-sha "$SOURCE_SHA" --image-revision "$SOURCE_SHA" \
+  --placement-capability \
+    benchmark-results/modal-v2-candidate-2026-07-19/diagnostics/placement-capability.json
 
 uv run python scripts/run_modal_v2_candidate_benchmark.py pilot \
   --source-sha "$SOURCE_SHA"

@@ -123,14 +123,35 @@ class ModalCandidateRunner:
         return True
 
 
+@dataclass(frozen=True)
+class ModalCandidatePlacementProbe:
+    run_id: str
+    backend: ModalCandidateBackend
+    requested_cloud: str | None
+    requested_region: str
+    actual_cloud: str | None
+    actual_region: str | None
+    i6pn_enabled: bool
+    i6pn_verified: bool
+    sandbox_created: bool
+    cleanup_succeeded: bool
+    status: Literal["valid", "failed"]
+    error_type: str | None = None
+
+
 @dataclass
 class ModalCandidateAllocationContext:
     app: object
     image: object
-    cloud: str
+    run_id: str
+    cloud: str | None
     region: str
     cpu: float
     memory_mib: int
+
+    def __post_init__(self) -> None:
+        if self.cloud is not None and not self.cloud.strip():
+            raise ValueError("candidate throughput cloud must be non-empty when provided")
 
     async def run_batch(
         self,
@@ -155,14 +176,16 @@ class ModalCandidateAllocationContext:
                 "image": self.image,
                 "cpu": self.cpu,
                 "memory": self.memory_mib,
-                "cloud": self.cloud,
                 "region": self.region,
                 "timeout": timeout_seconds,
                 "tags": {
                     "computer-use.benchmark": "modal-v2-candidate-throughput",
                     "computer-use.backend": backend,
+                    "computer-use.run_id": f"{self.run_id}-{backend}-{concurrency}-{index}",
                 },
             }
+            if self.cloud is not None:
+                kwargs["cloud"] = self.cloud
             if backend == "v2":
                 kwargs["i6pn"] = False
             sandbox = await creator.aio("sleep", "infinity", **kwargs)
@@ -254,7 +277,7 @@ def cleanup_modal_candidate_run(
     runtime: Any = modal_runtime
     app = runtime.App.lookup(app_name, create_if_missing=False)
     matched = []
-    for sandbox in runtime.Sandbox.list(app_id=app.app_id):
+    for sandbox in _list_modal_candidate_sandboxes(runtime, app_id=app.app_id):
         tags = sandbox.get_tags()
         target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
         runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
@@ -273,7 +296,7 @@ def cleanup_modal_candidate_run(
         else:
             terminated += 1
     remaining = 0
-    for sandbox in runtime.Sandbox.list(app_id=app.app_id):
+    for sandbox in _list_modal_candidate_sandboxes(runtime, app_id=app.app_id):
         tags = sandbox.get_tags()
         target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
         runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
@@ -289,6 +312,22 @@ def cleanup_modal_candidate_run(
         "remaining_sandboxes": remaining,
         "cleanup_succeeded": failed == 0 and remaining == 0,
     }
+
+
+def _list_modal_candidate_sandboxes(runtime: Any, *, app_id: str) -> list[Any]:
+    sandboxes: list[Any] = []
+    seen: set[str] = set()
+    for method_name in ("list", "_experimental_list"):
+        method = getattr(runtime.Sandbox, method_name, None)
+        if not callable(method):
+            continue
+        for sandbox in method(app_id=app_id):
+            identity = str(getattr(sandbox, "object_id", id(sandbox)))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            sandboxes.append(sandbox)
+    return sandboxes
 
 
 class _TimedModalRuntime:
@@ -493,12 +532,14 @@ def modal_sandbox_exec_in_place(
 def create_modal_candidate_runner(
     *,
     app_name: str,
-    cloud: str,
+    cloud: str | None,
     region: str,
     image_revision: str,
     tags: dict[str, str] | None = None,
     app_tags: dict[str, str] | None = None,
 ) -> ModalCandidateRunner:
+    if cloud is not None and not cloud.strip():
+        raise ValueError("candidate runner cloud must be non-empty when provided")
     try:
         import modal
     except ImportError as exc:
@@ -511,23 +552,23 @@ def create_modal_candidate_runner(
         profile="browser",
         browser="chromium",
     )
-    sandbox = modal.Sandbox._experimental_create(
-        "sleep",
-        "infinity",
-        app=app,
-        image=image,
-        cpu=1.0,
-        memory=1024,
-        cloud=cloud,
-        region=region,
-        i6pn=True,
-        timeout=3600,
-        idle_timeout=600,
-        tags={
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image,
+        "cpu": 1.0,
+        "memory": 1024,
+        "region": region,
+        "i6pn": True,
+        "timeout": 3600,
+        "idle_timeout": 600,
+        "tags": {
             "computer-use.runner": "modal-v2-candidate",
             **(tags or {}),
         },
-    )
+    }
+    if cloud is not None:
+        create_kwargs["cloud"] = cloud
+    sandbox = modal.Sandbox._experimental_create("sleep", "infinity", **create_kwargs)
     try:
         placement = _sandbox_runtime_placement(sandbox)
     except Exception:
@@ -540,7 +581,8 @@ def create_modal_candidate_allocation_context(
     *,
     app_name: str,
     image_revision: str,
-    cloud: str,
+    run_id: str,
+    cloud: str | None,
     region: str,
     cpu: float,
     memory_mib: int,
@@ -558,10 +600,111 @@ def create_modal_candidate_allocation_context(
     return ModalCandidateAllocationContext(
         app=app,
         image=image,
+        run_id=run_id,
         cloud=cloud,
         region=region,
         cpu=cpu,
         memory_mib=memory_mib,
+    )
+
+
+def probe_modal_candidate_placement(
+    *,
+    app_name: str,
+    image_revision: str,
+    run_id: str,
+    backend: ModalCandidateBackend,
+    cloud: str | None,
+    region: str,
+    cpu: float,
+    memory_mib: int,
+    i6pn: bool,
+    tags: dict[str, str] | None = None,
+) -> ModalCandidatePlacementProbe:
+    """Observe one unmeasured candidate placement and always terminate it."""
+    if not run_id:
+        raise ValueError("candidate placement probes require an exact run ID")
+    if backend not in {"v1", "v2"}:
+        raise ValueError("backend must be v1 or v2")
+    if i6pn and backend != "v2":
+        raise ValueError("i6pn placement probes require the V2 backend")
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError("Modal placement probes require the modal extra") from exc
+
+    app = modal.App.lookup(app_name, create_if_missing=True)
+    image = named_image(
+        revision=image_revision,
+        profile="browser",
+        browser="chromium",
+    )
+    sandbox_tags = {
+        "computer-use.benchmark": "modal-v2-placement-probe",
+        **(tags or {}),
+        "computer-use.run_id": f"{run_id}-placement-probe-{backend}",
+    }
+    _validate_sandbox_tags(sandbox_tags)
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image,
+        "cpu": cpu,
+        "memory": memory_mib,
+        "region": region,
+        "timeout": 300,
+        "idle_timeout": 60,
+        "tags": sandbox_tags,
+    }
+    if cloud is not None:
+        create_kwargs["cloud"] = cloud
+    if backend == "v2":
+        create_kwargs["i6pn"] = i6pn
+        create = modal.Sandbox._experimental_create
+    else:
+        create = modal.Sandbox.create
+
+    sandbox: object | None = None
+    actual = {"cloud": None, "region": None}
+    i6pn_verified = False
+    status: Literal["valid", "failed"] = "failed"
+    error_type: str | None = None
+    cleanup_succeeded = False
+    try:
+        sandbox = create("sleep", "infinity", **create_kwargs)
+        actual = _sandbox_runtime_placement(sandbox)
+        if i6pn:
+            _sandbox_i6pn_address(sandbox)
+            i6pn_verified = True
+        status = "valid"
+    except Exception as exc:
+        error_type = type(exc).__name__
+    finally:
+        if sandbox is not None:
+            with suppress(Exception):
+                sandbox.terminate(wait=True)
+        try:
+            cleanup = cleanup_modal_candidate_run(
+                app_name=app_name,
+                run_id=run_id,
+                modal_runtime=modal,
+            )
+        except Exception:
+            cleanup_succeeded = False
+        else:
+            cleanup_succeeded = cleanup["cleanup_succeeded"] is True
+    return ModalCandidatePlacementProbe(
+        run_id=run_id,
+        backend=backend,
+        requested_cloud=cloud,
+        requested_region=region,
+        actual_cloud=actual["cloud"],
+        actual_region=actual["region"],
+        i6pn_enabled=i6pn,
+        i6pn_verified=i6pn_verified,
+        sandbox_created=sandbox is not None,
+        cleanup_succeeded=cleanup_succeeded,
+        status=status,
+        error_type=error_type,
     )
 
 
@@ -1284,7 +1427,7 @@ def create_modal_candidate_computer(
     config: ComputerConfig,
     backend: ModalCandidateBackend,
     transport: ModalCandidateTransport,
-    cloud: str,
+    cloud: str | None,
     app_name: str = "modal-computer-use",
     image: object | None = None,
     tags: dict[str, str] | None = None,
@@ -1313,8 +1456,8 @@ def create_modal_candidate_computer(
         "workspace-private-i6pn",
     }:
         raise ValueError("candidate transport is unsupported")
-    if not cloud.strip():
-        raise ValueError("candidate cloud must be explicit")
+    if cloud is not None and not cloud.strip():
+        raise ValueError("candidate target cloud must be non-empty when provided")
     if config.image.source != "named":
         raise ConfigConflictError("candidate targets require an exact named image")
     if config.storage.persist_artifacts:
@@ -1381,7 +1524,6 @@ def create_modal_candidate_computer(
         "image": image,
         "cpu": config.resources.cpu,
         "memory": config.resources.memory_mib,
-        "cloud": cloud,
         "region": config.runtime.modal_region,
         "encrypted_ports": encrypted_ports,
         "timeout": config.runtime.timeout_seconds,
@@ -1393,6 +1535,8 @@ def create_modal_candidate_computer(
         "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
         "tags": sandbox_tags,
     }
+    if cloud is not None:
+        create_kwargs["cloud"] = cloud
     readiness_probe = _readiness_probe(runtime)
     if readiness_probe is not None:
         create_kwargs["readiness_probe"] = readiness_probe

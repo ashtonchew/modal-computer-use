@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from modal_computer_use.errors import (
 from modal_computer_use.registry import SandboxRegistry
 from modal_computer_use.sandbox import (
     MODAL_SNAPSHOT_RETENTION_SECONDS,
+    ModalCandidateAllocationContext,
     ModalVolumeMount,
     _connect_token_parts,
     cleanup_modal_candidate_run,
@@ -33,6 +35,7 @@ from modal_computer_use.sandbox import (
     modal_daemon_env,
     modal_sandbox_exec_once,
     modal_sandbox_exec_runner_from_id,
+    probe_modal_candidate_placement,
     run_modal_daemon_command,
 )
 from modal_computer_use.state import compute_config_hash
@@ -171,8 +174,10 @@ class FakeSandbox:
     from_name_calls: ClassVar[list[tuple[str, str]]] = []
     from_id_calls: ClassVar[list[str]] = []
     list_calls: ClassVar[list[dict[str, str] | None]] = []
+    experimental_list_calls: ClassVar[list[dict[str, str] | None]] = []
     created: ClassVar[FakeSandboxObject | None] = None
     listed: ClassVar[list[FakeSandboxObject]] = []
+    experimental_listed: ClassVar[list[FakeSandboxObject]] = []
     from_name_result: ClassVar[FakeSandboxObject | None] = None
     from_name_error: ClassVar[Exception | None] = None
     from_id_result: ClassVar[FakeSandboxObject | None] = None
@@ -225,6 +230,16 @@ class FakeSandbox:
         cls.list_calls.append(tags if app_id is None else {"app_id": app_id})
         return [sandbox for sandbox in cls.listed if not sandbox.terminated]
 
+    @classmethod
+    def _experimental_list(
+        cls,
+        *,
+        tags: dict[str, str] | None = None,
+        app_id: str | None = None,
+    ) -> list[FakeSandboxObject]:
+        cls.experimental_list_calls.append(tags if app_id is None else {"app_id": app_id})
+        return [sandbox for sandbox in cls.experimental_listed if not sandbox.terminated]
+
 
 def fake_modal() -> SimpleNamespace:
     FakeProbe.calls = []
@@ -235,8 +250,10 @@ def fake_modal() -> SimpleNamespace:
     FakeSandbox.from_name_calls = []
     FakeSandbox.from_id_calls = []
     FakeSandbox.list_calls = []
+    FakeSandbox.experimental_list_calls = []
     FakeSandbox.created = None
     FakeSandbox.listed = []
+    FakeSandbox.experimental_listed = []
     FakeSandbox.from_name_result = None
     FakeSandbox.from_name_error = None
     FakeSandbox.from_id_result = None
@@ -492,10 +509,17 @@ def test_candidate_constructor_terminates_target_on_keyboard_interrupt(monkeypat
 
 def test_candidate_run_cleanup_terminates_only_exact_run_tags() -> None:
     runtime = fake_modal()
-    target = FakeSandboxObject(tags={"computer-use.run_id": "run_exact-pilot-001"})
-    runner = FakeSandboxObject(tags={"benchmark_run": "run_exact"})
-    unrelated = FakeSandboxObject(tags={"computer-use.run_id": "run_other-pilot-001"})
-    FakeSandbox.listed = [target, runner, unrelated]
+    target = FakeSandboxObject(
+        sandbox_id="sb-target",
+        tags={"computer-use.run_id": "run_exact-pilot-001"},
+    )
+    runner = FakeSandboxObject(sandbox_id="sb-runner", tags={"benchmark_run": "run_exact"})
+    unrelated = FakeSandboxObject(
+        sandbox_id="sb-unrelated",
+        tags={"computer-use.run_id": "run_other-pilot-001"},
+    )
+    FakeSandbox.listed = [target, unrelated]
+    FakeSandbox.experimental_listed = [runner, unrelated]
 
     result = cleanup_modal_candidate_run(
         app_name="candidate-app",
@@ -517,6 +541,108 @@ def test_candidate_run_cleanup_terminates_only_exact_run_tags() -> None:
         {"app_id": "ap-candidate-app"},
         {"app_id": "ap-candidate-app"},
     ]
+    assert FakeSandbox.experimental_list_calls == [
+        {"app_id": "ap-candidate-app"},
+        {"app_id": "ap-candidate-app"},
+    ]
+
+
+def test_candidate_placement_probe_can_observe_unpinned_cloud_and_cleans_up(
+    monkeypatch,
+) -> None:
+    runtime = fake_modal()
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+    monkeypatch.setattr("modal_computer_use.sandbox.named_image", lambda **_kwargs: "image")
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
+    )
+
+    result = probe_modal_candidate_placement(
+        app_name="candidate-placement-probe",
+        image_revision="a" * 40,
+        run_id="run-placement",
+        backend="v1",
+        cloud=None,
+        region="us-west",
+        cpu=4.0,
+        memory_mib=8192,
+        i6pn=False,
+    )
+
+    assert result.status == "valid"
+    assert result.run_id == "run-placement"
+    assert result.requested_cloud is None
+    assert result.actual_cloud == "CLOUD_PROVIDER_AWS"
+    assert result.actual_region == "us-west-2"
+    assert result.cleanup_succeeded is True
+    assert FakeSandbox.create_calls[0][1].get("cloud") is None
+    assert FakeSandbox.create_calls[0][1]["tags"] == {
+        "computer-use.benchmark": "modal-v2-placement-probe",
+        "computer-use.run_id": "run-placement-placement-probe-v1",
+    }
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.terminate_wait_calls == [True]
+
+
+def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
+    monkeypatch,
+) -> None:
+    create_calls: list[dict[str, object]] = []
+    terminate_calls: list[bool] = []
+
+    async def read_placement() -> str:
+        return '{"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"}'
+
+    async def execute_placement(*_args: str, **_kwargs: object) -> object:
+        return SimpleNamespace(stdout=SimpleNamespace(read=SimpleNamespace(aio=read_placement)))
+
+    async def terminate(*, wait: bool) -> None:
+        terminate_calls.append(wait)
+
+    async def create(*_args: str, **kwargs: object) -> object:
+        create_calls.append(kwargs)
+        return SimpleNamespace(
+            exec=SimpleNamespace(aio=execute_placement),
+            terminate=SimpleNamespace(aio=terminate),
+        )
+
+    runtime = SimpleNamespace(
+        Sandbox=SimpleNamespace(
+            create=SimpleNamespace(aio=create),
+            _experimental_create=SimpleNamespace(aio=create),
+        )
+    )
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+    with pytest.raises(ValueError, match="non-empty"):
+        ModalCandidateAllocationContext(
+            app=object(),
+            image=object(),
+            run_id="run-123-throughput",
+            cloud="",
+            region="us-west",
+            cpu=4.0,
+            memory_mib=8192,
+        )
+    context = ModalCandidateAllocationContext(
+        app=object(),
+        image=object(),
+        run_id="run-123-throughput",
+        cloud="aws",
+        region="us-west",
+        cpu=4.0,
+        memory_mib=8192,
+    )
+
+    result = asyncio.run(context.run_batch(backend="v1", concurrency=1))
+
+    assert result["status"] == "valid"
+    assert create_calls[0]["tags"] == {
+        "computer-use.benchmark": "modal-v2-candidate-throughput",
+        "computer-use.backend": "v1",
+        "computer-use.run_id": "run-123-throughput-v1-1-0",
+    }
+    assert terminate_calls == [True]
 
 
 def test_create_forwards_current_network_allowlist_arguments(monkeypatch) -> None:

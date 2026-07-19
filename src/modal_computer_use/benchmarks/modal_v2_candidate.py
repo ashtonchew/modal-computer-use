@@ -64,7 +64,7 @@ _FORBIDDEN_KEYS = {
 @dataclass(frozen=True, slots=True)
 class ModalV2CandidateConfig:
     image_revision: str
-    cloud: str = "aws"
+    cloud: str | None = None
     region: str = "us-west"
     cpu: float = 4.0
     memory_mib: int = 8192
@@ -79,16 +79,19 @@ class ModalV2CandidateConfig:
     bootstrap_resamples: int = 2_000
     throughput_concurrency: tuple[int, ...] = (1, 5, 20)
     enable_concurrency_50: bool = False
-    max_estimated_cost_usd: float = 10.0
+    max_estimated_cost_usd: float = 20.0
     sandbox_timeout_seconds: int = 900
     readiness_timeout_seconds: int = 180
 
     def __post_init__(self) -> None:
         if not _is_hex(self.image_revision, _COMMIT_LENGTH):
             raise ValueError("image_revision must be a full Git SHA")
-        for name, value in (("cloud", self.cloud), ("region", self.region)):
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{name} must be explicit")
+        if not isinstance(self.region, str) or not self.region.strip():
+            raise ValueError("region must be explicit")
+        if self.cloud is not None and (
+            not isinstance(self.cloud, str) or not self.cloud.strip()
+        ):
+            raise ValueError("cloud must be non-empty when provided")
         if self.cloud == "azure":
             raise ValueError("azure is unsupported by the required Modal V1 benchmark arms")
         if not _positive_number(self.cpu):
@@ -200,13 +203,26 @@ def build_preregistration(
     sdk_versions: dict[str, str],
     package_versions: dict[str, str],
     runner_identity: dict[str, Any],
+    placement_capability: dict[str, Any],
     commands: dict[str, str],
 ) -> dict[str, Any]:
     if not _is_hex(source_sha, _COMMIT_LENGTH):
         raise ValueError("source_sha must be a full Git SHA")
-    required_commands = {"preregister", "pilot", "full", "sanitize", "check"}
+    _validate_placement_capability_binding(
+        placement_capability,
+        config=config,
+        source_sha=source_sha,
+    )
+    required_commands = {
+        "placement_probe",
+        "preregister",
+        "pilot",
+        "full",
+        "sanitize",
+        "check",
+    }
     if set(commands) != required_commands or any(not value.strip() for value in commands.values()):
-        raise ValueError("commands must contain the five exact candidate benchmark commands")
+        raise ValueError("commands must contain the six exact candidate benchmark commands")
     full_seed = config.order_seed + 1
     return {
         "schema_version": 1,
@@ -297,6 +313,7 @@ def build_preregistration(
         },
         "environment": {
             "runner_identity": copy.deepcopy(runner_identity),
+            "placement_capability": copy.deepcopy(placement_capability),
             "sdk_versions": dict(sorted(sdk_versions.items())),
             "package_versions": dict(sorted(package_versions.items())),
             "image_identity": f"modal-computer-use-{config.browser}:{config.image_revision}",
@@ -312,8 +329,8 @@ def build_preregistration(
                 "CLOUD_PROVIDER_AZURE/westus3; live preflight must reject that mismatch"
             ),
             "placement_match_policy": (
-                "actual cloud provider must match the requested provider; the requested broad "
-                "region may resolve to a concrete provider region but must be identical across arms"
+                "cloud may be unconstrained during discovery; every actual target and runner cloud "
+                "and concrete region must still be observed and identical before causal ratios"
             ),
         },
         "capabilities": {
@@ -328,6 +345,61 @@ def build_preregistration(
         "official_source_urls": list(OFFICIAL_SOURCE_URLS),
         "commands": dict(commands),
     }
+
+
+def _validate_placement_capability_binding(
+    binding: dict[str, Any],
+    *,
+    config: ModalV2CandidateConfig,
+    source_sha: str,
+) -> None:
+    required = {
+        "artifact_path",
+        "sha256",
+        "run_id",
+        "source_sha",
+        "image_identity",
+        "requested_region",
+        "target_resources",
+        "runner_resources",
+        "selected_request",
+        "classification",
+        "measurement_performed",
+    }
+    if set(binding) != required:
+        raise ValueError("placement capability binding fields are invalid")
+    path = PurePosixPath(str(binding["artifact_path"]))
+    if path.is_absolute() or not path.parts or path.parts[0] != "benchmark-results":
+        raise ValueError("placement capability artifact must be under benchmark-results")
+    if not _is_hex(binding["sha256"], _DIGEST_LENGTH):
+        raise ValueError("placement capability digest must be SHA-256")
+    if not isinstance(binding["run_id"], str) or not binding["run_id"]:
+        raise ValueError("placement capability run ID is invalid")
+    if binding["source_sha"] != source_sha:
+        raise ValueError("placement capability source SHA differs from preregistration")
+    expected_image = f"modal-computer-use-{config.browser}:{config.image_revision}"
+    if binding["image_identity"] != expected_image:
+        raise ValueError("placement capability image differs from preregistration")
+    if binding["requested_region"] != config.region:
+        raise ValueError("placement capability region differs from preregistration")
+    if binding["target_resources"] != {"cpu": config.cpu, "memory_mib": config.memory_mib}:
+        raise ValueError("placement capability target resources differ from preregistration")
+    if binding["runner_resources"] != {"cpu": 1.0, "memory_mib": 1024}:
+        raise ValueError("placement capability runner resources are invalid")
+    selected = binding["selected_request"]
+    if not isinstance(selected, dict) or selected.get("cloud") != config.cloud:
+        raise ValueError("placement capability cloud differs from preregistration")
+    if selected.get("region") != config.region:
+        raise ValueError("placement capability selected region differs from preregistration")
+    actual = selected.get("actual_placement")
+    if not isinstance(actual, dict) or not all(
+        isinstance(actual.get(key), str) and actual[key].strip() for key in ("cloud", "region")
+    ):
+        raise ValueError("placement capability lacks an exact observed placement")
+    if binding["classification"] != "exact-common-placement-available":
+        raise ValueError("placement capability classification is not comparable")
+    if binding["measurement_performed"] is not False:
+        raise ValueError("placement capability must be unmeasured")
 
 
 def preregistration_sha256(payload: dict[str, Any]) -> str:
@@ -449,6 +521,8 @@ def evaluate_pilot_gates(
             reasons.append("actual target or runner cloud/region was not observed")
         if any(not _actual_cloud_matches_requested(trial) for trial in rows):
             reasons.append("actual target or runner cloud did not match the requested provider")
+        if any(not _target_runner_colocated(trial) for trial in rows):
+            reasons.append("target and runner were not colocated on one exact provider region")
         if len({_placement_signature(trial) for trial in rows}) != 1:
             reasons.append("actual target or runner placement varied within the arm")
         arm_results[arm] = {"eligible": not reasons, "reasons": reasons}
@@ -689,6 +763,8 @@ def sanitize_result_artifact(
         raise ValueError("only complete candidate evidence can be promoted")
     if not safe_relative_path(raw_artifact_path):
         raise ValueError("raw artifact path must be repository-relative")
+    if PurePosixPath(raw_artifact_path).parts[0] != "benchmark-results":
+        raise ValueError("raw artifact path must be under benchmark-results")
     if not _is_hex(normalizer_sha, _COMMIT_LENGTH):
         raise ValueError("normalizer_sha must be a full Git SHA")
     _validate_promotion_gates(raw_payload, preregistration=preregistration)
@@ -768,8 +844,12 @@ def validate_promoted_artifact(
         if not _is_hex(provenance.get(key), length):
             raise ValueError(f"promoted provenance {key} is invalid")
     raw_path = provenance.get("raw_artifact_path")
-    if not isinstance(raw_path, str) or not safe_relative_path(raw_path):
-        raise ValueError("promoted raw artifact path must be repository-relative")
+    if (
+        not isinstance(raw_path, str)
+        or not safe_relative_path(raw_path)
+        or PurePosixPath(raw_path).parts[0] != "benchmark-results"
+    ):
+        raise ValueError("promoted raw artifact path must be under benchmark-results")
     if provenance.get("raw_artifact_tracked") is not False:
         raise ValueError("raw candidate evidence must remain untracked")
     if preregistration is not None:
@@ -830,6 +910,7 @@ def _full_backend_comparison_eligible(
         or bool(_trial_control_mismatches(trial, configuration, image_identity))
         or not _actual_placement_observed(trial)
         or not _actual_cloud_matches_requested(trial)
+        or not _target_runner_colocated(trial)
         for trial in rows
     ):
         return False
@@ -885,6 +966,8 @@ def _validate_promotion_gates(
                 )
     if len({_placement_signature(trial) for trial in trials}) != 1:
         raise ValueError("promotion requires identical target and runner placement across trials")
+    if any(not _target_runner_colocated(trial) for trial in trials):
+        raise ValueError("promotion requires exact target and runner colocation")
     if not require_throughput:
         return
     throughput = payload.get("throughput")
@@ -935,6 +1018,24 @@ def _validate_promotion_gates(
         raise ValueError("promotion requires valid cleanup-complete throughput at 1, 5, and 20")
     if len(throughput_placements) != 1:
         raise ValueError("promotion requires identical observed placement for throughput attempts")
+    lifecycle_target_placements = {
+        (
+            _mapping(trial.get("actual"), "trial actual placement").get("target_cloud"),
+            _mapping(trial.get("actual"), "trial actual placement").get("target_region"),
+        )
+        for trial in trials
+    }
+    if throughput_placements != lifecycle_target_placements:
+        raise ValueError("promotion requires throughput and lifecycle target placement to match")
+    throughput_cleanup = _mapping(
+        _mapping(payload.get("execution"), "execution").get("throughput_cleanup"),
+        "throughput cleanup",
+    )
+    if (
+        throughput_cleanup.get("cleanup_succeeded") is not True
+        or throughput_cleanup.get("remaining_sandboxes") != 0
+    ):
+        raise ValueError("promotion requires a successful run-scoped throughput cleanup sweep")
 
 
 def _cost_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1032,6 +1133,8 @@ def _actual_cloud_matches_requested(trial: dict[str, Any]) -> bool:
 
 
 def modal_cloud_matches(requested: Any, actual: Any) -> bool:
+    if requested is None or requested == "auto":
+        return isinstance(actual, str) and bool(actual.strip())
     expected = {
         "azure": {"azure", "CLOUD_PROVIDER_AZURE"},
         "aws": {"aws", "CLOUD_PROVIDER_AWS"},
@@ -1039,6 +1142,19 @@ def modal_cloud_matches(requested: Any, actual: Any) -> bool:
         "oci": {"oci", "CLOUD_PROVIDER_OCI"},
     }.get(requested)
     return expected is not None and actual in expected
+
+
+def _target_runner_colocated(trial: dict[str, Any]) -> bool:
+    actual = trial.get("actual")
+    if not isinstance(actual, dict):
+        return False
+    return (
+        actual.get("target_cloud"),
+        actual.get("target_region"),
+    ) == (
+        actual.get("runner_cloud"),
+        actual.get("runner_region"),
+    )
 
 
 def _placement_signature(trial: dict[str, Any]) -> tuple[Any, ...]:
@@ -1081,7 +1197,9 @@ def _reject_forbidden_fields(value: Any) -> None:
     if isinstance(value, dict):
         for raw_key, item in value.items():
             key = str(raw_key).lower().replace("-", "_")
-            if key in _FORBIDDEN_KEYS or key.endswith(("_token", "_secret", "_password")):
+            if key in _FORBIDDEN_KEYS or key.endswith(
+                ("_token", "_secret", "_password", "_endpoint", "_endpoint_url")
+            ):
                 raise ValueError(f"candidate artifact contains forbidden field: {raw_key}")
             _reject_forbidden_fields(item)
     elif isinstance(value, list):

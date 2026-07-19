@@ -31,6 +31,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     CandidatePlacementMismatchError,
     extract_candidate_runner_result,
     run_candidate_phase,
+    run_candidate_throughput,
 )
 
 
@@ -50,7 +51,8 @@ def test_config_freezes_sample_concurrency_and_common_cloud_policy() -> None:
     assert config.pilot_samples_per_arm == 5
     assert config.full_samples_per_arm == 30
     assert config.throughput_concurrency == (1, 5, 20)
-    assert config.cloud == "aws"
+    assert config.cloud is None
+    assert config.max_estimated_cost_usd == 20.0
 
     with pytest.raises(ValueError, match="unsupported by the required Modal V1"):
         ModalV2CandidateConfig(image_revision="a" * 40, cloud="azure")
@@ -142,6 +144,19 @@ def test_pilot_gate_fails_closed_on_placement_verification_and_cleanup() -> None
     assert all(not gate["eligible"] for gate in gates["arms"].values())
 
 
+def test_pilot_gate_rejects_runner_target_cross_cloud_path() -> None:
+    preregistration = _preregistration()
+    trials = _trials("pilot", 5)
+    trials[0]["actual"]["runner_cloud"] = "CLOUD_PROVIDER_AZURE"
+    trials[0]["actual"]["runner_region"] = "westus3"
+
+    gates = evaluate_pilot_gates(trials, preregistration=preregistration)
+
+    gate = gates["arms"][trials[0]["arm"]]
+    assert gate["eligible"] is False
+    assert "target and runner were not colocated on one exact provider region" in gate["reasons"]
+
+
 def test_rejected_raw_output_is_classified_and_never_targets_repository_root() -> None:
     assert classified_raw_artifact_path(
         "benchmark-results/modal-v2/candidates/pilot.json", status="rejected"
@@ -176,7 +191,11 @@ def test_checkpoint_validator_binds_partial_trials_to_preregistration() -> None:
 
 
 def test_candidate_phase_checkpoints_after_cleanup_on_interrupt(monkeypatch) -> None:
-    config = ModalV2CandidateConfig(image_revision="a" * 40, bootstrap_resamples=100)
+    config = ModalV2CandidateConfig(
+        image_revision="a" * 40,
+        cloud="aws",
+        bootstrap_resamples=100,
+    )
     runner = _FakeRunner()
     calls = 0
 
@@ -222,7 +241,11 @@ def test_candidate_phase_checkpoints_after_cleanup_on_interrupt(monkeypatch) -> 
 
 
 def test_candidate_phase_rejects_runner_cloud_mismatch_before_trials(monkeypatch) -> None:
-    config = ModalV2CandidateConfig(image_revision="a" * 40, bootstrap_resamples=100)
+    config = ModalV2CandidateConfig(
+        image_revision="a" * 40,
+        cloud="aws",
+        bootstrap_resamples=100,
+    )
     runner = _FakeRunner()
     runner.placement = {"cloud": "CLOUD_PROVIDER_AZURE", "region": "westus3"}
     monkeypatch.setattr(
@@ -250,10 +273,10 @@ def test_candidate_phase_rejects_runner_cloud_mismatch_before_trials(monkeypatch
         "requested_cloud": "aws",
         "requested_region": "us-west",
         "actual_cloud": "CLOUD_PROVIDER_AZURE",
-        "actual_region": "westus3",
-        "eligible": False,
-        "reason": "requested runner cloud aws; observed CLOUD_PROVIDER_AZURE",
-    }
+            "actual_region": "westus3",
+            "eligible": False,
+            "reason": "requested runner cloud aws; observed CLOUD_PROVIDER_AZURE/westus3",
+        }
     assert checkpoints[-1][1]["runner_cleanup_succeeded"] is True
     assert runner.terminated is True
 
@@ -333,6 +356,12 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
         throughput=throughput,
         execution_status="complete",
         status_reason="all gates passed",
+        execution={
+            "throughput_cleanup": {
+                "cleanup_succeeded": True,
+                "remaining_sandboxes": 0,
+            }
+        },
     )
     raw_bytes = json.dumps(raw, sort_keys=True).encode()
 
@@ -349,6 +378,26 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
     assert promoted["provenance"]["raw_artifact_tracked"] is False
     assert len(promoted["provenance"]["raw_artifact_sha256"]) == 64
 
+    with pytest.raises(ValueError, match="under benchmark-results"):
+        sanitize_result_artifact(
+            raw,
+            raw_bytes=raw_bytes,
+            raw_artifact_path="benchmark-data/full.json",
+            preregistration=preregistration,
+            normalizer_sha="b" * 40,
+        )
+
+    missing_sweep = copy.deepcopy(raw)
+    missing_sweep["execution"].pop("throughput_cleanup")
+    with pytest.raises(ValueError, match="throughput cleanup"):
+        sanitize_result_artifact(
+            missing_sweep,
+            raw_bytes=json.dumps(missing_sweep).encode(),
+            raw_artifact_path="benchmark-results/modal-v2-candidate/candidates/full.json",
+            preregistration=preregistration,
+            normalizer_sha="b" * 40,
+        )
+
     incomplete = copy.deepcopy(raw)
     incomplete["trials"] = incomplete["trials"][:-1]
     with pytest.raises(ValueError, match="30 valid full trials"):
@@ -359,6 +408,103 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
             preregistration=preregistration,
             normalizer_sha="b" * 40,
         )
+
+    mismatched_throughput = copy.deepcopy(raw)
+    for row in mismatched_throughput["throughput"]:
+        for attempt in row["attempts"]:
+            attempt["actual_region"] = "us-east-1"
+    with pytest.raises(ValueError, match="throughput and lifecycle target placement"):
+        sanitize_result_artifact(
+            mismatched_throughput,
+            raw_bytes=json.dumps(mismatched_throughput).encode(),
+            raw_artifact_path="benchmark-results/modal-v2-candidate/candidates/full.json",
+            preregistration=preregistration,
+            normalizer_sha="b" * 40,
+        )
+
+
+def test_throughput_uses_exact_run_id_and_finishes_with_cleanup_sweep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory_kwargs: dict[str, object] = {}
+    batch_calls: list[tuple[str, int, int]] = []
+    cleanup_calls: list[tuple[str, str]] = []
+
+    class FakeContext:
+        async def run_batch(
+            self,
+            *,
+            backend: str,
+            concurrency: int,
+            timeout_seconds: int,
+        ) -> dict[str, object]:
+            batch_calls.append((backend, concurrency, timeout_seconds))
+            return {
+                "backend": backend,
+                "concurrency": concurrency,
+                "status": "valid",
+                "attempts": [],
+                "cleanup_succeeded": True,
+            }
+
+    def context_factory(**kwargs: object) -> FakeContext:
+        factory_kwargs.update(kwargs)
+        return FakeContext()
+
+    def cleanup(*, app_name: str, run_id: str) -> dict[str, object]:
+        cleanup_calls.append((app_name, run_id))
+        return {"cleanup_succeeded": True, "remaining_sandboxes": 0}
+
+    monkeypatch.setattr(
+        candidate_execution,
+        "create_modal_candidate_allocation_context",
+        context_factory,
+    )
+    monkeypatch.setattr(candidate_execution, "cleanup_modal_candidate_run", cleanup)
+
+    rows, sweep = run_candidate_throughput(
+        ModalV2CandidateConfig(image_revision="a" * 40),
+        app_name="candidate-throughput",
+        run_id="run-123-throughput",
+    )
+
+    assert factory_kwargs["run_id"] == "run-123-throughput"
+    assert batch_calls == [
+        (backend, concurrency, 900)
+        for concurrency in (1, 5, 20)
+        for backend in ("v1", "v2")
+    ]
+    assert len(rows) == 6
+    assert cleanup_calls == [("candidate-throughput", "run-123-throughput")]
+    assert sweep == {"cleanup_succeeded": True, "remaining_sandboxes": 0}
+
+
+def test_throughput_interrupt_sweeps_exact_run_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    cleanup_calls: list[tuple[str, str]] = []
+
+    class InterruptingContext:
+        async def run_batch(self, **_kwargs: object) -> dict[str, object]:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        candidate_execution,
+        "create_modal_candidate_allocation_context",
+        lambda **_kwargs: InterruptingContext(),
+    )
+    monkeypatch.setattr(
+        candidate_execution,
+        "cleanup_modal_candidate_run",
+        lambda *, app_name, run_id: cleanup_calls.append((app_name, run_id)),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        run_candidate_throughput(
+            ModalV2CandidateConfig(image_revision="a" * 40),
+            app_name="candidate-throughput",
+            run_id="run-123-throughput",
+        )
+
+    assert cleanup_calls == [("candidate-throughput", "run-123-throughput")]
 
 
 def test_runner_result_parser_requires_bounded_safe_json() -> None:
@@ -377,6 +523,7 @@ def _preregistration() -> dict:
     return build_preregistration(
         ModalV2CandidateConfig(
             image_revision="a" * 40,
+            cloud="aws",
             bootstrap_resamples=100,
         ),
         source_sha="a" * 40,
@@ -384,7 +531,31 @@ def _preregistration() -> dict:
         sdk_versions={"modal": "1.5.2"},
         package_versions={"modal-computer-use": "1.1.0"},
         runner_identity={"kind": "test"},
+        placement_capability={
+            "artifact_path": (
+                "benchmark-results/modal-v2-candidate-2026-07-19/"
+                "diagnostics/placement-capability.json"
+            ),
+            "sha256": "b" * 64,
+            "run_id": "placement-test",
+            "source_sha": "a" * 40,
+            "image_identity": f"modal-computer-use-chromium:{'a' * 40}",
+            "requested_region": "us-west",
+            "target_resources": {"cpu": 4.0, "memory_mib": 8192},
+            "runner_resources": {"cpu": 1.0, "memory_mib": 1024},
+            "selected_request": {
+                "cloud": "aws",
+                "region": "us-west",
+                "actual_placement": {
+                    "cloud": "CLOUD_PROVIDER_AWS",
+                    "region": "us-west-2",
+                },
+            },
+            "classification": "exact-common-placement-available",
+            "measurement_performed": False,
+        },
         commands={
+            "placement_probe": "placement probe command",
             "preregister": "preregister command",
             "pilot": "pilot command",
             "full": "full command",

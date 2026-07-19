@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import suppress
 from textwrap import dedent
 from typing import Any
 
@@ -17,6 +18,7 @@ from ..config import (
 from ..latency import SessionStartupTiming
 from ..sandbox import (
     ModalCandidateRunner,
+    cleanup_modal_candidate_run,
     create_modal_candidate_allocation_context,
     create_modal_candidate_computer,
     create_modal_candidate_runner,
@@ -171,15 +173,23 @@ def _phase_execution(
     error_type: str | None = None,
 ) -> dict[str, Any]:
     actual_cloud = None if runner is None else runner.placement.get("cloud")
+    actual_region = None if runner is None else runner.placement.get("region")
     placement_eligible = (
-        None if runner is None else modal_cloud_matches(config.cloud, actual_cloud)
+        None
+        if runner is None
+        else modal_cloud_matches(config.cloud, actual_cloud)
+        and isinstance(actual_region, str)
+        and bool(actual_region.strip())
     )
     placement_reason = (
         "runner placement has not been observed"
         if runner is None
         else None
         if placement_eligible
-        else f"requested runner cloud {config.cloud}; observed {actual_cloud or 'unobserved'}"
+        else (
+            f"requested runner cloud {config.cloud or 'auto'}; observed "
+            f"{actual_cloud or 'unobserved'}/{actual_region or 'unobserved'}"
+        )
     )
     return {
         "state": state,
@@ -190,7 +200,7 @@ def _phase_execution(
             "requested_cloud": config.cloud,
             "requested_region": config.region,
             "actual_cloud": actual_cloud,
-            "actual_region": None if runner is None else runner.placement.get("region"),
+            "actual_region": actual_region,
             "eligible": placement_eligible,
             "reason": placement_reason,
         },
@@ -208,8 +218,11 @@ def _phase_execution(
 def run_candidate_throughput(
     config: ModalV2CandidateConfig,
     *,
+    run_id: str,
     app_name: str = "modal-computer-use-v2-candidate-throughput",
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not run_id:
+        raise ValueError("throughput execution requires an exact run ID")
     concurrency = list(config.throughput_concurrency)
     if config.enable_concurrency_50:
         concurrency.append(50)
@@ -221,6 +234,7 @@ def run_candidate_throughput(
     context = create_modal_candidate_allocation_context(
         app_name=app_name,
         image_revision=config.image_revision,
+        run_id=run_id,
         cloud=config.cloud,
         region=config.region,
         cpu=config.cpu,
@@ -247,7 +261,14 @@ def run_candidate_throughput(
                 rows.append(row)
         return rows
 
-    return asyncio.run(execute())
+    try:
+        rows = asyncio.run(execute())
+    except BaseException:
+        with suppress(Exception):
+            cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+        raise
+    cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+    return rows, cleanup
 
 
 def run_candidate_trial(

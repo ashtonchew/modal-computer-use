@@ -29,6 +29,9 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     run_candidate_phase,
     run_candidate_throughput,
 )
+from modal_computer_use.benchmarks.modal_v2_placement import (
+    build_placement_capability_binding,
+)
 from modal_computer_use.sandbox import cleanup_modal_candidate_run
 
 DEFAULT_ROOT = Path("benchmark-results/modal-v2-candidate-2026-07-19")
@@ -43,6 +46,11 @@ def main() -> int:
     preregister = subparsers.add_parser("preregister")
     _add_configuration_arguments(preregister)
     preregister.add_argument("--source-sha", required=True)
+    preregister.add_argument(
+        "--placement-capability",
+        type=Path,
+        default=DEFAULT_ROOT / "diagnostics/placement-capability.json",
+    )
     preregister.add_argument(
         "--output",
         type=Path,
@@ -70,14 +78,14 @@ def main() -> int:
 
 def _add_configuration_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--image-revision")
-    parser.add_argument("--cloud", default="aws")
+    parser.add_argument("--cloud")
     parser.add_argument("--region", default="us-west")
     parser.add_argument("--cpu", type=float, default=4.0)
     parser.add_argument("--memory-mib", type=int, default=8192)
     parser.add_argument("--order-seed", type=int, default=20260719)
     parser.add_argument("--bootstrap-seed", type=int, default=20260720)
     parser.add_argument("--bootstrap-resamples", type=int, default=2_000)
-    parser.add_argument("--max-estimated-cost-usd", type=float, default=10.0)
+    parser.add_argument("--max-estimated-cost-usd", type=float, default=20.0)
     parser.add_argument("--enable-concurrency-50", action="store_true")
 
 
@@ -93,9 +101,19 @@ def _add_execution_arguments(parser: argparse.ArgumentParser, *, default_output:
 
 def _preregister(args: argparse.Namespace) -> int:
     _require_clean_source(args.source_sha)
+    placement_payload = json.loads(args.placement_capability.read_bytes())
+    if not isinstance(placement_payload, dict):
+        raise ValueError("placement capability artifact must be a JSON object")
+    placement_capability = build_placement_capability_binding(
+        placement_payload,
+        artifact_path=args.placement_capability.as_posix(),
+    )
+    selected_cloud = placement_capability["selected_request"]["cloud"]
+    if args.cloud is not None and args.cloud != selected_cloud:
+        raise ValueError("--cloud differs from the selected placement capability request")
     config = ModalV2CandidateConfig(
         image_revision=args.image_revision or args.source_sha,
-        cloud=args.cloud,
+        cloud=selected_cloud,
         region=args.region,
         cpu=args.cpu,
         memory_mib=args.memory_mib,
@@ -118,6 +136,7 @@ def _preregister(args: argparse.Namespace) -> int:
             "timezone": "America/Los_Angeles",
             "measured_runner": "persistent-modal-v2-i6pn",
         },
+        placement_capability=placement_capability,
         commands=_commands(args.source_sha),
     )
     _write_new(args.output, payload)
@@ -267,14 +286,39 @@ def _full(args: argparse.Namespace) -> int:
     )
     throughput: list[dict[str, Any]] = []
     throughput_failure: str | None = None
+    throughput_interrupted = False
     if lifecycle_blocker is None:
+        throughput_app_name = "modal-computer-use-v2-candidate-throughput"
+        throughput_run_id = f"{full_execution['run_id']}-throughput"
         try:
-            throughput = run_candidate_throughput(config)
+            throughput, throughput_cleanup = run_candidate_throughput(
+                config,
+                app_name=throughput_app_name,
+                run_id=throughput_run_id,
+            )
+            execution["throughput_cleanup"] = throughput_cleanup
+        except KeyboardInterrupt:
+            throughput_interrupted = True
+            throughput_cleanup = _cleanup_candidate_run(
+                app_name=throughput_app_name,
+                run_id=throughput_run_id,
+            )
+            throughput_failure = "throughput execution interrupted"
+            execution["throughput_failure"] = {
+                "error_type": "KeyboardInterrupt",
+                "reason": throughput_failure,
+                "cleanup": throughput_cleanup,
+            }
         except Exception as exc:
-            throughput_failure = f"throughput execution failed: {type(exc).__name__}: {exc}"
+            throughput_cleanup = _cleanup_candidate_run(
+                app_name=throughput_app_name,
+                run_id=throughput_run_id,
+            )
+            throughput_failure = f"throughput execution failed: {type(exc).__name__}"
             execution["throughput_failure"] = {
                 "error_type": type(exc).__name__,
-                "reason": str(exc),
+                "reason": "throughput execution failed before promotion",
+                "cleanup": throughput_cleanup,
             }
     provisional = build_result_artifact(
         source_sha=args.source_sha,
@@ -308,6 +352,8 @@ def _full(args: argparse.Namespace) -> int:
     output = Path(classified_raw_artifact_path(args.output.as_posix(), status=status))
     _write_new(output, payload)
     print(json.dumps({"status": status, "output": str(output), "reason": reason}))
+    if throughput_interrupted:
+        return 130
     return 0 if status == "complete" else 2
 
 
@@ -315,9 +361,15 @@ def _commands(source_sha: str) -> dict[str, str]:
     root = DEFAULT_ROOT.as_posix()
     tracked = "benchmark-data/modal-v2-candidate-results-2026-07-19.json"
     return {
+        "placement_probe": (
+            "uv run python scripts/probe_modal_v2_candidate_placement.py "
+            f"--source-sha {source_sha} --image-revision {source_sha} "
+            f"--output {root}/diagnostics/placement-capability.json"
+        ),
         "preregister": (
             "uv run python scripts/run_modal_v2_candidate_benchmark.py preregister "
             f"--source-sha {source_sha} --image-revision {source_sha} "
+            f"--placement-capability {root}/diagnostics/placement-capability.json "
             f"--output {root}/preregistration.json"
         ),
         "pilot": (
@@ -361,6 +413,7 @@ def _read_preregistration(path: Path, *, source_sha: str) -> dict[str, Any]:
         sdk_versions=dict(payload["environment"]["sdk_versions"]),
         package_versions=dict(payload["environment"]["package_versions"]),
         runner_identity=dict(payload["environment"]["runner_identity"]),
+        placement_capability=dict(payload["environment"]["placement_capability"]),
         commands=dict(payload["commands"]),
     )
     if preregistration_sha256(expected) != preregistration_sha256(payload):
@@ -577,17 +630,7 @@ def _seal_checkpoint_after_cleanup(
     run_id = execution.get("run_id")
     app_name = execution.get("app_name")
     if isinstance(run_id, str) and run_id and isinstance(app_name, str) and app_name:
-        try:
-            cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
-        except Exception as exc:
-            cleanup = {
-                "matched_sandboxes": None,
-                "terminated_sandboxes": 0,
-                "termination_failures": None,
-                "remaining_sandboxes": None,
-                "cleanup_succeeded": False,
-                "error_type": type(exc).__name__,
-            }
+        cleanup = _cleanup_candidate_run(app_name=app_name, run_id=run_id)
     else:
         cleanup = {
             "matched_sandboxes": 0,
@@ -623,6 +666,20 @@ def _seal_checkpoint_after_cleanup(
     _write_atomic(_checkpoint_path(args.output, phase=phase), payload)
     checkpoint_state.clear()
     checkpoint_state.update(copy.deepcopy(payload))
+
+
+def _cleanup_candidate_run(*, app_name: str, run_id: str) -> dict[str, Any]:
+    try:
+        return cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+    except Exception as exc:
+        return {
+            "matched_sandboxes": None,
+            "terminated_sandboxes": 0,
+            "termination_failures": None,
+            "remaining_sandboxes": None,
+            "cleanup_succeeded": False,
+            "error_type": type(exc).__name__,
+        }
 
 
 def _write_atomic(path: Path, payload: dict[str, Any]) -> None:
