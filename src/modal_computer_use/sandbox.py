@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets as _secrets
 import time
@@ -50,6 +51,12 @@ from .transports import HotSessionTransport, ObservationStreamTransport
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
 ModalDaemonEndpointPath = Literal["inherited", "connect", "target-loopback"]
+ModalCandidateBackend = Literal["v1", "v2"]
+ModalCandidateTransport = Literal[
+    "connect-endpoint",
+    "encrypted-tunnel",
+    "workspace-private-i6pn",
+]
 MODAL_OPERATION_TIMEOUT_SECONDS = 55
 MODAL_SNAPSHOT_RETENTION_SECONDS = 30 * 24 * 3600
 
@@ -78,6 +85,155 @@ class ModalDaemonCommandResult:
     requested_region: str
     fallback_used: bool
     fallback_reason: str | None = None
+
+
+@dataclass
+class ModalCandidateRunner:
+    _sandbox: object
+    placement: dict[str, str | None]
+
+    def execute(
+        self,
+        computer: ComputerSandbox,
+        command: Sequence[str],
+        *,
+        transport: ModalCandidateTransport,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 240,
+    ) -> ModalSandboxExecResult:
+        command_tuple, _, runner_env = _prepare_modal_daemon_command(
+            computer,
+            command,
+            path="inherited",
+            env=env,
+        )
+        runner_env["COMPUTER_USE_DAEMON_RUNNER_PATH"] = transport
+        return modal_sandbox_exec_in_place(
+            self._sandbox,
+            command_tuple,
+            env=runner_env,
+            exec_timeout_seconds=timeout_seconds,
+        )
+
+    def terminate(self) -> bool:
+        try:
+            self._sandbox.terminate(wait=True)
+        except Exception:
+            return False
+        return True
+
+
+@dataclass
+class ModalCandidateAllocationContext:
+    app: object
+    image: object
+    cloud: str
+    region: str
+    cpu: float
+    memory_mib: int
+
+    async def run_batch(
+        self,
+        *,
+        backend: ModalCandidateBackend,
+        concurrency: int,
+        timeout_seconds: int = 300,
+    ) -> dict[str, Any]:
+        if backend not in {"v1", "v2"}:
+            raise ValueError("backend must be v1 or v2")
+        if concurrency < 1:
+            raise ValueError("concurrency must be positive")
+        import modal
+
+        creator = modal.Sandbox.create if backend == "v1" else modal.Sandbox._experimental_create
+        batch_started = time.perf_counter()
+
+        async def create_one(index: int) -> dict[str, Any]:
+            started = time.perf_counter()
+            kwargs: dict[str, Any] = {
+                "app": self.app,
+                "image": self.image,
+                "cpu": self.cpu,
+                "memory": self.memory_mib,
+                "cloud": self.cloud,
+                "region": self.region,
+                "timeout": timeout_seconds,
+                "tags": {
+                    "computer-use.benchmark": "modal-v2-candidate-throughput",
+                    "computer-use.backend": backend,
+                },
+            }
+            if backend == "v2":
+                kwargs["i6pn"] = False
+            sandbox = await creator.aio("sleep", "infinity", **kwargs)
+            return {
+                "index": index,
+                "sandbox": sandbox,
+                "allocation_ms": (time.perf_counter() - started) * 1000.0,
+            }
+
+        outcomes = await asyncio.gather(
+            *(create_one(index) for index in range(concurrency)),
+            return_exceptions=True,
+        )
+        batch_elapsed = time.perf_counter() - batch_started
+        attempts: list[dict[str, Any]] = []
+        cleanup_succeeded = True
+        for index, outcome in enumerate(outcomes):
+            if isinstance(outcome, BaseException):
+                attempts.append(
+                    {
+                        "index": index,
+                        "status": "failed",
+                        "allocation_ms": None,
+                        "actual_cloud": None,
+                        "actual_region": None,
+                        "error_type": type(outcome).__name__,
+                        "cleanup_succeeded": False,
+                    }
+                )
+                cleanup_succeeded = False
+                continue
+            sandbox = outcome["sandbox"]
+            placement = {"cloud": None, "region": None}
+            ready = False
+            cleanup = False
+            error_type: str | None = None
+            try:
+                await sandbox.wait_until_ready.aio(timeout=timeout_seconds)
+                ready = True
+                placement = await _sandbox_runtime_placement_async(sandbox)
+            except Exception as exc:
+                error_type = type(exc).__name__
+            finally:
+                try:
+                    await sandbox.terminate.aio(wait=True)
+                except Exception:
+                    cleanup = False
+                else:
+                    cleanup = True
+            cleanup_succeeded = cleanup_succeeded and cleanup
+            attempts.append(
+                {
+                    "index": index,
+                    "status": "valid" if ready and error_type is None else "failed",
+                    "allocation_ms": outcome["allocation_ms"],
+                    "actual_cloud": placement["cloud"],
+                    "actual_region": placement["region"],
+                    "error_type": error_type,
+                    "cleanup_succeeded": cleanup,
+                }
+            )
+        valid_count = sum(attempt["status"] == "valid" for attempt in attempts)
+        return {
+            "backend": backend,
+            "concurrency": concurrency,
+            "status": "valid" if valid_count == concurrency and cleanup_succeeded else "failed",
+            "attempts": attempts,
+            "batch_elapsed_seconds": batch_elapsed,
+            "throughput_allocations_per_second": concurrency / batch_elapsed,
+            "cleanup_succeeded": cleanup_succeeded,
+        }
 
 
 class _TimedModalRuntime:
@@ -196,6 +352,12 @@ def modal_sandbox_exec_once(
     timeout_seconds: int = 300,
     idle_timeout_seconds: int = 60,
     exec_timeout_seconds: int = 240,
+    backend: ModalCandidateBackend = "v1",
+    cloud: str | None = None,
+    i6pn: bool = False,
+    image_revision: str | None = None,
+    image_profile: Literal["standard", "browser", "browser-gpu", "custom"] = "standard",
+    browser: Literal["firefox", "chromium"] | None = None,
 ) -> ModalSandboxExecResult:
     try:
         import modal
@@ -209,6 +371,12 @@ def modal_sandbox_exec_once(
     app = modal.App.lookup(app_name, create_if_missing=True)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
+    if image is None and image_revision is not None:
+        image = named_image(
+            revision=image_revision,
+            profile=image_profile,
+            browser=browser,
+        )
     create_kwargs: dict[str, Any] = {
         "app": app,
         "image": image or default_image(profile="standard"),
@@ -220,9 +388,19 @@ def modal_sandbox_exec_once(
         "name": name,
         "tags": tags,
     }
+    if backend not in {"v1", "v2"}:
+        raise ValueError("backend must be v1 or v2")
+    if i6pn and backend != "v2":
+        raise ValueError("i6pn runner networking requires the V2 backend")
+    if cloud:
+        create_kwargs["cloud"] = cloud
     if region:
         create_kwargs["region"] = region
-    runner = modal.Sandbox.create("sleep", "infinity", **create_kwargs)
+    if backend == "v2":
+        create_kwargs["i6pn"] = i6pn
+        runner = modal.Sandbox._experimental_create("sleep", "infinity", **create_kwargs)
+    else:
+        runner = modal.Sandbox.create("sleep", "infinity", **create_kwargs)
     try:
         process = runner.exec(*command, timeout=exec_timeout_seconds, env=env or {})
         stdout = _read_modal_process_stream(getattr(process, "stdout", ""))
@@ -254,6 +432,82 @@ def modal_sandbox_exec_in_place(
         returncode=_modal_process_returncode(process),
         stdout=stdout,
         stderr=stderr,
+    )
+
+
+def create_modal_candidate_runner(
+    *,
+    app_name: str,
+    cloud: str,
+    region: str,
+    image_revision: str,
+    tags: dict[str, str] | None = None,
+    app_tags: dict[str, str] | None = None,
+) -> ModalCandidateRunner:
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError("Modal candidate runner requires the modal extra") from exc
+    app = modal.App.lookup(app_name, create_if_missing=True)
+    if app_tags:
+        _set_modal_object_tags(app, app_tags)
+    image = named_image(
+        revision=image_revision,
+        profile="browser",
+        browser="chromium",
+    )
+    sandbox = modal.Sandbox._experimental_create(
+        "sleep",
+        "infinity",
+        app=app,
+        image=image,
+        cpu=1.0,
+        memory=1024,
+        cloud=cloud,
+        region=region,
+        i6pn=True,
+        timeout=3600,
+        idle_timeout=600,
+        tags={
+            "computer-use.runner": "modal-v2-candidate",
+            **(tags or {}),
+        },
+    )
+    try:
+        sandbox.wait_until_ready(timeout=180)
+        placement = _sandbox_runtime_placement(sandbox)
+    except Exception:
+        _terminate_failed_sandbox(sandbox)
+        raise
+    return ModalCandidateRunner(_sandbox=sandbox, placement=placement)
+
+
+def create_modal_candidate_allocation_context(
+    *,
+    app_name: str,
+    image_revision: str,
+    cloud: str,
+    region: str,
+    cpu: float,
+    memory_mib: int,
+) -> ModalCandidateAllocationContext:
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError("Modal candidate throughput requires the modal extra") from exc
+    app = modal.App.lookup(app_name, create_if_missing=True)
+    image = named_image(
+        revision=image_revision,
+        profile="browser",
+        browser="chromium",
+    )
+    return ModalCandidateAllocationContext(
+        app=app,
+        image=image,
+        cloud=cloud,
+        region=region,
+        cpu=cpu,
+        memory_mib=memory_mib,
     )
 
 
@@ -742,15 +996,15 @@ class ComputerSandbox:
         return value if isinstance(value, int) else None
 
     def runtime_region(self) -> str | None:
-        sandbox = _require_modal_backing(self, path="runtime region")
-        process = sandbox.exec(
-            "python",
-            "-c",
-            "import os; print(os.environ.get('MODAL_REGION', ''))",
-            timeout=10,
-        )
-        region = _read_modal_process_stream(getattr(process, "stdout", "")).strip()
-        return region or None
+        return self.runtime_placement()["region"]
+
+    def runtime_placement(self) -> dict[str, str | None]:
+        sandbox = _require_modal_backing(self, path="runtime placement")
+        return _sandbox_runtime_placement(sandbox)
+
+    def runtime_i6pn_address(self) -> str:
+        sandbox = _require_modal_backing(self, path="runtime i6pn address")
+        return _sandbox_i6pn_address(sandbox)
 
     def tags(self) -> dict[str, str]:
         sandbox = _require_modal_backing(self, path="tags")
@@ -969,6 +1223,181 @@ def modal_daemon_endpoint(
             execute_in_target=True,
         )
     raise ValueError("path must be inherited, connect, or target-loopback")
+
+
+def create_modal_candidate_computer(
+    *,
+    config: ComputerConfig,
+    backend: ModalCandidateBackend,
+    transport: ModalCandidateTransport,
+    cloud: str,
+    app_name: str = "modal-computer-use",
+    image: object | None = None,
+    tags: dict[str, str] | None = None,
+    app_tags: dict[str, str] | None = None,
+    wait: bool = True,
+    timing: SessionStartupTiming | None = None,
+    modal_runtime: object | None = None,
+    client_factory: Callable[..., DaemonClient] = DaemonClient,
+) -> ComputerSandbox:
+    """Create one provenance-bound V1/V2 benchmark target.
+
+    This constructor intentionally supports only the candidate benchmark's
+    matched feature subset. It keeps the daemon image, resources, application
+    bearer, IPv6 bind, readiness probe, and placement arguments identical while
+    varying the backend and declared transport arm.
+    """
+    if backend not in {"v1", "v2"}:
+        raise ValueError("backend must be v1 or v2")
+    if transport == "connect-endpoint" and backend != "v1":
+        raise ConfigConflictError("Modal V2 Connect Tokens are unsupported")
+    if transport == "workspace-private-i6pn" and backend != "v2":
+        raise ConfigConflictError("workspace-private i6pn requires Modal V2")
+    if transport not in {
+        "connect-endpoint",
+        "encrypted-tunnel",
+        "workspace-private-i6pn",
+    }:
+        raise ValueError("candidate transport is unsupported")
+    if not cloud.strip():
+        raise ValueError("candidate cloud must be explicit")
+    if config.image.source != "named":
+        raise ConfigConflictError("candidate targets require an exact named image")
+    if config.storage.persist_artifacts:
+        raise ConfigConflictError("candidate targets do not mount artifact storage")
+    if config.resources.gpu is not None:
+        raise ConfigConflictError("candidate targets do not support GPUs")
+
+    timing = timing or SessionStartupTiming()
+    timing.mark("request_received")
+    timing.unsupported(
+        "scheduled",
+        f"Modal {backend.upper()} does not expose a common supported scheduling timestamp",
+    )
+    timing.unsupported(
+        "daemon_started",
+        "the daemon process does not emit an attested startup timestamp",
+    )
+    if modal_runtime is None:
+        try:
+            import modal as modal_runtime
+        except ImportError as exc:
+            raise ModalNotInstalledError(
+                "Modal candidate execution requires the modal extra"
+            ) from exc
+    runtime: Any = modal_runtime
+    if not config.run_id:
+        config.run_id = new_run_id()
+    browser_kind = config.browser.kind if config.browser else None
+    if image is None:
+        image = named_image(
+            revision=config.image.revision or "",
+            profile=config.resources.profile,
+            browser=browser_kind,
+            environment_name=config.image.environment_name,
+        )
+    app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
+    if config.image.environment_name is not None:
+        app_lookup_kwargs["environment_name"] = config.image.environment_name
+    app = runtime.App.lookup(app_name, **app_lookup_kwargs)
+    if app_tags:
+        _set_modal_object_tags(app, app_tags)
+
+    daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
+    env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
+    env.update(daemon_auth)
+    env["COMPUTER_USE_DAEMON_HOST"] = "::"
+    sandbox_tags = {**(tags or {}), **default_tags(config)}
+    sandbox_tags.update(
+        {
+            "computer-use.image_identity": selected_image_identity(
+                source=config.image.source,
+                revision=config.image.revision,
+                profile=config.resources.profile,
+                browser=browser_kind,
+            ),
+            "computer-use.modal_backend": backend,
+            "computer-use.candidate_transport": transport,
+        }
+    )
+    _validate_sandbox_tags(sandbox_tags)
+    encrypted_ports = [8080] if transport == "encrypted-tunnel" else []
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image,
+        "cpu": config.resources.cpu,
+        "memory": config.resources.memory_mib,
+        "cloud": cloud,
+        "region": config.runtime.modal_region,
+        "encrypted_ports": encrypted_ports,
+        "timeout": config.runtime.timeout_seconds,
+        "idle_timeout": config.runtime.idle_timeout_seconds,
+        "env": env,
+        "block_network": config.network.block_all,
+        "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
+        "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
+        "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
+        "tags": sandbox_tags,
+    }
+    readiness_probe = _readiness_probe(runtime)
+    if readiness_probe is not None:
+        create_kwargs["readiness_probe"] = readiness_probe
+    if backend == "v2":
+        create_kwargs["i6pn"] = transport == "workspace-private-i6pn"
+        create = runtime.Sandbox._experimental_create
+    else:
+        create = runtime.Sandbox.create
+
+    timing.mark("sandbox_create_started")
+    sandbox = create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
+    timing.mark("sandbox_registered")
+    client: DaemonClient | None = None
+    try:
+        if wait and hasattr(sandbox, "wait_until_ready"):
+            sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            timing.mark("container_ready")
+        if transport == "connect-endpoint":
+            token_info = sandbox.create_connect_token(
+                user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-v2-candidate"}
+            )
+            base_url, token = _connect_token_parts(token_info)
+            timing.mark("connect_endpoint_ready")
+        elif transport == "encrypted-tunnel":
+            base_url = _tunnel_url(sandbox, 8080)
+            token = next(iter(daemon_auth.values()))
+            timing.mark("encrypted_tunnel_ready")
+        else:
+            address = _sandbox_i6pn_address(sandbox)
+            base_url = f"http://[{address}]:8080"
+            token = next(iter(daemon_auth.values()))
+            timing.mark("workspace_private_endpoint_ready")
+        metadata = SandboxRef(
+            sandbox_id=getattr(sandbox, "object_id", "unknown"),
+            app_name=app_name,
+            run_id=config.run_id,
+            created_at=_created_at_from_tags(sandbox_tags),
+            config_hash=compute_config_hash(config),
+            status="started",
+            tags=sandbox_tags,
+            vnc_url=None,
+            artifacts_dir=config.storage.artifacts_dir,
+        )
+        client = client_factory(base_url=base_url, token=token, http2=False)
+        computer = ComputerSandbox(
+            client,
+            sandbox=sandbox,
+            metadata=metadata,
+            startup_timing=timing,
+        )
+        if wait and transport != "workspace-private-i6pn":
+            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            timing.mark("authenticated_daemon_ready")
+        return computer
+    except Exception:
+        if client is not None:
+            client.close()
+        _terminate_failed_sandbox(sandbox)
+        raise
 
 
 def create_modal_v2_tunnel_computer(
@@ -1265,6 +1694,70 @@ def _require_modal_backing(computer: ComputerSandbox, *, path: str) -> object:
     if computer._sandbox is None:
         raise SandboxUnavailableError(f"{path} requires a Modal-backed sandbox")
     return computer._sandbox
+
+
+def _sandbox_i6pn_address(sandbox: object) -> str:
+    process = sandbox.exec(
+        "python",
+        "-c",
+        (
+            "import socket; print(socket.getaddrinfo("
+            "'i6pn.modal.local', None, socket.AF_INET6)[0][4][0])"
+        ),
+        timeout=10,
+    )
+    address = _read_modal_process_stream(getattr(process, "stdout", "")).strip()
+    if not address or any(character not in "0123456789abcdefABCDEF:" for character in address):
+        raise SandboxUnavailableError("Modal runtime did not return a valid i6pn address")
+    return address
+
+
+def _sandbox_runtime_placement(sandbox: object) -> dict[str, str | None]:
+    process = sandbox.exec(
+        "python",
+        "-c",
+        (
+            "import json, os; print(json.dumps({"
+            "'cloud': os.environ.get('MODAL_CLOUD_PROVIDER') or None, "
+            "'region': os.environ.get('MODAL_REGION') or None}))"
+        ),
+        timeout=10,
+    )
+    raw = _read_modal_process_stream(getattr(process, "stdout", "")).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SandboxUnavailableError("Modal runtime placement returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise SandboxUnavailableError("Modal runtime placement returned an invalid payload")
+    return {
+        "cloud": payload.get("cloud") if isinstance(payload.get("cloud"), str) else None,
+        "region": payload.get("region") if isinstance(payload.get("region"), str) else None,
+    }
+
+
+async def _sandbox_runtime_placement_async(sandbox: object) -> dict[str, str | None]:
+    process = await sandbox.exec.aio(
+        "python",
+        "-c",
+        (
+            "import json, os; print(json.dumps({"
+            "'cloud': os.environ.get('MODAL_CLOUD_PROVIDER') or None, "
+            "'region': os.environ.get('MODAL_REGION') or None}))"
+        ),
+        timeout=10,
+    )
+    raw = (await process.stdout.read.aio()).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SandboxUnavailableError("Modal runtime placement returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise SandboxUnavailableError("Modal runtime placement returned an invalid payload")
+    return {
+        "cloud": payload.get("cloud") if isinstance(payload.get("cloud"), str) else None,
+        "region": payload.get("region") if isinstance(payload.get("region"), str) else None,
+    }
 
 
 def _terminate_failed_sandbox(sandbox: object) -> None:

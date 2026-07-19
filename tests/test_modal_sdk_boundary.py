@@ -25,6 +25,8 @@ from modal_computer_use.sandbox import (
     MODAL_SNAPSHOT_RETENTION_SECONDS,
     ModalVolumeMount,
     _connect_token_parts,
+    create_modal_candidate_computer,
+    create_modal_candidate_runner,
     create_modal_v2_tunnel_computer,
     modal_daemon_endpoint,
     modal_daemon_env,
@@ -343,6 +345,110 @@ def test_create_omits_modal_region_by_default(monkeypatch) -> None:
     assert "region" not in kwargs
 
 
+def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_i6pn_address",
+        lambda _sandbox: "fdaa::1234",
+    )
+    config = ComputerConfig(
+        run_id="candidate-v2",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="tunnel",
+    )
+
+    computer = create_modal_candidate_computer(
+        config=config,
+        backend="v2",
+        transport="workspace-private-i6pn",
+        cloud="aws",
+        tags={"benchmark_arm": "v2-i6pn-direct-optimized"},
+        wait=True,
+    )
+
+    args, kwargs = FakeSandbox.experimental_create_calls[0]
+    assert args == ("python", "-m", "modal_computer_use.daemon")
+    assert kwargs["image"] == "named-image"
+    assert kwargs["cpu"] == 4.0
+    assert kwargs["memory"] == 8192
+    assert kwargs["cloud"] == "aws"
+    assert kwargs["region"] == "us-west"
+    assert kwargs["i6pn"] is True
+    assert kwargs["encrypted_ports"] == []
+    assert kwargs["env"]["COMPUTER_USE_DAEMON_HOST"] == "::"
+    assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
+    assert len(kwargs["tags"]) == 10
+    assert computer.client.base_url == "http://[fdaa::1234]:8080"
+
+
+def test_candidate_v1_connect_uses_public_product_endpoint_without_tunnel(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    config = ComputerConfig(
+        run_id="candidate-v1",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="connect",
+    )
+
+    computer = create_modal_candidate_computer(
+        config=config,
+        backend="v1",
+        transport="connect-endpoint",
+        cloud="aws",
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["cloud"] == "aws"
+    assert kwargs["encrypted_ports"] == []
+    assert "i6pn" not in kwargs
+    assert computer.client.base_url == "https://sandbox-connect.example"
+
+
+def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "aws", "region": "us-west-2"},
+    )
+
+    runner = create_modal_candidate_runner(
+        app_name="candidate-app",
+        cloud="aws",
+        region="us-west",
+        image_revision="a" * 40,
+    )
+
+    args, kwargs = FakeSandbox.experimental_create_calls[0]
+    assert args == ("sleep", "infinity")
+    assert kwargs["image"] == "named-image"
+    assert kwargs["i6pn"] is True
+    assert kwargs["cloud"] == "aws"
+    assert runner.placement == {"cloud": "aws", "region": "us-west-2"}
+    assert runner.terminate() is True
+
+
 def test_create_forwards_current_network_allowlist_arguments(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(
@@ -645,9 +751,7 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "browser-gpu"
     assert kwargs["env"]["COMPUTER_USE_BROWSER"] == "chromium"
     assert kwargs["env"]["COMPUTER_USE_BROWSER_PREWARM"] == "false"
-    assert kwargs["env"]["COMPUTER_USE_BROWSER_PROFILE_DIR"] == (
-        "/home/desktop/browser-profile"
-    )
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_PROFILE_DIR"] == ("/home/desktop/browser-profile")
     assert kwargs["env"]["COMPUTER_USE_BROWSER_LAUNCH_ARGS"] == (
         '["--force-device-scale-factor=1"]'
     )
