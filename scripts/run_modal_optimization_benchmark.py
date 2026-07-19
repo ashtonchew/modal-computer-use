@@ -270,6 +270,9 @@ def _preregister_v2(args: argparse.Namespace) -> int:
         require_clean=True,
     )
     config = _v2_config(args)
+    modal_sdk_version = version("modal")
+    if modal_sdk_version != "1.5.2":
+        raise RuntimeError("Modal V2 benchmark execution requires Modal SDK 1.5.2")
     payload = build_v2_preregistration(
         config,
         source_sha=args.source_sha,
@@ -283,7 +286,7 @@ def _preregister_v2(args: argparse.Namespace) -> int:
             "timezone": "America/Los_Angeles",
             "location_label": "local-macos-arm64-America-Los_Angeles",
         },
-        sdk_versions={"modal": version("modal")},
+        sdk_versions={"modal": modal_sdk_version},
         commands=_v2_commands(
             args.source_sha,
             base_benchmark_source_sha=args.base_benchmark_source_sha,
@@ -311,6 +314,12 @@ def _run_v2(args: argparse.Namespace) -> int:
         raise RuntimeError("V2 preregistration targets a different base benchmark")
     if preregistration.get("dependency", {}).get("head_sha") != args.dependency_sha:
         raise RuntimeError("V2 preregistration dependency differs from PR #114")
+    modal_sdk_version = version("modal")
+    preregistered_modal_sdk_version = (
+        preregistration.get("environment", {}).get("sdk_versions", {}).get("modal")
+    )
+    if modal_sdk_version != "1.5.2" or modal_sdk_version != preregistered_modal_sdk_version:
+        raise RuntimeError("installed Modal SDK differs from the V2 preregistration")
     frozen = preregistration.get("configuration")
     expected = {
         "region": config.region,
@@ -344,6 +353,7 @@ def _run_v2(args: argparse.Namespace) -> int:
         source_sha=args.source_sha,
         dependency_sha=args.dependency_sha,
         base_benchmark_source_sha=args.base_benchmark_source_sha,
+        modal_sdk_version=modal_sdk_version,
         generated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         preregistration_sha256=hashlib.sha256(preregistration_bytes).hexdigest(),
         cold_attempts=cold_attempts,

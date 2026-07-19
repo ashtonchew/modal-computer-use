@@ -376,7 +376,7 @@ def test_sanitizer_merges_preregistered_v2_encrypted_tunnel_profile() -> None:
         base_benchmark_source_sha="a" * 40,
         generated_at="2026-07-19T01:00:00Z",
         runner_identity={"kind": "local"},
-        sdk_versions={"modal": "1.5.2"},
+        sdk_versions={"modal": "1.5.2+fixture"},
         commands=v2_commands,
     )
     v2_preregistration_bytes = json.dumps(v2_preregistration, sort_keys=True).encode()
@@ -400,6 +400,7 @@ def test_sanitizer_merges_preregistered_v2_encrypted_tunnel_profile() -> None:
         source_sha="d" * 40,
         dependency_sha="b" * 40,
         base_benchmark_source_sha="a" * 40,
+        modal_sdk_version="1.5.2+fixture",
         generated_at="2026-07-19T02:00:00Z",
         preregistration_sha256=hashlib.sha256(v2_preregistration_bytes).hexdigest(),
         cold_attempts=copy.deepcopy(v2_attempts),
@@ -433,6 +434,7 @@ def test_sanitizer_merges_preregistered_v2_encrypted_tunnel_profile() -> None:
     assert v2["warm_action_summary"]["p95_status"] == "reported"
     assert v2["connect_token_parity"] is False
     assert v2["provenance"]["source_sha"] == "d" * 40
+    assert v2["provenance"]["modal_sdk_version"] == "1.5.2+fixture"
     assert sanitized["v2_measurement_manifest"]["authentication"]["target_loopback"] is False
 
 
