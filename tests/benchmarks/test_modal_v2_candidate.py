@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import modal_computer_use.benchmarks.modal_v2_candidate_execution as candidate_execution
 from modal_computer_use.benchmarks.modal_v2_candidate import (
     ARM_V1_CONNECT,
     ARM_V1_TUNNEL,
@@ -18,15 +19,28 @@ from modal_computer_use.benchmarks.modal_v2_candidate import (
     build_trial_schedule,
     classified_raw_artifact_path,
     evaluate_pilot_gates,
+    preregistration_sha256,
     sanitize_result_artifact,
     summarize_distribution,
+    validate_phase_checkpoint,
     validate_result_artifact,
 )
 from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     CANDIDATE_RESULT_END,
     CANDIDATE_RESULT_START,
     extract_candidate_runner_result,
+    run_candidate_phase,
 )
+
+
+class _FakeRunner:
+    def __init__(self) -> None:
+        self.placement = {"cloud": "aws", "region": "us-west-2"}
+        self.terminated = False
+
+    def terminate(self) -> bool:
+        self.terminated = True
+        return True
 
 
 def test_config_freezes_sample_concurrency_and_supported_cloud_policy() -> None:
@@ -135,6 +149,77 @@ def test_rejected_raw_output_is_classified_and_never_targets_repository_root() -
         classified_raw_artifact_path("pilot.json", status="candidate")
 
 
+def test_checkpoint_validator_binds_partial_trials_to_preregistration() -> None:
+    preregistration = _preregistration()
+    trials = _trials("pilot", 5)[:3]
+    checkpoint = {
+        "schema_version": 1,
+        "benchmark": "modal-v2-candidate-checkpoint",
+        "generated_at": "2026-07-19T00:00:00Z",
+        "source_sha": "a" * 40,
+        "preregistration_sha256": preregistration_sha256(preregistration),
+        "phase": "pilot",
+        "state": "running",
+        "schedule_total": 20,
+        "completed_attempts": 3,
+        "trials": trials,
+        "execution": {"state": "running"},
+    }
+
+    validate_phase_checkpoint(checkpoint, preregistration=preregistration)
+
+    invalid = copy.deepcopy(checkpoint)
+    invalid["completed_attempts"] = 4
+    with pytest.raises(ValueError, match="completed count"):
+        validate_phase_checkpoint(invalid, preregistration=preregistration)
+
+
+def test_candidate_phase_checkpoints_after_cleanup_on_interrupt(monkeypatch) -> None:
+    config = ModalV2CandidateConfig(image_revision="a" * 40, bootstrap_resamples=100)
+    runner = _FakeRunner()
+    calls = 0
+
+    def fake_trial(*_args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        item = kwargs["schedule_item"]
+        return {
+            "phase": item["phase"],
+            "arm": item["arm"],
+            "status": "failed",
+            "failure": {"error_type": "RuntimeError"},
+            "cleanup": {
+                "target_terminated": True,
+                "target_detached": True,
+                "runner_terminated": None,
+            },
+        }
+
+    monkeypatch.setattr(candidate_execution, "run_candidate_trial", fake_trial)
+    checkpoints: list[tuple[list[dict], dict]] = []
+    progress: list[tuple] = []
+    schedule = build_trial_schedule(phase="pilot", samples_per_arm=5, seed=20260719)[:2]
+
+    with pytest.raises(KeyboardInterrupt):
+        run_candidate_phase(
+            config,
+            schedule=schedule,
+            runner_factory=lambda **_kwargs: runner,
+            checkpoint=lambda trials, execution: checkpoints.append(
+                (copy.deepcopy(trials), copy.deepcopy(execution))
+            ),
+            progress=lambda *args: progress.append(args),
+        )
+
+    assert progress[0][-2:] == ("failed", "RuntimeError")
+    assert checkpoints[-1][1]["state"] == "interrupted"
+    assert checkpoints[-1][1]["error_type"] == "KeyboardInterrupt"
+    assert checkpoints[-1][0][0]["cleanup"]["runner_terminated"] is True
+    assert runner.terminated is True
+
+
 def test_result_validator_rejects_aliases_winner_claims_and_ineligible_ratios() -> None:
     preregistration = _preregistration()
     payload = build_result_artifact(
@@ -164,6 +249,17 @@ def test_result_validator_rejects_aliases_winner_claims_and_ineligible_ratios() 
     ineligible["claims"]["backend_causal_ratios_emitted"] = False
     with pytest.raises(ValueError, match="ineligible backend"):
         validate_result_artifact(ineligible, preregistration=preregistration)
+
+    interrupted_full = build_result_artifact(
+        source_sha="a" * 40,
+        generated_at="2026-07-19T00:00:00Z",
+        preregistration=preregistration,
+        trials=[*_trials("pilot", 5), _trials("full", 1)[0]],
+        throughput=[],
+        execution_status="rejected",
+        status_reason="full interrupted after one retained attempt",
+    )
+    assert interrupted_full["comparisons"][BACKEND_COMPARISON]["phase"] == "pilot"
 
 
 def test_promotion_requires_complete_full_samples_and_throughput() -> None:
@@ -209,6 +305,7 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
     )
 
     assert promoted["artifact_status"] == "current_reference"
+    assert promoted["comparisons"][BACKEND_COMPARISON]["phase"] == "full"
     assert promoted["provenance"]["raw_artifact_tracked"] is False
     assert len(promoted["provenance"]["raw_artifact_sha256"]) == 64
 

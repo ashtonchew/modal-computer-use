@@ -516,7 +516,11 @@ def build_result_artifact(
         )
         for phase_index, phase in enumerate(("pilot", "full"))
     }
-    comparison_phase = "full" if any(trial.get("phase") == "full" for trial in trials) else "pilot"
+    comparison_phase = (
+        "full"
+        if _full_backend_comparison_eligible(trials, preregistration=preregistration)
+        else "pilot"
+    )
     comparisons = _build_comparisons(
         summaries[comparison_phase],
         pilot_gates=pilot_gates,
@@ -580,15 +584,7 @@ def validate_result_artifact(
     _reject_forbidden_fields(payload)
     _validate_safe_value(payload)
     trials = _list_of_mappings(payload.get("trials"), "trials")
-    for trial in trials:
-        if trial.get("arm") not in CANONICAL_ARMS:
-            raise ValueError("trial arm label is invalid")
-        if trial.get("phase") not in _ALLOWED_PHASES:
-            raise ValueError("trial phase is invalid")
-        if trial.get("status") not in _ALLOWED_STATUSES:
-            raise ValueError("trial status is invalid")
-        if trial.get("arm") == "target-loopback":
-            raise ValueError("target-loopback cannot be a product comparison arm")
+    _validate_trials(trials)
     claims = _mapping(payload.get("claims"), "claims")
     if claims.get("v2_is_default") is not False or claims.get("winner") is not None:
         raise ValueError("candidate results cannot label V2 as default or winner")
@@ -615,6 +611,48 @@ def validate_result_artifact(
             raise ValueError("result preregistration digest does not match")
         if payload.get("source_sha") != preregistration.get("source_sha"):
             raise ValueError("result source SHA differs from preregistration")
+
+
+def validate_phase_checkpoint(
+    payload: dict[str, Any],
+    *,
+    preregistration: dict[str, Any],
+) -> None:
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("benchmark") != "modal-v2-candidate-checkpoint"
+    ):
+        raise ValueError("candidate checkpoint schema or benchmark name is invalid")
+    _reject_forbidden_fields(payload)
+    _validate_safe_value(payload)
+    if payload.get("source_sha") != preregistration.get("source_sha"):
+        raise ValueError("checkpoint source SHA differs from preregistration")
+    if payload.get("preregistration_sha256") != preregistration_sha256(preregistration):
+        raise ValueError("checkpoint preregistration digest does not match")
+    phase = payload.get("phase")
+    if phase not in {"pilot", "full"}:
+        raise ValueError("checkpoint phase is invalid")
+    if payload.get("state") not in {"running", "complete", "interrupted", "failed"}:
+        raise ValueError("checkpoint state is invalid")
+    schedule_total = payload.get("schedule_total")
+    completed = payload.get("completed_attempts")
+    if (
+        isinstance(schedule_total, bool)
+        or not isinstance(schedule_total, int)
+        or schedule_total < 1
+        or isinstance(completed, bool)
+        or not isinstance(completed, int)
+        or completed < 0
+        or completed > schedule_total
+    ):
+        raise ValueError("checkpoint attempt counts are invalid")
+    trials = _list_of_mappings(payload.get("trials"), "checkpoint trials")
+    if len(trials) != completed or any(trial.get("phase") != phase for trial in trials):
+        raise ValueError("checkpoint trials do not match its phase or completed count")
+    _validate_trials(trials)
+    execution = _mapping(payload.get("execution"), "checkpoint execution")
+    if execution.get("state") != payload.get("state"):
+        raise ValueError("checkpoint state differs from execution state")
 
 
 def serialize_json(payload: dict[str, Any]) -> str:
@@ -744,6 +782,43 @@ def _build_comparisons(
             "ratios": ratios,
         }
     }
+
+
+def _full_backend_comparison_eligible(
+    trials: list[dict[str, Any]],
+    *,
+    preregistration: dict[str, Any],
+) -> bool:
+    configuration = _mapping(preregistration.get("configuration"), "configuration")
+    expected = configuration.get("full_samples_per_arm")
+    image_identity = _mapping(preregistration.get("environment"), "environment").get(
+        "image_identity"
+    )
+    rows = [
+        trial
+        for trial in trials
+        if trial.get("phase") == "full"
+        and trial.get("arm") in {ARM_V1_TUNNEL, ARM_V2_TUNNEL}
+    ]
+    if any(
+        sum(trial.get("arm") == arm for trial in rows) != expected
+        for arm in (ARM_V1_TUNNEL, ARM_V2_TUNNEL)
+    ):
+        return False
+    if any(
+        trial.get("status") != "valid"
+        or trial.get("retry_count") != 0
+        or not _verification_passed(trial.get("verification"))
+        or not _cleanup_passed(trial.get("cleanup"))
+        or bool(_trial_control_mismatches(trial, configuration, image_identity))
+        or not _actual_placement_observed(trial)
+        for trial in rows
+    ):
+        return False
+    return (
+        len({_placement_signature(trial) for trial in rows}) == 1
+        and len({_backend_control_signature(trial) for trial in rows}) == 1
+    )
 
 
 def _validate_promotion_gates(
@@ -966,6 +1041,18 @@ def _reject_forbidden_fields(value: Any) -> None:
     elif isinstance(value, list):
         for item in value:
             _reject_forbidden_fields(item)
+
+
+def _validate_trials(trials: list[dict[str, Any]]) -> None:
+    for trial in trials:
+        if trial.get("arm") not in CANONICAL_ARMS:
+            raise ValueError("trial arm label is invalid")
+        if trial.get("phase") not in _ALLOWED_PHASES:
+            raise ValueError("trial phase is invalid")
+        if trial.get("status") not in _ALLOWED_STATUSES:
+            raise ValueError("trial status is invalid")
+        if trial.get("arm") == "target-loopback":
+            raise ValueError("target-loopback cannot be a product comparison arm")
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:

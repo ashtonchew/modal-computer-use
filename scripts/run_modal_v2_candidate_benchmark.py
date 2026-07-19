@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -20,6 +22,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate import (
     preregistration_sha256,
     promotion_gate_failure_reason,
     serialize_json,
+    validate_phase_checkpoint,
     validate_result_artifact,
 )
 from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
@@ -125,28 +128,38 @@ def _pilot(args: argparse.Namespace) -> int:
     _require_clean_source(args.source_sha)
     preregistration = _read_preregistration(args.preregistration, source_sha=args.source_sha)
     config = _config_from_preregistration(preregistration)
+    checkpoint_path = _checkpoint_path(args.output, phase="pilot")
+    checkpoint_state: dict[str, Any] = {}
+    checkpoint = _checkpoint_writer(
+        checkpoint_path,
+        source_sha=args.source_sha,
+        preregistration=preregistration,
+        phase="pilot",
+        schedule_total=len(preregistration["pilot_schedule"]),
+        state=checkpoint_state,
+    )
     try:
         trials, execution = run_candidate_phase(
             config,
             schedule=list(preregistration["pilot_schedule"]),
             progress=_progress,
+            checkpoint=checkpoint,
+        )
+    except KeyboardInterrupt:
+        return _write_interrupted_result(
+            args=args,
+            preregistration=preregistration,
+            phase="pilot",
+            checkpoint_state=checkpoint_state,
         )
     except Exception as exc:
-        reason = f"pilot runner setup failed before measurement: {type(exc).__name__}"
-        payload = build_result_artifact(
-            source_sha=args.source_sha,
-            generated_at=_utc_now(),
+        return _write_failed_phase_result(
+            args=args,
             preregistration=preregistration,
-            trials=[],
-            throughput=[],
-            execution_status="rejected",
-            status_reason=reason,
-            execution={"pilot_setup": {"error_type": type(exc).__name__}},
+            phase="pilot",
+            checkpoint_state=checkpoint_state,
+            error_type=type(exc).__name__,
         )
-        output = Path(classified_raw_artifact_path(args.output.as_posix(), status="rejected"))
-        _write_new(output, payload)
-        print(json.dumps({"status": "rejected", "output": str(output), "reason": reason}))
-        return 2
     provisional = build_result_artifact(
         source_sha=args.source_sha,
         generated_at=_utc_now(),
@@ -190,11 +203,42 @@ def _full(args: argparse.Namespace) -> int:
     if not schedule:
         raise RuntimeError("no pilot-eligible arms can advance to full execution")
     config = _config_from_preregistration(preregistration)
-    full_trials, full_execution = run_candidate_phase(
-        config,
-        schedule=schedule,
-        progress=_progress,
+    checkpoint_path = _checkpoint_path(args.output, phase="full")
+    checkpoint_state: dict[str, Any] = {}
+    checkpoint = _checkpoint_writer(
+        checkpoint_path,
+        source_sha=args.source_sha,
+        preregistration=preregistration,
+        phase="full",
+        schedule_total=len(schedule),
+        state=checkpoint_state,
     )
+    try:
+        full_trials, full_execution = run_candidate_phase(
+            config,
+            schedule=schedule,
+            progress=_progress,
+            checkpoint=checkpoint,
+        )
+    except KeyboardInterrupt:
+        return _write_interrupted_result(
+            args=args,
+            preregistration=preregistration,
+            phase="full",
+            checkpoint_state=checkpoint_state,
+            prior_trials=list(pilot["trials"]),
+            prior_execution=dict(pilot.get("execution") or {}),
+        )
+    except Exception as exc:
+        return _write_failed_phase_result(
+            args=args,
+            preregistration=preregistration,
+            phase="full",
+            checkpoint_state=checkpoint_state,
+            error_type=type(exc).__name__,
+            prior_trials=list(pilot["trials"]),
+            prior_execution=dict(pilot.get("execution") or {}),
+        )
     all_trials = [*pilot["trials"], *full_trials]
     full_counts = {
         arm: sum(trial.get("phase") == "full" and trial.get("arm") == arm for trial in all_trials)
@@ -361,11 +405,17 @@ def _git_output(git: str, *args: str) -> str:
 def _write_new(path: Path, payload: dict[str, Any]) -> None:
     if path.exists():
         raise RuntimeError(f"output already exists: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(serialize_json(payload), encoding="utf-8")
+    _write_atomic(path, payload)
 
 
-def _progress(phase: str, completed: int, attempted: int, arm: str) -> None:
+def _progress(
+    phase: str,
+    completed: int,
+    attempted: int,
+    arm: str,
+    trial_status: str,
+    error_type: str | None,
+) -> None:
     print(
         json.dumps(
             {
@@ -374,10 +424,128 @@ def _progress(phase: str, completed: int, attempted: int, arm: str) -> None:
                 "completed": completed,
                 "attempted": attempted,
                 "arm": arm,
+                "trial_status": trial_status,
+                "error_type": error_type,
             }
         ),
         flush=True,
     )
+
+
+def _checkpoint_path(output: Path, *, phase: str) -> Path:
+    if len(output.parts) < 3 or output.parts[0] != "benchmark-results":
+        raise ValueError("benchmark output must be repository-relative under benchmark-results")
+    root = (
+        output.parent.parent
+        if output.parent.name in {"candidates", "rejected"}
+        else output.parent
+    )
+    return root / "checkpoints" / f"{phase}.json"
+
+
+def _checkpoint_writer(
+    path: Path,
+    *,
+    source_sha: str,
+    preregistration: dict[str, Any],
+    phase: str,
+    schedule_total: int,
+    state: dict[str, Any],
+) -> Any:
+    def write(trials: list[dict[str, Any]], execution: dict[str, Any]) -> None:
+        payload = {
+            "schema_version": 1,
+            "benchmark": "modal-v2-candidate-checkpoint",
+            "generated_at": _utc_now(),
+            "source_sha": source_sha,
+            "preregistration_sha256": preregistration_sha256(preregistration),
+            "phase": phase,
+            "state": execution.get("state"),
+            "schedule_total": schedule_total,
+            "completed_attempts": len(trials),
+            "trials": copy.deepcopy(trials),
+            "execution": copy.deepcopy(execution),
+        }
+        validate_phase_checkpoint(payload, preregistration=preregistration)
+        _write_atomic(path, payload)
+        state.clear()
+        state.update(copy.deepcopy(payload))
+
+    return write
+
+
+def _write_interrupted_result(
+    *,
+    args: argparse.Namespace,
+    preregistration: dict[str, Any],
+    phase: str,
+    checkpoint_state: dict[str, Any],
+    prior_trials: list[dict[str, Any]] | None = None,
+    prior_execution: dict[str, Any] | None = None,
+) -> int:
+    retained = copy.deepcopy(checkpoint_state.get("trials") or [])
+    trials = [*(prior_trials or []), *retained]
+    execution = dict(prior_execution or {})
+    execution[phase] = copy.deepcopy(checkpoint_state.get("execution") or {})
+    reason = (
+        f"{phase} interrupted after {len(retained)} of "
+        f"{checkpoint_state.get('schedule_total', 0)} retained attempts: KeyboardInterrupt"
+    )
+    payload = build_result_artifact(
+        source_sha=args.source_sha,
+        generated_at=_utc_now(),
+        preregistration=preregistration,
+        trials=trials,
+        throughput=[],
+        execution_status="rejected",
+        status_reason=reason,
+        execution=execution,
+    )
+    output = Path(classified_raw_artifact_path(args.output.as_posix(), status="rejected"))
+    _write_new(output, payload)
+    print(json.dumps({"status": "rejected", "output": str(output), "reason": reason}))
+    return 130
+
+
+def _write_failed_phase_result(
+    *,
+    args: argparse.Namespace,
+    preregistration: dict[str, Any],
+    phase: str,
+    checkpoint_state: dict[str, Any],
+    error_type: str,
+    prior_trials: list[dict[str, Any]] | None = None,
+    prior_execution: dict[str, Any] | None = None,
+) -> int:
+    retained = copy.deepcopy(checkpoint_state.get("trials") or [])
+    trials = [*(prior_trials or []), *retained]
+    execution = dict(prior_execution or {})
+    execution[phase] = copy.deepcopy(checkpoint_state.get("execution") or {})
+    execution[f"{phase}_failure"] = {"error_type": error_type}
+    reason = f"{phase} execution failed after {len(retained)} retained attempts: {error_type}"
+    payload = build_result_artifact(
+        source_sha=args.source_sha,
+        generated_at=_utc_now(),
+        preregistration=preregistration,
+        trials=trials,
+        throughput=[],
+        execution_status="rejected",
+        status_reason=reason,
+        execution=execution,
+    )
+    output = Path(classified_raw_artifact_path(args.output.as_posix(), status="rejected"))
+    _write_new(output, payload)
+    print(json.dumps({"status": "rejected", "output": str(output), "reason": reason}))
+    return 2
+
+
+def _write_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(serialize_json(payload), encoding="utf-8")
+    with temporary.open("rb") as stream:
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
 
 
 def _utc_now() -> str:

@@ -112,6 +112,8 @@ benchmark-results/modal-v2-candidate-2026-07-19/candidates/pilot.json
 benchmark-results/modal-v2-candidate-2026-07-19/candidates/full.json
 benchmark-results/modal-v2-candidate-2026-07-19/rejected/pilot.json
 benchmark-results/modal-v2-candidate-2026-07-19/rejected/full.json
+benchmark-results/modal-v2-candidate-2026-07-19/checkpoints/pilot.json
+benchmark-results/modal-v2-candidate-2026-07-19/checkpoints/full.json
 ```
 
 The raw artifact records source commit, preregistration digest, Modal and package versions, image
@@ -129,6 +131,9 @@ benchmark-data/modal-v2-candidate-results-2026-07-19.json
 ```
 
 Candidate and rejected evidence stays under ignored `benchmark-results/` with an exact reason.
+After every retained lifecycle, the runner atomically replaces a provenance-bound checkpoint. It
+writes a final checkpoint after runner cleanup. `SIGINT`/`KeyboardInterrupt` seals the retained rows
+as a rejected artifact and exits `130`; it never resumes or substitutes those rows into a later run.
 
 ## Reproduction
 

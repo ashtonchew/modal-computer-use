@@ -42,11 +42,13 @@ def run_candidate_phase(
     app_name: str = "modal-computer-use-v2-candidate",
     runner_factory: Any = create_modal_candidate_runner,
     progress: Any | None = None,
+    checkpoint: Any | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     run_id = new_run_id()
     runner: ModalCandidateRunner | None = None
     trials: list[dict[str, Any]] = []
     runner_cleanup = False
+    phase_error_type: str | None = None
     try:
         runner = runner_factory(
             app_name=app_name,
@@ -65,8 +67,24 @@ def run_candidate_phase(
                 run_id=run_id,
             )
             trials.append(trial)
+            if checkpoint is not None:
+                checkpoint(
+                    trials,
+                    _phase_execution(config, runner, runner_cleanup=None, state="running"),
+                )
             if progress is not None:
-                progress(item["phase"], len(trials), len(schedule), item["arm"])
+                failure = trial.get("failure")
+                progress(
+                    item["phase"],
+                    len(trials),
+                    len(schedule),
+                    item["arm"],
+                    str(trial.get("status")),
+                    failure.get("error_type") if isinstance(failure, dict) else None,
+                )
+    except BaseException as exc:
+        phase_error_type = type(exc).__name__
+        raise
     finally:
         if runner is not None:
             runner_cleanup = runner.terminate()
@@ -74,7 +92,43 @@ def run_candidate_phase(
             cleanup = trial.get("cleanup")
             if isinstance(cleanup, dict):
                 cleanup["runner_terminated"] = runner_cleanup
-    return trials, {
+        if checkpoint is not None:
+            state = (
+                "complete"
+                if phase_error_type is None
+                else "interrupted"
+                if phase_error_type == "KeyboardInterrupt"
+                else "failed"
+            )
+            checkpoint(
+                trials,
+                _phase_execution(
+                    config,
+                    runner,
+                    runner_cleanup=runner_cleanup,
+                    state=state,
+                    error_type=phase_error_type,
+                ),
+            )
+    return trials, _phase_execution(
+        config,
+        runner,
+        runner_cleanup=runner_cleanup,
+        state="complete",
+    )
+
+
+def _phase_execution(
+    config: ModalV2CandidateConfig,
+    runner: ModalCandidateRunner | None,
+    *,
+    runner_cleanup: bool | None,
+    state: str,
+    error_type: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "state": state,
+        "error_type": error_type,
         "runner_backend": "v2",
         "runner_i6pn_enabled": True,
         "runner_resources": {"cpu": 1.0, "memory_mib": 1024},
