@@ -2739,8 +2739,9 @@
       },
       "warm_capacity_enabled": false
     },
-    "modal-v2-ab": {
+    "modal-v2-encrypted-tunnel-candidate": {
       "authentication_path": "encrypted-tunnel-application-bearer",
+      "backend_causal_ratio_eligible": false,
       "cold_attempts": [
         {
           "actual_placement": "westus3",
@@ -4781,7 +4782,8 @@
         "timeout": 0,
         "valid": 30
       },
-      "comparison_scope": "modal-v1-optimized-on-demand-only",
+      "comparison_eligibility": "descriptive-candidate-only",
+      "comparison_scope": "modal-v1-optimized-on-demand-context-only",
       "connect_token_parity": false,
       "estimated_billed_cost": {
         "duration_seconds": 400.9753097111243,
@@ -4822,7 +4824,11 @@
       "limitations": [
         "no Connect Token or attested-tunnel lifecycle parity",
         "encrypted tunnel uses daemon-managed bearer authentication",
-        "beta V2 backend is not a production default"
+        "beta V2 backend is not a production default",
+        "V1 and V2 executions were not randomized or interleaved",
+        "V1 and V2 used different named image revisions",
+        "requested us-west placement produced different actual placement distributions",
+        "the separate runner actual placement and cloud were not observed"
       ],
       "provenance": {
         "base_benchmark_source_sha": "8c21cf1338fd747dca57bca6941c307270069712",
@@ -6171,7 +6177,7 @@
     "execution_date_utc": "2026-07-19",
     "image_identity": "modal-computer-use-chromium:8c21cf1338fd747dca57bca6941c307270069712",
     "modal_sdk_version": "1.5.2",
-    "normalizer_sha": "7d27c195ab0c42cc16454faf4bd799ff578beecd",
+    "normalizer_sha": "6f860de38df716c7cfdc0a23b186049751f34cd8",
     "preregistration_sha256": "d25ca8fc7b89a42ab863a6724bdbdd1e53aaa13261a5e9c1043a7841575289e2",
     "raw_artifact_path": "benchmark-results/modal-optimization-2026-07-19/raw.json",
     "raw_artifact_sha256": "bc8b7fa9cc111ce5df52d36b64608caacdfe974a8f15d96878f90439d54bbb3a",
