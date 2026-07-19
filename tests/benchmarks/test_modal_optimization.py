@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -78,6 +79,7 @@ def _artifact() -> dict[str, object]:
         "failures": [],
         "provenance": {
             "source_sha": "a" * 40,
+            "normalizer_sha": "a" * 40,
             "raw_artifact_sha256": "b" * 64,
             "raw_artifact_path": "benchmark-results/modal-optimization/raw.json",
         },
@@ -199,6 +201,52 @@ def test_sanitized_serialization_is_deterministic() -> None:
 
     assert first == second
     assert first.endswith("\n")
+
+
+def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() -> None:
+    commands = {
+        "provider_default": "provider command",
+        "provider_default_normalize": "provider normalize command",
+        "region_selection": "region command",
+        "publish_image": "publish command",
+        "benchmark": "benchmark command",
+        "normalize": "normalize command",
+    }
+    preregistration = build_preregistration(
+        ModalOptimizationConfig(region="us-west", image_revision="a" * 40),
+        source_sha="a" * 40,
+        dependency_sha="b" * 40,
+        generated_at="2026-07-19T00:00:00Z",
+        runner_identity={"kind": "local"},
+        sdk_versions={"modal": "1.5.2"},
+        commands=commands,
+    )
+    preregistration_bytes = json.dumps(preregistration, sort_keys=True).encode()
+    raw = _artifact()
+    raw["provenance"]["preregistration_sha256"] = hashlib.sha256(
+        preregistration_bytes
+    ).hexdigest()
+    for claim in raw["profiles"][PROFILE_MODAL_WARM_AVAILABILITY]["claim_attempts"]:
+        claim["request_to_authenticated_ms"] = claim["elapsed_ms"] - 1
+        claim["claim_elapsed_ms"] = claim["elapsed_ms"] + 1
+
+    sanitized = sanitize_modal_optimization_benchmark(
+        raw,
+        raw_bytes=json.dumps(raw).encode(),
+        raw_artifact_path="benchmark-results/modal-optimization/raw.json",
+        harness_commit="a" * 40,
+        preregistration_payload=preregistration,
+        preregistration_bytes=preregistration_bytes,
+        normalizer_commit="c" * 40,
+    )
+
+    assert sanitized["command_manifest"] == commands
+    assert sanitized["environment_manifest"]["sdk_versions"] == {"modal": "1.5.2"}
+    assert sanitized["measurement_manifest"]["retry_policy"]["replacement_samples"] is False
+    warm = sanitized["profiles"][PROFILE_MODAL_WARM_AVAILABILITY]
+    assert warm["request_to_authenticated_summary"]["valid"] == 30
+    assert warm["request_to_first_frame_summary"]["p95_status"] == "reported"
+    assert sanitized["provenance"]["normalizer_sha"] == "c" * 40
 
 
 def test_preregistration_freezes_commands_policies_and_dependency() -> None:

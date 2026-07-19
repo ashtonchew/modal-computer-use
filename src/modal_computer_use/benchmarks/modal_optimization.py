@@ -658,6 +658,8 @@ def validate_modal_optimization_artifact(payload: dict[str, Any]) -> None:
         raise ValueError("provenance source_sha must be a full Git SHA")
     if not _is_hex(provenance.get("raw_artifact_sha256"), 64):
         raise ValueError("provenance raw_artifact_sha256 must be SHA-256")
+    if not _is_hex(provenance.get("normalizer_sha"), 40):
+        raise ValueError("provenance normalizer_sha must be a full Git SHA")
     raw_path = provenance.get("raw_artifact_path")
     if not isinstance(raw_path, str) or not _safe_relative_path(raw_path):
         raise ValueError("provenance raw_artifact_path must be repository-relative")
@@ -669,6 +671,9 @@ def sanitize_modal_optimization_benchmark(
     raw_bytes: bytes,
     raw_artifact_path: str,
     harness_commit: str,
+    preregistration_payload: dict[str, Any] | None = None,
+    preregistration_bytes: bytes | None = None,
+    normalizer_commit: str | None = None,
 ) -> dict[str, Any]:
     if not _is_hex(harness_commit, 40):
         raise ValueError("harness_commit must be a full Git SHA")
@@ -677,6 +682,39 @@ def sanitize_modal_optimization_benchmark(
     _reject_forbidden_fields(raw_payload)
     _validate_safe_value(raw_payload)
     payload = copy.deepcopy(raw_payload)
+    _add_derived_summaries(payload)
+    if preregistration_payload is not None:
+        if preregistration_bytes is None:
+            raise ValueError("preregistration_bytes are required with a preregistration payload")
+        if preregistration_payload.get("source_sha") != harness_commit:
+            raise ValueError("preregistration source SHA must match the execution harness")
+        preregistration_digest = hashlib.sha256(preregistration_bytes).hexdigest()
+        existing_digest = _mapping(payload.get("provenance", {}), "provenance").get(
+            "preregistration_sha256"
+        )
+        if existing_digest != preregistration_digest:
+            raise ValueError("preregistration digest does not match the raw artifact")
+        payload["command_manifest"] = copy.deepcopy(
+            _mapping(preregistration_payload.get("commands"), "commands")
+        )
+        payload["environment_manifest"] = copy.deepcopy(
+            _mapping(preregistration_payload.get("environment"), "environment")
+        )
+        payload["measurement_manifest"] = {
+            key: copy.deepcopy(preregistration_payload[key])
+            for key in (
+                "sample_policy",
+                "metric_boundaries",
+                "timeout_policy",
+                "retry_policy",
+                "failure_policy",
+                "cost_policy",
+                "artifact_policy",
+            )
+        }
+    normalizer = normalizer_commit or harness_commit
+    if not _is_hex(normalizer, 40):
+        raise ValueError("normalizer_commit must be a full Git SHA")
     payload["provenance"] = {
         **_mapping(payload.get("provenance", {}), "provenance"),
         "source_sha": harness_commit,
@@ -685,7 +723,10 @@ def sanitize_modal_optimization_benchmark(
         "raw_artifact_tracked": False,
         "sanitizer": "modal_computer_use.benchmarks.modal_optimization",
         "sanitizer_version": 1,
+        "normalizer_sha": normalizer,
     }
+    _reject_forbidden_fields(payload)
+    _validate_safe_value(payload)
     validate_modal_optimization_artifact(payload)
     return payload
 
@@ -701,17 +742,26 @@ def generate_sanitized_modal_optimization_benchmark(
     output_path: Path,
     raw_artifact_path: str,
     harness_commit: str,
+    preregistration_path: Path,
+    normalizer_commit: str,
     check: bool = False,
 ) -> bool:
     raw_bytes = raw_path.read_bytes()
     raw_payload = json.loads(raw_bytes)
     if not isinstance(raw_payload, dict):
         raise ValueError("modal optimization payload must be a JSON object")
+    preregistration_bytes = preregistration_path.read_bytes()
+    preregistration_payload = json.loads(preregistration_bytes)
+    if not isinstance(preregistration_payload, dict):
+        raise ValueError("preregistration payload must be a JSON object")
     sanitized = sanitize_modal_optimization_benchmark(
         raw_payload,
         raw_bytes=raw_bytes,
         raw_artifact_path=raw_artifact_path,
         harness_commit=harness_commit,
+        preregistration_payload=preregistration_payload,
+        preregistration_bytes=preregistration_bytes,
+        normalizer_commit=normalizer_commit,
     )
     rendered = serialize_modal_optimization_benchmark(sanitized)
     if check:
@@ -719,6 +769,91 @@ def generate_sanitized_modal_optimization_benchmark(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8")
     return True
+
+
+def _add_derived_summaries(payload: dict[str, Any]) -> None:
+    profiles = _mapping(payload.get("profiles"), "profiles")
+    on_demand = _mapping(profiles.get(PROFILE_MODAL_ON_DEMAND), PROFILE_MODAL_ON_DEMAND)
+    cold = _list_of_mappings(on_demand.get("cold_attempts"), "cold_attempts")
+    stage_names = sorted(
+        {
+            str(stage)
+            for attempt in cold
+            for stage in _mapping(attempt.get("stages", {}), "stages")
+        }
+    )
+    stage_summaries: dict[str, Any] = {}
+    for stage in stage_names:
+        observed = []
+        unsupported_reasons: set[str] = set()
+        for attempt in cold:
+            stage_value = _mapping(attempt.get("stages", {}), "stages").get(stage)
+            if not isinstance(stage_value, dict):
+                continue
+            if stage_value.get("status") == "observed" and _is_nonnegative_finite(
+                stage_value.get("elapsed_ms")
+            ):
+                observed.append(float(stage_value["elapsed_ms"]))
+            elif stage_value.get("status") == "unsupported" and _nonempty_text(
+                stage_value.get("reason")
+            ):
+                unsupported_reasons.add(str(stage_value["reason"]))
+        if observed:
+            stage_summaries[stage] = {
+                "status": "observed",
+                **_summary_from_values(observed),
+            }
+        else:
+            stage_summaries[stage] = {
+                "status": "unsupported",
+                "reasons": sorted(unsupported_reasons),
+            }
+    on_demand["cold_stage_summaries"] = stage_summaries
+
+    warm = _mapping(
+        profiles.get(PROFILE_MODAL_WARM_AVAILABILITY),
+        PROFILE_MODAL_WARM_AVAILABILITY,
+    )
+    claims = _list_of_mappings(warm.get("claim_attempts"), "claim_attempts")
+    warm["request_to_authenticated_summary"] = _summary_from_attempt_field(
+        claims,
+        "request_to_authenticated_ms",
+    )
+    warm["request_to_first_frame_summary"] = _summary_from_attempt_field(
+        claims,
+        "elapsed_ms",
+    )
+    warm["claim_acquisition_summary"] = _summary_from_attempt_field(
+        claims,
+        "claim_elapsed_ms",
+    )
+
+
+def _summary_from_attempt_field(
+    attempts: list[dict[str, Any]],
+    field: str,
+) -> dict[str, Any]:
+    values = [
+        float(attempt[field])
+        for attempt in attempts
+        if attempt.get("status") == "valid" and _is_nonnegative_finite(attempt.get(field))
+    ]
+    return _summary_from_values(values)
+
+
+def _summary_from_values(values: list[float]) -> dict[str, Any]:
+    rows = [
+        {
+            "attempt": index,
+            "status": "valid",
+            "elapsed_ms": value,
+            "retry_count": 0,
+            "failure": None,
+            "cleanup": {"attempted": False, "succeeded": None, "error_type": None},
+        }
+        for index, value in enumerate(values)
+    ]
+    return summarize_attempts(rows)
 
 
 def _validate_attempt_collection(profile: dict[str, Any], prefix: str) -> None:

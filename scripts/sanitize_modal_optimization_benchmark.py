@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,13 +22,18 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
-    if not args.check:
-        _require_clean_exact_head(args.harness_commit)
+    normalizer_commit = _normalizer_commit(
+        args.harness_commit,
+        output_path=args.output,
+        check=args.check,
+    )
     matches = generate_sanitized_modal_optimization_benchmark(
         raw_path=args.raw,
         output_path=args.output,
         raw_artifact_path=args.raw_artifact_path,
         harness_commit=args.harness_commit,
+        preregistration_path=args.raw.parent / "preregistration.json",
+        normalizer_commit=normalizer_commit,
         check=args.check,
     )
     if args.check and not matches:
@@ -35,14 +41,30 @@ def main() -> int:
     return 0
 
 
-def _require_clean_exact_head(harness_commit: str) -> None:
+def _normalizer_commit(
+    harness_commit: str,
+    *,
+    output_path: Path,
+    check: bool,
+) -> str:
+    if check:
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+        return str(payload["provenance"]["normalizer_sha"])
     git = shutil.which("git")
     if git is None:
         raise RuntimeError("git is required to publish a benchmark artifact")
-    if _git_output(git, "rev-parse", "HEAD") != harness_commit:
-        raise RuntimeError("harness commit does not match HEAD")
+    head = _git_output(git, "rev-parse", "HEAD")
+    ancestor = subprocess.run(  # noqa: S603
+        [git, "merge-base", "--is-ancestor", harness_commit, head],
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    if ancestor.returncode != 0:
+        raise RuntimeError("execution harness must be an ancestor of the normalizer")
     if _git_output(git, "status", "--porcelain", "--untracked-files=no"):
         raise RuntimeError("artifact publication requires a clean tracked worktree")
+    return head
 
 
 def _git_output(git: str, *args: str) -> str:
