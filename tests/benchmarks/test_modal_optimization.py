@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -708,6 +710,35 @@ def test_region_evidence_envelope_binds_payload_to_source_revision() -> None:
             raw_bytes=envelope_bytes,
             expected_source_sha="b" * 40,
         )
+
+
+def test_region_attestation_requires_exact_clean_source(
+    tmp_path,
+) -> None:
+    raw = tmp_path / "region.json"
+    output = tmp_path / "region-attested.json"
+    raw.write_text('{"benchmark":"modal-region-ab"}', encoding="utf-8")
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "scripts/run_modal_optimization_benchmark.py",
+            "attest-region",
+            str(raw),
+            str(output),
+            "--source-sha",
+            "a" * 40,
+            "--raw-artifact-path",
+            "benchmark-results/run/region.json",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode != 0
+    assert "source SHA does not match HEAD" in result.stderr
+    assert not output.exists()
 
 
 def test_independent_cold_attempts_validate_frame_and_record_cleanup() -> None:

@@ -207,6 +207,7 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def _attest_region(args: argparse.Namespace) -> int:
+    _require_dependency(args.source_sha, DEPENDENCY_SHA, require_clean=True)
     raw_bytes = args.raw.read_bytes()
     payload = json.loads(raw_bytes)
     if not isinstance(payload, dict):
