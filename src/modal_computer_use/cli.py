@@ -1301,29 +1301,14 @@ def _record_modal_resource_lifetime(
     top_environment = result.setdefault("metadata", {}).setdefault("environment", {})
     if isinstance(top_environment, dict):
         top_environment.update(environment_metadata)
-    surfaces = result.get("surfaces")
-    if not isinstance(surfaces, dict):
-        return
-    for surface_name, raw_surface in surfaces.items():
-        if not isinstance(raw_surface, dict):
-            continue
-        surface_metadata = raw_surface.setdefault("metadata", {})
-        if not isinstance(surface_metadata, dict):
-            continue
-        surface_environment = surface_metadata.setdefault("environment", {})
-        if isinstance(surface_environment, dict):
-            surface_environment.update(environment_metadata)
-        estimate = estimate_surface_cost(
-            str(surface_name),
-            surface_status=str(raw_surface.get("status", "unknown")),
-            runtime_seconds=resource_lifetime_ms / 1000,
-            metadata=surface_metadata,
-        )
-        raw_surface["cost_estimate"] = estimate
-        cost_status = raw_surface.setdefault("cost_status", {})
-        if isinstance(cost_status, dict):
-            cost_status["estimate"] = estimate["status"]
-            cost_status.setdefault("billing_reconciliation", "not_requested")
+    estimate = estimate_surface_cost(
+        "daemon-http",
+        surface_status="ok" if result.get("ok") else "failed",
+        runtime_seconds=resource_lifetime_ms / 1000,
+        metadata={"environment": environment_metadata},
+    )
+    result["shared_resource_cost_estimate"] = estimate
+    result["cost_status"] = {"shared_resource_estimate": estimate["status"]}
 
 
 def _parse_cli_datetime(

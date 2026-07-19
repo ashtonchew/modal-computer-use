@@ -49,7 +49,7 @@ def benchmark_provenance(
         "git_worktree_clean": git_worktree_clean,
         "caller_path": caller_path,
         "region": modal_region or "provider-default",
-        "cost_status": "see_surface_cost_status",
+        "cost_status": "see_run_and_surface_cost_status",
     }
 
 

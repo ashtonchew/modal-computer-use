@@ -8,7 +8,12 @@ from pydantic import ValidationError
 
 from modal_computer_use.benchmarks.provenance import benchmark_provenance
 from modal_computer_use.config import ComputerConfig, ImageConfig, NetworkConfig
-from modal_computer_use.image import named_image, named_image_name, publish_named_images
+from modal_computer_use.image import (
+    _published_named_image_identities,
+    named_image,
+    named_image_name,
+    publish_named_images,
+)
 from modal_computer_use.sandbox import modal_billing_report
 
 REVISION = "0123456789abcdef0123456789abcdef01234567"
@@ -73,6 +78,17 @@ def test_named_image_config_requires_full_git_revision_and_browser() -> None:
             resources={"profile": "browser"},
             image={"source": "named", "revision": REVISION},
         )
+    with pytest.raises(ValidationError, match="require the xfce window manager"):
+        ComputerConfig(
+            desktop={"window_manager": "openbox"},
+            image={"source": "named", "revision": REVISION},
+        )
+    with pytest.raises(ValidationError, match=r"require browser\.prewarm"):
+        ComputerConfig(
+            resources={"profile": "browser"},
+            browser={"kind": "firefox", "prewarm": False},
+            image={"source": "named", "revision": REVISION},
+        )
 
 
 @pytest.mark.parametrize(
@@ -118,6 +134,10 @@ def test_named_image_uses_from_name_without_inline_fallback(monkeypatch) -> None
 
 def test_publish_named_images_publishes_all_variants(monkeypatch) -> None:
     published: list[tuple[str, str | None, str]] = []
+    monkeypatch.setattr(
+        "modal_computer_use.image._published_named_image_identities",
+        lambda *, environment_name: set(),
+    )
 
     class FakeRecipe:
         def __init__(self, variant: str) -> None:
@@ -149,6 +169,46 @@ def test_publish_named_images_publishes_all_variants(monkeypatch) -> None:
     assert set(identities) == {"standard", "firefox", "chromium"}
     assert {item[0] for item in published} == set(identities.values())
     assert {item[2] for item in published} == {"standard", "firefox", "chromium"}
+
+
+def test_publish_named_images_refuses_existing_revision_tag(monkeypatch) -> None:
+    identity = f"modal-computer-use-standard:{REVISION}"
+    monkeypatch.setattr(
+        "modal_computer_use.image._published_named_image_identities",
+        lambda *, environment_name: {identity},
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: (_ for _ in ()).throw(AssertionError("build started before preflight")),
+    )
+
+    with pytest.raises(ValueError, match="refusing to replace existing named Image"):
+        publish_named_images(revision=REVISION)
+
+
+def test_named_image_publication_preflight_uses_modal_cli_and_fails_closed(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> object:
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout='[{"tag": "modal-computer-use-standard:abc", "image_id": "im-1"}]',
+        )
+
+    monkeypatch.setattr("modal_computer_use.image.subprocess.run", fake_run)
+
+    identities = _published_named_image_identities(environment_name="prod")
+
+    assert identities == {"modal-computer-use-standard:abc"}
+    assert calls[0][-2:] == ["--env", "prod"]
+
+    monkeypatch.setattr(
+        "modal_computer_use.image.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""),
+    )
+    with pytest.raises(RuntimeError, match="could not verify existing named Image"):
+        _published_named_image_identities(environment_name=None)
 
 
 def test_modal_billing_report_uses_workspace_or_environment(monkeypatch) -> None:
@@ -224,4 +284,4 @@ def test_benchmark_provenance_records_complete_safe_inputs(monkeypatch) -> None:
     assert result["resolved_resources"]["memory"]["status"] == (
         "provider_default_unavailable"
     )
-    assert result["cost_status"] == "see_surface_cost_status"
+    assert result["cost_status"] == "see_run_and_surface_cost_status"

@@ -224,7 +224,8 @@ uv run python scripts/publish_modal_images.py --environment prod
 
 Select a published Image with `ImageConfig(source="named", revision="<full-git-sha>")`. Named
 selection never falls back to an inline build. Select a prior revision or restore the default
-`ImageConfig()` to roll back.
+`ImageConfig()` to roll back. The publisher refuses an existing revision tag. Serialize publishers
+for the same Environment because Modal does not provide an atomic create-only publish operation.
 
 To reuse an existing run-scoped sandbox, use an explicit reuse policy:
 

@@ -291,10 +291,15 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
                             "kind": "modal-attested-encrypted-h2-tunnel",
                         },
                     },
-                    "status": "ok",
-                    "cases": {},
-                    "failures": [],
-                }
+                        "status": "ok",
+                        "cases": {},
+                        "failures": [],
+                        "cost_estimate": {"status": "unknown"},
+                        "cost_status": {
+                            "estimate": "unknown",
+                            "billing_reconciliation": "not_requested",
+                        },
+                    }
             },
             "failures": [],
         }
@@ -363,7 +368,9 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert environment["cost_duration_policy"] == (
         "measured_resource_lifetime_including_creation_benchmark_and_teardown"
     )
-    assert payload["surfaces"]["daemon-http"]["cost_status"]["estimate"] == "estimated"
+    assert payload["surfaces"]["daemon-http"]["cost_status"]["estimate"] == "unknown"
+    assert payload["shared_resource_cost_estimate"]["status"] == "estimated"
+    assert payload["cost_status"] == {"shared_resource_estimate": "estimated"}
     assert closed == ["terminate", "detach"]
 
 def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:

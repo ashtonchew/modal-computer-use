@@ -920,6 +920,12 @@ partial `start` values down to the interval boundary and excludes partial `end` 
 tag keys can be absent when they were not in use, and tag changes apply to the whole reported
 interval. Saved reconciliation metadata omits raw billing rows, object ids, URLs, tokens,
 stdout/stderr, and daemon payloads.
+
+When one created Modal Sandbox runs multiple benchmark surfaces, the report records one
+`shared_resource_cost_estimate` for the full create-to-terminate lifetime. It does not copy that
+shared cost into every surface. Surface estimates keep their own measured runtime or remain
+`unknown` when a fair allocation is unavailable.
+
 For strongest attribution, run the benchmark in an isolated Modal App and pass the benchmark tags as
 `app_tags` to `ComputerSandbox.create(...)`, because Modal billing reports surface tags from the
 billed Modal object. Sandbox tags remain useful for operational lookup/debugging, but they should not

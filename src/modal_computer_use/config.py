@@ -228,10 +228,18 @@ class ComputerConfig(StrictBaseModel):
         if self.image.source == "named":
             if self.resources.profile == "custom":
                 raise ValueError("named images do not support the custom resource profile")
+            if self.desktop.window_manager != "xfce":
+                raise ValueError("named images require the xfce window manager")
             if self.resources.profile in ("browser", "browser-gpu") and (
                 self.browser is None or self.browser.kind is None
             ):
                 raise ValueError("named image selection requires browser.kind")
+            if (
+                self.resources.profile in ("browser", "browser-gpu")
+                and self.browser is not None
+                and not self.browser.prewarm
+            ):
+                raise ValueError("named browser images require browser.prewarm")
         return self
 
 

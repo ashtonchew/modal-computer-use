@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
+import subprocess
+import sys
 from typing import Literal
 
 from .errors import ModalNotInstalledError
@@ -118,24 +121,70 @@ def publish_named_images(
     revision: str,
     app_name: str = "modal-computer-use-image-builds",
     environment_name: str | None = None,
-    window_manager: Literal["xfce", "openbox"] = "xfce",
-) -> dict[str, str]:
+) -> dict[NamedImageVariant, str]:
     """Build and publish standard, Firefox, and Chromium Images for one Git revision."""
     _require_full_revision(revision)
+    variants: tuple[NamedImageVariant, ...] = ("standard", "firefox", "chromium")
+    identities = {
+        variant: f"{NAMED_IMAGE_PREFIX}-{variant}:{revision}"
+        for variant in variants
+    }
+    existing = _published_named_image_identities(environment_name=environment_name)
+    conflicts = sorted(set(identities.values()) & existing)
+    if conflicts:
+        raise ValueError(
+            "refusing to replace existing named Image revision tags: " + ", ".join(conflicts)
+        )
     modal = _modal()
     app = modal.App.lookup(
         app_name,
         create_if_missing=True,
         environment_name=environment_name,
     )
-    identities: dict[str, str] = {}
     with modal.enable_output():
-        for variant in ("standard", "firefox", "chromium"):
-            identity = f"{NAMED_IMAGE_PREFIX}-{variant}:{revision}"
-            recipe = _named_image_recipe(variant=variant, window_manager=window_manager)
+        for variant, identity in identities.items():
+            recipe = _named_image_recipe(variant=variant, window_manager="xfce")
             recipe.build(app).publish(identity, environment_name=environment_name)
-            identities[variant] = identity
     return identities
+
+
+def _published_named_image_identities(*, environment_name: str | None) -> set[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "modal",
+        "image",
+        "names",
+        "list",
+        "--prefix",
+        NAMED_IMAGE_PREFIX,
+        "--json",
+    ]
+    if environment_name is not None:
+        command.extend(("--env", environment_name))
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed interpreter and Modal CLI arguments.
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("could not verify existing named Image revision tags") from exc
+    if completed.returncode != 0:
+        raise RuntimeError("could not verify existing named Image revision tags")
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Modal named Image list returned invalid JSON") from exc
+    if not isinstance(payload, list):
+        raise RuntimeError("Modal named Image list returned an invalid result")
+    return {
+        str(item["tag"])
+        for item in payload
+        if isinstance(item, dict) and isinstance(item.get("tag"), str)
+    }
 
 
 def _named_image_recipe(
