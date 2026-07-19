@@ -337,7 +337,10 @@ class ComputerSandbox:
                 window_manager=config.desktop.window_manager,
                 browser_prewarm=config.browser.prewarm if config.browser else False,
             )
-        app = modal.App.lookup(app_name, create_if_missing=True)
+        app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
+        if config.image.source == "named" and config.image.environment_name is not None:
+            app_lookup_kwargs["environment_name"] = config.image.environment_name
+        app = modal.App.lookup(app_name, **app_lookup_kwargs)
         if app_tags:
             _set_modal_object_tags(app, app_tags)
         env = _daemon_environment(

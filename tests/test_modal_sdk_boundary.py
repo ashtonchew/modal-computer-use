@@ -46,12 +46,18 @@ class FakeProbe:
 
 
 class FakeApp:
-    lookups: ClassVar[list[tuple[str, bool]]] = []
+    lookups: ClassVar[list[tuple[str, bool, str | None]]] = []
     objects: ClassVar[list[FakeAppObject]] = []
 
     @classmethod
-    def lookup(cls, app_name: str, *, create_if_missing: bool) -> FakeAppObject:
-        cls.lookups.append((app_name, create_if_missing))
+    def lookup(
+        cls,
+        app_name: str,
+        *,
+        create_if_missing: bool,
+        environment_name: str | None = None,
+    ) -> FakeAppObject:
+        cls.lookups.append((app_name, create_if_missing, environment_name))
         app = FakeAppObject(app_name)
         cls.objects.append(app)
         return app
@@ -371,6 +377,7 @@ def test_create_selects_named_image_without_inline_fallback(monkeypatch) -> None
     assert kwargs["tags"]["computer-use.image_identity"] == (
         f"modal-computer-use-chromium:{revision}"
     )
+    assert FakeApp.lookups == [("modal-computer-use", True, "prod")]
     assert selected == [
         {
             "revision": revision,
