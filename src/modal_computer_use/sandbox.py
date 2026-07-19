@@ -4,6 +4,7 @@ import json
 import secrets as _secrets
 import time
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -21,6 +22,7 @@ from .errors import (
 )
 from .hot_session import HotSessionClient
 from .image import default_image, named_image, selected_image_identity
+from .latency import SessionStartupTiming, validate_first_frame
 from .models import ComputerStatus, DebugUrls, SandboxRef
 from .namespaces import (
     ActionsNamespace,
@@ -42,7 +44,7 @@ from .namespaces import (
     WindowsNamespace,
 )
 from .observations import ObservationClient
-from .state import compute_config_hash, default_tags, new_run_id
+from .state import compute_config_hash, default_tags, new_run_id, warm_pool_tags
 from .transports import HotSessionTransport, ObservationStreamTransport
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
@@ -67,6 +69,81 @@ class ModalSandboxExecResult:
     returncode: int | None
     stdout: str
     stderr: str
+
+
+@dataclass(frozen=True)
+class ModalDaemonCommandResult:
+    result: ModalSandboxExecResult
+    selected_path: Literal["same-region-connect", "external"]
+    requested_region: str
+    fallback_used: bool
+    fallback_reason: str | None = None
+
+
+class _TimedModalRuntime:
+    def __init__(self, runtime: object, timing: SessionStartupTiming) -> None:
+        self._runtime = runtime
+        self._timing = timing
+
+    def __getattr__(self, name: str) -> object:
+        value = getattr(self._runtime, name)
+        if name == "Sandbox":
+            return _TimedSandboxType(value, self._timing)
+        return value
+
+
+class _TimedSandboxType:
+    def __init__(self, sandbox_type: object, timing: SessionStartupTiming) -> None:
+        self._sandbox_type = sandbox_type
+        self._timing = timing
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._sandbox_type, name)
+
+    def create(self, *args: object, **kwargs: object) -> object:
+        create = getattr(self._sandbox_type, "create")  # noqa: B009 - dynamic Modal SDK type
+        self._timing.mark("sandbox_create_started")
+        sandbox = create(*args, **kwargs)
+        self._timing.mark("sandbox_registered")
+        return _TimedSandboxInstance(sandbox, self._timing)
+
+
+class _TimedSandboxInstance:
+    def __init__(self, sandbox: object, timing: SessionStartupTiming) -> None:
+        self._sandbox = sandbox
+        self._timing = timing
+
+    def __getattr__(self, name: str) -> object:
+        value = getattr(self._sandbox, name)
+        if name == "wait_until_ready":
+            return self._wait_until_ready
+        if name == "create_connect_token":
+            return self._create_connect_access
+        return value
+
+    def _wait_until_ready(self, *args: object, **kwargs: object) -> object:
+        wait_until_ready = getattr(  # noqa: B009 - dynamic Modal SDK type
+            self._sandbox, "wait_until_ready"
+        )
+        try:
+            result = wait_until_ready(*args, **kwargs)
+        except Exception:
+            _terminate_failed_sandbox(self._sandbox)
+            raise
+        self._timing.mark("tcp_ready")
+        return result
+
+    def _create_connect_access(self, *args: object, **kwargs: object) -> object:
+        create_access = getattr(  # noqa: B009 - dynamic Modal SDK type
+            self._sandbox, "create_connect_token"
+        )
+        try:
+            result = create_access(*args, **kwargs)
+        except Exception:
+            _terminate_failed_sandbox(self._sandbox)
+            raise
+        self._timing.mark("connect_token_ready")
+        return result
 
 
 @dataclass(frozen=True)
@@ -250,10 +327,14 @@ class ComputerSandbox:
         *,
         sandbox: object | None = None,
         metadata: SandboxRef | None = None,
+        startup_timing: SessionStartupTiming | None = None,
     ) -> None:
         self.client = client
         self._sandbox = sandbox
         self._metadata = metadata
+        self.startup_timing = startup_timing
+        self._cleanup_on_readiness_failure = False
+        self._readiness_stage_count = 0
         self.lifecycle = LifecycleNamespace(client)
         self.mouse = MouseNamespace(client)
         self.keyboard = KeyboardNamespace(client)
@@ -297,8 +378,20 @@ class ComputerSandbox:
         volumes: dict[str, object] | None = None,
         owner: str | None = None,
         wait: bool = True,
+        timing: SessionStartupTiming | None = None,
+        tag_profile: Literal["default", "warm_pool"] = "default",
         **sandbox_kwargs: Any,
     ) -> ComputerSandbox:
+        timing = timing or SessionStartupTiming()
+        timing.mark("request_received")
+        timing.unsupported(
+            "scheduled",
+            "Modal V1 does not expose a supported scheduling timestamp",
+        )
+        timing.unsupported(
+            "daemon_started",
+            "the daemon process does not yet emit an attested startup timestamp",
+        )
         try:
             import modal
         except ImportError as exc:
@@ -307,14 +400,13 @@ class ComputerSandbox:
                 "`uv sync --extra modal` in this repository or "
                 "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
+        modal = _TimedModalRuntime(modal, timing)
 
         config = config or ComputerConfig()
         if not config.run_id:
             config.run_id = new_run_id()
         volumes = _prepare_volume_mounts(volumes or {})
-        artifact_volume_mounted = _has_artifact_volume_mount(
-            volumes, config.storage.artifacts_dir
-        )
+        artifact_volume_mounted = _has_artifact_volume_mount(volumes, config.storage.artifacts_dir)
         if config.storage.persist_artifacts and not artifact_volume_mounted:
             raise ConfigConflictError(
                 "persist_artifacts=True requires a Volume mounted at storage.artifacts_dir "
@@ -348,7 +440,10 @@ class ComputerSandbox:
             vnc_mode=vnc_mode,
             artifact_volume_mounted=artifact_volume_mounted,
         )
-        sandbox_tags = {**(tags or {}), **default_tags(config, owner=owner)}
+        base_tags = (
+            warm_pool_tags() if tag_profile == "warm_pool" else default_tags(config, owner=owner)
+        )
+        sandbox_tags = {**(tags or {}), **base_tags}
         sandbox_tags["computer-use.image_identity"] = (
             "custom"
             if custom_image_supplied
@@ -359,6 +454,7 @@ class ComputerSandbox:
                 browser=browser_kind,
             )
         )
+        _validate_sandbox_tags(sandbox_tags)
         http2 = config.network.daemon_http_version == "2"
         ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
         h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
@@ -424,6 +520,8 @@ class ComputerSandbox:
             sandbox=sandbox,
             metadata=metadata,
         )
+        computer.startup_timing = timing
+        computer._cleanup_on_readiness_failure = True
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         if wait and config.ingress == "attested-tunnel":
@@ -438,7 +536,12 @@ class ComputerSandbox:
                 sandbox=sandbox,
                 metadata=metadata,
             )
+            computer.startup_timing = timing
+            computer._cleanup_on_readiness_failure = True
+            computer._readiness_stage_count = 1
+            timing.mark("attestation_ready")
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+        computer._cleanup_on_readiness_failure = False
         return computer
 
     @classmethod
@@ -593,11 +696,21 @@ class ComputerSandbox:
                 last_payload = payload
                 last_error = None
                 if payload.get("ready") is True:
+                    if self.startup_timing is not None:
+                        stage = (
+                            "connect_ready" if self._readiness_stage_count == 0 else "tunnel_ready"
+                        )
+                        self.startup_timing.mark(stage)
+                    self._readiness_stage_count += 1
                     return
             except Exception as exc:
                 last_error = exc
             if time.monotonic() >= deadline:
                 detail = _readiness_timeout_detail(last_payload, last_error)
+                if self._cleanup_on_readiness_failure:
+                    self.client.close()
+                    if self._sandbox is not None:
+                        _terminate_failed_sandbox(self._sandbox)
                 raise TimeoutError(
                     f"daemon did not become ready before timeout ({timeout:g}s){detail}"
                 )
@@ -619,6 +732,84 @@ class ComputerSandbox:
 
     def metadata(self) -> SandboxRef | None:
         return self._metadata
+
+    def poll(self) -> int | None:
+        sandbox = _require_modal_backing(self, path="poll")
+        poll = getattr(sandbox, "poll", None)
+        if not callable(poll):
+            raise SandboxUnavailableError("Modal Sandbox.poll is unavailable")
+        value = poll()
+        return value if isinstance(value, int) else None
+
+    def runtime_region(self) -> str | None:
+        sandbox = _require_modal_backing(self, path="runtime region")
+        process = sandbox.exec(
+            "python",
+            "-c",
+            "import os; print(os.environ.get('MODAL_REGION', ''))",
+            timeout=10,
+        )
+        region = _read_modal_process_stream(getattr(process, "stdout", "")).strip()
+        return region or None
+
+    def tags(self) -> dict[str, str]:
+        sandbox = _require_modal_backing(self, path="tags")
+        return _get_modal_object_tags(sandbox)
+
+    def set_tags(
+        self,
+        tags: dict[str, str],
+        *,
+        remove: set[str] | None = None,
+    ) -> None:
+        sandbox = _require_modal_backing(self, path="set_tags")
+        remote_tags = _read_modal_object_tags(sandbox)
+        metadata_tags = self._metadata.tags if self._metadata is not None else {}
+        complete_tags = {**(metadata_tags if remote_tags is None else remote_tags), **tags}
+        for key in remove or ():
+            complete_tags.pop(key, None)
+        _validate_sandbox_tags(complete_tags)
+        _replace_modal_object_tags(sandbox, complete_tags)
+        if self._metadata is not None:
+            self._metadata = self._metadata.model_copy(update={"tags": complete_tags})
+
+    def ensure_browser_ready(
+        self,
+        config: ComputerConfig,
+        *,
+        timing: SessionStartupTiming | None = None,
+    ) -> None:
+        if config.browser is None or config.browser.kind is None:
+            return
+        status = self.browser.status()
+        if status.get("configured_browser") != config.browser.kind:
+            raise RuntimeError("configured browser does not match the requested browser")
+        if not config.browser.prewarm:
+            return
+        prewarm_result = status.get("prewarm_result")
+        if not isinstance(prewarm_result, dict) or prewarm_result.get("ok") is not True:
+            raise RuntimeError("browser prewarm did not succeed")
+        if not isinstance(status.get("windows"), int) or status["windows"] < 1:
+            raise RuntimeError("browser prewarm did not create a browser window")
+        if timing is not None:
+            timing.mark("browser_ready")
+
+    def first_valid_frame(
+        self,
+        config: ComputerConfig,
+        *,
+        timing: SessionStartupTiming | None = None,
+    ) -> bytes:
+        screenshot = self.screenshots.full(format="png", processing="daemon")
+        payload = validate_first_frame(
+            screenshot.as_bytes(),
+            expected_width=config.desktop.resolution[0],
+            expected_height=config.desktop.resolution[1],
+            image_format="png",
+        )
+        if timing is not None:
+            timing.mark("first_valid_frame")
+        return payload
 
     def __enter__(self) -> ComputerSandbox:
         return self
@@ -660,6 +851,7 @@ class ComputerSandbox:
         multi_rect_min_savings: float | None = None,
         frame_encoding: Literal["json-binary", "binary-envelope"] | None = "binary-envelope",
         timeout: float = 30.0,
+        timing: SessionStartupTiming | None = None,
     ) -> ObservationClient:
         return ObservationClient(
             ObservationStreamTransport(
@@ -680,6 +872,7 @@ class ComputerSandbox:
             max_patch_rects=max_patch_rects,
             multi_rect_min_savings=multi_rect_min_savings,
             frame_encoding=frame_encoding,
+            startup_timing=timing,
         )
 
     def snapshot_filesystem(
@@ -728,8 +921,7 @@ class ComputerSandbox:
         """Block until every mounted Modal Volume has reloaded or the timeout expires."""
         if self._sandbox is None or not hasattr(self._sandbox, "reload_volumes"):
             raise SandboxUnavailableError(
-                "Volume reload requires a Modal-backed sandbox with "
-                "Sandbox.reload_volumes support"
+                "Volume reload requires a Modal-backed sandbox with Sandbox.reload_volumes support"
             )
         _validate_modal_operation_policy(timeout=timeout, ttl=None)
         self._sandbox.reload_volumes(timeout=timeout)
@@ -793,9 +985,7 @@ def modal_daemon_env(
         reserved["COMPUTER_USE_TARGET_SANDBOX_ID"] = endpoint.target_sandbox_id
     conflicts = sorted(set(reserved) & set(env or {}))
     if conflicts:
-        raise ValueError(
-            "runner env cannot override reserved daemon keys: " + ", ".join(conflicts)
-        )
+        raise ValueError("runner env cannot override reserved daemon keys: " + ", ".join(conflicts))
     return {**reserved, **(env or {})}
 
 
@@ -816,9 +1006,12 @@ def run_modal_daemon_command(
     exec_once: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_once,
     exec_in_target: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_in_place,
 ) -> ModalSandboxExecResult:
-    command_tuple = tuple(command)
-    endpoint = modal_daemon_endpoint(computer, path)
-    runner_env = modal_daemon_env(endpoint, env)
+    command_tuple, endpoint, runner_env = _prepare_modal_daemon_command(
+        computer,
+        command,
+        path=path,
+        env=env,
+    )
     if endpoint.execute_in_target:
         sandbox = _require_modal_backing(computer, path=path)
         return exec_in_target(
@@ -847,10 +1040,110 @@ def run_modal_daemon_command(
     )
 
 
+def run_modal_daemon_command_with_fallback(
+    computer: ComputerSandbox,
+    command: Sequence[str],
+    *,
+    modal_region: str,
+    app_name: str = "modal-computer-use",
+    runner_name: str | None = None,
+    env: dict[str, str] | None = None,
+    runner_cpu: float | None = None,
+    runner_memory_mib: int | None = None,
+    exec_timeout_seconds: int = 240,
+    app_tags: dict[str, str] | None = None,
+    tags: dict[str, str] | None = None,
+    external_runner: Callable[..., ModalSandboxExecResult] | None = None,
+    exec_once: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_once,
+) -> ModalDaemonCommandResult:
+    """Run a daemon workload in-region with an explicit pre-dispatch fallback.
+
+    The workload process receives the daemon endpoint directly. Action and frame
+    bytes do not pass through an allocation broker. The target-loopback path is
+    intentionally unavailable here because it is diagnostic-only. The caller must
+    supply ``external_runner`` to opt into execution outside Modal.
+    """
+    if not modal_region.strip():
+        raise ValueError("modal_region must be selected from measured evidence")
+    command_tuple = tuple(command)
+    if not command_tuple:
+        raise ValueError("command must not be empty")
+    try:
+        endpoint = modal_daemon_endpoint(computer, "connect")
+        runner_env = modal_daemon_env(endpoint, env)
+    except Exception as exc:
+        if external_runner is None:
+            raise
+        endpoint = modal_daemon_endpoint(computer, "inherited")
+        runner_env = modal_daemon_env(endpoint, env)
+        result = external_runner(
+            command_tuple,
+            env=runner_env,
+            timeout=exec_timeout_seconds,
+        )
+        return ModalDaemonCommandResult(
+            result=result,
+            selected_path="external",
+            requested_region=modal_region,
+            fallback_used=True,
+            fallback_reason=exc.__class__.__name__,
+        )
+    result = exec_once(
+        command_tuple,
+        app_name=app_name,
+        name=runner_name,
+        region=modal_region,
+        env=runner_env,
+        app_tags=app_tags,
+        tags={
+            "computer-use.runner": "colocated",
+            "computer-use.runner_path": endpoint.path,
+            **(tags or {}),
+        },
+        cpu=runner_cpu,
+        memory_mib=runner_memory_mib,
+        exec_timeout_seconds=exec_timeout_seconds,
+    )
+    return ModalDaemonCommandResult(
+        result=result,
+        selected_path="same-region-connect",
+        requested_region=modal_region,
+        fallback_used=False,
+    )
+
+
+def _prepare_modal_daemon_command(
+    computer: ComputerSandbox,
+    command: Sequence[str],
+    *,
+    path: ModalDaemonEndpointPath,
+    env: dict[str, str] | None,
+) -> tuple[tuple[str, ...], ModalDaemonEndpoint, dict[str, str]]:
+    command_tuple = tuple(command)
+    if not command_tuple:
+        raise ValueError("command must not be empty")
+    endpoint = modal_daemon_endpoint(computer, path)
+    return command_tuple, endpoint, modal_daemon_env(endpoint, env)
+
+
 def _require_modal_backing(computer: ComputerSandbox, *, path: str) -> object:
     if computer._sandbox is None:
         raise SandboxUnavailableError(f"{path} requires a Modal-backed sandbox")
     return computer._sandbox
+
+
+def _terminate_failed_sandbox(sandbox: object) -> None:
+    terminate = getattr(sandbox, "terminate", None)
+    if callable(terminate):
+        with suppress(Exception):
+            terminate(wait=True)
+
+
+def _validate_sandbox_tags(tags: dict[str, str]) -> None:
+    if len(tags) > 10:
+        raise ConfigConflictError(
+            f"Modal Sandboxes support at most 10 tags; resolved {len(tags)} tags"
+        )
 
 
 def _daemon_environment(
@@ -1157,10 +1450,23 @@ def _set_modal_object_tags(target: object, tags: dict[str, str]) -> None:
     set_tags = getattr(target, "set_tags", None)
     if not callable(set_tags):
         return
-    existing_tags: dict[str, str] = {}
+    set_tags({**_get_modal_object_tags(target), **tags})
+
+
+def _replace_modal_object_tags(target: object, tags: dict[str, str]) -> None:
+    set_tags = getattr(target, "set_tags", None)
+    if callable(set_tags):
+        set_tags(tags)
+
+
+def _get_modal_object_tags(target: object) -> dict[str, str]:
+    return _read_modal_object_tags(target) or {}
+
+
+def _read_modal_object_tags(target: object) -> dict[str, str] | None:
     get_tags = getattr(target, "get_tags", None)
     if callable(get_tags):
         raw_tags = get_tags()
         if isinstance(raw_tags, dict):
-            existing_tags = {str(key): str(value) for key, value in raw_tags.items()}
-    set_tags({**existing_tags, **tags})
+            return {str(key): str(value) for key, value in raw_tags.items()}
+    return None

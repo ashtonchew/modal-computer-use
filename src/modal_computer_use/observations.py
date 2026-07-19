@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Literal
 
+from .latency import SessionStartupTiming, validate_first_frame
 from .models import ScreenshotOptions
 from .transports.observation import ObservationFrame, ObservationStreamTransport
 
@@ -15,6 +17,7 @@ class ActionObservationResult:
     """Result for one causal action plus observation stream command."""
 
     frame: ObservationFrame
+    elapsed_ms: float | None = None
 
     @property
     def action_result(self) -> dict[str, Any] | None:
@@ -44,6 +47,51 @@ class ActionObservationResult:
         value = self.frame.metadata.get("change_timeout_reached")
         return value if isinstance(value, bool) else None
 
+    def require_valid_frame(
+        self,
+        *,
+        previous_payload: bytes | None = None,
+        require_change: bool = True,
+    ) -> bytes:
+        metadata = self.frame.metadata
+        request_id = metadata.get("id")
+        action_id = metadata.get("action_id")
+        if (
+            isinstance(request_id, bool)
+            or isinstance(action_id, bool)
+            or not isinstance(request_id, str | int)
+            or not isinstance(action_id, str | int)
+            or action_id != request_id
+        ):
+            raise ValueError("causal frame request and action IDs do not match")
+        if metadata.get("causal_frame") is not True:
+            raise ValueError("observation frame is not causal")
+        action_result = metadata.get("action_result")
+        if not isinstance(action_result, dict) or action_result.get("ok") is not True:
+            raise ValueError("causal frame action did not succeed")
+        if require_change and metadata.get("change_detected") is not True:
+            raise ValueError("causal frame did not contain a detected change")
+        if require_change and metadata.get("change_timeout_reached") is True:
+            raise ValueError("causal frame reached the change timeout")
+        payload = self.frame.compose(previous_payload)
+        width = metadata.get("width")
+        height = metadata.get("height")
+        image_format = metadata.get("format")
+        if (
+            isinstance(width, bool)
+            or isinstance(height, bool)
+            or not isinstance(width, int)
+            or not isinstance(height, int)
+            or not isinstance(image_format, str)
+        ):
+            raise ValueError("causal frame is missing image geometry or format")
+        return validate_first_frame(
+            payload or b"",
+            expected_width=width,
+            expected_height=height,
+            image_format=image_format,
+        )
+
 
 class ObservationClient:
     """Synchronous SDK facade over the daemon observation stream protocol."""
@@ -66,6 +114,7 @@ class ObservationClient:
         multi_rect_min_savings: float | None = None,
         transport_timing: bool = False,
         frame_encoding: Literal["json-binary", "binary-envelope"] | None = "binary-envelope",
+        startup_timing: SessionStartupTiming | None = None,
     ) -> None:
         self.transport = transport
         self.payload = _observation_payload(
@@ -85,6 +134,7 @@ class ObservationClient:
             frame_encoding=frame_encoding,
         )
         self._started = False
+        self._startup_timing = startup_timing
 
     def close(self) -> None:
         self.transport.close()
@@ -115,9 +165,14 @@ class ObservationClient:
         self.transport.start(self.payload)
         self._started = True
         if drain_initial_frame:
-            return self.transport.receive_frame(
+            frame = self.transport.receive_frame(
                 transport_timing=bool(self.payload.get("transport_timing"))
             )
+            if self._startup_timing is not None:
+                self._startup_timing.mark("observation_stream_ready")
+            return frame
+        if self._startup_timing is not None:
+            self._startup_timing.mark("observation_stream_connected")
         return None
 
     def pause(self) -> None:
@@ -192,11 +247,15 @@ class ObservationClient:
         )
         if resolved_change_region_radius is not None:
             payload["change_region_radius"] = resolved_change_region_radius
+        action_sent = perf_counter()
         frame = self.transport.run_actions_observe_change_and_recv(
             payload,
             transport_timing=bool(self.payload.get("transport_timing")),
         )
-        return ActionObservationResult(frame=frame)
+        return ActionObservationResult(
+            frame=frame,
+            elapsed_ms=(perf_counter() - action_sent) * 1000.0,
+        )
 
     def configure(self, **payload: Any) -> None:
         self.transport.configure(payload)

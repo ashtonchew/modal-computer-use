@@ -39,7 +39,6 @@ def default_tags(
         "computer-use.version": __version__,
         "computer-use.created_at": created_at_tag(created_at),
         "computer-use.config_hash": compute_config_hash(config),
-        "computer-use.window_manager": config.desktop.window_manager,
         "computer-use.artifacts_dir": config.storage.artifacts_dir,
     }
     if config.run_id:
@@ -47,6 +46,17 @@ def default_tags(
     if owner:
         tags["computer-use.owner"] = owner
     return tags
+
+
+def warm_pool_tags(
+    *,
+    created_at: datetime | None = None,
+) -> dict[str, str]:
+    """Return the minimal lifecycle tags needed by a bounded warm slot."""
+    return {
+        "computer-use": "true",
+        "computer-use.created_at": created_at_tag(created_at),
+    }
 
 
 def sandbox_ref_from_values(**values: Any) -> SandboxRef:

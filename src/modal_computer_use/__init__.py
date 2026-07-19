@@ -14,6 +14,19 @@ from .config import (
 )
 from .errors import ConfigConflictError, SandboxAmbiguousError, SandboxUnavailableError
 from .hot_session import HotSessionClient
+from .latency import (
+    SessionStartupTiming,
+    WarmPoolClaim,
+    WarmPoolClaimMetrics,
+    WarmPoolEntry,
+    WarmPoolFillResult,
+    WarmPoolPolicy,
+    WarmPoolReconcileResult,
+    estimate_pool_idle_cost,
+    estimate_warm_idle_cost,
+    pool_config_identity,
+    validate_first_frame,
+)
 from .manager import ComputerSandboxManager, SandboxManager
 from .models import (
     ActionBatchResult,
@@ -44,6 +57,7 @@ from .observations import ActionObservationResult, ObservationClient
 from .registry import SandboxRegistry
 from .sandbox import (
     ComputerSandbox,
+    ModalDaemonCommandResult,
     ModalDaemonEndpoint,
     ModalDaemonEndpointPath,
     ModalSandboxExecResult,
@@ -51,6 +65,7 @@ from .sandbox import (
     modal_daemon_endpoint,
     modal_daemon_env,
     run_modal_daemon_command,
+    run_modal_daemon_command_with_fallback,
 )
 
 __all__ = [
@@ -79,6 +94,7 @@ __all__ = [
     "DisplayInfo",
     "HotSessionClient",
     "ImageConfig",
+    "ModalDaemonCommandResult",
     "ModalDaemonEndpoint",
     "ModalDaemonEndpointPath",
     "ModalSandboxExecResult",
@@ -100,10 +116,22 @@ __all__ = [
     "SandboxUnavailableError",
     "Screenshot",
     "ScreenshotOptions",
+    "SessionStartupTiming",
     "StorageConfig",
+    "WarmPoolClaim",
+    "WarmPoolClaimMetrics",
+    "WarmPoolEntry",
+    "WarmPoolFillResult",
+    "WarmPoolPolicy",
+    "WarmPoolReconcileResult",
     "X11Window",
     "__version__",
+    "estimate_pool_idle_cost",
+    "estimate_warm_idle_cost",
     "modal_daemon_endpoint",
     "modal_daemon_env",
+    "pool_config_identity",
     "run_modal_daemon_command",
+    "run_modal_daemon_command_with_fallback",
+    "validate_first_frame",
 ]
