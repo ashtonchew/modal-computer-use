@@ -45,9 +45,9 @@ The inline Image builder is the default rollback path. `ImageConfig(source="name
 revision="<full-git-sha>")` selects a revision-tagged standard, Firefox, or Chromium Image through
 `Image.from_name()`. Run `scripts/publish_modal_images.py` from a clean commit to build and publish
 all three variants. Modal Image tags are mutable, so repository policy treats a full Git SHA tag as
-write-once. The publisher lists existing named Images and fails before the build if any target tag
-exists. Run one publisher at a time per Environment because the list and publish operations are not
-atomic.
+write-once. The publisher lists existing named Images, keeps existing target tags untouched, and
+publishes only missing variants. This makes retries safe after partial publication. Run one
+publisher at a time per Environment because the list and publish operations are not atomic.
 
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes
 in user configuration or examples. For immediate visibility before sandbox termination, use a

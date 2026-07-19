@@ -130,11 +130,11 @@ def publish_named_images(
         for variant in variants
     }
     existing = _published_named_image_identities(environment_name=environment_name)
-    conflicts = sorted(set(identities.values()) & existing)
-    if conflicts:
-        raise ValueError(
-            "refusing to replace existing named Image revision tags: " + ", ".join(conflicts)
-        )
+    pending = [
+        (variant, identity) for variant, identity in identities.items() if identity not in existing
+    ]
+    if not pending:
+        return identities
     modal = _modal()
     app = modal.App.lookup(
         app_name,
@@ -142,7 +142,7 @@ def publish_named_images(
         environment_name=environment_name,
     )
     with modal.enable_output():
-        for variant, identity in identities.items():
+        for variant, identity in pending:
             recipe = _named_image_recipe(variant=variant, window_manager="xfce")
             recipe.build(app).publish(identity, environment_name=environment_name)
     return identities

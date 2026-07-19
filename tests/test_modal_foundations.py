@@ -172,19 +172,59 @@ def test_publish_named_images_publishes_all_variants(monkeypatch) -> None:
     assert {item[2] for item in published} == {"standard", "firefox", "chromium"}
 
 
-def test_publish_named_images_refuses_existing_revision_tag(monkeypatch) -> None:
-    identity = f"modal-computer-use-standard:{REVISION}"
+def test_publish_named_images_keeps_complete_existing_revision(monkeypatch) -> None:
+    identities = {
+        f"modal-computer-use-{variant}:{REVISION}"
+        for variant in ("standard", "firefox", "chromium")
+    }
     monkeypatch.setattr(
         "modal_computer_use.image._published_named_image_identities",
-        lambda *, environment_name: {identity},
+        lambda *, environment_name: identities,
     )
     monkeypatch.setattr(
         "modal_computer_use.image._modal",
         lambda: (_ for _ in ()).throw(AssertionError("build started before preflight")),
     )
 
-    with pytest.raises(ValueError, match="refusing to replace existing named Image"):
-        publish_named_images(revision=REVISION)
+    result = publish_named_images(revision=REVISION)
+
+    assert set(result.values()) == identities
+
+
+def test_publish_named_images_resumes_missing_variants_without_overwrite(monkeypatch) -> None:
+    published: list[str] = []
+    existing = f"modal-computer-use-standard:{REVISION}"
+
+    class FakeRecipe:
+        def build(self, app: object) -> FakeRecipe:
+            return self
+
+        def publish(self, name: str, *, environment_name: str | None = None) -> None:
+            published.append(name)
+
+    monkeypatch.setattr(
+        "modal_computer_use.image._published_named_image_identities",
+        lambda *, environment_name: {existing},
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: SimpleNamespace(
+            App=SimpleNamespace(lookup=lambda *args, **kwargs: "image-app"),
+            enable_output=nullcontext,
+        ),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.image._named_image_recipe",
+        lambda *, variant, window_manager: FakeRecipe(),
+    )
+
+    publish_named_images(revision=REVISION)
+
+    assert existing not in published
+    assert published == [
+        f"modal-computer-use-firefox:{REVISION}",
+        f"modal-computer-use-chromium:{REVISION}",
+    ]
 
 
 def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
