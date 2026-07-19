@@ -48,7 +48,7 @@ def _attempt(index: int, *, status: str = "valid", elapsed_ms: float | None = No
 
 
 def _artifact() -> dict[str, object]:
-    cold = [_attempt(index, elapsed_ms=float(index + 1)) for index in range(20)]
+    cold = [_attempt(index, elapsed_ms=float(index + 1)) for index in range(30)]
     warm = [_attempt(index, elapsed_ms=float(index + 2)) for index in range(30)]
     claims = [
         {
@@ -59,6 +59,8 @@ def _artifact() -> dict[str, object]:
         }
         for index in range(30)
     ]
+    for attempt in [*cold, *warm, *claims]:
+        attempt["requested_placement"] = "us-west"
     return {
         "schema_version": 1,
         "benchmark": "modal-optimization-results",
@@ -75,6 +77,10 @@ def _artifact() -> dict[str, object]:
             PROFILE_MODAL_WARM_AVAILABILITY: {
                 "comparison_scope": "modal-on-demand-only",
                 "claim_attempts": claims,
+                "execution": {
+                    "pool_target_size": 3,
+                    "idle_hold_seconds_per_batch": 30.0,
+                },
             },
             "modal-v2-ab": {
                 "status": "not_run",
@@ -85,6 +91,15 @@ def _artifact() -> dict[str, object]:
         "failures": [],
         "provenance": {
             "source_sha": "a" * 40,
+            "dependency": {
+                "pull_request": 114,
+                "head_sha": "b" * 40,
+                "state": "open_unmerged",
+            },
+            "modal_sdk_version": "1.5.2",
+            "image_identity": "modal-computer-use-chromium:" + "a" * 40,
+            "requested_region": "us-west",
+            "region_selection": {"selected": "us-west"},
             "normalizer_sha": "a" * 40,
             "raw_artifact_sha256": "b" * 64,
             "raw_artifact_path": "benchmark-results/modal-optimization/raw.json",
@@ -271,6 +286,44 @@ def test_sanitizer_embeds_preregistered_manifests_and_derives_claim_summaries() 
     assert warm["request_to_authenticated_summary"]["valid"] == 30
     assert warm["request_to_first_frame_summary"]["p95_status"] == "reported"
     assert sanitized["provenance"]["normalizer_sha"] == "c" * 40
+
+
+def test_sanitizer_rejects_result_count_that_differs_from_preregistration() -> None:
+    commands = {
+        "provider_default": "provider command",
+        "provider_default_normalize": "provider normalize command",
+        "region_selection": "region command",
+        "region_selection_attest": "region attest command",
+        "publish_image": "publish command",
+        "benchmark": "benchmark command",
+        "normalize": "normalize command",
+    }
+    preregistration = build_preregistration(
+        ModalOptimizationConfig(region="us-west", image_revision="a" * 40),
+        source_sha="a" * 40,
+        dependency_sha="b" * 40,
+        generated_at="2026-07-19T00:00:00Z",
+        runner_identity={"kind": "local"},
+        sdk_versions={"modal": "1.5.2"},
+        commands=commands,
+    )
+    preregistration_bytes = json.dumps(preregistration, sort_keys=True).encode()
+    raw = _artifact()
+    raw["profiles"][PROFILE_MODAL_ON_DEMAND]["cold_attempts"].pop()
+    raw["provenance"]["preregistration_sha256"] = hashlib.sha256(
+        preregistration_bytes
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="independent_cold_attempts"):
+        sanitize_modal_optimization_benchmark(
+            raw,
+            raw_bytes=json.dumps(raw).encode(),
+            raw_artifact_path="benchmark-results/modal-optimization/raw.json",
+            harness_commit="a" * 40,
+            preregistration_payload=preregistration,
+            preregistration_bytes=preregistration_bytes,
+            normalizer_commit="c" * 40,
+        )
 
 
 def test_sanitizer_adds_post_execution_region_attestation_command() -> None:

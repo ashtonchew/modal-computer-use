@@ -772,6 +772,7 @@ def sanitize_modal_optimization_benchmark(
         )
         if existing_digest != preregistration_digest:
             raise ValueError("preregistration digest does not match the raw artifact")
+        _validate_preregistration_binding(payload, preregistration_payload)
         command_manifest = _portable_command_manifest(
             _mapping(preregistration_payload.get("commands"), "commands")
         )
@@ -970,6 +971,90 @@ def _portable_command_manifest(commands: dict[str, Any]) -> dict[str, str]:
             str(command),
         )
     return output
+
+
+def _validate_preregistration_binding(
+    payload: dict[str, Any],
+    preregistration: dict[str, Any],
+) -> None:
+    provenance = _mapping(payload.get("provenance"), "provenance")
+    preregistration_environment = _mapping(
+        preregistration.get("environment"),
+        "preregistration environment",
+    )
+    expected_provenance = {
+        "source_sha": preregistration.get("source_sha"),
+        "dependency": preregistration.get("dependency"),
+        "modal_sdk_version": _mapping(
+            preregistration_environment.get("sdk_versions"),
+            "preregistration SDK versions",
+        ).get("modal"),
+        "image_identity": preregistration_environment.get("image_identity"),
+    }
+    for key, expected in expected_provenance.items():
+        if provenance.get(key) != expected:
+            raise ValueError(f"raw benchmark {key} differs from preregistration")
+
+    region_selection = _mapping(
+        provenance.get("region_selection"),
+        "region selection provenance",
+    )
+    requested_region = provenance.get("requested_region")
+    if requested_region != region_selection.get("selected"):
+        raise ValueError("raw benchmark requested region differs from selected evidence")
+    frozen_region = _mapping(
+        preregistration.get("configuration"),
+        "preregistration configuration",
+    ).get("region")
+    if frozen_region not in {"selection-pending", requested_region}:
+        raise ValueError("raw benchmark region differs from preregistration")
+
+    profiles = _mapping(payload.get("profiles"), "profiles")
+    on_demand = _mapping(
+        profiles.get(PROFILE_MODAL_ON_DEMAND),
+        PROFILE_MODAL_ON_DEMAND,
+    )
+    warm = _mapping(
+        profiles.get(PROFILE_MODAL_WARM_AVAILABILITY),
+        PROFILE_MODAL_WARM_AVAILABILITY,
+    )
+    sample_policy = _mapping(
+        preregistration.get("sample_policy"),
+        "preregistration sample policy",
+    )
+    collections = {
+        "independent_cold_attempts": _list_of_mappings(
+            on_demand.get("cold_attempts"),
+            "cold_attempts",
+        ),
+        "warm_action_attempts": _list_of_mappings(
+            on_demand.get("warm_action_attempts"),
+            "warm_action_attempts",
+        ),
+        "warm_claim_attempts": _list_of_mappings(
+            warm.get("claim_attempts"),
+            "claim_attempts",
+        ),
+    }
+    for policy_name, attempts in collections.items():
+        expected_count = sample_policy.get(policy_name)
+        if (
+            isinstance(expected_count, bool)
+            or not isinstance(expected_count, int)
+            or expected_count < 1
+            or len(attempts) != expected_count
+        ):
+            raise ValueError(f"raw benchmark {policy_name} differs from preregistration")
+        if any(attempt.get("requested_placement") != requested_region for attempt in attempts):
+            raise ValueError("raw benchmark attempt placement differs from preregistration")
+
+    warm_execution = _mapping(warm.get("execution"), "warm availability execution")
+    for policy_name, execution_name in (
+        ("warm_pool_target", "pool_target_size"),
+        ("warm_idle_seconds", "idle_hold_seconds_per_batch"),
+    ):
+        if warm_execution.get(execution_name) != sample_policy.get(policy_name):
+            raise ValueError(f"raw benchmark {policy_name} differs from preregistration")
 
 
 def _add_region_attestation_command(
