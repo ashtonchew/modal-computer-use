@@ -31,6 +31,7 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
 )
 from modal_computer_use.benchmarks.modal_v2_placement import (
     build_placement_capability_binding,
+    serialize_placement_capability,
 )
 from modal_computer_use.sandbox import cleanup_modal_candidate_run
 
@@ -101,20 +102,26 @@ def _add_execution_arguments(parser: argparse.ArgumentParser, *, default_output:
 
 def _preregister(args: argparse.Namespace) -> int:
     _require_clean_source(args.source_sha)
-    placement_payload = json.loads(args.placement_capability.read_bytes())
+    placement_bytes = args.placement_capability.read_bytes()
+    placement_payload = json.loads(placement_bytes)
     if not isinstance(placement_payload, dict):
         raise ValueError("placement capability artifact must be a JSON object")
+    if placement_bytes != serialize_placement_capability(placement_payload):
+        raise ValueError("placement capability artifact serialization is not canonical")
     placement_capability = build_placement_capability_binding(
         placement_payload,
         artifact_path=args.placement_capability.as_posix(),
     )
     selected_cloud = placement_capability["selected_request"]["cloud"]
+    selected_actual = placement_capability["selected_request"]["actual_placement"]
     if args.cloud is not None and args.cloud != selected_cloud:
         raise ValueError("--cloud differs from the selected placement capability request")
     config = ModalV2CandidateConfig(
         image_revision=args.image_revision or args.source_sha,
         cloud=selected_cloud,
         region=args.region,
+        expected_actual_cloud=selected_actual["cloud"],
+        expected_actual_region=selected_actual["region"],
         cpu=args.cpu,
         memory_mib=args.memory_mib,
         order_seed=args.order_seed,

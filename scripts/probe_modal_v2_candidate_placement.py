@@ -12,6 +12,8 @@ from modal_computer_use.benchmarks.modal_v2_placement import (
     DEFAULT_CLOUD_REQUESTS,
     placement_capability_sha256,
     run_placement_capability_matrix,
+    serialize_placement_capability,
+    validate_placement_artifact_path,
 )
 
 DEFAULT_OUTPUT = Path(
@@ -58,7 +60,7 @@ def main() -> int:
         raise RuntimeError(f"output already exists: {args.output}")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.output.with_suffix(f"{args.output.suffix}.tmp")
-    temporary.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n")
+    temporary.write_bytes(serialize_placement_capability(payload))
     temporary.replace(args.output)
     print(
         json.dumps(
@@ -99,8 +101,10 @@ def _git_output(git: str, *args: str) -> str:
 
 
 def _require_benchmark_results_path(path: Path) -> None:
-    if path.is_absolute() or not path.parts or path.parts[0] != "benchmark-results":
-        raise ValueError("placement-probe output must be under benchmark-results")
+    try:
+        validate_placement_artifact_path(path.as_posix())
+    except ValueError as exc:
+        raise ValueError("placement-probe output must be under benchmark-results") from exc
 
 
 if __name__ == "__main__":

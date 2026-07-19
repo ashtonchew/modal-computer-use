@@ -33,6 +33,11 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     run_candidate_phase,
     run_candidate_throughput,
 )
+from modal_computer_use.benchmarks.modal_v2_placement import (
+    build_placement_capability_binding,
+    run_placement_capability_matrix,
+)
+from modal_computer_use.sandbox import ModalCandidatePlacementProbe
 
 
 class _FakeRunner:
@@ -157,6 +162,29 @@ def test_pilot_gate_rejects_runner_target_cross_cloud_path() -> None:
     assert "target and runner were not colocated on one exact provider region" in gate["reasons"]
 
 
+def test_pilot_gate_rejects_drift_from_unconstrained_capability_placement() -> None:
+    preregistration = _preregistration(cloud=None)
+    trials = _trials("pilot", 5)
+    for trial in trials:
+        trial["requested"]["cloud"] = None
+        trial["actual"].update(
+            {
+                "target_cloud": "CLOUD_PROVIDER_GCP",
+                "target_region": "us-west1-a",
+                "runner_cloud": "CLOUD_PROVIDER_GCP",
+                "runner_region": "us-west1-a",
+            }
+        )
+
+    gates = evaluate_pilot_gates(trials, preregistration=preregistration)
+
+    assert all(not gate["eligible"] for gate in gates["arms"].values())
+    assert all(
+        "actual placement differed from the capability-bound placement" in gate["reasons"]
+        for gate in gates["arms"].values()
+    )
+
+
 def test_rejected_raw_output_is_classified_and_never_targets_repository_root() -> None:
     assert classified_raw_artifact_path(
         "benchmark-results/modal-v2/candidates/pilot.json", status="rejected"
@@ -231,6 +259,10 @@ def test_candidate_phase_checkpoints_after_cleanup_on_interrupt(monkeypatch) -> 
                 (copy.deepcopy(trials), copy.deepcopy(execution))
             ),
             progress=lambda *args: progress.append(args),
+            cleanup_sweep=lambda **_kwargs: {
+                "cleanup_succeeded": True,
+                "remaining_sandboxes": 0,
+            },
         )
 
     assert progress[0][-2:] == ("failed", "RuntimeError")
@@ -265,6 +297,10 @@ def test_candidate_phase_rejects_runner_cloud_mismatch_before_trials(monkeypatch
             checkpoint=lambda trials, execution: checkpoints.append(
                 (copy.deepcopy(trials), copy.deepcopy(execution))
             ),
+            cleanup_sweep=lambda **_kwargs: {
+                "cleanup_succeeded": True,
+                "remaining_sandboxes": 0,
+            },
         )
 
     assert checkpoints[-1][0] == []
@@ -272,6 +308,8 @@ def test_candidate_phase_rejects_runner_cloud_mismatch_before_trials(monkeypatch
     assert checkpoints[-1][1]["placement_preflight"] == {
         "requested_cloud": "aws",
         "requested_region": "us-west",
+        "expected_actual_cloud": None,
+        "expected_actual_region": None,
         "actual_cloud": "CLOUD_PROVIDER_AZURE",
             "actual_region": "westus3",
             "eligible": False,
@@ -413,7 +451,7 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
     for row in mismatched_throughput["throughput"]:
         for attempt in row["attempts"]:
             attempt["actual_region"] = "us-east-1"
-    with pytest.raises(ValueError, match="throughput and lifecycle target placement"):
+    with pytest.raises(ValueError, match="capability-bound throughput placement"):
         sanitize_result_artifact(
             mismatched_throughput,
             raw_bytes=json.dumps(mismatched_throughput).encode(),
@@ -519,11 +557,13 @@ def test_runner_result_parser_requires_bounded_safe_json() -> None:
         extract_candidate_runner_result('{"status":"valid"}')
 
 
-def _preregistration() -> dict:
+def _preregistration(*, cloud: str | None = "aws") -> dict:
     return build_preregistration(
         ModalV2CandidateConfig(
             image_revision="a" * 40,
-            cloud="aws",
+            cloud=cloud,
+            expected_actual_cloud="CLOUD_PROVIDER_AWS",
+            expected_actual_region="us-west-2",
             bootstrap_resamples=100,
         ),
         source_sha="a" * 40,
@@ -531,29 +571,7 @@ def _preregistration() -> dict:
         sdk_versions={"modal": "1.5.2"},
         package_versions={"modal-computer-use": "1.1.0"},
         runner_identity={"kind": "test"},
-        placement_capability={
-            "artifact_path": (
-                "benchmark-results/modal-v2-candidate-2026-07-19/"
-                "diagnostics/placement-capability.json"
-            ),
-            "sha256": "b" * 64,
-            "run_id": "placement-test",
-            "source_sha": "a" * 40,
-            "image_identity": f"modal-computer-use-chromium:{'a' * 40}",
-            "requested_region": "us-west",
-            "target_resources": {"cpu": 4.0, "memory_mib": 8192},
-            "runner_resources": {"cpu": 1.0, "memory_mib": 1024},
-            "selected_request": {
-                "cloud": "aws",
-                "region": "us-west",
-                "actual_placement": {
-                    "cloud": "CLOUD_PROVIDER_AWS",
-                    "region": "us-west-2",
-                },
-            },
-            "classification": "exact-common-placement-available",
-            "measurement_performed": False,
-        },
+        placement_capability=_placement_capability_binding(cloud=cloud),
         commands={
             "placement_probe": "placement probe command",
             "preregister": "preregister command",
@@ -562,6 +580,42 @@ def _preregistration() -> dict:
             "sanitize": "sanitize command",
             "check": "check command",
         },
+    )
+
+
+def _placement_capability_binding(*, cloud: str | None) -> dict:
+    def probe(**kwargs):
+        return ModalCandidatePlacementProbe(
+            run_id=kwargs["run_id"],
+            backend=kwargs["backend"],
+            requested_cloud=kwargs["cloud"],
+            requested_region=kwargs["region"],
+            actual_cloud="CLOUD_PROVIDER_AWS",
+            actual_region="us-west-2",
+            i6pn_enabled=kwargs["i6pn"],
+            i6pn_verified=kwargs["i6pn"],
+            sandbox_created=True,
+            cleanup_succeeded=True,
+            status="valid",
+        )
+
+    payload = run_placement_capability_matrix(
+        run_id="placement-test",
+        source_sha="a" * 40,
+        generated_at="2026-07-19T00:00:00Z",
+        image_revision="a" * 40,
+        region="us-west",
+        target_cpu=4.0,
+        target_memory_mib=8192,
+        cloud_requests=(cloud,),
+        probe=probe,
+    )
+    return build_placement_capability_binding(
+        payload,
+        artifact_path=(
+            "benchmark-results/modal-v2-candidate-2026-07-19/"
+            "diagnostics/placement-capability.json"
+        ),
     )
 
 
@@ -599,6 +653,8 @@ def _trials(phase: str, count: int) -> list[dict]:
                         "observation_transport": "binary-envelope",
                         "cloud": "aws",
                         "region": "us-west",
+                        "expected_actual_cloud": "CLOUD_PROVIDER_AWS",
+                        "expected_actual_region": "us-west-2",
                         "cpu": 4.0,
                         "memory_mib": 8192,
                         "image_identity": "modal-computer-use-chromium:" + "a" * 40,
@@ -635,6 +691,7 @@ def _trials(phase: str, count: int) -> list[dict]:
                         "target_terminated": True,
                         "target_detached": True,
                         "runner_terminated": True,
+                        "run_sweep_succeeded": True,
                     },
                 }
             )

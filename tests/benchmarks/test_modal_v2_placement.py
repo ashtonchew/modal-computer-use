@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+
+import pytest
 
 from modal_computer_use.benchmarks.modal_v2_placement import (
     DEFAULT_CLOUD_REQUESTS,
     build_placement_capability_binding,
     placement_capability_sha256,
     run_placement_capability_matrix,
+    serialize_placement_capability,
+    validate_placement_artifact_path,
     validate_placement_capability_matrix,
 )
 from modal_computer_use.sandbox import ModalCandidatePlacementProbe
@@ -52,6 +57,9 @@ def test_capability_matrix_selects_unconstrained_exact_common_placement() -> Non
         },
     }
     assert len(placement_capability_sha256(payload)) == 64
+    assert hashlib.sha256(serialize_placement_capability(payload)).hexdigest() == (
+        placement_capability_sha256(payload)
+    )
     validate_placement_capability_matrix(payload)
     binding = build_placement_capability_binding(
         payload,
@@ -63,6 +71,15 @@ def test_capability_matrix_selects_unconstrained_exact_common_placement() -> Non
     assert binding["selected_request"] == payload["selected_request"]
     assert binding["sha256"] == placement_capability_sha256(payload)
     assert binding["run_id"] == "placement-test-exact"
+    assert binding["evidence"] == payload
+
+    with pytest.raises(ValueError, match="under benchmark-results"):
+        build_placement_capability_binding(
+            payload,
+            artifact_path="benchmark-results/../docs/capability.json",
+        )
+    with pytest.raises(ValueError, match="under benchmark-results"):
+        validate_placement_artifact_path("benchmark-results/../docs/capability.json")
 
     missing_run_id = dict(payload)
     missing_run_id.pop("run_id")

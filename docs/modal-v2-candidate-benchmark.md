@@ -53,10 +53,12 @@ request must also be honored.
 The matrix performs no latency measurement. Its path, SHA-256, run ID, source commit, image
 identity, resources, selected request, and observed placement are bound into preregistration.
 Preregistration fails when the matrix is descriptive-only or differs from the harness configuration.
-The pilot independently rechecks runner and target placement and suppresses all causal ratios if
-placement drifts. This makes the comparison stratum observed and auditable instead of inferred from
-requested placement. Azure is not a matrix request because Modal's documented runtime providers are
-AWS, GCP, and OCI and the current V1 API rejected the earlier observed V2 Azure placement.
+The SHA-256 covers the exact indented JSON bytes written at the recorded path. The pilot
+independently requires every runner and target to equal the matrix's concrete observed cloud and
+region, even when the cloud request was unconstrained, and suppresses all causal ratios if placement
+drifts. This makes the comparison stratum observed and auditable instead of inferred from requested
+placement. Azure is not a matrix request because Modal's documented runtime providers are AWS, GCP,
+and OCI and the current V1 API rejected the earlier observed V2 Azure placement.
 
 ## Measured Boundaries
 
@@ -96,8 +98,9 @@ credentialed execution:
 
 An arm advances only when its pilot has exactly five attempts, every attempt is valid and verified,
 all requested controls match, actual target and runner cloud/region are observed, no retry occurred,
-and target plus phase-scoped runner cleanup succeeded. The encrypted-tunnel backend comparison adds
-an exact cross-arm actual placement and control-signature gate.
+target plus phase-scoped runner cleanup succeeded, and a final run-scoped sweep enumerates both V1
+and V2 Sandboxes with zero remaining resources. The encrypted-tunnel backend comparison adds an
+exact cross-arm actual placement and control-signature gate.
 
 The full phase is not a repair pass. It cannot replace pilot samples or silently drop failed arms.
 Only a result with complete 5-per-arm pilot evidence, 30-per-arm full evidence, passing verification
@@ -132,10 +135,11 @@ benchmark-results/modal-v2-candidate-2026-07-19/checkpoints/pilot.json
 benchmark-results/modal-v2-candidate-2026-07-19/checkpoints/full.json
 ```
 
-The raw artifact records source commit, preregistration digest, Modal and package versions, image
-identity, requested and actual placement, transports, resources, prewarm, versions, verification,
-failures, retries, cleanup, estimated partial cost, explicit unreconciled Modal billed-cost status,
-and every asymmetric optimization. A failed execution is moved from the requested `candidates/`
+The raw and promoted artifacts record source commit, preregistration digest, the complete sanitized
+placement-capability evidence and byte digest, Modal and package versions, image identity, requested
+and actual placement, transports, resources, prewarm, versions, verification, failures, retries,
+cleanup, estimated partial cost, explicit unreconciled Modal billed-cost status, and every
+asymmetric optimization. A failed execution is moved from the requested `candidates/`
 path into `rejected/` before it is written. The artifact never
 records endpoint URLs, bearer values, private i6pn addresses, screenshots, clipboard or typed text,
 stdout, or stderr.

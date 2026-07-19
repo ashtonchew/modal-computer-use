@@ -12,6 +12,10 @@ from typing import Any, Literal
 
 from .artifacts import _validate_safe_value
 from .measurement import _percentile
+from .modal_v2_placement import (
+    placement_capability_sha256,
+    validate_placement_capability_matrix,
+)
 
 ARM_V1_CONNECT = "v1-connect-product"
 ARM_V1_TUNNEL = "v1-encrypted-tunnel"
@@ -66,6 +70,8 @@ class ModalV2CandidateConfig:
     image_revision: str
     cloud: str | None = None
     region: str = "us-west"
+    expected_actual_cloud: str | None = None
+    expected_actual_region: str | None = None
     cpu: float = 4.0
     memory_mib: int = 8192
     browser: str = "chromium"
@@ -94,6 +100,14 @@ class ModalV2CandidateConfig:
             raise ValueError("cloud must be non-empty when provided")
         if self.cloud == "azure":
             raise ValueError("azure is unsupported by the required Modal V1 benchmark arms")
+        if (self.expected_actual_cloud is None) != (self.expected_actual_region is None):
+            raise ValueError("expected actual cloud and region must be provided together")
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (self.expected_actual_cloud, self.expected_actual_region)
+            if value is not None
+        ):
+            raise ValueError("expected actual placement values must be non-empty")
         if not _positive_number(self.cpu):
             raise ValueError("cpu must be positive")
         positive_integers = (
@@ -365,11 +379,17 @@ def _validate_placement_capability_binding(
         "selected_request",
         "classification",
         "measurement_performed",
+        "evidence",
     }
     if set(binding) != required:
         raise ValueError("placement capability binding fields are invalid")
     path = PurePosixPath(str(binding["artifact_path"]))
-    if path.is_absolute() or not path.parts or path.parts[0] != "benchmark-results":
+    if (
+        path.is_absolute()
+        or not path.parts
+        or path.parts[0] != "benchmark-results"
+        or ".." in path.parts
+    ):
         raise ValueError("placement capability artifact must be under benchmark-results")
     if not _is_hex(binding["sha256"], _DIGEST_LENGTH):
         raise ValueError("placement capability digest must be SHA-256")
@@ -396,10 +416,34 @@ def _validate_placement_capability_binding(
         isinstance(actual.get(key), str) and actual[key].strip() for key in ("cloud", "region")
     ):
         raise ValueError("placement capability lacks an exact observed placement")
+    if (
+        config.expected_actual_cloud != actual["cloud"]
+        or config.expected_actual_region != actual["region"]
+    ):
+        raise ValueError("expected actual placement differs from placement capability")
     if binding["classification"] != "exact-common-placement-available":
         raise ValueError("placement capability classification is not comparable")
     if binding["measurement_performed"] is not False:
         raise ValueError("placement capability must be unmeasured")
+    evidence = binding["evidence"]
+    if not isinstance(evidence, dict):
+        raise ValueError("placement capability evidence is invalid")
+    validate_placement_capability_matrix(evidence)
+    if placement_capability_sha256(evidence) != binding["sha256"]:
+        raise ValueError("placement capability evidence digest differs from its binding")
+    evidence_fields = {
+        "run_id": "run_id",
+        "source_sha": "source_sha",
+        "image_identity": "image_identity",
+        "requested_region": "requested_region",
+        "target_resources": "target_resources",
+        "runner_resources": "runner_resources",
+        "selected_request": "selected_request",
+        "classification": "classification",
+        "measurement_performed": "measurement_performed",
+    }
+    if any(binding[key] != evidence[value] for key, value in evidence_fields.items()):
+        raise ValueError("placement capability evidence differs from its binding")
 
 
 def preregistration_sha256(payload: dict[str, Any]) -> str:
@@ -521,6 +565,8 @@ def evaluate_pilot_gates(
             reasons.append("actual target or runner cloud/region was not observed")
         if any(not _actual_cloud_matches_requested(trial) for trial in rows):
             reasons.append("actual target or runner cloud did not match the requested provider")
+        if any(not _actual_placement_matches_capability(trial) for trial in rows):
+            reasons.append("actual placement differed from the capability-bound placement")
         if any(not _target_runner_colocated(trial) for trial in rows):
             reasons.append("target and runner were not colocated on one exact provider region")
         if len({_placement_signature(trial) for trial in rows}) != 1:
@@ -646,6 +692,11 @@ def build_result_artifact(
                 _mapping(preregistration.get("environment"), "environment").get("sdk_versions")
             ),
             "official_source_urls": list(OFFICIAL_SOURCE_URLS),
+            "placement_capability": copy.deepcopy(
+                _mapping(preregistration.get("environment"), "environment").get(
+                    "placement_capability"
+                )
+            ),
             "raw_artifact_tracked": False,
         },
     }
@@ -695,6 +746,16 @@ def validate_result_artifact(
             raise ValueError("result preregistration digest does not match")
         if payload.get("source_sha") != preregistration.get("source_sha"):
             raise ValueError("result source SHA differs from preregistration")
+        expected_placement = _mapping(
+            _mapping(preregistration.get("environment"), "environment").get(
+                "placement_capability"
+            ),
+            "placement capability",
+        )
+        if _mapping(payload.get("provenance"), "provenance").get(
+            "placement_capability"
+        ) != expected_placement:
+            raise ValueError("result placement capability differs from preregistration")
 
 
 def validate_phase_checkpoint(
@@ -910,6 +971,7 @@ def _full_backend_comparison_eligible(
         or bool(_trial_control_mismatches(trial, configuration, image_identity))
         or not _actual_placement_observed(trial)
         or not _actual_cloud_matches_requested(trial)
+        or not _actual_placement_matches_capability(trial)
         or not _target_runner_colocated(trial)
         for trial in rows
     ):
@@ -964,6 +1026,10 @@ def _validate_promotion_gates(
                 raise ValueError(
                     f"promotion requires requested/actual {phase} cloud agreement for {arm}"
                 )
+            if any(not _actual_placement_matches_capability(trial) for trial in rows):
+                raise ValueError(
+                    f"promotion requires capability-bound {phase} placement for {arm}"
+                )
     if len({_placement_signature(trial) for trial in trials}) != 1:
         raise ValueError("promotion requires identical target and runner placement across trials")
     if any(not _target_runner_colocated(trial) for trial in trials):
@@ -980,11 +1046,25 @@ def _validate_promotion_gates(
     }
     observed: set[tuple[Any, Any]] = set()
     throughput_placements: set[tuple[Any, Any]] = set()
+    throughput_placement_drift = False
     for row in throughput:
         if not isinstance(row, dict):
             continue
         attempts = row.get("attempts")
         concurrency = row.get("concurrency")
+        if isinstance(attempts, list):
+            throughput_placement_drift = throughput_placement_drift or any(
+                isinstance(attempt, dict)
+                and (
+                    attempt.get("actual_cloud"),
+                    attempt.get("actual_region"),
+                )
+                != (
+                    configuration.get("expected_actual_cloud"),
+                    configuration.get("expected_actual_region"),
+                )
+                for attempt in attempts
+            )
         valid_attempts = (
             isinstance(attempts, list)
             and isinstance(concurrency, int)
@@ -1000,6 +1080,8 @@ def _validate_promotion_gates(
                 and modal_cloud_matches(
                     row.get("requested_cloud"), attempt.get("actual_cloud")
                 )
+                and attempt.get("actual_cloud") == configuration.get("expected_actual_cloud")
+                and attempt.get("actual_region") == configuration.get("expected_actual_region")
                 for attempt in attempts
             )
         )
@@ -1014,6 +1096,8 @@ def _validate_promotion_gates(
                 for attempt in attempts
                 if isinstance(attempt, dict)
             )
+    if throughput_placement_drift:
+        raise ValueError("promotion requires capability-bound throughput placement")
     if not required.issubset(observed):
         raise ValueError("promotion requires valid cleanup-complete throughput at 1, 5, and 20")
     if len(throughput_placements) != 1:
@@ -1070,6 +1154,8 @@ def _trial_control_mismatches(
     expected = {
         "cloud": configuration.get("cloud"),
         "region": configuration.get("region"),
+        "expected_actual_cloud": configuration.get("expected_actual_cloud"),
+        "expected_actual_region": configuration.get("expected_actual_region"),
         "cpu": configuration.get("cpu"),
         "memory_mib": configuration.get("memory_mib"),
         "browser": configuration.get("browser"),
@@ -1108,6 +1194,7 @@ def _cleanup_passed(value: Any) -> bool:
         and value.get("target_terminated") is True
         and value.get("target_detached") is True
         and value.get("runner_terminated") is True
+        and value.get("run_sweep_succeeded") is True
     )
 
 
@@ -1129,6 +1216,21 @@ def _actual_cloud_matches_requested(trial: dict[str, Any]) -> bool:
     return all(
         modal_cloud_matches(requested.get("cloud"), actual.get(key))
         for key in ("target_cloud", "runner_cloud")
+    )
+
+
+def _actual_placement_matches_capability(trial: dict[str, Any]) -> bool:
+    requested = trial.get("requested")
+    actual = trial.get("actual")
+    if not isinstance(requested, dict) or not isinstance(actual, dict):
+        return False
+    expected = (
+        requested.get("expected_actual_cloud"),
+        requested.get("expected_actual_region"),
+    )
+    return expected[0] is not None and all(
+        (actual.get(f"{owner}_cloud"), actual.get(f"{owner}_region")) == expected
+        for owner in ("target", "runner")
     )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Callable, Iterable
@@ -305,13 +306,23 @@ def validate_placement_capability_matrix(payload: dict[str, Any]) -> None:
         raise ValueError("placement capability classification is inconsistent")
 
 
+def validate_placement_artifact_path(artifact_path: str) -> PurePosixPath:
+    path = PurePosixPath(artifact_path)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or path.parts[0] != "benchmark-results"
+        or ".." in path.parts
+    ):
+        raise ValueError("placement capability artifact must be under benchmark-results")
+    return path
+
+
 def build_placement_capability_binding(
     payload: dict[str, Any], *, artifact_path: str
 ) -> dict[str, Any]:
     validate_placement_capability_matrix(payload)
-    path = PurePosixPath(artifact_path)
-    if path.is_absolute() or not path.parts or path.parts[0] != "benchmark-results":
-        raise ValueError("placement capability artifact must be under benchmark-results")
+    path = validate_placement_artifact_path(artifact_path)
     if payload.get("backend_causal_comparison_available") is not True:
         raise ValueError("placement capability matrix found no comparable placement")
     selected = payload.get("selected_request")
@@ -329,12 +340,16 @@ def build_placement_capability_binding(
         "selected_request": selected,
         "classification": payload.get("classification"),
         "measurement_performed": payload.get("measurement_performed"),
+        "evidence": copy.deepcopy(payload),
     }
 
 
 def placement_capability_sha256(payload: dict[str, Any]) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(serialize_placement_capability(payload)).hexdigest()
+
+
+def serialize_placement_capability(payload: dict[str, Any]) -> bytes:
+    return f"{json.dumps(payload, indent=2, sort_keys=True)}\n".encode()
 
 
 def cloud_request_label(value: str | None) -> str:

@@ -50,11 +50,13 @@ def run_candidate_phase(
     runner_factory: Any = create_modal_candidate_runner,
     progress: Any | None = None,
     checkpoint: Any | None = None,
+    cleanup_sweep: Any = cleanup_modal_candidate_run,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     run_id = new_run_id()
     runner: ModalCandidateRunner | None = None
     trials: list[dict[str, Any]] = []
     runner_cleanup = False
+    run_cleanup: dict[str, Any] | None = None
     phase_error_type: str | None = None
     try:
         if checkpoint is not None:
@@ -128,10 +130,22 @@ def run_candidate_phase(
     finally:
         if runner is not None:
             runner_cleanup = runner.terminate()
+        try:
+            run_cleanup = cleanup_sweep(app_name=app_name, run_id=run_id)
+        except Exception as exc:
+            run_cleanup = {
+                "cleanup_succeeded": False,
+                "remaining_sandboxes": None,
+                "error_type": type(exc).__name__,
+            }
         for trial in trials:
             cleanup = trial.get("cleanup")
             if isinstance(cleanup, dict):
                 cleanup["runner_terminated"] = runner_cleanup
+                cleanup["run_sweep_succeeded"] = (
+                    run_cleanup.get("cleanup_succeeded") is True
+                    and run_cleanup.get("remaining_sandboxes") == 0
+                )
         if checkpoint is not None:
             state = (
                 "complete"
@@ -149,6 +163,7 @@ def run_candidate_phase(
                     app_name=app_name,
                     runner_cleanup=runner_cleanup,
                     state=state,
+                    run_cleanup=run_cleanup,
                     error_type=phase_error_type,
                 ),
             )
@@ -159,6 +174,7 @@ def run_candidate_phase(
         app_name=app_name,
         runner_cleanup=runner_cleanup,
         state="complete",
+        run_cleanup=run_cleanup,
     )
 
 
@@ -170,13 +186,16 @@ def _phase_execution(
     app_name: str,
     runner_cleanup: bool | None,
     state: str,
+    run_cleanup: dict[str, Any] | None = None,
     error_type: str | None = None,
 ) -> dict[str, Any]:
     actual_cloud = None if runner is None else runner.placement.get("cloud")
     actual_region = None if runner is None else runner.placement.get("region")
-    placement_eligible = (
-        None
-        if runner is None
+    expected_placement = (config.expected_actual_cloud, config.expected_actual_region)
+    actual_placement = (actual_cloud, actual_region)
+    placement_eligible = None if runner is None else (
+        actual_placement == expected_placement
+        if expected_placement[0] is not None
         else modal_cloud_matches(config.cloud, actual_cloud)
         and isinstance(actual_region, str)
         and bool(actual_region.strip())
@@ -187,7 +206,11 @@ def _phase_execution(
         else None
         if placement_eligible
         else (
-            f"requested runner cloud {config.cloud or 'auto'}; observed "
+            f"capability-bound runner placement {expected_placement[0]}/"
+            f"{expected_placement[1]}; observed "
+            f"{actual_cloud or 'unobserved'}/{actual_region or 'unobserved'}"
+            if expected_placement[0] is not None
+            else f"requested runner cloud {config.cloud or 'auto'}; observed "
             f"{actual_cloud or 'unobserved'}/{actual_region or 'unobserved'}"
         )
     )
@@ -199,6 +222,8 @@ def _phase_execution(
         "placement_preflight": {
             "requested_cloud": config.cloud,
             "requested_region": config.region,
+            "expected_actual_cloud": config.expected_actual_cloud,
+            "expected_actual_region": config.expected_actual_region,
             "actual_cloud": actual_cloud,
             "actual_region": actual_region,
             "eligible": placement_eligible,
@@ -210,6 +235,7 @@ def _phase_execution(
         "runner_image_identity": f"modal-computer-use-{config.browser}:{config.image_revision}",
         "runner_placement": {} if runner is None else dict(runner.placement),
         "runner_cleanup_succeeded": runner_cleanup,
+        "run_cleanup": None if run_cleanup is None else dict(run_cleanup),
         "runner_reused_across_interleaved_trials": True,
         "broker_on_action_or_frame_path": False,
     }
@@ -395,6 +421,7 @@ def run_candidate_trial(
             "target_detached": target_detached,
             "runner_terminated": None,
             "runner_cleanup_scope": "phase",
+            "run_sweep_succeeded": None,
         },
         "resource_duration_seconds": resource_duration_seconds,
         "estimated_billed_cost": _estimated_target_cost(config, resource_duration_seconds),
@@ -566,6 +593,8 @@ def _requested_controls(config: ModalV2CandidateConfig, *, arm: str) -> dict[str
         "observation_transport": definition["observation_transport"],
         "cloud": config.cloud,
         "region": config.region,
+        "expected_actual_cloud": config.expected_actual_cloud,
+        "expected_actual_region": config.expected_actual_region,
         "cpu": config.cpu,
         "memory_mib": config.memory_mib,
         "image_identity": f"modal-computer-use-{config.browser}:{config.image_revision}",
