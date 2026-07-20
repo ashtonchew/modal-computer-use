@@ -467,6 +467,44 @@ def test_lifecycle_creates_generation_matched_runner_and_cleans_every_resource(
     assert trial["cleanup"]["run_sweep_succeeded"] is True
 
 
+def test_lifecycle_retains_allocation_timing_and_readiness_stage_on_timeout() -> None:
+    config = OptimizedFrontierConfig(image_revision="a" * 40)
+
+    class Runner:
+        def __init__(self) -> None:
+            self.placement = {"cloud": "CLOUD_PROVIDER_OCI", "region": "us-phoenix-1"}
+
+        def terminate(self) -> bool:
+            return True
+
+    def target_factory(**kwargs):
+        kwargs["timing"].mark("sandbox_registered")
+        raise TimeoutError
+
+    trial = run_frontier_trial(
+        config,
+        schedule_item={
+            "sequence": 0,
+            "phase": "pilot",
+            "arm": ARM_V1_TUNNEL,
+            "lifecycle_index": 0,
+        },
+        app_name="frontier-app",
+        phase_run_id="phase-run",
+        runner_factory=lambda **_kwargs: Runner(),
+        target_factory=target_factory,
+        cleanup_sweep=lambda **_kwargs: _cleanup(),
+    )
+
+    assert trial["status"] == "failed"
+    assert trial["failure"] == {
+        "phase": "lifecycle",
+        "stage": "target_container_readiness",
+        "error_type": "TimeoutError",
+    }
+    assert trial["metrics"]["allocation_ms"] is not None
+
+
 def _placement() -> tuple[dict, bytes]:
     raw = PLACEMENT_PATH.read_bytes()
     payload = json.loads(raw)

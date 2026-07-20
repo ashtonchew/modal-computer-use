@@ -173,6 +173,7 @@ def run_frontier_trial(
     target_detached = False
     cleanup: dict[str, Any] | None = None
     failure: dict[str, Any] | None = None
+    failure_stage = "runner_create"
     status = "failed"
     metrics: dict[str, float | None] = {
         metric: None
@@ -218,6 +219,7 @@ def run_frontier_trial(
         )
         if not verification["runner_placement"]:
             raise RuntimeError("runner placement differed from the predeclared frontier")
+        failure_stage = "target_create"
         target_started = clock()
         target = target_factory(
             config=_target_config(
@@ -236,11 +238,13 @@ def run_frontier_trial(
         )
         stages = timing.as_dict()["stages"]
         metrics["allocation_ms"] = observed_startup_stage_ms(stages, "sandbox_registered")
+        failure_stage = "target_placement"
         placement = target.runtime_placement()
         actual["target_cloud"] = placement["cloud"]
         actual["target_region"] = placement["region"]
         if (placement["cloud"], placement["region"]) != (expected_cloud, expected_region):
             raise RuntimeError("target placement differed from the predeclared frontier")
+        failure_stage = "direct_runner"
         dispatch_offset_ms = (clock() - target_started) * 1000.0
         runner_result = runner.execute(
             target,
@@ -263,6 +267,7 @@ def run_frontier_trial(
         )
         if payload.get("status") != "valid":
             raise RuntimeError(str(payload.get("error_type") or "frontier runner failed"))
+        failure_stage = "result_validation"
         stages_ms = payload["stages_ms"]
         metrics.update(
             {
@@ -286,7 +291,21 @@ def run_frontier_trial(
             raise RuntimeError("measured runner placement differed from the predeclared frontier")
         status = "valid"
     except Exception as exc:
-        failure = {"phase": "lifecycle", "error_type": type(exc).__name__}
+        stages = timing.as_dict()["stages"]
+        observed_allocation_ms = observed_startup_stage_ms(stages, "sandbox_registered")
+        if metrics["allocation_ms"] is None and observed_allocation_ms is not None:
+            metrics["allocation_ms"] = observed_allocation_ms
+        if failure_stage == "target_create" and observed_allocation_ms is not None:
+            failure_stage = (
+                "target_authenticated_readiness"
+                if observed_startup_stage_ms(stages, "container_ready") is not None
+                else "target_container_readiness"
+            )
+        failure = {
+            "phase": "lifecycle",
+            "stage": failure_stage,
+            "error_type": type(exc).__name__,
+        }
         status = "timeout" if isinstance(exc, TimeoutError) else "failed"
     finally:
         if target is not None:

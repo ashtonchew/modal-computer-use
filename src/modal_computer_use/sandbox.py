@@ -1577,7 +1577,11 @@ def create_modal_benchmark_computer(
     daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(daemon_auth)
-    env["COMPUTER_USE_DAEMON_HOST"] = "::"
+    env["COMPUTER_USE_DAEMON_HOST"] = (
+        "::"
+        if transport == "workspace-private-i6pn"
+        else "0.0.0.0"  # noqa: S104 - Modal tunnel/connect must accept external ingress.
+    )
     sandbox_tags = {**(tags or {}), **default_tags(config)}
     sandbox_tags.update(
         {

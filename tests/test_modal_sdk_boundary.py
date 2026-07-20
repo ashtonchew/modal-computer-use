@@ -446,6 +446,35 @@ def test_candidate_v1_connect_uses_public_product_endpoint_without_tunnel(
     assert computer.client.base_url == "https://sandbox-connect.example"
 
 
+def test_benchmark_v1_tunnel_binds_ipv4_for_modal_tcp_readiness(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    config = ComputerConfig(
+        run_id="frontier-v1-tunnel",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="tunnel",
+    )
+
+    create_modal_benchmark_computer(
+        config=config,
+        backend="v1",
+        transport="encrypted-tunnel",
+        cloud="oci",
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_DAEMON_HOST"] == "0.0.0.0"  # noqa: S104
+    assert kwargs["encrypted_ports"] == [8080]
+    assert "i6pn" not in kwargs
+
+
 def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     monkeypatch.setattr(
