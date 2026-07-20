@@ -27,6 +27,7 @@ from modal_computer_use.benchmarks.modal_optimized_frontier import (
     validate_result_artifact,
 )
 from modal_computer_use.benchmarks.modal_optimized_frontier_execution import (
+    exclusive_frontier_execution_lock,
     raise_benchmark_termination_signal,
     run_frontier_phase,
     run_frontier_throughput,
@@ -62,9 +63,10 @@ def main() -> int:
     if args.command == "preregister":
         return _preregister(args)
     signal.signal(signal.SIGTERM, raise_benchmark_termination_signal)
-    if args.command == "pilot":
-        return _pilot(args)
-    return _full(args)
+    with exclusive_frontier_execution_lock():
+        if args.command == "pilot":
+            return _pilot(args)
+        return _full(args)
 
 
 def _execution_arguments(parser: argparse.ArgumentParser, output: Path) -> None:

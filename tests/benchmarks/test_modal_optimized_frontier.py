@@ -34,6 +34,7 @@ from modal_computer_use.benchmarks.modal_optimized_frontier_execution import (
     FRONTIER_RESULT_END,
     FRONTIER_RESULT_START,
     BenchmarkTerminationSignal,
+    exclusive_frontier_execution_lock,
     raise_benchmark_termination_signal,
     run_frontier_trial,
 )
@@ -283,6 +284,20 @@ def test_rejected_artifacts_stay_under_ignored_results() -> None:
 def test_termination_signal_uses_interrupt_cleanup_path() -> None:
     with pytest.raises(BenchmarkTerminationSignal):
         raise_benchmark_termination_signal(15, None)
+
+
+def test_execution_lock_rejects_overlapping_pilots(tmp_path: Path) -> None:
+    lock_path = tmp_path / "frontier.lock"
+
+    with (
+        exclusive_frontier_execution_lock(lock_path),
+        pytest.raises(RuntimeError, match="already active"),
+        exclusive_frontier_execution_lock(lock_path),
+    ):
+        pytest.fail("overlapping execution must not acquire the lock")
+
+    with exclusive_frontier_execution_lock(lock_path):
+        pass
 
 
 @pytest.mark.parametrize(

@@ -98,6 +98,8 @@ failures. Interrupted and failed executions retain checkpoints and sanitized fai
 ignored `benchmark-results/`; they cannot be promoted.
 The CLI converts process termination signals into the same interrupt path so an externally stopped
 lifecycle still runs cleanup, seals the checkpoint, and writes rejected evidence.
+Pilot and full commands also hold one nonblocking host execution lock, rejecting overlapping runs
+before either can create a resource or write the shared raw evidence root.
 
 After the full lifecycle gate passes, a separately labeled minimal-container allocation throughput
 diagnostic runs at concurrency 1, 5, and 20 for each primary generation and its predeclared

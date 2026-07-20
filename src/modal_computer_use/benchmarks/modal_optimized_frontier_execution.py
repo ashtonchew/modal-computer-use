@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from ..config import (
@@ -39,6 +44,7 @@ from .modal_v2_candidate_execution import (
 
 FRONTIER_RESULT_START = "__MODAL_OPTIMIZED_FRONTIER_RESULT_START__"
 FRONTIER_RESULT_END = "__MODAL_OPTIMIZED_FRONTIER_RESULT_END__"
+DEFAULT_EXECUTION_LOCK = Path(tempfile.gettempdir()) / "modal-computer-use-optimized-frontier.lock"
 
 
 class BenchmarkTerminationSignal(KeyboardInterrupt):
@@ -47,6 +53,22 @@ class BenchmarkTerminationSignal(KeyboardInterrupt):
 
 def raise_benchmark_termination_signal(_signum: int, _frame: Any) -> None:
     raise BenchmarkTerminationSignal
+
+
+@contextmanager
+def exclusive_frontier_execution_lock(
+    lock_path: Path = DEFAULT_EXECUTION_LOCK,
+) -> Iterator[None]:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as stream:
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("another optimized-frontier execution is already active") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def run_frontier_phase(
