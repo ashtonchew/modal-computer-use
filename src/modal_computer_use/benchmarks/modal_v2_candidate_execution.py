@@ -627,6 +627,17 @@ except Exception as exc:
     ):
         result["error_code"] = error_code
     error_detail = {{
+        "causal frame request and action IDs do not match": "causal_id_mismatch",
+        "observation frame is not causal": "frame_not_causal",
+        "causal frame action did not succeed": "action_failed",
+        "causal frame did not contain a detected change": "change_not_detected",
+        "causal frame reached the change timeout": "change_timeout",
+        "causal frame is missing image geometry or format": "missing_frame_geometry",
+        "first frame is empty": "frame_empty",
+        "first frame could not be decoded": "frame_decode_failed",
+        "first frame content type does not match the requested format": "frame_format_mismatch",
+        "first frame geometry does not match the configured desktop": "frame_geometry_mismatch",
+        "observation stream did not emit an initial frame": "initial_frame_missing",
         "observation patch requires a previous frame": "patch_requires_previous_frame",
         "observation patch missing dirty rect": "patch_missing_dirty_rect",
         "unexpected observation stream frame": "unexpected_frame",
