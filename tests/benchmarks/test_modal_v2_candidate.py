@@ -29,7 +29,12 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     CANDIDATE_RESULT_END,
     CANDIDATE_RESULT_START,
     CandidatePlacementMismatchError,
-    extract_candidate_runner_result,
+    extract_modal_direct_runner_result,
+    modal_direct_runner_code,
+    modal_direct_runner_error_code,
+    modal_direct_runner_error_detail,
+    modal_direct_runner_error_stage,
+    modal_direct_runner_error_type,
     run_candidate_phase,
     run_candidate_throughput,
 )
@@ -173,7 +178,7 @@ def test_pilot_gate_rejects_drift_from_unconstrained_capability_placement() -> N
                 "target_region": "us-west1-a",
                 "runner_cloud": "CLOUD_PROVIDER_GCP",
                 "runner_region": "us-west1-a",
-            }
+            },
         )
 
     gates = evaluate_pilot_gates(trials, preregistration=preregistration)
@@ -412,7 +417,7 @@ def test_promotion_requires_complete_full_samples_and_throughput() -> None:
             "throughput_cleanup": {
                 "cleanup_succeeded": True,
                 "remaining_sandboxes": 0,
-            }
+            },
         },
     )
     raw_bytes = json.dumps(raw, sort_keys=True).encode()
@@ -520,10 +525,10 @@ def test_throughput_uses_exact_run_id_and_finishes_with_cleanup_sweep(
 
     monkeypatch.setattr(
         candidate_execution,
-        "create_modal_candidate_allocation_context",
+        "create_modal_benchmark_allocation_context",
         context_factory,
     )
-    monkeypatch.setattr(candidate_execution, "cleanup_modal_candidate_run", cleanup)
+    monkeypatch.setattr(candidate_execution, "cleanup_modal_benchmark_run", cleanup)
 
     rows, sweep = run_candidate_throughput(
         ModalV2CandidateConfig(image_revision="a" * 40),
@@ -532,6 +537,7 @@ def test_throughput_uses_exact_run_id_and_finishes_with_cleanup_sweep(
     )
 
     assert factory_kwargs["run_id"] == "run-123-throughput"
+    assert factory_kwargs["benchmark_tag"] == "modal-v2-candidate-throughput"
     assert batch_calls == [
         (backend, concurrency, 900)
         for concurrency in (1, 5, 20)
@@ -551,12 +557,12 @@ def test_throughput_interrupt_sweeps_exact_run_id(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(
         candidate_execution,
-        "create_modal_candidate_allocation_context",
+        "create_modal_benchmark_allocation_context",
         lambda **_kwargs: InterruptingContext(),
     )
     monkeypatch.setattr(
         candidate_execution,
-        "cleanup_modal_candidate_run",
+        "cleanup_modal_benchmark_run",
         lambda *, app_name, run_id: cleanup_calls.append((app_name, run_id)),
     )
 
@@ -577,9 +583,53 @@ def test_runner_result_parser_requires_bounded_safe_json() -> None:
         f"{CANDIDATE_RESULT_END}\n"
     )
 
-    assert extract_candidate_runner_result(stdout)["warm_action_to_frame_ms"] == 12.5
+    assert (
+        extract_modal_direct_runner_result(
+            stdout,
+            result_start=CANDIDATE_RESULT_START,
+            result_end=CANDIDATE_RESULT_END,
+        )["warm_action_to_frame_ms"]
+        == 12.5
+    )
     with pytest.raises(ValueError, match="bounded result"):
-        extract_candidate_runner_result('{"status":"valid"}')
+        extract_modal_direct_runner_result(
+            '{"status":"valid"}',
+            result_start=CANDIDATE_RESULT_START,
+            result_end=CANDIDATE_RESULT_END,
+        )
+
+
+def test_direct_runner_uses_version_contract_and_safe_remote_error_types() -> None:
+    source = modal_direct_runner_code(
+        result_start=CANDIDATE_RESULT_START,
+        result_end=CANDIDATE_RESULT_END,
+        source_prefix="modal-v2-candidate",
+    )
+
+    assert 'get("api_version") == "v1"' in source
+    assert 'get("daemon_version"), str' in source
+    assert "computer.wait_until_ready(timeout=180.0)" in source
+    assert "initial_frame = stream.start(drain_initial_frame=True)" in source
+    assert "previous_payload = initial_frame.compose()" in source
+    assert source.count("previous_payload=previous_payload") == 2
+    assert '"causal frame did not contain a detected change": "change_not_detected"' in source
+    assert '"status": "valid" if all(verification.values()) else "failed"' in source
+    assert modal_direct_runner_error_type({"error_type": "ConnectError"}) == "ConnectError"
+    assert modal_direct_runner_error_type({"error_type": "unsafe detail"}) == (
+        "DirectRunnerFailure"
+    )
+    assert modal_direct_runner_error_stage({"error_stage": "measured_action_frame"}) == (
+        "measured_action_frame"
+    )
+    assert modal_direct_runner_error_stage({"error_stage": "unsafe detail"}) is None
+    assert modal_direct_runner_error_code({"error_code": "observation_stream_error"}) == (
+        "observation_stream_error"
+    )
+    assert modal_direct_runner_error_code({"error_code": "unsafe detail"}) is None
+    assert modal_direct_runner_error_detail({"error_detail": "unexpected_frame"}) == (
+        "unexpected_frame"
+    )
+    assert modal_direct_runner_error_detail({"error_detail": "unsafe detail"}) is None
 
 
 def _preregistration(*, cloud: str | None = "aws") -> dict:

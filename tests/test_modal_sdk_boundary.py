@@ -24,12 +24,12 @@ from modal_computer_use.errors import (
 from modal_computer_use.registry import SandboxRegistry
 from modal_computer_use.sandbox import (
     MODAL_SNAPSHOT_RETENTION_SECONDS,
-    ModalCandidateAllocationContext,
+    ModalBenchmarkAllocationContext,
     ModalVolumeMount,
     _connect_token_parts,
-    cleanup_modal_candidate_run,
-    create_modal_candidate_computer,
-    create_modal_candidate_runner,
+    cleanup_modal_benchmark_run,
+    create_modal_benchmark_computer,
+    create_modal_benchmark_runner,
     create_modal_v2_tunnel_computer,
     modal_daemon_endpoint,
     modal_daemon_env,
@@ -390,7 +390,7 @@ def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
         ingress="tunnel",
     )
 
-    computer = create_modal_candidate_computer(
+    computer = create_modal_benchmark_computer(
         config=config,
         backend="v2",
         transport="workspace-private-i6pn",
@@ -408,6 +408,7 @@ def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
     assert kwargs["region"] == "us-west"
     assert kwargs["i6pn"] is True
     assert kwargs["encrypted_ports"] == []
+    assert "readiness_probe" not in kwargs
     assert kwargs["env"]["COMPUTER_USE_DAEMON_HOST"] == "::"
     assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
     assert len(kwargs["tags"]) == 10
@@ -431,7 +432,7 @@ def test_candidate_v1_connect_uses_public_product_endpoint_without_tunnel(
         ingress="connect",
     )
 
-    computer = create_modal_candidate_computer(
+    computer = create_modal_benchmark_computer(
         config=config,
         backend="v1",
         transport="connect-endpoint",
@@ -446,6 +447,35 @@ def test_candidate_v1_connect_uses_public_product_endpoint_without_tunnel(
     assert computer.client.base_url == "https://sandbox-connect.example"
 
 
+def test_benchmark_v1_tunnel_binds_ipv4_for_modal_tcp_readiness(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    config = ComputerConfig(
+        run_id="frontier-v1-tunnel",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="tunnel",
+    )
+
+    create_modal_benchmark_computer(
+        config=config,
+        backend="v1",
+        transport="encrypted-tunnel",
+        cloud="oci",
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["env"]["COMPUTER_USE_DAEMON_HOST"] == "0.0.0.0"  # noqa: S104
+    assert kwargs["encrypted_ports"] == [8080]
+    assert "i6pn" not in kwargs
+
+
 def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     monkeypatch.setattr(
@@ -457,11 +487,12 @@ def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> No
         lambda _sandbox: {"cloud": "aws", "region": "us-west-2"},
     )
 
-    runner = create_modal_candidate_runner(
+    runner = create_modal_benchmark_runner(
         app_name="candidate-app",
         cloud="aws",
         region="us-west",
         image_revision="a" * 40,
+        runner_label="modal-v2-candidate",
     )
 
     args, kwargs = FakeSandbox.experimental_create_calls[0]
@@ -469,10 +500,49 @@ def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> No
     assert kwargs["image"] == "named-image"
     assert kwargs["i6pn"] is True
     assert kwargs["cloud"] == "aws"
+    assert kwargs["cpu"] == 1.0
+    assert kwargs["memory"] == 1024
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.wait_until_ready_calls == []
     assert runner.placement == {"cloud": "aws", "region": "us-west-2"}
     assert runner.terminate() is True
+
+
+def test_optimized_frontier_v1_runner_uses_v1_create_without_i6pn(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "CLOUD_PROVIDER_OCI", "region": "us-phoenix-1"},
+    )
+
+    runner = create_modal_benchmark_runner(
+        app_name="frontier-app",
+        cloud="oci",
+        region="us-west",
+        image_revision="a" * 40,
+        backend="v1",
+        i6pn=False,
+        cpu=0.5,
+        memory_mib=512,
+        runner_label="modal-optimized-frontier",
+    )
+
+    args, kwargs = FakeSandbox.create_calls[0]
+    assert args == ("sleep", "infinity")
+    assert kwargs["image"] == "named-image"
+    assert kwargs["cloud"] == "oci"
+    assert kwargs["cpu"] == 0.5
+    assert kwargs["memory"] == 512
+    assert "i6pn" not in kwargs
+    assert FakeSandbox.experimental_create_calls == []
+    assert runner.placement == {
+        "cloud": "CLOUD_PROVIDER_OCI",
+        "region": "us-phoenix-1",
+    }
 
 
 def test_candidate_constructor_terminates_target_on_keyboard_interrupt(monkeypatch) -> None:
@@ -492,7 +562,7 @@ def test_candidate_constructor_terminates_target_on_keyboard_interrupt(monkeypat
     )
 
     with pytest.raises(KeyboardInterrupt):
-        create_modal_candidate_computer(
+        create_modal_benchmark_computer(
             config=config,
             backend="v1",
             transport="encrypted-tunnel",
@@ -521,7 +591,7 @@ def test_candidate_run_cleanup_terminates_only_exact_run_tags() -> None:
     FakeSandbox.listed = [target, unrelated]
     FakeSandbox.experimental_listed = [runner, unrelated]
 
-    result = cleanup_modal_candidate_run(
+    result = cleanup_modal_benchmark_run(
         app_name="candidate-app",
         run_id="run_exact",
         modal_runtime=runtime,
@@ -545,6 +615,25 @@ def test_candidate_run_cleanup_terminates_only_exact_run_tags() -> None:
         {"app_id": "ap-candidate-app"},
         {"app_id": "ap-candidate-app"},
     ]
+
+
+def test_candidate_run_cleanup_can_attest_both_listing_inventories() -> None:
+    runtime = fake_modal()
+    FakeSandbox.listed = []
+    FakeSandbox.experimental_listed = []
+
+    result = cleanup_modal_benchmark_run(
+        app_name="candidate-app",
+        run_id="frontier-run",
+        modal_runtime=runtime,
+        include_inventory=True,
+    )
+
+    assert result["enumeration"] == {
+        "before": {"list": 0, "_experimental_list": 0},
+        "after": {"list": 0, "_experimental_list": 0},
+        "apis": ["Sandbox.list", "Sandbox._experimental_list"],
+    }
 
 
 def test_candidate_placement_probe_can_observe_unpinned_cloud_and_cleans_up(
@@ -615,7 +704,7 @@ def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
     )
     monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
     with pytest.raises(ValueError, match="non-empty"):
-        ModalCandidateAllocationContext(
+        ModalBenchmarkAllocationContext(
             app=object(),
             image=object(),
             run_id="run-123-throughput",
@@ -623,8 +712,9 @@ def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
             region="us-west",
             cpu=4.0,
             memory_mib=8192,
+            benchmark_tag="modal-v2-candidate-throughput",
         )
-    context = ModalCandidateAllocationContext(
+    context = ModalBenchmarkAllocationContext(
         app=object(),
         image=object(),
         run_id="run-123-throughput",
@@ -632,6 +722,7 @@ def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
         region="us-west",
         cpu=4.0,
         memory_mib=8192,
+        benchmark_tag="modal-v2-candidate-throughput",
     )
 
     result = asyncio.run(context.run_batch(backend="v1", concurrency=1))

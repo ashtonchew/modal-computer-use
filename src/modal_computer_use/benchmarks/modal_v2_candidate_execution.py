@@ -17,11 +17,11 @@ from ..config import (
 )
 from ..latency import SessionStartupTiming
 from ..sandbox import (
-    ModalCandidateRunner,
-    cleanup_modal_candidate_run,
-    create_modal_candidate_allocation_context,
-    create_modal_candidate_computer,
-    create_modal_candidate_runner,
+    ModalBenchmarkRunner,
+    cleanup_modal_benchmark_run,
+    create_modal_benchmark_allocation_context,
+    create_modal_benchmark_computer,
+    create_modal_benchmark_runner,
 )
 from ..state import new_run_id
 from .modal_v2_candidate import (
@@ -47,13 +47,13 @@ def run_candidate_phase(
     *,
     schedule: list[dict[str, Any]],
     app_name: str = "modal-computer-use-v2-candidate",
-    runner_factory: Any = create_modal_candidate_runner,
+    runner_factory: Any = create_modal_benchmark_runner,
     progress: Any | None = None,
     checkpoint: Any | None = None,
-    cleanup_sweep: Any = cleanup_modal_candidate_run,
+    cleanup_sweep: Any = cleanup_modal_benchmark_run,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     run_id = new_run_id()
-    runner: ModalCandidateRunner | None = None
+    runner: ModalBenchmarkRunner | None = None
     trials: list[dict[str, Any]] = []
     runner_cleanup = False
     run_cleanup: dict[str, Any] | None = None
@@ -78,6 +78,7 @@ def run_candidate_phase(
             image_revision=config.image_revision,
             app_tags={"benchmark": "modal-v2-candidate"},
             tags={"benchmark_run": run_id},
+            runner_label="modal-v2-candidate",
         )
         preflight = _phase_execution(
             config,
@@ -180,7 +181,7 @@ def run_candidate_phase(
 
 def _phase_execution(
     config: ModalV2CandidateConfig,
-    runner: ModalCandidateRunner | None,
+    runner: ModalBenchmarkRunner | None,
     *,
     run_id: str,
     app_name: str,
@@ -257,7 +258,7 @@ def run_candidate_throughput(
     estimated_cost_ceiling = total_allocations * config.sandbox_timeout_seconds * per_second
     if estimated_cost_ceiling > config.max_estimated_cost_usd:
         raise RuntimeError("throughput cost ceiling exceeds the preregistered capacity/cost gate")
-    context = create_modal_candidate_allocation_context(
+    context = create_modal_benchmark_allocation_context(
         app_name=app_name,
         image_revision=config.image_revision,
         run_id=run_id,
@@ -265,6 +266,7 @@ def run_candidate_throughput(
         region=config.region,
         cpu=config.cpu,
         memory_mib=config.memory_mib,
+        benchmark_tag="modal-v2-candidate-throughput",
     )
 
     async def execute() -> list[dict[str, Any]]:
@@ -291,9 +293,9 @@ def run_candidate_throughput(
         rows = asyncio.run(execute())
     except BaseException:
         with suppress(Exception):
-            cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+            cleanup_modal_benchmark_run(app_name=app_name, run_id=run_id)
         raise
-    cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+    cleanup = cleanup_modal_benchmark_run(app_name=app_name, run_id=run_id)
     return rows, cleanup
 
 
@@ -301,7 +303,7 @@ def run_candidate_trial(
     config: ModalV2CandidateConfig,
     *,
     schedule_item: dict[str, Any],
-    runner: ModalCandidateRunner,
+    runner: ModalBenchmarkRunner,
     app_name: str,
     run_id: str,
     clock: Any = time.perf_counter,
@@ -337,10 +339,14 @@ def run_candidate_trial(
         "runner_region": runner.placement.get("region"),
         "i6pn_reachability": None,
     }
-    verification = _empty_verification()
+    verification = empty_direct_runner_verification()
+    runner_error_type: str | None = None
+    runner_error_stage: str | None = None
+    runner_error_code: str | None = None
+    runner_error_detail: str | None = None
     try:
         target_config = _target_config(config, arm=arm, run_id=run_id, schedule_item=schedule_item)
-        target = create_modal_candidate_computer(
+        target = create_modal_benchmark_computer(
             config=target_config,
             backend=backend,
             transport=transport,
@@ -352,20 +358,38 @@ def run_candidate_trial(
             timing=timing,
         )
         stages = timing.as_dict()["stages"]
-        metrics["allocation_ms"] = _observed_elapsed(stages, "sandbox_registered")
+        metrics["allocation_ms"] = observed_startup_stage_ms(stages, "sandbox_registered")
         placement = target.runtime_placement()
         actual["target_cloud"] = placement["cloud"]
         actual["target_region"] = placement["region"]
         runner_dispatch_offset_ms = (clock() - started) * 1000.0
         runner_result = runner.execute(
             target,
-            ("python", "-c", modal_candidate_runner_code()),
+            (
+                "python",
+                "-c",
+                modal_direct_runner_code(
+                    result_start=CANDIDATE_RESULT_START,
+                    result_end=CANDIDATE_RESULT_END,
+                    source_prefix="modal-v2-candidate",
+                ),
+            ),
             transport=transport,
             timeout_seconds=config.readiness_timeout_seconds + 120,
         )
-        payload = extract_candidate_runner_result(runner_result.stdout)
+        payload = extract_modal_direct_runner_result(
+            runner_result.stdout,
+            result_start=CANDIDATE_RESULT_START,
+            result_end=CANDIDATE_RESULT_END,
+        )
+        if isinstance(payload.get("verification"), dict):
+            verification.update(dict(payload["verification"]))
         if payload.get("status") != "valid":
-            raise RuntimeError(str(payload.get("error_type") or "candidate runner failed"))
+            runner_error_type = modal_direct_runner_error_type(payload)
+            runner_error_stage = modal_direct_runner_error_stage(payload)
+            runner_error_code = modal_direct_runner_error_code(payload)
+            runner_error_detail = modal_direct_runner_error_detail(payload)
+            raise RuntimeError("candidate runner failed")
         runner_stages = payload["stages_ms"]
         metrics.update(
             {
@@ -378,7 +402,6 @@ def run_candidate_trial(
                 "warm_action_to_frame_ms": float(payload["warm_action_to_frame_ms"]),
             }
         )
-        verification = dict(payload["verification"])
         actual["runner_cloud"] = payload["placement"].get("cloud")
         actual["runner_region"] = payload["placement"].get("region")
         actual["i6pn_reachability"] = (
@@ -386,8 +409,15 @@ def run_candidate_trial(
         )
         status = "valid"
     except Exception as exc:
-        failure = {"phase": "trial", "error_type": type(exc).__name__}
-        status = "timeout" if isinstance(exc, TimeoutError) else "failed"
+        error_type = runner_error_type or type(exc).__name__
+        failure = {
+            "phase": "trial",
+            "error_type": error_type,
+            **({"remote_stage": runner_error_stage} if runner_error_stage else {}),
+            **({"remote_code": runner_error_code} if runner_error_code else {}),
+            **({"remote_detail": runner_error_detail} if runner_error_detail else {}),
+        }
+        status = "timeout" if error_type == "TimeoutError" else "failed"
     finally:
         resource_duration_seconds = max(0.0, clock() - started)
         if target is not None:
@@ -429,7 +459,17 @@ def run_candidate_trial(
     }
 
 
-def modal_candidate_runner_code() -> str:
+def modal_direct_runner_code(*, result_start: str, result_end: str, source_prefix: str) -> str:
+    if not source_prefix or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for character in source_prefix
+    ):
+        raise ValueError("direct runner source prefix is invalid")
+    if any(
+        not marker
+        or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for character in marker)
+        for marker in (result_start, result_end)
+    ):
+        raise ValueError("direct runner result marker is invalid")
     return dedent(f"""\
 import json
 import os
@@ -450,54 +490,115 @@ def elapsed(started):
 started = time.perf_counter()
 result = {{"status": "failed"}}
 computer = None
+failure_stage = "client_initialization"
 try:
     computer = ComputerSandbox.local(
         base_url=os.environ["COMPUTER_USE_DAEMON_BASE_URL"],
         token=os.environ.get("COMPUTER_USE_DAEMON_TOKEN") or None,
         timeout=180.0,
     )
+    failure_stage = "daemon_readiness"
+    computer.wait_until_ready(timeout=180.0)
+    failure_stage = "healthz"
+    healthz = computer.client.get_json("/healthz")
+    failure_stage = "readyz"
+    readyz = computer.client.get_json("/readyz")
+    failure_stage = "version"
+    version = computer.client.get_json("/v1/version")
+    failure_stage = "capabilities"
+    capabilities = computer.client.get_json("/v1/capabilities")
     probes = {{
-        "healthz": computer.client.get_json("/healthz"),
-        "readyz": computer.client.get_json("/readyz"),
-        "version": computer.client.get_json("/v1/version"),
-        "capabilities": computer.client.get_json("/v1/capabilities"),
+        "healthz": healthz,
+        "readyz": readyz,
+        "version": version,
+        "capabilities": capabilities,
     }}
     daemon_ready_ms = elapsed(started)
+    failure_stage = "browser_status"
     browser = computer.browser.status()
     browser_ready_ms = elapsed(started)
+    failure_stage = "first_frame"
     first_frame = computer.screenshots.full_bytes(format="png", processing="daemon")
     validate_first_frame(first_frame, expected_width=1024, expected_height=768, image_format="png")
     first_valid_frame_ms = elapsed(started)
+    failure_stage = "test_page"
     _open_click_toggle_page(computer.client)
+    failure_stage = "observation_stream"
     with computer.observation_stream(
         fps=0.01,
         frame_encoding="binary-envelope",
         timeout=180.0,
     ) as stream:
+        failure_stage = "observation_initial_frame"
+        initial_frame = stream.start(drain_initial_frame=True)
+        if initial_frame is None:
+            raise RuntimeError("observation stream did not emit an initial frame")
+        previous_payload = initial_frame.compose()
+        validate_first_frame(
+            previous_payload or b"",
+            expected_width=1024,
+            expected_height=768,
+            image_format="png",
+        )
+        failure_stage = "warmup_action_frame"
         warmup = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
-            source="modal-v2-candidate-warmup",
+            source="{source_prefix}-warmup",
             change_timeout_ms=200,
             poll_strategy="adaptive",
             change_detection="auto_region",
             change_signal="auto",
             frame_encoding="binary-envelope",
         )
-        warmup.require_valid_frame(require_change=True)
+        previous_payload = warmup.require_valid_frame(
+            previous_payload=previous_payload,
+            require_change=True,
+        )
+        failure_stage = "measured_action_frame"
         measured = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
-            source="modal-v2-candidate-measured",
+            source="{source_prefix}-measured",
             change_timeout_ms=200,
             poll_strategy="adaptive",
             change_detection="auto_region",
             change_signal="auto",
             frame_encoding="binary-envelope",
         )
-        measured.require_valid_frame(require_change=True)
+        measured.require_valid_frame(
+            previous_payload=previous_payload,
+            require_change=True,
+        )
     metadata = measured.frame.metadata
     action_result = metadata.get("action_result") or {{}}
+    verification = {{
+        "healthz": probes["healthz"].get("ok") is True,
+        "readyz": probes["readyz"].get("ready") is True,
+        "version": (
+            probes["version"].get("api_version") == "v1"
+            and isinstance(probes["version"].get("daemon_version"), str)
+        ),
+        "capabilities": (
+            isinstance(probes["capabilities"].get("action_types"), list)
+            and isinstance(probes["capabilities"].get("screenshot_formats"), list)
+            and probes["capabilities"].get("image_profile") == "browser"
+        ),
+        "browser": (
+            browser.get("configured_browser") == "chromium"
+            and (browser.get("prewarm_result") or {{}}).get("ok") is True
+            and isinstance(browser.get("windows"), int)
+            and browser.get("windows") >= 1
+        ),
+        "frame": True,
+        "action": action_result.get("ok") is True,
+        "causal_frame": metadata.get("causal_frame") is True,
+        "changed_frame": (
+            metadata.get("change_detected") is True
+            and metadata.get("change_timeout_reached") is not True
+        ),
+        "binary_envelope": metadata.get("frame_encoding") == "binary-envelope",
+    }}
     result = {{
-        "status": "valid",
+        "status": "valid" if all(verification.values()) else "failed",
         "stages_ms": {{
             "daemon_ready": daemon_ready_ms,
             "browser_ready": browser_ready_ms,
@@ -508,52 +609,111 @@ try:
             "cloud": os.environ.get("MODAL_CLOUD_PROVIDER") or None,
             "region": os.environ.get("MODAL_REGION") or None,
         }},
-        "verification": {{
-            "healthz": probes["healthz"].get("ok") is True,
-            "readyz": probes["readyz"].get("ready") is True,
-            "version": isinstance(probes["version"].get("version"), str),
-            "capabilities": (
-                isinstance(probes["capabilities"].get("action_types"), list)
-                and isinstance(probes["capabilities"].get("screenshot_formats"), list)
-                and probes["capabilities"].get("image_profile") == "browser"
-            ),
-            "browser": (
-                browser.get("configured_browser") == "chromium"
-                and (browser.get("prewarm_result") or {{}}).get("ok") is True
-                and isinstance(browser.get("windows"), int)
-                and browser.get("windows") >= 1
-            ),
-            "frame": True,
-            "action": action_result.get("ok") is True,
-            "causal_frame": metadata.get("causal_frame") is True,
-            "changed_frame": (
-                metadata.get("change_detected") is True
-                and metadata.get("change_timeout_reached") is not True
-            ),
-            "binary_envelope": metadata.get("frame_encoding") == "binary-envelope",
-        }},
+        "verification": verification,
     }}
+    if result["status"] != "valid":
+        result["error_type"] = "VerificationError"
 except Exception as exc:
-    result = {{"status": "failed", "error_type": type(exc).__name__}}
+    result = {{
+        "status": "failed",
+        "error_type": type(exc).__name__,
+        "error_stage": failure_stage,
+    }}
+    error_code = getattr(exc, "code", None)
+    if (
+        isinstance(error_code, str)
+        and 0 < len(error_code) <= 100
+        and all(character.isalnum() or character == "_" for character in error_code)
+    ):
+        result["error_code"] = error_code
+    error_detail = {{
+        "causal frame request and action IDs do not match": "causal_id_mismatch",
+        "observation frame is not causal": "frame_not_causal",
+        "causal frame action did not succeed": "action_failed",
+        "causal frame did not contain a detected change": "change_not_detected",
+        "causal frame reached the change timeout": "change_timeout",
+        "causal frame is missing image geometry or format": "missing_frame_geometry",
+        "first frame is empty": "frame_empty",
+        "first frame could not be decoded": "frame_decode_failed",
+        "first frame content type does not match the requested format": "frame_format_mismatch",
+        "first frame geometry does not match the configured desktop": "frame_geometry_mismatch",
+        "observation stream did not emit an initial frame": "initial_frame_missing",
+        "observation patch requires a previous frame": "patch_requires_previous_frame",
+        "observation patch missing dirty rect": "patch_missing_dirty_rect",
+        "unexpected observation stream frame": "unexpected_frame",
+        "observation binary payload missing": "binary_payload_missing",
+        "invalid observation binary envelope": "invalid_binary_envelope",
+        "truncated observation binary envelope": "truncated_binary_envelope",
+        "invalid observation binary envelope metadata": "invalid_envelope_metadata",
+        "unexpected observation stream start response": "unexpected_start_response",
+    }}.get(str(exc))
+    if error_detail is not None:
+        result["error_detail"] = error_detail
 finally:
     if computer is not None:
         computer.client.close()
-print("{CANDIDATE_RESULT_START}")
+print("{result_start}")
 print(json.dumps(result, sort_keys=True))
-print("{CANDIDATE_RESULT_END}")
+print("{result_end}")
 """)
 
 
-def extract_candidate_runner_result(stdout: str) -> dict[str, Any]:
-    start = stdout.find(CANDIDATE_RESULT_START)
-    end = stdout.find(CANDIDATE_RESULT_END)
+def extract_modal_direct_runner_result(
+    stdout: str, *, result_start: str, result_end: str
+) -> dict[str, Any]:
+    start = stdout.find(result_start)
+    end = stdout.find(result_end)
     if start < 0 or end < 0 or end <= start:
-        raise ValueError("candidate runner did not emit a bounded result")
-    raw = stdout[start + len(CANDIDATE_RESULT_START) : end].strip()
+        raise ValueError("direct runner did not emit a bounded result")
+    raw = stdout[start + len(result_start) : end].strip()
     payload = json.loads(raw)
     if not isinstance(payload, dict):
-        raise ValueError("candidate runner result must be an object")
+        raise ValueError("direct runner result must be an object")
     return payload
+
+
+def modal_direct_runner_error_type(payload: dict[str, Any]) -> str:
+    value = payload.get("error_type")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return "DirectRunnerFailure"
+
+
+def modal_direct_runner_error_stage(payload: dict[str, Any]) -> str | None:
+    value = payload.get("error_stage")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return None
+
+
+def modal_direct_runner_error_code(payload: dict[str, Any]) -> str | None:
+    value = payload.get("error_code")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return None
+
+
+def modal_direct_runner_error_detail(payload: dict[str, Any]) -> str | None:
+    value = payload.get("error_detail")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return None
 
 
 def _target_config(
@@ -611,7 +771,7 @@ def _requested_controls(config: ModalV2CandidateConfig, *, arm: str) -> dict[str
     }
 
 
-def _empty_verification() -> dict[str, bool]:
+def empty_direct_runner_verification() -> dict[str, bool]:
     return {
         key: False
         for key in (
@@ -629,7 +789,7 @@ def _empty_verification() -> dict[str, bool]:
     }
 
 
-def _observed_elapsed(stages: dict[str, Any], name: str) -> float | None:
+def observed_startup_stage_ms(stages: dict[str, Any], name: str) -> float | None:
     stage = stages.get(name)
     if not isinstance(stage, dict) or stage.get("status") != "observed":
         return None
