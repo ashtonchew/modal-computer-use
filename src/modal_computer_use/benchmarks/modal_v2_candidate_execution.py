@@ -341,6 +341,9 @@ def run_candidate_trial(
     }
     verification = empty_direct_runner_verification()
     runner_error_type: str | None = None
+    runner_error_stage: str | None = None
+    runner_error_code: str | None = None
+    runner_error_detail: str | None = None
     try:
         target_config = _target_config(config, arm=arm, run_id=run_id, schedule_item=schedule_item)
         target = create_modal_benchmark_computer(
@@ -383,6 +386,9 @@ def run_candidate_trial(
             verification.update(dict(payload["verification"]))
         if payload.get("status") != "valid":
             runner_error_type = modal_direct_runner_error_type(payload)
+            runner_error_stage = modal_direct_runner_error_stage(payload)
+            runner_error_code = modal_direct_runner_error_code(payload)
+            runner_error_detail = modal_direct_runner_error_detail(payload)
             raise RuntimeError("candidate runner failed")
         runner_stages = payload["stages_ms"]
         metrics.update(
@@ -404,7 +410,13 @@ def run_candidate_trial(
         status = "valid"
     except Exception as exc:
         error_type = runner_error_type or type(exc).__name__
-        failure = {"phase": "trial", "error_type": error_type}
+        failure = {
+            "phase": "trial",
+            "error_type": error_type,
+            **({"remote_stage": runner_error_stage} if runner_error_stage else {}),
+            **({"remote_code": runner_error_code} if runner_error_code else {}),
+            **({"remote_detail": runner_error_detail} if runner_error_detail else {}),
+        }
         status = "timeout" if error_type == "TimeoutError" else "failed"
     finally:
         resource_duration_seconds = max(0.0, clock() - started)
@@ -478,30 +490,46 @@ def elapsed(started):
 started = time.perf_counter()
 result = {{"status": "failed"}}
 computer = None
+failure_stage = "client_initialization"
 try:
     computer = ComputerSandbox.local(
         base_url=os.environ["COMPUTER_USE_DAEMON_BASE_URL"],
         token=os.environ.get("COMPUTER_USE_DAEMON_TOKEN") or None,
         timeout=180.0,
     )
+    failure_stage = "daemon_readiness"
+    computer.wait_until_ready(timeout=180.0)
+    failure_stage = "healthz"
+    healthz = computer.client.get_json("/healthz")
+    failure_stage = "readyz"
+    readyz = computer.client.get_json("/readyz")
+    failure_stage = "version"
+    version = computer.client.get_json("/v1/version")
+    failure_stage = "capabilities"
+    capabilities = computer.client.get_json("/v1/capabilities")
     probes = {{
-        "healthz": computer.client.get_json("/healthz"),
-        "readyz": computer.client.get_json("/readyz"),
-        "version": computer.client.get_json("/v1/version"),
-        "capabilities": computer.client.get_json("/v1/capabilities"),
+        "healthz": healthz,
+        "readyz": readyz,
+        "version": version,
+        "capabilities": capabilities,
     }}
     daemon_ready_ms = elapsed(started)
+    failure_stage = "browser_status"
     browser = computer.browser.status()
     browser_ready_ms = elapsed(started)
+    failure_stage = "first_frame"
     first_frame = computer.screenshots.full_bytes(format="png", processing="daemon")
     validate_first_frame(first_frame, expected_width=1024, expected_height=768, image_format="png")
     first_valid_frame_ms = elapsed(started)
+    failure_stage = "test_page"
     _open_click_toggle_page(computer.client)
+    failure_stage = "observation_stream"
     with computer.observation_stream(
         fps=0.01,
         frame_encoding="binary-envelope",
         timeout=180.0,
     ) as stream:
+        failure_stage = "warmup_action_frame"
         warmup = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
             source="{source_prefix}-warmup",
@@ -512,6 +540,7 @@ try:
             frame_encoding="binary-envelope",
         )
         warmup.require_valid_frame(require_change=True)
+        failure_stage = "measured_action_frame"
         measured = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
             source="{source_prefix}-measured",
@@ -568,7 +597,28 @@ try:
     if result["status"] != "valid":
         result["error_type"] = "VerificationError"
 except Exception as exc:
-    result = {{"status": "failed", "error_type": type(exc).__name__}}
+    result = {{
+        "status": "failed",
+        "error_type": type(exc).__name__,
+        "error_stage": failure_stage,
+    }}
+    error_code = getattr(exc, "code", None)
+    if (
+        isinstance(error_code, str)
+        and 0 < len(error_code) <= 100
+        and all(character.isalnum() or character == "_" for character in error_code)
+    ):
+        result["error_code"] = error_code
+    error_detail = {{
+        "unexpected observation stream frame": "unexpected_frame",
+        "observation binary payload missing": "binary_payload_missing",
+        "invalid observation binary envelope": "invalid_binary_envelope",
+        "truncated observation binary envelope": "truncated_binary_envelope",
+        "invalid observation binary envelope metadata": "invalid_envelope_metadata",
+        "unexpected observation stream start response": "unexpected_start_response",
+    }}.get(str(exc))
+    if error_detail is not None:
+        result["error_detail"] = error_detail
 finally:
     if computer is not None:
         computer.client.close()
@@ -601,6 +651,39 @@ def modal_direct_runner_error_type(payload: dict[str, Any]) -> str:
     ):
         return value
     return "DirectRunnerFailure"
+
+
+def modal_direct_runner_error_stage(payload: dict[str, Any]) -> str | None:
+    value = payload.get("error_stage")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return None
+
+
+def modal_direct_runner_error_code(payload: dict[str, Any]) -> str | None:
+    value = payload.get("error_code")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return None
+
+
+def modal_direct_runner_error_detail(payload: dict[str, Any]) -> str | None:
+    value = payload.get("error_detail")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return None
 
 
 def _target_config(

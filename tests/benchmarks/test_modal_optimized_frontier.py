@@ -516,6 +516,9 @@ def test_lifecycle_retains_safe_direct_runner_error_type() -> None:
             payload = {
                 "status": "failed",
                 "error_type": "ConnectError",
+                "error_stage": "healthz",
+                "error_code": "transport_error",
+                "error_detail": "unexpected_frame",
                 "verification": {"healthz": False},
             }
             return SimpleNamespace(
@@ -559,6 +562,9 @@ def test_lifecycle_retains_safe_direct_runner_error_type() -> None:
         "phase": "lifecycle",
         "stage": "direct_runner",
         "error_type": "ConnectError",
+        "remote_stage": "healthz",
+        "remote_code": "transport_error",
+        "remote_detail": "unexpected_frame",
     }
     assert trial["verification"]["healthz"] is False
 

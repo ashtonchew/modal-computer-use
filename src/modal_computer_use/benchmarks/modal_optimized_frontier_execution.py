@@ -40,6 +40,9 @@ from .modal_v2_candidate_execution import (
     empty_direct_runner_verification,
     extract_modal_direct_runner_result,
     modal_direct_runner_code,
+    modal_direct_runner_error_code,
+    modal_direct_runner_error_detail,
+    modal_direct_runner_error_stage,
     modal_direct_runner_error_type,
     observed_startup_stage_ms,
 )
@@ -176,6 +179,9 @@ def run_frontier_trial(
     failure: dict[str, Any] | None = None
     failure_stage = "runner_create"
     runner_error_type: str | None = None
+    runner_error_stage: str | None = None
+    runner_error_code: str | None = None
+    runner_error_detail: str | None = None
     status = "failed"
     metrics: dict[str, float | None] = {
         metric: None
@@ -271,6 +277,9 @@ def run_frontier_trial(
             verification.update(dict(payload["verification"]))
         if payload.get("status") != "valid":
             runner_error_type = modal_direct_runner_error_type(payload)
+            runner_error_stage = modal_direct_runner_error_stage(payload)
+            runner_error_code = modal_direct_runner_error_code(payload)
+            runner_error_detail = modal_direct_runner_error_detail(payload)
             raise RuntimeError("frontier runner failed")
         failure_stage = "result_validation"
         stages_ms = payload["stages_ms"]
@@ -310,6 +319,9 @@ def run_frontier_trial(
             "phase": "lifecycle",
             "stage": failure_stage,
             "error_type": error_type,
+            **({"remote_stage": runner_error_stage} if runner_error_stage else {}),
+            **({"remote_code": runner_error_code} if runner_error_code else {}),
+            **({"remote_detail": runner_error_detail} if runner_error_detail else {}),
         }
         status = "timeout" if error_type == "TimeoutError" else "failed"
     finally:
