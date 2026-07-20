@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,13 +24,18 @@ from modal_computer_use.errors import (
 from modal_computer_use.registry import SandboxRegistry
 from modal_computer_use.sandbox import (
     MODAL_SNAPSHOT_RETENTION_SECONDS,
+    ModalCandidateAllocationContext,
     ModalVolumeMount,
     _connect_token_parts,
+    cleanup_modal_candidate_run,
+    create_modal_candidate_computer,
+    create_modal_candidate_runner,
     create_modal_v2_tunnel_computer,
     modal_daemon_endpoint,
     modal_daemon_env,
     modal_sandbox_exec_once,
     modal_sandbox_exec_runner_from_id,
+    probe_modal_candidate_placement,
     run_modal_daemon_command,
 )
 from modal_computer_use.state import compute_config_hash
@@ -67,6 +73,7 @@ class FakeApp:
 class FakeAppObject:
     def __init__(self, app_name: str) -> None:
         self.app_name = app_name
+        self.app_id = f"ap-{app_name}"
         self._tags = {"existing": "app-tag"}
         self.set_tags_calls: list[dict[str, str]] = []
 
@@ -167,8 +174,10 @@ class FakeSandbox:
     from_name_calls: ClassVar[list[tuple[str, str]]] = []
     from_id_calls: ClassVar[list[str]] = []
     list_calls: ClassVar[list[dict[str, str] | None]] = []
+    experimental_list_calls: ClassVar[list[dict[str, str] | None]] = []
     created: ClassVar[FakeSandboxObject | None] = None
     listed: ClassVar[list[FakeSandboxObject]] = []
+    experimental_listed: ClassVar[list[FakeSandboxObject]] = []
     from_name_result: ClassVar[FakeSandboxObject | None] = None
     from_name_error: ClassVar[Exception | None] = None
     from_id_result: ClassVar[FakeSandboxObject | None] = None
@@ -212,9 +221,24 @@ class FakeSandbox:
         return FakeSandboxObject()
 
     @classmethod
-    def list(cls, *, tags: dict[str, str] | None = None) -> list[FakeSandboxObject]:
-        cls.list_calls.append(tags)
-        return cls.listed
+    def list(
+        cls,
+        *,
+        tags: dict[str, str] | None = None,
+        app_id: str | None = None,
+    ) -> list[FakeSandboxObject]:
+        cls.list_calls.append(tags if app_id is None else {"app_id": app_id})
+        return [sandbox for sandbox in cls.listed if not sandbox.terminated]
+
+    @classmethod
+    def _experimental_list(
+        cls,
+        *,
+        tags: dict[str, str] | None = None,
+        app_id: str | None = None,
+    ) -> list[FakeSandboxObject]:
+        cls.experimental_list_calls.append(tags if app_id is None else {"app_id": app_id})
+        return [sandbox for sandbox in cls.experimental_listed if not sandbox.terminated]
 
 
 def fake_modal() -> SimpleNamespace:
@@ -226,8 +250,10 @@ def fake_modal() -> SimpleNamespace:
     FakeSandbox.from_name_calls = []
     FakeSandbox.from_id_calls = []
     FakeSandbox.list_calls = []
+    FakeSandbox.experimental_list_calls = []
     FakeSandbox.created = None
     FakeSandbox.listed = []
+    FakeSandbox.experimental_listed = []
     FakeSandbox.from_name_result = None
     FakeSandbox.from_name_error = None
     FakeSandbox.from_id_result = None
@@ -341,6 +367,282 @@ def test_create_omits_modal_region_by_default(monkeypatch) -> None:
 
     _, kwargs = FakeSandbox.create_calls[0]
     assert "region" not in kwargs
+
+
+def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_i6pn_address",
+        lambda _sandbox: "fdaa::1234",
+    )
+    config = ComputerConfig(
+        run_id="candidate-v2",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="tunnel",
+    )
+
+    computer = create_modal_candidate_computer(
+        config=config,
+        backend="v2",
+        transport="workspace-private-i6pn",
+        cloud="aws",
+        tags={"benchmark_arm": "v2-i6pn-direct-optimized"},
+        wait=True,
+    )
+
+    args, kwargs = FakeSandbox.experimental_create_calls[0]
+    assert args == ("python", "-m", "modal_computer_use.daemon")
+    assert kwargs["image"] == "named-image"
+    assert kwargs["cpu"] == 4.0
+    assert kwargs["memory"] == 8192
+    assert kwargs["cloud"] == "aws"
+    assert kwargs["region"] == "us-west"
+    assert kwargs["i6pn"] is True
+    assert kwargs["encrypted_ports"] == []
+    assert kwargs["env"]["COMPUTER_USE_DAEMON_HOST"] == "::"
+    assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
+    assert len(kwargs["tags"]) == 10
+    assert computer.client.base_url == "http://[fdaa::1234]:8080"
+
+
+def test_candidate_v1_connect_uses_public_product_endpoint_without_tunnel(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    config = ComputerConfig(
+        run_id="candidate-v1",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="connect",
+    )
+
+    computer = create_modal_candidate_computer(
+        config=config,
+        backend="v1",
+        transport="connect-endpoint",
+        cloud="aws",
+        wait=False,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["cloud"] == "aws"
+    assert kwargs["encrypted_ports"] == []
+    assert "i6pn" not in kwargs
+    assert computer.client.base_url == "https://sandbox-connect.example"
+
+
+def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "aws", "region": "us-west-2"},
+    )
+
+    runner = create_modal_candidate_runner(
+        app_name="candidate-app",
+        cloud="aws",
+        region="us-west",
+        image_revision="a" * 40,
+    )
+
+    args, kwargs = FakeSandbox.experimental_create_calls[0]
+    assert args == ("sleep", "infinity")
+    assert kwargs["image"] == "named-image"
+    assert kwargs["i6pn"] is True
+    assert kwargs["cloud"] == "aws"
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.wait_until_ready_calls == []
+    assert runner.placement == {"cloud": "aws", "region": "us-west-2"}
+    assert runner.terminate() is True
+
+
+def test_candidate_constructor_terminates_target_on_keyboard_interrupt(monkeypatch) -> None:
+    runtime = fake_modal()
+    monkeypatch.setattr(
+        FakeSandboxObject,
+        "wait_until_ready",
+        lambda _self, *, timeout: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+    config = ComputerConfig(
+        run_id="candidate-interrupt",
+        runtime={"modal_region": "us-west"},
+        resources={"profile": "browser", "cpu": 4.0, "memory_mib": 8192},
+        image={"source": "named", "revision": "a" * 40},
+        browser={"kind": "chromium", "prewarm": True},
+        ingress="tunnel",
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        create_modal_candidate_computer(
+            config=config,
+            backend="v1",
+            transport="encrypted-tunnel",
+            cloud="aws",
+            image=object(),
+            wait=True,
+            modal_runtime=runtime,
+        )
+
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.terminated is True
+    assert FakeSandbox.created.terminate_wait_calls == [True]
+
+
+def test_candidate_run_cleanup_terminates_only_exact_run_tags() -> None:
+    runtime = fake_modal()
+    target = FakeSandboxObject(
+        sandbox_id="sb-target",
+        tags={"computer-use.run_id": "run_exact-pilot-001"},
+    )
+    runner = FakeSandboxObject(sandbox_id="sb-runner", tags={"benchmark_run": "run_exact"})
+    unrelated = FakeSandboxObject(
+        sandbox_id="sb-unrelated",
+        tags={"computer-use.run_id": "run_other-pilot-001"},
+    )
+    FakeSandbox.listed = [target, unrelated]
+    FakeSandbox.experimental_listed = [runner, unrelated]
+
+    result = cleanup_modal_candidate_run(
+        app_name="candidate-app",
+        run_id="run_exact",
+        modal_runtime=runtime,
+    )
+
+    assert result == {
+        "matched_sandboxes": 2,
+        "terminated_sandboxes": 2,
+        "termination_failures": 0,
+        "remaining_sandboxes": 0,
+        "cleanup_succeeded": True,
+    }
+    assert target.terminated is True
+    assert runner.terminated is True
+    assert unrelated.terminated is False
+    assert FakeSandbox.list_calls == [
+        {"app_id": "ap-candidate-app"},
+        {"app_id": "ap-candidate-app"},
+    ]
+    assert FakeSandbox.experimental_list_calls == [
+        {"app_id": "ap-candidate-app"},
+        {"app_id": "ap-candidate-app"},
+    ]
+
+
+def test_candidate_placement_probe_can_observe_unpinned_cloud_and_cleans_up(
+    monkeypatch,
+) -> None:
+    runtime = fake_modal()
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+    monkeypatch.setattr("modal_computer_use.sandbox.named_image", lambda **_kwargs: "image")
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
+    )
+
+    result = probe_modal_candidate_placement(
+        app_name="candidate-placement-probe",
+        image_revision="a" * 40,
+        run_id="run-placement",
+        backend="v1",
+        cloud=None,
+        region="us-west",
+        cpu=4.0,
+        memory_mib=8192,
+        i6pn=False,
+    )
+
+    assert result.status == "valid"
+    assert result.run_id == "run-placement"
+    assert result.requested_cloud is None
+    assert result.actual_cloud == "CLOUD_PROVIDER_AWS"
+    assert result.actual_region == "us-west-2"
+    assert result.cleanup_succeeded is True
+    assert FakeSandbox.create_calls[0][1].get("cloud") is None
+    assert FakeSandbox.create_calls[0][1]["tags"] == {
+        "computer-use.benchmark": "modal-v2-placement-probe",
+        "computer-use.run_id": "run-placement-placement-probe-v1",
+    }
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.terminate_wait_calls == [True]
+
+
+def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
+    monkeypatch,
+) -> None:
+    create_calls: list[dict[str, object]] = []
+    terminate_calls: list[bool] = []
+
+    async def read_placement() -> str:
+        return '{"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"}'
+
+    async def execute_placement(*_args: str, **_kwargs: object) -> object:
+        return SimpleNamespace(stdout=SimpleNamespace(read=SimpleNamespace(aio=read_placement)))
+
+    async def terminate(*, wait: bool) -> None:
+        terminate_calls.append(wait)
+
+    async def create(*_args: str, **kwargs: object) -> object:
+        create_calls.append(kwargs)
+        return SimpleNamespace(
+            exec=SimpleNamespace(aio=execute_placement),
+            terminate=SimpleNamespace(aio=terminate),
+        )
+
+    runtime = SimpleNamespace(
+        Sandbox=SimpleNamespace(
+            create=SimpleNamespace(aio=create),
+            _experimental_create=SimpleNamespace(aio=create),
+        )
+    )
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+    with pytest.raises(ValueError, match="non-empty"):
+        ModalCandidateAllocationContext(
+            app=object(),
+            image=object(),
+            run_id="run-123-throughput",
+            cloud="",
+            region="us-west",
+            cpu=4.0,
+            memory_mib=8192,
+        )
+    context = ModalCandidateAllocationContext(
+        app=object(),
+        image=object(),
+        run_id="run-123-throughput",
+        cloud="aws",
+        region="us-west",
+        cpu=4.0,
+        memory_mib=8192,
+    )
+
+    result = asyncio.run(context.run_batch(backend="v1", concurrency=1))
+
+    assert result["status"] == "valid"
+    assert create_calls[0]["tags"] == {
+        "computer-use.benchmark": "modal-v2-candidate-throughput",
+        "computer-use.backend": "v1",
+        "computer-use.run_id": "run-123-throughput-v1-1-0",
+    }
+    assert terminate_calls == [True]
 
 
 def test_create_forwards_current_network_allowlist_arguments(monkeypatch) -> None:
@@ -645,9 +947,7 @@ def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_IMAGE_PROFILE"] == "browser-gpu"
     assert kwargs["env"]["COMPUTER_USE_BROWSER"] == "chromium"
     assert kwargs["env"]["COMPUTER_USE_BROWSER_PREWARM"] == "false"
-    assert kwargs["env"]["COMPUTER_USE_BROWSER_PROFILE_DIR"] == (
-        "/home/desktop/browser-profile"
-    )
+    assert kwargs["env"]["COMPUTER_USE_BROWSER_PROFILE_DIR"] == ("/home/desktop/browser-profile")
     assert kwargs["env"]["COMPUTER_USE_BROWSER_LAUNCH_ARGS"] == (
         '["--force-device-scale-factor=1"]'
     )

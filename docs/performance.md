@@ -936,16 +936,38 @@ cases; all other lifecycle resources are terminated and detached first. The depr
 `cold_create_to_ready` JSON alias remains through 1.1.x and is removed in 1.2.0. It is excluded from
 status and failure aggregation so canonical failures are counted once.
 
-The comparison profile in this PR is `provider-default`: a neutral external-caller correctness and
-provenance foundation, not a platform-optimized Modal result. A separate stacked follow-up may add
-`modal-platform-optimized` without changing `provider-default`. That future profile is reserved for
-a same-region separate Modal runner, direct Connect endpoint, persistent hot-session action control,
-and binary-envelope causal observation; its broker may handle allocation, authentication, placement,
-and cleanup, but never action or frame data. `target-loopback` remains a separately labeled
-same-container lower-bound diagnostic, not either provider profile. Future comparison artifacts must
-record caller path, region, ingress, action and observation transport, browser prewarm,
-named-image/snapshot/pool policy, resources, SDK versions, harness commit, verification, and billed
-cost. No optimized profile is implemented by this PR.
+### Modal V2 candidate classification
+
+The next Modal V2 benchmark uses four explicit arms: V1 Connect as the public product path, V1 and
+V2 encrypted tunnels as the only transport-matched backend pair, and V2 i6pn as a workspace-private
+asymmetric candidate. It uses a persistent same-region V2 runner, binary-envelope causal
+observations, one exact named image, randomized 5-per-arm pilot lifecycles, and 30 independent full
+lifecycles only after pilot gates pass. `target-loopback` remains diagnostic-only.
+
+The harness records requested and actual target/runner placement and suppresses backend-causal
+ratios unless image, resources, placement, readiness, action, observation, transport, verification,
+retry, and cleanup controls match. Pilot/full distributions report raw samples, p50, p95,
+bootstrap confidence intervals, and ECDF-ready rows. Allocation throughput at concurrency 1, 5, and
+20 is a separate diagnostic; concurrency 50 requires an explicit capacity and cost gate.
+
+See [Modal V2 Candidate Benchmark Methodology](modal-v2-candidate-benchmark.md) and
+[Modal V2 Candidate Result, 2026-07-19](benchmark-results-2026-07-19-modal-v2-candidate.md).
+
+The corrected 2026-07-19 capability matrix was descriptive-only and stopped before measurement.
+Across `auto`, `aws`, `gcp`, and `oci` requests, all three V2 roles consistently landed on
+`CLOUD_PROVIDER_AZURE/westus3`; V1 landed on OCI by default and honored each explicit supported
+provider request. No exact common placement existed, so the harness created no preregistration,
+retained no trials, emitted no ratios, and did not run lifecycle or throughput phases. The complete
+sanitized matrix is tracked as `benchmark-data/modal-v2-placement-capability-2026-07-19.json`.
+
+The earlier provider comparison profile remains `provider-default`: a neutral external-caller
+correctness and provenance foundation, not a platform-optimized Modal result. This Modal V2
+candidate does not relabel or supersede that evidence. Its separately classified
+`v2-i6pn-direct-optimized` arm implements the same-region direct workspace-private experiment while
+keeping Connect as the public product path and encrypted tunnels as the only backend-causal pair.
+The broker may handle allocation, authentication, placement, and cleanup, but never action or frame
+data for the direct arm. `target-loopback` remains a separately labeled same-container lower-bound
+diagnostic.
 
 Tracked provider artifacts are sanitized deterministic JSON with explicit provenance and status.
 Generate or drift-check a fresh artifact from its untracked raw result with:

@@ -1,0 +1,306 @@
+{
+  "backend_causal_comparison_available": false,
+  "benchmark": "modal-v2-placement-capability-matrix",
+  "candidate_order": [
+    "unconstrained",
+    "aws",
+    "gcp",
+    "oci"
+  ],
+  "candidates": [
+    {
+      "actual_placement": null,
+      "eligible": false,
+      "observations": {
+        "v1-target": {
+          "actual_cloud": "CLOUD_PROVIDER_OCI",
+          "actual_region": "us-phoenix-1",
+          "backend": "v1",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": null,
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-unconstrained-v1-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-runner": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": null,
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-unconstrained-v2-i6pn-runner",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": null,
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-unconstrained-v2-i6pn-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-tunnel-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": null,
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-unconstrained-v2-tunnel-target",
+          "sandbox_created": true,
+          "status": "valid"
+        }
+      },
+      "reasons": [
+        "V1 target, V2 targets, and V2 runner lack one exact observed placement"
+      ],
+      "requested_cloud": null,
+      "requested_region": "us-west"
+    },
+    {
+      "actual_placement": null,
+      "eligible": false,
+      "observations": {
+        "v1-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AWS",
+          "actual_region": "us-west-2",
+          "backend": "v1",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": "aws",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-aws-v1-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-runner": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": "aws",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-aws-v2-i6pn-runner",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": "aws",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-aws-v2-i6pn-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-tunnel-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": "aws",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-aws-v2-tunnel-target",
+          "sandbox_created": true,
+          "status": "valid"
+        }
+      },
+      "reasons": [
+        "v2-tunnel-target did not honor requested cloud aws",
+        "v2-i6pn-target did not honor requested cloud aws",
+        "v2-i6pn-runner did not honor requested cloud aws",
+        "V1 target, V2 targets, and V2 runner lack one exact observed placement"
+      ],
+      "requested_cloud": "aws",
+      "requested_region": "us-west"
+    },
+    {
+      "actual_placement": null,
+      "eligible": false,
+      "observations": {
+        "v1-target": {
+          "actual_cloud": "CLOUD_PROVIDER_GCP",
+          "actual_region": "us-west3",
+          "backend": "v1",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": "gcp",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-gcp-v1-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-runner": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": "gcp",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-gcp-v2-i6pn-runner",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": "gcp",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-gcp-v2-i6pn-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-tunnel-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": "gcp",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-gcp-v2-tunnel-target",
+          "sandbox_created": true,
+          "status": "valid"
+        }
+      },
+      "reasons": [
+        "v2-tunnel-target did not honor requested cloud gcp",
+        "v2-i6pn-target did not honor requested cloud gcp",
+        "v2-i6pn-runner did not honor requested cloud gcp",
+        "V1 target, V2 targets, and V2 runner lack one exact observed placement"
+      ],
+      "requested_cloud": "gcp",
+      "requested_region": "us-west"
+    },
+    {
+      "actual_placement": null,
+      "eligible": false,
+      "observations": {
+        "v1-target": {
+          "actual_cloud": "CLOUD_PROVIDER_OCI",
+          "actual_region": "us-phoenix-1",
+          "backend": "v1",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": "oci",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-oci-v1-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-runner": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": "oci",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-oci-v2-i6pn-runner",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-i6pn-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": true,
+          "i6pn_verified": true,
+          "requested_cloud": "oci",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-oci-v2-i6pn-target",
+          "sandbox_created": true,
+          "status": "valid"
+        },
+        "v2-tunnel-target": {
+          "actual_cloud": "CLOUD_PROVIDER_AZURE",
+          "actual_region": "westus3",
+          "backend": "v2",
+          "cleanup_succeeded": true,
+          "error_type": null,
+          "i6pn_enabled": false,
+          "i6pn_verified": false,
+          "requested_cloud": "oci",
+          "requested_region": "us-west",
+          "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236-oci-v2-tunnel-target",
+          "sandbox_created": true,
+          "status": "valid"
+        }
+      },
+      "reasons": [
+        "v2-tunnel-target did not honor requested cloud oci",
+        "v2-i6pn-target did not honor requested cloud oci",
+        "v2-i6pn-runner did not honor requested cloud oci",
+        "V1 target, V2 targets, and V2 runner lack one exact observed placement"
+      ],
+      "requested_cloud": "oci",
+      "requested_region": "us-west"
+    }
+  ],
+  "classification": "descriptive-placement-capability-only",
+  "generated_at": "2026-07-19T23:26:16.020739Z",
+  "image_identity": "modal-computer-use-chromium:ccf756154c8d7aa157ca6844b80d3042ea718df4",
+  "measurement_performed": false,
+  "requested_region": "us-west",
+  "run_id": "modal-v2-placement-0b5350350c024ace8e7a73a3821d9236",
+  "runner_resources": {
+    "cpu": 1.0,
+    "memory_mib": 1024
+  },
+  "schema_version": 1,
+  "selected_request": null,
+  "source_sha": "ccf756154c8d7aa157ca6844b80d3042ea718df4",
+  "target_resources": {
+    "cpu": 4.0,
+    "memory_mib": 8192
+  }
+}
