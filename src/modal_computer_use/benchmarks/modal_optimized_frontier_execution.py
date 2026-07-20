@@ -40,6 +40,7 @@ from .modal_v2_candidate_execution import (
     empty_direct_runner_verification,
     extract_modal_direct_runner_result,
     modal_direct_runner_code,
+    modal_direct_runner_error_type,
     observed_startup_stage_ms,
 )
 
@@ -174,6 +175,7 @@ def run_frontier_trial(
     cleanup: dict[str, Any] | None = None
     failure: dict[str, Any] | None = None
     failure_stage = "runner_create"
+    runner_error_type: str | None = None
     status = "failed"
     metrics: dict[str, float | None] = {
         metric: None
@@ -265,8 +267,11 @@ def run_frontier_trial(
             result_start=FRONTIER_RESULT_START,
             result_end=FRONTIER_RESULT_END,
         )
+        if isinstance(payload.get("verification"), dict):
+            verification.update(dict(payload["verification"]))
         if payload.get("status") != "valid":
-            raise RuntimeError(str(payload.get("error_type") or "frontier runner failed"))
+            runner_error_type = modal_direct_runner_error_type(payload)
+            raise RuntimeError("frontier runner failed")
         failure_stage = "result_validation"
         stages_ms = payload["stages_ms"]
         metrics.update(
@@ -277,7 +282,6 @@ def run_frontier_trial(
                 "warm_action_to_frame_ms": float(payload["warm_action_to_frame_ms"]),
             }
         )
-        verification.update(dict(payload["verification"]))
         actual["runner_cloud"] = payload["placement"].get("cloud")
         actual["runner_region"] = payload["placement"].get("region")
         verification["runner_placement"] = (actual["runner_cloud"], actual["runner_region"]) == (
@@ -301,12 +305,13 @@ def run_frontier_trial(
                 if observed_startup_stage_ms(stages, "container_ready") is not None
                 else "target_container_readiness"
             )
+        error_type = runner_error_type or type(exc).__name__
         failure = {
             "phase": "lifecycle",
             "stage": failure_stage,
-            "error_type": type(exc).__name__,
+            "error_type": error_type,
         }
-        status = "timeout" if isinstance(exc, TimeoutError) else "failed"
+        status = "timeout" if error_type == "TimeoutError" else "failed"
     finally:
         if target is not None:
             try:

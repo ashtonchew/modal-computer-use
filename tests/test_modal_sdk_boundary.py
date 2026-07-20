@@ -408,6 +408,7 @@ def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
     assert kwargs["region"] == "us-west"
     assert kwargs["i6pn"] is True
     assert kwargs["encrypted_ports"] == []
+    assert "readiness_probe" not in kwargs
     assert kwargs["env"]["COMPUTER_USE_DAEMON_HOST"] == "::"
     assert kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
     assert len(kwargs["tags"]) == 10

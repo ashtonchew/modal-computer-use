@@ -340,6 +340,7 @@ def run_candidate_trial(
         "i6pn_reachability": None,
     }
     verification = empty_direct_runner_verification()
+    runner_error_type: str | None = None
     try:
         target_config = _target_config(config, arm=arm, run_id=run_id, schedule_item=schedule_item)
         target = create_modal_benchmark_computer(
@@ -378,8 +379,11 @@ def run_candidate_trial(
             result_start=CANDIDATE_RESULT_START,
             result_end=CANDIDATE_RESULT_END,
         )
+        if isinstance(payload.get("verification"), dict):
+            verification.update(dict(payload["verification"]))
         if payload.get("status") != "valid":
-            raise RuntimeError(str(payload.get("error_type") or "candidate runner failed"))
+            runner_error_type = modal_direct_runner_error_type(payload)
+            raise RuntimeError("candidate runner failed")
         runner_stages = payload["stages_ms"]
         metrics.update(
             {
@@ -392,7 +396,6 @@ def run_candidate_trial(
                 "warm_action_to_frame_ms": float(payload["warm_action_to_frame_ms"]),
             }
         )
-        verification = dict(payload["verification"])
         actual["runner_cloud"] = payload["placement"].get("cloud")
         actual["runner_region"] = payload["placement"].get("region")
         actual["i6pn_reachability"] = (
@@ -400,8 +403,9 @@ def run_candidate_trial(
         )
         status = "valid"
     except Exception as exc:
-        failure = {"phase": "trial", "error_type": type(exc).__name__}
-        status = "timeout" if isinstance(exc, TimeoutError) else "failed"
+        error_type = runner_error_type or type(exc).__name__
+        failure = {"phase": "trial", "error_type": error_type}
+        status = "timeout" if error_type == "TimeoutError" else "failed"
     finally:
         resource_duration_seconds = max(0.0, clock() - started)
         if target is not None:
@@ -520,8 +524,35 @@ try:
         measured.require_valid_frame(require_change=True)
     metadata = measured.frame.metadata
     action_result = metadata.get("action_result") or {{}}
+    verification = {{
+        "healthz": probes["healthz"].get("ok") is True,
+        "readyz": probes["readyz"].get("ready") is True,
+        "version": (
+            probes["version"].get("api_version") == "v1"
+            and isinstance(probes["version"].get("daemon_version"), str)
+        ),
+        "capabilities": (
+            isinstance(probes["capabilities"].get("action_types"), list)
+            and isinstance(probes["capabilities"].get("screenshot_formats"), list)
+            and probes["capabilities"].get("image_profile") == "browser"
+        ),
+        "browser": (
+            browser.get("configured_browser") == "chromium"
+            and (browser.get("prewarm_result") or {{}}).get("ok") is True
+            and isinstance(browser.get("windows"), int)
+            and browser.get("windows") >= 1
+        ),
+        "frame": True,
+        "action": action_result.get("ok") is True,
+        "causal_frame": metadata.get("causal_frame") is True,
+        "changed_frame": (
+            metadata.get("change_detected") is True
+            and metadata.get("change_timeout_reached") is not True
+        ),
+        "binary_envelope": metadata.get("frame_encoding") == "binary-envelope",
+    }}
     result = {{
-        "status": "valid",
+        "status": "valid" if all(verification.values()) else "failed",
         "stages_ms": {{
             "daemon_ready": daemon_ready_ms,
             "browser_ready": browser_ready_ms,
@@ -532,31 +563,10 @@ try:
             "cloud": os.environ.get("MODAL_CLOUD_PROVIDER") or None,
             "region": os.environ.get("MODAL_REGION") or None,
         }},
-        "verification": {{
-            "healthz": probes["healthz"].get("ok") is True,
-            "readyz": probes["readyz"].get("ready") is True,
-            "version": isinstance(probes["version"].get("version"), str),
-            "capabilities": (
-                isinstance(probes["capabilities"].get("action_types"), list)
-                and isinstance(probes["capabilities"].get("screenshot_formats"), list)
-                and probes["capabilities"].get("image_profile") == "browser"
-            ),
-            "browser": (
-                browser.get("configured_browser") == "chromium"
-                and (browser.get("prewarm_result") or {{}}).get("ok") is True
-                and isinstance(browser.get("windows"), int)
-                and browser.get("windows") >= 1
-            ),
-            "frame": True,
-            "action": action_result.get("ok") is True,
-            "causal_frame": metadata.get("causal_frame") is True,
-            "changed_frame": (
-                metadata.get("change_detected") is True
-                and metadata.get("change_timeout_reached") is not True
-            ),
-            "binary_envelope": metadata.get("frame_encoding") == "binary-envelope",
-        }},
+        "verification": verification,
     }}
+    if result["status"] != "valid":
+        result["error_type"] = "VerificationError"
 except Exception as exc:
     result = {{"status": "failed", "error_type": type(exc).__name__}}
 finally:
@@ -580,6 +590,17 @@ def extract_modal_direct_runner_result(
     if not isinstance(payload, dict):
         raise ValueError("direct runner result must be an object")
     return payload
+
+
+def modal_direct_runner_error_type(payload: dict[str, Any]) -> str:
+    value = payload.get("error_type")
+    if (
+        isinstance(value, str)
+        and 0 < len(value) <= 100
+        and all(character.isalnum() or character == "_" for character in value)
+    ):
+        return value
+    return "DirectRunnerFailure"
 
 
 def _target_config(

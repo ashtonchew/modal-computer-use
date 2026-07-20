@@ -30,6 +30,8 @@ from modal_computer_use.benchmarks.modal_v2_candidate_execution import (
     CANDIDATE_RESULT_START,
     CandidatePlacementMismatchError,
     extract_modal_direct_runner_result,
+    modal_direct_runner_code,
+    modal_direct_runner_error_type,
     run_candidate_phase,
     run_candidate_throughput,
 )
@@ -592,6 +594,22 @@ def test_runner_result_parser_requires_bounded_safe_json() -> None:
             result_start=CANDIDATE_RESULT_START,
             result_end=CANDIDATE_RESULT_END,
         )
+
+
+def test_direct_runner_uses_version_contract_and_safe_remote_error_types() -> None:
+    source = modal_direct_runner_code(
+        result_start=CANDIDATE_RESULT_START,
+        result_end=CANDIDATE_RESULT_END,
+        source_prefix="modal-v2-candidate",
+    )
+
+    assert 'get("api_version") == "v1"' in source
+    assert 'get("daemon_version"), str' in source
+    assert '"status": "valid" if all(verification.values()) else "failed"' in source
+    assert modal_direct_runner_error_type({"error_type": "ConnectError"}) == "ConnectError"
+    assert modal_direct_runner_error_type({"error_type": "unsafe detail"}) == (
+        "DirectRunnerFailure"
+    )
 
 
 def _preregistration(*, cloud: str | None = "aws") -> dict:

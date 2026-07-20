@@ -1615,7 +1615,9 @@ def create_modal_benchmark_computer(
     }
     if cloud is not None:
         create_kwargs["cloud"] = cloud
-    readiness_probe = _readiness_probe(runtime)
+    readiness_probe = (
+        None if transport == "workspace-private-i6pn" else _readiness_probe(runtime)
+    )
     if readiness_probe is not None:
         create_kwargs["readiness_probe"] = readiness_probe
     if backend == "v2":
@@ -1629,7 +1631,7 @@ def create_modal_benchmark_computer(
     timing.mark("sandbox_registered")
     client: DaemonClient | None = None
     try:
-        if wait and hasattr(sandbox, "wait_until_ready"):
+        if wait and readiness_probe is not None and hasattr(sandbox, "wait_until_ready"):
             sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
             timing.mark("container_ready")
         if transport == "connect-endpoint":

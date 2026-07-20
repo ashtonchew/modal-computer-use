@@ -505,6 +505,64 @@ def test_lifecycle_retains_allocation_timing_and_readiness_stage_on_timeout() ->
     assert trial["metrics"]["allocation_ms"] is not None
 
 
+def test_lifecycle_retains_safe_direct_runner_error_type() -> None:
+    config = OptimizedFrontierConfig(image_revision="a" * 40)
+
+    class Runner:
+        def __init__(self) -> None:
+            self.placement = {"cloud": "CLOUD_PROVIDER_OCI", "region": "us-phoenix-1"}
+
+        def execute(self, *_args, **_kwargs):
+            payload = {
+                "status": "failed",
+                "error_type": "ConnectError",
+                "verification": {"healthz": False},
+            }
+            return SimpleNamespace(
+                stdout=(f"{FRONTIER_RESULT_START}\n{json.dumps(payload)}\n{FRONTIER_RESULT_END}\n")
+            )
+
+        def terminate(self) -> bool:
+            return True
+
+    class Target:
+        def runtime_placement(self):
+            return {"cloud": "CLOUD_PROVIDER_OCI", "region": "us-phoenix-1"}
+
+        def terminate(self, *, wait: bool) -> None:
+            assert wait is True
+
+        def detach(self) -> None:
+            return None
+
+    def target_factory(**kwargs):
+        kwargs["timing"].mark("sandbox_registered")
+        return Target()
+
+    trial = run_frontier_trial(
+        config,
+        schedule_item={
+            "sequence": 0,
+            "phase": "pilot",
+            "arm": ARM_V1_TUNNEL,
+            "lifecycle_index": 0,
+        },
+        app_name="frontier-app",
+        phase_run_id="phase-run",
+        runner_factory=lambda **_kwargs: Runner(),
+        target_factory=target_factory,
+        cleanup_sweep=lambda **_kwargs: _cleanup(),
+    )
+
+    assert trial["status"] == "failed"
+    assert trial["failure"] == {
+        "phase": "lifecycle",
+        "stage": "direct_runner",
+        "error_type": "ConnectError",
+    }
+    assert trial["verification"]["healthz"] is False
+
+
 def _placement() -> tuple[dict, bytes]:
     raw = PLACEMENT_PATH.read_bytes()
     payload = json.loads(raw)
