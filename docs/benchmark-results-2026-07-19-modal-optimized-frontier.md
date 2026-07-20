@@ -2,70 +2,95 @@
 
 ## Status
 
-**Rejected at the pilot gate; full lifecycle and throughput phases were not run.** No optimized-
-frontier path ratio is eligible.
+**Rejected at the clean pilot gate; full lifecycle and throughput phases were not run.** No
+optimized-frontier path ratio is eligible.
 
 The predeclared comparison used V1 encrypted tunnel on OCI `us-phoenix-1` and V2 i6pn on Azure
-`westus3`. This was a descriptive best-system design and never a backend-causal experiment. The
-placement foundation remains the unchanged `descriptive-placement-capability-only` artifact with
+`westus3`. This is a descriptive best-system design, not a backend-generation causal experiment.
+The unchanged placement foundation remains classified `descriptive-placement-capability-only` with
 `measurement_performed: false`.
 
 ## Exact rejection
 
-An initial `aedf44f356a7d42e430999be8d695bb63b79a9e9` pilot command detached from its tool session
-before retaining a sample. It remained active after its raw directory was preserved. A replacement
-signal-safe harness was frozen at `db25d89291a298351ce69fe78a7a48c191665b24`, but the stale process
-and the new process then overlapped and wrote into the same default raw evidence root. Those
-concurrent files are explicitly classified as contaminated and cannot be combined or promoted.
+The final clean pilot used source and image revision
+`f8d24e63e9cadaf3224da464dd517f98ca020258`. It completed all 20 preregistered independent
+lifecycles with zero retries and no replacement samples. Both primary arms failed the requirement
+for exactly five valid, fully verified samples:
 
-The signal-safe run independently retained one V1 primary attempt before it was interrupted to stop
-the contamination. Its generation-matched runner verified OCI `us-phoenix-1`, but V1 target
-creation timed out before returning a handle. The attempt therefore had no latency samples, 0%
-route/frame/action verification, and incomplete direct target cleanup fields. Its exact tagged
-cleanup sweep passed with zero remaining resources.
+- V1 encrypted-tunnel optimized: 2/5 valid; three samples timed out at
+  `observation_stream` while awaiting the initial stream frame.
+- V2 i6pn optimized: 3/5 valid; one sample failed semantic validation at
+  `warmup_action_frame` and one at `measured_action_frame`.
 
-Either condition is sufficient to reject the pilot:
+The V2 failures were safely retained as `ValueError`. The exact semantic invariant was not encoded
+by the frozen measurement commit. Three separately labeled post-pilot V2 diagnostics passed, so no
+narrower cause is asserted. The runner now classifies future fixed-message validation failures
+without exposing credentialed output.
 
-- only 1 of 5 required V1 primary attempts was retained, and it failed with `TimeoutError`;
-- V2 primary retained 0 of 5 required attempts;
-- two processes contaminated the shared raw checkpoint/output root.
-
-No samples were replaced. The full phase was not started, and throughput was not attempted.
+Earlier rejected diagnostics identified and corrected deterministic harness defects before this
+clean pilot: overlapping raw writers, unsealed process termination, a transport-insensitive daemon
+bind address, V2 private readiness ownership, and discarded observation-delta baselines. Those
+earlier rows remain ignored and are not mixed into the final pilot.
 
 ## Pilot score table
 
-Only the `db25d89291a298351ce69fe78a7a48c191665b24` signal-safe evidence is shown as the candidate
-pilot. The stale `aedf44f...` rows are retained separately as contaminated diagnostics and are not
-scores.
-
-| Arm | Role | Required | Retained | Valid | Verification rate | Eligible |
+| Arm | Role | Attempted | Valid | Verification rate | Cleanup rate | Gate result |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| `v1-encrypted-tunnel-optimized` | Primary | 5 | 1 | 0 | 0% | No: target create timeout |
-| `v2-i6pn-direct-optimized` | Primary | 5 | 0 | 0 | Not measured | No: schedule not reached |
-| `v1-connect-product` | Diagnostic | 5 | 0 | 0 | Not measured | Not evaluated |
-| `v2-encrypted-tunnel-diagnostic` | Diagnostic | 5 | 0 | 0 | Not measured | Not evaluated |
+| `v1-encrypted-tunnel-optimized` | Primary | 5 | 2 | 40% | 100% | Rejected: 3 initial-frame timeouts |
+| `v2-i6pn-direct-optimized` | Primary | 5 | 3 | 60% | 100% | Rejected: 2 semantic frame failures |
+| `v1-connect-product` | Diagnostic | 5 | 4 | 80% | 100% | Diagnostic only; 1 initial-frame timeout |
+| `v2-encrypted-tunnel-diagnostic` | Diagnostic | 5 | 4 | 80% | 100% | Diagnostic only; 1 initial-frame timeout |
 
-The retained V1 runner placement verification rate was 100% (1/1). Target placement was unobserved
-because target creation never returned.
+Every valid row passed all 11 verification fields: health, readiness, version, capabilities,
+browser prewarm, first frame, action, causal frame, changed frame, binary envelope, and runner
+placement. Every attempted row observed its declared target and runner placement.
 
-## Latency and percentile tables
+## Primary percentile table
 
-The only retained candidate attempt was invalid, so no latency value can enter a distribution.
+Percentiles use only valid samples. The small retained counts make these descriptive diagnostics,
+not an eligible comparison.
 
-| Primary arm | Allocation | Daemon ready | Browser ready | First valid frame | Warm action to frame |
-| --- | --- | --- | --- | --- | --- |
-| V1 optimized | Not reportable | Not reportable | Not reportable | Not reportable | Not reportable |
-| V2 optimized | Not measured | Not measured | Not measured | Not measured | Not measured |
+| Primary arm | Metric | n | p50 ms | p95 ms | Bootstrap 95% CI for p50 ms | Bootstrap 95% CI for p95 ms |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| V1 optimized | Allocation | 2 | 3540.888 | 4139.490 | 2875.774–4206.001 | 2875.774–4206.001 |
+| V1 optimized | Daemon ready | 2 | 9298.022 | 9490.865 | 9083.753–9512.291 | 9083.753–9512.291 |
+| V1 optimized | Browser ready | 2 | 9419.236 | 9614.520 | 9202.254–9636.218 | 9202.254–9636.218 |
+| V1 optimized | First valid frame | 2 | 9510.768 | 9708.381 | 9291.197–9730.339 | 9291.197–9730.339 |
+| V1 optimized | Warm action to frame | 2 | 14.470 | 20.553 | 7.712–21.228 | 7.712–21.228 |
+| V2 optimized | Allocation | 3 | 2280.578 | 2891.225 | 2065.779–2959.075 | 2065.779–2959.075 |
+| V2 optimized | Daemon ready | 3 | 9924.379 | 17894.419 | 7846.336–18779.979 | 7846.336–18779.979 |
+| V2 optimized | Browser ready | 3 | 10134.300 | 18339.226 | 8092.376–19250.885 | 8092.376–19250.885 |
+| V2 optimized | First valid frame | 3 | 10316.448 | 18777.258 | 8267.649–19717.348 | 8267.649–19717.348 |
+| V2 optimized | Warm action to frame | 3 | 49.748 | 112.055 | 47.723–118.978 | 47.723–118.978 |
 
-| Primary arm | p50 | p95 | ECDF | Bootstrap 95% CI |
-| --- | --- | --- | --- | --- |
-| V1 optimized | Not reportable | Not reportable | Empty | Not reportable |
-| V2 optimized | Not measured | Not measured | Empty | Not measured |
+The complete valid warm-action samples were V1 `{7.712, 21.228}` ms and V2
+`{47.723, 49.748, 118.978}` ms. They are not divided into a ratio because the lifecycle gate
+failed.
+
+## Diagnostic percentile table
+
+| Diagnostic arm | Metric | n | p50 ms | p95 ms |
+| --- | --- | ---: | ---: | ---: |
+| V1 Connect | Allocation | 4 | 3307.329 | 3503.450 |
+| V1 Connect | Daemon ready | 4 | 8534.688 | 8689.607 |
+| V1 Connect | Browser ready | 4 | 8665.464 | 8815.270 |
+| V1 Connect | First valid frame | 4 | 8763.634 | 8911.593 |
+| V1 Connect | Warm action to frame | 4 | 14.196 | 34.834 |
+| V2 encrypted tunnel | Allocation | 4 | 2197.909 | 10142.557 |
+| V2 encrypted tunnel | Daemon ready | 4 | 15513.700 | 16280.413 |
+| V2 encrypted tunnel | Browser ready | 4 | 15766.733 | 16534.586 |
+| V2 encrypted tunnel | First valid frame | 4 | 16001.706 | 17294.276 |
+| V2 encrypted tunnel | Warm action to frame | 4 | 13.055 | 25.476 |
+
+The complete valid warm-action samples were V1 Connect
+`{8.503, 8.531, 19.860, 37.476}` ms and V2 encrypted tunnel
+`{9.947, 11.607, 14.504, 27.412}` ms. Diagnostic paths cannot substitute for primary arms.
 
 ## Full, throughput, and ratio table
 
 | Evidence | V1 optimized | V2 optimized | Result |
 | --- | --- | --- | --- |
+| Pilot independent lifecycles | 2/5 valid | 3/5 valid | Rejected |
 | Full independent lifecycles | 0/30 | 0/30 | Not run: pilot gate failed |
 | Throughput concurrency 1 | Not run | Not run | Lifecycle eligibility absent |
 | Throughput concurrency 5 | Not run | Not run | Lifecycle eligibility absent |
@@ -75,59 +100,49 @@ The only retained candidate attempt was invalid, so no latency value can enter a
 
 ## Cleanup
 
-All known run IDs were explicitly enumerated through both `Sandbox.list()` and
-`Sandbox._experimental_list()` after interruption:
+Every one of the 20 final pilot lifecycles terminated its target and runner, detached its target,
+and completed its run-tagged sweep. The final phase sweep enumerated both `Sandbox.list()` and
+`Sandbox._experimental_list()` and observed zero resources before and after cleanup.
 
-| Run ID | Context | Matched before explicit cleanup | Terminated | Failures | Remaining V1 | Remaining V2 |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `run_129080cb614240a9` | Initial detached run | 2 in first recovery sweep | 2 | 0 | 0 | 0 |
-| `run_b2c2b87d306e4958` | Signal-safe run | 0 after interrupt cleanup | 0 | 0 | 0 | 0 |
+| Run ID | Source | Retained attempts | Phase cleanup | Remaining V1 | Remaining V2 |
+| --- | --- | ---: | --- | ---: | ---: |
+| `run_1a5a60b346c24cb6` | Final clean pilot | 20 | Passed | 0 | 0 |
+| `run_25620820b4624db9` | Rejected delta-baseline diagnostic | 2 | Passed | 0 | 0 |
+| `run_e0d1469fef294bf6` | Rejected readiness diagnostic | 5 | Passed | 0 | 0 |
+| `run_b2c2b87d306e4958` | Earlier signal-safe diagnostic | 1 | Passed | 0 | 0 |
+| `run_129080cb614240a9` | Earlier detached-run recovery | Contaminated | Passed | 0 | 0 |
 
-The stale process was interrupted and verified absent before the final two-run cleanup audit. That
-audit again observed zero tagged survivors for both run IDs in both listing APIs.
+All ad hoc path diagnostics also ended with both listing APIs at zero.
 
 ## Cost
 
 Modal billed cost was not synchronously attributable and remains **not reconciled**. The strongest
-available retained resource-time proxy is:
+available final-pilot proxy is **$0.6031404664**. It covers requested target and runner CPU/memory
+resource-seconds with the documented 1.75x narrow-region multiplier; it excludes actual usage above
+requests, control-plane charges, and billing adjustments.
 
-| Evidence | Requested-resource proxy |
-| --- | ---: |
-| Signal-safe V1 primary failure | $0.0826900817 |
-| Contaminated stale diagnostics (not score evidence) | $0.1991340421 |
-| Known retained proxy total | $0.2818241239 |
-
-This is not a bill. It covers requested target and runner CPU/memory resource time with the
-documented 1.75x narrow-region multiplier. It excludes unretained work, image builds, actual usage
-above requests, control-plane charges, and billing adjustments.
+The three post-pilot V2 semantic diagnostics added a separately labeled proxy of $0.0393841309.
+Earlier rejected and contaminated diagnostics are not added to the final-pilot cost.
 
 ## Provenance
 
 - Foundation commit: `33f056505940123877c4116d40df2c0d95deb3a4`
-- Initial harness commit: `aedf44f356a7d42e430999be8d695bb63b79a9e9`
-- Signal-safe harness commit and exact image revision:
-  `db25d89291a298351ce69fe78a7a48c191665b24`
+- Final clean pilot source and exact image revision:
+  `f8d24e63e9cadaf3224da464dd517f98ca020258`
 - Placement artifact: `benchmark-data/modal-v2-placement-capability-2026-07-19.json`
 - Placement artifact SHA-256:
   `d5ee2b31d70e924bdd9b24c55c4361e0adee1234c18246b245d0568b8aa89244`
-- Initial preregistration SHA-256:
-  `0b6614b23a6109c600779b27438b842c7b18b43825637bcbfcf4ad445f6e6c5a`
-- Signal-safe preregistration SHA-256:
-  `ef63a5ecb301441d8be31a22c58df30c174153ef6ded28ac96f4384df40ba0ad`
-- Initial zero-retained checkpoint SHA-256:
-  `fb0c0cbb74bb8618bb05359e99ac213c7cbbc759e91dc9f2cef3b640d4deda1e`
-- Initial recovery cleanup SHA-256:
-  `2d3f2296456bb31cc9090e673c20749889824bdbfe8d29655c96bee57ea1b81a`
-- Contaminated stale checkpoint SHA-256:
-  `79bd105255370c6f917f4d9407b1628e2502b3f7d2ba8884fa8ba1c55a46cf3d`
-- Signal-safe rejected result SHA-256:
-  `84212e4fcacf3c84267fa1ec82bd7b71cd72005c8a1c4d5da6dbb52f3c618c87`
-- Promoted artifact: none; promotion gates correctly refused partial and contaminated evidence
+- Final preregistration SHA-256:
+  `6a37ac8ae351418ca815e4593d23892c26fdb9874225e3dc38a2d12082ddb4da`
+- Final pilot checkpoint SHA-256:
+  `537c886b83152352011b113cd2c9fdaa2d6279dd587f18e9a3fcb740d0a04032`
+- Final rejected raw result SHA-256:
+  `6e471e773f190185cb060a5593115121c3a33d1b14ac1ede7f28af4423fcda02`
+- Final raw result:
+  `benchmark-results/modal-optimized-frontier-2026-07-19/rejected/pilot.json`
+- Promoted artifact: none; promotion gates correctly reject incomplete primary lifecycles
 
-Raw evidence remains ignored under:
-
-- `benchmark-results/modal-optimized-frontier-2026-07-19-aborted-aedf44f/`
-- `benchmark-results/modal-optimized-frontier-2026-07-19-contaminated-concurrent-runs/`
-
-See [the methodology](modal-optimized-frontier-benchmark.md) for the predeclared controls,
+Raw credentialed evidence remains ignored under `benchmark-results/`, including the final run and
+the separately named earlier rejected/contaminated directories. See
+[the methodology](modal-optimized-frontier-benchmark.md) for the predeclared controls,
 asymmetries, lifecycle boundary, and gates.
