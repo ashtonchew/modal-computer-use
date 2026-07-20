@@ -957,7 +957,8 @@ The separately preregistered follow-up compares each generation's fastest suppor
 as a descriptive best-system experiment. It uses independent generation-matched runners and labels
 any V1/V2 quotient only as an `optimized-frontier-path-ratio`; the observed OCI/Azure placement
 asymmetry precludes a backend-causal interpretation. See
-[Modal Optimized-Frontier Benchmark Methodology](modal-optimized-frontier-benchmark.md).
+[Modal Optimized-Frontier Benchmark Methodology](modal-optimized-frontier-benchmark.md) and
+[Modal Optimized-Frontier Result, 2026-07-19](benchmark-results-2026-07-19-modal-optimized-frontier.md).
 
 The corrected 2026-07-19 capability matrix was descriptive-only and stopped before measurement.
 Across `auto`, `aws`, `gcp`, and `oci` requests, all three V2 roles consistently landed on
