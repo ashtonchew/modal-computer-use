@@ -529,6 +529,17 @@ try:
         frame_encoding="binary-envelope",
         timeout=180.0,
     ) as stream:
+        failure_stage = "observation_initial_frame"
+        initial_frame = stream.start(drain_initial_frame=True)
+        if initial_frame is None:
+            raise RuntimeError("observation stream did not emit an initial frame")
+        previous_payload = initial_frame.compose()
+        validate_first_frame(
+            previous_payload or b"",
+            expected_width=1024,
+            expected_height=768,
+            image_format="png",
+        )
         failure_stage = "warmup_action_frame"
         warmup = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
@@ -539,7 +550,10 @@ try:
             change_signal="auto",
             frame_encoding="binary-envelope",
         )
-        warmup.require_valid_frame(require_change=True)
+        previous_payload = warmup.require_valid_frame(
+            previous_payload=previous_payload,
+            require_change=True,
+        )
         failure_stage = "measured_action_frame"
         measured = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
@@ -550,7 +564,10 @@ try:
             change_signal="auto",
             frame_encoding="binary-envelope",
         )
-        measured.require_valid_frame(require_change=True)
+        measured.require_valid_frame(
+            previous_payload=previous_payload,
+            require_change=True,
+        )
     metadata = measured.frame.metadata
     action_result = metadata.get("action_result") or {{}}
     verification = {{
@@ -610,6 +627,8 @@ except Exception as exc:
     ):
         result["error_code"] = error_code
     error_detail = {{
+        "observation patch requires a previous frame": "patch_requires_previous_frame",
+        "observation patch missing dirty rect": "patch_missing_dirty_rect",
         "unexpected observation stream frame": "unexpected_frame",
         "observation binary payload missing": "binary_payload_missing",
         "invalid observation binary envelope": "invalid_binary_envelope",

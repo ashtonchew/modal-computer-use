@@ -609,6 +609,9 @@ def test_direct_runner_uses_version_contract_and_safe_remote_error_types() -> No
     assert 'get("api_version") == "v1"' in source
     assert 'get("daemon_version"), str' in source
     assert "computer.wait_until_ready(timeout=180.0)" in source
+    assert "initial_frame = stream.start(drain_initial_frame=True)" in source
+    assert "previous_payload = initial_frame.compose()" in source
+    assert source.count("previous_payload=previous_payload") == 2
     assert '"status": "valid" if all(verification.values()) else "failed"' in source
     assert modal_direct_runner_error_type({"error_type": "ConnectError"}) == "ConnectError"
     assert modal_direct_runner_error_type({"error_type": "unsafe detail"}) == (
