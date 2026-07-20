@@ -150,9 +150,18 @@ def _pilot(args: argparse.Namespace) -> int:
         "both primary pilot arms passed; full phase is eligible"
         if eligible
         else "; ".join(
-            f"{arm}: {reason}"
-            for arm in PRIMARY_ARMS
-            for reason in provisional["eligibility"]["arms"][arm]["reasons"]
+            [
+                *(
+                    f"{arm}: {gate_reason}"
+                    for arm in PRIMARY_ARMS
+                    for gate_reason in provisional["eligibility"]["arms"][arm]["reasons"]
+                ),
+                *(
+                    gate_reason
+                    for gate_reason in provisional["eligibility"]["comparison"]["reasons"]
+                    if gate_reason != "one or more primary pilot arm gates failed"
+                ),
+            ]
         )
     )
     result = build_result_artifact(

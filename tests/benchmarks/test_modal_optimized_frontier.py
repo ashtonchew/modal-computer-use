@@ -70,6 +70,10 @@ def test_configuration_and_schedules_predeclare_primary_and_diagnostics() -> Non
         OptimizedFrontierConfig(image_revision="a" * 40, pilot_samples_per_arm=4)
     with pytest.raises(ValueError, match="unconstrained"):
         OptimizedFrontierConfig(image_revision="a" * 40, v2_cloud="aws")
+    with pytest.raises(ValueError, match="prewarmed Chromium"):
+        OptimizedFrontierConfig(image_revision="a" * 40, browser_prewarm=False)
+    with pytest.raises(ValueError, match="1024x768"):
+        OptimizedFrontierConfig(image_revision="a" * 40, width=1280)
 
 
 def test_placement_binding_preserves_descriptive_only_foundation() -> None:
@@ -130,7 +134,11 @@ def test_primary_gate_ignores_diagnostic_failure_but_fails_on_primary_cleanup() 
     diagnostic = next(row for row in trials if row["arm"] == ARM_V1_CONNECT)
     diagnostic["status"] = "failed"
 
-    gates = evaluate_gates(trials, preregistration=preregistration)
+    gates = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": _cleanup()}},
+    )
 
     assert gates["primary_pilot_eligible"] is True
     assert gates["advance_to_full"] == list(PRIMARY_ARMS)
@@ -139,7 +147,11 @@ def test_primary_gate_ignores_diagnostic_failure_but_fails_on_primary_cleanup() 
 
     primary = next(row for row in trials if row["arm"] == ARM_V2_I6PN)
     primary["cleanup"]["run_sweep_succeeded"] = False
-    gates = evaluate_gates(trials, preregistration=preregistration)
+    gates = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": _cleanup()}},
+    )
     assert gates["primary_pilot_eligible"] is False
     assert gates["advance_to_full"] == []
 
@@ -152,12 +164,63 @@ def test_gate_rejects_placement_drift_retry_and_partial_verification() -> None:
     rows[1]["retry_count"] = 1
     rows[2]["verification"]["causal_frame"] = False
 
-    gate = evaluate_gates(trials, preregistration=preregistration)["arms"][ARM_V1_TUNNEL]
+    gate = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": _cleanup()}},
+    )["arms"][ARM_V1_TUNNEL]
 
     assert gate["eligible"] is False
     assert "runner placement differed from the predeclared frontier" in gate["reasons"]
     assert "retry policy was violated" in gate["reasons"]
     assert "verification was incomplete" in gate["reasons"]
+
+
+def test_pilot_gate_rejects_phase_cleanup_cost_and_schedule_identity_failures() -> None:
+    preregistration = _preregistration()
+    trials = _trials("pilot", 5, PILOT_ARMS)
+
+    failed_cleanup = _cleanup()
+    failed_cleanup["enumeration"]["after"]["_experimental_list"] = 1
+    gates = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": failed_cleanup}},
+    )
+    assert gates["primary_pilot_eligible"] is False
+    assert gates["pilot_run_cleanup"]["eligible"] is False
+
+    preregistration["configuration"]["max_estimated_cost_usd"] = 0.1
+    gates = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": _cleanup()}},
+    )
+    assert gates["primary_pilot_eligible"] is False
+    assert gates["pilot_cost"]["eligible"] is False
+
+    preregistration = _preregistration()
+    arm_rows = [row for row in trials if row["arm"] == ARM_V1_TUNNEL]
+    arm_rows[1]["sequence"] = arm_rows[0]["sequence"]
+    arm_rows[1]["lifecycle_index"] = arm_rows[0]["lifecycle_index"]
+    gates = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": _cleanup()}},
+    )
+    assert "attempt identities differed from the preregistered lifecycle schedule" in (
+        gates["arms"][ARM_V1_TUNNEL]["reasons"]
+    )
+
+    preregistration = _preregistration()
+    preregistration["environment"]["placement_capability"]["measurement_performed"] = True
+    gates = evaluate_gates(
+        _trials("pilot", 5, PILOT_ARMS),
+        preregistration=preregistration,
+        execution={"pilot": {"run_cleanup": _cleanup()}},
+    )
+    assert gates["primary_pilot_eligible"] is False
+    assert gates["provenance"]["eligible"] is False
 
 
 def test_complete_artifact_emits_only_descriptive_optimized_frontier_ratio() -> None:
@@ -393,6 +456,8 @@ def test_lifecycle_creates_generation_matched_runner_and_cleans_every_resource(
     assert trial["status"] == "valid"
     assert runner_calls[0]["backend"] == backend
     assert runner_calls[0]["i6pn"] is i6pn
+    assert runner_calls[0]["cpu"] == config.runner_cpu
+    assert runner_calls[0]["memory_mib"] == config.runner_memory_mib
     assert runner_calls[0]["runner_label"] == "modal-optimized-frontier"
     assert target_calls[0]["backend"] == backend
     assert cleanup_calls == [("frontier-app", "phase-run-pilot-000", True)]
@@ -431,65 +496,70 @@ def _preregistration() -> dict:
 def _trials(phase: str, count: int, arms: tuple[str, ...]) -> list[dict]:
     config = OptimizedFrontierConfig(image_revision="a" * 40, bootstrap_resamples=100)
     rows: list[dict] = []
-    sequence = 0
-    for index in range(count):
-        for arm in arms:
-            cloud, region = config.expected_placement(arm)
-            rows.append(
-                {
-                    "sequence": sequence,
-                    "phase": phase,
-                    "arm": arm,
-                    "lifecycle_index": index,
-                    "status": "valid",
-                    "metrics": {
-                        "allocation_ms": 120.0 + index + (20 if arm == ARM_V1_TUNNEL else 0),
-                        "daemon_ready_ms": 220.0 + index,
-                        "browser_ready_ms": 320.0 + index,
-                        "first_valid_frame_ms": 420.0 + index,
-                        "warm_action_to_frame_ms": 20.0 + index,
-                    },
-                    "requested": requested_controls(config, arm),
-                    "actual": {
-                        "target_cloud": cloud,
-                        "target_region": region,
-                        "runner_cloud": cloud,
-                        "runner_region": region,
-                        "i6pn_reachability": (
-                            "verified-workspace-private-direct"
-                            if arm == ARM_V2_I6PN
-                            else "not-applicable"
-                        ),
-                    },
-                    "verification": {
-                        key: True
-                        for key in (
-                            "runner_placement",
-                            "healthz",
-                            "readyz",
-                            "version",
-                            "capabilities",
-                            "browser",
-                            "frame",
-                            "action",
-                            "causal_frame",
-                            "changed_frame",
-                            "binary_envelope",
-                        )
-                    },
-                    "retry_count": 0,
-                    "failure": None,
-                    "cleanup": {
-                        "target_terminated": True,
-                        "target_detached": True,
-                        "runner_terminated": True,
-                        "run_sweep_succeeded": True,
-                        "enumeration": _cleanup()["enumeration"],
-                    },
-                    "estimated_billed_cost": {"estimated_usd": 0.01},
-                }
-            )
-            sequence += 1
+    seed = config.order_seed if phase == "pilot" else config.order_seed + 1
+    schedule = build_trial_schedule(phase=phase, samples_per_arm=count, seed=seed)
+    assert {item["arm"] for item in schedule} == set(arms)
+    for item in schedule:
+        arm = item["arm"]
+        index = item["lifecycle_index"]
+        cloud, region = config.expected_placement(arm)
+        rows.append(
+            {
+                "sequence": item["sequence"],
+                "phase": item["phase"],
+                "arm": arm,
+                "lifecycle_index": item["lifecycle_index"],
+                "status": "valid",
+                "metrics": {
+                    "allocation_ms": 120.0 + index + (20 if arm == ARM_V1_TUNNEL else 0),
+                    "daemon_ready_ms": 220.0 + index,
+                    "browser_ready_ms": 320.0 + index,
+                    "first_valid_frame_ms": 420.0 + index,
+                    "warm_action_to_frame_ms": 20.0 + index,
+                },
+                "requested": requested_controls(config, arm),
+                "actual": {
+                    "target_cloud": cloud,
+                    "target_region": region,
+                    "runner_cloud": cloud,
+                    "runner_region": region,
+                    "i6pn_reachability": (
+                        "verified-workspace-private-direct"
+                        if arm == ARM_V2_I6PN
+                        else "not-applicable"
+                    ),
+                },
+                "verification": {
+                    key: True
+                    for key in (
+                        "runner_placement",
+                        "healthz",
+                        "readyz",
+                        "version",
+                        "capabilities",
+                        "browser",
+                        "frame",
+                        "action",
+                        "causal_frame",
+                        "changed_frame",
+                        "binary_envelope",
+                    )
+                },
+                "retry_count": 0,
+                "failure": None,
+                "cleanup": {
+                    "target_terminated": True,
+                    "target_detached": True,
+                    "runner_terminated": True,
+                    "run_sweep_succeeded": True,
+                    "enumeration": _cleanup()["enumeration"],
+                },
+                "estimated_billed_cost": {
+                    "status": "resource-time-proxy",
+                    "estimated_usd": 0.01,
+                },
+            }
+        )
     return rows
 
 

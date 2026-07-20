@@ -470,6 +470,8 @@ def test_candidate_runner_caches_named_image_and_uses_v2_i6pn(monkeypatch) -> No
     assert kwargs["image"] == "named-image"
     assert kwargs["i6pn"] is True
     assert kwargs["cloud"] == "aws"
+    assert kwargs["cpu"] == 1.0
+    assert kwargs["memory"] == 1024
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.wait_until_ready_calls == []
     assert runner.placement == {"cloud": "aws", "region": "us-west-2"}
@@ -494,6 +496,8 @@ def test_optimized_frontier_v1_runner_uses_v1_create_without_i6pn(monkeypatch) -
         image_revision="a" * 40,
         backend="v1",
         i6pn=False,
+        cpu=0.5,
+        memory_mib=512,
         runner_label="modal-optimized-frontier",
     )
 
@@ -501,6 +505,8 @@ def test_optimized_frontier_v1_runner_uses_v1_create_without_i6pn(monkeypatch) -
     assert args == ("sleep", "infinity")
     assert kwargs["image"] == "named-image"
     assert kwargs["cloud"] == "oci"
+    assert kwargs["cpu"] == 0.5
+    assert kwargs["memory"] == 512
     assert "i6pn" not in kwargs
     assert FakeSandbox.experimental_create_calls == []
     assert runner.placement == {

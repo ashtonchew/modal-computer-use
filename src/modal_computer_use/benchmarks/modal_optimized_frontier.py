@@ -99,6 +99,10 @@ class OptimizedFrontierConfig:
         )
         if any(not isinstance(value, str) or not value.strip() for value in strings):
             raise ValueError("placement and browser strings must be explicit")
+        if self.browser != "chromium" or self.browser_prewarm is not True:
+            raise ValueError("optimized frontier requires prewarmed Chromium")
+        if (self.width, self.height) != (1024, 768):
+            raise ValueError("optimized frontier requires the predeclared 1024x768 frame")
         if self.pilot_samples_per_arm != 5:
             raise ValueError("pilot requires exactly 5 samples per arm")
         if self.full_samples_per_primary_arm != 30:
@@ -301,7 +305,8 @@ def build_preregistration(
             "pilot": (
                 "both primary arms require exactly five valid independent lifecycles with "
                 "complete verification, expected placement, colocation, retry-free execution, "
-                "and dual-list cleanup"
+                "preregistered schedule identity, dual-list cleanup, and resource-time cost "
+                "within the preregistered limit"
             ),
             "full": (
                 "both primary pilot gates must pass before 30 independent lifecycles per "
@@ -355,23 +360,89 @@ def preregistration_sha256(payload: dict[str, Any]) -> str:
 
 
 def evaluate_gates(
-    trials: list[dict[str, Any]], *, preregistration: dict[str, Any]
+    trials: list[dict[str, Any]],
+    *,
+    preregistration: dict[str, Any],
+    execution: dict[str, Any],
 ) -> dict[str, Any]:
     config = _mapping(preregistration.get("configuration"), "configuration")
+    pilot_schedule = _list_of_mappings(
+        preregistration.get("pilot_schedule"), "pilot_schedule"
+    )
     arms: dict[str, Any] = {}
     for arm in PILOT_ARMS:
         rows = [
             trial for trial in trials if trial.get("phase") == "pilot" and trial.get("arm") == arm
         ]
-        reasons = _trial_gate_reasons(rows, arm=arm, expected=5, config=config)
+        reasons = _trial_gate_reasons(
+            rows,
+            arm=arm,
+            expected=5,
+            config=config,
+            schedule=pilot_schedule,
+        )
         arms[arm] = {
             "eligible": not reasons,
             "role": "primary" if arm in PRIMARY_ARMS else "diagnostic",
             "reasons": reasons,
         }
-    primary_eligible = all(arms[arm]["eligible"] for arm in PRIMARY_ARMS)
+    pilot_execution = execution.get("pilot")
+    pilot_cleanup = (
+        pilot_execution.get("run_cleanup") if isinstance(pilot_execution, dict) else None
+    )
+    cleanup_eligible = _run_cleanup_passed(pilot_cleanup)
+    pilot_cost = _cost_summary(
+        [trial for trial in trials if trial.get("phase") == "pilot"]
+    )["estimated_usd"]
+    cost_limit = float(config["max_estimated_cost_usd"])
+    cost_complete = all(
+        _cost_proxy_present(trial.get("estimated_billed_cost"))
+        for trial in trials
+        if trial.get("phase") == "pilot"
+    )
+    cost_eligible = cost_complete and pilot_cost <= cost_limit
+    environment = preregistration.get("environment")
+    placement = environment.get("placement_capability") if isinstance(environment, dict) else None
+    provenance_eligible = (
+        isinstance(environment, dict)
+        and environment.get("clean_source_verified") is True
+        and isinstance(placement, dict)
+        and placement.get("classification") == "descriptive-placement-capability-only"
+        and placement.get("measurement_performed") is False
+        and placement.get("backend_causal_comparison_available") is False
+        and _is_hex(placement.get("sha256"), 64)
+    )
+    primary_eligible = (
+        all(arms[arm]["eligible"] for arm in PRIMARY_ARMS)
+        and cleanup_eligible
+        and cost_eligible
+        and provenance_eligible
+    )
+    comparison_reasons: list[str] = []
+    if not all(arms[arm]["eligible"] for arm in PRIMARY_ARMS):
+        comparison_reasons.append("one or more primary pilot arm gates failed")
+    if not cleanup_eligible:
+        comparison_reasons.append("pilot phase dual-list cleanup gate failed")
+    if not cost_eligible:
+        comparison_reasons.append("pilot resource-time cost proxy exceeded its limit")
+    if not provenance_eligible:
+        comparison_reasons.append("pilot preregistration provenance gate failed")
     return {
         "arms": arms,
+        "pilot_run_cleanup": {
+            "eligible": cleanup_eligible,
+            "reason": None if cleanup_eligible else "both post-sweep inventories must be zero",
+        },
+        "pilot_cost": {
+            "eligible": cost_eligible,
+            "complete": cost_complete,
+            "estimated_usd": pilot_cost,
+            "limit_usd": cost_limit,
+        },
+        "provenance": {
+            "eligible": provenance_eligible,
+            "binding": "clean-source reproducible preregistration",
+        },
         "primary_pilot_eligible": primary_eligible,
         "advance_to_full": list(PRIMARY_ARMS) if primary_eligible else [],
         "comparison": {
@@ -380,7 +451,7 @@ def evaluate_gates(
             "classification": "descriptive-best-system",
             "backend_causal": False,
             "ratio_label": "optimized-frontier-path-ratio",
-            "reasons": [] if primary_eligible else ["one or more primary pilot gates failed"],
+            "reasons": comparison_reasons,
         },
     }
 
@@ -434,7 +505,11 @@ def build_result_artifact(
     execution: dict[str, Any],
 ) -> dict[str, Any]:
     config = _mapping(preregistration.get("configuration"), "configuration")
-    gates = evaluate_gates(trials, preregistration=preregistration)
+    gates = evaluate_gates(
+        trials,
+        preregistration=preregistration,
+        execution=execution,
+    )
     summaries = {
         phase: summarize_trials(
             [trial for trial in trials if trial.get("phase") == phase],
@@ -443,10 +518,15 @@ def build_result_artifact(
         )
         for index, phase in enumerate(("pilot", "full"))
     }
-    phase = "full" if _full_lifecycle_eligible(trials, config=config) else "pilot"
+    phase = (
+        "full"
+        if _full_lifecycle_eligible(trials, preregistration=preregistration)
+        else "pilot"
+    )
     comparisons: dict[str, Any] = {}
     if gates["comparison"]["eligible"] and (
-        phase == "pilot" or _full_lifecycle_eligible(trials, config=config)
+        phase == "pilot"
+        or _full_lifecycle_eligible(trials, preregistration=preregistration)
     ):
         ratios: dict[str, float] = {}
         for metric in METRICS:
@@ -635,7 +715,16 @@ def _validate_lifecycle_promotion(
     for arm in PRIMARY_ARMS:
         for phase, expected in (("pilot", 5), ("full", 30)):
             rows = [row for row in trials if row.get("arm") == arm and row.get("phase") == phase]
-            reasons = _trial_gate_reasons(rows, arm=arm, expected=expected, config=config)
+            schedule = _list_of_mappings(
+                preregistration.get(f"{phase}_schedule"), f"{phase}_schedule"
+            )
+            reasons = _trial_gate_reasons(
+                rows,
+                arm=arm,
+                expected=expected,
+                config=config,
+                schedule=schedule,
+            )
             if reasons:
                 raise ValueError(f"{arm} {phase} lifecycle gate failed: {reasons[0]}")
     for phase in ("pilot", "full"):
@@ -644,6 +733,11 @@ def _validate_lifecycle_promotion(
         )
         if not _run_cleanup_passed(cleanup):
             raise ValueError(f"{phase} requires zero survivors from both V1 and V2 listings")
+    if any(not _cost_proxy_present(row.get("estimated_billed_cost")) for row in trials):
+        raise ValueError("lifecycle resource-time cost proxy was incomplete")
+    estimated_cost = _cost_summary(trials)["estimated_usd"]
+    if estimated_cost > float(config["max_estimated_cost_usd"]):
+        raise ValueError("lifecycle resource-time cost proxy exceeded its preregistered limit")
 
 
 def _validate_throughput(payload: dict[str, Any], *, preregistration: dict[str, Any]) -> None:
@@ -651,6 +745,8 @@ def _validate_throughput(payload: dict[str, Any], *, preregistration: dict[str, 
     required = {(arm, count) for arm in PRIMARY_ARMS for count in (1, 5, 20)}
     observed: set[tuple[str, int]] = set()
     config = preregistration["configuration"]
+    if _throughput_cost_ceiling(config) > float(config["max_estimated_cost_usd"]):
+        raise ValueError("throughput public-rate cost ceiling exceeded its preregistered limit")
     for row in rows:
         arm = row.get("arm")
         concurrency = row.get("concurrency")
@@ -682,11 +778,27 @@ def _validate_throughput(payload: dict[str, Any], *, preregistration: dict[str, 
 
 
 def _trial_gate_reasons(
-    rows: list[dict[str, Any]], *, arm: str, expected: int, config: dict[str, Any]
+    rows: list[dict[str, Any]],
+    *,
+    arm: str,
+    expected: int,
+    config: dict[str, Any],
+    schedule: list[dict[str, Any]],
 ) -> list[str]:
     reasons: list[str] = []
     if len(rows) != expected:
         reasons.append(f"expected {expected} attempts, observed {len(rows)}")
+    expected_schedule = {
+        (row.get("sequence"), row.get("phase"), row.get("arm"), row.get("lifecycle_index"))
+        for row in schedule
+        if row.get("arm") == arm
+    }
+    observed_schedule = {
+        (row.get("sequence"), row.get("phase"), row.get("arm"), row.get("lifecycle_index"))
+        for row in rows
+    }
+    if len(observed_schedule) != len(rows) or observed_schedule != expected_schedule:
+        reasons.append("attempt identities differed from the preregistered lifecycle schedule")
     expected_placement = _expected_placement(config, arm)
     for row in rows:
         if row.get("status") != "valid":
@@ -719,6 +831,8 @@ def _trial_gate_reasons(
         requested = row.get("requested")
         if not isinstance(requested, dict) or requested != _requested_controls(config, arm):
             reasons.append("requested controls differed from preregistration")
+        if not _cost_proxy_present(row.get("estimated_billed_cost")):
+            reasons.append("resource-time cost proxy was missing or invalid")
     return list(dict.fromkeys(reasons))
 
 
@@ -760,13 +874,18 @@ def _requested_controls(config: dict[str, Any], arm: str) -> dict[str, Any]:
     }
 
 
-def _full_lifecycle_eligible(trials: list[dict[str, Any]], *, config: dict[str, Any]) -> bool:
+def _full_lifecycle_eligible(
+    trials: list[dict[str, Any]], *, preregistration: dict[str, Any]
+) -> bool:
+    config = _mapping(preregistration.get("configuration"), "configuration")
+    schedule = _list_of_mappings(preregistration.get("full_schedule"), "full_schedule")
     return all(
         not _trial_gate_reasons(
             [row for row in trials if row.get("phase") == "full" and row.get("arm") == arm],
             arm=arm,
             expected=30,
             config=config,
+            schedule=schedule,
         )
         for arm in PRIMARY_ARMS
     )
@@ -795,6 +914,22 @@ def _cost_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
         "excluded": ["actual usage above request", "control plane", "billing adjustments"],
         "modal_billed_cost": {"status": "not_reconciled", "amount_usd": None},
     }
+
+
+def _cost_proxy_present(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("status") == "resource-time-proxy"
+        and _nonnegative_number(value.get("estimated_usd"))
+    )
+
+
+def _throughput_cost_ceiling(config: dict[str, Any]) -> float:
+    total = len(PRIMARY_ARMS) * sum(int(value) for value in config["throughput_concurrency"])
+    rate = float(config["cpu"]) * 0.00003942 + (
+        float(config["memory_mib"]) / 1024
+    ) * 0.00000667
+    return total * float(config["sandbox_timeout_seconds"]) * rate * 1.75
 
 
 def _validated_observation(candidate: dict[str, Any], role: str) -> dict[str, Any]:
@@ -864,28 +999,39 @@ def _cleanup_passed(value: Any) -> bool:
         and value.get("target_detached") is True
         and value.get("runner_terminated") is True
         and value.get("run_sweep_succeeded") is True
+        and dual_list_cleanup_inventory_passed(value.get("enumeration"))
     )
 
 
 def _run_cleanup_passed(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    enumeration = value.get("enumeration")
     return (
         value.get("cleanup_succeeded") is True
         and value.get("remaining_sandboxes") == 0
         and value.get("termination_failures") == 0
-        and isinstance(enumeration, dict)
-        and enumeration.get("apis") == ["Sandbox.list", "Sandbox._experimental_list"]
-        and isinstance(enumeration.get("before"), dict)
-        and isinstance(enumeration.get("after"), dict)
-        and set(enumeration["before"]) == {"list", "_experimental_list"}
-        and set(enumeration["after"]) == {"list", "_experimental_list"}
+        and dual_list_cleanup_inventory_passed(value.get("enumeration"))
+    )
+
+
+def dual_list_cleanup_inventory_passed(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    before = value.get("before")
+    after = value.get("after")
+    expected_keys = {"list", "_experimental_list"}
+    return (
+        value.get("apis") == ["Sandbox.list", "Sandbox._experimental_list"]
+        and isinstance(before, dict)
+        and isinstance(after, dict)
+        and set(before) == expected_keys
+        and set(after) == expected_keys
         and all(
             not isinstance(count, bool) and isinstance(count, int) and count >= 0
-            for inventory in (enumeration["before"], enumeration["after"])
+            for inventory in (before, after)
             for count in inventory.values()
         )
+        and all(count == 0 for count in after.values())
     )
 
 

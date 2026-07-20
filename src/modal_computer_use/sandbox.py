@@ -592,6 +592,8 @@ def create_modal_benchmark_runner(
     cloud: str | None,
     region: str,
     image_revision: str,
+    cpu: float = 1.0,
+    memory_mib: int = 1024,
     tags: dict[str, str] | None = None,
     app_tags: dict[str, str] | None = None,
     backend: ModalBenchmarkBackend = "v2",
@@ -606,6 +608,8 @@ def create_modal_benchmark_runner(
         raise ConfigConflictError("V1 optimized-frontier runners cannot enable i6pn")
     if not runner_label.strip():
         raise ValueError("benchmark runner label must be non-empty")
+    if cpu <= 0 or memory_mib <= 0:
+        raise ValueError("benchmark runner resources must be positive")
     try:
         import modal
     except ImportError as exc:
@@ -621,8 +625,8 @@ def create_modal_benchmark_runner(
     create_kwargs: dict[str, Any] = {
         "app": app,
         "image": image,
-        "cpu": 1.0,
-        "memory": 1024,
+        "cpu": cpu,
+        "memory": memory_mib,
         "region": region,
         "timeout": 3600,
         "idle_timeout": 600,
@@ -1525,15 +1529,15 @@ def create_modal_benchmark_computer(
         "encrypted-tunnel",
         "workspace-private-i6pn",
     }:
-        raise ValueError("candidate transport is unsupported")
+        raise ValueError("benchmark transport is unsupported")
     if cloud is not None and not cloud.strip():
-        raise ValueError("candidate target cloud must be non-empty when provided")
+        raise ValueError("benchmark target cloud must be non-empty when provided")
     if config.image.source != "named":
-        raise ConfigConflictError("candidate targets require an exact named image")
+        raise ConfigConflictError("benchmark targets require an exact named image")
     if config.storage.persist_artifacts:
-        raise ConfigConflictError("candidate targets do not mount artifact storage")
+        raise ConfigConflictError("benchmark targets do not mount artifact storage")
     if config.resources.gpu is not None:
-        raise ConfigConflictError("candidate targets do not support GPUs")
+        raise ConfigConflictError("benchmark targets do not support GPUs")
 
     timing = timing or SessionStartupTiming()
     timing.mark("request_received")
@@ -1550,7 +1554,7 @@ def create_modal_benchmark_computer(
             import modal as modal_runtime
         except ImportError as exc:
             raise ModalNotInstalledError(
-                "Modal candidate execution requires the modal extra"
+                "Modal benchmark execution requires the modal extra"
             ) from exc
     runtime: Any = modal_runtime
     if not config.run_id:
@@ -1584,7 +1588,7 @@ def create_modal_benchmark_computer(
                 browser=browser_kind,
             ),
             "computer-use.modal_backend": backend,
-            "computer-use.candidate_transport": transport,
+            "computer-use.benchmark_transport": transport,
         }
     )
     _validate_sandbox_tags(sandbox_tags)
@@ -1626,7 +1630,7 @@ def create_modal_benchmark_computer(
             timing.mark("container_ready")
         if transport == "connect-endpoint":
             token_info = sandbox.create_connect_token(
-                user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-v2-candidate"}
+                user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-direct-path"}
             )
             base_url, token = _connect_token_parts(token_info)
             timing.mark("connect_endpoint_ready")

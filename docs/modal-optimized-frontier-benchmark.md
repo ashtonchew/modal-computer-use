@@ -89,8 +89,10 @@ source and image identity.
 
 The pilot randomizes five independent lifecycles for each of four arms. Full execution is forbidden
 unless both primary arms have exactly five valid, fully verified, retry-free, cleanup-complete
-samples with exact controls and placement. If eligible, the full schedule randomizes 30 independent
-lifecycle samples for each primary arm only.
+samples with exact controls, placement, and preregistered lifecycle identities; the phase-level
+dual-list sweep must also report zero survivors and the retained resource-time proxy must remain
+within its preregistered limit. If eligible, the full schedule randomizes 30 independent lifecycle
+samples for each primary arm only.
 
 Each lifecycle and each phase cleanup enumerates both `Sandbox.list()` and
 `Sandbox._experimental_list()`. Promotion requires zero tagged survivors and zero termination

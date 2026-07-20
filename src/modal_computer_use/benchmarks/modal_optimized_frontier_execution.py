@@ -33,6 +33,7 @@ from .modal_optimized_frontier import (
     PRIMARY_ARMS,
     OptimizedFrontierConfig,
     arm_definitions,
+    dual_list_cleanup_inventory_passed,
     requested_controls,
 )
 from .modal_v2_candidate_execution import (
@@ -198,6 +199,8 @@ def run_frontier_trial(
             cloud=config.requested_cloud(arm),
             region=config.region,
             image_revision=config.image_revision,
+            cpu=config.runner_cpu,
+            memory_mib=config.runner_memory_mib,
             backend=backend,
             i6pn=arm == ARM_V2_I6PN,
             app_tags={"benchmark": "modal-optimized-frontier"},
@@ -489,22 +492,11 @@ def _estimated_cost(
 def _cleanup_succeeded(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    enumeration = value.get("enumeration")
     return (
         value.get("cleanup_succeeded") is True
         and value.get("remaining_sandboxes") == 0
         and value.get("termination_failures") == 0
-        and isinstance(enumeration, dict)
-        and enumeration.get("apis") == ["Sandbox.list", "Sandbox._experimental_list"]
-        and all(
-            isinstance(inventory, dict)
-            and set(inventory) == {"list", "_experimental_list"}
-            and all(
-                not isinstance(count, bool) and isinstance(count, int) and count >= 0
-                for count in inventory.values()
-            )
-            for inventory in (enumeration.get("before"), enumeration.get("after"))
-        )
+        and dual_list_cleanup_inventory_passed(value.get("enumeration"))
     )
 
 
