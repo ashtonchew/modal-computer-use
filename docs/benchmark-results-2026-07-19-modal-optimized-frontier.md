@@ -67,6 +67,11 @@ The complete valid warm-action samples were V1 `{7.712, 21.228}` ms and V2
 `{47.723, 49.748, 118.978}` ms. They are not divided into a ratio because the lifecycle gate
 failed.
 
+Interpretation note: `Warm action to frame` is the historical result label for correlated
+action-to-first-changed-frame latency. It does not measure application settle, semantic readiness,
+or safety of a next action. The recorded samples, exclusions, and case identifiers are unchanged;
+see the [Alpha observation contract](experimental-visual-change-observation.md#benchmark-semantics).
+
 ## Diagnostic percentile table
 
 | Diagnostic arm | Metric | n | p50 ms | p95 ms |

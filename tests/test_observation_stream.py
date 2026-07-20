@@ -18,7 +18,7 @@ from modal_computer_use.daemon.routes import observations as observation_routes
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
 from modal_computer_use.models import CoordinateSpace, Region, sha256_bytes
-from modal_computer_use.observations import ObservationClient
+from modal_computer_use.observations import ActionObservationResult, ObservationClient
 from modal_computer_use.transports.observation import (
     ObservationFrame,
     ObservationStreamTransport,
@@ -2744,6 +2744,63 @@ def test_observation_client_act_and_observe_returns_causal_result() -> None:
     assert transport.change_payload["change_detection"] == "full"
     assert transport.change_payload["change_signal"] == "auto"
     assert "continue_on_error" not in transport.change_payload
+
+
+def test_observation_client_experimental_visual_change_returns_same_contract() -> None:
+    initial = ObservationFrame(payload=b"initial", metadata={"seq": 1, "kind": "keyframe"})
+    frame = ObservationFrame(
+        payload=b"png",
+        metadata={
+            "id": "2",
+            "action_id": "2",
+            "trigger": "run_actions_observe_change",
+            "causal_frame": True,
+            "change_detected": True,
+            "action_result": {"ok": True},
+        },
+    )
+    transport = _FakeObservationTransport([initial, frame])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+
+    result = client._experimental_act_until_visual_change(
+        actions=[
+            {"type": "click", "x": 12, "y": 34},
+            {"type": "wait", "duration_ms": 25},
+        ],
+        continue_on_error=True,
+    )
+
+    assert result.frame is frame
+    assert result.action_id == "2"
+    assert result.action_result == {"ok": True}
+    assert result.change_detected is True
+    assert transport.change_payload["actions"] == [
+        {"type": "click", "x": 12, "y": 34},
+        {"type": "wait", "duration_ms": 25},
+    ]
+    assert transport.change_payload["continue_on_error"] is True
+    assert transport.change_payload["change_detection"] == "auto_region"
+
+
+def test_observation_client_act_and_observe_delegates_once(monkeypatch) -> None:
+    transport = _FakeObservationTransport([])
+    client = ObservationClient(transport, max_frames=0)  # type: ignore[arg-type]
+    frame = ObservationFrame(payload=b"png", metadata={})
+    expected = ActionObservationResult(frame=frame, elapsed_ms=1.0)
+    calls: list[dict[str, object]] = []
+
+    def experimental(**payload: object) -> ActionObservationResult:
+        calls.append(payload)
+        return expected
+
+    monkeypatch.setattr(client, "_experimental_act_until_visual_change", experimental)
+
+    result = client.act_and_observe(actions=[{"type": "wait", "duration_ms": 10}])
+
+    assert result is expected
+    assert len(calls) == 1
+    assert calls[0]["actions"] == [{"type": "wait", "duration_ms": 10}]
+    assert transport.change_payload is None
 
 
 def test_observation_client_act_and_observe_can_override_frame_encoding() -> None:

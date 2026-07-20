@@ -65,12 +65,15 @@ Measured target metrics are:
   `/readyz`;
 - `browser_ready_ms`: target request start until configured Chromium prewarm is verified;
 - `first_valid_frame_ms`: target request start until a protected PNG decodes as 1024x768;
-- `warm_action_to_frame_ms`: correlated click dispatch until the matching changed causal frame is
-  reconstructed from a binary envelope.
+- `warm_action_to_frame_ms`: correlated click dispatch until the matching first changed causal
+  frame is reconstructed from a binary envelope. This is first visual response, not application
+  settle or semantic readiness.
 
 Every valid sample also verifies `/healthz`, `/v1/version`, `/v1/capabilities`, browser identity,
 prewarm, frame geometry, action success, causal identifiers, visual change, and measured runner
-placement. Verification failure produces a failed sample rather than a latency value.
+placement. Verification failure produces a failed sample rather than a latency value. These bits
+verify the benchmark transport and observable; they do not prove a workload-specific next action is
+safe. See the [Alpha observation contract](experimental-visual-change-observation.md).
 
 ## Placement and provenance
 

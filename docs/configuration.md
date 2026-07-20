@@ -49,7 +49,7 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 | `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | int | `20` | Rolling one-second per-sandbox limit for executable input actions. Set `0` to disable in trusted benchmark or local test harnesses. |
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | int | `5000` | Per-action timeout when the request does not specify one. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | int | `300000` | Upper bound a request can ask for. |
-| `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `0` | Optional sleep inserted after UI-mutating actions before a following action or `screenshot_after`. |
+| `COMPUTER_USE_POST_ACTION_DELAY_MS` | int | `0` | Explicit action/batch timing control inserted after UI-mutating actions before a following action or `screenshot_after`; the Alpha visual-change composition does not bypass it. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | int | `1000` | Idempotency-key cache size. Set to `0` to disable caching instead of retaining an unbounded cache. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | int | `3600` | Idempotency-key cache TTL. |
 | `COMPUTER_USE_MAX_ACTIONS` | int | unset | Optional ceiling on attempted executable desktop actions per run. Failed and timed-out actions count; validation failures, idempotency replays, screenshots, zooms, and cursor-position queries do not. |
@@ -82,5 +82,8 @@ Boolean variables accept `1`, `true`, `yes`, `on` (case-insensitive). Anything e
 
 - [security.md](security.md) for token handling and noVNC exposure rules.
 - [glossary.md](glossary.md) for what `CoordinateSpace`, `artifact`, and `Connect Token` mean.
-- [performance.md](performance.md) for when to tune `COMPUTER_USE_POST_ACTION_DELAY_MS` and the screenshot processing location.
+- [experimental-visual-change-observation.md](experimental-visual-change-observation.md) for the
+  synchronization decision ladder and Alpha limitations.
+- [performance.md](performance.md) for measurement details for
+  `COMPUTER_USE_POST_ACTION_DELAY_MS` and the screenshot processing location.
 - [modal-deployment.md](modal-deployment.md) for setting these on a Modal Sandbox.
