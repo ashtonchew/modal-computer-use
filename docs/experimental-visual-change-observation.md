@@ -1,49 +1,53 @@
-# Post-Action Visual-Change Observation
+# Observe the first visual change after an action
 
-> **Feature phase:** Alpha  
-> **SDK interface:** Experimental  
-> **Intended use:** Evaluation and controlled agent loops  
-> **Compatibility:** Method names, parameters, defaults, and result types may change.
+> **Feature phase:** Alpha<br>
+> **SDK interface:** Experimental<br>
+> **Use for:** Evaluation and controlled agent loops<br>
+> **Compatibility:** Method names, parameters, defaults, and result types can change.
 
-This Alpha feature issues an action batch once and returns the first correlated frame produced after
-the daemon detects a visual difference from the pre-action baseline. It can replace some blind fixed
-sleeps when first visual response is a useful heuristic, but it does not establish that an
-application is settled or ready for the next interaction.
+Use this feature to issue an action batch once and receive the first correlated frame that differs
+from the pre-action baseline. The signal can reduce unnecessary fixed delays when the first visual
+response is useful. It does not tell you when the application is ready for the next interaction.
 
 ```mermaid
 flowchart LR
     A["Service readiness<br/>/readyz"] --> B["Action request"]
-    B --> C["First visual change<br/>Alpha observable"]
+    B --> C["First visual change<br/>Alpha signal"]
     C --> D["Application settle<br/>caller policy"]
     D --> E["Semantic readiness<br/>workload predicate"]
 ```
 
-`/readyz` reports whether the daemon and desktop substrate can accept work. The Alpha composition
-reports only the first detected visual change after an action baseline. Application settle and the
-semantic condition required for a next step remain caller-owned.
+`/readyz` reports that the daemon and desktop can accept work. This feature reports only the first
+visual change after an action. Your application or agent loop must decide when the application is
+settled and ready for the next step.
 
-## What it guarantees
+## Understand the contract
 
-For one call, the implementation and its regression tests guarantee that:
+For each call, the feature:
 
-- the requested action batch is issued once;
-- the observation is correlated to that action request;
-- action success or failure metadata is preserved;
-- the returned frame is reconstructable and declares its geometry and format;
-- metadata distinguishes detected change from unchanged or timeout outcomes;
-- `ActionObservationResult.elapsed_ms` starts immediately before the action-observe send and ends
-  when the correlated frame is received; and
-- explicit `wait` actions and caller-supplied timing remain in the action contract.
+- Issues the requested action batch once.
+- Correlates the observation with the action request.
+- Preserves action success or failure metadata.
+- Returns a reconstructable frame with its geometry and format.
+- Distinguishes a detected change from an unchanged frame or timeout.
+- Measures `ActionObservationResult.elapsed_ms` from immediately before the action-observe request
+  is sent until the correlated frame is received.
+- Preserves explicit `wait` actions and caller-supplied timing.
 
-## What it does not guarantee
+The feature does not confirm:
 
-A detected pixel or frame change is not proof of animation completion, DOM or network idle, target
-enablement, page settle, task success, or safety of the next action. The composition does not
-guarantee visual stability after the first changed frame or universal superiority to fixed and
-explicit waits. A timeout does not mean the action failed, and no detected change does not mean the
-action had no semantic effect.
+- Animation completion.
+- DOM, network, or application idle.
+- Visual stability after the first changed frame.
+- Page settle or target enablement.
+- Task success.
+- Safety of the next action.
+- That this signal is better than an explicit or fixed wait for every workload.
 
-## Experimental SDK example
+A timeout does not mean that the action failed. No detected change does not mean that the action had
+no semantic effect.
+
+## Use the experimental SDK method
 
 ```python
 with computer.observation_stream(fps=0.01) as observations:
@@ -63,89 +67,95 @@ else:
     evaluate_unchanged_frame(result.frame)
 ```
 
-`ObservationClient.act_and_observe(...)` remains as a behavior-preserving compatibility name. It
-is not a promoted stable contract. Neither name suppresses, removes, or shortens explicit `wait`
-actions in the supplied batch.
+Use `_experimental_act_until_visual_change()` for new evaluation code. `act_and_observe()` remains a
+compatibility name with the same behavior. Neither method removes or shortens explicit `wait`
+actions in the batch.
 
-## Interpreting results
+## Interpret the result
 
-| Outcome | Meaning | Caller response |
+| Outcome | Meaning | What to do next |
 | --- | --- | --- |
-| Changed | The correlated frame differs from the pre-action baseline. | Evaluate the application-specific condition before the next dependent action. |
-| Unchanged | No difference was detected under the selected region and policy. | Treat the frame as valid evidence, not proof that the action had no effect. |
-| Timeout | The change deadline was reached and a correlated frame was returned. | Inspect action metadata and the frame; timeout alone is not action failure. |
-| Action failure | `action_result` reports that the batch failed. | Handle the action failure independently of visual-change metadata. |
+| Changed | The correlated frame differs from the pre-action baseline. | Check the application-specific condition before a dependent action. |
+| Unchanged | The selected region and policy detected no difference. | Treat the frame as evidence, not proof that the action had no effect. |
+| Timeout | The change deadline expired and the method returned a correlated frame. | Inspect the action metadata and frame. Do not treat the timeout as action failure. |
+| Action failure | `action_result` reports that the batch failed. | Handle the action failure separately from the visual-change outcome. |
 
-`require_valid_frame(require_change=True)` is a strict validation helper for changed-frame
-measurements. It checks correlation, action success, change metadata, timeout state, geometry,
-format, and frame reconstruction. It does not add a semantic readiness assertion.
+Use `require_valid_frame(require_change=True)` to validate a changed frame for measurement. It
+checks correlation, action success, change and timeout metadata, geometry, format, and frame
+reconstruction. It does not check whether the application is ready.
 
-## Synchronization decision ladder
+## Choose a synchronization method
 
-1. Prefer a workload-specific predicate or application assertion when one is available.
-2. Preserve explicit waits supplied by the model or caller.
-3. Use first-visual-change observation when its heuristic matches the workload and false positives
-   or false negatives are acceptable and measured.
-4. Use immediate screenshots or action-only paths when measuring primitive latency rather than loop
-   correctness.
+Use the narrowest condition that matches the workload:
 
-Synchronization policy belongs to the caller or model loop. Provider adapters normalize and execute
-actions; they do not choose settle policy.
+1. Use an application-specific predicate or assertion when one is available.
+2. Preserve explicit waits requested by the model or caller.
+3. Use first visual change when you have measured its false-positive and false-negative behavior
+   for the workload.
+4. Use an immediate screenshot or action-only path when you are measuring primitive latency rather
+   than loop correctness.
 
-## Known failure modes
+The caller or model loop owns synchronization policy. Provider adapters normalize and execute
+actions. They do not decide when an application is settled.
 
-- Cursor blink, caret, hover, clock, spinner, video, or an unrelated repaint can create a false
-  positive visual change.
-- A semantic state change may produce no detectable pixels in the selected region.
-- The first paint can precede the usable final state.
-- Regional detection can miss an effect outside the observed region.
-- XDamage is a wake-up hint, not semantic proof; captured pixels and hashes remain the change gate.
+## Account for known limitations
+
+- A cursor blink, caret, hover effect, clock, spinner, video, or unrelated repaint can cause a false
+  positive.
+- A semantic state change can occur without detectable pixels in the selected region.
+- The first paint can occur before the application reaches its usable final state.
+- Regional detection can miss an effect outside the selected region.
+- XDamage is a wake-up hint, not semantic proof. Captured pixels and hashes determine whether a
+  change occurred.
 - A timeout can return a valid correlated frame without proving action failure.
-- Desktop-global and keyboard actions generally require broader observation than pointer-local
+- Keyboard and desktop-wide actions usually need a broader observation region than pointer-local
   actions.
 
-## Benchmark semantics
+## Benchmark the signal
 
 `action_to_first_changed_frame_ms` starts immediately before the correlated action-observe request
-is sent and ends when its correlated changed frame is received. It measures first detected visual
-response, not application settle or semantic task completion.
+is sent. It ends when the correlated changed frame is received. The metric measures the first
+detected visual response, not application settle or task completion.
 
-| Measurement | Starts | Ends | What it supports |
+| Measurement | Starts | Ends | Use it to measure |
 | --- | --- | --- | --- |
 | Action-only | Action request | Action acknowledgement | Primitive actuation latency |
 | Immediate action-to-frame | Action request | First requested screenshot received | Screenshot-loop latency without change proof |
-| Action-to-first-changed-frame | Action request | Correlated changed frame received | Latency to first detected visual response |
+| Action-to-first-changed-frame | Action request | Correlated changed frame received | Latency to the first detected visual response |
 | Semantic readiness | Action request | Workload-specific predicate passes | Readiness for a particular next step |
 
-Steady-state model-loop latency additionally includes model, provider, tool, and caller policy time.
-Cross-provider action-only tables do not measure the Alpha composition unless every provider is run
-through the same observation contract. Historical benchmark case IDs and recorded values retain
-their original names for artifact compatibility; interpret their action-to-frame values using the
-definitions above. See [performance.md](performance.md) for methodology, attribution fields, raw
-case identifiers, and historical evidence.
+Steady-state model-loop latency also includes model, provider, tool, and caller-policy time. A
+cross-provider action-only table does not measure this feature unless each provider uses the same
+observation contract.
 
-## Advanced tuning
+Historical benchmark case IDs and values keep their original names for artifact compatibility.
+Interpret their action-to-frame values using the definitions above. See
+[Performance](performance.md) for methodology, attribution fields, case identifiers, and historical
+results.
 
-The stream and observe-change protocol exposes change timeout, polling, signal, region, producer,
-confirmation, fallback, and frame-encoding controls. These are diagnostic and workload-specific
-knobs, not universal recommendations. Defaults and detailed attribution behavior are documented in
-[performance.md](performance.md); configuration-level action timing is documented in
-[configuration.md](configuration.md).
+## Tune the detector
 
-## Alpha promotion criteria
+The stream and observe-change protocol provides controls for timeout, polling, signal, region,
+producer, confirmation, fallback, and frame encoding. Treat these controls as workload-specific
+diagnostics, not universal recommendations.
 
-Promotion requires evidence beyond an Alpha badge:
+See [Performance](performance.md) for defaults and attribution details. See
+[Configuration](configuration.md) for action timing controls.
 
-- stable terminology and return shape across at least two real loop integrations;
-- documented false-positive and false-negative behavior across representative applications;
-- comparisons of fixed wait, immediate screenshot, first change, and application-specific
-  readiness policies;
-- timeout semantics users interpret correctly;
-- no violation of caller-controlled explicit waits;
-- reproducible benchmarks from at least two ingress or caller placements; and
-- a clear decision on whether the interface should return first change, a quiet window, a
-  predicate-confirmed frame, or a composable lower-level result.
+## Promotion criteria
 
-Useful feedback includes: which application predicate followed the first changed frame, what caused
-false signals, whether timeout handling was understood, and which return shape made the caller's
-settle policy simplest.
+Before promoting the feature, collect evidence that shows:
+
+- Stable terminology and return shapes in at least two real agent-loop integrations.
+- False-positive and false-negative behavior across representative applications.
+- Comparisons of fixed waits, immediate screenshots, first visual change, and application-specific
+  readiness policies.
+- Timeout behavior that users interpret correctly.
+- No changes to caller-controlled explicit waits.
+- Reproducible results from at least two ingress or caller placements.
+- Whether the method should return the first change, a quiet window, a predicate-confirmed frame,
+  or a lower-level composable result.
+
+When you provide feedback, include the application predicate used after the first changed frame,
+the cause of any false signal, how timeout was handled, and which return shape made synchronization
+easiest.
