@@ -33,7 +33,7 @@ from modal_computer_use.benchmarks.modal_v2_placement import (
     build_placement_capability_binding,
     serialize_placement_capability,
 )
-from modal_computer_use.sandbox import cleanup_modal_candidate_run
+from modal_computer_use.sandbox import cleanup_modal_benchmark_run
 
 DEFAULT_ROOT = Path("benchmark-results/modal-v2-candidate-2026-07-19")
 
@@ -677,7 +677,7 @@ def _seal_checkpoint_after_cleanup(
 
 def _cleanup_candidate_run(*, app_name: str, run_id: str) -> dict[str, Any]:
     try:
-        return cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+        return cleanup_modal_benchmark_run(app_name=app_name, run_id=run_id)
     except Exception as exc:
         return {
             "matched_sandboxes": None,

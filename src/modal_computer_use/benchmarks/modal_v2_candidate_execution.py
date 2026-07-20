@@ -17,11 +17,11 @@ from ..config import (
 )
 from ..latency import SessionStartupTiming
 from ..sandbox import (
-    ModalCandidateRunner,
-    cleanup_modal_candidate_run,
-    create_modal_candidate_allocation_context,
-    create_modal_candidate_computer,
-    create_modal_candidate_runner,
+    ModalBenchmarkRunner,
+    cleanup_modal_benchmark_run,
+    create_modal_benchmark_allocation_context,
+    create_modal_benchmark_computer,
+    create_modal_benchmark_runner,
 )
 from ..state import new_run_id
 from .modal_v2_candidate import (
@@ -47,13 +47,13 @@ def run_candidate_phase(
     *,
     schedule: list[dict[str, Any]],
     app_name: str = "modal-computer-use-v2-candidate",
-    runner_factory: Any = create_modal_candidate_runner,
+    runner_factory: Any = create_modal_benchmark_runner,
     progress: Any | None = None,
     checkpoint: Any | None = None,
-    cleanup_sweep: Any = cleanup_modal_candidate_run,
+    cleanup_sweep: Any = cleanup_modal_benchmark_run,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     run_id = new_run_id()
-    runner: ModalCandidateRunner | None = None
+    runner: ModalBenchmarkRunner | None = None
     trials: list[dict[str, Any]] = []
     runner_cleanup = False
     run_cleanup: dict[str, Any] | None = None
@@ -78,6 +78,7 @@ def run_candidate_phase(
             image_revision=config.image_revision,
             app_tags={"benchmark": "modal-v2-candidate"},
             tags={"benchmark_run": run_id},
+            runner_label="modal-v2-candidate",
         )
         preflight = _phase_execution(
             config,
@@ -180,7 +181,7 @@ def run_candidate_phase(
 
 def _phase_execution(
     config: ModalV2CandidateConfig,
-    runner: ModalCandidateRunner | None,
+    runner: ModalBenchmarkRunner | None,
     *,
     run_id: str,
     app_name: str,
@@ -257,7 +258,7 @@ def run_candidate_throughput(
     estimated_cost_ceiling = total_allocations * config.sandbox_timeout_seconds * per_second
     if estimated_cost_ceiling > config.max_estimated_cost_usd:
         raise RuntimeError("throughput cost ceiling exceeds the preregistered capacity/cost gate")
-    context = create_modal_candidate_allocation_context(
+    context = create_modal_benchmark_allocation_context(
         app_name=app_name,
         image_revision=config.image_revision,
         run_id=run_id,
@@ -265,6 +266,7 @@ def run_candidate_throughput(
         region=config.region,
         cpu=config.cpu,
         memory_mib=config.memory_mib,
+        benchmark_tag="modal-v2-candidate-throughput",
     )
 
     async def execute() -> list[dict[str, Any]]:
@@ -291,9 +293,9 @@ def run_candidate_throughput(
         rows = asyncio.run(execute())
     except BaseException:
         with suppress(Exception):
-            cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+            cleanup_modal_benchmark_run(app_name=app_name, run_id=run_id)
         raise
-    cleanup = cleanup_modal_candidate_run(app_name=app_name, run_id=run_id)
+    cleanup = cleanup_modal_benchmark_run(app_name=app_name, run_id=run_id)
     return rows, cleanup
 
 
@@ -301,7 +303,7 @@ def run_candidate_trial(
     config: ModalV2CandidateConfig,
     *,
     schedule_item: dict[str, Any],
-    runner: ModalCandidateRunner,
+    runner: ModalBenchmarkRunner,
     app_name: str,
     run_id: str,
     clock: Any = time.perf_counter,
@@ -337,10 +339,10 @@ def run_candidate_trial(
         "runner_region": runner.placement.get("region"),
         "i6pn_reachability": None,
     }
-    verification = _empty_verification()
+    verification = empty_direct_runner_verification()
     try:
         target_config = _target_config(config, arm=arm, run_id=run_id, schedule_item=schedule_item)
-        target = create_modal_candidate_computer(
+        target = create_modal_benchmark_computer(
             config=target_config,
             backend=backend,
             transport=transport,
@@ -352,18 +354,30 @@ def run_candidate_trial(
             timing=timing,
         )
         stages = timing.as_dict()["stages"]
-        metrics["allocation_ms"] = _observed_elapsed(stages, "sandbox_registered")
+        metrics["allocation_ms"] = observed_startup_stage_ms(stages, "sandbox_registered")
         placement = target.runtime_placement()
         actual["target_cloud"] = placement["cloud"]
         actual["target_region"] = placement["region"]
         runner_dispatch_offset_ms = (clock() - started) * 1000.0
         runner_result = runner.execute(
             target,
-            ("python", "-c", modal_candidate_runner_code()),
+            (
+                "python",
+                "-c",
+                modal_direct_runner_code(
+                    result_start=CANDIDATE_RESULT_START,
+                    result_end=CANDIDATE_RESULT_END,
+                    source_prefix="modal-v2-candidate",
+                ),
+            ),
             transport=transport,
             timeout_seconds=config.readiness_timeout_seconds + 120,
         )
-        payload = extract_candidate_runner_result(runner_result.stdout)
+        payload = extract_modal_direct_runner_result(
+            runner_result.stdout,
+            result_start=CANDIDATE_RESULT_START,
+            result_end=CANDIDATE_RESULT_END,
+        )
         if payload.get("status") != "valid":
             raise RuntimeError(str(payload.get("error_type") or "candidate runner failed"))
         runner_stages = payload["stages_ms"]
@@ -429,7 +443,17 @@ def run_candidate_trial(
     }
 
 
-def modal_candidate_runner_code() -> str:
+def modal_direct_runner_code(*, result_start: str, result_end: str, source_prefix: str) -> str:
+    if not source_prefix or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for character in source_prefix
+    ):
+        raise ValueError("direct runner source prefix is invalid")
+    if any(
+        not marker
+        or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for character in marker)
+        for marker in (result_start, result_end)
+    ):
+        raise ValueError("direct runner result marker is invalid")
     return dedent(f"""\
 import json
 import os
@@ -476,7 +500,7 @@ try:
     ) as stream:
         warmup = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
-            source="modal-v2-candidate-warmup",
+            source="{source_prefix}-warmup",
             change_timeout_ms=200,
             poll_strategy="adaptive",
             change_detection="auto_region",
@@ -486,7 +510,7 @@ try:
         warmup.require_valid_frame(require_change=True)
         measured = stream.act_and_observe(
             actions=[CLICK_TOGGLE_ACTION],
-            source="modal-v2-candidate-measured",
+            source="{source_prefix}-measured",
             change_timeout_ms=200,
             poll_strategy="adaptive",
             change_detection="auto_region",
@@ -538,21 +562,23 @@ except Exception as exc:
 finally:
     if computer is not None:
         computer.client.close()
-print("{CANDIDATE_RESULT_START}")
+print("{result_start}")
 print(json.dumps(result, sort_keys=True))
-print("{CANDIDATE_RESULT_END}")
+print("{result_end}")
 """)
 
 
-def extract_candidate_runner_result(stdout: str) -> dict[str, Any]:
-    start = stdout.find(CANDIDATE_RESULT_START)
-    end = stdout.find(CANDIDATE_RESULT_END)
+def extract_modal_direct_runner_result(
+    stdout: str, *, result_start: str, result_end: str
+) -> dict[str, Any]:
+    start = stdout.find(result_start)
+    end = stdout.find(result_end)
     if start < 0 or end < 0 or end <= start:
-        raise ValueError("candidate runner did not emit a bounded result")
-    raw = stdout[start + len(CANDIDATE_RESULT_START) : end].strip()
+        raise ValueError("direct runner did not emit a bounded result")
+    raw = stdout[start + len(result_start) : end].strip()
     payload = json.loads(raw)
     if not isinstance(payload, dict):
-        raise ValueError("candidate runner result must be an object")
+        raise ValueError("direct runner result must be an object")
     return payload
 
 
@@ -611,7 +637,7 @@ def _requested_controls(config: ModalV2CandidateConfig, *, arm: str) -> dict[str
     }
 
 
-def _empty_verification() -> dict[str, bool]:
+def empty_direct_runner_verification() -> dict[str, bool]:
     return {
         key: False
         for key in (
@@ -629,7 +655,7 @@ def _empty_verification() -> dict[str, bool]:
     }
 
 
-def _observed_elapsed(stages: dict[str, Any], name: str) -> float | None:
+def observed_startup_stage_ms(stages: dict[str, Any], name: str) -> float | None:
     stage = stages.get(name)
     if not isinstance(stage, dict) or stage.get("status") != "observed":
         return None

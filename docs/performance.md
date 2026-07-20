@@ -953,6 +953,12 @@ bootstrap confidence intervals, and ECDF-ready rows. Allocation throughput at co
 See [Modal V2 Candidate Benchmark Methodology](modal-v2-candidate-benchmark.md) and
 [Modal V2 Candidate Result, 2026-07-19](benchmark-results-2026-07-19-modal-v2-candidate.md).
 
+The separately preregistered follow-up compares each generation's fastest supported colocated path
+as a descriptive best-system experiment. It uses independent generation-matched runners and labels
+any V1/V2 quotient only as an `optimized-frontier-path-ratio`; the observed OCI/Azure placement
+asymmetry precludes a backend-causal interpretation. See
+[Modal Optimized-Frontier Benchmark Methodology](modal-optimized-frontier-benchmark.md).
+
 The corrected 2026-07-19 capability matrix was descriptive-only and stopped before measurement.
 Across `auto`, `aws`, `gcp`, and `oci` requests, all three V2 roles consistently landed on
 `CLOUD_PROVIDER_AZURE/westus3`; V1 landed on OCI by default and honored each explicit supported

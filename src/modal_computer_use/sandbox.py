@@ -51,8 +51,8 @@ from .transports import HotSessionTransport, ObservationStreamTransport
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
 ModalDaemonEndpointPath = Literal["inherited", "connect", "target-loopback"]
-ModalCandidateBackend = Literal["v1", "v2"]
-ModalCandidateTransport = Literal[
+ModalBenchmarkBackend = Literal["v1", "v2"]
+ModalBenchmarkTransport = Literal[
     "connect-endpoint",
     "encrypted-tunnel",
     "workspace-private-i6pn",
@@ -88,7 +88,7 @@ class ModalDaemonCommandResult:
 
 
 @dataclass
-class ModalCandidateRunner:
+class ModalBenchmarkRunner:
     _sandbox: object
     placement: dict[str, str | None]
 
@@ -97,7 +97,7 @@ class ModalCandidateRunner:
         computer: ComputerSandbox,
         command: Sequence[str],
         *,
-        transport: ModalCandidateTransport,
+        transport: ModalBenchmarkTransport,
         env: dict[str, str] | None = None,
         timeout_seconds: int = 240,
     ) -> ModalSandboxExecResult:
@@ -126,7 +126,7 @@ class ModalCandidateRunner:
 @dataclass(frozen=True)
 class ModalCandidatePlacementProbe:
     run_id: str
-    backend: ModalCandidateBackend
+    backend: ModalBenchmarkBackend
     requested_cloud: str | None
     requested_region: str
     actual_cloud: str | None
@@ -140,7 +140,7 @@ class ModalCandidatePlacementProbe:
 
 
 @dataclass
-class ModalCandidateAllocationContext:
+class ModalBenchmarkAllocationContext:
     app: object
     image: object
     run_id: str
@@ -148,15 +148,18 @@ class ModalCandidateAllocationContext:
     region: str
     cpu: float
     memory_mib: int
+    benchmark_tag: str
 
     def __post_init__(self) -> None:
         if self.cloud is not None and not self.cloud.strip():
-            raise ValueError("candidate throughput cloud must be non-empty when provided")
+            raise ValueError("benchmark throughput cloud must be non-empty when provided")
+        if not self.benchmark_tag.strip():
+            raise ValueError("benchmark throughput tag must be non-empty")
 
     async def run_batch(
         self,
         *,
-        backend: ModalCandidateBackend,
+        backend: ModalBenchmarkBackend,
         concurrency: int,
         timeout_seconds: int = 300,
     ) -> dict[str, Any]:
@@ -179,7 +182,7 @@ class ModalCandidateAllocationContext:
                 "region": self.region,
                 "timeout": timeout_seconds,
                 "tags": {
-                    "computer-use.benchmark": "modal-v2-candidate-throughput",
+                    "computer-use.benchmark": self.benchmark_tag,
                     "computer-use.backend": backend,
                     "computer-use.run_id": f"{self.run_id}-{backend}-{concurrency}-{index}",
                 },
@@ -258,30 +261,37 @@ class ModalCandidateAllocationContext:
         }
 
 
-def cleanup_modal_candidate_run(
+def cleanup_modal_benchmark_run(
     *,
     app_name: str,
     run_id: str,
     modal_runtime: object | None = None,
+    include_inventory: bool = False,
 ) -> dict[str, Any]:
-    """Terminate only candidate Sandboxes carrying the exact benchmark run ID."""
+    """Terminate only benchmark Sandboxes carrying the exact run ID or its children."""
     if not run_id:
-        raise ValueError("candidate cleanup requires an exact run ID")
+        raise ValueError("benchmark cleanup requires an exact run ID")
     if modal_runtime is None:
         try:
             import modal as modal_runtime
         except ImportError as exc:
             raise ModalNotInstalledError(
-                "Modal candidate cleanup requires the modal extra"
+                "Modal benchmark cleanup requires the modal extra"
             ) from exc
     runtime: Any = modal_runtime
     app = runtime.App.lookup(app_name, create_if_missing=False)
+    before, before_inventory = _list_modal_benchmark_sandboxes_with_inventory(
+        runtime, app_id=app.app_id, run_id=run_id
+    )
     matched = []
-    for sandbox in _list_modal_candidate_sandboxes(runtime, app_id=app.app_id):
+    for sandbox in before:
         tags = sandbox.get_tags()
         target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
         runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
-        if runner_run_id == run_id or (
+        if (
+            isinstance(runner_run_id, str)
+            and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
+        ) or (
             isinstance(target_run_id, str)
             and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
         ):
@@ -295,39 +305,86 @@ def cleanup_modal_candidate_run(
             failed += 1
         else:
             terminated += 1
+    after, after_inventory = _list_modal_benchmark_sandboxes_with_inventory(
+        runtime, app_id=app.app_id, run_id=run_id
+    )
     remaining = 0
-    for sandbox in _list_modal_candidate_sandboxes(runtime, app_id=app.app_id):
+    for sandbox in after:
         tags = sandbox.get_tags()
         target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
         runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
-        if runner_run_id == run_id or (
+        if (
+            isinstance(runner_run_id, str)
+            and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
+        ) or (
             isinstance(target_run_id, str)
             and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
         ):
             remaining += 1
-    return {
+    result: dict[str, Any] = {
         "matched_sandboxes": len(matched),
         "terminated_sandboxes": terminated,
         "termination_failures": failed,
         "remaining_sandboxes": remaining,
         "cleanup_succeeded": failed == 0 and remaining == 0,
     }
+    if include_inventory:
+        inventory_complete = all(
+            not isinstance(value, bool) and isinstance(value, int)
+            for inventory in (before_inventory, after_inventory)
+            for value in inventory.values()
+        )
+        result["cleanup_succeeded"] = result["cleanup_succeeded"] and inventory_complete
+        result["enumeration"] = {
+            "before": before_inventory,
+            "after": after_inventory,
+            "apis": ["Sandbox.list", "Sandbox._experimental_list"],
+        }
+    return result
 
 
-def _list_modal_candidate_sandboxes(runtime: Any, *, app_id: str) -> list[Any]:
+def _list_modal_benchmark_sandboxes(runtime: Any, *, app_id: str) -> list[Any]:
+    sandboxes, _ = _list_modal_benchmark_sandboxes_with_inventory(runtime, app_id=app_id)
+    return sandboxes
+
+
+def _list_modal_benchmark_sandboxes_with_inventory(
+    runtime: Any, *, app_id: str, run_id: str | None = None
+) -> tuple[list[Any], dict[str, int | bool]]:
     sandboxes: list[Any] = []
     seen: set[str] = set()
+    inventory: dict[str, int | bool] = {}
     for method_name in ("list", "_experimental_list"):
         method = getattr(runtime.Sandbox, method_name, None)
         if not callable(method):
+            inventory[method_name] = False
             continue
-        for sandbox in method(app_id=app_id):
+        listed = list(method(app_id=app_id))
+        if run_id is not None:
+            listed = [
+                sandbox for sandbox in listed if _modal_benchmark_run_matches(sandbox, run_id)
+            ]
+        inventory[method_name] = len(listed)
+        for sandbox in listed:
             identity = str(getattr(sandbox, "object_id", id(sandbox)))
             if identity in seen:
                 continue
             seen.add(identity)
             sandboxes.append(sandbox)
-    return sandboxes
+    return sandboxes, inventory
+
+
+def _modal_benchmark_run_matches(sandbox: Any, run_id: str) -> bool:
+    tags = sandbox.get_tags()
+    target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
+    runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
+    return (
+        isinstance(runner_run_id, str)
+        and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
+    ) or (
+        isinstance(target_run_id, str)
+        and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
+    )
 
 
 class _TimedModalRuntime:
@@ -446,7 +503,7 @@ def modal_sandbox_exec_once(
     timeout_seconds: int = 300,
     idle_timeout_seconds: int = 60,
     exec_timeout_seconds: int = 240,
-    backend: ModalCandidateBackend = "v1",
+    backend: ModalBenchmarkBackend = "v1",
     cloud: str | None = None,
     i6pn: bool = False,
     image_revision: str | None = None,
@@ -529,7 +586,7 @@ def modal_sandbox_exec_in_place(
     )
 
 
-def create_modal_candidate_runner(
+def create_modal_benchmark_runner(
     *,
     app_name: str,
     cloud: str | None,
@@ -537,13 +594,22 @@ def create_modal_candidate_runner(
     image_revision: str,
     tags: dict[str, str] | None = None,
     app_tags: dict[str, str] | None = None,
-) -> ModalCandidateRunner:
+    backend: ModalBenchmarkBackend = "v2",
+    i6pn: bool = True,
+    runner_label: str,
+) -> ModalBenchmarkRunner:
     if cloud is not None and not cloud.strip():
-        raise ValueError("candidate runner cloud must be non-empty when provided")
+        raise ValueError("benchmark runner cloud must be non-empty when provided")
+    if backend not in {"v1", "v2"}:
+        raise ValueError("benchmark runner backend must be v1 or v2")
+    if backend == "v1" and i6pn:
+        raise ConfigConflictError("V1 optimized-frontier runners cannot enable i6pn")
+    if not runner_label.strip():
+        raise ValueError("benchmark runner label must be non-empty")
     try:
         import modal
     except ImportError as exc:
-        raise ModalNotInstalledError("Modal candidate runner requires the modal extra") from exc
+        raise ModalNotInstalledError("Modal benchmark runner requires the modal extra") from exc
     app = modal.App.lookup(app_name, create_if_missing=True)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
@@ -558,26 +624,28 @@ def create_modal_candidate_runner(
         "cpu": 1.0,
         "memory": 1024,
         "region": region,
-        "i6pn": True,
         "timeout": 3600,
         "idle_timeout": 600,
         "tags": {
-            "computer-use.runner": "modal-v2-candidate",
+            "computer-use.runner": runner_label,
             **(tags or {}),
         },
     }
     if cloud is not None:
         create_kwargs["cloud"] = cloud
-    sandbox = modal.Sandbox._experimental_create("sleep", "infinity", **create_kwargs)
+    creator = modal.Sandbox.create if backend == "v1" else modal.Sandbox._experimental_create
+    if backend == "v2":
+        create_kwargs["i6pn"] = i6pn
+    sandbox = creator("sleep", "infinity", **create_kwargs)
     try:
         placement = _sandbox_runtime_placement(sandbox)
     except Exception:
         _terminate_failed_sandbox(sandbox)
         raise
-    return ModalCandidateRunner(_sandbox=sandbox, placement=placement)
+    return ModalBenchmarkRunner(_sandbox=sandbox, placement=placement)
 
 
-def create_modal_candidate_allocation_context(
+def create_modal_benchmark_allocation_context(
     *,
     app_name: str,
     image_revision: str,
@@ -586,18 +654,19 @@ def create_modal_candidate_allocation_context(
     region: str,
     cpu: float,
     memory_mib: int,
-) -> ModalCandidateAllocationContext:
+    benchmark_tag: str,
+) -> ModalBenchmarkAllocationContext:
     try:
         import modal
     except ImportError as exc:
-        raise ModalNotInstalledError("Modal candidate throughput requires the modal extra") from exc
+        raise ModalNotInstalledError("Modal benchmark throughput requires the modal extra") from exc
     app = modal.App.lookup(app_name, create_if_missing=True)
     image = named_image(
         revision=image_revision,
         profile="browser",
         browser="chromium",
     )
-    return ModalCandidateAllocationContext(
+    return ModalBenchmarkAllocationContext(
         app=app,
         image=image,
         run_id=run_id,
@@ -605,6 +674,7 @@ def create_modal_candidate_allocation_context(
         region=region,
         cpu=cpu,
         memory_mib=memory_mib,
+        benchmark_tag=benchmark_tag,
     )
 
 
@@ -613,7 +683,7 @@ def probe_modal_candidate_placement(
     app_name: str,
     image_revision: str,
     run_id: str,
-    backend: ModalCandidateBackend,
+    backend: ModalBenchmarkBackend,
     cloud: str | None,
     region: str,
     cpu: float,
@@ -683,7 +753,7 @@ def probe_modal_candidate_placement(
             with suppress(Exception):
                 sandbox.terminate(wait=True)
         try:
-            cleanup = cleanup_modal_candidate_run(
+            cleanup = cleanup_modal_benchmark_run(
                 app_name=app_name,
                 run_id=run_id,
                 modal_runtime=modal,
@@ -1422,11 +1492,11 @@ def modal_daemon_endpoint(
     raise ValueError("path must be inherited, connect, or target-loopback")
 
 
-def create_modal_candidate_computer(
+def create_modal_benchmark_computer(
     *,
     config: ComputerConfig,
-    backend: ModalCandidateBackend,
-    transport: ModalCandidateTransport,
+    backend: ModalBenchmarkBackend,
+    transport: ModalBenchmarkTransport,
     cloud: str | None,
     app_name: str = "modal-computer-use",
     image: object | None = None,
@@ -1439,7 +1509,7 @@ def create_modal_candidate_computer(
 ) -> ComputerSandbox:
     """Create one provenance-bound V1/V2 benchmark target.
 
-    This constructor intentionally supports only the candidate benchmark's
+    This constructor intentionally supports only the direct-path benchmark's
     matched feature subset. It keeps the daemon image, resources, application
     bearer, IPv6 bind, readiness probe, and placement arguments identical while
     varying the backend and declared transport arm.
