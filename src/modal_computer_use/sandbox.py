@@ -273,11 +273,12 @@ def cleanup_modal_benchmark_run(
         raise ValueError("benchmark cleanup requires an exact run ID")
     if modal_runtime is None:
         try:
-            import modal as modal_runtime
+            import modal as imported_modal_runtime
         except ImportError as exc:
             raise ModalNotInstalledError(
                 "Modal benchmark cleanup requires the modal extra"
             ) from exc
+        modal_runtime = imported_modal_runtime
     runtime: Any = modal_runtime
     app = runtime.App.lookup(app_name, create_if_missing=False)
     before, before_inventory = _list_modal_benchmark_sandboxes_with_inventory(
@@ -1551,11 +1552,12 @@ def create_modal_benchmark_computer(
     )
     if modal_runtime is None:
         try:
-            import modal as modal_runtime
+            import modal as imported_modal_runtime
         except ImportError as exc:
             raise ModalNotInstalledError(
                 "Modal benchmark execution requires the modal extra"
             ) from exc
+        modal_runtime = imported_modal_runtime
     runtime: Any = modal_runtime
     if not config.run_id:
         config.run_id = new_run_id()
@@ -1717,11 +1719,12 @@ def create_modal_v2_tunnel_computer(
         raise ConfigConflictError("the V2 benchmark path does not mount artifact storage")
     if modal_runtime is None:
         try:
-            import modal as modal_runtime
+            import modal as imported_modal_runtime
         except ImportError as exc:
             raise ModalNotInstalledError(
                 "Modal V2 benchmark execution requires the modal extra"
             ) from exc
+        modal_runtime = imported_modal_runtime
     runtime: Any = modal_runtime
     if not config.run_id:
         config.run_id = new_run_id()

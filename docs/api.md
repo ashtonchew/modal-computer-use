@@ -33,6 +33,27 @@ For Modal-created sandboxes, noVNC tunnel URLs are owned by Modal orchestration;
 `ComputerSandbox.debug_urls()` rather than the daemon-only `computer.debug.urls()` helper when you
 need to know whether a Modal noVNC URL exists.
 
+## Experimental observations
+
+Post-action first-visual-change observation is an Alpha feature exposed through an Experimental
+Python SDK interface:
+
+```python
+with computer.observation_stream(fps=0.01) as observations:
+    result = observations._experimental_act_until_visual_change(
+        actions=[{"type": "click", "x": 100, "y": 100}],
+    )
+```
+
+The method issues the batch once and returns a correlated frame after detected change or timeout.
+It does not establish semantic application readiness, visual stability, or safety of the next
+action. `ObservationClient.act_and_observe(...)` remains a behavior-preserving compatibility name,
+not a promoted stable contract. Parameters, result interpretation, failure modes, and maturity are
+owned by the [Alpha visual-change observation guide](experimental-visual-change-observation.md).
+
+Provider adapters remain translation layers over stable action primitives. They do not own
+model-loop synchronization or application settle policy.
+
 ## Observability
 
 Structured JSON logs are enabled by default and redact secret-bearing fields. Optional
@@ -256,9 +277,10 @@ metadata only and does not affect Modal placement. Use
 markdown table for benchmark notes and PR descriptions.
 Use `computer-use benchmark modal-colocated-client --modal-region <region>` when you need to test
 whether running the benchmark client from a same-region Modal runner lowers the target sandbox's
-transport floor. Pass `--surface daemon-observation-stream` as well when you need the causal
-action-to-frame comparison for the observation stream; that surface also requires a browser-capable
-target such as `--browser chromium`.
+transport floor. Pass `--surface daemon-observation-stream` as well when you need an
+action-to-first-changed-frame comparison for the observation stream; that surface also requires a
+browser-capable target such as `--browser chromium`. It is not a semantic-readiness measurement;
+see the [Alpha guide](experimental-visual-change-observation.md).
 Application code can use `run_modal_daemon_command(computer, command, path=...)` for the same
 runner pattern. `path="inherited"` passes the target client's current daemon URL/token into a
 same-region runner, `path="connect"` creates a fresh Modal Connect Token for that runner, and

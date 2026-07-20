@@ -72,7 +72,9 @@ Each primary sample is one independent target lifecycle:
   Chromium window;
 - `first_valid_frame_ms`: target request start until a protected PNG decodes as 1024x768;
 - `warm_action_to_frame_ms`: immediately before a correlated click on a persistent observation
-  session until a matching changed causal frame arrives in one binary envelope.
+  session until a matching first changed causal frame arrives in one binary envelope. This measures
+  first visual response, not application settle or semantic readiness; see the
+  [Alpha observation contract](experimental-visual-change-observation.md).
 
 The runner also verifies `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, browser identity,
 browser prewarm, frame geometry and format, action success, matching causal identifiers, visual

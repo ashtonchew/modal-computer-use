@@ -37,9 +37,10 @@ POST /v1/screenshots/full/raw
 POST /v1/actions/run/raw-screenshot
 ```
 
-The fused action route is the canonical model-loop path because it executes the requested actions
-and returns the post-action screenshot in one HTTP request. That avoids the extra network round
-trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`.
+The fused action route measures an immediate action-to-frame surface: it executes the requested
+actions and returns the post-action screenshot in one HTTP request. That avoids the extra network
+round trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`, but it does not
+define a canonical model loop or prove application readiness.
 
 For tighter interactive loops, use the hot-session WebSocket:
 
@@ -63,6 +64,21 @@ For continuous observation, use the observation stream instead of polling screen
 ```text
 GET /v1/observations/stream
 ```
+
+Keep these measured surfaces distinct:
+
+| Measurement | Timer starts | Timer ends | Supports |
+| --- | --- | --- | --- |
+| Action-only | Action request | Action acknowledgement | Primitive actuation latency |
+| Immediate action-to-frame | Action request | Requested screenshot received | Screenshot-loop latency without change proof |
+| Action-to-first-changed-frame | Immediately before correlated send | Correlated changed frame received | First detected visual response |
+| Semantic readiness | Action request | Workload predicate passes | Readiness for one particular next step |
+
+The Alpha observation composition verifies matching request/action identifiers, action metadata,
+`causal_frame`, change/timeout bits, reconstructable pixels, geometry, and format. Those verification
+bits do not assert animation completion, settle, or application readiness. Cross-provider
+action-only tables remain valid primitive evidence but are not observation-inclusive comparisons.
+See the [authoritative Alpha guide](experimental-visual-change-observation.md).
 
 The observation stream is a passive, server-pushed WebSocket. The daemon protocol supports the raw
 `json-binary` shape, which sends one JSON metadata frame followed by one binary image frame for
@@ -139,7 +155,7 @@ The operation defaults to immediate capture after the action batch. If the targe
 a paint boundary before the screenshot, pass an explicit `capture_delay_ms` or include an explicit
 `wait` action in the batch. The SDK does not add an implicit post-action delay.
 
-When correctness depends on observing the next visual change rather than taking the first possible
+To evaluate the Alpha first-visual-change heuristic rather than taking the first possible
 post-action screenshot, use `run_actions_observe_change()`:
 
 ```python
@@ -161,8 +177,9 @@ inside the daemon until the stream's source screenshot hash changes or the timeo
 emits exactly one stream frame, preserving the same patch/keyframe/unchanged semantics as the rest
 of the observation stream. Frame metadata includes `change_detected`, `change_attempts`,
 `change_wait_ms`, and `change_timeout_reached` so callers can distinguish a real painted change
-from a no-op or timeout. Use this for paint-aware GUI loops instead of guessing a fixed post-action
-delay.
+from an unchanged or timeout outcome. A detected change is not application settle or semantic
+readiness. Use the [Alpha guide](experimental-visual-change-observation.md) to choose between an
+application predicate, explicit wait, first-change heuristic, and immediate screenshot.
 
 The change detector supports two optional optimizations:
 
@@ -181,19 +198,21 @@ The change detector supports two optional optimizations:
   action, then resets it after a detected event. That keeps stale damage from a prior capture from
   satisfying the next action-observe turn.
 
-`ObservationClient.act_and_observe()` uses the same route with `change_detection="auto"` by
-default. The SDK resolves that policy from the last non-wait action: pointer-local actions such as
-clicks, moves, and drags use `auto_region`, and explicit `change_detection_region` also opts into
-region detection. Keyboard-only and global actions stay on full-frame detection unless the caller
-opts into a region.
+`ObservationClient._experimental_act_until_visual_change()` is the preferred Experimental SDK name
+for the same route. `act_and_observe()` remains a behavior-preserving compatibility name. Both use
+`change_detection="auto"` by default. The SDK resolves that policy from the last non-wait action:
+pointer-local actions such as clicks, moves, and drags use `auto_region`, and explicit
+`change_detection_region` also opts into region detection. Keyboard-only and global actions stay on
+full-frame detection unless the caller opts into a region.
 
-`act_and_observe()` starts its warm latency timer immediately before the single correlated
+The Experimental method starts its warm latency timer immediately before the single correlated
 action-observe message and stops it after the correlated frame arrives. The returned
-`ActionObservationResult.elapsed_ms` is this action-to-frame boundary. For a visual-mutation
+`ActionObservationResult.elapsed_ms` is this action-to-first-correlated-frame boundary. For a visual-mutation
 measurement, call `require_valid_frame(require_change=True)`. It requires matching request and
 action IDs, a successful action, `causal_frame=true`, `change_detected=true`, no change timeout,
 and a reconstructable image with declared geometry and format. A causal unchanged or timeout frame
-remains valid protocol output, but it does not count as a changed-frame latency success.
+remains valid protocol output, but it does not count as a changed-frame latency success. None of
+these checks establishes semantic application readiness.
 
 Observe-change frames include `change_stage_timing_ms` for attribution. It records daemon-side
 signal preparation, region baseline capture, action batch wall time, explicit capture delay, signal
@@ -250,10 +269,10 @@ dirty-producer regions: when combined with `full_frame_fallback=false`, a produc
 tile-fingerprint unchanged frame without the regional confirmation capture and records
 `frame_poll_skipped_reason="dirty_region_confirmation_disabled"`. The default remains
 `dirty_region_confirmation="auto"`.
-The raw daemon route default remains conservative, while SDK `act_and_observe()` resolves pointer
-and explicit-region auto-region requests to `full_frame_fallback=false` unless the caller passes an
-explicit override. The raw daemon route keeps the conservative `change_region_radius=192` default;
-SDK auto-region requests use `change_region_radius=64` unless the caller passes an explicit radius.
+The raw daemon route and Experimental SDK default remain conservative: pointer and explicit-region
+auto-region requests preserve `full_frame_fallback=true` unless the caller passes an explicit
+override. The raw daemon route keeps the conservative `change_region_radius=192` default; SDK
+auto-region requests use `change_region_radius=64` unless the caller passes an explicit radius.
 Confirmation capture timing is split into ready, input-lock wait, backend operation, total capture,
 and native tile-diff timings so live tails can distinguish scheduler/lock delay from backend
 capture work. Benchmark summaries also expose
@@ -394,13 +413,14 @@ frames include `kind="patch"`, `dirty_rect`, `dirty_ratio`, `previous_seq`, and 
 Clients should apply patches only when their previous frame sequence matches; otherwise request or
 wait for a keyframe.
 
-For one-shot turns that need a paint-aware wait but do not maintain an observation stream, use
+For one-shot turns evaluating first-visual-change without maintaining an observation stream, use
 `actions.run_and_observe_change_screenshot_bytes(...)` or
 `POST /v1/actions/run/observe-change/raw-screenshot`. With `change_signal="auto"`, the daemon uses
 XDamage as the paint signal when available, then captures one final binary screenshot. If XDamage is
 unavailable, or if callers set `change_signal="poll"`, the route falls back to source-hash polling.
 This route is intentionally a one-shot binary response, not a replacement for stream patch/delta
-state.
+state. It has the same Alpha semantic limitation: the first detected change is not settle or
+application readiness.
 
 For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
 screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
@@ -779,8 +799,9 @@ from the external caller, then creates an ephemeral Modal runner sandbox in the 
 the same surfaces against the target daemon URL. Treat it as an architecture experiment: it measures
 whether co-locating the caller/model loop is likely to help before adding any hosted control-plane
 shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor attribution, and add
-`daemon-observation-stream` when the question is the causal action-to-frame workload an agent loop
-actually experiences.
+`daemon-observation-stream` when the question is action-to-first-changed-frame latency under the
+Alpha observation contract. This is one measured part of an agent loop, not semantic readiness or
+end-to-end loop latency.
 Observation-stream runs need a browser-capable target image, so pass `--browser chromium` or
 `--browser firefox`; the CLI rejects that surface on the standard image because its browser setup
 would fail before measuring the workload.
@@ -827,15 +848,18 @@ A broker should stay off this hot path. Use a broker for session lifecycle, plac
 cleanup; have it return direct daemon/runner connection metadata. Use `examples/modal_session_broker.py`
 for the ASGI control-plane shape.
 
-When `daemon-observation-stream` is selected, the comparison also reports the preferred causal
-observation case as `causal_action_to_frame_p50_ms`. New artifacts prefer
+When `daemon-observation-stream` is selected, the comparison also reports the selected causal
+observation case as `causal_action_to_frame_p50_ms`. This historical artifact key measures first
+detected visual response and is not a readiness metric. New artifacts prefer
 `observation_action_click_act_and_observe_sdk_default_production`, which measures the SDK
-`ObservationClient.act_and_observe()` default policy. The SDK resolves `change_detection="auto"` to
+Experimental visual-change policy through its compatibility name. The SDK resolves
+`change_detection="auto"` to
 `auto_region` only when the last non-wait action has pointer coordinates or the caller provides an
 explicit change-detection region; keyboard-only or global actions stay on full-frame detection. SDK
-auto-region requests default to a 96 px region radius while preserving caller overrides. That
-metric is the better next-step proof than transport floor alone because it includes action
-submission, daemon execution, change detection, and frame receipt. The causal-stage diagnosis also
+auto-region requests default to a 64 px region radius while preserving caller overrides. The metric
+includes action submission, daemon execution, change detection, and frame receipt, so it provides
+observation-inclusive evidence that is distinct from action-only provider comparisons. The
+causal-stage diagnosis also
 forwards sample-stability metadata and dirty capture region width, height, area, and source
 summaries when the selected case emits them, so before/after runs can separate capture-area changes
 from scheduler or backend capture noise.
@@ -866,9 +890,9 @@ A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 | Fastest 0B transport floor p50 | 31.5ms | 31.1ms | 0.99x |
 | Causal action-to-frame p50 | 82.8ms | 52.5ms | 0.63x |
 
-That run shows the co-located runner improvement on the actual agent-like action-observe path even
-when the synthetic 0B transport floor is flat. Treat this as directional until repeated 30x runs
-confirm tail behavior.
+That run shows a co-located runner improvement for action-to-first-changed-frame latency even when
+the synthetic 0B transport floor is flat. It does not show semantic readiness or task completion;
+treat it as directional until repeated 30x runs confirm tail behavior.
 
 A June 2, 2026 10x browser-target runner-path matrix in `us-west` measured:
 
@@ -1315,7 +1339,9 @@ or use, so use Volumes or external storage for durable artifacts. See `examples/
 requested action and return immediately; observation-loop settle policy belongs in the caller,
 example, or benchmark profile. Set a nonzero delay only for screenshot-driven agent loops that need
 a short settle period before the next screenshot, or use explicit `wait` actions when the caller
-knows the condition it is waiting for.
+knows the condition it is waiting for. This is an explicit action/batch timing control; the Alpha
+first-visual-change composition does not remove, shorten, or bypass it. See the
+[synchronization decision ladder](experimental-visual-change-observation.md#synchronization-decision-ladder).
 
 ## When in doubt
 

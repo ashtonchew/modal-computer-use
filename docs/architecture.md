@@ -43,6 +43,21 @@ Those controllers use these CLI tools:
 - `ffmpeg` for screen recording.
 - `xclip` and `xsel` for clipboard read and write.
 
+The observation transport and action execution remain stable primitives. The Alpha
+post-action visual-change feature composes them without creating another runtime layer:
+
+```text
+stable action primitive + stable observation transport
+                    ↓
+experimental first-visual-change composition
+                    ↓
+caller-owned application/model policy
+```
+
+The composition reports a correlated first visual change only. Semantic application readiness,
+settle policy, and provider model loops stay outside core. See the
+[Alpha guide](experimental-visual-change-observation.md).
+
 ## Local mock backend
 
 When `COMPUTER_USE_BACKEND=mock` is set, the daemon answers every action with a deterministic stub response. This lets tests and CI exercise the same routes and SDK surface without an X server. See [local-development.md](local-development.md).

@@ -14,7 +14,7 @@ SDK_AUTO_REGION_RADIUS = 64
 
 @dataclass(frozen=True)
 class ActionObservationResult:
-    """Result for one causal action plus observation stream command."""
+    """Alpha result for one causal action plus first-visual-change observation."""
 
     frame: ObservationFrame
     elapsed_ms: float | None = None
@@ -190,7 +190,7 @@ class ObservationClient:
     def run_actions_observe_change(self, **payload: Any) -> None:
         self.transport.run_actions_observe_change(payload)
 
-    def act_and_observe(
+    def _experimental_act_until_visual_change(
         self,
         *,
         actions: list[Mapping[str, Any]],
@@ -210,6 +210,12 @@ class ObservationClient:
         change_region_radius: int | None = None,
         continue_on_error: bool = False,
     ) -> ActionObservationResult:
+        """Issue one action batch and observe its first detected visual change.
+
+        This experimental SDK interface exposes an Alpha composition. A changed
+        frame is correlated to the action request, but it does not establish
+        application readiness, visual stability, or safety of the next action.
+        """
         self.start(drain_initial_frame=True)
         action_payloads = [dict(action) for action in actions]
         resolved_change_detection = _resolve_action_change_detection(
@@ -255,6 +261,51 @@ class ObservationClient:
         return ActionObservationResult(
             frame=frame,
             elapsed_ms=(perf_counter() - action_sent) * 1000.0,
+        )
+
+    def act_and_observe(
+        self,
+        *,
+        actions: list[Mapping[str, Any]],
+        source: str = "sdk",
+        capture_delay_ms: int = 0,
+        change_timeout_ms: int = 100,
+        poll_interval_ms: int = 8,
+        poll_strategy: Literal["fixed", "adaptive"] = "adaptive",
+        change_detection: Literal["auto", "full", "auto_region"] = "auto",
+        change_signal: Literal["poll", "xdamage", "auto"] = "auto",
+        dirty_frame_producer: Literal["auto", "off"] = "auto",
+        dirty_frame_producer_wait_ms: int | None = None,
+        dirty_region_confirmation: Literal["auto", "off"] = "auto",
+        full_frame_fallback: bool | None = None,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+        change_detection_region: Mapping[str, Any] | None = None,
+        change_region_radius: int | None = None,
+        continue_on_error: bool = False,
+    ) -> ActionObservationResult:
+        """Compatibility name for the Alpha visual-change observation composition.
+
+        Prefer :meth:`_experimental_act_until_visual_change`. This wrapper keeps
+        existing behavior without promoting the old name to a stable contract.
+        Neither name guarantees semantic application readiness.
+        """
+        return self._experimental_act_until_visual_change(
+            actions=actions,
+            source=source,
+            capture_delay_ms=capture_delay_ms,
+            change_timeout_ms=change_timeout_ms,
+            poll_interval_ms=poll_interval_ms,
+            poll_strategy=poll_strategy,
+            change_detection=change_detection,
+            change_signal=change_signal,
+            dirty_frame_producer=dirty_frame_producer,
+            dirty_frame_producer_wait_ms=dirty_frame_producer_wait_ms,
+            dirty_region_confirmation=dirty_region_confirmation,
+            full_frame_fallback=full_frame_fallback,
+            frame_encoding=frame_encoding,
+            change_detection_region=change_detection_region,
+            change_region_radius=change_region_radius,
+            continue_on_error=continue_on_error,
         )
 
     def configure(self, **payload: Any) -> None:
