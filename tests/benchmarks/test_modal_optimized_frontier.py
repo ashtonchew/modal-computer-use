@@ -33,6 +33,8 @@ from modal_computer_use.benchmarks.modal_optimized_frontier import (
 from modal_computer_use.benchmarks.modal_optimized_frontier_execution import (
     FRONTIER_RESULT_END,
     FRONTIER_RESULT_START,
+    BenchmarkTerminationSignal,
+    raise_benchmark_termination_signal,
     run_frontier_trial,
 )
 from modal_computer_use.benchmarks.modal_v2_placement import (
@@ -276,6 +278,11 @@ def test_rejected_artifacts_stay_under_ignored_results() -> None:
     )
     with pytest.raises(ValueError, match="under benchmark-results"):
         classified_raw_artifact_path("pilot.json", status="rejected")
+
+
+def test_termination_signal_uses_interrupt_cleanup_path() -> None:
+    with pytest.raises(BenchmarkTerminationSignal):
+        raise_benchmark_termination_signal(15, None)
 
 
 @pytest.mark.parametrize(

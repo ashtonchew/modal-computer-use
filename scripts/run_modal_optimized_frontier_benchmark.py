@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -26,6 +27,7 @@ from modal_computer_use.benchmarks.modal_optimized_frontier import (
     validate_result_artifact,
 )
 from modal_computer_use.benchmarks.modal_optimized_frontier_execution import (
+    raise_benchmark_termination_signal,
     run_frontier_phase,
     run_frontier_throughput,
 )
@@ -59,6 +61,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "preregister":
         return _preregister(args)
+    signal.signal(signal.SIGTERM, raise_benchmark_termination_signal)
     if args.command == "pilot":
         return _pilot(args)
     return _full(args)

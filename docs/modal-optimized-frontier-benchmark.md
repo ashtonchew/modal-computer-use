@@ -96,6 +96,8 @@ Each lifecycle and each phase cleanup enumerates both `Sandbox.list()` and
 `Sandbox._experimental_list()`. Promotion requires zero tagged survivors and zero termination
 failures. Interrupted and failed executions retain checkpoints and sanitized failure metadata under
 ignored `benchmark-results/`; they cannot be promoted.
+The CLI converts process termination signals into the same interrupt path so an externally stopped
+lifecycle still runs cleanup, seals the checkpoint, and writes rejected evidence.
 
 After the full lifecycle gate passes, a separately labeled minimal-container allocation throughput
 diagnostic runs at concurrency 1, 5, and 20 for each primary generation and its predeclared

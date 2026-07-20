@@ -41,6 +41,14 @@ FRONTIER_RESULT_START = "__MODAL_OPTIMIZED_FRONTIER_RESULT_START__"
 FRONTIER_RESULT_END = "__MODAL_OPTIMIZED_FRONTIER_RESULT_END__"
 
 
+class BenchmarkTerminationSignal(KeyboardInterrupt):
+    """Turn process termination into the benchmark's cleanup/checkpoint path."""
+
+
+def raise_benchmark_termination_signal(_signum: int, _frame: Any) -> None:
+    raise BenchmarkTerminationSignal
+
+
 def run_frontier_phase(
     config: OptimizedFrontierConfig,
     *,
