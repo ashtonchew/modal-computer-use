@@ -19,6 +19,8 @@ KEY_ALIASES: dict[str, str] = {
     "return": "Return",
     "esc": "Escape",
     "escape": "Escape",
+    "home": "Home",
+    "end": "End",
     "left": "Left",
     "right": "Right",
     "up": "Up",
@@ -31,6 +33,14 @@ KEY_ALIASES: dict[str, str] = {
     "space": "space",
     "super": "super",
     "tab": "Tab",
+    "arrow_down": "Down",
+    "arrowdown": "Down",
+    "arrow_left": "Left",
+    "arrowleft": "Left",
+    "arrow_right": "Right",
+    "arrowright": "Right",
+    "arrow_up": "Up",
+    "arrowup": "Up",
 }
 
 

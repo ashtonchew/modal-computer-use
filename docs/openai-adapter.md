@@ -2,9 +2,40 @@
 
 `OpenAIAdapter` translates OpenAI-style computer-use action JSON into the core [action schema](glossary.md#action-schema). It does not call the OpenAI API.
 
+## Current OpenAI integration
+
+New integrations should use the GA Responses API computer tool:
+
+```python
+response = client.responses.create(
+    model="gpt-5.6",
+    tools=[{"type": "computer"}],
+    input="Complete the task. Use the computer tool for UI interaction.",
+)
+```
+
+For every returned `computer_call`, execute every item in `actions[]` in order, capture one updated
+screenshot, return a `computer_call_output`, and continue with `previous_response_id`. Stop when the
+response has no `computer_call`, and enforce an application-level turn/action/time budget. The
+runnable implementation is [examples/03_openai_computer_loop.py](../examples/03_openai_computer_loop.py).
+
+The legacy `computer-use-preview` model, `computer_use_preview` tool, one-action response shape,
+display fields, and required `truncation="auto"` are not used by the current cookbook.
+
 ## Supported actions
 
 `click`, `double_click`, `scroll`, `type`, `keypress`, `drag`, `move`, `wait`, `screenshot`.
+
+The adapter accepts current provider fields:
+
+- `keys` carries click, double-click, drag, move, and scroll modifiers.
+- `keypress.keys` is executed sequentially, not as a simultaneous hotkey.
+- drag paths accept both `[x, y]` pairs and `{x, y}` objects.
+- `wheel`, `back`, and `forward` buttons map to native X11 buttons.
+- pixel-like scroll deltas are converted to bounded wheel clicks and both axes are preserved.
+
+`normalize()` represents exactly one native action. Provider actions that expand to multiple native
+actions, such as a multi-key keypress or two-axis scroll, must use `apply_many()`.
 
 Unknown actions raise `UnsupportedActionError` by default. Pass `allow_unknown=True` only for an
 intentional compatibility mode; unknown payloads become a zero-duration native `wait` action with
@@ -61,3 +92,14 @@ adapter = OpenAIAdapter(computer, coordinate_space=space)
 
 The `before_action` hook, when provided, sees the normalized native action after this transform
 and can deny execution before the action is sent to the daemon.
+
+## Safety boundary
+
+Run the desktop in an isolated least-privilege sandbox. Treat screenshots, page content, PDFs,
+emails, chats, and tool outputs as untrusted input; only direct user instructions grant permission.
+Use domain and action allowlists, stop on suspected prompt injection or phishing, and confirm at the
+point of risk before destructive, authenticated, financial, external-communication, permission, or
+sensitive-data actions. Typing sensitive data counts as transmission. Keep turn/action/time budgets,
+fail closed on unknown actions, and redact screenshots, typed text, tokens, and URLs from logs.
+
+Canonical source: [OpenAI Computer use](https://developers.openai.com/api/docs/guides/tools-computer-use).

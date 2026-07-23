@@ -47,7 +47,7 @@ class AnthropicAdapter:
         self,
         computer: object,
         *,
-        tool_version: str = "computer_20241022",
+        tool_version: str = "computer_20251124",
         beta_header: str | None = None,
         enable_zoom: bool | None = None,
         before_action: PolicyHook | None = None,
@@ -57,7 +57,7 @@ class AnthropicAdapter:
         self.computer = computer
         self.version: AnthropicToolVersion = get_tool_version(tool_version)
         self.beta_header = beta_header or self.version.beta_header
-        self.enable_zoom = self.version.supports_zoom if enable_zoom is None else enable_zoom
+        self.enable_zoom = False if enable_zoom is None else enable_zoom
         self.allow_unknown = allow_unknown
         self.executor = ActionExecutor(
             computer,
@@ -111,12 +111,28 @@ class AnthropicAdapter:
             return _with_common({"type": "type", "text": action.get("text", "")}, action)
         if name in {"left_click", "right_click", "middle_click"}:
             button = name.split("_")[0]
-            return _with_common(_click(button, coord), action)
+            return _with_common(_click(button, coord, modifiers=_click_modifiers(action)), action)
         if name == "double_click":
-            return _with_common(_click("left", coord, kind="double_click"), action)
+            return _with_common(
+                _click(
+                    "left",
+                    coord,
+                    kind="double_click",
+                    modifiers=_click_modifiers(action),
+                ),
+                action,
+            )
         if name == "triple_click":
             self._require_enhanced(name)
-            return _with_common(_click("left", coord, kind="triple_click"), action)
+            return _with_common(
+                _click(
+                    "left",
+                    coord,
+                    kind="triple_click",
+                    modifiers=_click_modifiers(action),
+                ),
+                action,
+            )
         if name in {"left_mouse_down", "mouse_down"}:
             self._require_enhanced(name)
             return _with_common(_button("mouse_down", coord), action)
@@ -125,25 +141,32 @@ class AnthropicAdapter:
             return _with_common(_button("mouse_up", coord), action)
         if name == "scroll":
             self._require_enhanced(name)
-            return _with_common(
+            direction = action.get("scroll_direction", action.get("direction"))
+            amount = action.get("scroll_amount", action.get("amount"))
+            if direction is None or amount is None:
+                raise ActionValidationError(
+                    "scroll action requires scroll_direction and scroll_amount"
+                )
+            scroll_payload = _with_common(
                 {
                     "type": "scroll",
-                    "direction": action.get("direction", "down"),
-                    "amount": int(action.get("amount", 1)),
+                    "direction": direction,
+                    "amount": int(amount),
                     "x": coord.x if coord else None,
                     "y": coord.y if coord else None,
                 },
                 action,
             )
+            return _with_held_key(scroll_payload, action.get("text"))
         if name == "hold_key":
             self._require_enhanced(name)
-            key = action.get("key") or action.get("text")
+            key = action.get("text") or action.get("key")
             if not key:
-                raise ActionValidationError("hold_key action requires key or text")
+                raise ActionValidationError("hold_key action requires text")
             payload: dict[str, Any] = {
                 "type": "hold_key",
                 "key": key,
-                "duration_ms": action.get("duration_ms"),
+                "duration_ms": _duration_ms(action),
             }
             if "actions" in action:
                 nested_actions = action["actions"]
@@ -157,7 +180,7 @@ class AnthropicAdapter:
         if name == "wait":
             self._require_enhanced(name)
             return _with_common(
-                {"type": "wait", "duration_ms": int(action.get("duration_ms", 1000))},
+                {"type": "wait", "duration_ms": _duration_ms(action)},
                 action,
             )
         if name == "screenshot":
@@ -167,8 +190,9 @@ class AnthropicAdapter:
                 raise UnsupportedActionError("zoom is not enabled for this Anthropic tool version")
             if "region" not in action:
                 raise ActionValidationError("zoom action requires region")
+            region, scale = _zoom_region(action)
             return _with_common(
-                {"type": "zoom", "region": action["region"], "scale": action.get("scale", 2.0)},
+                {"type": "zoom", "region": region, "scale": scale},
                 action,
             )
         if name == "cursor_position":
@@ -252,11 +276,66 @@ def _coord(value: object) -> Point | None:
     raise UnsupportedActionError("coordinate must be [x, y] or {x, y}")
 
 
-def _click(button: str, coord: Point | None, *, kind: str = "click") -> dict[str, Any]:
-    payload: dict[str, Any] = {"type": kind, "button": button}
+def _click(
+    button: str,
+    coord: Point | None,
+    *,
+    kind: str = "click",
+    modifiers: list[str] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": kind,
+        "button": button,
+        "modifiers": modifiers or [],
+    }
     if coord:
         payload.update({"x": coord.x, "y": coord.y})
     return payload
+
+
+def _click_modifiers(action: dict[str, Any]) -> list[str]:
+    key = action.get("key")
+    if key is None:
+        return []
+    if not isinstance(key, str):
+        raise ActionValidationError("click action key must be a string")
+    return [key]
+
+
+def _with_held_key(payload: dict[str, Any], key: object) -> dict[str, Any]:
+    if key is None:
+        return payload
+    if not isinstance(key, str):
+        raise ActionValidationError("scroll action text modifier must be a string")
+    return {"type": "hold_key", "key": key, "actions": [payload]}
+
+
+def _duration_ms(action: dict[str, Any]) -> int:
+    if "duration" in action:
+        duration = action["duration"]
+        if not isinstance(duration, int | float):
+            raise ActionValidationError("duration must be a number of seconds")
+        if duration < 0 or duration > 100:
+            raise ActionValidationError("duration must be between 0 and 100 seconds")
+        return round(duration * 1000)
+    if "duration_ms" in action:
+        return int(action["duration_ms"])
+    raise ActionValidationError("action requires duration in seconds")
+
+
+def _zoom_region(action: dict[str, Any]) -> tuple[dict[str, int], float]:
+    region = action["region"]
+    if isinstance(region, list | tuple) and len(region) == 4:
+        x0, y0, x1, y1 = (int(value) for value in region)
+        if min(x0, y0, x1, y1) < 0 or x1 <= x0 or y1 <= y0:
+            raise ActionValidationError("zoom region must be [x0, y0, x1, y1]")
+        return (
+            {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0},
+            1.0,
+        )
+    if isinstance(region, dict):
+        return region, float(action.get("scale", 2.0))
+    raise ActionValidationError("zoom region must be [x0, y0, x1, y1]")
 
 
 def _button(kind: str, coord: Point | None) -> dict[str, Any]:
@@ -283,6 +362,9 @@ def _reject_unknown_fields(action: dict[str, Any]) -> None:
         "key",
         "direction",
         "amount",
+        "scroll_direction",
+        "scroll_amount",
+        "duration",
         "duration_ms",
         "actions",
         "region",

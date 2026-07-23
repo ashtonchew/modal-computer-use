@@ -108,7 +108,8 @@ def test_openai_adapter_fixture_matrix() -> None:
         "scroll",
         "type",
         "wait",
-        "hotkey",
+        "keypress",
+        "keypress",
         "drag",
         "drag",
         "move",
@@ -122,7 +123,7 @@ def test_openai_adapter_fixture_matrix() -> None:
                 "x": 100,
                 "y": 200,
                 "button": "left",
-                "modifiers": ["shift"],
+                "keys": ["shift"],
             }
         },
         "call_id": None,
@@ -135,11 +136,11 @@ def test_openai_adapter_fixture_matrix() -> None:
     }
     assert run["actions"][2]["direction"] == "down"
     assert run["actions"][2]["amount"] == 5
-    assert run["actions"][5]["keys"] == ["ctrl", "c"]
-    assert run["actions"][6]["start_x"] == 1
-    assert run["actions"][6]["end_y"] == 4
-    assert run["actions"][6]["modifiers"] == ["shift"]
-    assert run["actions"][7]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+    assert [run["actions"][5]["key"], run["actions"][6]["key"]] == ["ctrl", "c"]
+    assert run["actions"][7]["start_x"] == 1
+    assert run["actions"][7]["end_y"] == 4
+    assert run["actions"][7]["modifiers"] == ["shift"]
+    assert run["actions"][8]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
 
 
 def test_provider_apply_many_forwards_batch_options() -> None:
@@ -182,6 +183,45 @@ def test_openai_unknown_action_fails_closed() -> None:
         adapter.normalize({"type": "future"})
     with pytest.raises(UnsupportedActionError):
         adapter.normalize({"type": "future", "new_provider_field": True})
+
+
+def test_openai_ga_scroll_buttons_and_modifier_fields() -> None:
+    computer = RecordingComputer()
+    adapter = OpenAIAdapter(computer)
+
+    adapter.apply_many(
+        [
+            {"type": "click", "button": "wheel", "x": 1, "y": 2, "keys": ["CTRL"]},
+            {"type": "click", "button": "back", "x": 3, "y": 4},
+            {
+                "type": "scroll",
+                "x": 5,
+                "y": 6,
+                "scroll_x": -250,
+                "scroll_y": 600,
+                "keys": ["SHIFT"],
+            },
+        ]
+    )
+
+    actions = computer.actions.runs[0]["actions"]
+    assert actions[0]["button"] == "middle"
+    assert actions[0]["modifiers"] == ["CTRL"]
+    assert actions[1]["button"] == "back"
+    assert actions[2]["type"] == "hold_key"
+    assert actions[2]["actions"][0]["direction"] == "down"
+    assert actions[2]["actions"][0]["amount"] == 6
+    assert actions[3]["actions"][0]["direction"] == "left"
+    assert actions[3]["actions"][0]["amount"] == 2
+
+
+def test_openai_multi_native_actions_require_batch_path() -> None:
+    adapter = OpenAIAdapter(RecordingComputer())
+
+    with pytest.raises(ActionValidationError, match="require apply_many"):
+        adapter.normalize({"type": "keypress", "keys": ["CTRL", "C"]})
+    with pytest.raises(ActionValidationError, match="require apply_many"):
+        adapter.normalize({"type": "scroll", "scroll_x": 100, "scroll_y": 100})
 
 
 def test_openai_allow_unknown_is_explicit_safe_noop() -> None:
@@ -248,8 +288,6 @@ def test_openai_computer_call_output_uses_native_screenshot_without_metadata_los
     output = openai_computer_call_output(
         screenshot,
         call_id="call_123",
-        current_url="https://example.com",
-        acknowledged_safety_checks=[],
     )
     metadata = openai_screenshot_metadata(screenshot)
 
@@ -261,8 +299,6 @@ def test_openai_computer_call_output_uses_native_screenshot_without_metadata_los
             "image_url": f"data:image/png;base64,{screenshot.data_base64}",
             "detail": "original",
         },
-        "current_url": "https://example.com",
-        "acknowledged_safety_checks": [],
     }
     assert metadata["width"] == 1
     assert metadata["coordinate_space"]["desktop_width"] == 1
@@ -296,6 +332,16 @@ def test_openai_preserves_native_metadata_and_rejects_unknown_fields() -> None:
 def test_anthropic_versions() -> None:
     assert get_tool_version("computer_20241022").supports_enhanced_actions is False
     assert get_tool_version("computer_20251124").supports_zoom is True
+
+
+def test_anthropic_defaults_to_current_tool_with_zoom_opt_in() -> None:
+    adapter = AnthropicAdapter(RecordingComputer())
+
+    assert adapter.version.name == "computer_20251124"
+    assert adapter.beta_header == "computer-use-2025-11-24"
+    assert adapter.enable_zoom is False
+    with pytest.raises(UnsupportedActionError, match="not enabled"):
+        adapter.normalize({"action": "zoom", "region": [0, 0, 10, 10]})
 
 
 def test_anthropic_20241022_fixture_matrix() -> None:
@@ -353,6 +399,26 @@ def test_anthropic_20250124_enhanced_fixture_matrix() -> None:
     assert actions[4]["duration_ms"] == 100
 
 
+def test_anthropic_current_modifiers_and_duration_validation() -> None:
+    adapter = AnthropicAdapter(RecordingComputer())
+
+    click = adapter.normalize({"action": "left_click", "key": "shift"})
+    scroll = adapter.normalize(
+        {
+            "action": "scroll",
+            "scroll_direction": "down",
+            "scroll_amount": 3,
+            "text": "shift",
+        }
+    )
+
+    assert click["modifiers"] == ["shift"]
+    assert scroll["type"] == "hold_key"
+    assert scroll["actions"][0]["direction"] == "down"
+    with pytest.raises(ActionValidationError, match="between 0 and 100"):
+        adapter.normalize({"action": "wait", "duration": 101})
+
+
 def test_anthropic_hold_key_normalizes_nested_actions() -> None:
     adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20250124")
 
@@ -360,6 +426,7 @@ def test_anthropic_hold_key_normalizes_nested_actions() -> None:
         {
             "action": "hold_key",
             "key": "shift",
+            "duration_ms": 100,
             "actions": [
                 {"action": "mouse_move", "coordinate": [10, 20]},
                 {"action": "left_click"},
@@ -381,6 +448,7 @@ def test_anthropic_hold_key_provider_provenance_redacts_nested_typed_text() -> N
         {
             "action": "hold_key",
             "key": "shift",
+            "duration_ms": 100,
             "actions": [{"action": "type", "text": "nested secret"}],
         }
     )
@@ -394,14 +462,18 @@ def test_anthropic_hold_key_provider_provenance_redacts_nested_typed_text() -> N
 
 def test_anthropic_20251124_zoom_fixture_matrix() -> None:
     computer = RecordingComputer()
-    adapter = AnthropicAdapter(computer, tool_version="computer_20251124")
+    adapter = AnthropicAdapter(
+        computer,
+        tool_version="computer_20251124",
+        enable_zoom=True,
+    )
 
     adapter.apply_many(_fixture("anthropic_20251124.json"))
 
     action = computer.actions.runs[0]["actions"][0]
     assert action["type"] == "zoom"
     assert action["region"] == {"x": 0, "y": 0, "width": 100, "height": 100}
-    assert action["scale"] == 2.0
+    assert action["scale"] == 1.0
 
 
 def test_anthropic_enhanced_actions_are_version_gated() -> None:
@@ -422,7 +494,11 @@ def test_anthropic_zoom_requires_tool_support_even_if_enabled() -> None:
 
 
 def test_anthropic_zoom_requires_region_as_structured_validation_error() -> None:
-    adapter = AnthropicAdapter(RecordingComputer(), tool_version="computer_20251124")
+    adapter = AnthropicAdapter(
+        RecordingComputer(),
+        tool_version="computer_20251124",
+        enable_zoom=True,
+    )
 
     with pytest.raises(ActionValidationError, match="zoom action requires region"):
         adapter.normalize({"action": "zoom"})

@@ -1,3 +1,3 @@
 [
-  {"action": "zoom", "region": {"x": 0, "y": 0, "width": 100, "height": 100}, "scale": 2.0}
+  {"action": "zoom", "region": [0, 0, 100, 100]}
 ]

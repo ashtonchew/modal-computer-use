@@ -13,7 +13,7 @@ from modal_computer_use.models import ActionResult, Point
 RunCommand = Callable[..., Awaitable[subprocess.CompletedProcess[str]]]
 KeyAction = Callable[[str], Awaitable[None]]
 
-BUTTON_NUMBERS = {"left": "1", "middle": "2", "right": "3"}
+BUTTON_NUMBERS = {"left": "1", "middle": "2", "right": "3", "back": "8", "forward": "9"}
 SCROLL_BUTTONS = {"up": "4", "down": "5", "left": "6", "right": "7"}
 
 

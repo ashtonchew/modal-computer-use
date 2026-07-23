@@ -282,7 +282,11 @@ Adapters normalize provider-returned actions into the core action schema. They d
 ```python
 from modal_computer_use.adapters.anthropic import AnthropicAdapter
 
-adapter = AnthropicAdapter(computer, tool_version="computer_20250124")
+adapter = AnthropicAdapter(
+    computer,
+    tool_version="computer_20251124",
+    enable_zoom=True,
+)
 adapter.apply({"action": "mouse_move", "coordinate": [500, 300]})
 ```
 
@@ -313,6 +317,12 @@ input_item = openai_computer_call_output(shot, call_id="call_123")
 
 The helpers are pure conversions from native `Screenshot`/`ActionResult` models. They do not call
 provider APIs or import provider SDKs.
+
+See the runnable [OpenAI](examples/03_openai_computer_loop.py) and
+[Anthropic](examples/anthropic_message_server.py) loops for current provider request shapes,
+bounded iteration, ordered tool results, and post-action screenshots. The
+[provider comparison](docs/computer-use-providers.md) distinguishes model providers, browser-agent
+frameworks, and desktop infrastructure competitors.
 
 ## Security Defaults
 

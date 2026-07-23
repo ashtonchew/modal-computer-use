@@ -712,7 +712,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -1183,7 +1185,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -1276,7 +1280,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -1809,7 +1815,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -1850,7 +1858,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -1903,7 +1913,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -1989,7 +2001,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -2152,7 +2166,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"
@@ -3276,7 +3292,9 @@
             "enum": [
               "left",
               "middle",
-              "right"
+              "right",
+              "back",
+              "forward"
             ],
             "title": "Button",
             "type": "string"

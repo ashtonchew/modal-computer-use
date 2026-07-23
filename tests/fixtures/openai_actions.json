@@ -1,12 +1,12 @@
 [
-  {"type": "click", "x": 100, "y": 200, "button": "left", "modifiers": ["shift"]},
+  {"type": "click", "x": 100, "y": 200, "button": "left", "keys": ["shift"]},
   {"type": "double_click", "x": 100, "y": 200},
-  {"type": "scroll", "dy": 5},
+  {"type": "scroll", "scroll_y": 500},
   {"type": "type", "text": "hello"},
   {"type": "wait", "duration_ms": 100},
   {"type": "keypress", "keys": ["ctrl", "c"]},
-  {"type": "drag", "start_x": 1, "start_y": 2, "end_x": 3, "end_y": 4, "modifiers": ["shift"]},
-  {"type": "drag", "path": [[1, 2], [3, 4]]},
+  {"type": "drag", "start_x": 1, "start_y": 2, "end_x": 3, "end_y": 4, "keys": ["shift"]},
+  {"type": "drag", "path": [[1, 2], {"x": 3, "y": 4}]},
   {"type": "move", "x": 10, "y": 20},
   {"type": "screenshot"}
 ]
