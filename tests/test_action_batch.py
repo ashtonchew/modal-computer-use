@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 from datetime import UTC, datetime
 
 from PIL import Image
 
-from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot
-from modal_computer_use.models import ActionResult, CoordinateSpace, sha256_bytes
+from modal_computer_use.daemon.desktop.screenshots import (
+    CapturedRawScreenshot,
+    CapturedScreenshot,
+)
+from modal_computer_use.daemon.desktop.xdamage import XDamageWaitResult
+from modal_computer_use.daemon.routes import actions as action_routes
+from modal_computer_use.models import ActionResult, CoordinateSpace, Point, sha256_bytes
 
 
 def test_action_batch_stop_on_error(test_client) -> None:
@@ -242,6 +248,508 @@ def test_action_batch_observe_change_raw_screenshot_returns_image_and_change_hea
     assert change_timing["total_ms"] >= 0.0
 
 
+def test_action_batch_observe_change_waits_when_click_ack_precedes_paint(
+    test_client,
+    app,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    click_count = 0
+    capture_count = 0
+    click_acknowledged = False
+    events: list[str] = []
+
+    async def click_then_defer_paint(*_args, **_kwargs):
+        nonlocal click_acknowledged, click_count
+        click_count += 1
+        click_acknowledged = True
+        events.append("click_acknowledged")
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        nonlocal capture_count
+        assert click_acknowledged is True
+        capture_count += 1
+        if capture_count == 1:
+            events.append("unchanged_capture")
+            return before
+        events.append("changed_capture")
+        return after
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        assert click_acknowledged is True
+        assert capture_count == 2
+        events.append("final_encode")
+        return _encoded_screenshot("black")
+
+    app.state.backend.mouse_click = click_then_defer_paint
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is True
+    assert change_result["attempts"] == 2
+    assert change_result["timeout_reached"] is False
+    assert change_result["source_sha256"] == after.sha256
+    assert events == [
+        "click_acknowledged",
+        "unchanged_capture",
+        "changed_capture",
+        "final_encode",
+    ]
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.convert("RGB").getpixel((0, 0)) == (0, 0, 0)
+
+
+def test_action_batch_observe_change_timeout_does_not_retry_click(
+    test_client,
+    app,
+) -> None:
+    unchanged = _raw_screenshot_bytes("white")
+    click_count = 0
+
+    async def click_without_paint(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return unchanged
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        return _encoded_screenshot("white")
+
+    app.state.backend.mouse_click = click_without_paint
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": unchanged.sha256,
+            "change_timeout_ms": 0,
+            "poll_interval_ms": 1,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is False
+    assert change_result["attempts"] == 1
+    assert change_result["timeout_reached"] is True
+
+
+def test_action_batch_observe_change_falls_back_when_xdamage_setup_is_unavailable(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    click_count = 0
+
+    class UnavailableWatcher:
+        failure = "secret setup detail"
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            raise RuntimeError(self.failure)
+
+        def close(self) -> None:
+            pass
+
+    async def click_once(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_click = click_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", UnavailableWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is True
+    assert change_result["change_signal_active"] == "poll"
+    assert change_result["change_signal_reason"] == "unavailable"
+    assert change_result["source_confirmation_active"] is True
+    assert change_result["source_confirmation_attempts"] == 1
+    assert change_result["source_confirmation_fallback_used"] is True
+    assert change_result["source_confirmation_fallback_reason"] == "setup_unavailable"
+    assert "secret" not in str(change_result)
+
+
+def test_action_batch_observe_change_falls_back_when_xdamage_wait_is_unavailable(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    click_count = 0
+
+    class WaitUnavailableWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int) -> XDamageWaitResult:
+            assert 0 <= timeout_ms <= 25
+            return XDamageWaitResult(
+                available=False,
+                detected=False,
+                wait_ms=0.1,
+                reason="secret wait detail",
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def click_once(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_click = click_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", WaitUnavailableWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is True
+    assert change_result["change_signal_active"] == "xdamage"
+    assert change_result["change_signal_available"] is False
+    assert change_result["change_signal_reason"] == "unavailable"
+    assert change_result["source_confirmation_attempts"] == 1
+    assert change_result["source_confirmation_fallback_used"] is True
+    assert change_result["source_confirmation_fallback_reason"] == "wait_unavailable"
+    assert "secret" not in str(change_result)
+
+
+def test_action_batch_observe_change_source_confirms_after_irrelevant_xdamage(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    captures = iter([before, after])
+    click_count = 0
+
+    class DetectedWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int) -> XDamageWaitResult:
+            assert 0 <= timeout_ms <= 25
+            return XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def click_once(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_click = click_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", DetectedWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is True
+    assert change_result["change_signal_detected"] is True
+    assert change_result["source_confirmation_attempts"] == 2
+    assert change_result["attempts"] == 2
+    assert change_result["source_confirmation_fallback_used"] is True
+    assert change_result["source_confirmation_fallback_reason"] == "source_unchanged"
+
+
+def test_action_batch_observe_change_xdamage_source_confirmation_needs_no_fallback(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    click_count = 0
+
+    class DetectedWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int) -> XDamageWaitResult:
+            assert 0 <= timeout_ms <= 25
+            return XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def click_once(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_click = click_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", DetectedWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is True
+    assert change_result["source_confirmation_attempts"] == 1
+    assert change_result["source_confirmation_fallback_used"] is False
+    assert change_result["source_confirmation_fallback_reason"] is None
+
+
+def test_action_batch_observe_change_xdamage_signal_timeout_is_bounded(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    unchanged = _raw_screenshot_bytes("white")
+    click_count = 0
+
+    class TimeoutWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int) -> XDamageWaitResult:
+            assert timeout_ms == 0
+            return XDamageWaitResult(
+                available=True,
+                detected=False,
+                wait_ms=0.0,
+                reason="secret timeout detail",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def click_once(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        raise AssertionError("no source-confirmation budget remains")
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_click = click_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", TimeoutWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": unchanged.sha256,
+            "change_timeout_ms": 0,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert change_result["detected"] is False
+    assert change_result["change_signal_reason"] == "timeout"
+    assert change_result["source_confirmation_attempts"] == 0
+    assert change_result["source_confirmation_fallback_used"] is True
+    assert change_result["source_confirmation_fallback_reason"] == "signal_timeout"
+    assert "secret" not in str(change_result)
+
+
+def test_action_batch_observe_change_xdamage_unchanged_timeout_does_not_replay_click(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    unchanged = _raw_screenshot_bytes("white")
+    click_count = 0
+    capture_count = 0
+
+    class DetectedWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int) -> XDamageWaitResult:
+            assert timeout_ms == 0
+            return XDamageWaitResult(available=True, detected=True, wait_ms=0.0)
+
+        def close(self) -> None:
+            pass
+
+    async def click_once(*_args, **_kwargs):
+        nonlocal click_count
+        click_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        nonlocal capture_count
+        capture_count += 1
+        return unchanged
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_click = click_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", DetectedWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "click", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "previous_source_sha256": unchanged.sha256,
+            "change_timeout_ms": 0,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert click_count == 1
+    assert capture_count == 1
+    assert change_result["detected"] is False
+    assert change_result["timeout_reached"] is True
+    assert change_result["source_confirmation_attempts"] == 1
+    assert change_result["source_confirmation_fallback_used"] is True
+    assert change_result["source_confirmation_fallback_reason"] == "source_unchanged"
+
+
+def _change_result(response) -> dict:
+    return json.loads(
+        base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
+    )
+
+
 def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
     sentinel = "_".join(["SENTINEL", "TYPED", "PAYLOAD", "NO", "LEAK"])
 
@@ -277,6 +785,29 @@ def _raw_screenshot_bytes(color: str) -> CapturedRawScreenshot:
         ),
         cursor_visible=False,
         capture_backend="test-raw",
+        timings_ms={"total_ms": 0.0},
+    )
+
+
+def _encoded_screenshot(color: str) -> CapturedScreenshot:
+    output = io.BytesIO()
+    Image.new("RGB", (8, 8), color).save(output, format="PNG")
+    data = output.getvalue()
+    return CapturedScreenshot(
+        format="png",
+        width=8,
+        height=8,
+        data=data,
+        sha256=sha256_bytes(data),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=8,
+            desktop_height=8,
+            image_width=8,
+            image_height=8,
+        ),
+        cursor_visible=False,
+        capture_backend="test-encoded",
         timings_ms={"total_ms": 0.0},
     )
 

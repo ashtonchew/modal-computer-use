@@ -153,36 +153,74 @@ async def run_observe_change_raw_screenshot(
             await asyncio.sleep(payload.capture_delay_ms / 1000)
             capture_delay_wall_ms = _elapsed_ms(capture_delay_started)
         wait_started = perf_counter()
+        deadline = wait_started + payload.change_timeout_ms / 1000
         signal_wait_wall_ms = 0.0
         if change_signal.watcher is not None:
             signal_wait_started = perf_counter()
             signal_result = await asyncio.to_thread(
                 change_signal.watcher.wait,
-                payload.change_timeout_ms,
+                _remaining_timeout_ms(deadline),
             )
             signal_wait_wall_ms = _elapsed_ms(signal_wait_started)
         attempts = 0
         source_sha256 = baseline_sha256
-        detected = bool(signal_result.detected) if signal_result is not None else False
+        detected = (
+            bool(signal_result.detected)
+            if signal_result is not None and baseline_sha256 is None
+            else False
+        )
+        source_confirmation_active = baseline_sha256 is not None
+        source_confirmation_fallback_used = False
+        source_confirmation_fallback_reason: str | None = None
         poll_ms = 0.0
-        if needs_poll_baseline and baseline_sha256 is not None:
+        should_poll = needs_poll_baseline and baseline_sha256 is not None
+        if change_signal.active == "xdamage" and baseline_sha256 is not None:
+            if signal_result is None or not signal_result.available:
+                source_confirmation_fallback_used = True
+                source_confirmation_fallback_reason = "wait_unavailable"
+                should_poll = True
+            elif not signal_result.detected:
+                source_confirmation_fallback_used = True
+                source_confirmation_fallback_reason = "signal_timeout"
+                should_poll = True
+            else:
+                poll_started = perf_counter()
+                attempts += 1
+                source_sha256 = await _capture_source_sha256(request, region=region)
+                detected = source_sha256 != baseline_sha256
+                poll_ms = _elapsed_ms(poll_started)
+                if not detected:
+                    source_confirmation_fallback_used = True
+                    source_confirmation_fallback_reason = "source_unchanged"
+                    should_poll = True
+        elif (
+            change_signal.active == "poll"
+            and change_signal.requested != "poll"
+            and baseline_sha256 is not None
+        ):
+            source_confirmation_fallback_used = True
+            source_confirmation_fallback_reason = "setup_unavailable"
+        if should_poll and not detected:
             poll_started = perf_counter()
-            deadline = wait_started + payload.change_timeout_ms / 1000
-            while True:
+            while perf_counter() < deadline or (needs_poll_baseline and attempts == 0):
+                if attempts > 0:
+                    sleep_ms = _change_poll_sleep_ms(
+                        attempt=attempts,
+                        poll_interval_ms=payload.poll_interval_ms,
+                        poll_strategy=payload.poll_strategy,
+                    )
+                    remaining_ms = _remaining_timeout_ms(deadline)
+                    if remaining_ms <= 0:
+                        break
+                    await asyncio.sleep(min(sleep_ms, remaining_ms) / 1000)
+                    if perf_counter() >= deadline:
+                        break
                 attempts += 1
                 source_sha256 = await _capture_source_sha256(request, region=region)
                 detected = source_sha256 != baseline_sha256
                 if detected or perf_counter() >= deadline:
                     break
-                await asyncio.sleep(
-                    _change_poll_sleep_ms(
-                        attempt=attempts,
-                        poll_interval_ms=payload.poll_interval_ms,
-                        poll_strategy=payload.poll_strategy,
-                    )
-                    / 1000
-                )
-            poll_ms = _elapsed_ms(poll_started)
+            poll_ms += _elapsed_ms(poll_started)
         screenshot_started = perf_counter()
 
         async def operation():
@@ -218,6 +256,10 @@ async def run_observe_change_raw_screenshot(
         "change_signal_wait_ms": None if signal_result is None else signal_result.wait_ms,
         "change_signal_reason": _change_signal_reason(signal_result, change_signal),
         "change_signal_version": None if signal_result is None else signal_result.version,
+        "source_confirmation_active": source_confirmation_active,
+        "source_confirmation_attempts": attempts,
+        "source_confirmation_fallback_used": source_confirmation_fallback_used,
+        "source_confirmation_fallback_reason": source_confirmation_fallback_reason,
     }
     headers = {
         **_screenshot_headers(shot),
@@ -342,6 +384,10 @@ def _change_poll_sleep_ms(
     return min(4 * (2 ** max(attempt - 1, 0)), poll_interval_ms)
 
 
+def _remaining_timeout_ms(deadline: float) -> int:
+    return max(0, int((deadline - perf_counter()) * 1000))
+
+
 def _change_signal_available(
     result: XDamageWaitResult | None,
     signal: _PreparedActionChangeSignal,
@@ -358,8 +404,14 @@ def _change_signal_reason(
     signal: _PreparedActionChangeSignal,
 ) -> str | None:
     if result is not None:
-        return result.reason
-    return signal.unavailable_reason
+        if not result.available:
+            return "unavailable"
+        if not result.detected:
+            return "timeout"
+        return None
+    if signal.unavailable_reason is not None:
+        return "unavailable"
+    return None
 
 
 def _json_header(payload: dict[str, Any]) -> str:
