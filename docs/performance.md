@@ -837,6 +837,9 @@ For application code, the same pattern is available as a co-located runner Sandb
 desktop sandbox and runner sandbox are created in the same Modal region, and the runner talks
 directly to the target daemon. Use `run_modal_daemon_command()` or
 `examples/modal_colocated_runner.py` as the minimal shape before building a hosted control plane.
+When the target was created with an explicit `runtime.modal_region`, the SDK runner helpers inherit
+that requested selector. An explicit conflicting region is rejected by the production helper;
+targets attached without trustworthy creation config must provide the runner region.
 
 If a runner can reach `/healthz`, `/v1/version`, and `/v1/capabilities` but times out opening
 `/v1/observations/stream`, the failure is likely specific to WebSocket ingress rather than daemon

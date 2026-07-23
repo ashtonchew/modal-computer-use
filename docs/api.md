@@ -269,6 +269,9 @@ computer = ComputerSandbox.create(
 `runtime.modal_region=None` leaves placement to Modal. A region only affects newly created
 sandboxes; attaching or reusing an existing sandbox cannot relocate it. Because the region lives in
 `ComputerConfig`, it participates in the existing config-hash mismatch protection for reuse flows.
+SDK-owned co-located runner helpers retain that requested placement on a newly created target, or on
+an `attach_or_create()` result whose config hash matches. They do not infer placement from an
+observed runtime region.
 Use `computer-use benchmark modal-region-ab` to compare fresh `daemon-transport-floor` runs across
 repeatable `--modal-region` values while holding ingress, HTTP version, image, and resource knobs
 fixed. Pass `--caller-region-label` to record where the benchmark caller or model loop ran; this is
@@ -281,9 +284,16 @@ transport floor. Pass `--surface daemon-observation-stream` as well when you nee
 action-to-first-changed-frame comparison for the observation stream; that surface also requires a
 browser-capable target such as `--browser chromium`. It is not a semantic-readiness measurement;
 see the [Alpha guide](experimental-visual-change-observation.md).
-Application code can use `run_modal_daemon_command(computer, command, path=...)` for the same
-runner pattern. `path="inherited"` passes the target client's current daemon URL/token into a
-same-region runner, `path="connect"` creates a fresh Modal Connect Token for that runner, and
+Application code can use `run_modal_daemon_command_with_fallback(computer, command)` for the
+production runner pattern. When the target has a known explicit `runtime.modal_region`, the helper
+inherits it and rejects a conflicting explicit runner region. Targets attached without a matching
+creation config must pass `modal_region` because their placement policy is unknown. Run the complete
+latency-sensitive session in one command; creating a fresh runner for every action would put runner
+allocation back on the hot path.
+
+Use `run_modal_daemon_command(computer, command, path=...)` for explicit diagnostics.
+`path="inherited"` passes the target client's current daemon URL/token into a separate runner,
+`path="connect"` creates a fresh Modal Connect Token for that runner, and
 `path="target-loopback"` executes inside the target sandbox against `http://127.0.0.1:8080`.
 The helper owns the reserved daemon env keys and rejects user overrides so benchmark or workload
 metadata cannot accidentally replace the daemon endpoint or bearer token.

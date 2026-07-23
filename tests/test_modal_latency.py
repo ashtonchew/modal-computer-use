@@ -21,6 +21,7 @@ from modal_computer_use.manager import ComputerSandboxManager
 from modal_computer_use.observations import ActionObservationResult
 from modal_computer_use.sandbox import (
     ModalSandboxExecResult,
+    run_modal_daemon_command,
     run_modal_daemon_command_with_fallback,
 )
 from modal_computer_use.transports import ObservationFrame
@@ -243,6 +244,99 @@ def test_same_region_runner_falls_back_to_external_caller(monkeypatch) -> None:
     assert result.fallback_used is True
     assert result.fallback_reason == "TimeoutError"
     assert result.result.stdout == "ok"
+
+
+def test_same_region_runner_inherits_target_requested_region(monkeypatch) -> None:
+    dispatched: list[dict[str, object]] = []
+    computer = SimpleNamespace(_requested_modal_region="us-west")
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.modal_daemon_endpoint",
+        lambda _computer, path: SimpleNamespace(
+            path=path,
+            base_url="https://connect.example",
+            token="test-token",
+            target_sandbox_id="sb-target",
+        ),
+    )
+
+    def exec_once(command: tuple[str, ...], **kwargs: object) -> ModalSandboxExecResult:
+        dispatched.append({"command": command, **kwargs})
+        return ModalSandboxExecResult(
+            sandbox_id="sb-runner",
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    result = run_modal_daemon_command_with_fallback(
+        computer,
+        ("python", "worker.py"),
+        exec_once=exec_once,
+    )
+
+    assert result.requested_region == "us-west"
+    assert result.selected_path == "same-region-connect"
+    assert dispatched[0]["region"] == "us-west"
+
+
+def test_same_region_runner_rejects_region_conflict_before_connect(monkeypatch) -> None:
+    endpoint_calls = 0
+
+    def endpoint(*args: object, **kwargs: object) -> SimpleNamespace:
+        nonlocal endpoint_calls
+        endpoint_calls += 1
+        raise AssertionError("conflicting placement must fail before Connect preparation")
+
+    monkeypatch.setattr("modal_computer_use.sandbox.modal_daemon_endpoint", endpoint)
+    with pytest.raises(ConfigConflictError, match="does not match"):
+        run_modal_daemon_command_with_fallback(
+            SimpleNamespace(_requested_modal_region="us-west"),
+            ("python", "worker.py"),
+            modal_region="us-east",
+        )
+
+    assert endpoint_calls == 0
+
+
+def test_colocated_runner_requires_region_when_target_placement_is_unknown() -> None:
+    with pytest.raises(ValueError, match="requested region is unknown"):
+        run_modal_daemon_command_with_fallback(
+            SimpleNamespace(),
+            ("python", "worker.py"),
+        )
+
+
+def test_diagnostic_runner_inherits_target_requested_region(monkeypatch) -> None:
+    dispatched: list[dict[str, object]] = []
+    computer = SimpleNamespace(_requested_modal_region="us-west")
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.modal_daemon_endpoint",
+        lambda _computer, path: SimpleNamespace(
+            path=path,
+            base_url="https://daemon.example",
+            token="test-token",
+            target_sandbox_id="sb-target",
+            execute_in_target=False,
+        ),
+    )
+
+    def exec_once(command: tuple[str, ...], **kwargs: object) -> ModalSandboxExecResult:
+        dispatched.append({"command": command, **kwargs})
+        return ModalSandboxExecResult(
+            sandbox_id="sb-runner",
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    run_modal_daemon_command(
+        computer,
+        ("python", "worker.py"),
+        path="connect",
+        exec_once=exec_once,
+    )
+
+    assert dispatched[0]["region"] == "us-west"
 
 
 def test_same_region_runner_never_falls_back_after_dispatch(monkeypatch) -> None:
@@ -1030,6 +1124,7 @@ def test_claim_warm_pool_rejects_stale_then_hits_and_is_one_shot(monkeypatch) ->
     assert attached["sb-stale"].terminated == [True]
     assert attached["sb-stale"].detached is True
     assert claim.entry == valid
+    assert claim.computer._requested_modal_region == "us-east"
     claim.close()
     assert attached["sb-valid"].terminated == [True]
     assert attached["sb-valid"].detached is True
