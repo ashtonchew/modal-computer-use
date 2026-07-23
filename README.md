@@ -120,6 +120,9 @@ known caller location. The same creation knob is available in SDK code as
 placement policy. SDK-owned co-located runner commands inherit this requested region, so the target
 and runner use one placement decision. Targets attached without a matching `ComputerConfig` still
 require an explicit runner region because the SDK cannot safely reconstruct their creation policy.
+Broad selectors preserve scheduling flexibility but do not guarantee the same concrete provider
+region; use a measured narrow selector when that stronger latency guarantee justifies its
+availability and pricing tradeoffs.
 
 To compare placement directly, run one fresh `daemon-transport-floor` sandbox per region:
 

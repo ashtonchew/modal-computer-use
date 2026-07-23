@@ -795,10 +795,11 @@ uv run computer-use benchmark modal-colocated-client --iterations 30 \
 ```
 
 This creates one target desktop sandbox in the selected region, runs the selected benchmark surfaces
-from the external caller, then creates an ephemeral Modal runner sandbox in the same region and runs
-the same surfaces against the target daemon URL. Treat it as an architecture experiment: it measures
-whether co-locating the caller/model loop is likely to help before adding any hosted control-plane
-shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor attribution, and add
+from the external caller, then creates an ephemeral Modal runner sandbox with the same requested
+region selector and runs the same surfaces against the target daemon URL. Treat it as an architecture
+experiment: it measures whether co-locating the caller/model loop is likely to help before adding any
+hosted control-plane shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor
+attribution, and add
 `daemon-observation-stream` when the question is action-to-first-changed-frame latency under the
 Alpha observation contract. This is one measured part of an agent loop, not semantic readiness or
 end-to-end loop latency.
@@ -810,8 +811,8 @@ Use runner paths to separate caller placement from target ingress:
 
 | Runner path | Caller location | Target daemon path | Use |
 | --- | --- | --- | --- |
-| `inherited` | Separate same-region Modal runner sandbox | The same URL/token as the external caller | Backward-compatible baseline. |
-| `connect` | Separate same-region Modal runner sandbox | Fresh Modal Connect Token URL/token for the same target sandbox | Tests Modal's documented HTTP/WebSocket Sandbox path from inside Modal. |
+| `inherited` | Separate Modal runner with the target's requested region selector | The same URL/token as the external caller | Backward-compatible baseline. |
+| `connect` | Separate Modal runner with the target's requested region selector | Fresh Modal Connect Token URL/token for the same target sandbox | Tests Modal's documented HTTP/WebSocket Sandbox path from inside Modal. |
 | `target-loopback` | The target desktop sandbox itself via `Sandbox.exec` | `http://127.0.0.1:8080` plus the daemon bearer token | Measures the daemon/client loopback floor without tunnel or Connect ingress. |
 
 `target-loopback` is not a separate runner sandbox: `127.0.0.1` only reaches the target daemon from
@@ -821,21 +822,32 @@ The benchmark uses the SDK-owned `run_modal_daemon_command()` helper for these p
 selection, Connect Token creation, loopback execution, and reserved daemon environment variables stay
 in the Modal SDK boundary instead of benchmark-local code.
 
-A May 29, 2026 `modal-colocated-client` run with a `us-west` target and a development-laptop
-external caller measured:
+A July 23, 2026 `modal-colocated-client` rerun at revision `ebd1ed0` used Connect on both arms,
+30 measured iterations, and the inherited target-region policy:
 
-| Caller path | Fastest 0B p50 | Ratio vs external |
-| --- | ---: | ---: |
-| External caller -> `us-west` target | 29.4ms | 1.00x |
-| Same-region Modal runner -> `us-west` target | 1.7ms | 0.06x |
+```bash
+uv run computer-use benchmark modal-colocated-client --iterations 30 \
+  --modal-region us-west-2 --modal-ingress connect --runner-path connect \
+  --surface daemon-transport-floor --caller-region-label dev-laptop-us-west
+```
 
-This points to caller/ingress placement as the dominant remaining floor for remote SDK control
-loops. It does not make the ephemeral runner itself a product surface; it is a proof point for a
-future hosted model-loop/control-plane shape.
+| Target and runner selector | External Connect p50 | Co-located Connect p50 | Result |
+| --- | ---: | ---: | --- |
+| Broad `us-west` | 25.736ms | 43.081ms | Co-located was 1.67x slower |
+| Narrow `us-west-2` | 29.911ms | 1.253ms | Co-located was 23.87x faster; 28.658ms / 95.8% removed |
+
+Both narrow-region arms completed 30/30 samples and were classified stable. The metric is the
+fastest matched zero-byte daemon transport-floor case, not a complete action, screenshot, or model
+loop. The broad-region negative control matters: inheriting `us-west` preserves scheduling policy,
+but it does not prove that the target and runner landed in one concrete provider region. The
+`us-west-2` result points to caller/ingress placement as the dominant transport floor once placement
+is actually narrow enough. It does not make the ephemeral runner itself a product surface; it is a
+proof point for a future hosted model-loop/control-plane shape and carries Modal's narrow-region
+availability and pricing tradeoffs.
 
 For application code, the same pattern is available as a co-located runner Sandbox. The target
-desktop sandbox and runner sandbox are created in the same Modal region, and the runner talks
-directly to the target daemon. Use `run_modal_daemon_command()` or
+desktop sandbox and runner sandbox are created with the same requested region selector, and the
+runner talks directly to the target daemon. Use `run_modal_daemon_command()` or
 `examples/modal_colocated_runner.py` as the minimal shape before building a hosted control plane.
 When the target was created with an explicit `runtime.modal_region`, the SDK runner helpers inherit
 that requested selector. An explicit conflicting region is rejected by the production helper;

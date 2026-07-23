@@ -132,6 +132,10 @@ config has unknown creation policy, so its runner still requires an explicit `mo
 The helper never guesses from the external caller's location or from the target's observed concrete
 runtime region. Modal placement selectors such as `us-west` are scheduling policy, while an observed
 region such as `us-west-2` is runtime evidence and is not automatically reusable as that policy.
+Broad selectors preserve scheduling flexibility and therefore do not guarantee that two Sandboxes
+land in one concrete provider region. If the workload needs that stronger co-location guarantee,
+select a supported narrow region explicitly in `ComputerConfig` after measuring the real topology
+and accepting the narrower region's availability and pricing tradeoffs.
 
 Fallback to the current external attested endpoint happens only when the caller supplies an explicit
 `external_runner` and Connect preparation fails before dispatch. Without that callable, preparation
