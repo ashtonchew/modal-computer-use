@@ -17,7 +17,7 @@ from modal_computer_use.adapters.anthropic import (
     anthropic_tool_result,
     get_tool_version,
 )
-from modal_computer_use.models import Screenshot
+from modal_computer_use.models import ActionResult, Screenshot
 
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_TOOL_VERSION = "computer_20251124"
@@ -83,31 +83,45 @@ def run_anthropic_computer_loop(
         tool_uses = [
             block for block in response.content if getattr(block, "type", None) == "tool_use"
         ]
-        if not tool_uses:
+        if response.stop_reason != "tool_use":
+            if tool_uses:
+                raise RuntimeError(
+                    "Anthropic returned tool_use content without stop_reason='tool_use'"
+                )
             return response
+        if not tool_uses:
+            raise RuntimeError(
+                "Anthropic returned stop_reason='tool_use' without a tool_use block"
+            )
+        if action_count + len(tool_uses) > max_actions:
+            raise RuntimeError(f"Anthropic computer loop exceeded {max_actions} actions")
 
         results: list[dict[str, Any]] = []
         for tool_use in tool_uses:
-            _check_deadline(started_at, max_elapsed_seconds)
             action_count += 1
-            if action_count > max_actions:
-                raise RuntimeError(
-                    f"Anthropic computer loop exceeded {max_actions} actions"
-                )
-            action = _provider_dict(tool_use.input)
-            action.setdefault("timeout_ms", max_action_timeout_ms)
-            result = adapter.apply(action)
-            if not result.ok:
+            try:
+                _check_deadline(started_at, max_elapsed_seconds)
+                action = _provider_dict(tool_use.input)
+                action.setdefault("timeout_ms", max_action_timeout_ms)
+                result = adapter.apply(action)
                 results.append(
-                    anthropic_tool_result(tool_use_id=tool_use.id, result=result)
+                    _tool_result(
+                        computer=computer,
+                        tool_use_id=tool_use.id,
+                        action=action,
+                        result=result,
+                    )
                 )
-                continue
-            screenshot = _result_screenshot(action, result.output)
-            if screenshot is None:
-                screenshot = computer.screenshots.full()
-            results.append(
-                anthropic_tool_result(tool_use_id=tool_use.id, result=screenshot)
-            )
+            except Exception as exc:
+                results.append(
+                    anthropic_tool_result(
+                        tool_use_id=tool_use.id,
+                        result=ActionResult(
+                            ok=False,
+                            message=f"computer action failed: {type(exc).__name__}",
+                        ),
+                    )
+                )
         messages.append({"role": "user", "content": results})
 
     raise RuntimeError(f"Anthropic computer loop exceeded {max_turns} turns")
@@ -121,13 +135,27 @@ def _provider_dict(value: Any) -> dict[str, Any]:
     raise TypeError(f"unsupported Anthropic computer action object: {type(value).__name__}")
 
 
-def _result_screenshot(action: dict[str, Any], output: dict[str, Any]) -> Screenshot | None:
-    if action.get("action") not in {"screenshot", "zoom"}:
-        return None
-    try:
-        return Screenshot.model_validate(output)
-    except Exception:
-        return None
+def _tool_result(
+    *,
+    computer: Any,
+    tool_use_id: str,
+    action: dict[str, Any],
+    result: ActionResult,
+) -> dict[str, Any]:
+    if not result.ok:
+        return anthropic_tool_result(tool_use_id=tool_use_id, result=result)
+    if action.get("action") == "cursor_position":
+        x = int(result.output["x"])
+        y = int(result.output["y"])
+        return anthropic_tool_result(
+            tool_use_id=tool_use_id,
+            result=ActionResult(ok=True, message=f"X={x},Y={y}"),
+        )
+    if action.get("action") in {"screenshot", "zoom"}:
+        screenshot = Screenshot.model_validate(result.output)
+    else:
+        screenshot = computer.screenshots.full()
+    return anthropic_tool_result(tool_use_id=tool_use_id, result=screenshot)
 
 
 def _check_deadline(started_at: float, max_elapsed_seconds: float) -> None:
@@ -153,9 +181,9 @@ def main() -> None:
             display_width_px=width,
             display_height_px=height,
             task=(
-                "Open the browser and verify the example page is reachable. "
-                "Stop after reporting the page title; do not sign in, submit "
-                "forms, or change data."
+                "Open https://example.com in the browser. Verify that the page title is "
+                "'Example Domain', then report the title and stop. Do not sign in, "
+                "submit forms, or change data."
             ),
         )
         print(response.content)

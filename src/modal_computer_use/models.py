@@ -424,7 +424,7 @@ class HotkeyAction(BaseAction):
 class HoldKeyAction(BaseAction):
     type: Literal["hold_key"] = "hold_key"
     key: str
-    duration_ms: int | None = Field(default=None, ge=0, le=60_000)
+    duration_ms: int | None = Field(default=None, ge=0, le=100_000)
     actions: list[dict[str, Any]] | None = None
 
 

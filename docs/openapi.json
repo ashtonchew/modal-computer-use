@@ -1457,7 +1457,7 @@
           "duration_ms": {
             "anyOf": [
               {
-                "maximum": 60000.0,
+                "maximum": 100000.0,
                 "minimum": 0.0,
                 "type": "integer"
               },

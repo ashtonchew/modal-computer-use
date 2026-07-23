@@ -111,7 +111,6 @@ def test_openai_adapter_fixture_matrix() -> None:
         "keypress",
         "keypress",
         "drag",
-        "drag",
         "move",
         "screenshot",
     ]
@@ -137,10 +136,29 @@ def test_openai_adapter_fixture_matrix() -> None:
     assert run["actions"][2]["direction"] == "down"
     assert run["actions"][2]["amount"] == 5
     assert [run["actions"][5]["key"], run["actions"][6]["key"]] == ["ctrl", "c"]
-    assert run["actions"][7]["start_x"] == 1
-    assert run["actions"][7]["end_y"] == 4
     assert run["actions"][7]["modifiers"] == ["shift"]
-    assert run["actions"][8]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+    assert run["actions"][7]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+
+
+def test_openai_adapter_accepts_explicit_compatibility_shapes() -> None:
+    adapter = OpenAIAdapter(RecordingComputer())
+
+    drag = adapter.normalize(
+        {
+            "type": "drag",
+            "start_x": 1,
+            "start_y": 2,
+            "end_x": 3,
+            "end_y": 4,
+        }
+    )
+    tuple_path = adapter.normalize({"type": "drag", "path": [[1, 2], [3, 4]]})
+    wait = adapter.normalize({"type": "wait", "duration_ms": 100})
+
+    assert drag["start_x"] == 1
+    assert drag["end_y"] == 4
+    assert tuple_path["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+    assert wait["duration_ms"] == 100
 
 
 def test_provider_apply_many_forwards_batch_options() -> None:
@@ -222,6 +240,28 @@ def test_openai_multi_native_actions_require_batch_path() -> None:
         adapter.normalize({"type": "keypress", "keys": ["CTRL", "C"]})
     with pytest.raises(ActionValidationError, match="require apply_many"):
         adapter.normalize({"type": "scroll", "scroll_x": 100, "scroll_y": 100})
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"type": "keypress", "keys": ["CTRL", "C"], "future_field": True},
+        {
+            "type": "scroll",
+            "x": 1,
+            "y": 2,
+            "scroll_y": 100,
+            "future_field": True,
+        },
+    ],
+)
+def test_openai_expanded_actions_reject_unknown_fields(
+    action: dict[str, Any],
+) -> None:
+    adapter = OpenAIAdapter(RecordingComputer())
+
+    with pytest.raises(ActionValidationError, match="unknown fields"):
+        adapter.apply_many([action])
 
 
 def test_openai_allow_unknown_is_explicit_safe_noop() -> None:
@@ -417,6 +457,19 @@ def test_anthropic_current_modifiers_and_duration_validation() -> None:
     assert scroll["actions"][0]["direction"] == "down"
     with pytest.raises(ActionValidationError, match="between 0 and 100"):
         adapter.normalize({"action": "wait", "duration": 101})
+
+
+@pytest.mark.parametrize("duration", [60, 61, 100])
+def test_anthropic_hold_key_accepts_current_duration_boundary(
+    duration: int,
+) -> None:
+    computer = RecordingComputer()
+
+    AnthropicAdapter(computer).apply(
+        {"action": "hold_key", "text": "shift", "duration": duration}
+    )
+
+    assert computer.actions.applied[0]["duration_ms"] == duration * 1000
 
 
 def test_anthropic_hold_key_normalizes_nested_actions() -> None:

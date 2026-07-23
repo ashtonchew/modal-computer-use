@@ -60,6 +60,8 @@ class _Actions:
 
     def apply(self, action: Any, *, source: str = "sdk") -> ActionResult:
         self.applied.append((action, source))
+        if action.type == "cursor_position":
+            return ActionResult(ok=True, output={"x": 12, "y": 34})
         return ActionResult(ok=True, output={"type": action.type})
 
     def run(
@@ -148,8 +150,11 @@ def test_anthropic_cookbook_preserves_assistant_content_and_tool_ids() -> None:
     )
     create = _CreateQueue(
         [
-            SimpleNamespace(content=[tool_use]),
-            SimpleNamespace(content=[SimpleNamespace(type="text", text="done")]),
+            SimpleNamespace(stop_reason="tool_use", content=[tool_use]),
+            SimpleNamespace(
+                stop_reason="end_turn",
+                content=[SimpleNamespace(type="text", text="done")],
+            ),
         ]
     )
     client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
@@ -179,6 +184,172 @@ def test_anthropic_cookbook_preserves_assistant_content_and_tool_ids() -> None:
     assert tool_result["type"] == "tool_result"
     assert tool_result["tool_use_id"] == "tool_1"
     assert tool_result["content"][0]["type"] == "image"
+
+
+def test_anthropic_cookbook_returns_all_results_when_one_action_fails() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    tool_uses = [
+        SimpleNamespace(
+            type="tool_use",
+            id="tool_bad",
+            input={"action": "future_action"},
+        ),
+        SimpleNamespace(
+            type="tool_use",
+            id="tool_cursor",
+            input={"action": "cursor_position"},
+        ),
+    ]
+    create = _CreateQueue(
+        [
+            SimpleNamespace(stop_reason="tool_use", content=tool_uses),
+            SimpleNamespace(stop_reason="end_turn", content=[]),
+        ]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    example.run_anthropic_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        display_width_px=1280,
+        display_height_px=800,
+    )
+
+    results = create.calls[1]["messages"][2]["content"]
+    assert [result["tool_use_id"] for result in results] == [
+        "tool_bad",
+        "tool_cursor",
+    ]
+    assert results[0]["is_error"] is True
+    assert "computer action failed: UnsupportedActionError" in results[0]["content"][0]["text"]
+    assert results[1]["content"] == [
+        {"type": "text", "text": '{"message":"X=12,Y=34","ok":true}'}
+    ]
+
+
+def test_anthropic_cookbook_converts_screenshot_failure_to_tool_error() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+
+    def fail_screenshot() -> Screenshot:
+        raise RuntimeError("secret screenshot failure")
+
+    computer.screenshots.full = fail_screenshot
+    tool_use = SimpleNamespace(
+        type="tool_use",
+        id="tool_1",
+        input={"action": "left_click", "coordinate": [10, 20]},
+    )
+    create = _CreateQueue(
+        [
+            SimpleNamespace(stop_reason="tool_use", content=[tool_use]),
+            SimpleNamespace(stop_reason="end_turn", content=[]),
+        ]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    example.run_anthropic_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        display_width_px=1280,
+        display_height_px=800,
+    )
+
+    tool_result = create.calls[1]["messages"][2]["content"][0]
+    assert tool_result["is_error"] is True
+    assert "secret screenshot failure" not in tool_result["content"][0]["text"]
+
+
+def test_anthropic_cookbook_marks_daemon_failure_as_tool_error() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+
+    def fail_action(action: Any, *, source: str = "sdk") -> ActionResult:
+        del action, source
+        return ActionResult(ok=False, message="action rejected")
+
+    computer.actions.apply = fail_action
+    tool_use = SimpleNamespace(
+        type="tool_use",
+        id="tool_1",
+        input={"action": "left_click", "coordinate": [10, 20]},
+    )
+    create = _CreateQueue(
+        [
+            SimpleNamespace(stop_reason="tool_use", content=[tool_use]),
+            SimpleNamespace(stop_reason="end_turn", content=[]),
+        ]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    example.run_anthropic_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        display_width_px=1280,
+        display_height_px=800,
+    )
+
+    tool_result = create.calls[1]["messages"][2]["content"][0]
+    assert tool_result["is_error"] is True
+    assert "action rejected" in tool_result["content"][0]["text"]
+
+
+def test_anthropic_cookbook_checks_batch_budget_before_execution() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    tool_uses = [
+        SimpleNamespace(
+            type="tool_use",
+            id=f"tool_{index}",
+            input={"action": "left_click", "coordinate": [10, 20]},
+        )
+        for index in range(2)
+    ]
+    create = _CreateQueue(
+        [SimpleNamespace(stop_reason="tool_use", content=tool_uses)]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    with pytest.raises(RuntimeError, match="exceeded 1 actions"):
+        example.run_anthropic_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            display_width_px=1280,
+            display_height_px=800,
+            max_actions=1,
+        )
+
+    assert computer.actions.applied == []
+
+
+def test_anthropic_cookbook_does_not_execute_tools_after_non_tool_stop() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    create = _CreateQueue(
+        [
+            SimpleNamespace(
+                stop_reason="max_tokens",
+                content=[SimpleNamespace(type="text", text="partial")],
+            )
+        ]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    response = example.run_anthropic_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        display_width_px=1280,
+        display_height_px=800,
+    )
+
+    assert response.stop_reason == "max_tokens"
+    assert computer.actions.applied == []
 
 
 @pytest.mark.parametrize(

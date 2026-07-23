@@ -20,6 +20,7 @@ KEY_ALIASES: dict[str, str] = {
     "esc": "Escape",
     "escape": "Escape",
     "home": "Home",
+    "meta": "super",
     "end": "End",
     "left": "Left",
     "right": "Right",

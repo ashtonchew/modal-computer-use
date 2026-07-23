@@ -177,6 +177,7 @@ class OpenAIAdapter:
         for action in actions:
             kind = action.get("type") or action.get("action")
             if kind == "keypress" and isinstance(action.get("keys"), list):
+                _reject_unknown_fields(action)
                 keys = action["keys"]
                 if not keys:
                     raise ActionValidationError("OpenAI keypress action requires keys")
@@ -185,6 +186,7 @@ class OpenAIAdapter:
                     for key in keys
                 )
             elif kind == "scroll":
+                _reject_unknown_fields(action)
                 normalized.extend(_scroll_actions(action))
             else:
                 normalized.append(self.normalize(action))

@@ -5,11 +5,13 @@
 
 ## Tool versions
 
-Use one of these tool versions:
+Use one of these current API tool versions:
 
 - Use `computer_20251124` with beta `computer-use-2025-11-24` for new code.
 - Use `computer_20250124` with beta `computer-use-2025-01-24` for compatible older models.
-- Use `computer_20241022` only for legacy integrations.
+
+The adapter also accepts `computer_20241022` for legacy integrations. Do not use this
+adapter-only compatibility option in new API requests.
 
 `AnthropicAdapter` uses `computer_20251124` by default. Zoom is off by default. Set
 `enable_zoom=True` to enable it.
@@ -156,9 +158,10 @@ response = client.beta.messages.create(
 )
 ```
 
-Keep the complete assistant content in the message history. Run each `tool_use`. Add one matching
-`tool_result` for each tool use. Put all tool results in the next user message. Mark a failed action
-with `is_error`. Return a screenshot after a graphical action.
+Keep the complete assistant content in the message history. Continue the tool loop only when
+`stop_reason` is `tool_use`. Run each `tool_use`. Add one matching `tool_result` for each tool use,
+including failures. Put all tool results in the next user message. Mark a failed action with
+`is_error`. Return a screenshot after a graphical action and text for `cursor_position`.
 
 Stop when Claude does not request a tool. Set limits for turns, actions, action time, and total time.
 See [examples/anthropic_message_server.py](../examples/anthropic_message_server.py) for a complete

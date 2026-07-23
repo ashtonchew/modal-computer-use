@@ -134,9 +134,9 @@ def main() -> None:
             computer=computer,
             model=model,
             task=(
-                "Open the browser and verify the example page is reachable. "
-                "Use the computer tool for UI interaction. Stop after reporting "
-                "the page title; do not sign in, submit forms, or change data."
+                "Open https://example.com in the browser. Verify that the page title is "
+                "'Example Domain', then report the title and stop. Use the computer tool "
+                "for UI interaction. Do not sign in, submit forms, or change data."
             ),
         )
         print(response.output_text)
