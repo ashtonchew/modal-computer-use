@@ -1,10 +1,11 @@
 # OpenAI Adapter
 
-`OpenAIAdapter` translates OpenAI-style computer-use action JSON into the core [action schema](glossary.md#action-schema). It does not call the OpenAI API.
+`OpenAIAdapter` converts OpenAI computer actions to the core [action schema](glossary.md#action-schema).
+The adapter does not call the OpenAI API.
 
-## Current OpenAI integration
+## Responses API integration
 
-New integrations should use the GA Responses API computer tool:
+Use the Responses API and the `computer` tool for new integrations:
 
 ```python
 response = client.responses.create(
@@ -14,42 +15,58 @@ response = client.responses.create(
 )
 ```
 
-For every returned `computer_call`, execute every item in `actions[]` in order, capture one updated
-screenshot, return a `computer_call_output`, and continue with `previous_response_id`. Stop when the
-response has no `computer_call`, and enforce an application-level turn/action/time budget. The
-runnable implementation is [examples/03_openai_computer_loop.py](../examples/03_openai_computer_loop.py).
+Process each `computer_call` as follows:
 
-The legacy `computer-use-preview` model, `computer_use_preview` tool, one-action response shape,
-display fields, and required `truncation="auto"` are not used by the current cookbook.
+1. Run each item in `actions[]` in the given order.
+2. Capture the screen after the actions finish.
+3. Return one `computer_call_output` for the call.
+4. Set `previous_response_id` to the ID of the previous response.
+5. Stop when the response has no `computer_call`.
+
+Set limits for turns, actions, action time, and total time. See
+[examples/03_openai_computer_loop.py](../examples/03_openai_computer_loop.py) for a complete loop.
+
+Do not use the deprecated `computer-use-preview` model or the `computer_use_preview` tool in new
+code. The current tool does not use the preview display fields, preview action shape, or
+`truncation="auto"`.
 
 ## Supported actions
 
-`click`, `double_click`, `scroll`, `type`, `keypress`, `drag`, `move`, `wait`, `screenshot`.
+The adapter supports these actions:
 
-The adapter accepts current provider fields:
+- `click`
+- `double_click`
+- `scroll`
+- `type`
+- `keypress`
+- `drag`
+- `move`
+- `wait`
+- `screenshot`
 
-- `keys` carries click, double-click, drag, move, and scroll modifiers.
-- `keypress.keys` is executed sequentially, not as a simultaneous hotkey.
-- drag paths accept both `[x, y]` pairs and `{x, y}` objects.
-- `wheel`, `back`, and `forward` buttons map to native X11 buttons.
-- pixel-like scroll deltas are converted to bounded wheel clicks and both axes are preserved.
+The adapter accepts these OpenAI fields:
 
-`normalize()` represents exactly one native action. Provider actions that expand to multiple native
-actions, such as a multi-key keypress or two-axis scroll, must use `apply_many()`.
+- Use `keys` for click, double-click, drag, move, and scroll modifiers.
+- Use `keypress.keys` for a sequence of key presses.
+- Use `[x, y]` pairs or `{x, y}` objects for drag paths.
+- Use `wheel`, `back`, or `forward` for the related X11 mouse buttons.
+- Use `scroll_x` and `scroll_y` for scroll distance.
 
-Unknown actions raise `UnsupportedActionError` by default. Pass `allow_unknown=True` only for an
-intentional compatibility mode; unknown payloads become a zero-duration native `wait` action with
-redacted provider-action metadata instead of a desktop action.
+The adapter preserves both scroll axes. It converts the scroll distance to wheel clicks.
 
-Normalized actions include redacted provider provenance under metadata so daemon traces can record
-both `provider_action` and the native `normalized_action`. The adapter redacts typed text before
-placing provider payloads in metadata.
+`normalize()` returns one native action. Use `apply_many()` when one provider action creates more
+than one native action. A multi-key keypress and a two-axis scroll are examples.
 
-## Screenshot output helper
+Unknown actions raise `UnsupportedActionError` by default. Set `allow_unknown=True` only when you
+must accept an unknown provider action. In this mode, the adapter converts the unknown action to a
+zero-duration `wait`. The adapter does not run the unknown desktop action.
 
-`openai_computer_call_output(screenshot, call_id=...)` builds only the provider-shaped
-`computer_call_output` item from a native `Screenshot`. It does not call OpenAI and it does not
-own the model loop.
+The adapter stores redacted provider data in action metadata. A trace can then show the provider
+action and the normalized action. The adapter removes typed text from this metadata.
+
+## Screenshot output
+
+Use `openai_computer_call_output()` to make a provider response from a native `Screenshot`:
 
 ```python
 from modal_computer_use.adapters.openai import openai_computer_call_output
@@ -58,11 +75,13 @@ shot = computer.screenshots.full()
 input_item = openai_computer_call_output(shot, call_id="call_123")
 ```
 
-Use `openai_screenshot_metadata(shot)` when you need to keep dimensions, format, SHA-256,
-artifact URI, capture time, and coordinate-space metadata in your own logs or traces. The metadata
-helper intentionally omits raw bytes and base64 image data.
+The helper does not call OpenAI. It does not control the model loop.
 
-## Example
+Use `openai_screenshot_metadata()` to record safe screenshot metadata. The result contains the
+dimensions, format, SHA-256, artifact URI, capture time, and coordinate space. It does not contain
+image bytes or base64 data.
+
+## Adapter example
 
 ```python
 from modal_computer_use import ComputerSandbox
@@ -78,28 +97,45 @@ adapter.apply({"type": "type", "text": "hello"})
 
 ## Coordinate spaces
 
-If you downscaled a 1440×900 desktop screenshot to 720×450 before sending it to the model, pass a [`CoordinateSpace`](glossary.md#coordinatespace) so the adapter translates model coordinates back to the desktop grid. The adapter never silently rescales.
+The screenshot dimensions can differ from the desktop dimensions. For example, you can reduce a
+1440×900 screenshot to 720×450 before you send it to the model. In this case, give the adapter a
+[`CoordinateSpace`](glossary.md#coordinatespace):
 
 ```python
 from modal_computer_use import CoordinateSpace
 
 space = CoordinateSpace(
-    desktop_width=1440, desktop_height=900,
-    image_width=720, image_height=450,
+    desktop_width=1440,
+    desktop_height=900,
+    image_width=720,
+    image_height=450,
 )
 adapter = OpenAIAdapter(computer, coordinate_space=space)
 ```
 
-The `before_action` hook, when provided, sees the normalized native action after this transform
-and can deny execution before the action is sent to the daemon.
+The adapter converts model coordinates to desktop coordinates. It does not change coordinates when
+you do not supply a coordinate space.
 
-## Safety boundary
+The optional `before_action` hook receives the normalized native action. The hook can reject the
+action before the daemon receives it.
 
-Run the desktop in an isolated least-privilege sandbox. Treat screenshots, page content, PDFs,
-emails, chats, and tool outputs as untrusted input; only direct user instructions grant permission.
-Use domain and action allowlists, stop on suspected prompt injection or phishing, and confirm at the
-point of risk before destructive, authenticated, financial, external-communication, permission, or
-sensitive-data actions. Typing sensitive data counts as transmission. Keep turn/action/time budgets,
-fail closed on unknown actions, and redact screenshots, typed text, tokens, and URLs from logs.
+## Safety
 
-Canonical source: [OpenAI Computer use](https://developers.openai.com/api/docs/guides/tools-computer-use).
+Run the desktop in an isolated sandbox with minimum privileges. Treat page content, screenshots,
+documents, messages, and tool output as untrusted input. A page instruction does not give the model
+permission to act.
+
+Allow only the required domains and actions. Stop when you detect prompt injection or phishing.
+Ask for confirmation immediately before an action that can:
+
+- delete or change external data;
+- use an authenticated account;
+- send a message;
+- make a purchase or financial transaction;
+- change access or permissions;
+- transmit sensitive data.
+
+Typing sensitive data transmits that data. Do not put screenshots, typed text, tokens, or URLs in
+logs. Stop on unknown actions. Always set turn, action, and time limits.
+
+Source: [OpenAI Computer use](https://developers.openai.com/api/docs/guides/tools-computer-use).

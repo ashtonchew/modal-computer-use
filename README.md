@@ -319,10 +319,10 @@ The helpers are pure conversions from native `Screenshot`/`ActionResult` models.
 provider APIs or import provider SDKs.
 
 See the runnable [OpenAI](examples/03_openai_computer_loop.py) and
-[Anthropic](examples/anthropic_message_server.py) loops for current provider request shapes,
-bounded iteration, ordered tool results, and post-action screenshots. The
-[provider comparison](docs/computer-use-providers.md) distinguishes model providers, browser-agent
-frameworks, and desktop infrastructure competitors.
+[Anthropic](examples/anthropic_message_server.py) loops. These examples use the current provider
+request formats. They set execution limits, keep tool results in order, and return screenshots
+after graphical actions. The [computer-use landscape](research/computer-use-landscape.md) compares
+model providers, browser-agent frameworks, browser infrastructure, and desktop infrastructure.
 
 ## Security Defaults
 
