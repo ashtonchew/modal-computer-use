@@ -117,7 +117,9 @@ in metadata. Passing `--gpu` defaults the created resource profile to `browser-g
 Use `--modal-region` to pin placement for created benchmark sandboxes when measuring latency from a
 known caller location. The same creation knob is available in SDK code as
 `ComputerConfig(runtime={"modal_region": "us-west"})`; leaving it unset preserves Modal's default
-placement policy.
+placement policy. SDK-owned co-located runner commands inherit this requested region, so the target
+and runner use one placement decision. Targets attached without a matching `ComputerConfig` still
+require an explicit runner region because the SDK cannot safely reconstruct their creation policy.
 
 To compare placement directly, run one fresh `daemon-transport-floor` sandbox per region:
 
@@ -158,6 +160,12 @@ visual response, not semantic application readiness or a complete model loop. Ob
 benchmark runs need a browser-capable target image, so pass `--browser chromium` or
 `--browser firefox`. See the [Alpha visual-change observation guide](docs/experimental-visual-change-observation.md)
 for the contract and limitations.
+
+Application workloads can use `run_modal_daemon_command_with_fallback()` for the same topology.
+Create the target with an explicit `runtime.modal_region`, then run the whole latency-sensitive
+session as one runner command; the helper inherits the target's requested region. It rejects a
+conflicting explicit runner region rather than silently losing co-location. See
+`examples/modal_colocated_runner.py`.
 
 The default SDK benchmark runs daemon HTTP plus OpenAI, Anthropic, and generic action-executor
 adapter normalization/execution without calling provider APIs. The raw Modal `Sandbox.exec`

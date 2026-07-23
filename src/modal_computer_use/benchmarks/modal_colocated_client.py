@@ -250,7 +250,6 @@ def run_modal_colocated_runner_benchmark(
         path=runner_path,
         app_name=config.app_name,
         runner_name=modal_colocated_runner_name(config.name),
-        modal_region=config.modal_region,
         env=env,
         app_tags={"benchmark": "modal-colocated-client", "benchmark_run_id": run_id},
         tags={

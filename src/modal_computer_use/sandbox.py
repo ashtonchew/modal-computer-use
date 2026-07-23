@@ -858,6 +858,7 @@ class ComputerSandbox:
         self.client = client
         self._sandbox = sandbox
         self._metadata = metadata
+        self._requested_modal_region: str | None = None
         self.startup_timing = startup_timing
         self._cleanup_on_readiness_failure = False
         self._readiness_stage_count = 0
@@ -1067,6 +1068,7 @@ class ComputerSandbox:
             computer._readiness_stage_count = 1
             timing.mark("attestation_ready")
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+        computer._requested_modal_region = config.runtime.modal_region
         computer._cleanup_on_readiness_failure = False
         return computer
 
@@ -1170,6 +1172,10 @@ class ComputerSandbox:
                     requested_hash=requested_hash,
                     on_config_mismatch=on_config_mismatch,
                 )
+                if computer.metadata() is not None and (
+                    computer.metadata().config_hash == requested_hash
+                ):
+                    computer._requested_modal_region = config.runtime.modal_region
                 return computer
             except SandboxAmbiguousError:
                 raise
@@ -1190,6 +1196,10 @@ class ComputerSandbox:
                     requested_hash=requested_hash,
                     on_config_mismatch=on_config_mismatch,
                 )
+                if computer.metadata() is not None and (
+                    computer.metadata().config_hash == requested_hash
+                ):
+                    computer._requested_modal_region = config.runtime.modal_region
                 return computer
             except SandboxAmbiguousError:
                 raise
@@ -1669,6 +1679,7 @@ def create_modal_benchmark_computer(
             metadata=metadata,
             startup_timing=timing,
         )
+        computer._requested_modal_region = config.runtime.modal_region
         if wait and transport != "workspace-private-i6pn":
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
             timing.mark("authenticated_daemon_ready")
@@ -1805,6 +1816,7 @@ def create_modal_v2_tunnel_computer(
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = ComputerSandbox(client, sandbox=sandbox, metadata=metadata)
+        computer._requested_modal_region = config.runtime.modal_region
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
             timing.mark("authenticated_tunnel_ready")
@@ -1851,6 +1863,11 @@ def run_modal_daemon_command(
     exec_once: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_once,
     exec_in_target: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_in_place,
 ) -> ModalSandboxExecResult:
+    selected_region = (
+        None
+        if path == "target-loopback"
+        else _resolve_modal_runner_region(computer, modal_region)
+    )
     command_tuple, endpoint, runner_env = _prepare_modal_daemon_command(
         computer,
         command,
@@ -1865,13 +1882,12 @@ def run_modal_daemon_command(
             env=runner_env,
             exec_timeout_seconds=exec_timeout_seconds,
         )
-    if not modal_region:
-        raise ValueError("modal_region is required for separate runner paths")
+    assert selected_region is not None
     return exec_once(
         command_tuple,
         app_name=app_name,
         name=runner_name,
-        region=modal_region,
+        region=selected_region,
         env=runner_env,
         app_tags=app_tags,
         tags={
@@ -1889,7 +1905,7 @@ def run_modal_daemon_command_with_fallback(
     computer: ComputerSandbox,
     command: Sequence[str],
     *,
-    modal_region: str,
+    modal_region: str | None = None,
     app_name: str = "modal-computer-use",
     runner_name: str | None = None,
     env: dict[str, str] | None = None,
@@ -1906,13 +1922,17 @@ def run_modal_daemon_command_with_fallback(
     The workload process receives the daemon endpoint directly. Action and frame
     bytes do not pass through an allocation broker. The target-loopback path is
     intentionally unavailable here because it is diagnostic-only. The caller must
-    supply ``external_runner`` to opt into execution outside Modal.
+    supply ``external_runner`` to opt into execution outside Modal. When the target
+    was created by this SDK with an explicit region, the runner inherits it.
     """
-    if not modal_region.strip():
-        raise ValueError("modal_region must be selected from measured evidence")
     command_tuple = tuple(command)
     if not command_tuple:
         raise ValueError("command must not be empty")
+    selected_region = _resolve_modal_runner_region(
+        computer,
+        modal_region,
+        require_target_match=True,
+    )
     try:
         endpoint = modal_daemon_endpoint(computer, "connect")
         runner_env = modal_daemon_env(endpoint, env)
@@ -1929,7 +1949,7 @@ def run_modal_daemon_command_with_fallback(
         return ModalDaemonCommandResult(
             result=result,
             selected_path="external",
-            requested_region=modal_region,
+            requested_region=selected_region,
             fallback_used=True,
             fallback_reason=exc.__class__.__name__,
         )
@@ -1937,7 +1957,7 @@ def run_modal_daemon_command_with_fallback(
         command_tuple,
         app_name=app_name,
         name=runner_name,
-        region=modal_region,
+        region=selected_region,
         env=runner_env,
         app_tags=app_tags,
         tags={
@@ -1952,8 +1972,41 @@ def run_modal_daemon_command_with_fallback(
     return ModalDaemonCommandResult(
         result=result,
         selected_path="same-region-connect",
-        requested_region=modal_region,
+        requested_region=selected_region,
         fallback_used=False,
+    )
+
+
+def _resolve_modal_runner_region(
+    computer: ComputerSandbox,
+    modal_region: str | None,
+    *,
+    require_target_match: bool = False,
+) -> str:
+    explicit_region = modal_region.strip() if modal_region is not None else None
+    if modal_region is not None and not explicit_region:
+        raise ValueError("modal_region must be non-empty when provided")
+    requested_region_value = getattr(computer, "_requested_modal_region", None)
+    requested_region = (
+        requested_region_value.strip()
+        if isinstance(requested_region_value, str) and requested_region_value.strip()
+        else None
+    )
+    if explicit_region is not None:
+        if (
+            require_target_match
+            and requested_region is not None
+            and explicit_region != requested_region
+        ):
+            raise ConfigConflictError(
+                f"runner modal_region {explicit_region!r} does not match the target sandbox's "
+                f"requested region {requested_region!r}"
+            )
+        return explicit_region
+    if requested_region is not None:
+        return requested_region
+    raise ValueError(
+        "modal_region is required when the target sandbox's requested region is unknown"
     )
 
 

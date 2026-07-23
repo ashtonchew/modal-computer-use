@@ -18,6 +18,7 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
     surfaces = ["daemon-transport-floor", "daemon-observation-stream"]
 
     class CreatedComputer:
+        _requested_modal_region = "us-west"
         client = SimpleNamespace(
             base_url="https://target.example.modal.host",
             transport=SimpleNamespace(token="target-token"),
@@ -136,6 +137,7 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
 
     class CreatedComputer:
         _sandbox = TargetSandbox()
+        _requested_modal_region = "us-west"
         client = SimpleNamespace(
             base_url="https://target.example.modal.host",
             transport=SimpleNamespace(token="attested-token"),

@@ -25,7 +25,6 @@ def run_colocated_command(
     command: Sequence[str],
     *,
     computer: ComputerSandbox,
-    modal_region: str,
     app_name: str = "modal-computer-use",
     runner_name: str | None = None,
     env: dict[str, str] | None = None,
@@ -38,7 +37,6 @@ def run_colocated_command(
         computer,
         tuple(command),
         app_name=app_name,
-        modal_region=modal_region,
         runner_name=runner_name,
         env=env,
         runner_cpu=runner_cpu,
@@ -72,7 +70,6 @@ def main() -> None:
                 "print(client.version())",
             ),
             computer=computer,
-            modal_region=modal_region,
             runner_name="computer-use-colocated-runner",
         )
         print(

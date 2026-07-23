@@ -354,10 +354,11 @@ def test_create_passes_modal_region_when_set(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(run_id="run-123", runtime={"modal_region": "us-west"})
 
-    ComputerSandbox.create(config=config, image=object(), wait=False)
+    computer = ComputerSandbox.create(config=config, image=object(), wait=False)
 
     _, kwargs = FakeSandbox.create_calls[0]
     assert kwargs["region"] == "us-west"
+    assert computer._requested_modal_region == "us-west"
 
 
 def test_create_omits_modal_region_by_default(monkeypatch) -> None:
@@ -1776,7 +1777,10 @@ def test_registry_find_by_run_id_ambiguous_fails(monkeypatch) -> None:
 
 def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    config = ComputerConfig(run_id="run-123")
+    config = ComputerConfig(
+        run_id="run-123",
+        runtime={"modal_region": "us-west"},
+    )
     FakeSandbox.listed = [
         FakeSandboxObject(
             tags={
@@ -1791,6 +1795,7 @@ def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
 
     assert computer.metadata() is not None
     assert computer.metadata().run_id == "run-123"
+    assert computer._requested_modal_region == "us-west"
     assert FakeSandbox.list_calls == [{"computer-use.run_id": "run-123"}]
     assert FakeSandbox.create_calls == []
 
@@ -1871,7 +1876,10 @@ def test_attach_or_create_config_hash_mismatch_can_reuse_explicitly(monkeypatch)
     ]
 
     computer = ComputerSandbox.attach_or_create(
-        config=ComputerConfig(run_id="run-123"),
+        config=ComputerConfig(
+            run_id="run-123",
+            runtime={"modal_region": "us-west"},
+        ),
         on_config_mismatch="reuse",
         image=object(),
         wait=False,
@@ -1879,6 +1887,7 @@ def test_attach_or_create_config_hash_mismatch_can_reuse_explicitly(monkeypatch)
 
     assert computer.metadata() is not None
     assert computer.metadata().config_hash == "different"
+    assert computer._requested_modal_region is None
     assert FakeSandbox.create_calls == []
 
 
