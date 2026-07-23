@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass
+from math import ceil
 from time import perf_counter
 from typing import Any
 
@@ -12,6 +13,10 @@ from fastapi import APIRouter, Header, Request, Response
 from modal_computer_use.daemon.actions import ActionBatchContext, run_with_screenshot_bytes
 from modal_computer_use.daemon.actions import run as run_batch
 from modal_computer_use.daemon.actions import validate as validate_batch
+from modal_computer_use.daemon.desktop.screenshots import (
+    CapturedRawScreenshot,
+    try_encode_captured_raw,
+)
 from modal_computer_use.daemon.desktop.xdamage import XDamageWaitResult, XDamageWatcher
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_screenshot_capture
@@ -38,6 +43,12 @@ class _PreparedActionChangeSignal:
     active: str
     watcher: XDamageWatcher | None = None
     unavailable_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _SourceConfirmation:
+    source_sha256: str
+    raw_frame: CapturedRawScreenshot | None
 
 
 @router.post("/validate")
@@ -119,7 +130,9 @@ async def run_observe_change_raw_screenshot(
     baseline_capture_ms = 0.0
     needs_poll_baseline = change_signal.active == "poll"
     if needs_poll_baseline and baseline_sha256 is None:
-        baseline_sha256 = await _capture_source_sha256(request, region=region)
+        baseline_sha256 = (
+            await _capture_source_confirmation(request, region=region)
+        ).source_sha256
         baseline_capture_ms = _elapsed_ms(baseline_started)
     action_request = ActionBatchRequest.model_validate(
         payload.model_dump(
@@ -172,6 +185,7 @@ async def run_observe_change_raw_screenshot(
         source_confirmation_active = baseline_sha256 is not None
         source_confirmation_fallback_used = False
         source_confirmation_fallback_reason: str | None = None
+        confirmed_raw_frame: CapturedRawScreenshot | None = None
         poll_ms = 0.0
         should_poll = needs_poll_baseline and baseline_sha256 is not None
         if change_signal.active == "xdamage" and baseline_sha256 is not None:
@@ -186,8 +200,11 @@ async def run_observe_change_raw_screenshot(
             else:
                 poll_started = perf_counter()
                 attempts += 1
-                source_sha256 = await _capture_source_sha256(request, region=region)
+                confirmation = await _capture_source_confirmation(request, region=region)
+                source_sha256 = confirmation.source_sha256
                 detected = source_sha256 != baseline_sha256
+                if detected:
+                    confirmed_raw_frame = confirmation.raw_frame
                 poll_ms = _elapsed_ms(poll_started)
                 if not detected:
                     source_confirmation_fallback_used = True
@@ -216,21 +233,36 @@ async def run_observe_change_raw_screenshot(
                     if perf_counter() >= deadline:
                         break
                 attempts += 1
-                source_sha256 = await _capture_source_sha256(request, region=region)
+                confirmation = await _capture_source_confirmation(request, region=region)
+                source_sha256 = confirmation.source_sha256
                 detected = source_sha256 != baseline_sha256
+                if detected:
+                    confirmed_raw_frame = confirmation.raw_frame
                 if detected or perf_counter() >= deadline:
                     break
             poll_ms += _elapsed_ms(poll_started)
         screenshot_started = perf_counter()
+        shot = try_encode_captured_raw(
+            confirmed_raw_frame,
+            options,
+            output_region=None,
+        )
+        confirmed_frame_reused = shot is not None
+        if shot is None:
 
-        async def operation():
-            return await request.app.state.backend.screenshot_bytes(options, prefer_native_png=True)
+            async def operation():
+                return await request.app.state.backend.screenshot_bytes(
+                    options,
+                    prefer_native_png=True,
+                )
 
-        shot = await run_screenshot_capture(request, operation)
+            shot = await run_screenshot_capture(request, operation)
     finally:
         if change_signal.watcher is not None:
             change_signal.watcher.close()
     screenshot_ms = _elapsed_ms(screenshot_started)
+    confirmed_frame_encode_ms = screenshot_ms if confirmed_frame_reused else 0.0
+    fresh_final_capture_ms = screenshot_ms if not confirmed_frame_reused else 0.0
     change_timing = {
         "baseline_capture_ms": baseline_capture_ms,
         "signal_prepare_ms": signal_prepare_ms,
@@ -239,6 +271,8 @@ async def run_observe_change_raw_screenshot(
         "signal_wait_wall_ms": signal_wait_wall_ms,
         "poll_ms": poll_ms,
         "screenshot_ms": screenshot_ms,
+        "confirmed_frame_encode_ms": confirmed_frame_encode_ms,
+        "fresh_final_capture_ms": fresh_final_capture_ms,
         "total_ms": _elapsed_ms(started),
     }
     change_result = {
@@ -260,6 +294,9 @@ async def run_observe_change_raw_screenshot(
         "source_confirmation_attempts": attempts,
         "source_confirmation_fallback_used": source_confirmation_fallback_used,
         "source_confirmation_fallback_reason": source_confirmation_fallback_reason,
+        "confirmed_frame_reused": confirmed_frame_reused,
+        "final_frame_source": "source_confirmation" if confirmed_frame_reused else "fresh_capture",
+        "final_desktop_capture_performed": not confirmed_frame_reused,
     }
     headers = {
         **_screenshot_headers(shot),
@@ -272,23 +309,27 @@ async def run_observe_change_raw_screenshot(
     return Response(content=shot.data, media_type=f"image/{shot.format}", headers=headers)
 
 
-async def _capture_source_sha256(request: Request, *, region: Region | None) -> str:
+async def _capture_source_confirmation(
+    request: Request,
+    *,
+    region: Region | None,
+) -> _SourceConfirmation:
     async def raw_operation():
         return await request.app.state.backend.screenshot_raw_pixels(region=region)
 
     raw = await run_screenshot_capture(request, raw_operation)
     if raw is not None:
-        return raw.sha256
+        return _SourceConfirmation(source_sha256=raw.sha256, raw_frame=raw)
 
-    async def operation():
+    async def encoded_operation():
         return await request.app.state.backend.screenshot_bytes(
             ScreenshotOptions(format="png", show_cursor=False),
             region=region,
             prefer_native_png=True,
         )
 
-    shot = await run_screenshot_capture(request, operation)
-    return shot.sha256
+    shot = await run_screenshot_capture(request, encoded_operation)
+    return _SourceConfirmation(source_sha256=shot.sha256, raw_frame=None)
 
 
 def _prepare_action_change_signal(
@@ -385,7 +426,7 @@ def _change_poll_sleep_ms(
 
 
 def _remaining_timeout_ms(deadline: float) -> int:
-    return max(0, int((deadline - perf_counter()) * 1000))
+    return max(0, ceil((deadline - perf_counter()) * 1000))
 
 
 def _change_signal_available(

@@ -128,7 +128,7 @@ class ActionsNamespace(Namespace):
         change_detection: str = "full",
         change_detection_region: Region | dict[str, Any] | None = None,
         change_region_radius: int = 192,
-        change_signal: str = "auto",
+        change_signal: str = "poll",
         continue_on_error: bool = False,
         screenshot_options: ScreenshotOptions | None = None,
         max_action_timeout_ms: int | None = None,

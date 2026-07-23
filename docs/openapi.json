@@ -288,7 +288,7 @@
             "type": "integer"
           },
           "change_signal": {
-            "default": "auto",
+            "default": "poll",
             "enum": [
               "poll",
               "xdamage",

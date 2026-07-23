@@ -415,12 +415,14 @@ wait for a keyframe.
 
 For one-shot turns evaluating first-visual-change without maintaining an observation stream, use
 `actions.run_and_observe_change_screenshot_bytes(...)` or
-`POST /v1/actions/run/observe-change/raw-screenshot`. With `change_signal="auto"`, the daemon uses
-XDamage as the paint signal when available, then captures one final binary screenshot. If XDamage is
-unavailable, or if callers set `change_signal="poll"`, the route falls back to source-hash polling.
-This route is intentionally a one-shot binary response, not a replacement for stream patch/delta
-state. It has the same Alpha semantic limitation: the first detected change is not settle or
-application readiness.
+`POST /v1/actions/run/observe-change/raw-screenshot`. The one-shot action surface defaults to
+`change_signal="poll"`: it captures raw source pixels until the source hash changes, then encodes and
+returns that exact confirming frame when full-frame cursorless semantics allow it. This avoids a
+second desktop read and keeps change proof and returned pixels causally identical. Explicit
+`change_signal="auto"` and `change_signal="xdamage"` remain available; XDamage is only a wakeup hint
+and the route source-confirms it before reuse. This route is intentionally a one-shot binary
+response, not a replacement for stream patch/delta state. It has the same Alpha semantic
+limitation: the first detected change is not settle or application readiness.
 
 For no-cursor screenshots, the X11 daemon prefers an in-process MSS capture path. Native raw PNG
 screenshots use MSS PNG bytes directly. JPEG, WebP, and scaled screenshots use MSS pixel capture
@@ -1263,9 +1265,11 @@ single daemon request while returning the screenshot as binary image bytes. The 
 
 When the caller needs to wait for the next paint instead of capturing immediately, use
 `actions.run_and_observe_change_screenshot_bytes(...)`. It returns binary image bytes plus parsed
-`change_result` and `change_timing_ms` metadata. The default `change_signal="auto"` is fastest on
-X11 images with DAMAGE support; set `change_signal="poll"` when the caller needs source-hash
-verification instead of event-driven paint detection.
+`change_result` and `change_timing_ms` metadata. The action surface defaults to
+`change_signal="poll"`, source-confirms changed pixels, and reuses that exact frame for cursorless
+full-frame output. Explicit `auto` and `xdamage` modes still source-confirm XDamage before returning
+a frame. The observation stream keeps its separate persistent-watcher default because it amortizes
+watcher state across turns.
 
 For raw PNG screenshots at native scale without the cursor, the daemon first tries an in-process
 MSS/XShm capture and falls back to `scrot`, then `maim`, if the fast capture is unavailable.

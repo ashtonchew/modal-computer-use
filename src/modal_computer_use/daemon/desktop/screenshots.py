@@ -66,6 +66,58 @@ class CapturedRawScreenshot:
     timings_ms: Mapping[str, float] = field(default_factory=dict)
 
 
+def try_encode_captured_raw(
+    raw: CapturedRawScreenshot | None,
+    options: ScreenshotOptions,
+    *,
+    output_region: Region | None,
+) -> CapturedScreenshot | None:
+    if raw is None:
+        return None
+    if raw.width <= 0 or raw.height <= 0:
+        raise ValueError("raw screenshot dimensions must be positive")
+    if (
+        raw.coordinate_space.image_width != raw.width
+        or raw.coordinate_space.image_height != raw.height
+    ):
+        raise ValueError("raw screenshot dimensions do not match its coordinate space")
+    if len(raw.rgb) != raw.width * raw.height * 3:
+        raise ValueError("raw screenshot RGB byte length does not match its dimensions")
+    if raw.cursor_visible or options.show_cursor:
+        return None
+    if raw.coordinate_space.source_region != output_region:
+        return None
+
+    image_width = scaled_dimension(raw.width, options.scale)
+    image_height = scaled_dimension(raw.height, options.scale)
+    if options.format == "png" and options.scale == 1.0:
+        data = encode_rgb_png(raw.rgb, (raw.width, raw.height))
+    else:
+        image = Image.frombytes("RGB", (raw.width, raw.height), raw.rgb)
+        if options.scale != 1.0:
+            image = image.resize((image_width, image_height))
+        data = encode_image(image, options.format, options.quality)
+
+    coordinate_space = CoordinateSpace.from_dimensions(
+        desktop_width=raw.coordinate_space.desktop_width,
+        desktop_height=raw.coordinate_space.desktop_height,
+        image_width=image_width,
+        image_height=image_height,
+        source_region=output_region,
+    )
+    return CapturedScreenshot(
+        format=options.format,
+        width=image_width,
+        height=image_height,
+        data=data,
+        sha256=sha256_bytes(data),
+        captured_at=raw.captured_at,
+        coordinate_space=coordinate_space,
+        cursor_visible=raw.cursor_visible,
+        capture_backend=raw.capture_backend,
+    )
+
+
 class X11ScreenshotController:
     def __init__(
         self,

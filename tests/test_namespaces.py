@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from modal_computer_use.daemon.schemas import (
+    ActionObserveChangeScreenshotRequest,
+    ObservationActionObserveChangeRequest,
+)
 from modal_computer_use.namespaces.actions import ActionsNamespace
 from modal_computer_use.namespaces.recordings import RecordingsNamespace
 from modal_computer_use.namespaces.screenshots import ScreenshotsNamespace
@@ -147,6 +151,22 @@ def test_actions_namespace_run_and_observe_change_screenshot_bytes_uses_fast_pat
     assert client.posts[0]["json"]["change_detection"] == "auto_region"
     assert client.posts[0]["json"]["change_region_radius"] == 64
     assert client.posts[0]["json"]["change_signal"] == "poll"
+
+
+def test_actions_namespace_observe_change_defaults_to_poll() -> None:
+    client = _FakeClient()
+    namespace = ActionsNamespace(client)  # type: ignore[arg-type]
+
+    namespace.run_and_observe_change_screenshot_bytes(
+        [{"type": "move", "x": 1, "y": 2}],
+    )
+
+    assert client.posts[0]["json"]["change_signal"] == "poll"
+
+
+def test_observe_change_schema_defaults_keep_one_shot_and_stream_separate() -> None:
+    assert ActionObserveChangeScreenshotRequest(actions=[]).change_signal == "poll"
+    assert ObservationActionObserveChangeRequest(actions=[]).change_signal == "auto"
 
 
 def test_recordings_namespace_download_streams_to_target(tmp_path) -> None:

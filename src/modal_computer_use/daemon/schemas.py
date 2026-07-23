@@ -54,7 +54,7 @@ class ActionObserveChangeScreenshotRequest(ActionBatchRequest):
     poll_interval_ms: int = Field(default=8, ge=1, le=1_000)
     poll_strategy: Literal["fixed", "adaptive"] = "fixed"
     change_detection: Literal["full", "region", "auto_region"] = "full"
-    change_signal: Literal["poll", "xdamage", "auto"] = "auto"
+    change_signal: Literal["poll", "xdamage", "auto"] = "poll"
     change_detection_region: Region | None = None
     change_region_radius: int = Field(default=192, ge=1, le=10_000)
 

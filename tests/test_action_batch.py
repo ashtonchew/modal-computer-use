@@ -5,6 +5,7 @@ import io
 import json
 from datetime import UTC, datetime
 
+import pytest
 from PIL import Image
 
 from modal_computer_use.daemon.desktop.screenshots import (
@@ -13,7 +14,7 @@ from modal_computer_use.daemon.desktop.screenshots import (
 )
 from modal_computer_use.daemon.desktop.xdamage import XDamageWaitResult
 from modal_computer_use.daemon.routes import actions as action_routes
-from modal_computer_use.models import ActionResult, CoordinateSpace, Point, sha256_bytes
+from modal_computer_use.models import ActionResult, CoordinateSpace, Point, Region, sha256_bytes
 
 
 def test_action_batch_stop_on_error(test_client) -> None:
@@ -277,10 +278,7 @@ def test_action_batch_observe_change_waits_when_click_ack_precedes_paint(
         return after
 
     async def screenshot_bytes(*_args, **_kwargs):
-        assert click_acknowledged is True
-        assert capture_count == 2
-        events.append("final_encode")
-        return _encoded_screenshot("black")
+        raise AssertionError("changed confirmation should be the returned frame")
 
     app.state.backend.mouse_click = click_then_defer_paint
     app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
@@ -309,10 +307,59 @@ def test_action_batch_observe_change_waits_when_click_ack_precedes_paint(
         "click_acknowledged",
         "unchanged_capture",
         "changed_capture",
-        "final_encode",
     ]
+    assert change_result["confirmed_frame_reused"] is True
+    assert change_result["final_frame_source"] == "source_confirmation"
+    assert change_result["final_desktop_capture_performed"] is False
     with Image.open(io.BytesIO(response.content)) as image:
         assert image.convert("RGB").getpixel((0, 0)) == (0, 0, 0)
+
+
+def test_action_batch_observe_change_reuses_post_action_confirmation_not_baseline(
+    test_client,
+    app,
+) -> None:
+    baseline = _raw_screenshot_bytes("white")
+    confirming = _raw_screenshot_bytes("red")
+    raw_captures = iter([baseline, confirming])
+    raw_capture_count = 0
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        nonlocal raw_capture_count
+        raw_capture_count += 1
+        return next(raw_captures)
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        raise AssertionError("confirming frame must be encoded without another desktop capture")
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": False},
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    change_timing = json.loads(response.headers["x-computer-use-change-timing-ms"])
+    assert response.status_code == 200
+    assert raw_capture_count == 2
+    assert change_result["baseline_source_sha256"] == baseline.sha256
+    assert change_result["source_sha256"] == confirming.sha256
+    assert change_result["confirmed_frame_reused"] is True
+    assert change_result["final_frame_source"] == "source_confirmation"
+    assert change_result["final_desktop_capture_performed"] is False
+    assert change_timing["confirmed_frame_encode_ms"] >= 0.0
+    assert change_timing["fresh_final_capture_ms"] == 0.0
+    assert change_timing["screenshot_ms"] >= 0.0
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.convert("RGB").getpixel((0, 0)) == (255, 0, 0)
 
 
 def test_action_batch_observe_change_timeout_does_not_retry_click(
@@ -355,6 +402,212 @@ def test_action_batch_observe_change_timeout_does_not_retry_click(
     assert change_result["detected"] is False
     assert change_result["attempts"] == 1
     assert change_result["timeout_reached"] is True
+    assert change_result["confirmed_frame_reused"] is False
+    assert change_result["final_frame_source"] == "fresh_capture"
+    assert change_result["final_desktop_capture_performed"] is True
+
+
+def test_action_batch_observe_change_cursor_output_uses_one_fresh_capture(
+    test_client,
+    app,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    final_capture_count = 0
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        nonlocal final_capture_count
+        final_capture_count += 1
+        return _encoded_screenshot("red")
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": True},
+            "previous_source_sha256": before.sha256,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    change_timing = json.loads(response.headers["x-computer-use-change-timing-ms"])
+    assert response.status_code == 200
+    assert final_capture_count == 1
+    assert change_result["detected"] is True
+    assert change_result["confirmed_frame_reused"] is False
+    assert change_result["final_frame_source"] == "fresh_capture"
+    assert change_result["final_desktop_capture_performed"] is True
+    assert change_timing["confirmed_frame_encode_ms"] == 0.0
+    assert change_timing["fresh_final_capture_ms"] >= 0.0
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.convert("RGB").getpixel((0, 0)) == (255, 0, 0)
+
+
+def test_action_batch_observe_change_raw_unavailable_uses_one_fresh_capture(
+    test_client,
+    app,
+) -> None:
+    before = _encoded_screenshot("white")
+    confirming = _encoded_screenshot("black")
+    final = _encoded_screenshot("red")
+    encoded_captures = iter([confirming, final])
+    encoded_capture_count = 0
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return None
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        nonlocal encoded_capture_count
+        encoded_capture_count += 1
+        return next(encoded_captures)
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before.sha256,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert encoded_capture_count == 2
+    assert change_result["source_sha256"] == confirming.sha256
+    assert change_result["confirmed_frame_reused"] is False
+    assert change_result["final_frame_source"] == "fresh_capture"
+    assert change_result["final_desktop_capture_performed"] is True
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.convert("RGB").getpixel((0, 0)) == (255, 0, 0)
+
+
+def test_action_batch_observe_change_regional_confirmation_uses_full_fresh_capture(
+    test_client,
+    app,
+) -> None:
+    region = {"x": 0, "y": 0, "width": 4, "height": 4}
+    region_rgb = Image.new("RGB", (4, 4), "black").tobytes()
+    before_sha256 = sha256_bytes(Image.new("RGB", (4, 4), "white").tobytes())
+    confirming = CapturedRawScreenshot(
+        width=4,
+        height=4,
+        rgb=region_rgb,
+        sha256=sha256_bytes(region_rgb),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=8,
+            desktop_height=8,
+            source_region=Region.model_validate(region),
+        ),
+        cursor_visible=False,
+    )
+    final_capture_count = 0
+
+    async def screenshot_raw_pixels(*_args, **kwargs):
+        assert kwargs["region"].model_dump(mode="json") == region
+        return confirming
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        nonlocal final_capture_count
+        final_capture_count += 1
+        return _encoded_screenshot("red")
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 2, "y": 2}],
+            "previous_source_sha256": before_sha256,
+            "change_detection": "region",
+            "change_detection_region": region,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert final_capture_count == 1
+    assert change_result["detected"] is True
+    assert change_result["confirmed_frame_reused"] is False
+    assert change_result["final_frame_source"] == "fresh_capture"
+    assert change_result["final_desktop_capture_performed"] is True
+
+
+def test_action_batch_observe_change_encoding_error_closes_watcher_without_replay(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    mutation_count = 0
+    fresh_capture_count = 0
+    watcher_close_count = 0
+
+    class DetectedWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            assert display == ":99"
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int) -> XDamageWaitResult:
+            return XDamageWaitResult(available=True, detected=True, wait_ms=0.0)
+
+        def close(self) -> None:
+            nonlocal watcher_close_count
+            watcher_close_count += 1
+
+    async def mouse_move_once(*_args, **_kwargs):
+        nonlocal mutation_count
+        mutation_count += 1
+        return Point(x=10, y=20)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    async def screenshot_bytes(*_args, **_kwargs):
+        nonlocal fresh_capture_count
+        fresh_capture_count += 1
+        return _encoded_screenshot("red")
+
+    def fail_encoding(*_args, **_kwargs):
+        raise RuntimeError("confirmed frame encoding failed")
+
+    app.state.backend.display = ":99"
+    app.state.backend.mouse_move = mouse_move_once
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+    monkeypatch.setattr(action_routes, "XDamageWatcher", DetectedWatcher)
+    monkeypatch.setattr(action_routes, "try_encode_captured_raw", fail_encoding, raising=False)
+
+    with pytest.raises(RuntimeError, match="confirmed frame encoding failed"):
+        test_client.post(
+            "/v1/actions/run/observe-change/raw-screenshot",
+            json={
+                "actions": [{"type": "move", "x": 10, "y": 20}],
+                "previous_source_sha256": before.sha256,
+                "change_signal": "xdamage",
+            },
+        )
+
+    assert mutation_count == 1
+    assert fresh_capture_count == 0
+    assert watcher_close_count == 1
 
 
 def test_action_batch_observe_change_falls_back_when_xdamage_setup_is_unavailable(
@@ -742,6 +995,13 @@ def test_action_batch_observe_change_xdamage_unchanged_timeout_does_not_replay_c
     assert change_result["source_confirmation_attempts"] == 1
     assert change_result["source_confirmation_fallback_used"] is True
     assert change_result["source_confirmation_fallback_reason"] == "source_unchanged"
+
+
+def test_remaining_timeout_ms_preserves_positive_fraction(monkeypatch) -> None:
+    monkeypatch.setattr(action_routes, "perf_counter", lambda: 10.0001)
+
+    assert action_routes._remaining_timeout_ms(10.001) == 1
+    assert action_routes._remaining_timeout_ms(10.0) == 0
 
 
 def _change_result(response) -> dict:
