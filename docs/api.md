@@ -271,7 +271,9 @@ sandboxes; attaching or reusing an existing sandbox cannot relocate it. Because 
 `ComputerConfig`, it participates in the existing config-hash mismatch protection for reuse flows.
 SDK-owned co-located runner helpers retain that requested placement on a newly created target, or on
 an `attach_or_create()` result whose config hash matches. They do not infer placement from an
-observed runtime region.
+observed runtime region. Broad selectors such as `us-west` preserve scheduling flexibility rather
+than guaranteeing one concrete provider region. Choose a supported narrow selector only after
+measuring it from the real caller environment and accepting its availability and pricing tradeoffs.
 Use `computer-use benchmark modal-region-ab` to compare fresh `daemon-transport-floor` runs across
 repeatable `--modal-region` values while holding ingress, HTTP version, image, and resource knobs
 fixed. Pass `--caller-region-label` to record where the benchmark caller or model loop ran; this is
