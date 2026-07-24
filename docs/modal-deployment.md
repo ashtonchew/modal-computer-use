@@ -190,16 +190,22 @@ Each Modal App and pool pair receives a distinct Queue. Each fixed slot uses its
 [Modal Queue partitions](https://modal.com/docs/sdk/py/latest/modal.Queue)
 are cleared after 24 hours without a put and when their App stops. A fresh queue identity is written to the Sandbox before enqueue.
 Claims compare that identity twice, so stale or concurrent duplicate entries cannot claim a slot.
-Refill and the final claim transition also take a non-blocking file lock inside the target Sandbox.
-The lock prevents a stale registry snapshot from restoring a slot after another consumer claims it.
+Refill, stale-entry discard, candidate validation and transition, and reconciliation all take a
+non-blocking file lock inside a running target Sandbox before a decision can terminate it. Each
+path then refreshes the target's lifecycle tags while holding the lock. Busy, claimed, mismatched,
+or unverifiable targets are detached or skipped rather than terminated. A target already observed
+as finished can be cleaned up without a lock because that lifecycle state cannot return to running.
+These rules prevent stale queue or registry snapshots from killing or restoring capacity after
+another consumer claims it.
 
 Warm configs cannot set `idle_timeout_seconds` because Modal does not expose the remaining idle
 lifetime. They also cannot set an explicit `vnc_password`, because that credential is fixed when
 the Sandbox starts and must not cross claims. Expiry is conservative: it starts before the create
 request and subtracts a configured skew. Pool tags record stable configuration identity, fixed slot, requested and actual region,
 ready time, expiry, CPU, and memory. `reconcile_warm_pool()` removes near-expiry, incompatible, and
-abandoned provisioning slots. Queue entries can outlive a terminated slot; the claim path rejects
-those stale entries and preserves the cold fallback.
+abandoned provisioning slots only after the same locked live-tag verification. Queue entries can
+outlive a terminated slot; the claim path rejects those stale entries and preserves the cold
+fallback.
 
 Claim metrics report pool hit or miss, every rejection reason, claim latency, total
 request-to-first-frame latency, remaining lifetime, configured pool size, idle resource-seconds,

@@ -160,12 +160,13 @@ adds `zoom`. Older versions reject newer actions instead of accepting them silen
 
 ## Modal attach and reuse
 
-Modal mode supports three explicit attach paths:
+The SDK supports four explicit attach paths:
 
 ```python
 ComputerSandbox.attach(sandbox_id="sb-...")
 ComputerSandbox.attach(name="desktop-1", app_name="modal-computer-use")
 ComputerSandbox.attach(run_id="support-ticket-123")
+ComputerSandbox.attach(base_url="https://daemon.example", token="...")
 ```
 
 `run_id` is the canonical sandbox lifetime identifier. `request_id` is only a deprecated
@@ -205,6 +206,10 @@ existing sandbox configuration.
 terminate a sandbox. Pass `wait=True` to poll `/readyz` after attaching. `attach_or_create(...)`
 defaults to `wait=True` for both reused and newly-created sandboxes, so resumable workflows get a
 desktop-ready handle unless they explicitly pass `wait=False`.
+If readiness times out, `attach(...)` closes the client it created but does not terminate the
+existing target. This cleanup applies equally to Modal handles and direct `base_url` attachments.
+The readiness timeout remains the primary error if client cleanup also fails; only the cleanup
+exception type is attached as diagnostic context.
 
 Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does

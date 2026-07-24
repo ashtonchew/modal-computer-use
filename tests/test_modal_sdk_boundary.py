@@ -1368,6 +1368,70 @@ def test_attach_closes_new_client_when_readiness_fails_without_terminating_targe
     assert target.terminate_wait_calls == []
 
 
+def test_attach_by_base_url_closes_new_client_when_readiness_fails(monkeypatch) -> None:
+    clients: list[object] = []
+
+    class FailingClient:
+        def __init__(self, base_url: str, **kwargs: object) -> None:
+            self.base_url = base_url
+            self.closed = False
+            clients.append(self)
+
+        def get_json(self, path: str) -> dict[str, object]:
+            raise ConnectionError("diagnostic endpoint failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    ticks = iter((0.0, 1.0))
+    monkeypatch.setattr("modal_computer_use.sandbox.DaemonClient", FailingClient)
+    monkeypatch.setattr("modal_computer_use.sandbox.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("modal_computer_use.sandbox.time.sleep", lambda *_: None)
+
+    with pytest.raises(TimeoutError):
+        ComputerSandbox.attach(
+            base_url="https://fixture.invalid",
+            wait=True,
+            readiness_timeout=0.5,
+        )
+
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+
+def test_attach_preserves_readiness_timeout_when_client_cleanup_fails(
+    monkeypatch,
+) -> None:
+    class CleanupFailure(RuntimeError):
+        pass
+
+    class FailingClient:
+        def __init__(self, base_url: str, **kwargs: object) -> None:
+            self.base_url = base_url
+
+        def get_json(self, path: str) -> dict[str, object]:
+            raise ConnectionError("diagnostic endpoint failed")
+
+        def close(self) -> None:
+            raise CleanupFailure("cleanup diagnostic payload")
+
+    ticks = iter((0.0, 1.0))
+    monkeypatch.setattr("modal_computer_use.sandbox.DaemonClient", FailingClient)
+    monkeypatch.setattr("modal_computer_use.sandbox.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("modal_computer_use.sandbox.time.sleep", lambda *_: None)
+
+    with pytest.raises(TimeoutError) as raised:
+        ComputerSandbox.attach(
+            base_url="https://fixture.invalid",
+            wait=True,
+            readiness_timeout=0.5,
+        )
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert notes == ["readiness cleanup also failed: client.close (CleanupFailure)"]
+    assert "cleanup diagnostic payload" not in " ".join(notes)
+
+
 def test_attach_by_run_id_ambiguous_matches_fail(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     FakeSandbox.listed = [

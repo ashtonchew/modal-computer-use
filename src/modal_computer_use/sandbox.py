@@ -1110,7 +1110,9 @@ class ComputerSandbox:
         if base_url:
             computer = cls(DaemonClient(base_url=base_url, token=token, http2=http2))
             if wait:
+                computer._readiness_failure_cleanup = "client"
                 computer.wait_until_ready(timeout=readiness_timeout)
+                computer._readiness_failure_cleanup = "none"
             return computer
         try:
             import modal
@@ -1266,16 +1268,23 @@ class ComputerSandbox:
                 last_error = exc
             if time.monotonic() >= deadline:
                 detail = _readiness_timeout_detail(last_payload, last_error)
+                timeout_error = TimeoutError(
+                    f"daemon did not become ready before timeout ({timeout:g}s){detail}"
+                )
                 if self._readiness_failure_cleanup != "none":
-                    self.client.close()
+                    try:
+                        self.client.close()
+                    except Exception as exc:
+                        timeout_error.add_note(
+                            "readiness cleanup also failed: "
+                            f"client.close ({type(exc).__name__})"
+                        )
                 if (
                     self._readiness_failure_cleanup == "sandbox"
                     and self._sandbox is not None
                 ):
                     _terminate_failed_sandbox(self._sandbox)
-                raise TimeoutError(
-                    f"daemon did not become ready before timeout ({timeout:g}s){detail}"
-                )
+                raise timeout_error
             time.sleep(interval)
 
     def terminate(self, *, wait: bool = False) -> None:

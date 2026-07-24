@@ -64,7 +64,7 @@ implementation is safe:
 | Cursor-visible capture | `maim` | None | Missing or invalid cursor composition is terminal for the request. |
 | Change notification | XDamage hint | Source-hash polling | XDamage availability only selects when to capture; pixels/hashes remain the correctness check. |
 | Same-region runner preparation | Modal Connect runner | Explicit external runner | Only for explicit endpoint-availability failures before dispatch. Modal authentication, permission, validation, version, and quota errors are terminal. |
-| Warm allocation | Verified, exclusively claimed entry | Cold creation | Only for an owned candidate-rejection phase. Failed live-tag verification, ambiguous claims, and incomplete cleanup are terminal. |
+| Warm allocation | Locked, live-verified slot ownership | Cold creation | Only for an owned candidate-rejection phase. Fill, discard, claim, and reconcile never terminate a running slot from a stale snapshot; failed live-tag verification, ambiguous claims, and incomplete cleanup are terminal. |
 
 These are not global retry chains. Each controller exposes the backend or reason selected for its
 own completed operation, and orchestration never replays work after dispatch may have started.

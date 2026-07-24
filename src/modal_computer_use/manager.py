@@ -168,34 +168,43 @@ class ComputerSandboxManager:
         valid_existing: list[tuple[object, SandboxRef]] = []
         for sandbox, ref in existing:
             if not _warm_sandbox_running(sandbox):
-                terminate = getattr(sandbox, "terminate", None)
-                if callable(terminate):
-                    terminate(wait=True)
                 continue
-            if ref.name not in allowed_names:
-                if ref.tags.get("computer-use.pool_state") == "claimed":
+            with _warm_slot_lock(sandbox) as acquired:
+                if not acquired:
+                    if ref.name in allowed_names:
+                        valid_existing.append((sandbox, ref))
+                    continue
+                try:
+                    live_ref = _refresh_pool_ref(sandbox, ref)
+                except Exception as exc:
+                    _detach_warm_sandbox_handle(sandbox, primary=exc)
+                    raise
+                if live_ref.tags.get("computer-use.pool_state") == "claimed":
+                    if live_ref.name in allowed_names:
+                        valid_existing.append((sandbox, live_ref))
+                    continue
+                if ref.name not in allowed_names:
+                    terminate = getattr(sandbox, "terminate", None)
+                    if not callable(terminate):
+                        raise RuntimeError(
+                            "cannot enforce warm pool capacity because termination is unavailable"
+                        )
+                    terminate(wait=True)
+                    continue
+                reason = _warm_slot_rejection_reason(
+                    live_ref,
+                    expected_identity=identity,
+                    policy=policy,
+                    now=current,
+                )
+                if reason is None:
+                    valid_existing.append((sandbox, live_ref))
                     continue
                 terminate = getattr(sandbox, "terminate", None)
                 if not callable(terminate):
-                    raise RuntimeError(
-                        "cannot enforce warm pool capacity because termination is unavailable"
-                    )
+                    valid_existing.append((sandbox, live_ref))
+                    continue
                 terminate(wait=True)
-                continue
-            reason = _warm_slot_rejection_reason(
-                ref,
-                expected_identity=identity,
-                policy=policy,
-                now=current,
-            )
-            if reason is None:
-                valid_existing.append((sandbox, ref))
-                continue
-            terminate = getattr(sandbox, "terminate", None)
-            if not callable(terminate):
-                valid_existing.append((sandbox, ref))
-                continue
-            terminate(wait=True)
         for sandbox, ref in valid_existing:
             if ref.tags.get("computer-use.pool_state") != "ready":
                 continue
@@ -294,7 +303,7 @@ class ComputerSandboxManager:
                 )
                 _queue_replace_slot(pool_queue, entry)
                 entries.append(entry)
-            except Exception:
+            except Exception as exc:
                 if computer is not None:
                     computer.terminate(wait=True)
                     raise
@@ -303,6 +312,7 @@ class ComputerSandboxManager:
                     identity=identity,
                     policy=policy,
                     now=_as_utc(now()),
+                    primary=exc,
                 ):
                     concurrent_existing_count += 1
                     continue
@@ -327,22 +337,45 @@ class ComputerSandboxManager:
         identity: str,
         policy: WarmPoolPolicy,
         now: datetime,
+        primary: BaseException,
     ) -> bool:
         """Confirm a fixed-name race after Modal rejects a duplicate allocation."""
         entries = self.registry.list_sandboxes_with_refs(
             tags={"computer-use.pool": policy.pool_name}
         )
-        return any(
-            ref.name == slot_name
-            and _warm_slot_rejection_reason(
-                ref,
-                expected_identity=identity,
-                policy=policy,
-                now=now,
-            )
-            is None
-            for _, ref in entries
-        )
+        for sandbox, ref in entries:
+            if ref.name != slot_name:
+                continue
+            try:
+                if not _warm_sandbox_running(sandbox):
+                    continue
+                live_ref = _refresh_pool_ref(sandbox, ref)
+            except Exception as exc:
+                if isinstance(exc, SandboxUnavailableError) or _is_modal_availability_error(
+                    exc
+                ):
+                    continue
+                primary.add_note(
+                    "warm pool reservation confirmation also failed: "
+                    f"{type(exc).__name__}"
+                )
+                raise primary from exc
+            if live_ref.tags.get("computer-use.pool_state") not in {
+                "ready",
+                "provisioning",
+            }:
+                continue
+            if (
+                _warm_slot_rejection_reason(
+                    live_ref,
+                    expected_identity=identity,
+                    policy=policy,
+                    now=now,
+                )
+                is None
+            ):
+                return True
+        return False
 
     def claim_warm_pool(
         self,
@@ -416,55 +449,9 @@ class ComputerSandboxManager:
                 _detach_warm_candidate(computer)
                 continue
 
-            try:
-                finished = computer.poll() is not None
-            except Exception as exc:
-                reason = _warm_candidate_exception_reason(exc, phase="poll")
-                _retire_warm_candidate(computer, primary=exc)
-                if reason is None:
-                    raise
-                rejection_reasons.append(reason)
-                continue
-            if finished:
-                rejection_reasons.append("candidate_finished")
-                _retire_warm_candidate(computer)
-                continue
-
-            try:
-                computer.ensure_browser_ready(config)
-            except Exception as exc:
-                reason = _warm_candidate_exception_reason(exc, phase="browser")
-                _retire_warm_candidate(computer, primary=exc)
-                if reason is None:
-                    raise
-                rejection_reasons.append(reason)
-                continue
-            request_to_authenticated_ms = (monotonic_clock() - started) * 1000.0
-
-            try:
-                computer.first_valid_frame(config)
-            except Exception as exc:
-                reason = _warm_candidate_exception_reason(exc, phase="first_frame")
-                _retire_warm_candidate(computer, primary=exc)
-                if reason is None:
-                    raise
-                rejection_reasons.append(reason)
-                continue
-            request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
-
-            claimed_at = _as_utc(now())
-            post_validation_reason = policy.rejection_reason(
-                entry,
-                expected_identity=identity,
-                now=claimed_at,
-            )
-            if post_validation_reason is not None:
-                rejection_reasons.append(post_validation_reason)
-                _retire_warm_candidate(computer)
-                continue
-
             claim_transition_started = False
             candidate_termination_authorized = False
+            candidate_retirement_attempted = False
             client_cleanup_attempted = False
             try:
                 with _warm_slot_lock(_warm_lock_target(computer)) as acquired:
@@ -486,6 +473,59 @@ class ComputerSandboxManager:
                         _detach_warm_candidate(computer)
                         continue
                     candidate_termination_authorized = True
+
+                    try:
+                        finished = computer.poll() is not None
+                    except Exception as exc:
+                        reason = _warm_candidate_exception_reason(exc, phase="poll")
+                        candidate_retirement_attempted = True
+                        _retire_warm_candidate(computer, primary=exc)
+                        if reason is None:
+                            raise
+                        rejection_reasons.append(reason)
+                        continue
+                    if finished:
+                        rejection_reasons.append("candidate_finished")
+                        candidate_retirement_attempted = True
+                        _retire_warm_candidate(computer)
+                        continue
+
+                    try:
+                        computer.ensure_browser_ready(config)
+                    except Exception as exc:
+                        reason = _warm_candidate_exception_reason(exc, phase="browser")
+                        candidate_retirement_attempted = True
+                        _retire_warm_candidate(computer, primary=exc)
+                        if reason is None:
+                            raise
+                        rejection_reasons.append(reason)
+                        continue
+                    request_to_authenticated_ms = (monotonic_clock() - started) * 1000.0
+
+                    try:
+                        computer.first_valid_frame(config)
+                    except Exception as exc:
+                        reason = _warm_candidate_exception_reason(exc, phase="first_frame")
+                        candidate_retirement_attempted = True
+                        _retire_warm_candidate(computer, primary=exc)
+                        if reason is None:
+                            raise
+                        rejection_reasons.append(reason)
+                        continue
+                    request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
+
+                    claimed_at = _as_utc(now())
+                    post_validation_reason = policy.rejection_reason(
+                        entry,
+                        expected_identity=identity,
+                        now=claimed_at,
+                    )
+                    if post_validation_reason is not None:
+                        rejection_reasons.append(post_validation_reason)
+                        candidate_retirement_attempted = True
+                        _retire_warm_candidate(computer)
+                        continue
+
                     claim_transition_started = True
                     computer.set_tags(
                         {
@@ -524,6 +564,8 @@ class ComputerSandboxManager:
                         ),
                     )
             except Exception as exc:
+                if candidate_retirement_attempted:
+                    raise
                 if not candidate_termination_authorized:
                     if not client_cleanup_attempted:
                         _detach_warm_candidate(computer, primary=exc)
@@ -599,13 +641,19 @@ class ComputerSandboxManager:
             state = tags.get("computer-use.pool_state")
             reason: str | None = None
             if not _warm_sandbox_running(sandbox):
-                reason = "finished"
-            elif state == "claimed":
+                terminate = getattr(sandbox, "terminate", None)
+                if callable(terminate):
+                    terminate(wait=True)
+                    terminated.append((ref.sandbox_id, "finished"))
+                else:
+                    skipped_count += 1
+                continue
+            if state == "claimed":
                 skipped_count += 1
                 continue
-            elif ref.name not in allowed_slots:
+            if ref.name not in allowed_slots:
                 reason = "outside_capacity"
-            elif reason is None:
+            else:
                 reason = _warm_slot_rejection_reason(
                     ref,
                     expected_identity=expected_identity,
@@ -616,12 +664,43 @@ class ComputerSandboxManager:
             if reason is None:
                 skipped_count += 1
                 continue
-            terminate = getattr(sandbox, "terminate", None)
-            if callable(terminate):
-                terminate(wait=True)
-                terminated.append((ref.sandbox_id, reason))
-            else:
-                skipped_count += 1
+            with _warm_slot_lock(sandbox) as acquired:
+                if not acquired:
+                    _detach_warm_sandbox_handle(sandbox)
+                    skipped_count += 1
+                    continue
+                try:
+                    live_ref = _refresh_pool_ref(sandbox, ref)
+                except Exception as exc:
+                    _detach_warm_sandbox_handle(sandbox, primary=exc)
+                    raise
+                live_state = live_ref.tags.get("computer-use.pool_state")
+                if live_state == "claimed":
+                    _detach_warm_sandbox_handle(sandbox)
+                    skipped_count += 1
+                    continue
+                live_reason: str | None = None
+                if not _warm_sandbox_running(sandbox):
+                    live_reason = "finished"
+                elif live_ref.name not in allowed_slots:
+                    live_reason = "outside_capacity"
+                else:
+                    live_reason = _warm_slot_rejection_reason(
+                        live_ref,
+                        expected_identity=expected_identity,
+                        policy=policy,
+                        now=current,
+                        provisioning_grace_seconds=provisioning_grace_seconds,
+                    )
+                if live_reason is None:
+                    skipped_count += 1
+                    continue
+                terminate = getattr(sandbox, "terminate", None)
+                if callable(terminate):
+                    terminate(wait=True)
+                    terminated.append((live_ref.sandbox_id, live_reason))
+                else:
+                    skipped_count += 1
         return WarmPoolReconcileResult(
             pool_name=policy.pool_name,
             inspected_count=len(entries),
@@ -649,7 +728,30 @@ class ComputerSandboxManager:
         if live_tag_reason is not None:
             _detach_warm_candidate(computer)
             return
-        _retire_warm_candidate(computer)
+        cleanup_attempted = False
+        try:
+            with _warm_slot_lock(_warm_lock_target(computer)) as acquired:
+                if not acquired:
+                    cleanup_attempted = True
+                    _detach_warm_candidate(computer)
+                    return
+                try:
+                    live_tags = computer.tags()
+                except Exception as exc:
+                    cleanup_attempted = True
+                    _detach_warm_candidate(computer, primary=exc)
+                    raise
+                live_tag_reason = _warm_claim_tag_rejection_reason(live_tags, entry)
+                if live_tag_reason is not None:
+                    cleanup_attempted = True
+                    _detach_warm_candidate(computer)
+                    return
+                cleanup_attempted = True
+                _retire_warm_candidate(computer)
+        except Exception as exc:
+            if not cleanup_attempted:
+                _detach_warm_candidate(computer, primary=exc)
+            raise
 
 
 WarmCandidatePhase = Literal[
@@ -737,6 +839,25 @@ def _detach_warm_candidate(
         cleanup_errors,
         primary=primary,
         prefix="warm candidate cleanup also failed",
+    )
+
+
+def _detach_warm_sandbox_handle(
+    sandbox: object,
+    *,
+    primary: BaseException | None = None,
+) -> None:
+    detach = getattr(sandbox, "detach", None)
+    cleanup_errors: list[tuple[str, Exception]] = []
+    if callable(detach):
+        try:
+            detach()
+        except Exception as exc:
+            cleanup_errors.append(("detach", exc))
+    _raise_warm_cleanup_errors(
+        cleanup_errors,
+        primary=primary,
+        prefix="warm sandbox cleanup also failed",
     )
 
 

@@ -986,30 +986,26 @@ def test_fill_warm_pool_retires_ready_slots_after_capacity_reduction() -> None:
     now = datetime(2026, 7, 18, tzinfo=UTC)
     config = _pool_config()
     identity = pool_config_identity(config)
-    retained = FakeComputer("sb-retained")
-    excess = FakeComputer("sb-excess")
+    retained_ref = _pool_ref(
+        sandbox_id="sb-retained",
+        slot_name="prod-000",
+        identity=identity,
+        state="ready",
+        now=now,
+    )
+    excess_ref = _pool_ref(
+        sandbox_id="sb-excess",
+        slot_name="prod-001",
+        identity=identity,
+        state="ready",
+        now=now,
+    )
+    retained = FakeComputer("sb-retained", remote_tags=retained_ref.tags)
+    excess = FakeComputer("sb-excess", remote_tags=excess_ref.tags)
     manager.registry = SimpleNamespace(
         list_sandboxes_with_refs=lambda tags: [
-            (
-                retained,
-                _pool_ref(
-                    sandbox_id="sb-retained",
-                    slot_name="prod-000",
-                    identity=identity,
-                    state="ready",
-                    now=now,
-                ),
-            ),
-            (
-                excess,
-                _pool_ref(
-                    sandbox_id="sb-excess",
-                    slot_name="prod-001",
-                    identity=identity,
-                    state="ready",
-                    now=now,
-                ),
-            ),
+            (retained, retained_ref),
+            (excess, excess_ref),
         ]
     )
 
@@ -1024,6 +1020,42 @@ def test_fill_warm_pool_retires_ready_slots_after_capacity_reduction() -> None:
     assert result.created_count == 0
     assert retained.terminated == []
     assert excess.terminated == [True]
+
+
+def test_fill_warm_pool_does_not_count_claimed_slots_outside_capacity(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    config = _pool_config()
+    identity = pool_config_identity(config)
+    claimed_ref = _pool_ref(
+        sandbox_id="sb-claimed",
+        slot_name="prod-001",
+        identity=identity,
+        state="claimed",
+        now=now,
+    )
+    claimed = FakeComputer("sb-claimed", remote_tags=claimed_ref.tags)
+    replacement = FakeComputer("sb-replacement")
+    manager.registry = SimpleNamespace(
+        list_sandboxes_with_refs=lambda tags: [(claimed, claimed_ref)]
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: replacement,
+    )
+
+    result = manager.fill_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue(),
+        now=lambda: now,
+    )
+
+    assert result.existing_count == 0
+    assert result.created_count == 1
+    assert claimed.terminated == []
 
 
 def test_fill_warm_pool_replaces_terminal_claimed_slot(monkeypatch) -> None:
@@ -1057,7 +1089,7 @@ def test_fill_warm_pool_replaces_terminal_claimed_slot(monkeypatch) -> None:
         now=lambda: now,
     )
 
-    assert finished.terminated == [True]
+    assert finished.terminated == []
     assert result.existing_count == 0
     assert result.created_count == 1
 
@@ -1129,6 +1161,46 @@ def test_fill_warm_pool_never_restores_slot_claimed_after_registry_snapshot() ->
     assert "computer-use.pool_queue_identity" not in racing.remote_tags
 
 
+def test_fill_warm_pool_never_retires_slot_claimed_after_registry_snapshot(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    config = _pool_config()
+    ref = _pool_ref(
+        sandbox_id="sb-racing-claim",
+        slot_name="prod-000",
+        identity="old-config",
+        state="ready",
+        now=now,
+    )
+
+    class ClaimRaceComputer(FakeComputer):
+        def exec(self, *args: str, **kwargs: Any) -> FakeProcess:
+            if "fcntl" in args[2]:
+                self.remote_tags["computer-use.pool_state"] = "claimed"
+            return super().exec(*args, **kwargs)
+
+    racing = ClaimRaceComputer("sb-racing-claim", remote_tags=ref.tags)
+    manager.registry = SimpleNamespace(list_sandboxes_with_refs=lambda tags: [(racing, ref)])
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("a concurrently claimed slot still reserves capacity"),
+    )
+
+    result = manager.fill_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue(),
+        now=lambda: now,
+    )
+
+    assert result.existing_count == 1
+    assert result.created_count == 0
+    assert racing.terminated == []
+    assert racing.remote_tags["computer-use.pool_state"] == "claimed"
+
+
 def test_fill_warm_pool_releases_unconfirmed_lock_holder(monkeypatch) -> None:
     manager = ComputerSandboxManager(app_name="computer-app")
     now = datetime(2026, 7, 18, tzinfo=UTC)
@@ -1171,7 +1243,6 @@ def test_fill_warm_pool_accepts_concurrent_fixed_name_winner(monkeypatch) -> Non
     now = datetime(2026, 7, 18, tzinfo=UTC)
     config = _pool_config()
     identity = pool_config_identity(config)
-    winner = FakeComputer("sb-winner")
     winner_ref = _pool_ref(
         sandbox_id="sb-winner",
         slot_name="prod-000",
@@ -1179,6 +1250,7 @@ def test_fill_warm_pool_accepts_concurrent_fixed_name_winner(monkeypatch) -> Non
         state="provisioning",
         now=now,
     )
+    winner = FakeComputer("sb-winner", remote_tags=winner_ref.tags)
     registry_reads = iter(([], [(winner, winner_ref)]))
     manager.registry = SimpleNamespace(list_sandboxes_with_refs=lambda tags: next(registry_reads))
 
@@ -1198,6 +1270,41 @@ def test_fill_warm_pool_accepts_concurrent_fixed_name_winner(monkeypatch) -> Non
 
     assert result.existing_count == 1
     assert result.created_count == 0
+
+
+def test_fill_warm_pool_does_not_accept_terminal_concurrent_reservation(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    config = _pool_config()
+    ref = _pool_ref(
+        sandbox_id="sb-terminal",
+        slot_name="prod-000",
+        identity=pool_config_identity(config),
+        state="ready",
+        now=now,
+    )
+
+    class FinishedComputer(FakeComputer):
+        def poll(self) -> int | None:
+            return 0
+
+    finished = FinishedComputer("sb-terminal", remote_tags=ref.tags)
+    registry_reads = iter(([], [(finished, ref)]))
+    manager.registry = SimpleNamespace(list_sandboxes_with_refs=lambda tags: next(registry_reads))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("create failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="create failed"):
+        manager.fill_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue(),
+            now=lambda: now,
+        )
 
 
 def test_fill_warm_pool_cleans_up_when_enqueue_fails(monkeypatch) -> None:
@@ -1931,6 +2038,46 @@ def test_claim_warm_pool_records_browser_rejection_before_cold_fallback(
     assert warm.detached is True
 
 
+def test_claim_warm_pool_does_not_validate_or_retire_a_busy_candidate(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class BusyUnreadyComputer(FakeComputer):
+        def exec(self, *args: str, **kwargs: Any) -> FakeProcess:
+            if "fcntl" in args[2]:
+                return FakeProcess(running=False, returncode=75)
+            return super().exec(*args, **kwargs)
+
+        def ensure_browser_ready(self, config: ComputerConfig) -> None:
+            raise AssertionError("busy candidate must not be validated")
+
+    warm = BusyUnreadyComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    cold = FakeComputer("sb-cold")
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: cold,
+    )
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue([entry.as_dict()]),
+        now=lambda: entry.ready_at + timedelta(seconds=10),
+    )
+
+    assert claim.computer is cold
+    assert claim.metrics.rejection_reasons == ("slot_busy",)
+    assert warm.terminated == []
+    assert warm.detached is True
+
+
 def test_claim_warm_pool_records_first_frame_rejection_before_cold_fallback(
     monkeypatch,
 ) -> None:
@@ -2136,17 +2283,6 @@ def test_reconcile_warm_pool_terminates_expired_and_abandoned_slots() -> None:
     config = _pool_config()
     identity = pool_config_identity(config)
 
-    class PoolSandbox:
-        def __init__(self) -> None:
-            self.terminate_calls: list[bool] = []
-
-        def terminate(self, *, wait: bool) -> None:
-            self.terminate_calls.append(wait)
-
-    expired = PoolSandbox()
-    abandoned = PoolSandbox()
-    claimed = PoolSandbox()
-
     def ref(sandbox_id: str, slot_name: str, state: str, expires_at: datetime) -> SandboxRef:
         return SandboxRef(
             sandbox_id=sandbox_id,
@@ -2162,14 +2298,22 @@ def test_reconcile_warm_pool_terminates_expired_and_abandoned_slots() -> None:
             },
         )
 
+    expired_ref = ref("expired", "prod-000", "ready", now + timedelta(seconds=10))
+    abandoned_ref = ref(
+        "abandoned",
+        "prod-001",
+        "provisioning",
+        now + timedelta(seconds=500),
+    )
+    claimed_ref = ref("claimed", "prod-002", "claimed", now + timedelta(seconds=500))
+    expired = FakeComputer("expired", remote_tags=expired_ref.tags)
+    abandoned = FakeComputer("abandoned", remote_tags=abandoned_ref.tags)
+    claimed = FakeComputer("claimed", remote_tags=claimed_ref.tags)
     manager.registry = SimpleNamespace(
         list_sandboxes_with_refs=lambda tags: [
-            (expired, ref("expired", "prod-000", "ready", now + timedelta(seconds=10))),
-            (
-                abandoned,
-                ref("abandoned", "prod-001", "provisioning", now + timedelta(seconds=500)),
-            ),
-            (claimed, ref("claimed", "prod-002", "claimed", now + timedelta(seconds=500))),
+            (expired, expired_ref),
+            (abandoned, abandoned_ref),
+            (claimed, claimed_ref),
         ]
     )
     result = manager.reconcile_warm_pool(
@@ -2181,6 +2325,80 @@ def test_reconcile_warm_pool_terminates_expired_and_abandoned_slots() -> None:
         ("expired", "near_expiry"),
         ("abandoned", "abandoned_provisioning"),
     )
-    assert expired.terminate_calls == [True]
-    assert abandoned.terminate_calls == [True]
-    assert claimed.terminate_calls == []
+    assert expired.terminated == [True]
+    assert abandoned.terminated == [True]
+    assert claimed.terminated == []
+
+
+def test_reconcile_warm_pool_does_not_retire_a_concurrently_claimed_slot() -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    config = _pool_config()
+    ref = _pool_ref(
+        sandbox_id="sb-racing-claim",
+        slot_name="prod-000",
+        identity="old-config",
+        state="ready",
+        now=now,
+    )
+
+    class ClaimRaceComputer(FakeComputer):
+        def exec(self, *args: str, **kwargs: Any) -> FakeProcess:
+            if "fcntl" in args[2]:
+                self.remote_tags["computer-use.pool_state"] = "claimed"
+            return super().exec(*args, **kwargs)
+
+    racing = ClaimRaceComputer("sb-racing-claim", remote_tags=ref.tags)
+    manager.registry = SimpleNamespace(list_sandboxes_with_refs=lambda tags: [(racing, ref)])
+
+    result = manager.reconcile_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        now=now,
+    )
+
+    assert result.terminated_count == 0
+    assert result.skipped_count == 1
+    assert racing.terminated == []
+    assert racing.detached is True
+
+
+def test_discard_warm_entry_does_not_retire_a_busy_slot(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    stale = WarmPoolEntry.from_dict(
+        {
+            **_claim_entry(config, now=now, sandbox_id="sb-stale").as_dict(),
+            "expires_at": (now + timedelta(seconds=10)).isoformat(),
+        }
+    )
+
+    class BusyComputer(FakeComputer):
+        def exec(self, *args: str, **kwargs: Any) -> FakeProcess:
+            if "fcntl" in args[2]:
+                return FakeProcess(running=False, returncode=75)
+            return super().exec(*args, **kwargs)
+
+    warm = BusyComputer("sb-stale", remote_tags=_warm_entry_tags(stale))
+    cold = FakeComputer("sb-cold")
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: cold,
+    )
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue([stale.as_dict()]),
+        now=lambda: now,
+    )
+
+    assert claim.computer is cold
+    assert claim.metrics.rejection_reasons == ("near_expiry",)
+    assert warm.terminated == []
+    assert warm.detached is True
