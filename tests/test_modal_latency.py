@@ -223,7 +223,7 @@ def test_same_region_runner_falls_back_to_external_caller(monkeypatch) -> None:
     def endpoint(_computer: object, path: str) -> SimpleNamespace:
         attempts.append(path)
         if path == "connect":
-            raise SandboxUnavailableError("connect failed with secret-token")
+            raise SandboxUnavailableError("connect failed with diagnostic payload")
         return SimpleNamespace(
             path=path,
             base_url="https://external.example",
@@ -246,7 +246,7 @@ def test_same_region_runner_falls_back_to_external_caller(monkeypatch) -> None:
     assert result.fallback_used is True
     assert result.fallback_reason == "connect_endpoint_unavailable"
     assert result.fallback_error_type == "SandboxUnavailableError"
-    assert "secret-token" not in repr(result)
+    assert "diagnostic payload" not in repr(result)
     assert result.result.stdout == "ok"
 
 
@@ -430,7 +430,7 @@ def test_same_region_runner_does_not_fallback_for_invalid_runner_environment(
             SimpleNamespace(),
             ("python", "worker.py"),
             modal_region="us-east",
-            env={"COMPUTER_USE_DAEMON_TOKEN": "caller-token"},
+            env={"COMPUTER_USE_DAEMON_TOKEN": "test-caller-token"},
             external_runner=external_runner,
         )
 
@@ -1683,10 +1683,10 @@ def test_claim_warm_pool_preserves_candidate_failure_when_retirement_fails(
 
     class UncleanComputer(FakeComputer):
         def ensure_browser_ready(self, config: ComputerConfig) -> None:
-            raise BrowserFailure("browser secret")
+            raise BrowserFailure("browser diagnostic payload")
 
         def terminate(self, *, wait: bool = False) -> None:
-            raise CleanupFailure("cleanup secret")
+            raise CleanupFailure("cleanup diagnostic payload")
 
     warm = UncleanComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
     monkeypatch.setattr(
@@ -1708,7 +1708,7 @@ def test_claim_warm_pool_preserves_candidate_failure_when_retirement_fails(
 
     notes = getattr(raised.value, "__notes__", [])
     assert notes == ["warm candidate cleanup also failed: terminate (CleanupFailure)"]
-    assert "cleanup secret" not in " ".join(notes)
+    assert "cleanup diagnostic payload" not in " ".join(notes)
     assert warm.detached is True
 
 
@@ -1722,10 +1722,10 @@ def test_warm_pool_claim_close_preserves_termination_failure_when_detach_fails()
     class FailingComputer:
         def terminate(self, *, wait: bool) -> None:
             assert wait is True
-            raise TerminationFailure("termination secret")
+            raise TerminationFailure("termination diagnostic payload")
 
         def detach(self) -> None:
-            raise DetachFailure("detach secret")
+            raise DetachFailure("detach diagnostic payload")
 
     claim = WarmPoolClaim(
         computer=FailingComputer(),
@@ -1737,7 +1737,7 @@ def test_warm_pool_claim_close_preserves_termination_failure_when_detach_fails()
 
     notes = getattr(raised.value, "__notes__", [])
     assert notes == ["claim cleanup also failed: detach (DetachFailure)"]
-    assert "detach secret" not in " ".join(notes)
+    assert "detach diagnostic payload" not in " ".join(notes)
 
 
 def test_reconcile_warm_pool_terminates_expired_and_abandoned_slots() -> None:

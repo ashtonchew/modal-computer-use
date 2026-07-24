@@ -156,7 +156,7 @@ def test_static_tunnel_bearer_preserves_connect_proxy_authentication(tmp_path) -
         require_connect_user=True,
         reject_query_tokens=True,
         trust_private_connect_proxy=True,
-        tunnel_token="daemon-tunnel-token",
+        tunnel_token="test-tunnel-token",
     )
 
     with TestClient(
@@ -195,13 +195,13 @@ def test_static_tunnel_token_allows_public_tunnel_request(tmp_path) -> None:
         tmp_path,
         require_connect_user=True,
         reject_query_tokens=True,
-        tunnel_token="daemon-tunnel-token",
+        tunnel_token="test-tunnel-token",
     )
 
     with TestClient(
         app,
         client=("203.0.113.10", 50000),
-        headers={"Authorization": "Bearer daemon-tunnel-token"},
+        headers={"Authorization": "Bearer test-tunnel-token"},
     ) as client:
         response = client.get("/v1/version")
 

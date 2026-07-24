@@ -1311,14 +1311,14 @@ def test_wait_until_ready_timeout_reports_last_readyz_errors() -> None:
 def test_wait_until_ready_timeout_reports_transient_error() -> None:
     class FakeClient:
         def get_json(self, path: str) -> dict[str, object]:
-            raise ConnectionError("connection refused at https://secret.example?token=secret")
+            raise ConnectionError("connection refused at https://fixture.invalid?detail=raw-value")
 
     try:
         ComputerSandbox(FakeClient()).wait_until_ready(timeout=0, interval=0)
     except TimeoutError as exc:
         assert "last error type: ConnectionError" in str(exc)
-        assert "secret.example" not in str(exc)
-        assert "token=secret" not in str(exc)
+        assert "fixture.invalid" not in str(exc)
+        assert "detail=raw-value" not in str(exc)
     else:
         raise AssertionError("expected readiness timeout")
 
@@ -1350,7 +1350,7 @@ def test_attach_closes_new_client_when_readiness_fails_without_terminating_targe
             clients.append(self)
 
         def get_json(self, path: str) -> dict[str, object]:
-            raise ConnectionError("secret endpoint failed")
+            raise ConnectionError("diagnostic endpoint failed")
 
         def close(self) -> None:
             self.closed = True
@@ -1502,7 +1502,7 @@ def test_modal_sandbox_exec_once_preserves_command_failure_when_cleanup_fails(
         raise CommandFailure("command failed")
 
     def fail_cleanup(self: FakeSandboxObject, *, wait: bool = False) -> None:
-        raise CleanupFailure("cleanup secret")
+        raise CleanupFailure("cleanup diagnostic payload")
 
     monkeypatch.setattr(FakeSandboxObject, "exec", fail_command)
     monkeypatch.setattr(FakeSandboxObject, "terminate", fail_cleanup)
@@ -1516,7 +1516,7 @@ def test_modal_sandbox_exec_once_preserves_command_failure_when_cleanup_fails(
 
     notes = getattr(raised.value, "__notes__", [])
     assert notes == ["runner cleanup also failed: terminate (CleanupFailure)"]
-    assert "cleanup secret" not in " ".join(notes)
+    assert "cleanup diagnostic payload" not in " ".join(notes)
 
 
 def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:
