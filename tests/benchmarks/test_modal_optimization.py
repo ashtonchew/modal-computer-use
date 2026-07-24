@@ -726,6 +726,21 @@ def test_resource_cost_marks_target_only_estimate_partial() -> None:
     )
 
 
+def test_resource_cost_supports_narrow_us_west_2_placement() -> None:
+    cost = estimate_resource_cost(
+        duration_seconds=10.0,
+        cpu=4.0,
+        memory_mib=8192,
+        requested_region="us-west-2",
+        includes_runner=False,
+    )
+
+    assert cost["region_multiplier"] == 1.75
+    assert cost["estimated_usd"] == pytest.approx(
+        10.0 * (4.0 * 0.00003942 + 8.0 * 0.00000667) * 1.75
+    )
+
+
 def test_provider_default_extraction_keeps_only_safe_summary_fields() -> None:
     payload = {
         "ok": True,

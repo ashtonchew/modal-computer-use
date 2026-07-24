@@ -53,6 +53,7 @@ _PROVIDER_NAMES = {
 }
 _REGION_MULTIPLIERS = {
     "us-west": 1.75,
+    "us-west-2": 1.75,
     "us-east": 1.75,
     "eu-west": 1.75,
     "ap-southeast": 1.75,
