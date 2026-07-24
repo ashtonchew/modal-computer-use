@@ -48,6 +48,53 @@ The native implementation is the canonical fast path. `xdotool` remains useful a
 compatibility adapter and as an automatic fallback when native preflight fails before any event is
 emitted.
 
+## Same-run provider comparison, 2026-07-24
+
+The PR commit was also run through the repository's neutral provider-default comparison against
+Daytona and E2B. The run used the established credential symlink, Chromium at 1024x768, the browser
+resource profile, provider-default placement, one warmup, and three measured product lifecycles per
+provider. Modal used the attested HTTP/1.1 tunnel and forced XTest.
+
+```bash
+uv run computer-use benchmark compare \
+  --create-modal-sandbox \
+  --provider modal-daemon \
+  --provider daytona \
+  --provider e2b \
+  --modal-ingress attested-tunnel \
+  --resource-profile browser \
+  --browser chromium \
+  --input-backend xtest \
+  --iterations 3 \
+  --env-file .env \
+  --output benchmark-results/candidates/provider-compare-native-x11-all-20260724.json \
+  --json
+```
+
+The complete run returned `ok=true` with zero failures. Every case recorded 3/3 measured samples,
+all providers passed cursor and controlled typing readback, and Modal's input cases reported
+`xtest`. Values below are p50; ratios above `1.00x` mean Modal is faster.
+
+| Case | Modal XTest | Daytona | E2B | Modal vs Daytona | Modal vs E2B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Product create to first screenshot | 6,419.1 ms | 10,638.5 ms | 1,156.7 ms | **1.66x** | 0.18x |
+| Full screenshot | 211.6 ms | 214.2 ms | 177.0 ms | **1.01x** | 0.84x |
+| Move + click | 156.5 ms | 347.0 ms | 279.5 ms | **2.22x** | **1.79x** |
+| Four move/click pairs | 160.8 ms | 1,429.5 ms | 1,122.1 ms | **8.89x** | **6.98x** |
+| Type 100 characters | 168.6 ms | 634.6 ms | 4,100.7 ms | **3.76x** | **24.32x** |
+| Type 1,000 characters | 277.5 ms | 5,371.1 ms | 41,520.4 ms | **19.35x** | **149.60x** |
+| Command echo | 197.9 ms | 120.9 ms | 62.9 ms | 0.61x | 0.32x |
+
+This result supports action-path claims, not a universal provider ranking. E2B remains much faster
+for product startup, both competitors remain faster for command execution, and E2B is faster for
+the default screenshot call. Modal's advantage is concentrated in native input and daemon batching.
+
+The secret-safe candidate artifact is
+`benchmark-data/provider-compare-native-x11-2026-07-24-candidate.json`. Its raw artifact SHA-256 is
+`7befb822232442cd4dcf46fcd12cf684855a134262885d4c759ce2af643421eb`; the raw report remains
+untracked. The candidate is eligible and complete but is not promoted as the repository's current
+reference until PR review and merge.
+
 ## Diagnostic findings during the run
 
 Cloud validation and independent autoreview caught issues that local happy-path fakes did not:
