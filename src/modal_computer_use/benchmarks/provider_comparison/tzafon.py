@@ -309,12 +309,19 @@ def _ensure_action_succeeded(result: Any) -> None:
     if isinstance(error_message, str) and error_message:
         raise RuntimeError("Tzafon action failed")
     status = _result_value(result, "status")
-    if isinstance(status, str) and status.lower() not in _SUCCESS_ACTION_STATUSES:
+    if not isinstance(status, str) or status.lower() not in _SUCCESS_ACTION_STATUSES:
         raise RuntimeError("Tzafon action failed")
 
 
 def _ensure_batch_succeeded(result: Any, *, expected_actions: int) -> None:
-    _ensure_action_succeeded(result)
+    error_message = _result_value(result, "error_message")
+    if isinstance(error_message, str) and error_message:
+        raise RuntimeError("Tzafon batch failed")
+    status = _result_value(result, "status")
+    if status is not None and (
+        not isinstance(status, str) or status.lower() not in _SUCCESS_ACTION_STATUSES
+    ):
+        raise RuntimeError("Tzafon batch failed")
     executed = _batch_result_value(result, "executed")
     if isinstance(executed, bool) or not isinstance(executed, int):
         raise RuntimeError("Tzafon batch returned an invalid executed count")

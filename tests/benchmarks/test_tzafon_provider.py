@@ -229,8 +229,11 @@ def test_tzafon_coordinate_click_records_semantic_and_provider_counts() -> None:
     assert result["semantic_equivalent"] == "coordinate_click_without_standalone_move"
 
 
-@pytest.mark.parametrize("status", ["COMMAND_NOT_SUPPORTED", "FAILED", "UNKNOWN_ACTION"])
-def test_tzafon_action_rejects_non_success_status(status: str) -> None:
+@pytest.mark.parametrize(
+    "status",
+    [None, 7, "COMMAND_NOT_SUPPORTED", "FAILED", "UNKNOWN_ACTION"],
+)
+def test_tzafon_action_requires_explicit_success_status(status: Any) -> None:
     with pytest.raises(RuntimeError, match="action failed"):
         tzafon._ensure_action_succeeded(
             SimpleNamespace(status=status, result={}, error_message=None)
