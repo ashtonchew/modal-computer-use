@@ -1384,13 +1384,17 @@ When the caller needs to wait for the next paint instead of capturing immediatel
 X11 images with DAMAGE support; set `change_signal="poll"` when the caller needs source-hash
 verification instead of event-driven paint detection.
 
-For cursor-hidden screenshots, the daemon first tries one in-process MSS session, resets and
-reopens that session once after an open or grab failure, and then falls back to `scrot` followed by
-`maim`. The daemon explicitly selects MSS's XShm-preferred Linux implementation, which internally
-falls back to XGetImage when shared-memory capture cannot be used. The daemon does not implement a
-second fallback between those MSS internals. Native raw PNG can use MSS PNG bytes directly; scaled, JPEG, WebP, and JSON
-captures use MSS pixels plus in-memory Pillow encoding. `scrot` is the first portable file fallback
-and `maim` is the final fallback plus the required cursor-visible adapter.
+For cursor-hidden screenshots, the daemon first uses one in-process MSS session. After an open or
+grab failure, it resets and reopens the session once. If the retry fails, the daemon uses `scrot`
+and then `maim`.
+
+The daemon selects the XShm-preferred MSS implementation on Linux. MSS can use XGetImage when
+shared-memory capture is unavailable. The daemon does not add another fallback between these MSS
+internals.
+
+Native raw PNG can use MSS PNG bytes directly. Scaled, JPEG, WebP, and JSON captures use MSS pixels
+with in-memory Pillow encoding. The first file-capture fallback is `scrot`. The final fallback is
+`maim`, which is also the required cursor-visible adapter.
 Raw screenshot responses include `x-computer-use-capture-backend` (`mss`, `scrot`, `maim`, or
 `unknown`) so benchmark artifacts can attribute the capture path directly instead of inferring it
 from timing.

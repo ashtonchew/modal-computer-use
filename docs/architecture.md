@@ -57,25 +57,26 @@ Fallback decisions stay with the feature that can prove whether retrying through
 implementation is safe:
 
 | Behavior | Preferred path | Compatibility path | Fallback boundary |
-|---|---|---|---|
-| Mouse and keyboard input | Persistent XTest/XKB | `xdotool` | Only before native emission starts; possibly partial input is terminal. |
+| --- | --- | --- | --- |
+| Mouse and keyboard input | Persistent XTest/XKB | `xdotool` | Only before native emission starts. If native input might be partial, the request is terminal. |
 | Window operations | Native EWMH/Xlib | `wmctrl` | When the window manager does not advertise or complete the requested EWMH operation. |
-| Cursor-hidden capture | MSS XShm-preferred capture | `scrot`, then `maim` | After an MSS session reset/retry cannot produce a valid frame. MSS itself falls back from XShm to XGetImage. |
-| Cursor-visible capture | `maim` | None | Missing or invalid cursor composition is terminal for the request. |
-| Change notification | XDamage hint | Source-hash polling | XDamage availability only selects when to capture; pixels/hashes remain the correctness check. |
-| Same-region runner preparation | Modal Connect runner | Explicit external runner | Only for explicit endpoint-availability failures before dispatch. Modal authentication, permission, validation, version, and quota errors are terminal. |
-| Warm allocation | Locked, live-verified slot ownership | Cold creation | Only for an owned candidate-rejection phase. Fill, discard, claim, and reconcile never terminate a running slot from a stale snapshot; failed live-tag verification, ambiguous claims, and incomplete cleanup are terminal. |
+| Cursor-hidden capture | MSS XShm-preferred capture | `scrot`, then `maim` | After one MSS reset and retry cannot produce a valid frame. MSS can use XGetImage when XShm is unavailable. |
+| Cursor-visible capture | `maim` | None | Invalid or unavailable cursor composition is terminal. |
+| Change notification | XDamage hint | Source-hash polling | XDamage selects when to capture. Pixels and hashes confirm the change. |
+| Same-region runner preparation | Modal Connect runner | Explicit external runner | Only when endpoint preparation is unavailable before dispatch. Authentication, permission, validation, version, and quota errors are terminal. |
+| Warm allocation | Locked, live-verified slot | Cold creation | Only after an owned candidate rejection. Stale or unverifiable state cannot authorize termination. |
 
-These are not global retry chains. Each controller exposes the backend or reason selected for its
-own completed operation, and orchestration never replays work after dispatch may have started.
-The safety boundaries follow the upstream contracts: XTest is an input-synthesis protocol,
-EWMH window-manager requests are advisory, and MSS 10.2 selects XShm with an automatic XGetImage
-fallback. See the
+These paths are not one global retry chain. Each controller reports the backend or reason for its
+own operation. Orchestration does not replay work after dispatch might have started.
+
+The boundaries follow the upstream contracts. XTest is an input-synthesis protocol. EWMH
+window-manager requests are advisory. MSS 10.2 selects XShm and can use XGetImage when required.
+See the
 [XTEST protocol](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html),
 [EWMH specification](https://specifications.freedesktop.org/wm/latest-single/), and
 [MSS 10.2 release notes](https://python-mss.readthedocs.io/latest/release-history/v10.2.0.html).
-Modal availability handling follows its documented specialized exception types rather than the
-catch-all `modal.exception.Error` base; see the
+Modal availability handling uses documented specialized exception types. It does not use the
+catch-all `modal.exception.Error` base. See the
 [Modal exception reference](https://modal.com/docs/sdk/py/latest/modal.exception).
 
 The observation transport and action execution remain stable primitives. The Alpha

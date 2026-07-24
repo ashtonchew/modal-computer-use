@@ -137,16 +137,18 @@ land in one concrete provider region. If the workload needs that stronger co-loc
 select a supported narrow region explicitly in `ComputerConfig` after measuring the real topology
 and accepting the narrower region's availability and pricing tradeoffs.
 
-Fallback to the current external attested endpoint happens only when the caller supplies an explicit
-`external_runner` and typed Connect endpoint preparation is unavailable before dispatch. Validation,
-placement, reserved-environment, programming, and Modal authentication, permission, invalid-request,
-version, and quota errors remain terminal. The availability set is intentionally narrow:
-connection, service, timeout, documented retriable-internal, missing-target, and terminated-Sandbox
-errors. Without the explicit callable, preparation errors propagate. Once runner dispatch starts,
-every failure is terminal and the helper never repeats the command. Fallback attribution uses a
-stable semantic reason plus a sanitized exception type; it never returns raw exception text. The
-command owns the persistent hot session and observation stream. A broker does not proxy action or
-frame bytes.
+Fallback to the external attested endpoint requires an explicit `external_runner`. Connect endpoint
+preparation must fail before dispatch. Connection, service, timeout, documented
+retriable-internal, missing-target, and terminated-Sandbox errors can use this fallback.
+
+Validation, placement, reserved-environment, programming, authentication, permission,
+invalid-request, version, and quota errors are terminal. Without `external_runner`, preparation
+errors propagate. After dispatch starts, every failure is terminal. The helper does not repeat the
+command.
+
+Fallback attribution uses a stable reason and a sanitized exception type. It does not return raw
+exception text. The command owns the persistent hot session and observation stream. A broker does
+not proxy action or frame bytes.
 
 Use `run_modal_daemon_command()` for explicit diagnostics. It supports three paths:
 
@@ -173,29 +175,32 @@ out-of-capacity slots. Claimed slots remain owned by their consumers.
 so each fixed name is also the provider-side provisioning reservation. If concurrent fillers race,
 the loser accepts the winner only after a registry read confirms the same compatible reserved slot.
 `claim_warm_pool()` uses a non-blocking Modal Queue dequeue as the atomic claim point. A claim rejects
-an incompatible, invalid, finished, unready, or near-expiry Sandbox, retires an owned live candidate
-with `wait=True`, and scans a bounded number of entries. Expected candidate rejection can continue
-to the normal cold fallback. A failed live-tag read is terminal because ownership cannot be verified
-after the queue entry has been consumed; the client detaches without terminating an unverified
-target. Configuration/programming failures, ambiguous claim transitions, and incomplete retirement
-are likewise terminal rather than being relabeled as pool misses. Claimed capacity is one-shot and
-must be closed; it is never requeued. Browser and first-frame rejection use the feature-owned
-`BrowserReadinessError` and `FrameValidationError` types; generic `RuntimeError` and `ValueError`
-remain terminal. A candidate may be terminated only after the slot lock is held and its live tags
-still match the dequeued entry; detach failures while declining a busy or mismatched slot propagate
-without terminating capacity that another claimant may own.
+an incompatible, invalid, finished, unready, or near-expiry Sandbox. It scans a bounded number of
+entries. An expected candidate rejection can continue to the normal cold fallback.
+
+A claim retires a running candidate only after it holds the slot lock and verifies the live tags.
+A failed live-tag read is terminal because the claim cannot verify ownership. The client detaches
+and does not terminate the unverified target. A busy or mismatched target also detaches without
+termination.
+
+Configuration errors, programming errors, ambiguous claim transitions, and incomplete retirement
+are terminal. The manager does not relabel them as pool misses. Browser rejection uses
+`BrowserReadinessError`. First-frame rejection uses `FrameValidationError`. Generic `RuntimeError`
+and `ValueError` remain terminal. Claimed capacity is one-shot. It must be closed and is never
+requeued.
 
 Each Modal App and pool pair receives a distinct Queue. Each fixed slot uses its own partition.
 `fill_warm_pool()` rebuilds that partition from the Sandbox's durable lifecycle tags, because
 [Modal Queue partitions](https://modal.com/docs/sdk/py/latest/modal.Queue)
 are cleared after 24 hours without a put and when their App stops. A fresh queue identity is written to the Sandbox before enqueue.
 Claims compare that identity twice, so stale or concurrent duplicate entries cannot claim a slot.
-Refill, stale-entry discard, candidate validation and transition, and reconciliation all take a
-non-blocking file lock inside a running target Sandbox before a decision can terminate it. Each
-path then refreshes the target's lifecycle tags while holding the lock. Busy, claimed, mismatched,
-or unverifiable targets are detached or skipped rather than terminated. A target already observed
-as finished can be cleaned up without a lock because that lifecycle state cannot return to running.
-These rules prevent stale queue or registry snapshots from killing or restoring capacity after
+Refill, stale-entry discard, candidate validation, claim transition, and reconciliation use a
+non-blocking file lock inside a running target Sandbox. Each path refreshes the lifecycle tags while
+it holds the lock. Busy, claimed, mismatched, or unverifiable targets are detached or skipped. They
+are not terminated.
+
+A finished target does not need this lock because it cannot return to the running state. These
+rules prevent stale queue or registry snapshots from terminating or restoring capacity after
 another consumer claims it.
 
 Warm configs cannot set `idle_timeout_seconds` because Modal does not expose the remaining idle
