@@ -502,6 +502,52 @@ def test_command_manifest_uses_requested_artifact_paths() -> None:
     )
 
 
+def test_preregistration_implicit_artifact_requires_exact_canonical_output() -> None:
+    script = runpy.run_path(
+        str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
+    )
+    resolve = script["_preregistration_artifact_output"]
+
+    assert resolve(
+        output=script["DEFAULT_PREREGISTRATION"],
+        artifact_output=None,
+    ) == script["DEFAULT_PUBLISHED_ARTIFACT"]
+    with pytest.raises(ValueError, match="--artifact-output is required"):
+        resolve(
+            output=script["DEFAULT_RAW_ROOT"] / "alternate-preregistration.json",
+            artifact_output=None,
+        )
+
+
+def test_preregistration_custom_outputs_keep_explicit_artifacts_distinct() -> None:
+    script = runpy.run_path(
+        str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
+    )
+    resolve = script["_preregistration_artifact_output"]
+    baseline = Path("benchmark-data/native-input-baseline.json")
+    variant = Path("benchmark-data/native-input-variant.json")
+
+    assert resolve(
+        output=Path("benchmark-results/native-input/prereg-baseline.json"),
+        artifact_output=baseline,
+    ) == baseline
+    assert resolve(
+        output=Path("benchmark-results/native-input/prereg-variant.json"),
+        artifact_output=variant,
+    ) == variant
+
+
+def test_preregister_refuses_existing_output_before_dependency_checks(tmp_path: Path) -> None:
+    script = runpy.run_path(
+        str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
+    )
+    output = tmp_path / "preregistration.json"
+    output.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="preregistration output already exists"):
+        script["_preregister"](SimpleNamespace(output=output))
+
+
 def test_v2_runner_rejects_sample_counts_that_differ_from_preregistration() -> None:
     script = runpy.run_path(
         str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")

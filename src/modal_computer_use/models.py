@@ -552,6 +552,9 @@ class Capabilities(StrictBaseModel):
     image_profile: str
     vnc_enabled: bool
     input_backend: str | None = None
+    input_backend_configured: str | None = None
+    input_backends_supported: list[str] = Field(default_factory=list)
+    input_backends_available: list[str] = Field(default_factory=list)
 
 
 class TraceEntry(StrictBaseModel):

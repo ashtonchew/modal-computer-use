@@ -42,6 +42,26 @@ layout-mapped text uses native keystrokes, while long or unmapped Unicode text u
 and restores the previous clipboard. `method="clipboard"` forces that behavior, and legacy
 `method="xdotool"` forces the compatibility path.
 
+### Which input backend is actually in use?
+
+Inspect `/v1/capabilities`. `input_backend_configured` is the requested policy, while the legacy
+`input_backend` field is the adapter most recently selected and can change when `auto` falls back.
+`input_backends_supported` describes implementations built into the backend;
+`input_backends_available` describes the latest readiness probe and is empty before that probe.
+An installed `xdotool` executable is listed as available only after a bounded command probe reaches
+the configured `DISPLAY`.
+
+An `input_backend_unavailable` error guarantees emission did not start and identifies the selected
+adapter in `details.input_backend`, so `details.retry_safe` is true with respect to duplicate input.
+An `input_may_be_partial` error means emission may already have started. Presses, typing, clicks,
+and drags must not be replayed through another adapter; idempotent key/button releases explicitly
+report `details.retry_safe=true`. Neither value guarantees that retrying will resolve the
+underlying display problem.
+
+If `input.release_all` returns `release_all_incomplete`, inspect `output.remaining` for controls
+that are still tracked as held. Stop sending new input until the display/backend problem is
+resolved and cleanup succeeds.
+
 ## Adapters
 
 ### Provider actions click the wrong location

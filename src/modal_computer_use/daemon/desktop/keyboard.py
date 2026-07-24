@@ -7,14 +7,20 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+import anyio
+
 from modal_computer_use.actions import KEY_ALIASES, normalize_key, normalize_key_combo
 from modal_computer_use.models import ActionResult
 
 from .xtest import (
     KeyEvent,
+    X11EmissionResult,
     X11InputInjectionError,
+    X11InputReleaseError,
     X11InputSession,
+    X11InputStateConflictError,
     X11InputUnavailableError,
+    X11KeyboardState,
 )
 
 RunCommand = Callable[..., Awaitable[subprocess.CompletedProcess[str]]]
@@ -103,9 +109,7 @@ class NativeKeyboardSession(Protocol):
         levels: int = 4,
     ) -> tuple[tuple[int, tuple[int, ...]], ...]: ...
 
-    def keyboard_group(self) -> int: ...
-
-    def modifier_state(self) -> int: ...
+    def keyboard_state(self) -> X11KeyboardState: ...
 
     def pressed_keycodes(self, keycodes: Iterable[int] | None = None) -> frozenset[int]: ...
 
@@ -115,13 +119,14 @@ class NativeKeyboardSession(Protocol):
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
         reject_pressed_keycodes: Iterable[int] = (),
-    ) -> None: ...
+    ) -> X11EmissionResult: ...
 
 
 @dataclass(frozen=True, slots=True)
 class _KeyStroke:
     keycode: int
     modifiers: tuple[int, ...] = ()
+    modifier_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +134,31 @@ class _HeldKey:
     keycode: int | None
     owned: bool
     owned_modifiers: tuple[int, ...] = ()
+    owned_modifier_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class KeyReleaseFailure:
+    key: str
+    input_backend: Literal["xtest", "xdotool"] | None
+
+
+@dataclass(frozen=True, slots=True)
+class KeyboardReleaseOutcome:
+    released: tuple[str, ...]
+    failures: tuple[KeyReleaseFailure, ...]
+
+
+type _KeyMapping = tuple[tuple[int, tuple[int, ...]], ...]
+type _KeysymMatch = tuple[int, int, tuple[int, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class _XkbSnapshot:
+    group: int
+    modifier_state: int
+    mapping: _KeyMapping
+    by_keysym: dict[int, _KeysymMatch]
 
 
 class XkbKeymapResolver:
@@ -136,101 +166,97 @@ class XkbKeymapResolver:
 
     def __init__(self, session: NativeKeyboardSession) -> None:
         self._session = session
+        self._keysym_cache: dict[str, int] = {}
 
     def action_key(self, key: str) -> _KeyStroke:
+        return self.action_keys((key,))[0]
+
+    def action_keys(self, keys: Sequence[str]) -> list[_KeyStroke]:
+        snapshot = self._snapshot()
+        return [self._action_key(key, snapshot) for key in keys]
+
+    def _action_key(self, key: str, snapshot: _XkbSnapshot) -> _KeyStroke:
         normalized = normalize_key(key)
-        group = self._session.keyboard_group()
-        mapping = self._session.keyboard_mapping(group)
         if len(normalized) == 1:
-            stroke = self._character(
-                normalized,
-                mapping,
-                self._session.modifier_state(),
-            )
+            stroke = self._character(normalized, snapshot)
             if stroke is not None:
                 return stroke
-            raise X11InputUnavailableError(
-                f"key is not mapped in the active XKB group: {key!r}"
-            )
-        keysym = self._session.resolve_keysym(_KEYSYM_NAMES.get(normalized, normalized))
+            raise X11InputUnavailableError(f"key is not mapped in the active XKB group: {key!r}")
+        keysym = self._resolve_keysym(_KEYSYM_NAMES.get(normalized, normalized))
         if keysym <= 0:
             raise X11InputUnavailableError(f"key is not mapped by the X server: {key!r}")
-        match = self._find_keysym(keysym, mapping)
+        match = snapshot.by_keysym.get(keysym)
         if match is None:
             raise X11InputUnavailableError(f"key is not mapped by the X server: {key!r}")
         keycode, level, _keysyms = match
-        modifiers = () if normalized in _KEYSYM_NAMES else self._level_modifiers(level, mapping)
+        modifiers = () if normalized in _KEYSYM_NAMES else self._level_modifiers(level, snapshot)
         return _KeyStroke(keycode, modifiers)
 
     def text(self, text: str) -> list[_KeyStroke] | None:
-        group = self._session.keyboard_group()
-        mapping = self._session.keyboard_mapping(group)
-        modifier_state = self._session.modifier_state()
+        snapshot = self._snapshot()
         strokes: list[_KeyStroke] = []
         for character in text:
-            stroke = self._character(character, mapping, modifier_state)
+            stroke = self._character(character, snapshot)
             if stroke is None:
                 return None
             strokes.append(stroke)
         return strokes
 
     def character(self, character: str) -> _KeyStroke | None:
-        group = self._session.keyboard_group()
-        return self._character(
-            character,
-            self._session.keyboard_mapping(group),
-            self._session.modifier_state(),
-        )
+        return self._character(character, self._snapshot())
 
     def _character(
         self,
         character: str,
-        mapping: Sequence[tuple[int, Sequence[int]]],
-        modifier_state: int,
+        snapshot: _XkbSnapshot,
     ) -> _KeyStroke | None:
-        keysym = self._session.resolve_keysym(_character_keysym_name(character))
+        keysym = self._resolve_keysym(_character_keysym_name(character))
         if keysym <= 0:
             return None
-        match = self._find_keysym(keysym, mapping)
+        match = snapshot.by_keysym.get(keysym)
         if match is None:
             return None
         keycode, matched_level, keysyms = match
 
-        modifiers = list(self._level_modifiers(matched_level, mapping))
-        if self._caps_lock_inverts(character, keysyms, modifier_state):
-            shift = self._modifier_keycode("Shift_L", mapping)
+        modifiers = list(self._level_modifiers(matched_level, snapshot))
+        if self._caps_lock_inverts(character, keysyms, snapshot.modifier_state):
+            shift = self._modifier_keycode("Shift_L", snapshot)
             if shift in modifiers:
                 modifiers.remove(shift)
             else:
                 modifiers.insert(0, shift)
-        return _KeyStroke(keycode=keycode, modifiers=tuple(modifiers))
+        return _KeyStroke(
+            keycode=keycode,
+            modifiers=tuple(modifiers),
+            modifier_names=tuple(self._modifier_name(modifier, snapshot) for modifier in modifiers),
+        )
 
-    @staticmethod
-    def _find_keysym(
-        keysym: int,
-        mapping: Sequence[tuple[int, Sequence[int]]],
-    ) -> tuple[int, int, Sequence[int]] | None:
-        return next(
-            (
-                (keycode, level, keysyms)
-                for keycode, keysyms in mapping
-                for level, mapped_keysym in enumerate(keysyms)
-                if mapped_keysym == keysym
-            ),
-            None,
+    def _snapshot(self) -> _XkbSnapshot:
+        state = self._session.keyboard_state()
+        mapping = self._session.keyboard_mapping(state.group)
+        by_keysym: dict[int, _KeysymMatch] = {}
+        for keycode, keysyms in mapping:
+            for level, keysym in enumerate(keysyms):
+                if keysym > 0:
+                    by_keysym.setdefault(keysym, (keycode, level, keysyms))
+        return _XkbSnapshot(
+            group=state.group,
+            modifier_state=state.modifiers,
+            mapping=mapping,
+            by_keysym=by_keysym,
         )
 
     def _level_modifiers(
         self,
         level: int,
-        mapping: Sequence[tuple[int, Sequence[int]]],
+        snapshot: _XkbSnapshot,
     ) -> tuple[int, ...]:
         if level == 0:
             return ()
-        shift = self._modifier_keycode("Shift_L", mapping)
+        shift = self._modifier_keycode("Shift_L", snapshot)
         if level == 1:
             return (shift,)
-        level_three = self._modifier_keycode("ISO_Level3_Shift", mapping)
+        level_three = self._modifier_keycode("ISO_Level3_Shift", snapshot)
         if level == 2:
             return (level_three,)
         return (shift, level_three)
@@ -238,15 +264,22 @@ class XkbKeymapResolver:
     def _modifier_keycode(
         self,
         keysym_name: str,
-        mapping: Sequence[tuple[int, Sequence[int]]],
+        snapshot: _XkbSnapshot,
     ) -> int:
-        keysym = self._session.resolve_keysym(keysym_name)
-        match = self._find_keysym(keysym, mapping)
+        keysym = self._resolve_keysym(keysym_name)
+        match = snapshot.by_keysym.get(keysym)
         if match is None:
             raise X11InputUnavailableError(
                 f"required keyboard modifier is not mapped: {keysym_name}"
             )
         return match[0]
+
+    def _modifier_name(self, keycode: int, snapshot: _XkbSnapshot) -> str:
+        if keycode == self._modifier_keycode("Shift_L", snapshot):
+            return "shift"
+        if keycode == self._modifier_keycode("ISO_Level3_Shift", snapshot):
+            return "ISO_Level3_Shift"
+        raise X11InputUnavailableError("required keyboard modifier is not mapped")
 
     def _caps_lock_inverts(
         self,
@@ -261,11 +294,20 @@ class XkbKeymapResolver:
         if lower == upper or len(lower) != 1 or len(upper) != 1:
             return False
         try:
-            lower_keysym = self._session.resolve_keysym(_character_keysym_name(lower))
-            upper_keysym = self._session.resolve_keysym(_character_keysym_name(upper))
+            lower_keysym = self._resolve_keysym(_character_keysym_name(lower))
+            upper_keysym = self._resolve_keysym(_character_keysym_name(upper))
         except X11InputUnavailableError:
             return False
         return {keysyms[0], keysyms[1]} == {lower_keysym, upper_keysym}
+
+    def _resolve_keysym(self, name: str) -> int:
+        cached = self._keysym_cache.get(name)
+        if cached is not None:
+            return cached
+        keysym = self._session.resolve_keysym(name)
+        if keysym > 0:
+            self._keysym_cache[name] = keysym
+        return keysym
 
 
 class X11KeyboardController:
@@ -297,6 +339,7 @@ class X11KeyboardController:
         self._held_keys: dict[str, _HeldKey] = {}
         self._operation_lock = asyncio.Lock()
         self._active_backend = "xdotool"
+        self._release_attempt_backend: Literal["xtest", "xdotool"] | None = None
 
     @property
     def backend_name(self) -> str:
@@ -321,10 +364,9 @@ class X11KeyboardController:
             normalized_modifiers = [normalize_key(modifier) for modifier in modifiers]
             if self._native_enabled():
                 try:
-                    target = self._keymap.action_key(normalized_key)
-                    modifier_strokes = [
-                        self._keymap.action_key(modifier) for modifier in normalized_modifiers
-                    ]
+                    target, *modifier_strokes = self._keymap.action_keys(
+                        (normalized_key, *normalized_modifiers)
+                    )
                     keycodes = _deduplicate(
                         [
                             *(stroke.keycode for stroke in modifier_strokes),
@@ -332,7 +374,11 @@ class X11KeyboardController:
                             target.keycode,
                         ]
                     )
-                    await self._native_chord(keycodes, duration_ms)
+                    await self._native_chord(
+                        keycodes,
+                        duration_ms,
+                        target_keycodes=(target.keycode,),
+                    )
                 except X11InputUnavailableError:
                     if self._configured_backend != "auto":
                         raise
@@ -360,116 +406,187 @@ class X11KeyboardController:
             return await self._hotkey_state(keys, duration_ms=duration_ms)
 
     async def down(self, key: str) -> None:
+        await self.acquire(key)
+
+    async def acquire(self, key: str) -> bool:
+        """Hold a key and report whether this caller acquired temporary tracking."""
+
         async with self._operation_lock:
             normalized = normalize_key(key)
             if normalized in self._held_keys:
-                return
+                return False
             if self._native_enabled():
                 try:
                     stroke = self._keymap.action_key(normalized)
                     held = await self._native_key_down(stroke)
+                except X11InputInjectionError as exc:
+                    possible_hold = getattr(exc, "_possible_held_key", None)
+                    if possible_hold is not None:
+                        self._held_keys[normalized] = possible_hold
+                    raise
                 except X11InputUnavailableError:
                     if self._configured_backend != "auto":
                         raise
                     self._active_backend = "xdotool"
-                    await self._run("xdotool", "keydown", normalized)
+                    try:
+                        await self._run_xdotool_emission("xdotool", "keydown", normalized)
+                    except X11InputUnavailableError as exc:
+                        raise X11InputUnavailableError(
+                            "xdotool is unavailable before input emission",
+                            input_backend="xdotool",
+                        ) from exc
+                    except BaseException:
+                        self._held_keys[normalized] = _HeldKey(keycode=None, owned=True)
+                        await _shielded_cleanup(self._up_unlocked(normalized))
+                        raise
                     held = _HeldKey(keycode=None, owned=True)
             else:
                 self._active_backend = "xdotool"
-                await self._run("xdotool", "keydown", normalized)
+                try:
+                    await self._run_xdotool_emission("xdotool", "keydown", normalized)
+                except X11InputUnavailableError as exc:
+                    raise X11InputUnavailableError(
+                        "xdotool is unavailable before input emission",
+                        input_backend="xdotool",
+                    ) from exc
+                except BaseException:
+                    self._held_keys[normalized] = _HeldKey(keycode=None, owned=True)
+                    await _shielded_cleanup(self._up_unlocked(normalized))
+                    raise
                 held = _HeldKey(keycode=None, owned=True)
             self._held_keys[normalized] = held
-            await self._key_down_state(key)
+            try:
+                await self._key_down_state(key)
+            except BaseException:
+                await _shielded_cleanup(self._up_unlocked(normalized))
+                raise
+            return True
 
     async def up(self, key: str) -> None:
         async with self._operation_lock:
             await self._up_unlocked(key)
 
-    async def release_all(self, keys: Iterable[str] = ()) -> None:
+    async def release_all(self, keys: Iterable[str] = ()) -> KeyboardReleaseOutcome:
         """Best-effort release and reconcile every key owned by this controller."""
         async with self._operation_lock:
             targets = {
                 *(normalize_key(key) for key in keys),
                 *self._held_keys,
             }
+            released: list[str] = []
+            failures: list[KeyReleaseFailure] = []
             for normalized in reversed(sorted(targets)):
                 tracked = self._held_keys.get(normalized)
+                self._release_attempt_backend = None
                 try:
                     await self._up_unlocked(normalized)
                 except Exception:
                     # A release is idempotent, so one direct retry is safe even when
                     # the first adapter may have delivered the event before failing.
-                    with contextlib.suppress(Exception):
+                    try:
                         await self._retry_release_unlocked(normalized, tracked)
-                    self._held_keys.pop(normalized, None)
-                    with contextlib.suppress(Exception):
                         await self._key_up_state(normalized)
+                    except Exception:
+                        failures.append(
+                            KeyReleaseFailure(
+                                key=normalized,
+                                input_backend=self._release_attempt_backend,
+                            )
+                        )
+                        continue
+                    self._held_keys.pop(normalized, None)
+                released.append(normalized)
+            return KeyboardReleaseOutcome(
+                released=tuple(sorted(released)),
+                failures=tuple(sorted(failures, key=lambda failure: failure.key)),
+            )
 
     async def _up_unlocked(self, key: str) -> None:
+        try:
+            await self._release_key_unlocked(key)
+        except X11InputReleaseError:
+            raise
+        except X11InputInjectionError as exc:
+            raise X11InputReleaseError(
+                "key release outcome is indeterminate",
+                input_backend=self._release_attempt_backend or self._active_backend,
+            ) from exc
+
+    async def _release_key_unlocked(self, key: str) -> None:
         normalized = normalize_key(key)
         tracked = self._held_keys.get(normalized)
         if tracked is not None and tracked.keycode is not None:
-            if tracked.owned:
+            releases = _held_key_releases(tracked)
+            if releases:
                 try:
-                    self._xtest.emit(
-                        [
-                            KeyEvent(tracked.keycode, False),
-                            *(
-                                KeyEvent(keycode, False)
-                                for keycode in reversed(tracked.owned_modifiers)
-                            ),
-                        ]
-                    )
+                    self._release_attempt_backend = "xtest"
+                    self._xtest.emit(releases)
                     self._active_backend = "xtest"
                 except X11InputUnavailableError:
                     if self._configured_backend != "auto":
                         raise
                     self._active_backend = "xdotool"
-                    await self._run("xdotool", "keyup", normalized)
+                    self._release_attempt_backend = "xdotool"
+                    await self._release_held_via_xdotool(normalized, tracked)
         elif tracked is not None:
             self._active_backend = "xdotool"
-            await self._run("xdotool", "keyup", normalized)
+            self._release_attempt_backend = "xdotool"
+            await self._run_xdotool_release("xdotool", "keyup", normalized)
         elif self._native_enabled():
             try:
                 stroke = self._keymap.action_key(normalized)
+                self._release_attempt_backend = "xtest"
                 self._xtest.emit([KeyEvent(stroke.keycode, False)])
                 self._active_backend = "xtest"
             except X11InputUnavailableError:
                 if self._configured_backend != "auto":
                     raise
                 self._active_backend = "xdotool"
-                await self._run("xdotool", "keyup", normalized)
+                self._release_attempt_backend = "xdotool"
+                await self._run_xdotool_release("xdotool", "keyup", normalized)
         else:
             self._active_backend = "xdotool"
-            await self._run("xdotool", "keyup", normalized)
-        self._held_keys.pop(normalized, None)
+            self._release_attempt_backend = "xdotool"
+            await self._run_xdotool_release("xdotool", "keyup", normalized)
         await self._key_up_state(key)
+        self._held_keys.pop(normalized, None)
 
     async def _retry_release_unlocked(
         self,
         normalized: str,
         tracked: _HeldKey | None,
     ) -> None:
-        if tracked is not None and not tracked.owned:
-            return
         if tracked is not None and tracked.keycode is not None:
+            releases = _held_key_releases(tracked)
+            if not releases:
+                return
             try:
-                self._xtest.emit(
-                    [
-                        KeyEvent(tracked.keycode, False),
-                        *(
-                            KeyEvent(keycode, False)
-                            for keycode in reversed(tracked.owned_modifiers)
-                        ),
-                    ]
-                )
+                self._release_attempt_backend = "xtest"
+                self._xtest.emit(releases)
                 self._active_backend = "xtest"
                 return
             except (X11InputInjectionError, X11InputUnavailableError):
                 if self._configured_backend != "auto":
                     raise
+            self._active_backend = "xdotool"
+            self._release_attempt_backend = "xdotool"
+            await self._release_held_via_xdotool(normalized, tracked)
+            return
         self._active_backend = "xdotool"
-        await self._run("xdotool", "keyup", normalized)
+        self._release_attempt_backend = "xdotool"
+        await self._run_xdotool_release("xdotool", "keyup", normalized)
+
+    async def _release_held_via_xdotool(
+        self,
+        normalized: str,
+        tracked: _HeldKey,
+    ) -> None:
+        keys = [
+            *((normalized,) if tracked.owned else ()),
+            *tracked.owned_modifier_names,
+        ]
+        for key in keys:
+            await self._run_xdotool_release("xdotool", "keyup", key)
 
     async def _type_text_unlocked(
         self,
@@ -536,11 +653,9 @@ class X11KeyboardController:
                     (*stroke.modifiers, stroke.keycode),
                     (stroke.keycode,),
                 )
-            except X11InputUnavailableError as exc:
+            except (X11InputStateConflictError, X11InputUnavailableError) as exc:
                 if emitted:
-                    raise X11InputInjectionError(
-                        "typing may have been partially injected"
-                    ) from exc
+                    raise X11InputInjectionError("typing may have been partially injected") from exc
                 raise
             emitted = True
             if index + 1 < len(strokes):
@@ -548,7 +663,15 @@ class X11KeyboardController:
 
     async def _type_via_xdotool(self, text: str, delay_ms: int) -> None:
         self._active_backend = "xdotool"
-        await self._run("xdotool", "type", "--delay", str(delay_ms), text)
+        await self._run_xdotool_emission(
+            "xdotool",
+            "type",
+            "--delay",
+            str(delay_ms),
+            "--file",
+            "-",
+            input_text=text,
+        )
 
     async def _type_via_clipboard(self, text: str) -> None:
         previous = await self._clipboard_get()
@@ -561,7 +684,7 @@ class X11KeyboardController:
     async def _hotkey_unlocked(self, keys: Sequence[str], *, duration_ms: int) -> None:
         if self._native_enabled():
             try:
-                strokes = [self._keymap.action_key(key) for key in keys]
+                strokes = self._keymap.action_keys(keys)
                 keycodes = _deduplicate(
                     [
                         keycode
@@ -569,7 +692,11 @@ class X11KeyboardController:
                         for keycode in (*stroke.modifiers, stroke.keycode)
                     ]
                 )
-                await self._native_chord(keycodes, duration_ms)
+                await self._native_chord(
+                    keycodes,
+                    duration_ms,
+                    target_keycodes=(strokes[-1].keycode,),
+                )
             except X11InputUnavailableError:
                 if self._configured_backend != "auto":
                     raise
@@ -584,60 +711,92 @@ class X11KeyboardController:
             self._active_backend = "xtest"
             return _HeldKey(keycode=stroke.keycode, owned=False)
         owned_modifiers = [keycode for keycode in stroke.modifiers if keycode not in pressed]
+        owned_modifier_names = [
+            name
+            for keycode, name in zip(
+                stroke.modifiers,
+                stroke.modifier_names,
+                strict=True,
+            )
+            if keycode in owned_modifiers
+        ]
         events = [
             *(KeyEvent(keycode, True) for keycode in owned_modifiers),
             KeyEvent(stroke.keycode, True),
         ]
         try:
-            self._xtest.emit(
+            result = self._xtest.emit(
                 events,
                 preserve_pressed_keycodes=(*stroke.modifiers, stroke.keycode),
             )
             self._active_backend = "xtest"
-        except X11InputInjectionError:
-            cleanup = [
-                KeyEvent(stroke.keycode, False),
-                *(KeyEvent(keycode, False) for keycode in reversed(owned_modifiers)),
-            ]
-            with contextlib.suppress(Exception):
-                self._xtest.emit(cleanup)
+        except X11InputInjectionError as exc:
+            possible_hold = _held_key_from_emission(
+                stroke.keycode,
+                owned_modifiers,
+                owned_modifier_names,
+                exc.emission_result,
+            )
+            cleanup = _held_key_releases(possible_hold)
+            try:
+                if cleanup:
+                    self._xtest.emit(cleanup)
+            except Exception:
+                exc._possible_held_key = possible_hold  # type: ignore[attr-defined]
             raise
-        return _HeldKey(
-            keycode=stroke.keycode,
-            owned=True,
-            owned_modifiers=tuple(owned_modifiers),
+        return _held_key_from_emission(
+            stroke.keycode,
+            owned_modifiers,
+            owned_modifier_names,
+            result,
         )
 
-    async def _native_chord(self, keycodes: Sequence[int], duration_ms: int) -> None:
-        pressed = self._xtest.pressed_keycodes(keycodes)
-        owned = [keycode for keycode in keycodes if keycode not in pressed]
-        if not owned:
-            self._active_backend = "xtest"
-            return
-        downs = [KeyEvent(keycode, True) for keycode in owned]
-        ups = [KeyEvent(keycode, False) for keycode in reversed(owned)]
+    async def _native_chord(
+        self,
+        keycodes: Sequence[int],
+        duration_ms: int,
+        *,
+        target_keycodes: Iterable[int],
+    ) -> None:
+        targets = frozenset(target_keycodes)
+        unique_keycodes = _deduplicate(keycodes)
+        downs = [KeyEvent(keycode, True) for keycode in unique_keycodes]
+        preserved = tuple(keycode for keycode in unique_keycodes if keycode not in targets)
         if duration_ms <= 0:
+            ups = [KeyEvent(keycode, False) for keycode in reversed(unique_keycodes)]
             try:
                 self._xtest.emit(
                     [*downs, *ups],
-                    preserve_pressed_keycodes=keycodes,
+                    preserve_pressed_keycodes=preserved,
+                    reject_pressed_keycodes=targets,
                 )
                 self._active_backend = "xtest"
-            except X11InputInjectionError:
+            except X11InputInjectionError as exc:
+                cleanup = _owned_key_releases(exc.emission_result, unique_keycodes)
                 with contextlib.suppress(Exception):
-                    self._xtest.emit(ups)
+                    self._xtest.emit(cleanup)
                 raise
             return
         try:
-            self._xtest.emit(downs, preserve_pressed_keycodes=keycodes)
+            result = self._xtest.emit(
+                downs,
+                preserve_pressed_keycodes=preserved,
+                reject_pressed_keycodes=targets,
+            )
             self._active_backend = "xtest"
+        except X11InputInjectionError as exc:
+            cleanup = _owned_key_releases(exc.emission_result, unique_keycodes)
+            with contextlib.suppress(Exception):
+                self._xtest.emit(cleanup)
+            raise
+        ups = _owned_key_releases(result, unique_keycodes)
+        try:
             await asyncio.sleep(duration_ms / 1000)
         except BaseException:
             with contextlib.suppress(Exception):
                 self._xtest.emit(ups)
             raise
-        else:
-            self._finish_native_chord(ups)
+        self._finish_native_chord(ups)
 
     def _finish_native_chord(self, ups: Sequence[KeyEvent]) -> None:
         try:
@@ -662,10 +821,6 @@ class X11KeyboardController:
     ) -> None:
         unique_keycodes = _deduplicate(keycodes)
         targets = frozenset(target_keycodes)
-        initially_pressed = self._xtest.pressed_keycodes(unique_keycodes)
-        if initially_pressed.intersection(targets):
-            raise X11InputUnavailableError("typing target key is already held")
-        owned = [keycode for keycode in unique_keycodes if keycode not in initially_pressed]
         try:
             self._xtest.emit(
                 events,
@@ -675,11 +830,10 @@ class X11KeyboardController:
                 reject_pressed_keycodes=targets,
             )
             self._active_backend = "xtest"
-        except X11InputInjectionError:
+        except X11InputInjectionError as exc:
+            cleanup = _owned_key_releases(exc.emission_result, unique_keycodes)
             with contextlib.suppress(Exception):
-                self._xtest.emit(
-                    [KeyEvent(keycode, False) for keycode in reversed(owned)]
-                )
+                self._xtest.emit(cleanup)
             raise
 
     async def _xdotool_press(
@@ -689,42 +843,116 @@ class X11KeyboardController:
         duration_ms: int,
     ) -> None:
         self._active_backend = "xdotool"
+        if key in self._held_keys:
+            raise X11InputStateConflictError("keyboard target key is already held")
         transient = [
             modifier for modifier in _deduplicate(modifiers) if modifier not in self._held_keys
         ]
-        for modifier in transient:
-            await self._run("xdotool", "keydown", modifier)
+        pending_releases: list[str] = []
         try:
+            for modifier in transient:
+                pending_releases.append(modifier)
+                await self._run_xdotool_emission("xdotool", "keydown", modifier)
+            target_registered = key not in self._held_keys and key not in pending_releases
+            if target_registered:
+                pending_releases.append(key)
             if duration_ms > 0:
-                await self._run("xdotool", "keydown", key)
-                try:
+                if key not in self._held_keys:
+                    await self._run_xdotool_emission("xdotool", "keydown", key)
                     await asyncio.sleep(duration_ms / 1000)
-                finally:
-                    await self._run("xdotool", "keyup", key)
+                    await self._run_xdotool_release("xdotool", "keyup", key)
+                    if target_registered:
+                        pending_releases.remove(key)
+                else:
+                    await asyncio.sleep(duration_ms / 1000)
             else:
-                await self._run("xdotool", "key", key)
+                if key not in self._held_keys:
+                    await self._run_xdotool_emission("xdotool", "key", key)
+                    if target_registered:
+                        pending_releases.remove(key)
         finally:
-            for modifier in reversed(transient):
-                with contextlib.suppress(Exception):
-                    await self._run("xdotool", "keyup", modifier)
+            await self._cleanup_xdotool_keys(pending_releases)
 
     async def _xdotool_chord(self, keys: Sequence[str], duration_ms: int) -> None:
         self._active_backend = "xdotool"
+        if keys and keys[-1] in self._held_keys:
+            raise X11InputStateConflictError("keyboard target key is already held")
         if duration_ms <= 0 and not any(key in self._held_keys for key in keys):
-            await self._run("xdotool", "key", "+".join(keys))
+            candidates = _deduplicate(keys)
+            try:
+                await self._run_xdotool_emission("xdotool", "key", "+".join(keys))
+            except BaseException:
+                await self._cleanup_xdotool_keys(candidates)
+                raise
             return
         transient = [key for key in _deduplicate(keys) if key not in self._held_keys]
-        pressed: list[str] = []
+        pending_releases: list[str] = []
         try:
             for key in transient:
-                await self._run("xdotool", "keydown", key)
-                pressed.append(key)
+                pending_releases.append(key)
+                await self._run_xdotool_emission("xdotool", "keydown", key)
             if duration_ms > 0:
                 await asyncio.sleep(duration_ms / 1000)
         finally:
-            for key in reversed(pressed):
-                with contextlib.suppress(Exception):
-                    await self._run("xdotool", "keyup", key)
+            await self._cleanup_xdotool_keys(pending_releases)
+
+    async def _cleanup_xdotool_keys(self, keys: Sequence[str]) -> None:
+        for key in reversed(keys):
+            await _shielded_cleanup(self._run_xdotool_release("xdotool", "keyup", key))
+
+    async def _run_xdotool_emission(
+        self,
+        *args: str,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return await self._run(*args, input_text=input_text)
+        except X11InputUnavailableError as exc:
+            raise X11InputUnavailableError(
+                "xdotool is unavailable before input emission",
+                input_backend="xdotool",
+            ) from exc
+        except (FileNotFoundError, PermissionError) as exc:
+            raise X11InputUnavailableError(
+                "xdotool could not start before input emission",
+                input_backend="xdotool",
+            ) from exc
+        except X11InputInjectionError:
+            raise
+        except Exception as exc:
+            raise X11InputInjectionError(
+                "xdotool input may have been partially applied",
+                input_backend="xdotool",
+            ) from exc
+
+    async def _run_xdotool_release(
+        self,
+        *args: str,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return await self._run(*args)
+        except X11InputUnavailableError as exc:
+            raise X11InputUnavailableError(
+                "xdotool is unavailable before key release",
+                input_backend="xdotool",
+            ) from exc
+        except (FileNotFoundError, PermissionError) as exc:
+            raise X11InputUnavailableError(
+                "xdotool could not start before key release",
+                input_backend="xdotool",
+            ) from exc
+        except X11InputReleaseError:
+            raise
+        except X11InputInjectionError as exc:
+            raise X11InputReleaseError(
+                "xdotool key release outcome is indeterminate",
+                input_backend="xdotool",
+            ) from exc
+        except Exception as exc:
+            raise X11InputReleaseError(
+                "xdotool key release may have been partially applied",
+                input_backend="xdotool",
+            ) from exc
 
     def _native_enabled(self) -> bool:
         if self._configured_backend == "xdotool":
@@ -754,6 +982,63 @@ def _character_keysym_name(character: str) -> str:
 
 def _deduplicate[T](values: Iterable[T]) -> list[T]:
     return list(dict.fromkeys(values))
+
+
+def _owned_key_releases(
+    result: X11EmissionResult | None,
+    keycodes: Sequence[int],
+) -> list[KeyEvent]:
+    if result is None:
+        return []
+    return [
+        KeyEvent(keycode, False)
+        for keycode in reversed(keycodes)
+        if keycode not in result.initially_pressed_keycodes
+    ]
+
+
+def _held_key_from_emission(
+    target_keycode: int,
+    modifier_keycodes: Sequence[int],
+    modifier_names: Sequence[str],
+    result: X11EmissionResult | None,
+) -> _HeldKey:
+    initially_pressed = result.initially_pressed_keycodes if result is not None else frozenset()
+    return _HeldKey(
+        keycode=target_keycode,
+        owned=result is not None and target_keycode not in initially_pressed,
+        owned_modifiers=(
+            tuple(keycode for keycode in modifier_keycodes if keycode not in initially_pressed)
+            if result is not None
+            else ()
+        ),
+        owned_modifier_names=(
+            tuple(
+                name
+                for keycode, name in zip(
+                    modifier_keycodes,
+                    modifier_names,
+                    strict=True,
+                )
+                if keycode not in initially_pressed
+            )
+            if result is not None
+            else ()
+        ),
+    )
+
+
+def _held_key_releases(held: _HeldKey) -> list[KeyEvent]:
+    return [
+        *([KeyEvent(held.keycode, False)] if held.owned and held.keycode is not None else []),
+        *(KeyEvent(keycode, False) for keycode in reversed(held.owned_modifiers)),
+    ]
+
+
+async def _shielded_cleanup(cleanup: Awaitable[object]) -> None:
+    with anyio.CancelScope(shield=True):
+        with contextlib.suppress(BaseException):
+            await cleanup
 
 
 __all__ = [

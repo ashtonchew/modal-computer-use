@@ -6,6 +6,7 @@ import ctypes.util
 import threading
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from time import perf_counter
 
 from ._xlib_runtime import configure_xlib_runtime
 
@@ -16,6 +17,10 @@ _XKB_USE_CORE_KBD = 0x0100
 class X11InputUnavailableError(RuntimeError):
     """Raised before input emission when the native X11 adapter cannot be used."""
 
+    def __init__(self, message: str, *, input_backend: str = "xtest") -> None:
+        super().__init__(message)
+        self.input_backend = input_backend
+
 
 class X11InputInjectionError(RuntimeError):
     """Raised after native input emission may have started.
@@ -23,6 +28,23 @@ class X11InputInjectionError(RuntimeError):
     Callers must not replay the operation through another adapter because doing so
     could duplicate an event that the X server already accepted.
     """
+
+    def __init__(self, message: str, *, input_backend: str = "xtest") -> None:
+        super().__init__(message)
+        self.input_backend = input_backend
+        self.emission_result: X11EmissionResult | None = None
+
+
+class X11InputReleaseError(X11InputInjectionError):
+    """Raised when an idempotent release may have been partially applied."""
+
+    def __init__(self, message: str, *, input_backend: str) -> None:
+        super().__init__(message)
+        self.input_backend = input_backend
+
+
+class X11InputStateConflictError(RuntimeError):
+    """Raised before emission when existing input state conflicts with the request."""
 
 
 # Keep the established name import-compatible while callers migrate to the semantic name.
@@ -55,6 +77,68 @@ class MotionEvent:
 type X11InputEvent = KeyEvent | ButtonEvent | MotionEvent
 
 
+@dataclass(frozen=True, slots=True)
+class X11EmissionResult:
+    """Atomic pressed-state ownership and secret-safe numeric emission diagnostics."""
+
+    initially_pressed_keycodes: frozenset[int]
+    requested_event_count: int = 0
+    filtered_event_count: int = 0
+    emitted_event_count: int = 0
+    cleanup_event_count: int = 0
+    pressed_query_count: int = 0
+    explicit_flush_count: int = 0
+    sync_count: int = 0
+    pressed_query_ms: float = 0.0
+    enqueue_ms: float = 0.0
+    sync_ms: float = 0.0
+    cleanup_ms: float = 0.0
+    total_ms: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class X11KeyboardState:
+    group: int
+    modifiers: int
+
+
+@dataclass(slots=True)
+class _X11EmissionMetrics:
+    requested_event_count: int
+    filtered_event_count: int = 0
+    emitted_event_count: int = 0
+    cleanup_event_count: int = 0
+    pressed_query_count: int = 0
+    explicit_flush_count: int = 0
+    sync_count: int = 0
+    pressed_query_ms: float = 0.0
+    enqueue_ms: float = 0.0
+    sync_ms: float = 0.0
+    cleanup_ms: float = 0.0
+
+    def result(
+        self,
+        *,
+        initially_pressed_keycodes: frozenset[int],
+        total_ms: float,
+    ) -> X11EmissionResult:
+        return X11EmissionResult(
+            initially_pressed_keycodes=initially_pressed_keycodes,
+            requested_event_count=self.requested_event_count,
+            filtered_event_count=self.filtered_event_count,
+            emitted_event_count=self.emitted_event_count,
+            cleanup_event_count=self.cleanup_event_count,
+            pressed_query_count=self.pressed_query_count,
+            explicit_flush_count=self.explicit_flush_count,
+            sync_count=self.sync_count,
+            pressed_query_ms=self.pressed_query_ms,
+            enqueue_ms=self.enqueue_ms,
+            sync_ms=self.sync_ms,
+            cleanup_ms=self.cleanup_ms,
+            total_ms=total_ms,
+        )
+
+
 class _XkbStateRec(ctypes.Structure):
     _fields_ = [
         ("group", ctypes.c_ubyte),
@@ -85,10 +169,18 @@ class X11InputSession:
         self._display: int | None = None
         self._available: bool | None = None
         self._failure: str | None = None
+        self._last_emission_result: X11EmissionResult | None = None
 
     @property
     def failure(self) -> str | None:
         return self._failure
+
+    @property
+    def last_emission_result(self) -> X11EmissionResult | None:
+        """Return secret-safe numeric diagnostics for the most recent emit attempt."""
+
+        with self._lock:
+            return self._last_emission_result
 
     def available(self) -> bool:
         with self._lock:
@@ -188,6 +280,10 @@ class X11InputSession:
     def modifier_state(self) -> int:
         return self._xkb_state().mods
 
+    def keyboard_state(self) -> X11KeyboardState:
+        state = self._xkb_state()
+        return X11KeyboardState(group=state.group, modifiers=state.mods)
+
     def pressed_keycodes(self, keycodes: Iterable[int] | None = None) -> frozenset[int]:
         requested = None if keycodes is None else tuple(keycodes)
         if requested is not None:
@@ -235,7 +331,7 @@ class X11InputSession:
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
         reject_pressed_keycodes: Iterable[int] = (),
-    ) -> None:
+    ) -> X11EmissionResult:
         sequence = tuple(events)
         preserved = frozenset(preserve_pressed_keycodes)
         rejected = frozenset(reject_pressed_keycodes)
@@ -243,24 +339,47 @@ class X11InputSession:
         for keycode in preserved | rejected:
             self._validate_keycode(keycode)
 
+        started_total = perf_counter()
+        metrics = _X11EmissionMetrics(requested_event_count=len(sequence))
+        pressed: frozenset[int] = frozenset()
+        result: X11EmissionResult | None = None
+        injection_error: X11InputInjectionError | None = None
         with self._lock:
-            display = self._ensure_open()
-            pressed = (
-                self._query_pressed_keycodes(display)
-                if preserved or rejected
-                else frozenset()
-            )
-            if pressed.intersection(rejected):
-                raise X11InputUnavailableError("typing target key is already held")
-            already_pressed = pressed.intersection(preserved)
-            filtered = tuple(
-                event
-                for event in sequence
-                if not (isinstance(event, KeyEvent) and event.keycode in already_pressed)
-            )
-            if not filtered:
-                return
-            self._emit_locked(display, filtered)
+            try:
+                display = self._ensure_open()
+                if preserved or rejected:
+                    metrics.pressed_query_count += 1
+                    query_started = perf_counter()
+                    try:
+                        pressed = self._query_pressed_keycodes(display)
+                    finally:
+                        metrics.pressed_query_ms += _elapsed_ms(query_started)
+                else:
+                    pressed = frozenset()
+                if pressed.intersection(rejected):
+                    raise X11InputStateConflictError("keyboard target key is already held")
+                already_pressed = pressed.intersection(preserved)
+                filtered = tuple(
+                    event
+                    for event in sequence
+                    if not (isinstance(event, KeyEvent) and event.keycode in already_pressed)
+                )
+                metrics.filtered_event_count = len(sequence) - len(filtered)
+                if filtered:
+                    self._emit_locked(display, filtered, metrics=metrics)
+            except X11InputInjectionError as exc:
+                injection_error = exc
+                raise
+            finally:
+                result = metrics.result(
+                    initially_pressed_keycodes=pressed,
+                    total_ms=_elapsed_ms(started_total),
+                )
+                self._last_emission_result = result
+                if injection_error is not None:
+                    injection_error.emission_result = result
+        assert result is not None
+        return result
 
     def _xkb_state(self) -> _XkbStateRec:
         with self._lock:
@@ -334,8 +453,6 @@ class X11InputSession:
         x11.XOpenDisplay.restype = ctypes.c_void_p
         x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
         x11.XCloseDisplay.restype = ctypes.c_int
-        x11.XFlush.argtypes = [ctypes.c_void_p]
-        x11.XFlush.restype = ctypes.c_int
         x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         x11.XSync.restype = ctypes.c_int
         x11.XScreenCount.argtypes = [ctypes.c_void_p]
@@ -420,34 +537,47 @@ class X11InputSession:
         if not ok:
             raise X11InputUnavailableError("XQueryKeymap failed")
         return frozenset(
-            keycode
-            for keycode in range(256)
-            if keymap[keycode >> 3][0] & (1 << (keycode & 7))
+            keycode for keycode in range(256) if keymap[keycode >> 3][0] & (1 << (keycode & 7))
         )
 
-    def _emit_locked(self, display: int, events: Sequence[X11InputEvent]) -> None:
+    def _emit_locked(
+        self,
+        display: int,
+        events: Sequence[X11InputEvent],
+        *,
+        metrics: _X11EmissionMetrics,
+    ) -> None:
         assert self._x11 is not None
         assert self._xtst is not None
         held_by_sequence: list[KeyEvent | ButtonEvent] = []
         attempted = False
         try:
-            for event in events:
-                attempted = True
-                if isinstance(event, (KeyEvent, ButtonEvent)) and event.pressed:
-                    # Treat a failed press call as indeterminate and release it during cleanup.
-                    held_by_sequence.append(event)
-                ok = self._fake_event(display, event)
-                if not ok:
-                    raise X11InputInjectionError(
-                        f"{type(event).__name__} may not have been injected"
-                    )
-                if isinstance(event, (KeyEvent, ButtonEvent)) and not event.pressed:
-                    self._discard_matching_press(held_by_sequence, event)
-            self._x11.XFlush(ctypes.c_void_p(display))
-            self._x11.XSync(ctypes.c_void_p(display), 0)
+            enqueue_started = perf_counter()
+            try:
+                for event in events:
+                    attempted = True
+                    metrics.emitted_event_count += 1
+                    if isinstance(event, (KeyEvent, ButtonEvent)) and event.pressed:
+                        # Treat a failed press call as indeterminate and release it during cleanup.
+                        held_by_sequence.append(event)
+                    ok = self._fake_event(display, event)
+                    if not ok:
+                        raise X11InputInjectionError(
+                            f"{type(event).__name__} may not have been injected"
+                        )
+                    if isinstance(event, (KeyEvent, ButtonEvent)) and not event.pressed:
+                        self._discard_matching_press(held_by_sequence, event)
+            finally:
+                metrics.enqueue_ms += _elapsed_ms(enqueue_started)
+            sync_started = perf_counter()
+            metrics.sync_count += 1
+            try:
+                self._x11.XSync(ctypes.c_void_p(display), 0)
+            finally:
+                metrics.sync_ms += _elapsed_ms(sync_started)
         except Exception as exc:
             if attempted:
-                self._release_after_failure(display, held_by_sequence)
+                self._release_after_failure(display, held_by_sequence, metrics=metrics)
                 if isinstance(exc, X11InputInjectionError):
                     raise
                 raise X11InputInjectionError(
@@ -490,19 +620,30 @@ class X11InputSession:
         self,
         display: int,
         held_by_sequence: Sequence[KeyEvent | ButtonEvent],
+        *,
+        metrics: _X11EmissionMetrics,
     ) -> None:
         assert self._x11 is not None
-        for event in reversed(held_by_sequence):
-            with contextlib.suppress(Exception):
-                self._fake_event(
-                    display,
-                    KeyEvent(event.keycode, False)
-                    if isinstance(event, KeyEvent)
-                    else ButtonEvent(event.button, False),
-                )
-        with contextlib.suppress(Exception):
-            self._x11.XFlush(ctypes.c_void_p(display))
-            self._x11.XSync(ctypes.c_void_p(display), 0)
+        cleanup_started = perf_counter()
+        try:
+            for event in reversed(held_by_sequence):
+                metrics.cleanup_event_count += 1
+                with contextlib.suppress(Exception):
+                    self._fake_event(
+                        display,
+                        KeyEvent(event.keycode, False)
+                        if isinstance(event, KeyEvent)
+                        else ButtonEvent(event.button, False),
+                    )
+            sync_started = perf_counter()
+            metrics.sync_count += 1
+            try:
+                with contextlib.suppress(Exception):
+                    self._x11.XSync(ctypes.c_void_p(display), 0)
+            finally:
+                metrics.sync_ms += _elapsed_ms(sync_started)
+        finally:
+            metrics.cleanup_ms += _elapsed_ms(cleanup_started)
 
     @staticmethod
     def _discard_matching_press(
@@ -540,6 +681,10 @@ class X11InputSession:
             raise ValueError("keycode must be between 1 and 255")
 
 
+def _elapsed_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000
+
+
 # Compatibility for integrations that imported the pointer-specific class before it was deepened.
 XTestPointerController = X11InputSession
 
@@ -548,10 +693,14 @@ __all__ = [
     "ButtonEvent",
     "KeyEvent",
     "MotionEvent",
+    "X11EmissionResult",
     "X11InputEvent",
     "X11InputInjectionError",
+    "X11InputReleaseError",
     "X11InputSession",
+    "X11InputStateConflictError",
     "X11InputUnavailableError",
+    "X11KeyboardState",
     "XTestPointerController",
     "XTestUnavailableError",
 ]

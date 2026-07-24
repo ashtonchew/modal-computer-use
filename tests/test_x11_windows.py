@@ -12,12 +12,13 @@ from modal_computer_use.daemon.desktop.windows import (
     NativeEwmhWindowAdapter,
     NativeWindowRequest,
     X11WindowController,
+    X11WindowNativeIndeterminateError,
     X11WindowNativeOperationError,
     X11WindowNativeUnavailableError,
     normalize_window_id,
     parse_window_id,
 )
-from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend
+from modal_computer_use.daemon.desktop.x11 import MockDesktopBackend, X11DesktopBackend
 from modal_computer_use.models import X11Window
 
 
@@ -256,6 +257,33 @@ def test_native_request_failure_uses_wmctrl_rollout_fallback(
 
 
 @pytest.mark.parametrize("operation", ["activate", "close_window"])
+def test_indeterminate_native_request_is_never_replayed(
+    operation: str,
+) -> None:
+    native = FakeNativeWindowAdapter(
+        operation_error=X11WindowNativeIndeterminateError(
+            "native window request outcome is indeterminate"
+        )
+    )
+    commands = CommandRecorder()
+    controller = _controller(native, commands)
+
+    result = anyio.run(getattr(controller, operation), "42")
+
+    assert result.ok is False
+    assert result.message == "native window request outcome is indeterminate"
+    assert result.output == {
+        "code": "window_request_indeterminate",
+        "window_id": "0x0000002a",
+        "window_backend": "xlib-ewmh",
+        "verified": False,
+        "indeterminate": True,
+    }
+    assert commands.calls == []
+    assert controller.backend_name == "xlib-ewmh"
+
+
+@pytest.mark.parametrize("operation", ["activate", "close_window"])
 def test_native_request_failure_is_structured_when_wmctrl_is_absent(
     operation: str,
 ) -> None:
@@ -379,6 +407,11 @@ def test_x11_readiness_rejects_command_fallback_when_window_manager_is_not_live(
     backend = X11DesktopBackend(width=100, height=100)
     backend._windows = controller
     backend._mouse.probe_backend = lambda: (True, None)  # type: ignore[method-assign]
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
     monkeypatch.setattr(windows_module.shutil, "which", lambda _name: "/usr/bin/tool")
 
     ready, errors = anyio.run(backend.ready)
@@ -492,6 +525,36 @@ def test_native_adapter_sends_ewmh_close_and_verifies_once() -> None:
     assert adapter.sent == [
         ("_NET_CLOSE_WINDOW", 20, (0, 1, 0, 0, 0)),
     ]
+
+
+@pytest.mark.parametrize("operation", ["activate", "close"])
+def test_native_adapter_marks_post_send_failures_indeterminate(operation: str) -> None:
+    adapter = InspectableNativeAdapter()
+    adapter.client_lists = [[10, 20], [10]]
+
+    def fail_after_send(_display: int) -> None:
+        raise X11WindowNativeOperationError("display disconnected")
+
+    adapter._sync = fail_after_send  # type: ignore[method-assign]
+
+    with pytest.raises(X11WindowNativeIndeterminateError, match="indeterminate"):
+        getattr(adapter, operation)(20)
+
+    assert len(adapter.sent) == 1
+
+
+@pytest.mark.parametrize("operation", ["activate", "close"])
+def test_native_adapter_marks_send_call_failures_indeterminate(operation: str) -> None:
+    adapter = InspectableNativeAdapter()
+    adapter.client_lists = [[10, 20], [10]]
+
+    def fail_during_send(**_kwargs: object) -> None:
+        raise X11WindowNativeOperationError("display disconnected")
+
+    adapter._send_client_message = fail_during_send  # type: ignore[method-assign]
+
+    with pytest.raises(X11WindowNativeIndeterminateError, match="indeterminate"):
+        getattr(adapter, operation)(20)
 
 
 def test_native_adapter_rejects_unmanaged_window_before_sending() -> None:
@@ -667,3 +730,17 @@ def test_native_adapter_reads_window_metadata_with_icccm_fallback() -> None:
         workspace=-1,
         is_active=True,
     )
+
+
+def test_production_x11_window_failure_never_leaks_mock_window() -> None:
+    backend = X11DesktopBackend(width=100, height=100)
+    backend._windows._native = FakeNativeWindowAdapter(  # type: ignore[assignment]
+        operation_error=X11WindowNativeUnavailableError("XOpenDisplay failed")
+    )
+    backend._windows._commands.available = lambda: False  # type: ignore[method-assign]
+
+    assert anyio.run(backend.windows) == []
+    assert anyio.run(backend.active_window) is None
+
+    mock_windows = anyio.run(MockDesktopBackend(width=100, height=100).windows)
+    assert [window.id for window in mock_windows] == ["mock-root"]

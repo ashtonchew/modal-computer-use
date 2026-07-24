@@ -35,6 +35,7 @@ from modal_computer_use.sandbox import create_modal_v2_tunnel_computer
 DEPENDENCY_SHA = "37f977f80de93800c005caeec7ead5222b00b040"
 BASE_BENCHMARK_SOURCE_SHA = "8c21cf1338fd747dca57bca6941c307270069712"
 DEFAULT_RAW_ROOT = Path("benchmark-results/modal-optimization-2026-07-19")
+DEFAULT_PREREGISTRATION = DEFAULT_RAW_ROOT / "preregistration.json"
 DEFAULT_PUBLISHED_ARTIFACT = Path(
     "benchmark-data/modal-optimization-results-2026-07-19.json"
 )
@@ -51,7 +52,7 @@ def main() -> int:
     preregister.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_RAW_ROOT / "preregistration.json",
+        default=DEFAULT_PREREGISTRATION,
     )
     preregister.add_argument("--artifact-output", type=Path)
 
@@ -168,6 +169,12 @@ def _v2_config(args: argparse.Namespace) -> ModalOptimizationConfig:
 
 
 def _preregister(args: argparse.Namespace) -> int:
+    if args.output.exists():
+        raise RuntimeError("preregistration output already exists; refusing stale evidence")
+    artifact_output = _preregistration_artifact_output(
+        output=args.output,
+        artifact_output=args.artifact_output,
+    )
     _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
     config = _config(args)
     region_selection_source_sha = args.region_selection_source_sha or args.source_sha
@@ -177,14 +184,7 @@ def _preregister(args: argparse.Namespace) -> int:
         region_selection_source_sha=region_selection_source_sha,
         provider_default_source_sha=provider_default_source_sha,
         root=args.output.parent,
-        artifact_output=(
-            args.artifact_output
-            or (
-                DEFAULT_PUBLISHED_ARTIFACT
-                if args.output.parent == DEFAULT_RAW_ROOT
-                else Path("benchmark-data") / f"{args.output.parent.name}.json"
-            )
-        ),
+        artifact_output=artifact_output,
     )
     payload = build_preregistration(
         config,
@@ -211,6 +211,21 @@ def _preregister(args: argparse.Namespace) -> int:
     args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     print(json.dumps({"status": "preregistered", "output": str(args.output)}))
     return 0
+
+
+def _preregistration_artifact_output(
+    *,
+    output: Path,
+    artifact_output: Path | None,
+) -> Path:
+    if artifact_output is not None:
+        return artifact_output
+    if output == DEFAULT_PREREGISTRATION:
+        return DEFAULT_PUBLISHED_ARTIFACT
+    raise ValueError(
+        "--artifact-output is required when --output is not the canonical "
+        f"{DEFAULT_PREREGISTRATION.as_posix()}"
+    )
 
 
 def _run_region(args: argparse.Namespace) -> int:

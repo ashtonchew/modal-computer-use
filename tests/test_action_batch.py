@@ -4,9 +4,15 @@ import base64
 import json
 from datetime import UTC, datetime
 
+import pytest
 from PIL import Image
 
 from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot
+from modal_computer_use.daemon.desktop.xtest import (
+    X11InputInjectionError,
+    X11InputStateConflictError,
+    X11InputUnavailableError,
+)
 from modal_computer_use.models import ActionResult, CoordinateSpace, sha256_bytes
 
 
@@ -32,6 +38,218 @@ def test_action_batch_attributes_keyboard_input_backend(test_client) -> None:
 
     assert result["ok"] is True
     assert result["results"][0]["output"]["input_backend"] == "mock"
+
+
+@pytest.mark.parametrize(
+    ("exception", "code", "retry_safe", "emission_state", "message"),
+    [
+        (
+            X11InputUnavailableError,
+            "input_backend_unavailable",
+            True,
+            "not_started",
+            "native input backend is unavailable before input emission",
+        ),
+        (
+            X11InputInjectionError,
+            "input_may_be_partial",
+            False,
+            "possibly_partial",
+            "input may have been partially applied",
+        ),
+    ],
+)
+def test_action_batch_preserves_native_input_retry_contract(
+    test_client,
+    app,
+    exception,
+    code: str,
+    retry_safe: bool,
+    emission_state: str,
+    message: str,
+) -> None:
+    sentinel = "SENTINEL_TYPED_TEXT_MUST_NOT_LEAK"
+
+    async def fail_type(text: str, delay_ms: int = 10, method: str = "auto"):
+        del text, delay_ms, method
+        raise exception(sentinel)
+
+    app.state.backend.keyboard_type = fail_type
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "type", "text": sentinel}]},
+    ).json()
+
+    item = result["results"][0]
+    assert item["error_code"] == code
+    assert item["error"] == message
+    assert item["output"] == {
+        "code": code,
+        "input_backend": "xtest",
+        "retry_safe": retry_safe,
+        "emission_state": emission_state,
+    }
+    assert sentinel not in str(result)
+
+
+def test_action_batch_preserves_input_state_conflict(test_client, app) -> None:
+    async def fail_press(key: str, modifiers=(), duration_ms: int = 0):
+        del key, modifiers, duration_ms
+        raise X11InputStateConflictError("private state details")
+
+    app.state.backend.keyboard_press = fail_press
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "keypress", "key": "a"}]},
+    ).json()
+
+    item = result["results"][0]
+    assert item["error_code"] == "input_state_conflict"
+    assert item["error"] == "input target is already held"
+    assert item["output"] == {
+        "code": "input_state_conflict",
+        "retry_safe": True,
+        "emission_state": "not_started",
+    }
+
+
+def test_action_batch_attaches_incomplete_cleanup_without_replacing_primary_error(
+    test_client,
+    app,
+) -> None:
+    async def fail_move(x: int, y: int):
+        del x, y
+        raise RuntimeError("primary action failed")
+
+    async def incomplete_release() -> ActionResult:
+        return ActionResult(
+            ok=False,
+            message="failed to release all held input",
+            output={
+                "code": "release_all_incomplete",
+                "keys": [],
+                "buttons": [],
+                "remaining": {"keys": ["shift"], "buttons": []},
+                "failures": [
+                    {
+                        "kind": "key",
+                        "value": "shift",
+                        "input_backend": "xtest",
+                        "code": "key_release_failed",
+                    }
+                ],
+            },
+        )
+
+    app.state.backend.mouse_move = fail_move
+    app.state.backend.release_all = incomplete_release
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "move", "x": 1, "y": 1}]},
+    ).json()
+
+    item = result["results"][0]
+    assert item["error_code"] == "action_failed"
+    assert item["error"] == "primary action failed"
+    assert item["output"] == {
+        "cleanup": {
+            "code": "release_all_incomplete",
+            "keys": [],
+            "buttons": [],
+            "remaining": {"keys": ["shift"], "buttons": []},
+            "failures": [
+                {
+                    "kind": "key",
+                    "value": "shift",
+                    "input_backend": "xtest",
+                    "code": "key_release_failed",
+                }
+            ],
+        }
+    }
+
+
+def test_action_batch_reports_explicit_release_all_failure_without_nested_cleanup(
+    test_client,
+    app,
+) -> None:
+    calls = 0
+
+    async def incomplete_release() -> ActionResult:
+        nonlocal calls
+        calls += 1
+        return ActionResult(
+            ok=False,
+            message="failed to release all held input",
+            output={
+                "code": "release_all_incomplete",
+                "keys": [],
+                "buttons": [],
+                "remaining": {"keys": ["shift"], "buttons": []},
+                "failures": [],
+            },
+        )
+
+    app.state.backend.release_all = incomplete_release
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "release_all"}]},
+    ).json()
+
+    item = result["results"][0]
+    assert calls == 1
+    assert item["error_code"] == "release_all_incomplete"
+    assert item["output"] == {
+        "code": "release_all_incomplete",
+        "keys": [],
+        "buttons": [],
+        "remaining": {"keys": ["shift"], "buttons": []},
+        "failures": [],
+    }
+
+
+def test_action_batch_unexpected_release_all_error_runs_secondary_cleanup(
+    test_client,
+    app,
+) -> None:
+    calls = 0
+
+    async def release_all() -> ActionResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("release crashed")
+        return ActionResult(
+            ok=False,
+            message="failed to release all held input",
+            output={
+                "code": "release_all_incomplete",
+                "keys": [],
+                "buttons": [],
+                "remaining": {"keys": ["shift"], "buttons": []},
+                "failures": [],
+            },
+        )
+
+    app.state.backend.release_all = release_all
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "release_all"}]},
+    ).json()
+
+    item = result["results"][0]
+    assert calls == 2
+    assert item["error_code"] == "action_failed"
+    assert item["error"] == "release crashed"
+    assert item["output"] == {
+        "cleanup": {
+            "code": "release_all_incomplete",
+            "keys": [],
+            "buttons": [],
+            "remaining": {"keys": ["shift"], "buttons": []},
+            "failures": [],
+        }
+    }
 
 
 def test_action_batch_stop_on_runtime_error(test_client, app) -> None:

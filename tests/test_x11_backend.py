@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import anyio
@@ -11,10 +12,16 @@ from PIL import Image
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
-from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend, choose_backend
+from modal_computer_use.daemon.desktop.x11 import (
+    MockDesktopBackend,
+    X11DesktopBackend,
+    choose_backend,
+)
 from modal_computer_use.daemon.desktop.xtest import (
     ButtonEvent,
     MotionEvent,
+    X11InputInjectionError,
+    X11InputReleaseError,
     XTestUnavailableError,
 )
 from modal_computer_use.models import Point, Region, ScreenshotOptions
@@ -163,6 +170,87 @@ def test_x11_mouse_falls_back_to_xdotool_when_auto_xtest_fails() -> None:
     ]
 
 
+def test_mouse_release_attempt_backend_records_forced_native_failure() -> None:
+    backend = RecordingX11Backend()
+    backend._mouse._configured_backend = "xtest"
+    backend._mouse._xtest = FakeXTestPointer(fail=True)
+
+    with pytest.raises(XTestUnavailableError) as raised:
+        anyio.run(backend._mouse.up, "left")
+
+    assert raised.value.input_backend == "xtest"
+    assert backend._mouse.release_attempt_backend == "xtest"
+
+
+def test_mouse_release_attempt_backend_records_xdotool_before_command_failure() -> None:
+    backend = RecordingX11Backend()
+    backend._mouse._xtest = FakeXTestPointer(fail=True)
+
+    async def fail_run(*_args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        raise RuntimeError("xdotool release failed")
+
+    backend._run = fail_run  # type: ignore[method-assign]
+
+    with pytest.raises(X11InputReleaseError) as raised:
+        anyio.run(backend._mouse.up, "left")
+
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert str(raised.value.__cause__) == "xdotool release failed"
+    assert raised.value.input_backend == "xdotool"
+    assert backend._mouse.release_attempt_backend == "xdotool"
+
+
+def test_release_all_reports_possible_native_button_after_failed_down_compensation() -> None:
+    original_error = X11InputInjectionError("partial button down")
+
+    class PartialDownSession:
+        failure = None
+        release_succeeds = False
+
+        def available(self) -> bool:
+            return True
+
+        def emit(self, events: object, **_kwargs: object) -> None:
+            button_event = next(
+                event for event in events if isinstance(event, ButtonEvent)
+            )
+            if button_event.pressed:
+                raise original_error
+            if not self.release_succeeds:
+                raise X11InputInjectionError("button up failed")
+
+    backend = RecordingX11Backend()
+    session = PartialDownSession()
+    backend._mouse._configured_backend = "xtest"
+    backend._mouse._xtest = session
+
+    with pytest.raises(X11InputInjectionError) as raised:
+        anyio.run(backend.mouse_down, "left")
+
+    assert raised.value is original_error
+    assert backend.held_buttons == {"left"}
+
+    incomplete = anyio.run(backend.release_all)
+
+    assert incomplete.ok is False
+    assert incomplete.output["remaining"] == {"keys": [], "buttons": ["left"]}
+    assert incomplete.output["failures"] == [
+        {
+            "kind": "button",
+            "value": "left",
+            "input_backend": "xtest",
+            "code": "button_release_failed",
+        }
+    ]
+
+    session.release_succeeds = True
+    completed = anyio.run(backend.release_all)
+
+    assert completed.ok is True
+    assert completed.output == {"keys": [], "buttons": ["left"]}
+    assert backend.held_buttons == set()
+
+
 def test_x11_mouse_drag_uses_xdotool_down_move_up() -> None:
     backend = RecordingX11Backend()
 
@@ -233,6 +321,29 @@ def test_x11_mouse_click_applies_and_releases_modifiers() -> None:
         ("xdotool", "keyup", "shift"),
     ]
     assert backend.held_keys == set()
+
+
+@pytest.mark.parametrize("operation", ["click", "drag"])
+def test_modified_pointer_operations_preserve_preheld_modifiers(operation: str) -> None:
+    backend = RecordingX11Backend()
+    anyio.run(backend.key_down, "shift")
+    backend.commands.clear()
+
+    async def perform() -> None:
+        if operation == "click":
+            await backend.mouse_click(4, 5, modifiers=["shift"])
+        else:
+            await backend.mouse_drag(
+                start=Point(x=1, y=2),
+                end=Point(x=4, y=5),
+                duration_ms=0,
+                modifiers=["shift"],
+            )
+
+    anyio.run(perform)
+
+    assert ("xdotool", "keyup", "shift") not in backend.commands
+    assert backend.held_keys == {"shift"}
 
 
 def test_x11_launch_and_open_url_spawn_desktop_process() -> None:
@@ -318,7 +429,10 @@ def test_x11_keyboard_press_hotkey_hold_and_release_all() -> None:
     assert ("xdotool", "key", "ctrl+shift+t") in backend.commands
     assert ("xdotool", "keyup", "shift") in backend.commands
     assert ("xdotool", "mouseup", "1") in backend.commands
-    assert released.output == {"keys": ["shift"], "buttons": ["left"]}
+    assert released.output == {
+        "keys": ["shift"],
+        "buttons": ["left"],
+    }
 
 
 def test_x11_keyboard_type_restores_clipboard_after_clipboard_paste() -> None:
@@ -522,9 +636,7 @@ def test_x11_screenshot_bytes_scrot_fast_path_supports_regions(monkeypatch) -> N
 
     assert shot.width == 10
     assert shot.height == 11
-    assert backend.commands == [
-        ("scrot", "-z", "-o", "-a", "3,4,10,11", backend.commands[0][-1])
-    ]
+    assert backend.commands == [("scrot", "-z", "-o", "-a", "3,4,10,11", backend.commands[0][-1])]
 
 
 def test_x11_screenshot_bytes_falls_back_to_maim_when_scrot_fails(monkeypatch) -> None:
@@ -801,3 +913,117 @@ def test_auto_backend_fails_closed_to_x11_on_posix_without_xdotool(monkeypatch) 
     backend = choose_backend("auto", width=100, height=100, display=":99")
 
     assert isinstance(backend, X11DesktopBackend)
+
+
+def test_choose_backend_rejects_unknown_backend_kind() -> None:
+    with pytest.raises(
+        ValueError,
+        match="unsupported desktop backend 'wayland'; expected one of: auto, mock, x11",
+    ):
+        choose_backend("wayland", width=100, height=100, display=":99")
+
+
+def test_x11_backend_rejects_unknown_input_backend() -> None:
+    with pytest.raises(
+        ValueError,
+        match="unsupported input backend 'native'; expected one of: auto, xtest, xdotool",
+    ):
+        X11DesktopBackend(input_backend="native")
+
+
+def test_input_backend_metadata_separates_policy_support_availability_and_last_use(
+    monkeypatch,
+) -> None:
+    mock = MockDesktopBackend()
+    assert mock.configured_input_backend == "mock"
+    assert mock.supported_input_backends == ("mock",)
+    assert mock.available_input_backends == ("mock",)
+    assert mock.input_backend == "mock"
+
+    backend = X11DesktopBackend(input_backend="auto")
+    assert backend.configured_input_backend == "auto"
+    assert backend.supported_input_backends == ("xtest", "xdotool")
+    assert backend.available_input_backends == ()
+    assert backend.input_backend is None
+
+    monkeypatch.setattr(backend._input, "available", lambda: True)
+    monkeypatch.setattr(
+        x11_module.shutil,
+        "which",
+        lambda name: "/usr/bin/xdotool" if name == "xdotool" else None,
+    )
+    probe_calls: list[tuple[str, ...]] = []
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        probe_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
+    anyio.run(backend._cache_available_input_backends)
+
+    assert backend.available_input_backends == ("xtest", "xdotool")
+    assert backend.input_backend is None
+    assert probe_calls == [("xdotool", "getmouselocation", "--shell")]
+
+
+def test_xdotool_availability_requires_a_live_display_probe(monkeypatch) -> None:
+    backend = X11DesktopBackend(input_backend="auto")
+    monkeypatch.setattr(backend._input, "available", lambda: False)
+    monkeypatch.setattr(x11_module.shutil, "which", lambda _name: "/usr/bin/xdotool")
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, "", "cannot open display")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    anyio.run(backend._cache_available_input_backends)
+
+    assert backend.available_input_backends == ()
+
+
+def test_forced_xdotool_readiness_fails_when_live_probe_cannot_reach_display(
+    monkeypatch,
+) -> None:
+    backend = X11DesktopBackend(input_backend="xdotool")
+    monkeypatch.setattr(x11_module.shutil, "which", lambda _name: "/usr/bin/xdotool")
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 1, "", "cannot open display")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    ready, errors = anyio.run(backend.ready)
+
+    assert ready is False
+    assert errors == ["xdotool could not reach display"]
+    assert backend.available_input_backends == ()
+
+
+def test_native_only_readiness_does_not_require_xdotool(monkeypatch) -> None:
+    backend = X11DesktopBackend(input_backend="xtest")
+    monkeypatch.setattr(backend._input, "available", lambda: True)
+    backend._windows._backend_name = "xlib-ewmh"
+
+    async def probe_windows() -> tuple[bool, str | None]:
+        return True, None
+
+    backend._windows.probe_backend = probe_windows  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        x11_module.shutil,
+        "which",
+        lambda name: None if name == "xdotool" else f"/usr/bin/{name}",
+    )
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        if args[0] == "maim":
+            Path(args[1]).write_bytes(b"png")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    ready, errors = anyio.run(backend.ready)
+
+    assert ready is True
+    assert errors == []
+    assert backend.input_backend == "xtest"
+    assert backend.available_input_backends == ("xtest",)

@@ -46,14 +46,28 @@ from modal_computer_use.models import (
     sha256_bytes,
 )
 
+_RELEASE_FAILURE_LIMIT = 32
+
 
 class DesktopBackend(ABC):
     width: int
     height: int
 
     @property
-    def input_backend(self) -> str:
-        return "unknown"
+    def input_backend(self) -> str | None:
+        return None
+
+    @property
+    def configured_input_backend(self) -> str | None:
+        return self.input_backend
+
+    @property
+    def supported_input_backends(self) -> tuple[str, ...]:
+        return (self.input_backend,) if self.input_backend is not None else ()
+
+    @property
+    def available_input_backends(self) -> tuple[str, ...]:
+        return (self.input_backend,) if self.input_backend is not None else ()
 
     def close(self) -> None:
         """Release persistent backend resources."""
@@ -265,8 +279,20 @@ class MockDesktopBackend(DesktopBackend):
         self.recordings: dict[str, Recording] = {}
 
     @property
-    def input_backend(self) -> str:
+    def input_backend(self) -> str | None:
         return "mock"
+
+    @property
+    def configured_input_backend(self) -> str:
+        return "mock"
+
+    @property
+    def supported_input_backends(self) -> tuple[str, ...]:
+        return ("mock",)
+
+    @property
+    def available_input_backends(self) -> tuple[str, ...]:
+        return ("mock",)
 
     async def ready(self) -> tuple[bool, list[str]]:
         return True, []
@@ -533,13 +559,15 @@ class X11DesktopBackend(MockDesktopBackend):
         self.display = display
         self.browser = browser
         normalized_input_backend = _normalize_input_backend(input_backend)
-        self._last_input_backend = "xdotool"
+        self._configured_input_backend = normalized_input_backend
+        self._available_input_backends: tuple[str, ...] = ()
+        self._last_input_backend: str | None = None
         self._input = X11InputSession(display=display)
         self._display = StaticDisplayController(width=width, height=height, display=display)
         self._apps = X11AppController(spawn=lambda *args: self._spawn(*args))
         self._windows = X11WindowController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
-            fallback_windows=super().windows,
+            fallback_windows=_empty_windows,
             display=display,
         )
         self._browser = X11BrowserController(
@@ -577,7 +605,7 @@ class X11DesktopBackend(MockDesktopBackend):
             scroll_state=super().mouse_scroll,
             button_down_state=super().mouse_down,
             button_up_state=super().mouse_up,
-            key_down=self.key_down,
+            key_down=self._keyboard.acquire,
             key_up=self.key_up,
             input_backend=normalized_input_backend,
             xtest=self._input,
@@ -591,30 +619,46 @@ class X11DesktopBackend(MockDesktopBackend):
         )
 
     @property
-    def input_backend(self) -> str:
+    def input_backend(self) -> str | None:
         return self._last_input_backend
+
+    @property
+    def configured_input_backend(self) -> str:
+        return self._configured_input_backend
+
+    @property
+    def supported_input_backends(self) -> tuple[str, ...]:
+        return ("xtest", "xdotool")
+
+    @property
+    def available_input_backends(self) -> tuple[str, ...]:
+        return self._available_input_backends
 
     def close(self) -> None:
         self._windows.close()
         self._input.close()
 
     async def ready(self) -> tuple[bool, list[str]]:
+        await self._cache_available_input_backends()
         input_ready, input_error = self._mouse.probe_backend()
         if not input_ready:
             return False, [input_error or "input backend is not ready"]
+        if (
+            self._mouse.backend_name == "xdotool"
+            and "xdotool" not in self._available_input_backends
+        ):
+            return False, ["xdotool could not reach display"]
         self._last_input_backend = self._mouse.backend_name
         windows_ready, windows_error = await self._windows.probe_backend()
         if not windows_ready:
             return False, [windows_error or "window backend is not ready"]
 
-        required_tools = {"maim", "xclip", "xsel", "xdotool", "xdpyinfo", "ffmpeg"}
+        required_tools = {"maim", "xclip", "xsel", "xdpyinfo", "ffmpeg"}
+        if self._mouse.backend_name == "xdotool":
+            required_tools.add("xdotool")
         if self._windows.backend_name != "xlib-ewmh":
             required_tools.update(("wmctrl", "xdotool"))
-        missing = [
-            tool
-            for tool in sorted(required_tools)
-            if shutil.which(tool) is None
-        ]
+        missing = [tool for tool in sorted(required_tools) if shutil.which(tool) is None]
         if missing:
             return False, [f"missing required tools: {', '.join(missing)}"]
         result = await self._run("xdpyinfo", timeout=2, check=False)
@@ -629,6 +673,26 @@ class X11DesktopBackend(MockDesktopBackend):
         finally:
             temp_path.unlink(missing_ok=True)
         return True, []
+
+    async def _cache_available_input_backends(self) -> None:
+        available: list[str] = []
+        if self._input.available():
+            available.append("xtest")
+        if shutil.which("xdotool") is not None:
+            try:
+                probe = await self._run(
+                    "xdotool",
+                    "getmouselocation",
+                    "--shell",
+                    timeout=2,
+                    check=False,
+                )
+            except (OSError, TimeoutError):
+                pass
+            else:
+                if probe.returncode == 0:
+                    available.append("xdotool")
+        self._available_input_backends = tuple(available)
 
     async def _run(
         self,
@@ -832,17 +896,78 @@ class X11DesktopBackend(MockDesktopBackend):
     async def release_all(self) -> ActionResult:
         keys = sorted(self.held_keys)
         buttons = sorted(self.held_buttons)
-        released = {"keys": keys, "buttons": buttons}
-        if keys:
-            await self._keyboard.release_all(keys)
+        released_keys: list[str] = []
+        failed_key_records: list[dict[str, str | None]] = []
+        key_outcome = await self._keyboard.release_all(keys)
+        released_keys = list(key_outcome.released)
+        failed_key_records = [
+            {
+                "kind": "key",
+                "value": failure.key,
+                "input_backend": failure.input_backend,
+                "code": "key_release_failed",
+            }
+            for failure in key_outcome.failures
+        ]
+        if key_outcome.released or key_outcome.failures:
             self._last_input_backend = self._keyboard.backend_name
+        released_buttons: list[str] = []
+        failed_buttons: list[str] = []
+        failed_button_backends: dict[str, str | None] = {}
         for button in reversed(buttons):
-            with contextlib.suppress(Exception):
-                await self._mouse.up(button)
-            self._last_input_backend = self._mouse.backend_name
-        self.held_keys.clear()
-        self.held_buttons.clear()
-        return ActionResult(ok=True, output=released)
+            button_released = False
+            for _attempt in range(2):
+                with contextlib.suppress(Exception):
+                    await self._mouse.up(button)
+                    button_released = True
+                if button_released:
+                    break
+            if button_released:
+                released_buttons.append(button)
+            else:
+                failed_buttons.append(button)
+                failed_button_backends[button] = self._mouse.release_attempt_backend
+            self._last_input_backend = (
+                self._mouse.release_attempt_backend or self._mouse.backend_name
+            )
+        failed = bool(failed_key_records or failed_buttons)
+        if not failed:
+            return ActionResult(
+                ok=True,
+                output={
+                    "keys": sorted(released_keys),
+                    "buttons": sorted(released_buttons),
+                },
+            )
+        failures = failed_key_records
+        failures.extend(
+            {
+                "kind": "button",
+                "value": button,
+                "input_backend": failed_button_backends[button],
+                "code": "button_release_failed",
+            }
+            for button in sorted(failed_buttons)
+        )
+        return ActionResult(
+            ok=False,
+            message="failed to release all held input",
+            output={
+                "code": "release_all_incomplete",
+                "keys": sorted(released_keys),
+                "buttons": sorted(released_buttons),
+                "remaining": {
+                    "keys": sorted(
+                        {
+                            *self.held_keys,
+                            *(failure.key for failure in key_outcome.failures),
+                        }
+                    ),
+                    "buttons": sorted(self.held_buttons),
+                },
+                "failures": failures[:_RELEASE_FAILURE_LIMIT],
+            },
+        )
 
     async def screenshot(
         self,
@@ -921,6 +1046,8 @@ def choose_backend(
             browser_gpu_mode=browser_gpu_mode,
             input_backend=input_backend,
         )
+    if kind != "auto":
+        raise ValueError(f"unsupported desktop backend {kind!r}; expected one of: auto, mock, x11")
     if os.name != "posix":
         return MockDesktopBackend(width=width, height=height)
     return X11DesktopBackend(
@@ -938,4 +1065,8 @@ def choose_backend(
 def _normalize_input_backend(value: str) -> Literal["auto", "xtest", "xdotool"]:
     if value in {"auto", "xtest", "xdotool"}:
         return cast("Literal['auto', 'xtest', 'xdotool']", value)
-    return "auto"
+    raise ValueError(f"unsupported input backend {value!r}; expected one of: auto, xtest, xdotool")
+
+
+async def _empty_windows() -> list[X11Window]:
+    return []

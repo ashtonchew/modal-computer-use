@@ -27,8 +27,13 @@ Precedence: process environment overrides defaults. There is no config file. Sec
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `COMPUTER_USE_BACKEND` | string | `auto` | Desktop backend. `auto` uses `x11` on POSIX systems so readiness fails closed when desktop tools are missing. Set explicitly to `mock` for deterministic local tests. |
+| `COMPUTER_USE_BACKEND` | string | `auto` | Desktop backend. One of `auto`, `x11`, or `mock`. `auto` uses `x11` on POSIX systems so readiness fails closed when desktop tools are missing. Set explicitly to `mock` for deterministic local tests. |
+| `COMPUTER_USE_INPUT_BACKEND` | string | `auto` | X11 input adapter policy. One of `auto`, `xtest`, or `xdotool`. `auto` prefers the persistent XTest/XKB adapter and may fall back to `xdotool` only before native emission starts. |
 | `COMPUTER_USE_VNC_MODE` | string | `off` | VNC exposure. One of `off`, `view_only`, `control`. The daemon refuses to start a VNC server when `off`. |
+
+Unknown desktop or input backend values fail daemon settings construction. They are never treated
+as `auto`. `/v1/capabilities` reports the configured policy separately from the adapter most
+recently selected at runtime.
 
 ## Auth and access control
 

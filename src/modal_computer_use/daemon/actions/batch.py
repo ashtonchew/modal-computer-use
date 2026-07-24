@@ -12,7 +12,7 @@ from typing import Any
 from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacted_action
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
-from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.errors import DaemonError, public_input_error
 from modal_computer_use.daemon.routes.validation import backend_readiness, mark_desktop_ready
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
@@ -51,6 +51,10 @@ from modal_computer_use.redaction import (
 )
 
 logger = logging.getLogger("modal_computer_use.daemon.actions")
+
+
+class _FailedActionResultError(DaemonError):
+    """Internal marker for a completed action that returned ok=False."""
 
 
 class ActionBatchContext:
@@ -164,9 +168,7 @@ async def _run(
         cached = (
             None
             if raw_screenshot_after
-            else _cached_idempotency_result(
-                context, effective_idempotency_key, request_fingerprint
-            )
+            else _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
         )
         if cached is not None:
             return cached, None
@@ -283,9 +285,15 @@ async def _run(
                     await _post_action_delay(context, batch_deadline)
             except TimeoutError:
                 elapsed_ms = (time.perf_counter() - start) * 1000
-                with suppress(Exception):
-                    await context.state.backend.release_all()
+                cleanup = await _shielded_release_all_cleanup(context)
                 effective_timeout_ms = batch_timeout_ms if timeout_scope == "batch" else timeout_ms
+                timeout_output: dict[str, Any] = {
+                    "code": "timeout",
+                    "timeout_ms": effective_timeout_ms,
+                    "scope": timeout_scope,
+                }
+                if cleanup is not None:
+                    timeout_output["cleanup"] = cleanup
                 item = ActionItemResult(
                     index=index,
                     type=action.type,
@@ -293,11 +301,7 @@ async def _run(
                     elapsed_ms=elapsed_ms,
                     error_code="timeout",
                     error=f"{timeout_scope} timed out after {effective_timeout_ms} ms",
-                    output={
-                        "code": "timeout",
-                        "timeout_ms": effective_timeout_ms,
-                        "scope": timeout_scope,
-                    },
+                    output=timeout_output,
                 )
                 results.append(item)
                 batch_timed_out = timeout_scope == "batch"
@@ -321,12 +325,18 @@ async def _run(
                     break
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start) * 1000
-                with suppress(Exception):
-                    await context.state.backend.release_all()
+                cleanup = (
+                    None
+                    if _is_completed_release_all_incomplete(action, exc)
+                    else await _shielded_release_all_cleanup(context)
+                )
                 error_code = _exception_code(exc)
                 if error_code in {"budget_exceeded", "rate_limited"}:
                     screenshot_after_blocked = True
                 error = _action_error_message(action, exc)
+                output = _exception_output(exc, action, context=context)
+                if cleanup is not None:
+                    output["cleanup"] = cleanup
                 item = ActionItemResult(
                     index=index,
                     type=action.type,
@@ -334,7 +344,7 @@ async def _run(
                     elapsed_ms=elapsed_ms,
                     error_code=error_code,
                     error=error,
-                    output=_exception_output(exc, action, context=context),
+                    output=output,
                 )
                 results.append(item)
                 context.traces.append_action(payload, action, item, call_id=call_id, sequence=index)
@@ -422,7 +432,7 @@ async def _run(
                     )
                 except TimeoutError:
                     elapsed_ms = (time.perf_counter() - start) * 1000
-                    await _release_all_suppressed(context)
+                    cleanup = await _release_all_cleanup(context)
                     effective_timeout_ms = (
                         batch_timeout_ms if timeout_scope == "batch" else timeout_ms
                     )
@@ -432,22 +442,27 @@ async def _run(
                         timeout_ms=effective_timeout_ms,
                         scope=timeout_scope,
                     )
+                    if cleanup is not None:
+                        item.output["cleanup"] = cleanup
                     results.append(item)
                     context.traces.append_screenshot_after(payload, None, item, call_id=call_id)
                 except Exception as exc:
                     elapsed_ms = (time.perf_counter() - start) * 1000
-                    await _release_all_suppressed(context)
+                    cleanup = await _release_all_cleanup(context)
                     error_code = _exception_code(exc)
                     failed_screenshot = screenshot
                     screenshot = None
+                    output = _exception_output(exc, context=context)
+                    if cleanup is not None:
+                        output["cleanup"] = cleanup
                     item = ActionItemResult(
                         index=len(results),
                         type="screenshot_after",
                         ok=False,
                         elapsed_ms=elapsed_ms,
                         error_code=error_code,
-                        error=sanitize_text(str(exc)),
-                        output=_exception_output(exc, context=context),
+                        error=_action_error_message(None, exc),
+                        output=output,
                     )
                     results.append(item)
                     context.traces.append_screenshot_after(
@@ -562,9 +577,7 @@ def _validate_batch_request(payload: ActionBatchRequest, context: ActionBatchCon
             f"{context.state.settings.max_batch_actions} "
             f"with {action_count} total actions"
         )
-    errors.extend(
-        _validate_action_timeouts(payload, context.state.settings.max_action_timeout_ms)
-    )
+    errors.extend(_validate_action_timeouts(payload, context.state.settings.max_action_timeout_ms))
     errors.extend(_validate_screenshot_pixel_budget(payload, context))
     return errors
 
@@ -750,9 +763,41 @@ async def _post_action_delay(context: ActionBatchContext, batch_deadline: float)
     await asyncio.sleep(min(delay_ms / 1000, remaining_seconds))
 
 
-async def _release_all_suppressed(context: ActionBatchContext) -> None:
-    with suppress(Exception):
-        await context.state.backend.release_all()
+async def _release_all_cleanup(context: ActionBatchContext) -> dict[str, Any] | None:
+    try:
+        result = await context.state.backend.release_all()
+    except Exception as exc:
+        output = _exception_output(exc, context=context)
+        return output or {"code": "release_all_failed"}
+    if not isinstance(result, ActionResult) or result.ok:
+        return None
+    output = sanitize_payload(result.output)
+    if not isinstance(output, dict):
+        return {"code": "release_all_failed"}
+    code = output.get("code")
+    if not isinstance(code, str) or not code:
+        return {"code": "release_all_failed", **output}
+    return output
+
+
+async def _shielded_release_all_cleanup(
+    context: ActionBatchContext,
+) -> dict[str, Any] | None:
+    cleanup_task = asyncio.create_task(_release_all_cleanup(context))
+    try:
+        return await asyncio.shield(cleanup_task)
+    except asyncio.CancelledError:
+        with suppress(Exception):
+            await cleanup_task
+        raise
+
+
+def _is_completed_release_all_incomplete(action: Any, exc: Exception) -> bool:
+    return (
+        isinstance(action, ReleaseAllAction)
+        and isinstance(exc, _FailedActionResultError)
+        and exc.code == "release_all_incomplete"
+    )
 
 
 def _reserve_action_budget(
@@ -779,6 +824,9 @@ def _reserve_action_budget(
 def _exception_code(exc: Exception) -> str:
     if isinstance(exc, DaemonError):
         return exc.code
+    mapped_error = public_input_error(exc)
+    if mapped_error is not None:
+        return mapped_error.code
     if isinstance(exc, BudgetExceededError):
         return "budget_exceeded"
     return "action_failed"
@@ -797,6 +845,9 @@ def _exception_output(
                 [(action.text, "[redacted typed text]")],
             )
         return sanitized if isinstance(sanitized, dict) else {"code": exc.code}
+    mapped_error = public_input_error(exc)
+    if mapped_error is not None:
+        return {"code": mapped_error.code, **mapped_error.details}
     if isinstance(exc, BudgetExceededError):
         output = {"code": "budget_exceeded"}
         if context is not None:
@@ -805,8 +856,9 @@ def _exception_output(
     return {}
 
 
-def _action_error_message(action: Any, exc: Exception) -> str:
-    message = sanitize_text(str(exc))
+def _action_error_message(action: Any | None, exc: Exception) -> str:
+    mapped_error = public_input_error(exc)
+    message = sanitize_text(mapped_error.message if mapped_error is not None else str(exc))
     for text in _typed_texts_for_action(action):
         message = message.replace(text, "[redacted typed text]")
     return message
@@ -865,7 +917,7 @@ def _checked_action_result(result: ActionResult, action: Any) -> dict[str, Any]:
             str(message),
             [(action.text, "[redacted typed text]")],
         )
-    raise DaemonError(
+    raise _FailedActionResultError(
         sanitize_text(str(message)),
         code=code,
         details=output,

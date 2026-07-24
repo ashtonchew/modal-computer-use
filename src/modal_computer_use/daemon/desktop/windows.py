@@ -38,6 +38,10 @@ class X11WindowNativeOperationError(X11WindowNativeError):
     """Raised when a native X11 window operation cannot be completed."""
 
 
+class X11WindowNativeIndeterminateError(X11WindowNativeOperationError):
+    """Raised after a native request may have reached the window manager."""
+
+
 class _X11WindowDisplayNotReadyError(X11WindowNativeUnavailableError):
     """Raised while the configured X display may still be starting."""
 
@@ -180,6 +184,7 @@ class NativeEwmhWindowAdapter:
 
     def activate(self, window_id: int) -> NativeWindowRequest:
         with self._lock:
+            sent = False
             try:
                 display, root = self._ensure_open()
                 managed_windows = self._client_window_ids()
@@ -188,6 +193,7 @@ class NativeEwmhWindowAdapter:
                         "window is not managed by the window manager"
                     )
                 current_active = self._active_window_id() or 0
+                sent = True
                 self._send_client_message(
                     display=display,
                     root=root,
@@ -197,15 +203,26 @@ class NativeEwmhWindowAdapter:
                 )
                 self._sync(display)
                 return NativeWindowRequest(verified=self._active_window_id() == window_id)
-            except X11WindowNativeError:
+            except X11WindowNativeIndeterminateError:
+                raise
+            except X11WindowNativeError as exc:
+                if sent:
+                    raise X11WindowNativeIndeterminateError(
+                        "native window activation request outcome is indeterminate"
+                    ) from exc
                 raise
             except Exception as exc:
+                if sent:
+                    raise X11WindowNativeIndeterminateError(
+                        "native window activation request outcome is indeterminate"
+                    ) from exc
                 raise X11WindowNativeOperationError(
                     f"native X11 window activation failed: {type(exc).__name__}"
                 ) from exc
 
     def close(self, window_id: int) -> NativeWindowRequest:
         with self._lock:
+            sent = False
             try:
                 display, root = self._ensure_open()
                 managed_windows = self._client_window_ids()
@@ -213,6 +230,7 @@ class NativeEwmhWindowAdapter:
                     raise X11WindowNativeOperationError(
                         "window is not managed by the window manager"
                     )
+                sent = True
                 self._send_client_message(
                     display=display,
                     root=root,
@@ -222,9 +240,19 @@ class NativeEwmhWindowAdapter:
                 )
                 self._sync(display)
                 return NativeWindowRequest(verified=window_id not in self._client_window_ids())
-            except X11WindowNativeError:
+            except X11WindowNativeIndeterminateError:
+                raise
+            except X11WindowNativeError as exc:
+                if sent:
+                    raise X11WindowNativeIndeterminateError(
+                        "native window close request outcome is indeterminate"
+                    ) from exc
                 raise
             except Exception as exc:
+                if sent:
+                    raise X11WindowNativeIndeterminateError(
+                        "native window close request outcome is indeterminate"
+                    ) from exc
                 raise X11WindowNativeOperationError(
                     f"native X11 window close failed: {type(exc).__name__}"
                 ) from exc
@@ -447,9 +475,7 @@ class NativeEwmhWindowAdapter:
             expected_type_name="WINDOW",
         )
         if not manager_check or manager_check[0] != manager_window:
-            raise X11WindowNativeUnavailableError(
-                "window manager ownership check is stale"
-            )
+            raise X11WindowNativeUnavailableError("window manager ownership check is stale")
 
     def _active_window_id(self) -> int | None:
         assert self._root is not None
@@ -470,15 +496,11 @@ class NativeEwmhWindowAdapter:
             expected_type_name="ATOM",
         )
         if supported is None:
-            raise X11WindowNativeUnavailableError(
-                "window manager does not expose _NET_SUPPORTED"
-            )
+            raise X11WindowNativeUnavailableError("window manager does not expose _NET_SUPPORTED")
         for name in _REQUIRED_EWMH_REQUESTS:
             atom = self._atom(name, only_if_exists=True)
             if not atom or atom not in supported:
-                raise X11WindowNativeUnavailableError(
-                    f"window manager does not advertise {name}"
-                )
+                raise X11WindowNativeUnavailableError(f"window manager does not advertise {name}")
 
     def _read_window(self, window_id: int, *, active_id: int | None) -> X11Window | None:
         geometry = self._geometry(window_id)
@@ -716,9 +738,7 @@ class X11WindowController:
         self._backend_name = "unavailable"
         return (
             False,
-            fallback_error
-            or self._native.failure
-            or "native X11 window management is unavailable",
+            fallback_error or self._native.failure or "native X11 window management is unavailable",
         )
 
     def close(self) -> None:
@@ -750,6 +770,9 @@ class X11WindowController:
         normalized_id = normalize_window_id(window_id)
         try:
             request = await asyncio.to_thread(self._native.activate, parsed_id)
+        except X11WindowNativeIndeterminateError as exc:
+            self._backend_name = "xlib-ewmh"
+            return _window_request_indeterminate_result(normalized_id, str(exc))
         except X11WindowNativeError:
             if not self._commands.available():
                 self._backend_name = "unavailable"
@@ -776,6 +799,9 @@ class X11WindowController:
         normalized_id = normalize_window_id(window_id)
         try:
             request = await asyncio.to_thread(self._native.close, parsed_id)
+        except X11WindowNativeIndeterminateError as exc:
+            self._backend_name = "xlib-ewmh"
+            return _window_request_indeterminate_result(normalized_id, str(exc))
         except X11WindowNativeError:
             if not self._commands.available():
                 self._backend_name = "unavailable"
@@ -827,8 +853,20 @@ def _invalid_window_id_result(window_id: str) -> ActionResult:
 def _window_command_unavailable_result(window_id: str, operation: str) -> ActionResult:
     return ActionResult(
         ok=False,
-        message=(
-            f"native window {operation} failed and the wmctrl fallback is unavailable"
-        ),
+        message=(f"native window {operation} failed and the wmctrl fallback is unavailable"),
         output={"window_id": window_id, "window_backend": "unavailable"},
+    )
+
+
+def _window_request_indeterminate_result(window_id: str, message: str) -> ActionResult:
+    return ActionResult(
+        ok=False,
+        message=message,
+        output={
+            "code": "window_request_indeterminate",
+            "window_id": window_id,
+            "window_backend": "xlib-ewmh",
+            "verified": False,
+            "indeterminate": True,
+        },
     )
