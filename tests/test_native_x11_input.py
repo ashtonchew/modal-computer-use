@@ -59,6 +59,25 @@ class FakeX11:
             keymap[byte_index] = bytes((value,))
         return 1
 
+    def XDisplayKeycodes(
+        self,
+        _display: object,
+        minimum: object,
+        maximum: object,
+    ) -> int:
+        ctypes.cast(minimum, ctypes.POINTER(ctypes.c_int))[0] = 8
+        ctypes.cast(maximum, ctypes.POINTER(ctypes.c_int))[0] = 9
+        return 1
+
+    def XkbKeycodeToKeysym(
+        self,
+        _display: object,
+        keycode: object,
+        group: int,
+        level: int,
+    ) -> int:
+        return group * 1000 + int(getattr(keycode, "value", keycode)) * 10 + level
+
     def XFlush(self, _display: object) -> int:
         self.flushes += 1
         return 0
@@ -136,6 +155,15 @@ def test_unmapped_keysyms_return_zero_without_marking_backend_unavailable() -> N
     assert session.resolve_keysym("U1F642") == 0
     assert session.keysym_to_keycode(0x1F642) == 0
     assert session.failure is None
+
+
+def test_keyboard_mapping_snapshots_all_keycodes_in_one_active_group() -> None:
+    session, _x11, _xtst = session_with_fakes()
+
+    assert session.keyboard_mapping(2, levels=2) == (
+        (8, (2080, 2081)),
+        (9, (2090, 2091)),
+    )
 
 
 def test_emit_preserves_previously_pressed_keys_and_syncs_once() -> None:

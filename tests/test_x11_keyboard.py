@@ -102,6 +102,8 @@ class FakeX11InputSession:
             10: (ord("1"), ord("!"), 0, 0),
             20: (ord("-"), ord("_"), 0, 0),
         }
+        for keysym, keycode in self._keycodes.items():
+            self._levels.setdefault(keycode, (keysym, 0, 0, 0))
 
     def available(self) -> bool:
         return self._available
@@ -119,6 +121,18 @@ class FakeX11InputSession:
         assert group == self.group
         levels = self._levels.get(keycode, ())
         return levels[level] if level < len(levels) else 0
+
+    def keyboard_mapping(
+        self,
+        group: int,
+        *,
+        levels: int = 4,
+    ) -> tuple[tuple[int, tuple[int, ...]], ...]:
+        assert group == self.group
+        return tuple(
+            (keycode, tuple(keysyms[:levels]))
+            for keycode, keysyms in sorted(self._levels.items())
+        )
 
     def keyboard_group(self) -> int:
         return self.group
@@ -266,14 +280,47 @@ def test_native_press_maps_every_semantic_action_key(
 
 def test_character_press_does_not_resolve_from_an_inactive_xkb_group() -> None:
     harness = KeyboardHarness(input_backend="auto")
-    harness.session.keycode_to_keysym = (  # type: ignore[method-assign]
-        lambda _keycode, _group, _level: 0
+    harness.session.keyboard_mapping = (  # type: ignore[method-assign]
+        lambda _group, **_kwargs: ()
     )
 
     anyio.run(harness.controller.press, "a")
 
     assert harness.commands == [("xdotool", "key", "a")]
     assert harness.session.emissions == []
+
+
+def test_forced_native_press_searches_the_active_group_instead_of_global_lookup() -> None:
+    session = FakeX11InputSession()
+    session.group = 1
+
+    def french_group_mapping(
+        group: int,
+        *,
+        levels: int = 4,
+    ) -> tuple[tuple[int, tuple[int, ...]], ...]:
+        assert group == 1
+        assert levels == 4
+        return (
+            (24, (ord("a"), ord("A"), 0, 0)),
+            (38, (ord("q"), ord("Q"), 0, 0)),
+            (50, (0xFFE1, 0, 0, 0)),
+        )
+
+    # XKeysymToKeycode is global and points at keycode 38 from another group.
+    assert session.keysym_to_keycode(ord("A")) == 38
+    session.keyboard_mapping = french_group_mapping  # type: ignore[method-assign]
+    harness = KeyboardHarness(input_backend="xtest", session=session)
+
+    anyio.run(harness.controller.press, "A")
+
+    assert harness.commands == []
+    assert _event_pairs(session.emissions[0]) == [
+        (50, True),
+        (24, True),
+        (24, False),
+        (50, False),
+    ]
 
 
 def test_native_typing_uses_active_layout_for_shift_and_level_three() -> None:

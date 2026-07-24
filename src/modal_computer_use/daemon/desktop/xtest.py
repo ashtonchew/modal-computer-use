@@ -142,6 +142,46 @@ class X11InputSession:
                 )
             )
 
+    def keyboard_mapping(
+        self,
+        group: int,
+        *,
+        levels: int = 4,
+    ) -> tuple[tuple[int, tuple[int, ...]], ...]:
+        if group < 0:
+            raise ValueError("keyboard group must be non-negative")
+        if levels < 1:
+            raise ValueError("keyboard mapping must include at least one level")
+        with self._lock:
+            display = self._ensure_open()
+            assert self._x11 is not None
+            minimum = ctypes.c_int()
+            maximum = ctypes.c_int()
+            ok = self._x11.XDisplayKeycodes(
+                ctypes.c_void_p(display),
+                ctypes.byref(minimum),
+                ctypes.byref(maximum),
+            )
+            if not ok:
+                raise X11InputUnavailableError("XDisplayKeycodes failed")
+            return tuple(
+                (
+                    keycode,
+                    tuple(
+                        int(
+                            self._x11.XkbKeycodeToKeysym(
+                                ctypes.c_void_p(display),
+                                ctypes.c_ubyte(keycode),
+                                group,
+                                level,
+                            )
+                        )
+                        for level in range(levels)
+                    ),
+                )
+                for keycode in range(minimum.value, maximum.value + 1)
+            )
+
     def keyboard_group(self) -> int:
         return self._xkb_state().group
 
@@ -313,6 +353,12 @@ class X11InputSession:
         x11.XStringToKeysym.restype = ctypes.c_ulong
         x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         x11.XKeysymToKeycode.restype = ctypes.c_ubyte
+        x11.XDisplayKeycodes.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        x11.XDisplayKeycodes.restype = ctypes.c_int
         x11.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char)]
         x11.XQueryKeymap.restype = ctypes.c_int
         x11.XkbKeycodeToKeysym.argtypes = [

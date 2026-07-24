@@ -1410,15 +1410,20 @@ def _align_replay_manifest_paths(
     )
     if match is None:
         return
-    old_root = Path(match.group("raw")).parent.as_posix()
+    old_raw = match.group("raw")
+    old_root = Path(old_raw).parent.as_posix()
     new_root = Path(raw_artifact_path).parent.as_posix()
     old_prefix = f"{old_root}/"
     new_prefix = f"{new_root}/"
     old_published = match.group("published")
     for name, command in commands.items():
-        commands[name] = command.replace(old_prefix, new_prefix).replace(
-            old_published,
-            published_artifact_path,
+        commands[name] = (
+            command.replace(old_raw, raw_artifact_path)
+            .replace(old_prefix, new_prefix)
+            .replace(
+                old_published,
+                published_artifact_path,
+            )
         )
     if provider_artifact_status in {"candidate", "current_reference"}:
         provider_normalize = commands.get("provider_default_normalize")

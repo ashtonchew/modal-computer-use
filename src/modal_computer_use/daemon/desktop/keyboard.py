@@ -96,6 +96,13 @@ class NativeKeyboardSession(Protocol):
 
     def keycode_to_keysym(self, keycode: int, group: int, level: int) -> int: ...
 
+    def keyboard_mapping(
+        self,
+        group: int,
+        *,
+        levels: int = 4,
+    ) -> tuple[tuple[int, tuple[int, ...]], ...]: ...
+
     def keyboard_group(self) -> int: ...
 
     def modifier_state(self) -> int: ...
@@ -131,77 +138,120 @@ class XkbKeymapResolver:
 
     def action_key(self, key: str) -> _KeyStroke:
         normalized = normalize_key(key)
+        group = self._session.keyboard_group()
+        mapping = self._session.keyboard_mapping(group)
         if len(normalized) == 1:
-            stroke = self.character(normalized)
+            stroke = self._character(
+                normalized,
+                mapping,
+                self._session.modifier_state(),
+            )
             if stroke is not None:
                 return stroke
             raise X11InputUnavailableError(
                 f"key is not mapped in the active XKB group: {key!r}"
             )
-        keycode = self._session.resolve_keycode(_KEYSYM_NAMES.get(normalized, normalized))
-        if keycode <= 0:
+        keysym = self._session.resolve_keysym(_KEYSYM_NAMES.get(normalized, normalized))
+        match = self._find_keysym(keysym, mapping)
+        if match is None:
             raise X11InputUnavailableError(f"key is not mapped by the X server: {key!r}")
-        return _KeyStroke(keycode)
+        keycode, level, _keysyms = match
+        modifiers = () if normalized in _KEYSYM_NAMES else self._level_modifiers(level, mapping)
+        return _KeyStroke(keycode, modifiers)
 
     def text(self, text: str) -> list[_KeyStroke] | None:
+        group = self._session.keyboard_group()
+        mapping = self._session.keyboard_mapping(group)
+        modifier_state = self._session.modifier_state()
         strokes: list[_KeyStroke] = []
         for character in text:
-            stroke = self.character(character)
+            stroke = self._character(character, mapping, modifier_state)
             if stroke is None:
                 return None
             strokes.append(stroke)
         return strokes
 
     def character(self, character: str) -> _KeyStroke | None:
+        group = self._session.keyboard_group()
+        return self._character(
+            character,
+            self._session.keyboard_mapping(group),
+            self._session.modifier_state(),
+        )
+
+    def _character(
+        self,
+        character: str,
+        mapping: Sequence[tuple[int, Sequence[int]]],
+        modifier_state: int,
+    ) -> _KeyStroke | None:
         keysym = self._session.resolve_keysym(_character_keysym_name(character))
         if keysym <= 0:
             return None
-        keycode = self._session.keysym_to_keycode(keysym)
-        if keycode <= 0:
+        match = self._find_keysym(keysym, mapping)
+        if match is None:
             return None
+        keycode, matched_level, keysyms = match
 
-        group = self._session.keyboard_group()
-        matched_level = next(
-            (
-                level
-                for level in range(4)
-                if self._session.keycode_to_keysym(keycode, group, level) == keysym
-            ),
-            None,
-        )
-        if matched_level is None:
-            return None
-
-        modifiers = list(self._level_modifiers(matched_level))
-        if self._caps_lock_inverts(character, keycode, group):
-            shift = self._modifier_keycode("Shift_L")
+        modifiers = list(self._level_modifiers(matched_level, mapping))
+        if self._caps_lock_inverts(character, keysyms, modifier_state):
+            shift = self._modifier_keycode("Shift_L", mapping)
             if shift in modifiers:
                 modifiers.remove(shift)
             else:
                 modifiers.insert(0, shift)
         return _KeyStroke(keycode=keycode, modifiers=tuple(modifiers))
 
-    def _level_modifiers(self, level: int) -> tuple[int, ...]:
+    @staticmethod
+    def _find_keysym(
+        keysym: int,
+        mapping: Sequence[tuple[int, Sequence[int]]],
+    ) -> tuple[int, int, Sequence[int]] | None:
+        return next(
+            (
+                (keycode, level, keysyms)
+                for keycode, keysyms in mapping
+                for level, mapped_keysym in enumerate(keysyms)
+                if mapped_keysym == keysym
+            ),
+            None,
+        )
+
+    def _level_modifiers(
+        self,
+        level: int,
+        mapping: Sequence[tuple[int, Sequence[int]]],
+    ) -> tuple[int, ...]:
         if level == 0:
             return ()
-        shift = self._modifier_keycode("Shift_L")
+        shift = self._modifier_keycode("Shift_L", mapping)
         if level == 1:
             return (shift,)
-        level_three = self._modifier_keycode("ISO_Level3_Shift")
+        level_three = self._modifier_keycode("ISO_Level3_Shift", mapping)
         if level == 2:
             return (level_three,)
         return (shift, level_three)
 
-    def _modifier_keycode(self, keysym_name: str) -> int:
-        keycode = self._session.resolve_keycode(keysym_name)
-        if keycode <= 0:
+    def _modifier_keycode(
+        self,
+        keysym_name: str,
+        mapping: Sequence[tuple[int, Sequence[int]]],
+    ) -> int:
+        keysym = self._session.resolve_keysym(keysym_name)
+        match = self._find_keysym(keysym, mapping)
+        if match is None:
             raise X11InputUnavailableError(
                 f"required keyboard modifier is not mapped: {keysym_name}"
             )
-        return keycode
+        return match[0]
 
-    def _caps_lock_inverts(self, character: str, keycode: int, group: int) -> bool:
-        if not self._session.modifier_state() & _LOCK_MASK:
+    def _caps_lock_inverts(
+        self,
+        character: str,
+        keysyms: Sequence[int],
+        modifier_state: int,
+    ) -> bool:
+        if not modifier_state & _LOCK_MASK or len(keysyms) < 2:
             return False
         lower = character.lower()
         upper = character.upper()
@@ -212,9 +262,7 @@ class XkbKeymapResolver:
             upper_keysym = self._session.resolve_keysym(_character_keysym_name(upper))
         except X11InputUnavailableError:
             return False
-        level_zero = self._session.keycode_to_keysym(keycode, group, 0)
-        level_one = self._session.keycode_to_keysym(keycode, group, 1)
-        return {level_zero, level_one} == {lower_keysym, upper_keysym}
+        return {keysyms[0], keysyms[1]} == {lower_keysym, upper_keysym}
 
 
 class X11KeyboardController:

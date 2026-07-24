@@ -621,7 +621,7 @@ def test_sanitizer_aligns_historical_replay_paths_with_published_artifact() -> N
 
     align_replay_manifest_paths(
         commands,
-        raw_artifact_path="benchmark-results/new/raw.json",
+        raw_artifact_path="benchmark-results/new/capture.json",
         published_artifact_path="benchmark-data/new.json",
         provider_artifact_status="candidate",
     )
@@ -629,7 +629,8 @@ def test_sanitizer_aligns_historical_replay_paths_with_published_artifact() -> N
     assert all(
         "benchmark-results/old/" not in command for command in commands.values()
     )
-    assert "benchmark-results/new/raw.json" in commands["normalize"]
+    assert "benchmark-results/new/capture.json" in commands["normalize"]
+    assert "benchmark-results/new/raw.json" not in commands["normalize"]
     assert "benchmark-data/new.json" in commands["normalize"]
 
 
