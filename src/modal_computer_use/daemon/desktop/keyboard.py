@@ -520,10 +520,12 @@ class X11KeyboardController:
         if delay_ms == 0:
             events: list[KeyEvent] = []
             keycodes: list[int] = []
+            target_keycodes: list[int] = []
             for stroke in strokes:
                 events.extend(_stroke_events(stroke))
                 keycodes.extend((*stroke.modifiers, stroke.keycode))
-            self._emit_taps(events, keycodes)
+                target_keycodes.append(stroke.keycode)
+            self._emit_taps(events, keycodes, target_keycodes)
             return
         emitted = False
         for index, stroke in enumerate(strokes):
@@ -531,6 +533,7 @@ class X11KeyboardController:
                 self._emit_taps(
                     _stroke_events(stroke),
                     (*stroke.modifiers, stroke.keycode),
+                    (stroke.keycode,),
                 )
             except X11InputUnavailableError as exc:
                 if emitted:
@@ -650,14 +653,24 @@ class X11KeyboardController:
                     "native chord release failed after key-down events were emitted"
                 ) from cleanup_exc
 
-    def _emit_taps(self, events: Sequence[KeyEvent], keycodes: Iterable[int]) -> None:
+    def _emit_taps(
+        self,
+        events: Sequence[KeyEvent],
+        keycodes: Iterable[int],
+        target_keycodes: Iterable[int],
+    ) -> None:
         unique_keycodes = _deduplicate(keycodes)
+        targets = frozenset(target_keycodes)
         initially_pressed = self._xtest.pressed_keycodes(unique_keycodes)
+        if initially_pressed.intersection(targets):
+            raise X11InputUnavailableError("typing target key is already held")
         owned = [keycode for keycode in unique_keycodes if keycode not in initially_pressed]
         try:
             self._xtest.emit(
                 events,
-                preserve_pressed_keycodes=unique_keycodes,
+                preserve_pressed_keycodes=(
+                    keycode for keycode in unique_keycodes if keycode not in targets
+                ),
             )
             self._active_backend = "xtest"
         except X11InputInjectionError:

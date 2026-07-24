@@ -579,6 +579,28 @@ def test_auto_typing_falls_back_when_first_native_emit_is_unavailable() -> None:
     assert harness.commands == [("xdotool", "type", "--delay", "0", "a")]
 
 
+def test_typing_never_silently_drops_an_already_held_target_key() -> None:
+    automatic = KeyboardHarness(
+        input_backend="auto",
+        session=FakeX11InputSession(pressed={38}),
+    )
+
+    result = anyio.run(automatic.controller.type_text, "a", 0, "keystrokes")
+
+    assert result.output["method"] == "xdotool"
+    assert automatic.commands == [("xdotool", "type", "--delay", "0", "a")]
+    assert automatic.session.emissions == []
+
+    forced = KeyboardHarness(
+        input_backend="xtest",
+        session=FakeX11InputSession(pressed={38}),
+    )
+    with pytest.raises(X11InputUnavailableError, match="already held"):
+        anyio.run(forced.controller.type_text, "a", 0, "keystrokes")
+    assert forced.commands == []
+    assert forced.session.emissions == []
+
+
 def test_delayed_typing_never_replays_after_native_progress() -> None:
     harness = KeyboardHarness(input_backend="auto")
     original_emit = harness.session.emit
