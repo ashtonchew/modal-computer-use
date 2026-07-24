@@ -5,6 +5,8 @@ from typing import Any
 from ..client import DaemonClient
 from .constants import (
     COMMAND_ECHO_COMMAND,
+    COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
     TYPE_1000_CHARS_TEXT,
@@ -23,6 +25,8 @@ from .measurement import (
 from .operations import (
     _ClickScreenshotRawBenchmark,
     _CommandEchoBenchmark,
+    _CoordinateClickBenchmark,
+    _CoordinateClickSequenceBenchmark,
     _MoveClickBenchmark,
     _MoveClickSequenceBenchmark,
     _RecordingStartStopBenchmark,
@@ -153,6 +157,67 @@ def run_move_click_sequence_benchmark(
         }
     )
     return result
+
+
+def run_coordinate_click_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+    failures: list[dict[str, Any]] = []
+    samples, observations = _measure_observed_case(
+        name="coordinate_click",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=_CoordinateClickBenchmark(client).run,
+        failures=failures,
+    )
+    result = _attributed_case_result(
+        "coordinate_click", iterations, samples, observations, failures
+    )
+    result.update(_coordinate_click_accounting(sequence=False))
+    return result
+
+
+def run_coordinate_click_sequence_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+    failures: list[dict[str, Any]] = []
+    samples, observations = _measure_observed_case(
+        name="coordinate_click_sequence",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=_CoordinateClickSequenceBenchmark(client).run,
+        failures=failures,
+    )
+    result = _attributed_case_result(
+        "coordinate_click_sequence", iterations, samples, observations, failures
+    )
+    result.update(_coordinate_click_accounting(sequence=True))
+    return result
+
+
+def _coordinate_click_accounting(*, sequence: bool) -> dict[str, Any]:
+    action_count = len(COORDINATE_CLICK_SEQUENCE_ACTIONS) if sequence else 1
+    return {
+        "semantic": "coordinate_click_sequence" if sequence else "coordinate_click",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": action_count,
+        "provider_action_count": action_count,
+        "provider_sdk_call_count": 1,
+        "transport_request_count": 1,
+        "request_count_source": "harness_direct",
+        "native_batch": sequence,
+        "batching": "single_request",
+    }
 
 def run_click_then_screenshot_benchmark(
     *,

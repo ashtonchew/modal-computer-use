@@ -4,7 +4,7 @@ import shlex
 from collections.abc import Callable
 from typing import Any
 
-from ..constants import MOVE_CLICK_SEQUENCE_ACTIONS
+from ..constants import COORDINATE_CLICK_SEQUENCE_ACTIONS
 from ..safety import _redact_text
 from .provider_sdk import call_first_available, provider_computer_use
 
@@ -140,10 +140,10 @@ def _type_readback_result_command() -> str:
 
 
 def _expected_sequence_cursor_position() -> tuple[int, int]:
-    for action in reversed(MOVE_CLICK_SEQUENCE_ACTIONS):
-        if action["type"] == "move":
+    for action in reversed(COORDINATE_CLICK_SEQUENCE_ACTIONS):
+        if action["type"] == "click":
             return int(action["x"]), int(action["y"])
-    raise RuntimeError("move/click sequence did not include a move action")
+    raise RuntimeError("coordinate-click sequence did not include a click action")
 
 
 def _parse_xdotool_position(output: str) -> tuple[int, int] | None:

@@ -4,7 +4,14 @@ import os
 import shlex
 from typing import Any
 
-from ..constants import MOVE_CLICK_SEQUENCE_ACTIONS, PROVIDER_BENCHMARK_TEXT, TYPE_1000_CHARS_TEXT
+from ..constants import (
+    COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
+    MOVE_CLICK_SEQUENCE_ACTIONS,
+    PROVIDER_BENCHMARK_TEXT,
+    TYPE_1000_CHARS_TEXT,
+    coordinate_click_target,
+)
 from ..lifecycle import CleanupError
 from ..safety import _safe_base_url
 from .live import (
@@ -83,6 +90,8 @@ def run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[str
             "screenshot_full",
             "move_click",
             "move_click_sequence",
+            "coordinate_click",
+            "coordinate_click_sequence",
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
@@ -105,6 +114,7 @@ class DaytonaDriver:
     ) -> None:
         self._module = daytona_module
         self._snapshot = snapshot
+        self._coordinate_click_index = 0
         config_cls = getattr(daytona_module, "DaytonaConfig", None)
         client_cls = daytona_module.Daytona
         if config_cls is None:
@@ -176,6 +186,19 @@ class DaytonaDriver:
                     action["y"],
                 )
         return {"action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS)}
+
+    def coordinate_click(self, sandbox: Any) -> dict[str, Any]:
+        x, y = coordinate_click_target(self._coordinate_click_index)
+        self._coordinate_click_index += 1
+        mouse = provider_computer_use(sandbox).mouse
+        call_first_available(mouse, ("click", "left_click"), x, y)
+        return _coordinate_click_result()
+
+    def coordinate_click_sequence(self, sandbox: Any) -> dict[str, Any]:
+        mouse = provider_computer_use(sandbox).mouse
+        for action in COORDINATE_CLICK_SEQUENCE_ACTIONS:
+            call_first_available(mouse, ("click", "left_click"), action["x"], action["y"])
+        return _coordinate_click_sequence_result()
 
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         keyboard = provider_computer_use(sandbox).keyboard
@@ -283,4 +306,33 @@ def _daytona_default_resource_metadata() -> dict[str, Any]:
             "Daytona default sandbox resources are documented as 1 vCPU, 1 GiB memory, "
             "and 3 GiB disk; storage estimate does not account for account-level free allowance"
         ],
+    }
+
+
+def _coordinate_click_result() -> dict[str, Any]:
+    return {
+        "semantic": "coordinate_click",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": 1,
+        "provider_action_count": 1,
+        "provider_sdk_call_count": 1,
+        "transport_request_count": 1,
+        "request_count_source": "harness_direct",
+        "native_batch": False,
+        "batching": "single_request",
+    }
+
+
+def _coordinate_click_sequence_result() -> dict[str, Any]:
+    count = len(COORDINATE_CLICK_SEQUENCE_ACTIONS)
+    return {
+        "semantic": "coordinate_click_sequence",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": count,
+        "provider_action_count": count,
+        "provider_sdk_call_count": count,
+        "transport_request_count": count,
+        "request_count_source": "harness_direct",
+        "native_batch": False,
+        "batching": "sequential_requests",
     }

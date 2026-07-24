@@ -57,6 +57,20 @@ MOVE_CLICK_SEQUENCE_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 16, "y": 128},
     {"type": "click", "x": 16, "y": 128, "button": "left"},
 ]
+COORDINATE_CLICK_TARGETS: tuple[tuple[int, int], ...] = ((24, 24), (25, 25))
+COORDINATE_CLICK_BENCHMARK_SEMANTICS = "coordinate-click-v1"
+COORDINATE_CLICK_SEQUENCE_ACTIONS: list[dict[str, Any]] = [
+    {"type": "click", "x": 16, "y": 16, "button": "left"},
+    {"type": "click", "x": 128, "y": 16, "button": "left"},
+    {"type": "click", "x": 128, "y": 128, "button": "left"},
+    {"type": "click", "x": 16, "y": 128, "button": "left"},
+]
+
+
+def coordinate_click_target(index: int) -> tuple[int, int]:
+    return COORDINATE_CLICK_TARGETS[index % len(COORDINATE_CLICK_TARGETS)]
+
+
 TYPING_BENCHMARK_TEXT = "0123456789" * 10
 TYPE_1000_CHARS_TEXT = "0123456789" * 100
 TYPING_BENCHMARK_METHOD = "keystrokes"

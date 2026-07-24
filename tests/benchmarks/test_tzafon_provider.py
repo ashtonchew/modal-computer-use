@@ -159,6 +159,8 @@ def test_tzafon_happy_path_runs_all_canonical_cases_and_readbacks(monkeypatch) -
         "screenshot_full",
         "move_click",
         "move_click_sequence",
+        "coordinate_click",
+        "coordinate_click_sequence",
         "type_100_chars",
         "type_1000_chars",
         "command_echo",
@@ -166,6 +168,22 @@ def test_tzafon_happy_path_runs_all_canonical_cases_and_readbacks(monkeypatch) -
     assert all(provider["cases"][case]["status"] == "ok" for case in provider["cases"])
     assert provider["verification"]["cursor_position"]["status"] == "ok"
     assert provider["verification"]["type_text"]["status"] == "ok"
+    assert provider["cases"]["coordinate_click"]["semantic"] == "coordinate_click"
+    assert (
+        provider["cases"]["coordinate_click"]["benchmark_semantics"]
+        == "coordinate-click-v1"
+    )
+    assert provider["cases"]["coordinate_click"]["provider_sdk_call_count"] == 1
+    assert (
+        provider["cases"]["coordinate_click_sequence"]["semantic"]
+        == "coordinate_click_sequence"
+    )
+    assert (
+        provider["cases"]["coordinate_click_sequence"]["benchmark_semantics"]
+        == "coordinate-click-v1"
+    )
+    assert provider["cases"]["coordinate_click_sequence"]["logical_action_count"] == 4
+    assert provider["cases"]["coordinate_click_sequence"]["native_batch"] is True
     assert provider["metadata"]["resolution_requested"] == "1024x768"
     assert provider["metadata"]["resolution"] == "1280x720"
     assert provider["metadata"]["requested_resolution_honored"] is False
@@ -229,6 +247,25 @@ def test_tzafon_coordinate_click_records_semantic_and_provider_counts() -> None:
     assert result["semantic_equivalent"] == "coordinate_click_without_standalone_move"
 
 
+def test_tzafon_canonical_coordinate_click_records_parity_accounting() -> None:
+    driver, computers = _driver()
+
+    result = driver.coordinate_click("computer-1")
+
+    assert computers.click_calls == [("computer-1", 24, 24)]
+    assert result == {
+        "semantic": "coordinate_click",
+        "benchmark_semantics": "coordinate-click-v1",
+        "logical_action_count": 1,
+        "provider_action_count": 1,
+        "provider_sdk_call_count": 1,
+        "transport_request_count": 1,
+        "request_count_source": "harness_direct",
+        "native_batch": False,
+        "batching": "single_request",
+    }
+
+
 @pytest.mark.parametrize(
     "status",
     [None, 7, "COMMAND_NOT_SUPPORTED", "FAILED", "UNKNOWN_ACTION"],
@@ -259,6 +296,31 @@ def test_tzafon_four_click_sequence_uses_one_native_batch() -> None:
     assert result["provider_action_count"] == 4
     assert result["request_count"] == 1
     assert result["native_batch"] is True
+
+
+def test_tzafon_canonical_coordinate_click_sequence_uses_native_batch() -> None:
+    driver, computers = _driver()
+
+    result = driver.coordinate_click_sequence("computer-1")
+
+    assert computers.batch_calls == [
+        (
+            "computer-1",
+            [
+                {"type": "click", "x": 16, "y": 16},
+                {"type": "click", "x": 128, "y": 16},
+                {"type": "click", "x": 128, "y": 128},
+                {"type": "click", "x": 16, "y": 128},
+            ],
+        )
+    ]
+    assert result["semantic"] == "coordinate_click_sequence"
+    assert result["benchmark_semantics"] == "coordinate-click-v1"
+    assert result["logical_action_count"] == result["provider_action_count"] == 4
+    assert result["provider_sdk_call_count"] == result["transport_request_count"] == 1
+    assert result["request_count_source"] == "harness_direct"
+    assert result["native_batch"] is True
+    assert result["batching"] == "single_request"
 
 
 @pytest.mark.parametrize(

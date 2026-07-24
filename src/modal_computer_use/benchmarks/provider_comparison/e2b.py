@@ -3,7 +3,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from ..constants import MOVE_CLICK_SEQUENCE_ACTIONS, PROVIDER_BENCHMARK_TEXT, TYPE_1000_CHARS_TEXT
+from ..constants import (
+    COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
+    MOVE_CLICK_SEQUENCE_ACTIONS,
+    PROVIDER_BENCHMARK_TEXT,
+    TYPE_1000_CHARS_TEXT,
+    coordinate_click_target,
+)
 from ..lifecycle import CleanupError
 from .live import (
     cleanup_provider_sandbox,
@@ -68,6 +75,8 @@ def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, An
             "screenshot_full",
             "move_click",
             "move_click_sequence",
+            "coordinate_click",
+            "coordinate_click_sequence",
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
@@ -83,6 +92,7 @@ class E2BDriver:
         self._sandbox_cls = e2b_module.Sandbox
         self._template = template
         self._move_click_count = 0
+        self._coordinate_click_index = 0
 
     def create_lifecycle_session(self) -> Any:
         return self._create_sandbox()
@@ -121,6 +131,22 @@ class E2BDriver:
             elif action["type"] == "click":
                 call_first_available(sandbox, ("left_click", "leftClick"))
         return {"action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS)}
+
+    def coordinate_click(self, sandbox: Any) -> dict[str, Any]:
+        x, y = coordinate_click_target(self._coordinate_click_index)
+        self._coordinate_click_index += 1
+        call_first_available(sandbox, ("left_click", "leftClick"), x, y)
+        return _coordinate_click_result()
+
+    def coordinate_click_sequence(self, sandbox: Any) -> dict[str, Any]:
+        for action in COORDINATE_CLICK_SEQUENCE_ACTIONS:
+            call_first_available(
+                sandbox,
+                ("left_click", "leftClick"),
+                action["x"],
+                action["y"],
+            )
+        return _coordinate_click_sequence_result()
 
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         call_first_available(sandbox, ("write", "type"), PROVIDER_BENCHMARK_TEXT)
@@ -194,3 +220,32 @@ class E2BDriver:
         if exit_code not in (None, 0):
             raise RuntimeError("provider readback command exited nonzero")
         return provider_stdout(result)
+
+
+def _coordinate_click_result() -> dict[str, Any]:
+    return {
+        "semantic": "coordinate_click",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": 1,
+        "provider_action_count": 1,
+        "provider_sdk_call_count": 1,
+        "transport_request_count": 2,
+        "request_count_source": "pinned_sdk_implementation",
+        "native_batch": False,
+        "batching": "single_sdk_call",
+    }
+
+
+def _coordinate_click_sequence_result() -> dict[str, Any]:
+    count = len(COORDINATE_CLICK_SEQUENCE_ACTIONS)
+    return {
+        "semantic": "coordinate_click_sequence",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": count,
+        "provider_action_count": count,
+        "provider_sdk_call_count": count,
+        "transport_request_count": count * 2,
+        "request_count_source": "pinned_sdk_implementation",
+        "native_batch": False,
+        "batching": "sequential_requests",
+    }

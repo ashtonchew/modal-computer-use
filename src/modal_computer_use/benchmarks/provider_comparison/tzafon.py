@@ -7,9 +7,12 @@ from typing import Any
 
 from ..constants import (
     COMMAND_ECHO_COMMAND,
+    COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
     PROVIDER_BENCHMARK_TEXT,
     TYPE_1000_CHARS_TEXT,
+    coordinate_click_target,
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_url_origin
@@ -123,6 +126,8 @@ def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str,
             "screenshot_full",
             "move_click",
             "move_click_sequence",
+            "coordinate_click",
+            "coordinate_click_sequence",
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
@@ -147,6 +152,7 @@ class TzafonDriver:
         self._client = tzafon_module.Lightcone(**client_kwargs)
         self._observed_resolution: str | None = None
         self._observed_screenshot_format: str | None = None
+        self._coordinate_click_index = 0
 
     def create_lifecycle_session(self) -> Any:
         computer = self._client.computers.create(
@@ -225,6 +231,42 @@ class TzafonDriver:
             "request_count": 1,
             "native_batch": True,
             "semantic": "coordinate_click_sequence",
+        }
+
+    def coordinate_click(self, computer: Any) -> dict[str, Any]:
+        x, y = coordinate_click_target(self._coordinate_click_index)
+        self._coordinate_click_index += 1
+        result = self._client.computers.click(_computer_id(computer), x=x, y=y)
+        _ensure_action_succeeded(result)
+        return {
+            "semantic": "coordinate_click",
+            "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+            "logical_action_count": 1,
+            "provider_action_count": 1,
+            "provider_sdk_call_count": 1,
+            "transport_request_count": 1,
+            "request_count_source": "harness_direct",
+            "native_batch": False,
+            "batching": "single_request",
+        }
+
+    def coordinate_click_sequence(self, computer: Any) -> dict[str, Any]:
+        actions = [
+            {"type": "click", "x": action["x"], "y": action["y"]}
+            for action in COORDINATE_CLICK_SEQUENCE_ACTIONS
+        ]
+        result = self._client.computers.batch(_computer_id(computer), actions=actions)
+        _ensure_batch_succeeded(result, expected_actions=len(actions))
+        return {
+            "semantic": "coordinate_click_sequence",
+            "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+            "logical_action_count": len(actions),
+            "provider_action_count": len(actions),
+            "provider_sdk_call_count": 1,
+            "transport_request_count": 1,
+            "request_count_source": "harness_direct",
+            "native_batch": True,
+            "batching": "single_request",
         }
 
     def type_100_chars(self, computer: Any) -> dict[str, Any]:

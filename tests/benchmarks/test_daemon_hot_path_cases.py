@@ -8,6 +8,8 @@ from modal_computer_use.benchmarks import (
     TYPE_1000_CHARS_TIMEOUT_MS,
     TYPING_BENCHMARK_TEXT,
     run_click_then_screenshot_benchmark,
+    run_coordinate_click_benchmark,
+    run_coordinate_click_sequence_benchmark,
     run_move_click_sequence_benchmark,
     run_type_100_chars_benchmark,
     run_type_1000_chars_benchmark,
@@ -253,6 +255,72 @@ def test_move_click_sequence_benchmark_uses_safe_metadata_and_attribution() -> N
         "move",
         "click",
     ]
+
+
+def test_coordinate_click_benchmark_uses_click_only_schedule_and_accounting() -> None:
+    seen_actions: list[list[dict[str, object]]] = []
+
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            seen_actions.append(json["actions"])
+            return {
+                "ok": True,
+                "results": [{"ok": True} for _action in json["actions"]],
+                "timing": {"daemon_ms": 1.0},
+            }
+
+    payload = run_coordinate_click_benchmark(
+        client=TimedClient(), iterations=2, warmup_iterations=1
+    )
+
+    assert seen_actions == [
+        [{"type": "click", "x": 24, "y": 24, "button": "left"}],
+        [{"type": "click", "x": 25, "y": 25, "button": "left"}],
+        [{"type": "click", "x": 24, "y": 24, "button": "left"}],
+    ]
+    assert payload["semantic"] == "coordinate_click"
+    assert payload["benchmark_semantics"] == "coordinate-click-v1"
+    assert payload["logical_action_count"] == payload["provider_action_count"] == 1
+    assert payload["provider_sdk_call_count"] == payload["transport_request_count"] == 1
+    assert payload["request_count_source"] == "harness_direct"
+    assert payload["native_batch"] is False
+    assert payload["batching"] == "single_request"
+
+
+def test_coordinate_click_sequence_uses_four_clicks_in_one_request() -> None:
+    seen_actions: list[dict[str, object]] = []
+
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            seen_actions.extend(json["actions"])
+            return {
+                "ok": True,
+                "results": [{"ok": True} for _action in json["actions"]],
+                "timing": {"daemon_ms": 2.0},
+            }
+
+    payload = run_coordinate_click_sequence_benchmark(
+        client=TimedClient(), iterations=1, warmup_iterations=0
+    )
+
+    assert seen_actions == [
+        {"type": "click", "x": 16, "y": 16, "button": "left"},
+        {"type": "click", "x": 128, "y": 16, "button": "left"},
+        {"type": "click", "x": 128, "y": 128, "button": "left"},
+        {"type": "click", "x": 16, "y": 128, "button": "left"},
+    ]
+    assert payload["semantic"] == "coordinate_click_sequence"
+    assert payload["benchmark_semantics"] == "coordinate-click-v1"
+    assert payload["logical_action_count"] == payload["provider_action_count"] == 4
+    assert payload["provider_sdk_call_count"] == payload["transport_request_count"] == 1
+    assert payload["native_batch"] is True
+    assert payload["batching"] == "single_request"
 
 
 def test_click_then_screenshot_benchmark_uses_fused_binary_endpoint() -> None:

@@ -69,6 +69,16 @@ def _run_daemon_http_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "coordinate_click": core.run_coordinate_click_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
+        "coordinate_click_sequence": core.run_coordinate_click_sequence_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
         "type_100_chars": core.run_type_100_chars_benchmark(
             client=client,
             iterations=iterations,

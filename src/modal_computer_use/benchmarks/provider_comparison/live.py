@@ -109,6 +109,7 @@ def run_product_provider_cases(
                     result["last_result"] = (
                         sanitize_provider_observation(observations[-1]) if observations else None
                     )
+                    _promote_accounting_metadata(result)
                     results[case] = result
             finally:
                 verifier = getattr(driver, "verify_readbacks", None)
@@ -182,6 +183,25 @@ def _bind_provider_operation(operation: Callable[[Any], Any], sandbox: Any) -> C
         return operation(sandbox)
 
     return run
+
+
+def _promote_accounting_metadata(result: dict[str, Any]) -> None:
+    observation = result.get("last_result")
+    if not isinstance(observation, dict):
+        return
+    for key in (
+        "semantic",
+        "benchmark_semantics",
+        "logical_action_count",
+        "provider_action_count",
+        "provider_sdk_call_count",
+        "transport_request_count",
+        "request_count_source",
+        "native_batch",
+        "batching",
+    ):
+        if key in observation:
+            result[key] = observation[key]
 
 
 def _provider_case_redacted_text(case: str) -> str | None:

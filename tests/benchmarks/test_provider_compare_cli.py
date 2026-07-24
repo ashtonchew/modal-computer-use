@@ -42,6 +42,19 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     )
     assert payload["providers"]["modal-daemon"]["cases"]["command_echo"]["status"] == "ok"
     assert payload["providers"]["modal-daemon"]["cases"]["screenshot_full"]["status"] == "ok"
+    coordinate_click = payload["providers"]["modal-daemon"]["cases"]["coordinate_click"]
+    coordinate_sequence = payload["providers"]["modal-daemon"]["cases"][
+        "coordinate_click_sequence"
+    ]
+    assert coordinate_click["semantic"] == "coordinate_click"
+    assert coordinate_click["benchmark_semantics"] == "coordinate-click-v1"
+    assert coordinate_click["logical_action_count"] == 1
+    assert coordinate_click["provider_action_count"] == 1
+    assert coordinate_sequence["semantic"] == "coordinate_click_sequence"
+    assert coordinate_sequence["benchmark_semantics"] == "coordinate-click-v1"
+    assert coordinate_sequence["logical_action_count"] == 4
+    assert coordinate_sequence["provider_action_count"] == 4
+    assert coordinate_sequence["native_batch"] is True
     assert (
         payload["providers"]["modal-daemon"]["cases"]["click_then_screenshot"]["status"] == "ok"
     )
