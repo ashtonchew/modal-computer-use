@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -252,6 +253,15 @@ def test_modal_colocated_runner_failure_is_structured_without_output() -> None:
         "daemon-observation-stream",
     ]
     assert "secret" not in json.dumps(result)
+
+
+def test_daemon_http_runner_timeout_covers_full_input_matrix() -> None:
+    config = replace(
+        _config(surfaces=["daemon-http"]),
+        iterations=30,
+    )
+
+    assert colocated._runner_exec_timeout_seconds(config) >= 450
 
 
 def test_modal_colocated_latency_diagnosis_identifies_daemon_bound() -> None:

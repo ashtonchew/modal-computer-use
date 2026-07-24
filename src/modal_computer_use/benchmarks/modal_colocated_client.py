@@ -385,6 +385,8 @@ def modal_colocated_runner_name(name: str | None) -> str | None:
 def _runner_exec_timeout_seconds(config: ModalColocatedClientBenchmarkConfig) -> int:
     if "daemon-observation-stream" in config.surfaces:
         return max(900, config.iterations * 90)
+    if "daemon-http" in config.surfaces:
+        return max(450, config.iterations * 15)
     return 240
 
 
