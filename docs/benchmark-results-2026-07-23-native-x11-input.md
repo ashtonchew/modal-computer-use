@@ -51,7 +51,8 @@ emitted.
 ## Fully optimized Modal operation harness, 2026-07-24
 
 The native-X11 branch was stacked on the canonical colocated-region harness and run at clean,
-reviewed revision `9e81fd75f64584cb22af19edddc4de82a09fab30`. The run used a 4 CPU / 8192 MiB Chromium target
+reviewed revision `fe788eaf74104ded52ce000ae3041b0660e10e03`, rebased onto main at
+`7fd5e8dfae7ecf0cd38d8729cd257aab42fb1059`. The run used a 4 CPU / 8192 MiB Chromium target
 and a separate 1 CPU / 1024 MiB Connect runner, both requested in `us-west-2`. It forced XTest,
 disabled input throttling, used one warmup, and measured 30 iterations of every selected public
 daemon operation.
@@ -62,12 +63,12 @@ preflight passed, and the post-run Modal container inventory was empty.
 
 | Public operation, p50 | Modal optimized XTest | Daytona default | E2B default | Modal vs Daytona | Modal vs E2B |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Full screenshot | **38.6 ms** | 214.2 ms | 177.0 ms | **5.55x** | **4.59x** |
-| Move + click | **4.7 ms** | 347.0 ms | 279.5 ms | **73.95x** | **59.57x** |
-| Four move/click pairs | **10.0 ms** | 1,429.5 ms | 1,122.1 ms | **142.27x** | **111.67x** |
-| Type 100 characters | **10.9 ms** | 634.6 ms | 4,100.7 ms | **58.27x** | **376.54x** |
-| Type 1,000 characters | **55.3 ms** | 5,371.1 ms | 41,520.4 ms | **97.12x** | **750.78x** |
-| Command echo | 91.1 ms | 120.9 ms | **62.9 ms** | **1.33x** | 0.69x |
+| Full screenshot | **38.3 ms** | 214.2 ms | 177.0 ms | **5.59x** | **4.62x** |
+| Move + click | **3.7 ms** | 347.0 ms | 279.5 ms | **93.77x** | **75.54x** |
+| Four move/click pairs | **8.5 ms** | 1,429.5 ms | 1,122.1 ms | **167.21x** | **131.25x** |
+| Type 100 characters | **10.0 ms** | 634.6 ms | 4,100.7 ms | **63.39x** | **409.65x** |
+| Type 1,000 characters | **52.1 ms** | 5,371.1 ms | 41,520.4 ms | **103.01x** | **796.31x** |
+| Command echo | 86.1 ms | 120.9 ms | **62.9 ms** | **1.40x** | 0.73x |
 
 The Daytona and E2B columns reuse the distinct fresh provider-default run at `cebdaa3`, which used
 three measured product lifecycles per provider. The operation boundaries match, but the samples are
@@ -75,21 +76,21 @@ not contemporaneous or paired, so these are descriptive best-system ratios rathe
 provider causal effects.
 
 The same-run external Connect control used the same target and operation boundaries. Moving the
-caller into the selected region reduced screenshot p50 from 84.2 ms to 38.6 ms, move/click from
-48.1 ms to 4.7 ms, four move/click pairs from 102.3 ms to 10.0 ms, 100-character typing from
-54.2 ms to 10.9 ms, 1,000-character typing from 96.9 ms to 55.3 ms, and command echo from 121.1 ms
-to 91.1 ms.
+caller into the selected region reduced screenshot p50 from 74.4 ms to 38.3 ms, move/click from
+38.6 ms to 3.7 ms, four move/click pairs from 43.8 ms to 8.5 ms, 100-character typing from
+45.7 ms to 10.0 ms, 1,000-character typing from 87.3 ms to 52.1 ms, and command echo from 115.0 ms
+to 86.1 ms.
 
-Against the parent optimized Modal artifact, the native-X11 path was 66.2x faster for 100-character
-typing and 118.1x faster for 1,000-character typing. Screenshot was 1.01x faster and command echo
-1.03x faster; move/click was 0.97x and the four-click sequence was 0.92x as fast. Those historical
+Against the parent optimized Modal artifact, the native-X11 path was 72.0x faster for 100-character
+typing and 125.3x faster for 1,000-character typing. Screenshot was 1.02x faster, move/click 1.24x,
+the four-click sequence 1.08x, and command echo 1.09x faster. Those historical
 comparisons are unpaired and should be read as directional; the controlled native-vs-compatibility
 A/B above isolates adapter cost.
 
 The secret-safe compact evidence is
 `benchmark-data/modal-optimized-native-x11-us-west-2-2026-07-24.json`. The credential-bearing raw
 report remains ignored at
-`benchmark-results/native-x11-colocated-us-west-2-2026-07-24-final.json`, bound by SHA-256 in the
+`benchmark-results/native-x11-colocated-us-west-2-2026-07-24-rebased.json`, bound by SHA-256 in the
 compact artifact.
 
 ## Optimized action-to-frame and availability harness, 2026-07-24
@@ -114,7 +115,7 @@ The 34.6 ms result is a separate optimized screenshot-sensitive agent-loop resul
 immediately before correlated input dispatch and stops only after the matching causal observation
 contains a changed, reconstructable frame. It should not be confused with the 211.6 ms
 provider-default `screenshot_full` RPC below, which crosses the external attested HTTP/1.1 tunnel
-from the local caller and returns a full PNG, or with the 38.6 ms fully optimized standalone
+from the local caller and returns a full PNG, or with the 38.3 ms fully optimized standalone
 screenshot operation above.
 
 For context, the immediately preceding neutral provider run at commit
