@@ -565,6 +565,7 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
+- [Tzafon provider comparison, 2026-07-24](benchmark-results-2026-07-24-tzafon.md)
 - [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
 - [Provider-default benchmark reference, 2026-07-18](benchmark-results-2026-07-18-provider-default.md)
 - [Fallback ownership and current provider comparison, 2026-07-24](benchmark-results-2026-07-24-fallback-ownership.md)
