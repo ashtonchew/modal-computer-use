@@ -2,7 +2,7 @@
   {"action": "triple_click"},
   {"action": "left_mouse_down"},
   {"action": "left_mouse_up"},
-  {"action": "scroll", "direction": "down", "amount": 3},
-  {"action": "hold_key", "key": "shift", "duration_ms": 100},
-  {"action": "wait", "duration_ms": 100}
+  {"action": "scroll", "scroll_direction": "down", "scroll_amount": 3},
+  {"action": "hold_key", "text": "shift", "duration": 0.1},
+  {"action": "wait", "duration": 0.1}
 ]

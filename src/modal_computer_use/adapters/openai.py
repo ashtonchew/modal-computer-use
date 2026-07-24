@@ -28,6 +28,13 @@ _OPENAI_ACTIONS = {
     "wait",
     "screenshot",
 }
+_OPENAI_BUTTONS = {
+    "left": "left",
+    "right": "right",
+    "wheel": "middle",
+    "back": "back",
+    "forward": "forward",
+}
 
 
 class OpenAIAdapter:
@@ -68,33 +75,29 @@ class OpenAIAdapter:
                     "type": "click",
                     "x": x,
                     "y": y,
-                    "button": action.get("button", "left"),
-                    "modifiers": action.get("modifiers", []),
+                    "button": _button(action.get("button", "left")),
+                    "modifiers": _modifier_keys(action),
                 },
                 action,
             )
         if kind == "double_click":
             x, y = _required_xy(action)
-            return _with_common({"type": "double_click", "x": x, "y": y}, action)
-        if kind == "scroll":
-            dx = int(action.get("scroll_x", action.get("dx", 0)) or 0)
-            dy = int(action.get("scroll_y", action.get("dy", action.get("amount", 0))) or 0)
-            if abs(dx) > abs(dy):
-                direction = "right" if dx > 0 else "left"
-                amount = abs(dx)
-            else:
-                direction = "down" if dy > 0 else "up"
-                amount = abs(dy) or int(action.get("amount", 1))
             return _with_common(
                 {
-                    "type": "scroll",
-                    "direction": direction,
-                    "amount": amount,
-                    "x": action.get("x"),
-                    "y": action.get("y"),
+                    "type": "double_click",
+                    "x": x,
+                    "y": y,
+                    "modifiers": _modifier_keys(action),
                 },
                 action,
             )
+        if kind == "scroll":
+            normalized = _scroll_actions(action)
+            if len(normalized) != 1:
+                raise ActionValidationError(
+                    "OpenAI two-axis scroll actions require apply_many()"
+                )
+            return normalized[0]
         if kind == "type":
             if "text" not in action:
                 raise ActionValidationError("OpenAI type action requires text")
@@ -104,14 +107,15 @@ class OpenAIAdapter:
             if not keys:
                 raise ActionValidationError("OpenAI keypress action requires key or keys")
             if isinstance(keys, list) and len(keys) > 1:
-                return _with_common({"type": "hotkey", "keys": keys}, action)
+                raise ActionValidationError(
+                    "OpenAI multi-key keypress actions require apply_many()"
+                )
             if isinstance(keys, list):
                 keys = keys[0]
             return _with_common(
                 {
                     "type": "keypress",
                     "key": keys,
-                    "modifiers": action.get("modifiers", []),
                 },
                 action,
             )
@@ -120,12 +124,9 @@ class OpenAIAdapter:
                 return _with_common(
                     {
                         "type": "drag",
-                        "path": [
-                            Point(x=point[0], y=point[1]).model_dump()
-                            for point in action["path"]
-                        ],
-                        "button": action.get("button", "left"),
-                        "modifiers": action.get("modifiers", []),
+                        "path": [_point(point).model_dump() for point in action["path"]],
+                        "button": _button(action.get("button", "left")),
+                        "modifiers": _modifier_keys(action),
                     },
                     action,
                 )
@@ -138,19 +139,22 @@ class OpenAIAdapter:
                     "start_y": action.get("start_y"),
                     "end_x": action.get("end_x", action.get("x")),
                     "end_y": action.get("end_y", action.get("y")),
-                    "button": action.get("button", "left"),
-                    "modifiers": action.get("modifiers", []),
+                    "button": _button(action.get("button", "left")),
+                    "modifiers": _modifier_keys(action),
                 },
                 action,
             )
         if kind == "move":
             x, y = _required_xy(action)
-            return _with_common({"type": "move", "x": x, "y": y}, action)
+            return _with_modifiers(
+                _with_common({"type": "move", "x": x, "y": y}, action),
+                _modifier_keys(action),
+            )
         if kind == "wait":
             return _with_common(
                 {
                     "type": "wait",
-                    "duration_ms": int(action.get("duration_ms", action.get("ms", 1000))),
+                    "duration_ms": int(action.get("duration_ms", action.get("ms", 2000))),
                 },
                 action,
             )
@@ -169,8 +173,25 @@ class OpenAIAdapter:
         screenshot_after: bool = False,
         max_action_timeout_ms: int | None = None,
     ) -> ActionBatchResult:
+        normalized: list[dict[str, Any]] = []
+        for action in actions:
+            kind = action.get("type") or action.get("action")
+            if kind == "keypress" and isinstance(action.get("keys"), list):
+                _reject_unknown_fields(action)
+                keys = action["keys"]
+                if not keys:
+                    raise ActionValidationError("OpenAI keypress action requires keys")
+                normalized.extend(
+                    _with_common({"type": "keypress", "key": key}, action)
+                    for key in keys
+                )
+            elif kind == "scroll":
+                _reject_unknown_fields(action)
+                normalized.extend(_scroll_actions(action))
+            else:
+                normalized.append(self.normalize(action))
         return self.executor.apply_many(
-            [self.normalize(action) for action in actions],
+            normalized,
             continue_on_error=continue_on_error,
             screenshot_after=screenshot_after,
             max_action_timeout_ms=max_action_timeout_ms,
@@ -181,8 +202,6 @@ def openai_computer_call_output(
     screenshot: Screenshot,
     *,
     call_id: str,
-    current_url: str | None = None,
-    acknowledged_safety_checks: list[dict[str, Any]] | None = None,
     detail: str = "original",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -194,10 +213,6 @@ def openai_computer_call_output(
             "detail": detail,
         },
     }
-    if current_url is not None:
-        payload["current_url"] = current_url
-    if acknowledged_safety_checks is not None:
-        payload["acknowledged_safety_checks"] = acknowledged_safety_checks
     return payload
 
 
@@ -210,6 +225,75 @@ def _required_xy(action: dict[str, Any]) -> tuple[int, int]:
         kind = action.get("type") or action.get("action")
         raise ActionValidationError(f"OpenAI {kind} action requires x and y")
     return int(action["x"]), int(action["y"])
+
+
+def _button(value: object) -> str:
+    try:
+        return _OPENAI_BUTTONS[str(value)]
+    except KeyError as exc:
+        raise ActionValidationError(f"unsupported OpenAI mouse button: {value}") from exc
+
+
+def _modifier_keys(action: dict[str, Any]) -> list[str]:
+    keys = action.get("keys", action.get("modifiers", []))
+    if keys is None:
+        return []
+    if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+        raise ActionValidationError("OpenAI action keys must be a list of strings")
+    return keys
+
+
+def _with_modifiers(payload: dict[str, Any], modifiers: list[str]) -> dict[str, Any]:
+    if not modifiers:
+        return payload
+    common = {
+        key: value
+        for key in ("metadata", "call_id", "sequence", "timeout_ms")
+        if (value := payload.get(key)) is not None
+    }
+    wrapped = {key: value for key, value in payload.items() if key not in common}
+    for key in reversed(modifiers):
+        wrapped = {"type": "hold_key", "key": key, "actions": [wrapped]}
+    wrapped.update(common)
+    return wrapped
+
+
+def _point(value: object) -> Point:
+    if isinstance(value, dict) and "x" in value and "y" in value:
+        return Point(x=int(value["x"]), y=int(value["y"]))
+    if isinstance(value, list | tuple) and len(value) >= 2:
+        return Point(x=int(value[0]), y=int(value[1]))
+    raise ActionValidationError(
+        "OpenAI drag path entries must be [x, y] pairs or {x, y} objects"
+    )
+
+
+def _scroll_actions(action: dict[str, Any]) -> list[dict[str, Any]]:
+    dx = int(action.get("scroll_x", action.get("dx", 0)) or 0)
+    dy = int(action.get("scroll_y", action.get("dy", 0)) or 0)
+    if not dx and not dy and "amount" in action:
+        dy = int(action["amount"])
+    normalized: list[dict[str, Any]] = []
+    for delta, negative, positive in (
+        (dy, "up", "down"),
+        (dx, "left", "right"),
+    ):
+        if not delta:
+            continue
+        payload = _with_common(
+            {
+                "type": "scroll",
+                "direction": negative if delta < 0 else positive,
+                "amount": max(1, abs(round(delta / 100))),
+                "x": action.get("x"),
+                "y": action.get("y"),
+            },
+            action,
+        )
+        normalized.append(_with_modifiers(payload, _modifier_keys(action)))
+    if not normalized:
+        raise ActionValidationError("OpenAI scroll action requires a non-zero delta")
+    return normalized
 
 
 def _with_common(payload: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:

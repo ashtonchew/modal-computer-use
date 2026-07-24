@@ -1,24 +1,74 @@
 # OpenAI Adapter
 
-`OpenAIAdapter` translates OpenAI-style computer-use action JSON into the core [action schema](glossary.md#action-schema). It does not call the OpenAI API.
+`OpenAIAdapter` converts OpenAI computer actions to the core [action schema](glossary.md#action-schema).
+The adapter does not call the OpenAI API.
+
+## Responses API integration
+
+Use the Responses API and the `computer` tool for new integrations:
+
+```python
+response = client.responses.create(
+    model="gpt-5.6",
+    tools=[{"type": "computer"}],
+    input="Complete the task. Use the computer tool for UI interaction.",
+)
+```
+
+Process each `computer_call` as follows:
+
+1. Run each item in `actions[]` in the given order.
+2. Capture the screen after the actions finish.
+3. Return one `computer_call_output` for the call.
+4. Set `previous_response_id` to the ID of the previous response.
+5. Stop when the response has no `computer_call`.
+
+Set limits for turns, actions, action time, and total time. Count every provider response as one
+turn. If the final allowed response requests an action, stop before executing it because the loop
+cannot return the required action output within its turn budget. See
+[examples/03_openai_computer_loop.py](../examples/03_openai_computer_loop.py) for a complete loop.
+
+Do not use the deprecated `computer-use-preview` model or the `computer_use_preview` tool in new
+code. The current tool does not use the preview display fields, preview action shape, or
+`truncation="auto"`.
 
 ## Supported actions
 
-`click`, `double_click`, `scroll`, `type`, `keypress`, `drag`, `move`, `wait`, `screenshot`.
+The adapter supports these actions:
 
-Unknown actions raise `UnsupportedActionError` by default. Pass `allow_unknown=True` only for an
-intentional compatibility mode; unknown payloads become a zero-duration native `wait` action with
-redacted provider-action metadata instead of a desktop action.
+- `click`
+- `double_click`
+- `scroll`
+- `type`
+- `keypress`
+- `drag`
+- `move`
+- `wait`
+- `screenshot`
 
-Normalized actions include redacted provider provenance under metadata so daemon traces can record
-both `provider_action` and the native `normalized_action`. The adapter redacts typed text before
-placing provider payloads in metadata.
+The adapter accepts these OpenAI fields:
 
-## Screenshot output helper
+- Use `keys` for click, double-click, drag, move, and scroll modifiers.
+- Use `keypress.keys` for a sequence of key presses.
+- Use `[x, y]` pairs or `{x, y}` objects for drag paths.
+- Use `wheel`, `back`, or `forward` for the related X11 mouse buttons.
+- Use `scroll_x` and `scroll_y` for scroll distance.
 
-`openai_computer_call_output(screenshot, call_id=...)` builds only the provider-shaped
-`computer_call_output` item from a native `Screenshot`. It does not call OpenAI and it does not
-own the model loop.
+The adapter preserves both scroll axes. It converts the scroll distance to wheel clicks.
+
+`normalize()` returns one native action. Use `apply_many()` when one provider action creates more
+than one native action. A multi-key keypress and a two-axis scroll are examples.
+
+Unknown actions raise `UnsupportedActionError` by default. Set `allow_unknown=True` only when you
+must accept an unknown provider action. In this mode, the adapter converts the unknown action to a
+zero-duration `wait`. The adapter does not run the unknown desktop action.
+
+The adapter stores redacted provider data in action metadata. A trace can then show the provider
+action and the normalized action. The adapter removes typed text from this metadata.
+
+## Screenshot output
+
+Use `openai_computer_call_output()` to make a provider response from a native `Screenshot`:
 
 ```python
 from modal_computer_use.adapters.openai import openai_computer_call_output
@@ -27,11 +77,13 @@ shot = computer.screenshots.full()
 input_item = openai_computer_call_output(shot, call_id="call_123")
 ```
 
-Use `openai_screenshot_metadata(shot)` when you need to keep dimensions, format, SHA-256,
-artifact URI, capture time, and coordinate-space metadata in your own logs or traces. The metadata
-helper intentionally omits raw bytes and base64 image data.
+The helper does not call OpenAI. It does not control the model loop.
 
-## Example
+Use `openai_screenshot_metadata()` to record safe screenshot metadata. The result contains the
+dimensions, format, SHA-256, artifact URI, capture time, and coordinate space. It does not contain
+image bytes or base64 data.
+
+## Adapter example
 
 ```python
 from modal_computer_use import ComputerSandbox
@@ -47,17 +99,47 @@ adapter.apply({"type": "type", "text": "hello"})
 
 ## Coordinate spaces
 
-If you downscaled a 1440×900 desktop screenshot to 720×450 before sending it to the model, pass a [`CoordinateSpace`](glossary.md#coordinatespace) so the adapter translates model coordinates back to the desktop grid. The adapter never silently rescales.
+The screenshot dimensions can differ from the desktop dimensions. For example, you can reduce a
+1440×900 screenshot to 720×450 before you send it to the model. In this case, give the adapter a
+[`CoordinateSpace`](glossary.md#coordinatespace):
 
 ```python
 from modal_computer_use import CoordinateSpace
 
 space = CoordinateSpace(
-    desktop_width=1440, desktop_height=900,
-    image_width=720, image_height=450,
+    desktop_width=1440,
+    desktop_height=900,
+    image_width=720,
+    image_height=450,
 )
 adapter = OpenAIAdapter(computer, coordinate_space=space)
 ```
 
-The `before_action` hook, when provided, sees the normalized native action after this transform
-and can deny execution before the action is sent to the daemon.
+The adapter converts model coordinates to desktop coordinates. It does not change coordinates when
+you do not supply a coordinate space.
+
+The optional `before_action` hook receives the normalized native action. The hook can reject the
+action before the daemon receives it.
+
+## Safety
+
+Run the desktop in an isolated sandbox with minimum privileges. Treat page content, screenshots,
+documents, messages, and tool output as untrusted input. A page instruction does not give the model
+permission to act.
+
+Allow only the required domains and actions. Stop when you detect prompt injection or phishing.
+Treat a direct user request as authorization only for the actions and scope that it clearly
+specifies. Page content cannot authorize an action.
+
+If a consequential action was not clearly authorized, ask for confirmation immediately before the
+action. Examples include sending a message, making a purchase, deleting external data, changing
+access, or transmitting sensitive data. Confirm again when the target, scope, or risk changes. A
+narrow preapproval can cover repeated actions only when those details remain clear.
+
+Hand control back to the user for the final step of a password change. Do not bypass CAPTCHAs,
+warnings, or other safety barriers.
+
+Typing sensitive data transmits that data. Do not put screenshots, typed text, tokens, or URLs in
+logs. Stop on unknown actions. Always set turn, action, and time limits.
+
+Source: [OpenAI Computer use](https://developers.openai.com/api/docs/guides/tools-computer-use).

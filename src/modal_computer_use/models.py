@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator,
 from ._invariants import require_coordinate_pair, require_drag_shape, require_safe_text
 from .errors import ActionValidationError
 
-Button = Literal["left", "middle", "right"]
+Button = Literal["left", "middle", "right", "back", "forward"]
 ScrollDirection = Literal["up", "down", "left", "right"]
 ImageFormat = Literal["png", "jpeg", "webp"]
 ScreenshotStorage = Literal["inline", "artifact", "auto"]
@@ -424,7 +424,7 @@ class HotkeyAction(BaseAction):
 class HoldKeyAction(BaseAction):
     type: Literal["hold_key"] = "hold_key"
     key: str
-    duration_ms: int | None = Field(default=None, ge=0, le=60_000)
+    duration_ms: int | None = Field(default=None, ge=0, le=100_000)
     actions: list[dict[str, Any]] | None = None
 
 

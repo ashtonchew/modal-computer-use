@@ -1053,7 +1053,7 @@ openai = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.101" },
     { name = "daytona", marker = "extra == 'bench-daytona'", specifier = "==0.175.0" },
     { name = "daytona", marker = "extra == 'bench-providers'", specifier = "==0.175.0" },
     { name = "e2b-desktop", marker = "extra == 'bench-e2b'", specifier = "==2.3.1" },
@@ -1065,7 +1065,7 @@ requires-dist = [
     { name = "modal", marker = "extra == 'modal'", specifier = "~=1.5.2" },
     { name = "mss", specifier = ">=10.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=2.36" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
