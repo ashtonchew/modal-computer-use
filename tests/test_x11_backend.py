@@ -12,7 +12,11 @@ from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
 from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend, choose_backend
-from modal_computer_use.daemon.desktop.xtest import XTestUnavailableError
+from modal_computer_use.daemon.desktop.xtest import (
+    ButtonEvent,
+    MotionEvent,
+    XTestUnavailableError,
+)
 from modal_computer_use.models import Point, Region, ScreenshotOptions
 
 
@@ -64,34 +68,19 @@ class FakeXTestPointer:
     def available(self) -> bool:
         return self._available
 
-    def move(self, x: int, y: int) -> None:
-        self._record("move", {"x": x, "y": y})
-
-    def click(
+    def emit(
         self,
+        events: object,
         *,
-        button: int,
-        count: int = 1,
-        x: int | None = None,
-        y: int | None = None,
+        preserve_pressed_keycodes: object = (),
     ) -> None:
-        self._record("click", {"button": button, "count": count, "x": x, "y": y})
-
-    def down(self, *, button: int, x: int | None = None, y: int | None = None) -> None:
-        self._record("down", {"button": button, "x": x, "y": y})
-
-    def up(self, *, button: int, x: int | None = None, y: int | None = None) -> None:
-        self._record("up", {"button": button, "x": x, "y": y})
-
-    def scroll(
-        self,
-        *,
-        button: int,
-        amount: int = 1,
-        x: int | None = None,
-        y: int | None = None,
-    ) -> None:
-        self._record("scroll", {"button": button, "amount": amount, "x": x, "y": y})
+        self._record(
+            "emit",
+            {
+                "events": tuple(events),
+                "preserve_pressed_keycodes": tuple(preserve_pressed_keycodes),
+            },
+        )
 
     def _record(self, name: str, payload: object) -> None:
         if self._fail:
@@ -113,11 +102,51 @@ def test_x11_mouse_uses_xtest_pointer_backend_when_available() -> None:
     assert backend.commands == []
     assert backend.input_backend == "xtest"
     assert xtest.calls == [
-        ("move", {"x": 1, "y": 2}),
-        ("click", {"button": 1, "count": 1, "x": 3, "y": 4}),
-        ("scroll", {"button": 5, "amount": 2, "x": 5, "y": 6}),
-        ("down", {"button": 3, "x": 7, "y": 8}),
-        ("up", {"button": 3, "x": 9, "y": 10}),
+        (
+            "emit",
+            {
+                "events": (MotionEvent(1, 2),),
+                "preserve_pressed_keycodes": (),
+            },
+        ),
+        (
+            "emit",
+            {
+                "events": (
+                    MotionEvent(3, 4),
+                    ButtonEvent(1, True),
+                    ButtonEvent(1, False),
+                ),
+                "preserve_pressed_keycodes": (),
+            },
+        ),
+        (
+            "emit",
+            {
+                "events": (
+                    MotionEvent(5, 6),
+                    ButtonEvent(5, True),
+                    ButtonEvent(5, False),
+                    ButtonEvent(5, True),
+                    ButtonEvent(5, False),
+                ),
+                "preserve_pressed_keycodes": (),
+            },
+        ),
+        (
+            "emit",
+            {
+                "events": (MotionEvent(7, 8), ButtonEvent(3, True)),
+                "preserve_pressed_keycodes": (),
+            },
+        ),
+        (
+            "emit",
+            {
+                "events": (MotionEvent(9, 10), ButtonEvent(3, False)),
+                "preserve_pressed_keycodes": (),
+            },
+        ),
     ]
 
 

@@ -178,7 +178,10 @@ def main(argv: list[str] | None = None) -> int:
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
         default="auto",
-        help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
+        help=(
+            "daemon mouse and keyboard input backend for created benchmark sandboxes; "
+            "defaults to auto"
+        ),
     )
     sdk_parser.add_argument("--image-profile", dest="image_profile")
     sdk_parser.add_argument("--image-variant", dest="image_profile")

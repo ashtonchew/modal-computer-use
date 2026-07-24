@@ -23,9 +23,11 @@ def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
             assert headers is None
             assert json["actions"][0]["type"] == "type"
             assert json["actions"][0]["text"] == TYPING_BENCHMARK_TEXT
+            assert json["actions"][0]["method"] == "keystrokes"
+            assert json["actions"][0]["delay_ms"] == 0
             return {
                 "ok": True,
-                "results": [{"ok": True, "output": {"length": 100, "method": "xdotool"}}],
+                "results": [{"ok": True, "output": {"length": 100, "method": "keystrokes"}}],
                 "timing": {"daemon_ms": 12.5},
             }
 
@@ -36,7 +38,11 @@ def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
     )
 
     assert payload["status"] == "ok"
-    assert payload["request"] == {"character_count": 100, "method": "xdotool"}
+    assert payload["request"] == {
+        "character_count": 100,
+        "method": "keystrokes",
+        "delay_ms": 0,
+    }
     assert payload["daemon_samples_ms"] == [12.5]
     assert payload["attribution"]["status"] == "measured"
     serialized = json.dumps(payload)
@@ -116,11 +122,12 @@ def test_type_1000_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
             assert headers is None
             assert json["actions"][0]["type"] == "type"
             assert json["actions"][0]["text"] == TYPE_1000_CHARS_TEXT
-            assert json["actions"][0]["method"] == "xdotool"
+            assert json["actions"][0]["method"] == "keystrokes"
+            assert json["actions"][0]["delay_ms"] == 0
             assert json["actions"][0]["timeout_ms"] == TYPE_1000_CHARS_TIMEOUT_MS
             return {
                 "ok": True,
-                "results": [{"ok": True, "output": {"length": 1000, "method": "xdotool"}}],
+                "results": [{"ok": True, "output": {"length": 1000, "method": "keystrokes"}}],
                 "timing": {"daemon_ms": 125.0},
             }
 
@@ -133,7 +140,8 @@ def test_type_1000_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
     assert payload["status"] == "ok"
     assert payload["request"] == {
         "character_count": 1000,
-        "method": "xdotool",
+        "method": "keystrokes",
+        "delay_ms": 0,
         "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
     }
     assert payload["daemon_samples_ms"] == [125.0]

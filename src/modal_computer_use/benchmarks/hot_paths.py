@@ -9,6 +9,7 @@ from .constants import (
     MOVE_CLICK_SEQUENCE_ACTIONS,
     TYPE_1000_CHARS_TEXT,
     TYPE_1000_CHARS_TIMEOUT_MS,
+    TYPING_BENCHMARK_DELAY_MS,
     TYPING_BENCHMARK_METHOD,
     TYPING_BENCHMARK_TEXT,
 )
@@ -214,6 +215,7 @@ def run_type_100_chars_benchmark(
         client,
         TYPING_BENCHMARK_TEXT,
         method=TYPING_BENCHMARK_METHOD,
+        delay_ms=TYPING_BENCHMARK_DELAY_MS,
     )
     samples, observations = _measure_observed_case(
         name="type_100_chars",
@@ -230,6 +232,7 @@ def run_type_100_chars_benchmark(
             "request": {
                 "character_count": len(TYPING_BENCHMARK_TEXT),
                 "method": TYPING_BENCHMARK_METHOD,
+                "delay_ms": TYPING_BENCHMARK_DELAY_MS,
             },
         }
     )
@@ -249,6 +252,7 @@ def run_type_1000_chars_benchmark(
         client,
         TYPE_1000_CHARS_TEXT,
         method=TYPING_BENCHMARK_METHOD,
+        delay_ms=TYPING_BENCHMARK_DELAY_MS,
         timeout_ms=TYPE_1000_CHARS_TIMEOUT_MS,
     )
     samples, observations = _measure_observed_case(
@@ -266,6 +270,7 @@ def run_type_1000_chars_benchmark(
             "request": {
                 "character_count": len(TYPE_1000_CHARS_TEXT),
                 "method": TYPING_BENCHMARK_METHOD,
+                "delay_ms": TYPING_BENCHMARK_DELAY_MS,
                 "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
             },
         }

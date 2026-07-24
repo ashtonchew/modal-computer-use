@@ -13,7 +13,7 @@ class KeyboardNamespace(Namespace):
         self,
         text: str,
         delay_ms: int = 10,
-        method: Literal["auto", "xdotool", "clipboard"] = "auto",
+        method: Literal["auto", "keystrokes", "xdotool", "clipboard"] = "auto",
     ) -> ActionResult:
         return ActionResult.model_validate(
             self._client.post_json(

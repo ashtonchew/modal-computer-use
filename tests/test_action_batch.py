@@ -24,6 +24,16 @@ def test_action_batch_stop_on_error(test_client) -> None:
     assert response.status_code == 422
 
 
+def test_action_batch_attributes_keyboard_input_backend(test_client) -> None:
+    result = test_client.post(
+        "/v1/actions/run",
+        json={"actions": [{"type": "type", "text": "safe", "method": "keystrokes"}]},
+    ).json()
+
+    assert result["ok"] is True
+    assert result["results"][0]["output"]["input_backend"] == "mock"
+
+
 def test_action_batch_stop_on_runtime_error(test_client, app) -> None:
     original = app.state.backend.mouse_move
 

@@ -1162,6 +1162,11 @@ def _is_input_backend_action(action: Any) -> bool:
             ScrollAction,
             MouseDownAction,
             MouseUpAction,
+            TypeAction,
+            KeyPressAction,
+            HotkeyAction,
+            HoldKeyAction,
+            ReleaseAllAction,
         ),
     )
 

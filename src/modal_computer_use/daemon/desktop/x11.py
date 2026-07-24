@@ -22,7 +22,7 @@ from modal_computer_use.daemon.desktop.browser import X11BrowserController
 from modal_computer_use.daemon.desktop.clipboard import X11ClipboardController
 from modal_computer_use.daemon.desktop.display import StaticDisplayController
 from modal_computer_use.daemon.desktop.keyboard import X11KeyboardController
-from modal_computer_use.daemon.desktop.mouse import BUTTON_NUMBERS, X11MouseController
+from modal_computer_use.daemon.desktop.mouse import X11MouseController
 from modal_computer_use.daemon.desktop.screenshots import (
     CapturedRawScreenshot,
     CapturedScreenshot,
@@ -31,7 +31,7 @@ from modal_computer_use.daemon.desktop.screenshots import (
     scaled_dimension,
 )
 from modal_computer_use.daemon.desktop.windows import X11WindowController
-from modal_computer_use.daemon.desktop.xtest import XTestPointerController
+from modal_computer_use.daemon.desktop.xtest import X11InputSession
 from modal_computer_use.models import (
     ActionResult,
     CoordinateSpace,
@@ -54,6 +54,10 @@ class DesktopBackend(ABC):
     @property
     def input_backend(self) -> str:
         return "unknown"
+
+    def close(self) -> None:
+        """Release persistent backend resources."""
+        return None
 
     @abstractmethod
     async def ready(self) -> tuple[bool, list[str]]:
@@ -528,11 +532,15 @@ class X11DesktopBackend(MockDesktopBackend):
         super().__init__(width=width, height=height)
         self.display = display
         self.browser = browser
+        normalized_input_backend = _normalize_input_backend(input_backend)
+        self._last_input_backend = "xdotool"
+        self._input = X11InputSession(display=display)
         self._display = StaticDisplayController(width=width, height=height, display=display)
         self._apps = X11AppController(spawn=lambda *args: self._spawn(*args))
         self._windows = X11WindowController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
             fallback_windows=super().windows,
+            display=display,
         )
         self._browser = X11BrowserController(
             browser=browser,
@@ -557,6 +565,8 @@ class X11DesktopBackend(MockDesktopBackend):
             key_up_state=super().key_up,
             clipboard_get=self.clipboard_get,
             clipboard_set=self.clipboard_set,
+            input_backend=normalized_input_backend,
+            xtest=self._input,
         )
         self._mouse = X11MouseController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
@@ -569,8 +579,8 @@ class X11DesktopBackend(MockDesktopBackend):
             button_up_state=super().mouse_up,
             key_down=self.key_down,
             key_up=self.key_up,
-            input_backend=_normalize_input_backend(input_backend),
-            xtest=XTestPointerController(display=display),
+            input_backend=normalized_input_backend,
+            xtest=self._input,
         )
         self._screenshots = X11ScreenshotController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
@@ -582,12 +592,29 @@ class X11DesktopBackend(MockDesktopBackend):
 
     @property
     def input_backend(self) -> str:
-        return self._mouse.backend_name
+        return self._last_input_backend
+
+    def close(self) -> None:
+        self._windows.close()
+        self._input.close()
 
     async def ready(self) -> tuple[bool, list[str]]:
+        input_ready, input_error = self._mouse.probe_backend()
+        if not input_ready:
+            return False, [input_error or "input backend is not ready"]
+        self._last_input_backend = self._mouse.backend_name
+        windows_ready, windows_error = self._windows.probe_backend()
+        if not windows_ready:
+            return False, [windows_error or "window backend is not ready"]
+
+        required_tools = {"maim", "xclip", "xsel", "xdpyinfo", "ffmpeg"}
+        if self._mouse.backend_name != "xtest":
+            required_tools.add("xdotool")
+        if self._windows.backend_name != "xlib-ewmh":
+            required_tools.update(("wmctrl", "xdotool"))
         missing = [
             tool
-            for tool in ("xdotool", "wmctrl", "maim", "xclip", "xsel", "xdpyinfo", "ffmpeg")
+            for tool in sorted(required_tools)
             if shutil.which(tool) is None
         ]
         if missing:
@@ -595,12 +622,6 @@ class X11DesktopBackend(MockDesktopBackend):
         result = await self._run("xdpyinfo", timeout=2, check=False)
         if result.returncode != 0:
             return False, ["xdpyinfo could not reach display"]
-        wm = await self._run("wmctrl", "-m", timeout=2, check=False)
-        if wm.returncode != 0:
-            return False, ["window manager is not responding"]
-        input_ready, input_error = self._mouse.probe_backend()
-        if not input_ready:
-            return False, [input_error or "input backend is not ready"]
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
         try:
@@ -694,13 +715,15 @@ class X11DesktopBackend(MockDesktopBackend):
         return await self._windows.activate(window_id)
 
     async def close_window(self, window_id: str) -> ActionResult:
-        return await self._windows.close(window_id)
+        return await self._windows.close_window(window_id)
 
     async def display_info(self) -> DisplayInfo:
         return await self._display.info()
 
     async def mouse_move(self, x: int, y: int) -> Point:
-        return await self._mouse.move(x, y)
+        result = await self._mouse.move(x, y)
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def mouse_click(
         self,
@@ -711,7 +734,15 @@ class X11DesktopBackend(MockDesktopBackend):
         count: int = 1,
         modifiers: Sequence[str] = (),
     ) -> Point:
-        return await self._mouse.click(x, y, button=button, count=count, modifiers=modifiers)
+        result = await self._mouse.click(
+            x,
+            y,
+            button=button,
+            count=count,
+            modifiers=modifiers,
+        )
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def mouse_drag(
         self,
@@ -723,7 +754,7 @@ class X11DesktopBackend(MockDesktopBackend):
         duration_ms: int = 500,
         modifiers: Sequence[str] = (),
     ) -> Point:
-        return await self._mouse.drag(
+        result = await self._mouse.drag(
             start=start,
             end=end,
             path=path,
@@ -731,43 +762,65 @@ class X11DesktopBackend(MockDesktopBackend):
             duration_ms=duration_ms,
             modifiers=modifiers,
         )
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def mouse_scroll(
         self, direction: str, amount: int = 1, x: int | None = None, y: int | None = None
     ) -> ActionResult:
-        return await self._mouse.scroll(direction, amount=amount, x=x, y=y)
+        result = await self._mouse.scroll(direction, amount=amount, x=x, y=y)
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def mouse_down(
         self, button: str = "left", x: int | None = None, y: int | None = None
     ) -> ActionResult:
-        return await self._mouse.down(button, x=x, y=y)
+        result = await self._mouse.down(button, x=x, y=y)
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def mouse_up(
         self, button: str = "left", x: int | None = None, y: int | None = None
     ) -> ActionResult:
-        return await self._mouse.up(button, x=x, y=y)
+        result = await self._mouse.up(button, x=x, y=y)
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def mouse_position(self) -> Point:
-        return await self._mouse.position()
+        result = await self._mouse.position()
+        self._last_input_backend = self._mouse.backend_name
+        return result
 
     async def keyboard_type(
         self, text: str, delay_ms: int = 10, method: str = "auto"
     ) -> ActionResult:
-        return await self._keyboard.type_text(text, delay_ms=delay_ms, method=method)
+        result = await self._keyboard.type_text(text, delay_ms=delay_ms, method=method)
+        self._last_input_backend = self._keyboard.backend_name
+        return result
 
     async def keyboard_press(
         self, key: str, modifiers: Sequence[str] = (), duration_ms: int = 0
     ) -> ActionResult:
-        return await self._keyboard.press(key, modifiers=modifiers, duration_ms=duration_ms)
+        result = await self._keyboard.press(
+            key,
+            modifiers=modifiers,
+            duration_ms=duration_ms,
+        )
+        self._last_input_backend = self._keyboard.backend_name
+        return result
 
     async def keyboard_hotkey(self, keys: Sequence[str], duration_ms: int = 0) -> ActionResult:
-        return await self._keyboard.hotkey(keys, duration_ms=duration_ms)
+        result = await self._keyboard.hotkey(keys, duration_ms=duration_ms)
+        self._last_input_backend = self._keyboard.backend_name
+        return result
 
     async def key_down(self, key: str) -> None:
         await self._keyboard.down(key)
+        self._last_input_backend = self._keyboard.backend_name
 
     async def key_up(self, key: str) -> None:
         await self._keyboard.up(key)
+        self._last_input_backend = self._keyboard.backend_name
 
     async def clipboard_get(self) -> str:
         return await self._clipboard.get()
@@ -782,10 +835,10 @@ class X11DesktopBackend(MockDesktopBackend):
         released = {"keys": sorted(self.held_keys), "buttons": sorted(self.held_buttons)}
         for key in reversed(sorted(self.held_keys)):
             with contextlib.suppress(Exception):
-                await self._run("xdotool", "keyup", key)
+                await self._keyboard.up(key)
         for button in reversed(sorted(self.held_buttons)):
             with contextlib.suppress(Exception):
-                await self._run("xdotool", "mouseup", BUTTON_NUMBERS[button])
+                await self._mouse.up(button)
         self.held_keys.clear()
         self.held_buttons.clear()
         return ActionResult(ok=True, output=released)

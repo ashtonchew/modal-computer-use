@@ -81,8 +81,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 message="browser prewarm failed",
                 output={"error": type(exc).__name__},
             )
-    yield
-    await supervisor.stop()
+    try:
+        yield
+    finally:
+        try:
+            await supervisor.stop()
+        finally:
+            app.state.backend.close()
 
 
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
