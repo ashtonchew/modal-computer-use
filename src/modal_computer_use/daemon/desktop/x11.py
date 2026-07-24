@@ -653,9 +653,7 @@ class X11DesktopBackend(MockDesktopBackend):
         if not windows_ready:
             return False, [windows_error or "window backend is not ready"]
 
-        required_tools = {"maim", "xclip", "xsel", "xdpyinfo", "ffmpeg"}
-        if self._mouse.backend_name == "xdotool":
-            required_tools.add("xdotool")
+        required_tools = {"maim", "xclip", "xsel", "xdotool", "xdpyinfo", "ffmpeg"}
         if self._windows.backend_name != "xlib-ewmh":
             required_tools.update(("wmctrl", "xdotool"))
         missing = [tool for tool in sorted(required_tools) if shutil.which(tool) is None]

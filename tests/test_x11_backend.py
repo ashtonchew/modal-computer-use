@@ -999,7 +999,7 @@ def test_forced_xdotool_readiness_fails_when_live_probe_cannot_reach_display(
     assert backend.available_input_backends == ()
 
 
-def test_native_only_readiness_does_not_require_xdotool(monkeypatch) -> None:
+def test_native_readiness_requires_public_xdotool_compatibility_path(monkeypatch) -> None:
     backend = X11DesktopBackend(input_backend="xtest")
     monkeypatch.setattr(backend._input, "available", lambda: True)
     backend._windows._backend_name = "xlib-ewmh"
@@ -1023,7 +1023,7 @@ def test_native_only_readiness_does_not_require_xdotool(monkeypatch) -> None:
 
     ready, errors = anyio.run(backend.ready)
 
-    assert ready is True
-    assert errors == []
+    assert ready is False
+    assert errors == ["missing required tools: xdotool"]
     assert backend.input_backend == "xtest"
     assert backend.available_input_backends == ("xtest",)
