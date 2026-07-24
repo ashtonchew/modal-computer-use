@@ -104,10 +104,18 @@ def test_benchmark_compare_external_providers_skip_without_credentials(
 ) -> None:
     monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
     monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.delenv("TZAFON_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(
-        ["benchmark", "compare", "--providers", "daytona,e2b", "--iterations", "1"]
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "daytona,e2b,tzafon",
+            "--iterations",
+            "1",
+        ]
     )
 
     captured = capsys.readouterr()
@@ -116,8 +124,49 @@ def test_benchmark_compare_external_providers_skip_without_credentials(
     assert payload["ok"] is True
     assert payload["providers"]["daytona"]["status"] == "not_measured"
     assert payload["providers"]["e2b"]["status"] == "not_measured"
+    assert payload["providers"]["tzafon"]["status"] == "not_measured"
     assert "DAYTONA_API_KEY is not set" in captured.out
     assert "E2B_API_KEY is not set" in captured.out
+    assert "TZAFON_API_KEY is not set" in captured.out
+
+
+def test_provider_compare_cli_accepts_tzafon() -> None:
+    args = SimpleNamespace(providers="tzafon", provider=[])
+
+    assert cli._compare_providers(args) == ["tzafon"]
+    assert cli._has_live_external_provider(["tzafon"]) is True
+
+
+def test_provider_compare_parser_accepts_repeated_tzafon_provider(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("TZAFON_API_KEY", raising=False)
+
+    exit_code = cli.main(
+        ["benchmark", "compare", "--provider", "tzafon", "--iterations", "1"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["providers"]["tzafon"]["status"] == "not_measured"
+
+
+def test_provider_compare_env_file_whitelists_tzafon_key(
+    monkeypatch, tmp_path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "TZAFON_API_KEY=tzafon-test-secret\n"
+        "NOT_A_BENCHMARK_SECRET=must-not-load\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TZAFON_API_KEY", raising=False)
+    monkeypatch.delenv("NOT_A_BENCHMARK_SECRET", raising=False)
+
+    cli._load_benchmark_env_file(env_file)
+
+    assert __import__("os").environ["TZAFON_API_KEY"] == "tzafon-test-secret"
+    assert "NOT_A_BENCHMARK_SECRET" not in __import__("os").environ
 
 
 def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:

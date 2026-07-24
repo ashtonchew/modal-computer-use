@@ -21,6 +21,7 @@ ComparisonProvider = Literal[
     "generic",
     "daytona",
     "e2b",
+    "tzafon",
 ]
 FutureBenchmarkStatus = Literal["not_measured", "unsupported"]
 DEFAULT_SDK_BENCHMARK_SURFACES: tuple[BenchmarkSurface, ...] = (

@@ -32,9 +32,11 @@ def verify_daytona_cursor_position(sandbox: Any) -> dict[str, Any]:
 
 def verify_provider_cursor_position(
     run_command: Callable[[str, int], str],
+    *,
+    query_command: str = "xdotool getmouselocation --shell",
 ) -> dict[str, Any]:
     expected = _expected_sequence_cursor_position()
-    output = run_command("xdotool getmouselocation --shell", 10)
+    output = run_command(query_command, 10)
     observed = _parse_xdotool_position(output)
     ok = observed == expected
     return {

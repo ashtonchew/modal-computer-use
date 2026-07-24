@@ -1036,6 +1036,10 @@ bench-e2b = [
 bench-providers = [
     { name = "daytona" },
     { name = "e2b-desktop" },
+    { name = "tzafon" },
+]
+bench-tzafon = [
+    { name = "tzafon" },
 ]
 dev = [
     { name = "mypy" },
@@ -1073,11 +1077,13 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "types-pillow", marker = "extra == 'dev'" },
+    { name = "tzafon", marker = "extra == 'bench-providers'", specifier = "==2.44.1" },
+    { name = "tzafon", marker = "extra == 'bench-tzafon'", specifier = "==2.44.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "websockets", specifier = ">=13.0" },
     { name = "xxhash", specifier = ">=3.6" },
 ]
-provides-extras = ["modal", "openai", "anthropic", "bench-daytona", "bench-e2b", "bench-providers", "dev"]
+provides-extras = ["modal", "openai", "anthropic", "bench-daytona", "bench-e2b", "bench-tzafon", "bench-providers", "dev"]
 
 [[package]]
 name = "mss"
@@ -1901,15 +1907,6 @@ wheels = [
 ]
 
 [[package]]
-name = "shellingham"
-version = "1.5.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
-]
-
-[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2019,6 +2016,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
+]
+
+[[package]]
+name = "tzafon"
+version = "2.44.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/8d/251ff5ae00e8073c46766f2c4f91e3a8b6016bba9b4d145edc059b591abc/tzafon-2.44.1.tar.gz", hash = "sha256:5086cf20ae8981b125b1851ebbc9da7111ff8fe88ced57ef18b7c2fd07f0ab50", size = 294715, upload-time = "2026-07-16T20:51:07.769Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/7e/d4f6cac76cf9a236f9a5a42ec6406b86bc9d4a04de9c5cbeeadcebd1c503/tzafon-2.44.1-py3-none-any.whl", hash = "sha256:3bb50f18d054a638bb3ad185d70db1de8879edc42f25d80f30076cda299e9184", size = 194831, upload-time = "2026-07-16T20:51:08.859Z" },
 ]
 
 [[package]]

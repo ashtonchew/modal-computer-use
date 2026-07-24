@@ -245,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
             "generic",
             "daytona",
             "e2b",
+            "tzafon",
         ],
         help="provider to benchmark; may be passed more than once",
     )
@@ -1677,7 +1678,7 @@ def _compare_providers(
         values.extend(args.provider)
     if not values:
         return list(DEFAULT_COMPARE_PROVIDERS)
-    allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b"}
+    allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b", "tzafon"}
     invalid = [provider for provider in values if provider not in allowed]
     if invalid:
         if parser is not None:
@@ -1687,7 +1688,7 @@ def _compare_providers(
 
 
 def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:
-    return any(provider in {"daytona", "e2b"} for provider in providers)
+    return any(provider in {"daytona", "e2b", "tzafon"} for provider in providers)
 
 
 def _load_benchmark_env_file(env_file: Path | None) -> None:
@@ -1709,6 +1710,8 @@ _BENCHMARK_ENV_KEYS = frozenset(
         "DAYTONA_SNAPSHOT",
         "E2B_API_KEY",
         "E2B_TEMPLATE",
+        "LIGHTCONE_BASE_URL",
+        "TZAFON_API_KEY",
     }
 )
 
