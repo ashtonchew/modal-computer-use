@@ -28,6 +28,7 @@
   },
   "results": {
     "screenshot_full": {
+      "same_run_external_connect_p50_ms": 80.01,
       "modal_optimized_p50_ms": 38.95895899999857,
       "modal_optimized_p95_ms": 41.51400779999949,
       "modal_daemon_p50_ms": 23.32824350000351,
@@ -36,9 +37,11 @@
       "e2b_provider_default_p50_ms": 192.80008395435289,
       "modal_vs_daytona": 4.184768104097351,
       "modal_vs_e2b": 4.948799683132189,
+      "same_run_external_to_optimized": 2.053699638124,
       "modal_default_to_optimized": 6.160155613950193
     },
     "move_click": {
+      "same_run_external_connect_p50_ms": 32.373,
       "modal_optimized_p50_ms": 4.573218000000878,
       "modal_optimized_p95_ms": 5.659430699999388,
       "modal_daemon_p50_ms": 0.9930165000184843,
@@ -47,9 +50,11 @@
       "e2b_provider_default_p50_ms": 218.02895900327712,
       "modal_vs_daytona": 74.38846475313767,
       "modal_vs_e2b": 47.67517293145335,
+      "same_run_external_to_optimized": 7.078822833286,
       "modal_default_to_optimized": 36.98677452579579
     },
     "move_click_sequence": {
+      "same_run_external_connect_p50_ms": 37.058,
       "modal_optimized_p50_ms": 9.236268999998742,
       "modal_optimized_p95_ms": 10.12664509999901,
       "modal_daemon_p50_ms": 5.160918999990827,
@@ -58,9 +63,11 @@
       "e2b_provider_default_p50_ms": 878.554750001058,
       "modal_vs_daytona": 145.42921324608798,
       "modal_vs_e2b": 95.12009124043243,
+      "same_run_external_to_optimized": 4.012226148892,
       "modal_default_to_optimized": 18.783048870206823
     },
     "type_100_chars": {
+      "same_run_external_connect_p50_ms": 742.142,
       "modal_optimized_p50_ms": 720.5197905000009,
       "modal_optimized_p95_ms": 726.8505343499983,
       "modal_daemon_p50_ms": 712.784573499988,
@@ -69,9 +76,11 @@
       "e2b_provider_default_p50_ms": 4074.3710420210846,
       "modal_vs_daytona": 0.8563480367095552,
       "modal_vs_e2b": 5.654766316958062,
+      "same_run_external_to_optimized": 1.030009181962,
       "modal_default_to_optimized": 1.3532360773772736
     },
     "type_1000_chars": {
+      "same_run_external_connect_p50_ms": 6557.071,
       "modal_optimized_p50_ms": 6531.359455,
       "modal_optimized_p95_ms": 6571.214207900008,
       "modal_daemon_p50_ms": 6523.604869499991,
@@ -80,15 +89,18 @@
       "e2b_provider_default_p50_ms": 41172.90054203477,
       "modal_vs_daytona": 0.8044175173938927,
       "modal_vs_e2b": 6.303879127417398,
+      "same_run_external_to_optimized": 1.003936629913,
       "modal_default_to_optimized": 1.3151209905332921
     },
     "command_echo": {
+      "same_run_external_connect_p50_ms": 110.716,
       "modal_optimized_p50_ms": 93.77446199998474,
       "modal_optimized_p95_ms": 278.94006290000897,
       "daytona_provider_default_p50_ms": 90.88062500813976,
       "e2b_provider_default_p50_ms": 61.44587497692555,
       "modal_vs_daytona": 0.9691404575390105,
       "modal_vs_e2b": 0.6552516929069191,
+      "same_run_external_to_optimized": 1.180662598736,
       "modal_default_to_optimized": 2.6692595153545096
     }
   },
@@ -106,6 +118,7 @@
   "limitations": [
     "Daytona and E2B values are the dated three-sample provider-default reference and were not rerun contemporaneously.",
     "The Modal optimized caller is a separate same-region runner; it is an explicit deployment configuration, not the provider-default external-caller path.",
+    "The same-run external Connect control and optimized Modal arm share the same operation boundaries and raw benchmark artifact.",
     "Requested narrow-region placement is recorded, but this harness does not independently attest the runner's physical availability zone.",
     "Ratios compare matching public operation boundaries, not identical internal implementations."
   ]

@@ -872,9 +872,11 @@ the optimization default from a broad region to one narrow region. The compact e
 
 A follow-up exact-boundary run measured the provider-comparison operations from a separate Connect
 runner with the same `us-west-2` selector. Every selected case completed 30/30 samples with no
-failures. The important action results were 4.573ms p50 for one move/click batch and 9.236ms for
-four move/click pairs, compared with 169.149ms and 173.485ms on the historical external-caller
-Modal default. The optimized action rows retained daemon/client attribution:
+failures. Against the same-run external Connect control, co-location reduced one move/click batch
+from 32.373ms to 4.573ms (7.08x) and four move/click pairs from 37.058ms to 9.236ms (4.01x).
+The historical provider-default values were 169.149ms and 173.485ms respectively, but those larger
+historical-to-optimized ratios also include ingress and run-date differences. The optimized action
+rows retained daemon/client attribution:
 
 | Exact operation | Modal default p50 | Modal optimized p50 | Optimized daemon p50 | Optimized client/transport p50 |
 | --- | ---: | ---: | ---: | ---: |

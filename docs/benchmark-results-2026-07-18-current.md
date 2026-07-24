@@ -83,19 +83,25 @@ the caller into a separate Modal runner with the same narrow `us-west-2` selecto
 uses the daemon Connect path directly. It is an explicit deployment configuration, not a silent
 replacement for the provider-default external caller.
 
-| Case | Modal optimized p50 | Daytona default p50 | E2B default p50 | Modal vs Daytona | Modal vs E2B |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Full screenshot | **39.0 ms** | 163.0 ms | 192.8 ms | **4.18x** | **4.95x** |
-| Move and click | **4.6 ms** | 340.2 ms | 218.0 ms | **74.39x** | **47.68x** |
-| Four move/click pairs | **9.2 ms** | 1343.2 ms | 878.6 ms | **145.43x** | **95.12x** |
-| Type 100 characters | 720.5 ms | **617.0 ms** | 4074.4 ms | 0.86x | **5.65x** |
-| Type 1000 characters | 6531.4 ms | **5253.9 ms** | 41172.9 ms | 0.80x | **6.30x** |
-| Command echo | 93.8 ms | 90.9 ms | **61.4 ms** | 0.97x | 0.66x |
+| Case | Modal default | Same-run external Connect | Modal optimized | Daytona default | E2B default | Optimized comparison |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Full screenshot | 240.0 ms | 80.0 ms | **39.0 ms** | 163.0 ms | 192.8 ms | **4.18x / 4.95x faster** |
+| Move and click | 169.1 ms | 32.4 ms | **4.6 ms** | 340.2 ms | 218.0 ms | **74.39x / 47.68x faster** |
+| Four move/click pairs | 173.5 ms | 37.1 ms | **9.2 ms** | 1343.2 ms | 878.6 ms | **145.43x / 95.12x faster** |
+| Type 100 characters | 975.0 ms | 742.1 ms | 720.5 ms | **617.0 ms** | 4074.4 ms | Daytona 1.17x faster; Modal 5.65x faster than E2B |
+| Type 1000 characters | 8589.5 ms | 6557.1 ms | 6531.4 ms | **5253.9 ms** | 41172.9 ms | Daytona 1.24x faster; Modal 6.30x faster than E2B |
+| Command echo | 250.3 ms | 110.7 ms | 93.8 ms | 90.9 ms | **61.4 ms** | Daytona 1.03x and E2B 1.53x faster |
 
-The Modal arm has 30 measured iterations after one warmup, 30/30 valid samples for every row, and
-zero failures. The Daytona and E2B cells are the dated three-sample provider-default reference from
-this page, not a contemporaneous rerun, so treat the cross-provider ratios as the current reference
-rather than a randomized paired experiment.
+The same-run external Connect control and Modal optimized arm use matching operation boundaries from
+one raw artifact. Co-location reduced those p50s by 2.05x for screenshot, 7.08x for move-and-click,
+4.01x for four move/click pairs, 1.03x for 100-character typing, 1.004x for 1000-character typing,
+and 1.18x for command echo. The Modal optimized arm has 30 measured iterations after one warmup,
+30/30 valid samples for every row, and zero failures. `Type 100 characters` is the standard
+100-character operation; it does not mean 100 benchmark iterations.
+
+The Modal default column is the historical provider-default reference. The Daytona and E2B cells are
+the dated three-sample provider-default reference from this page, not a contemporaneous rerun, so
+treat the cross-provider ratios as the current reference rather than a randomized paired experiment.
 
 The largest wins come from removing the external ingress floor while retaining daemon-native
 batching. Move-and-click fell from 169.1ms provider-default to 4.6ms optimized: daemon work was
