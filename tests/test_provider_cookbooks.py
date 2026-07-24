@@ -309,6 +309,67 @@ def test_anthropic_cookbook_preserves_assistant_content_and_tool_ids() -> None:
     assert tool_result["content"][0]["type"] == "image"
 
 
+def test_anthropic_cookbook_omits_zoom_for_older_tool_version() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    create = _CreateQueue(
+        [SimpleNamespace(stop_reason="end_turn", content=[])]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    example.run_anthropic_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        display_width_px=1280,
+        display_height_px=800,
+        tool_version="computer_20250124",
+    )
+
+    assert create.calls[0]["betas"] == ["computer-use-2025-01-24"]
+    assert create.calls[0]["tools"] == [
+        {
+            "type": "computer_20250124",
+            "name": "computer",
+            "display_width_px": 1280,
+            "display_height_px": 800,
+        }
+    ]
+
+
+def test_anthropic_cookbook_caps_provider_timeout_by_remaining_time() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    tool_use = SimpleNamespace(
+        type="tool_use",
+        id="tool_1",
+        input={
+            "action": "left_click",
+            "coordinate": [10, 20],
+            "timeout_ms": 30_000,
+        },
+    )
+    create = _CreateQueue(
+        [
+            SimpleNamespace(stop_reason="tool_use", content=[tool_use]),
+            SimpleNamespace(stop_reason="end_turn", content=[]),
+        ]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+    example.monotonic = lambda: 0.0
+
+    example.run_anthropic_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        display_width_px=1280,
+        display_height_px=800,
+        max_elapsed_seconds=1.0,
+    )
+
+    assert computer.actions.applied[0][0].timeout_ms == 1000
+
+
 def test_anthropic_cookbook_returns_all_results_when_one_action_fails() -> None:
     example = _load_example("anthropic_message_server.py")
     computer = _Computer()
@@ -445,6 +506,40 @@ def test_anthropic_cookbook_checks_batch_budget_before_execution() -> None:
             display_width_px=1280,
             display_height_px=800,
             max_actions=1,
+        )
+
+    assert computer.actions.applied == []
+
+
+def test_anthropic_cookbook_counts_nested_hold_actions_before_execution() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    tool_use = SimpleNamespace(
+        type="tool_use",
+        id="tool_1",
+        input={
+            "action": "hold_key",
+            "text": "shift",
+            "duration": 0.1,
+            "actions": [
+                {"action": "mouse_move", "coordinate": [10, 20]},
+                {"action": "left_click"},
+            ],
+        },
+    )
+    create = _CreateQueue(
+        [SimpleNamespace(stop_reason="tool_use", content=[tool_use])]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    with pytest.raises(RuntimeError, match="exceeded 2 actions"):
+        example.run_anthropic_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            display_width_px=1280,
+            display_height_px=800,
+            max_actions=2,
         )
 
     assert computer.actions.applied == []

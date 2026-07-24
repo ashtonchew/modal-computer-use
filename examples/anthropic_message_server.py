@@ -53,10 +53,11 @@ def run_anthropic_computer_loop(
         raise ValueError("max_action_timeout_ms must be at least 1")
 
     version = get_tool_version(tool_version)
+    zoom_enabled = enable_zoom and version.supports_zoom
     adapter = AnthropicAdapter(
         computer,
         tool_version=tool_version,
-        enable_zoom=enable_zoom,
+        enable_zoom=zoom_enabled,
     )
     tool: dict[str, Any] = {
         "type": tool_version,
@@ -64,7 +65,7 @@ def run_anthropic_computer_loop(
         "display_width_px": display_width_px,
         "display_height_px": display_height_px,
     }
-    if enable_zoom:
+    if zoom_enabled:
         tool["enable_zoom"] = True
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
@@ -95,7 +96,8 @@ def run_anthropic_computer_loop(
             )
         if turn == max_turns - 1:
             raise RuntimeError(f"Anthropic computer loop exceeded {max_turns} turns")
-        if action_count + len(tool_uses) > max_actions:
+        requested_actions = sum(_requested_action_count(tool_use) for tool_use in tool_uses)
+        if action_count + requested_actions > max_actions:
             raise RuntimeError(f"Anthropic computer loop exceeded {max_actions} actions")
 
         results: list[dict[str, Any]] = []
@@ -104,7 +106,12 @@ def run_anthropic_computer_loop(
             try:
                 _check_deadline(started_at, max_elapsed_seconds)
                 action = _provider_dict(tool_use.input)
-                action.setdefault("timeout_ms", max_action_timeout_ms)
+                action_count += _anthropic_action_count(action) - 1
+                action["timeout_ms"] = _remaining_action_timeout_ms(
+                    started_at=started_at,
+                    max_elapsed_seconds=max_elapsed_seconds,
+                    max_action_timeout_ms=max_action_timeout_ms,
+                )
                 result = adapter.apply(action)
                 results.append(
                     _tool_result(
@@ -135,6 +142,41 @@ def _provider_dict(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json", exclude_none=True)
     raise TypeError(f"unsupported Anthropic computer action object: {type(value).__name__}")
+
+
+def _requested_action_count(tool_use: Any) -> int:
+    try:
+        return _anthropic_action_count(_provider_dict(tool_use.input))
+    except Exception:
+        return 0
+
+
+def _anthropic_action_count(action: dict[str, Any]) -> int:
+    if (action.get("action") or action.get("type")) != "hold_key":
+        return 1
+    nested = action.get("actions")
+    if not isinstance(nested, list):
+        return 1
+    return 1 + sum(
+        _anthropic_action_count(item) if isinstance(item, dict) else 1
+        for item in nested
+    )
+
+
+def _remaining_action_timeout_ms(
+    *,
+    started_at: float,
+    max_elapsed_seconds: float,
+    max_action_timeout_ms: int,
+) -> int:
+    remaining_ms = int(
+        (max_elapsed_seconds - (monotonic() - started_at)) * 1000
+    )
+    if remaining_ms < 1:
+        raise RuntimeError(
+            f"Anthropic computer loop exceeded {max_elapsed_seconds:g} seconds"
+        )
+    return min(max_action_timeout_ms, remaining_ms)
 
 
 def _tool_result(
