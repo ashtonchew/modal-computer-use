@@ -203,7 +203,18 @@ class WarmPoolClaim:
             return
         try:
             self.computer.terminate(wait=True)
-        finally:
+        except BaseException as exc:
+            try:
+                self.computer.detach()
+            except Exception as cleanup_exc:
+                exc.add_note(
+                    "claim cleanup also failed: "
+                    f"detach ({type(cleanup_exc).__name__})"
+                )
+            else:
+                self._closed = True
+            raise
+        else:
             self.computer.detach()
             self._closed = True
 

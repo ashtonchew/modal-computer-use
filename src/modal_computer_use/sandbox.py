@@ -85,6 +85,7 @@ class ModalDaemonCommandResult:
     requested_region: str
     fallback_used: bool
     fallback_reason: str | None = None
+    fallback_error_type: str | None = None
 
 
 @dataclass
@@ -559,15 +560,25 @@ def modal_sandbox_exec_once(
         stdout = _read_modal_process_stream(getattr(process, "stdout", ""))
         stderr = _read_modal_process_stream(getattr(process, "stderr", ""))
         returncode = _modal_process_returncode(process)
-        return ModalSandboxExecResult(
+        result = ModalSandboxExecResult(
             sandbox_id=getattr(runner, "object_id", "unknown"),
             returncode=returncode,
             stdout=stdout,
             stderr=stderr,
         )
-    finally:
+    except BaseException as exc:
         if hasattr(runner, "terminate"):
-            runner.terminate()
+            try:
+                runner.terminate(wait=True)
+            except Exception as cleanup_exc:
+                exc.add_note(
+                    "runner cleanup also failed: "
+                    f"terminate ({type(cleanup_exc).__name__})"
+                )
+        raise
+    if hasattr(runner, "terminate"):
+        runner.terminate(wait=True)
+    return result
 
 
 def modal_sandbox_exec_in_place(
@@ -860,6 +871,7 @@ class ComputerSandbox:
         self._sandbox = sandbox
         self._metadata = metadata
         self._requested_modal_region: str | None = None
+        self._daemon_bearer_token: str | None = None
         self.startup_timing = startup_timing
         self._cleanup_on_readiness_failure = False
         self._readiness_stage_count = 0
@@ -986,9 +998,8 @@ class ComputerSandbox:
         http2 = config.network.daemon_http_version == "2"
         ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
         h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
-        tunnel_token = _secrets.token_urlsafe(32) if config.ingress == "tunnel" else None
-        if tunnel_token:
-            env["COMPUTER_USE_TUNNEL_TOKEN"] = tunnel_token
+        daemon_bearer_token = _secrets.token_urlsafe(32)
+        env["COMPUTER_USE_TUNNEL_TOKEN"] = daemon_bearer_token
         create_kwargs: dict[str, Any] = {
             "app": app,
             "image": image,
@@ -1028,7 +1039,7 @@ class ComputerSandbox:
             ingress=config.ingress,
             connect_base_url=connect_base_url,
             connect_token=connect_token,
-            tunnel_token=tunnel_token,
+            tunnel_token=daemon_bearer_token,
         )
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
@@ -1049,6 +1060,7 @@ class ComputerSandbox:
             metadata=metadata,
         )
         computer.startup_timing = timing
+        computer._daemon_bearer_token = daemon_bearer_token
         computer._cleanup_on_readiness_failure = True
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
@@ -1065,6 +1077,7 @@ class ComputerSandbox:
                 metadata=metadata,
             )
             computer.startup_timing = timing
+            computer._daemon_bearer_token = daemon_bearer_token
             computer._cleanup_on_readiness_failure = True
             computer._readiness_stage_count = 1
             timing.mark("attestation_ready")
@@ -1121,21 +1134,25 @@ class ComputerSandbox:
             sandbox=sandbox,
             metadata=metadata,
         )
-        if wait:
-            computer.wait_until_ready(timeout=readiness_timeout)
-            if ingress == "attested-tunnel":
-                computer.client.close()
-                connect_base_url, connect_token = _attested_tunnel_parts(
-                    sandbox,
-                    connect_base_url=connect_base_url,
-                    connect_token=connect_token,
-                )
-                computer = cls(
-                    DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
-                    sandbox=sandbox,
-                    metadata=metadata,
-                )
+        try:
+            if wait:
                 computer.wait_until_ready(timeout=readiness_timeout)
+                if ingress == "attested-tunnel":
+                    computer.client.close()
+                    connect_base_url, connect_token = _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=connect_base_url,
+                        connect_token=connect_token,
+                    )
+                    computer = cls(
+                        DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
+                        sandbox=sandbox,
+                        metadata=metadata,
+                    )
+                    computer.wait_until_ready(timeout=readiness_timeout)
+        except BaseException:
+            computer.client.close()
+            raise
         return computer
 
     @classmethod
@@ -1498,10 +1515,15 @@ def modal_daemon_endpoint(
             target_sandbox_id=target_sandbox_id,
         )
     if path == "target-loopback":
+        daemon_bearer_token = getattr(computer, "_daemon_bearer_token", None)
+        if not daemon_bearer_token:
+            raise SandboxUnavailableError(
+                "target-loopback requires an SDK-owned daemon bearer"
+            )
         return ModalDaemonEndpoint(
             path=path,
             base_url="http://127.0.0.1:8080",
-            token=computer.client.transport.token,
+            token=daemon_bearer_token,
             target_sandbox_id=target_sandbox_id,
             execute_in_target=True,
         )
@@ -1587,7 +1609,8 @@ def create_modal_benchmark_computer(
     if app_tags:
         _set_modal_object_tags(app, app_tags)
 
-    daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
+    daemon_bearer_token = _secrets.token_urlsafe(32)
+    daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": daemon_bearer_token}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(daemon_auth)
     env["COMPUTER_USE_DAEMON_HOST"] = (
@@ -1655,12 +1678,12 @@ def create_modal_benchmark_computer(
             timing.mark("connect_endpoint_ready")
         elif transport == "encrypted-tunnel":
             base_url = _tunnel_url(sandbox, 8080)
-            token = next(iter(daemon_auth.values()))
+            token = daemon_bearer_token
             timing.mark("encrypted_tunnel_ready")
         else:
             address = _sandbox_i6pn_address(sandbox)
             base_url = f"http://[{address}]:8080"
-            token = next(iter(daemon_auth.values()))
+            token = daemon_bearer_token
             timing.mark("workspace_private_endpoint_ready")
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
@@ -1680,6 +1703,7 @@ def create_modal_benchmark_computer(
             metadata=metadata,
             startup_timing=timing,
         )
+        computer._daemon_bearer_token = daemon_bearer_token
         computer._requested_modal_region = config.runtime.modal_region
         if wait and transport != "workspace-private-i6pn":
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
@@ -1754,7 +1778,8 @@ def create_modal_v2_tunnel_computer(
     app = runtime.App.lookup(app_name, **app_lookup_kwargs)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
-    tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
+    daemon_bearer_token = _secrets.token_urlsafe(32)
+    tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": daemon_bearer_token}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(tunnel_auth)
     sandbox_tags = {**(tags or {}), **default_tags(config)}
@@ -1800,7 +1825,7 @@ def create_modal_v2_tunnel_computer(
         timing.mark("encrypted_tunnel_ready")
         client = client_factory(
             base_url=base_url,
-            token=next(iter(tunnel_auth.values())),
+            token=daemon_bearer_token,
             http2=False,
         )
         metadata = SandboxRef(
@@ -1817,6 +1842,7 @@ def create_modal_v2_tunnel_computer(
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = ComputerSandbox(client, sandbox=sandbox, metadata=metadata)
+        computer._daemon_bearer_token = daemon_bearer_token
         computer._requested_modal_region = config.runtime.modal_region
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
@@ -1936,8 +1962,9 @@ def run_modal_daemon_command_with_fallback(
     )
     try:
         endpoint = modal_daemon_endpoint(computer, "connect")
-        runner_env = modal_daemon_env(endpoint, env)
     except Exception as exc:
+        if not _is_connect_preparation_failure(exc):
+            raise
         if external_runner is None:
             raise
         endpoint = modal_daemon_endpoint(computer, "inherited")
@@ -1952,8 +1979,10 @@ def run_modal_daemon_command_with_fallback(
             selected_path="external",
             requested_region=selected_region,
             fallback_used=True,
-            fallback_reason=exc.__class__.__name__,
+            fallback_reason="connect_endpoint_unavailable",
+            fallback_error_type=type(exc).__name__,
         )
+    runner_env = modal_daemon_env(endpoint, env)
     result = exec_once(
         command_tuple,
         app_name=app_name,
@@ -1976,6 +2005,16 @@ def run_modal_daemon_command_with_fallback(
         requested_region=selected_region,
         fallback_used=False,
     )
+
+
+def _is_connect_preparation_failure(exc: Exception) -> bool:
+    if isinstance(exc, SandboxUnavailableError):
+        return True
+    try:
+        from modal.exception import Error as ModalError
+    except ImportError:
+        return False
+    return isinstance(exc, ModalError)
 
 
 def _resolve_modal_runner_region(
@@ -2388,11 +2427,12 @@ def _readiness_timeout_detail(payload: object | None, error: Exception | None) -
     if isinstance(payload, dict):
         errors = payload.get("errors")
         if isinstance(errors, list) and errors:
-            return f"; last /readyz errors: {', '.join(str(item) for item in errors)}"
+            suffix = "" if len(errors) == 1 else "s"
+            return f"; last /readyz reported {len(errors)} error{suffix}"
         if payload:
-            return f"; last /readyz response: {payload}"
+            return "; last /readyz response was not ready"
     if error is not None:
-        return f"; last error: {type(error).__name__}: {error}"
+        return f"; last error type: {type(error).__name__}"
     return ""
 
 

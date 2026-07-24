@@ -8,7 +8,10 @@ from time import monotonic, sleep
 from typing import Any, Literal
 from uuid import uuid4
 
+import httpx
+
 from .config import ComputerConfig
+from .errors import AuthenticationError, DaemonHTTPError, SandboxUnavailableError
 from .latency import (
     WarmPoolClaim,
     WarmPoolClaimMetrics,
@@ -377,7 +380,6 @@ class ComputerSandboxManager:
                 rejection_reasons.append(reason)
                 self._discard_warm_entry(entry)
                 continue
-            computer: ComputerSandbox | None = None
             try:
                 computer = ComputerSandbox.attach(
                     sandbox_id=entry.sandbox_id,
@@ -386,45 +388,97 @@ class ComputerSandboxManager:
                     wait=True,
                     readiness_timeout=config.runtime.readiness_timeout_seconds,
                 )
-                live_tag_reason = _warm_claim_tag_rejection_reason(computer.tags(), entry)
-                if live_tag_reason is not None:
-                    rejection_reasons.append(live_tag_reason)
-                    computer.detach()
-                    computer = None
-                    continue
-                if computer.poll() is not None:
-                    raise RuntimeError("warm Sandbox has already finished")
+            except Exception as exc:
+                reason = _warm_candidate_exception_reason(exc, phase="attach")
+                if reason is None:
+                    raise
+                rejection_reasons.append(reason)
+                continue
+
+            try:
+                live_tags = computer.tags()
+            except Exception as exc:
+                reason = _warm_candidate_exception_reason(exc, phase="tags")
+                _detach_warm_candidate(computer, primary=exc)
+                if reason is None:
+                    raise
+                rejection_reasons.append(reason)
+                continue
+            live_tag_reason = _warm_claim_tag_rejection_reason(live_tags, entry)
+            if live_tag_reason is not None:
+                rejection_reasons.append(live_tag_reason)
+                _detach_warm_candidate(computer)
+                continue
+
+            try:
+                finished = computer.poll() is not None
+            except Exception as exc:
+                reason = _warm_candidate_exception_reason(exc, phase="poll")
+                _retire_warm_candidate(computer, primary=exc)
+                if reason is None:
+                    raise
+                rejection_reasons.append(reason)
+                continue
+            if finished:
+                rejection_reasons.append("candidate_finished")
+                _retire_warm_candidate(computer)
+                continue
+
+            try:
                 computer.ensure_browser_ready(config)
-                request_to_authenticated_ms = (monotonic_clock() - started) * 1000.0
+            except Exception as exc:
+                reason = _warm_candidate_exception_reason(exc, phase="browser")
+                _retire_warm_candidate(computer, primary=exc)
+                if reason is None:
+                    raise
+                rejection_reasons.append(reason)
+                continue
+            request_to_authenticated_ms = (monotonic_clock() - started) * 1000.0
+
+            try:
                 computer.first_valid_frame(config)
-                request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
-                claimed_at = _as_utc(now())
-                post_validation_reason = policy.rejection_reason(
-                    entry,
-                    expected_identity=identity,
-                    now=claimed_at,
-                )
-                if post_validation_reason is not None:
-                    rejection_reasons.append(post_validation_reason)
-                    rejected = computer
-                    computer = None
-                    try:
-                        rejected.terminate(wait=True)
-                    finally:
-                        rejected.detach()
-                    continue
+            except Exception as exc:
+                reason = _warm_candidate_exception_reason(exc, phase="first_frame")
+                _retire_warm_candidate(computer, primary=exc)
+                if reason is None:
+                    raise
+                rejection_reasons.append(reason)
+                continue
+            request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
+
+            claimed_at = _as_utc(now())
+            post_validation_reason = policy.rejection_reason(
+                entry,
+                expected_identity=identity,
+                now=claimed_at,
+            )
+            if post_validation_reason is not None:
+                rejection_reasons.append(post_validation_reason)
+                _retire_warm_candidate(computer)
+                continue
+
+            claim_transition_started = False
+            try:
                 with _warm_slot_lock(_warm_lock_target(computer)) as acquired:
                     if not acquired:
                         rejection_reasons.append("slot_busy")
-                        computer.detach()
-                        computer = None
+                        _detach_warm_candidate(computer)
                         continue
-                    live_tag_reason = _warm_claim_tag_rejection_reason(computer.tags(), entry)
+                    try:
+                        live_tags = computer.tags()
+                    except Exception as exc:
+                        reason = _warm_candidate_exception_reason(exc, phase="tags")
+                        _detach_warm_candidate(computer, primary=exc)
+                        if reason is None:
+                            raise
+                        rejection_reasons.append(reason)
+                        continue
+                    live_tag_reason = _warm_claim_tag_rejection_reason(live_tags, entry)
                     if live_tag_reason is not None:
                         rejection_reasons.append(live_tag_reason)
-                        computer.detach()
-                        computer = None
+                        _detach_warm_candidate(computer)
                         continue
+                    claim_transition_started = True
                     computer.set_tags(
                         {
                             "computer-use.pool_state": "claimed",
@@ -461,13 +515,14 @@ class ComputerSandboxManager:
                             request_to_first_frame_ms=request_to_first_frame_ms,
                         ),
                     )
-            except Exception:
-                rejection_reasons.append("attach_or_readiness_failed")
-                if computer is not None:
-                    try:
-                        computer.terminate(wait=True)
-                    finally:
-                        computer.detach()
+            except Exception as exc:
+                _retire_warm_candidate(computer, primary=exc)
+                if claim_transition_started:
+                    raise
+                reason = _warm_candidate_exception_reason(exc, phase="claim_lock")
+                if reason is None:
+                    raise
+                rejection_reasons.append(reason)
                 continue
 
         claim_elapsed_ms = (monotonic_clock() - started) * 1000.0
@@ -482,11 +537,8 @@ class ComputerSandboxManager:
             cold.first_valid_frame(config)
             request_to_first_frame_ms = (monotonic_clock() - started) * 1000.0
             actual_region = cold.runtime_region()
-        except Exception:
-            try:
-                cold.terminate(wait=True)
-            finally:
-                cold.detach()
+        except Exception as exc:
+            _retire_warm_candidate(cold, primary=exc)
             raise
         return WarmPoolClaim(
             computer=cold,
@@ -567,19 +619,132 @@ class ComputerSandboxManager:
         )
 
     def _discard_warm_entry(self, entry: WarmPoolEntry) -> None:
-        computer: ComputerSandbox | None = None
         try:
             computer = ComputerSandbox.attach(
                 sandbox_id=entry.sandbox_id,
                 app_name=self.app_name,
                 wait=False,
             )
-            computer.terminate(wait=True)
-        except Exception:
+        except Exception as exc:
+            if _warm_candidate_exception_reason(exc, phase="attach") is not None:
+                return
+            raise
+        try:
+            live_tag_reason = _warm_claim_tag_rejection_reason(computer.tags(), entry)
+        except Exception as exc:
+            reason = _warm_candidate_exception_reason(exc, phase="tags")
+            _detach_warm_candidate(computer, primary=exc)
+            if reason is None:
+                raise
             return
-        finally:
-            if computer is not None:
-                computer.detach()
+        if live_tag_reason is not None:
+            _detach_warm_candidate(computer)
+            return
+        _retire_warm_candidate(computer)
+
+
+WarmCandidatePhase = Literal[
+    "attach",
+    "tags",
+    "poll",
+    "browser",
+    "first_frame",
+    "claim_lock",
+]
+
+
+def _warm_candidate_exception_reason(
+    exc: Exception,
+    *,
+    phase: WarmCandidatePhase,
+) -> str | None:
+    operational = isinstance(
+        exc,
+        (
+            AuthenticationError,
+            DaemonHTTPError,
+            SandboxUnavailableError,
+            TimeoutError,
+            httpx.HTTPError,
+        ),
+    ) or _is_modal_provider_error(exc)
+    if phase == "attach" and operational:
+        return "attach_unavailable"
+    if phase == "tags" and operational:
+        return "tags_unavailable"
+    if phase == "poll" and operational:
+        return "candidate_unavailable"
+    if phase == "browser" and (operational or isinstance(exc, RuntimeError)):
+        return "browser_not_ready"
+    if phase == "first_frame" and (operational or isinstance(exc, ValueError)):
+        return "first_frame_invalid"
+    if phase == "claim_lock" and operational:
+        return "claim_lock_unavailable"
+    return None
+
+
+def _is_modal_provider_error(exc: Exception) -> bool:
+    try:
+        from modal.exception import Error as ModalError
+    except ImportError:
+        return False
+    return isinstance(exc, ModalError)
+
+
+def _retire_warm_candidate(
+    computer: ComputerSandbox,
+    *,
+    primary: BaseException | None = None,
+) -> None:
+    cleanup_errors: list[tuple[str, Exception]] = []
+    try:
+        computer.terminate(wait=True)
+    except Exception as exc:
+        cleanup_errors.append(("terminate", exc))
+    try:
+        computer.detach()
+    except Exception as exc:
+        cleanup_errors.append(("detach", exc))
+    _raise_warm_cleanup_errors(
+        cleanup_errors,
+        primary=primary,
+        prefix="warm candidate cleanup also failed",
+    )
+
+
+def _detach_warm_candidate(
+    computer: ComputerSandbox,
+    *,
+    primary: BaseException | None = None,
+) -> None:
+    cleanup_errors: list[tuple[str, Exception]] = []
+    try:
+        computer.detach()
+    except Exception as exc:
+        cleanup_errors.append(("detach", exc))
+    _raise_warm_cleanup_errors(
+        cleanup_errors,
+        primary=primary,
+        prefix="warm candidate cleanup also failed",
+    )
+
+
+def _raise_warm_cleanup_errors(
+    cleanup_errors: list[tuple[str, Exception]],
+    *,
+    primary: BaseException | None,
+    prefix: str,
+) -> None:
+    if not cleanup_errors:
+        return
+    detail = ", ".join(f"{operation} ({type(exc).__name__})" for operation, exc in cleanup_errors)
+    if primary is not None:
+        primary.add_note(f"{prefix}: {detail}")
+        raise primary
+    cleanup_error = cleanup_errors[0][1]
+    if len(cleanup_errors) > 1:
+        cleanup_error.add_note(f"{prefix}: {detail}")
+    raise cleanup_error
 
 
 SandboxManager = ComputerSandboxManager

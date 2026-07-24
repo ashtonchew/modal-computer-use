@@ -7,9 +7,10 @@ from typing import Any, ClassVar
 import pytest
 
 from modal_computer_use import ComputerConfig, ComputerSandbox, SandboxRef
-from modal_computer_use.errors import ConfigConflictError
+from modal_computer_use.errors import ConfigConflictError, SandboxUnavailableError
 from modal_computer_use.latency import (
     SessionStartupTiming,
+    WarmPoolClaim,
     WarmPoolEntry,
     WarmPoolPolicy,
     estimate_pool_idle_cost,
@@ -21,6 +22,7 @@ from modal_computer_use.manager import ComputerSandboxManager
 from modal_computer_use.observations import ActionObservationResult
 from modal_computer_use.sandbox import (
     ModalSandboxExecResult,
+    modal_daemon_endpoint,
     run_modal_daemon_command,
     run_modal_daemon_command_with_fallback,
 )
@@ -221,7 +223,7 @@ def test_same_region_runner_falls_back_to_external_caller(monkeypatch) -> None:
     def endpoint(_computer: object, path: str) -> SimpleNamespace:
         attempts.append(path)
         if path == "connect":
-            raise TimeoutError("connect failed")
+            raise SandboxUnavailableError("connect failed with secret-token")
         return SimpleNamespace(
             path=path,
             base_url="https://external.example",
@@ -242,7 +244,9 @@ def test_same_region_runner_falls_back_to_external_caller(monkeypatch) -> None:
     assert attempts == ["connect", "inherited", "external"]
     assert result.selected_path == "external"
     assert result.fallback_used is True
-    assert result.fallback_reason == "TimeoutError"
+    assert result.fallback_reason == "connect_endpoint_unavailable"
+    assert result.fallback_error_type == "SandboxUnavailableError"
+    assert "secret-token" not in repr(result)
     assert result.result.stdout == "ok"
 
 
@@ -371,14 +375,76 @@ def test_same_region_runner_never_falls_back_after_dispatch(monkeypatch) -> None
     assert external_calls == 0
 
 
+def test_same_region_runner_does_not_fallback_for_unexpected_preparation_error(
+    monkeypatch,
+) -> None:
+    external_calls = 0
+
+    def endpoint(_computer: object, path: str) -> SimpleNamespace:
+        if path == "connect":
+            raise RuntimeError("programming failure")
+        return SimpleNamespace(
+            path=path,
+            base_url="https://external.example",
+            token="test-token",
+            target_sandbox_id="sb-target",
+        )
+
+    def external_runner(*args: object, **kwargs: object) -> ModalSandboxExecResult:
+        nonlocal external_calls
+        external_calls += 1
+        raise AssertionError("unexpected failures must not reach external fallback")
+
+    monkeypatch.setattr("modal_computer_use.sandbox.modal_daemon_endpoint", endpoint)
+    with pytest.raises(RuntimeError, match="programming failure"):
+        run_modal_daemon_command_with_fallback(
+            SimpleNamespace(),
+            ("python", "worker.py"),
+            modal_region="us-east",
+            external_runner=external_runner,
+        )
+    assert external_calls == 0
+
+
+def test_same_region_runner_does_not_fallback_for_invalid_runner_environment(
+    monkeypatch,
+) -> None:
+    external_calls = 0
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.modal_daemon_endpoint",
+        lambda _computer, path: SimpleNamespace(
+            path=path,
+            base_url="https://connect.example",
+            token="test-token",
+            target_sandbox_id="sb-target",
+        ),
+    )
+
+    def external_runner(*args: object, **kwargs: object) -> ModalSandboxExecResult:
+        nonlocal external_calls
+        external_calls += 1
+        raise AssertionError("invalid runner env must not reach external fallback")
+
+    with pytest.raises(ValueError, match="reserved daemon keys"):
+        run_modal_daemon_command_with_fallback(
+            SimpleNamespace(),
+            ("python", "worker.py"),
+            modal_region="us-east",
+            env={"COMPUTER_USE_DAEMON_TOKEN": "caller-token"},
+            external_runner=external_runner,
+        )
+
+    assert external_calls == 0
+
+
 def test_same_region_runner_requires_explicit_external_fallback(monkeypatch) -> None:
     def endpoint(_computer: object, path: str) -> SimpleNamespace:
         if path == "connect":
-            raise TimeoutError("connect preparation failed")
+            raise SandboxUnavailableError("connect preparation failed")
         raise AssertionError("implicit external fallback must not be prepared")
 
     monkeypatch.setattr("modal_computer_use.sandbox.modal_daemon_endpoint", endpoint)
-    with pytest.raises(TimeoutError, match="connect preparation failed"):
+    with pytest.raises(SandboxUnavailableError, match="connect preparation failed"):
         run_modal_daemon_command_with_fallback(
             SimpleNamespace(),
             ("python", "worker.py"),
@@ -493,6 +559,12 @@ def test_create_records_supported_and_unsupported_startup_stages(monkeypatch) ->
     )
     assert computer.startup_timing is timing
     assert computer._cleanup_on_readiness_failure is False
+    daemon_bearer = BoundarySandbox.create_calls[0]["env"][
+        "COMPUTER_USE_TUNNEL_TOKEN"
+    ]
+    assert daemon_bearer
+    assert daemon_bearer != computer.client.transport.token
+    assert modal_daemon_endpoint(computer, "target-loopback").token == daemon_bearer
 
 
 def test_create_cleans_up_tcp_and_final_tunnel_readiness_failures(monkeypatch) -> None:
@@ -729,6 +801,30 @@ def _warm_entry_tags(entry: WarmPoolEntry) -> dict[str, str]:
         "computer-use.pool_identity": entry.config_identity,
         "computer-use.pool_queue_identity": entry.queue_identity,
     }
+
+
+def _claim_entry(
+    config: ComputerConfig,
+    *,
+    now: datetime | None = None,
+    sandbox_id: str = "sb-warm",
+) -> WarmPoolEntry:
+    observed_at = now or datetime(2026, 7, 18, tzinfo=UTC)
+    return WarmPoolEntry(
+        sandbox_id=sandbox_id,
+        slot_name="prod-000",
+        pool_name="prod",
+        app_name="computer-app",
+        config_identity=pool_config_identity(config),
+        queue_identity="queue-warm",
+        created_at=observed_at - timedelta(seconds=20),
+        ready_at=observed_at - timedelta(seconds=10),
+        expires_at=observed_at + timedelta(seconds=500),
+        requested_region="us-east",
+        actual_region="us-east-1",
+        cpu=4,
+        memory_mib=8192,
+    )
 
 
 def test_fill_warm_pool_bounds_capacity_and_enqueues_only_valid_frames(monkeypatch) -> None:
@@ -1130,6 +1226,76 @@ def test_claim_warm_pool_rejects_stale_then_hits_and_is_one_shot(monkeypatch) ->
     assert attached["sb-valid"].detached is True
 
 
+def test_claim_warm_pool_skips_stale_entry_when_retirement_attach_is_unavailable(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    stale = WarmPoolEntry.from_dict(
+        {
+            **_claim_entry(config, now=now, sandbox_id="sb-stale").as_dict(),
+            "expires_at": (now + timedelta(seconds=10)).isoformat(),
+        }
+    )
+    valid = WarmPoolEntry.from_dict(
+        {
+            **_claim_entry(config, now=now, sandbox_id="sb-valid").as_dict(),
+            "slot_name": "prod-001",
+            "queue_identity": "queue-valid",
+        }
+    )
+    warm = FakeComputer("sb-valid", remote_tags=_warm_entry_tags(valid))
+
+    def attach(*, sandbox_id: str, **kwargs: Any) -> FakeComputer:
+        if sandbox_id == "sb-stale":
+            raise SandboxUnavailableError("stale candidate is unavailable")
+        return warm
+
+    monkeypatch.setattr("modal_computer_use.manager.ComputerSandbox.attach", attach)
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=2),
+        queue=FakeQueue([stale.as_dict(), valid.as_dict()]),
+        now=lambda: now,
+    )
+
+    assert claim.computer is warm
+    assert claim.metrics.rejection_reasons == ("near_expiry",)
+
+
+def test_claim_warm_pool_propagates_programming_failure_retiring_stale_entry(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    stale = WarmPoolEntry.from_dict(
+        {
+            **_claim_entry(config, now=now, sandbox_id="sb-stale").as_dict(),
+            "expires_at": (now + timedelta(seconds=10)).isoformat(),
+        }
+    )
+
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("programming failure")),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("programming failure must not create cold fallback"),
+    )
+
+    with pytest.raises(AssertionError, match="programming failure"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([stale.as_dict()]),
+            now=lambda: now,
+        )
+
+
 def test_claim_warm_pool_rechecks_lifetime_after_readiness_validation(monkeypatch) -> None:
     manager = ComputerSandboxManager(app_name="computer-app")
     config = _pool_config()
@@ -1333,6 +1499,245 @@ def test_claim_warm_pool_invalid_entry_is_counted_before_cold_fallback(monkeypat
     )
     assert claim.metrics.miss_reason == "rejected"
     assert claim.metrics.rejection_reasons == ("invalid_entry",)
+
+
+def test_claim_warm_pool_falls_back_when_warm_attach_is_unavailable(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+    cold = FakeComputer("sb-cold")
+
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: (_ for _ in ()).throw(SandboxUnavailableError("gone")),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: cold,
+    )
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue([entry.as_dict()]),
+        now=lambda: entry.ready_at + timedelta(seconds=10),
+    )
+
+    assert claim.computer is cold
+    assert claim.metrics.rejection_reasons == ("attach_unavailable",)
+
+
+def test_claim_warm_pool_does_not_fallback_for_unexpected_attach_failure(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+    cold_creates = 0
+
+    def fail_attach(**kwargs: Any) -> FakeComputer:
+        raise AssertionError("programming failure")
+
+    def create_cold(**kwargs: Any) -> FakeComputer:
+        nonlocal cold_creates
+        cold_creates += 1
+        return FakeComputer("sb-cold")
+
+    monkeypatch.setattr("modal_computer_use.manager.ComputerSandbox.attach", fail_attach)
+    monkeypatch.setattr("modal_computer_use.manager.ComputerSandbox.create", create_cold)
+
+    with pytest.raises(AssertionError, match="programming failure"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    assert cold_creates == 0
+
+
+def test_claim_warm_pool_records_browser_rejection_before_cold_fallback(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class UnreadyComputer(FakeComputer):
+        def ensure_browser_ready(self, config: ComputerConfig) -> None:
+            raise RuntimeError("browser prewarm did not succeed")
+
+    warm = UnreadyComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    cold = FakeComputer("sb-cold")
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: cold,
+    )
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue([entry.as_dict()]),
+        now=lambda: entry.ready_at + timedelta(seconds=10),
+    )
+
+    assert claim.computer is cold
+    assert claim.metrics.rejection_reasons == ("browser_not_ready",)
+    assert warm.terminated == [True]
+    assert warm.detached is True
+
+
+def test_claim_warm_pool_records_first_frame_rejection_before_cold_fallback(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class InvalidFrameComputer(FakeComputer):
+        def first_valid_frame(self, config: ComputerConfig) -> bytes:
+            raise ValueError("first frame could not be decoded")
+
+    warm = InvalidFrameComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    cold = FakeComputer("sb-cold")
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: cold,
+    )
+
+    claim = manager.claim_warm_pool(
+        config=config,
+        policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+        queue=FakeQueue([entry.as_dict()]),
+        now=lambda: entry.ready_at + timedelta(seconds=10),
+    )
+
+    assert claim.computer is cold
+    assert claim.metrics.rejection_reasons == ("first_frame_invalid",)
+    assert warm.terminated == [True]
+    assert warm.detached is True
+
+
+def test_claim_warm_pool_treats_claim_transition_failure_as_terminal(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+    cold_creates = 0
+
+    class TransitionFailureComputer(FakeComputer):
+        def set_tags(
+            self,
+            tags: dict[str, str],
+            *,
+            remove: set[str] | None = None,
+        ) -> None:
+            raise RuntimeError("claim transition failed")
+
+    warm = TransitionFailureComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+
+    def create_cold(**kwargs: Any) -> FakeComputer:
+        nonlocal cold_creates
+        cold_creates += 1
+        return FakeComputer("sb-cold")
+
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr("modal_computer_use.manager.ComputerSandbox.create", create_cold)
+
+    with pytest.raises(RuntimeError, match="claim transition failed"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    assert cold_creates == 0
+    assert warm.terminated == [True]
+    assert warm.detached is True
+
+
+def test_claim_warm_pool_preserves_candidate_failure_when_retirement_fails(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class BrowserFailure(RuntimeError):
+        pass
+
+    class CleanupFailure(RuntimeError):
+        pass
+
+    class UncleanComputer(FakeComputer):
+        def ensure_browser_ready(self, config: ComputerConfig) -> None:
+            raise BrowserFailure("browser secret")
+
+        def terminate(self, *, wait: bool = False) -> None:
+            raise CleanupFailure("cleanup secret")
+
+    warm = UncleanComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("incomplete cleanup must not create cold fallback"),
+    )
+
+    with pytest.raises(BrowserFailure) as raised:
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert notes == ["warm candidate cleanup also failed: terminate (CleanupFailure)"]
+    assert "cleanup secret" not in " ".join(notes)
+    assert warm.detached is True
+
+
+def test_warm_pool_claim_close_preserves_termination_failure_when_detach_fails() -> None:
+    class TerminationFailure(RuntimeError):
+        pass
+
+    class DetachFailure(RuntimeError):
+        pass
+
+    class FailingComputer:
+        def terminate(self, *, wait: bool) -> None:
+            assert wait is True
+            raise TerminationFailure("termination secret")
+
+        def detach(self) -> None:
+            raise DetachFailure("detach secret")
+
+    claim = WarmPoolClaim(
+        computer=FailingComputer(),
+        metrics=SimpleNamespace(),
+    )
+
+    with pytest.raises(TerminationFailure) as raised:
+        claim.close()
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert notes == ["claim cleanup also failed: detach (DetachFailure)"]
+    assert "detach secret" not in " ".join(notes)
 
 
 def test_reconcile_warm_pool_terminates_expired_and_abandoned_slots() -> None:
