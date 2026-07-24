@@ -36,6 +36,9 @@ from modal_computer_use.benchmarks.modal_optimization import (
 from modal_computer_use.benchmarks.modal_optimization import (
     _add_region_attestation_command as add_region_attestation_command,
 )
+from modal_computer_use.benchmarks.modal_optimization import (
+    _align_replay_manifest_paths as align_replay_manifest_paths,
+)
 from modal_computer_use.benchmarks.modal_optimization_execution import (
     run_independent_cold_attempts,
     run_warm_action_attempts,
@@ -471,6 +474,34 @@ def test_v2_command_manifest_replays_effective_configuration() -> None:
     assert "--warm-action-attempts 32" in command
 
 
+def test_command_manifest_uses_requested_artifact_paths() -> None:
+    script = runpy.run_path(
+        str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
+    )
+    commands = script["_commands"](
+        "a" * 40,
+        region_selection_source_sha="b" * 40,
+        provider_default_source_sha="c" * 40,
+        root=Path("benchmark-results/modal-optimization-native-x11-2026-07-24"),
+        artifact_output=Path(
+            "benchmark-data/modal-optimization-native-x11-2026-07-24.json"
+        ),
+    )
+
+    assert all(
+        "modal-optimization-2026-07-19" not in command
+        for command in commands.values()
+    )
+    assert (
+        "benchmark-results/modal-optimization-native-x11-2026-07-24/raw.json"
+        in commands["normalize"]
+    )
+    assert (
+        "benchmark-data/modal-optimization-native-x11-2026-07-24.json"
+        in commands["normalize"]
+    )
+
+
 def test_v2_runner_rejects_sample_counts_that_differ_from_preregistration() -> None:
     script = runpy.run_path(
         str(Path(__file__).parents[2] / "scripts" / "run_modal_optimization_benchmark.py")
@@ -570,6 +601,35 @@ def test_sanitizer_normalizes_equals_form_credential_file_path() -> None:
     assert sanitized["command_manifest"]["provider_default"] == (
         "provider command --env-file .env"
     )
+
+
+def test_sanitizer_aligns_historical_replay_paths_with_published_artifact() -> None:
+    commands = {
+        "region_selection": (
+            "region command --output benchmark-results/old/region-selection.json"
+        ),
+        "benchmark": (
+            "benchmark command --preregistration "
+            "benchmark-results/old/preregistration.json "
+            "--output benchmark-results/old/raw.json"
+        ),
+        "normalize": (
+            "uv run python scripts/sanitize_modal_optimization_benchmark.py "
+            "benchmark-results/old/raw.json benchmark-data/old.json"
+        ),
+    }
+
+    align_replay_manifest_paths(
+        commands,
+        raw_artifact_path="benchmark-results/new/raw.json",
+        published_artifact_path="benchmark-data/new.json",
+    )
+
+    assert all(
+        "benchmark-results/old/" not in command for command in commands.values()
+    )
+    assert "benchmark-results/new/raw.json" in commands["normalize"]
+    assert "benchmark-data/new.json" in commands["normalize"]
 
 
 def test_preregistration_freezes_commands_policies_and_dependency() -> None:

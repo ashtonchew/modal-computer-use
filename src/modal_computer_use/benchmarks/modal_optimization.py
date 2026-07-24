@@ -991,6 +991,7 @@ def sanitize_modal_optimization_benchmark(
     *,
     raw_bytes: bytes,
     raw_artifact_path: str,
+    published_artifact_path: str | None = None,
     harness_commit: str,
     preregistration_payload: dict[str, Any] | None = None,
     preregistration_bytes: bytes | None = None,
@@ -1007,6 +1008,10 @@ def sanitize_modal_optimization_benchmark(
         raise ValueError("harness_commit must be a full Git SHA")
     if not _safe_relative_path(raw_artifact_path):
         raise ValueError("raw_artifact_path must be repository-relative")
+    if published_artifact_path is not None and not _safe_relative_path(
+        published_artifact_path
+    ):
+        raise ValueError("published_artifact_path must be repository-relative")
     _reject_forbidden_fields(raw_payload)
     _validate_safe_value(raw_payload)
     payload = copy.deepcopy(raw_payload)
@@ -1040,6 +1045,11 @@ def sanitize_modal_optimization_benchmark(
         command_manifest = _portable_command_manifest(
             _mapping(preregistration_payload.get("commands"), "commands")
         )
+        _align_replay_manifest_paths(
+            command_manifest,
+            raw_artifact_path=raw_artifact_path,
+            published_artifact_path=published_artifact_path,
+        )
         _add_region_attestation_command(
             command_manifest,
             region_evidence_payload=region_evidence_payload,
@@ -1047,6 +1057,8 @@ def sanitize_modal_optimization_benchmark(
         payload["command_manifest"] = command_manifest
         payload["command_manifest_sanitization"] = (
             "Normalized the runner-specific credential file path to repository-relative .env. "
+            "Aligned historical preregistration paths with the published raw and normalized "
+            "artifact paths. "
             "Added the digest-bound region attestation command when the execution-time "
             "preregistration did not contain that later provenance step. Updated the "
             "published replay command to consume the attested region evidence."
@@ -1265,6 +1277,7 @@ def generate_sanitized_modal_optimization_benchmark(
         raw_payload,
         raw_bytes=raw_bytes,
         raw_artifact_path=raw_artifact_path,
+        published_artifact_path=output_path.as_posix(),
         harness_commit=harness_commit,
         preregistration_payload=preregistration_payload,
         preregistration_bytes=preregistration_bytes,
@@ -1372,6 +1385,36 @@ def _portable_command_manifest(commands: dict[str, Any]) -> dict[str, str]:
             str(command),
         )
     return output
+
+
+def _align_replay_manifest_paths(
+    commands: dict[str, str],
+    *,
+    raw_artifact_path: str,
+    published_artifact_path: str | None,
+) -> None:
+    if published_artifact_path is None:
+        return
+    normalize = commands.get("normalize")
+    if normalize is None:
+        return
+    match = re.search(
+        r"scripts/sanitize_modal_optimization_benchmark\.py\s+"
+        r"(?P<raw>\S+)\s+(?P<published>\S+)",
+        normalize,
+    )
+    if match is None:
+        return
+    old_root = Path(match.group("raw")).parent.as_posix()
+    new_root = Path(raw_artifact_path).parent.as_posix()
+    old_prefix = f"{old_root}/"
+    new_prefix = f"{new_root}/"
+    old_published = match.group("published")
+    for name, command in commands.items():
+        commands[name] = command.replace(old_prefix, new_prefix).replace(
+            old_published,
+            published_artifact_path,
+        )
 
 
 def _validate_preregistration_binding(

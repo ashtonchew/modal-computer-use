@@ -48,6 +48,56 @@ The native implementation is the canonical fast path. `xdotool` remains useful a
 compatibility adapter and as an automatic fallback when native preflight fails before any event is
 emitted.
 
+## Fully optimized Modal harness, 2026-07-24
+
+The provider-default comparison below measures every provider through its public SDK from the local
+macOS caller. It is intentionally neutral, but it is not Modal's optimized production shape. The
+repository's dedicated optimization harness was therefore run separately against the exact
+revisioned Chromium image for commit `4ea0deb8d2cb37668cab3310a5394487e9140869`.
+
+The harness preregistered and executed 30 independent cold starts, 30 persistent-session action
+observations, and 30 warm-pool claims, without replacement samples. A region probe selected
+`us-west`; the action path used a separate same-region Modal runner connected to a persistent hot
+target and consumed the binary causal-observation envelope.
+
+| Optimized Modal metric | p50 | p95 | Valid | Failures |
+| --- | ---: | ---: | ---: | ---: |
+| Persistent action to first causally changed frame | **34.6 ms** | **51.0 ms** | 30/30 | 0 |
+| Warm-pool claim to first authenticated frame | 1,597.4 ms | 1,765.4 ms | 30/30 | 0 |
+| Cold request to first authenticated frame | 11,195.0 ms | 12,712.9 ms | 30/30 | 0 |
+
+The 34.6 ms result is the optimized screenshot-sensitive agent-loop result: timing starts
+immediately before correlated input dispatch and stops only after the matching causal observation
+contains a changed, reconstructable frame. It should not be confused with the 211.6 ms
+provider-default `screenshot_full` RPC below, which crosses the external attested HTTP/1.1 tunnel
+from the local caller and returns a full PNG.
+
+For context, the immediately preceding neutral provider run at commit
+`cebdaa3ea91c8360b3f634d373d7aeb8a6579267` reported the following public-SDK action latencies. The
+optimized image revision adds only benchmark documentation on top of that native-X11 revision, but
+the evidence is still a distinct run and source SHA. Modal's optimized action-to-frame path is
+descriptively 10.0x lower latency than Daytona's action-only p50 and 8.1x lower than E2B's
+action-only p50. These are not controlled speedup claims because the vendor timers stop when the
+action call completes, while the optimized Modal timer additionally waits for a causally matching
+changed frame.
+
+| Context metric | Modal optimized | Daytona default | E2B default |
+| --- | ---: | ---: | ---: |
+| Warm interaction p50 | **34.6 ms action → changed frame** | 347.0 ms action call | 279.5 ms action call |
+| Warm interaction p95 | **51.0 ms action → changed frame** | 367.6 ms action call | 306.1 ms action call |
+| Cold request → first frame p50 | 11,195.0 ms | 10,638.5 ms | **1,156.7 ms** |
+| Cold request → first frame p95 | 12,712.9 ms | 10,795.4 ms | **1,378.9 ms** |
+
+Warm availability hit 30/30 claims with no pool misses or cold fallbacks. The partial target-only
+cost estimate was `$0.12697` for the on-demand attempts and `$0.50711` for 1,373.1 warm-pool idle
+resource-seconds; runner compute, control-plane charges, claimed-session compute, and billing
+adjustments are excluded as recorded in the artifact.
+
+The secret-safe normalized evidence is
+`benchmark-data/modal-optimization-native-x11-2026-07-24.json`. It preserves the complete attempt
+records, command manifest, measurement contract, region attestation, cleanup outcomes, raw artifact
+digest, and partial-cost assumptions. The credential-bearing raw report remains untracked.
+
 ## Same-run provider comparison, 2026-07-24
 
 The PR commit was also run through the repository's neutral provider-default comparison against
