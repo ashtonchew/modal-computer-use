@@ -46,7 +46,7 @@ As of v7, the **v0.1 primitive layer has shipped and been hardened** (see §0). 
 
 The shipped implementation is:
 
-1. **A Modal-managed Linux Sandbox** launched with a custom Modal `Image` that contains X11 desktop dependencies: Xvfb, XFCE or a minimal window manager, x11vnc, noVNC/websockify, xdotool, wmctrl, maim, ffmpeg, xclip/xsel, and the package's daemon.
+1. **A Modal-managed Linux Sandbox** launched with a custom Modal `Image` that contains X11 desktop dependencies: Xvfb, XFCE or a minimal window manager, x11vnc, noVNC/websockify, xdotool, wmctrl, scrot, maim, ffmpeg, xclip, and the package's daemon.
 2. **An in-sandbox daemon** (`computer-use-daemon`) listening on port `8080`, exposed through Modal Sandbox Connect Tokens. The daemon owns process supervision (`src/modal_computer_use/daemon/supervisor.py:13`), input serialization (`src/modal_computer_use/daemon/app.py:68` — `app.state.input_lock = asyncio.Lock()`), screenshots, recordings, display/window inspection, and structured logs (`src/modal_computer_use/daemon/logging.py`).
 3. **A Python client SDK** (`src/modal_computer_use/sandbox.py`, `src/modal_computer_use/namespaces/`) that creates or attaches to Modal Sandboxes, obtains connect tokens, calls the daemon over HTTP, optionally exposes a noVNC tunnel for manual viewing, and presents a Daytona-like API.
 4. **A session and artifact layer** generalized around one canonical `run_id`, sandbox lookup by ID/name/tags, safe artifact roots, optional Volume persistence, and explicit cleanup semantics.
@@ -196,11 +196,13 @@ src/modal_computer_use/
     supervisor.py        — Xvfb/window-manager/x11vnc/noVNC supervisor
     desktop/             — backend seam plus feature-local X11 controllers
       x11.py             — DesktopBackend seam, MockDesktopBackend, X11DesktopBackend composition
-      mouse.py           — xdotool pointer/click/drag/scroll behavior
-      keyboard.py        — xdotool key behavior and clipboard-paste typing fallback
-      screenshots.py     — maim capture, scaling, encoding, coordinate metadata
+      xtest.py           — persistent native XTest session and emission-state failures
+      mouse.py           — native XTest input, xdotool compatibility, held-button state
+      keyboard.py        — XKB/XTest input, xdotool compatibility, clipboard-paste fallback
+      screenshots.py     — MSS capture, scrot/maim fallback, encoding, readiness
+      xdamage.py         — XDamage hint preparation and watcher ownership
       clipboard.py       — xclip clipboard read/write/clear behavior
-      windows.py         — wmctrl parsing plus activate/close behavior
+      windows.py         — native EWMH operations plus wmctrl compatibility
       apps.py, browser.py, display.py, processes.py
       recordings.py      — RecordingRegistry, ffmpeg control
     routes/              — 17 FastAPI routers

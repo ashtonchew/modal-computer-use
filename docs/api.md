@@ -54,6 +54,16 @@ need to know whether a Modal noVNC URL exists.
 
 Capability reads report cached state and do not trigger a new input probe.
 
+Successful direct primitive responses also attribute the implementation used for that operation:
+
+- direct mouse routes return `X-Computer-Use-Input-Backend`;
+- direct window routes return `X-Computer-Use-Window-Backend`;
+- raw screenshot routes return `X-Computer-Use-Capture-Backend`.
+
+Use these per-response headers for concurrent diagnostics and benchmarks. The legacy
+`input_backend` capability remains last-observed process state and is not a request correlation
+mechanism. Response bodies and SDK return models are unchanged by attribution headers.
+
 ## Input failure and cleanup contracts
 
 Direct primitive failures use `{code, message, details}`. Batch item failures use the same `code`
@@ -339,10 +349,19 @@ creation config must pass `modal_region` because their placement policy is unkno
 latency-sensitive session in one command; creating a fresh runner for every action would put runner
 allocation back on the hot path.
 
+When an explicit `external_runner` is supplied, `ModalDaemonCommandResult.fallback_used` can become
+true only if Connect endpoint preparation is unavailable before dispatch. In that case
+`fallback_reason` is the stable semantic value `connect_endpoint_unavailable`, while
+`fallback_error_type` contains only the sanitized exception class. Validation, configuration,
+environment, programming, runner-dispatch, and workload failures are terminal and do not replay the
+command externally.
+
 Use `run_modal_daemon_command(computer, command, path=...)` for explicit diagnostics.
 `path="inherited"` passes the target client's current daemon URL/token into a separate runner,
 `path="connect"` creates a fresh Modal Connect Token for that runner, and
 `path="target-loopback"` executes inside the target sandbox against `http://127.0.0.1:8080`.
+The loopback path uses the target daemon's application bearer rather than an ingress token; tokens
+are never placed in public sandbox metadata or benchmark logs.
 The helper owns the reserved daemon env keys and rejects user overrides so benchmark or workload
 metadata cannot accidentally replace the daemon endpoint or bearer token.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.

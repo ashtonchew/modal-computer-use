@@ -30,8 +30,8 @@ behavior lives next to the feature that owns it:
   adapter, and held-button state.
 - `daemon/desktop/keyboard.py` owns XKB key mapping, native XTest input, the `xdotool`
   compatibility adapter, clipboard-paste typing fallback, and held-key state.
-- `daemon/desktop/screenshots.py` owns `maim` capture, scaling, encoding, coordinate-space
-  metadata, and screenshot artifact writes.
+- `daemon/desktop/screenshots.py` owns cursor-hidden MSS capture, the file-capture ladder, scaling,
+  encoding, coordinate-space metadata, screenshot readiness, and screenshot artifact writes.
 - `daemon/desktop/clipboard.py` owns clipboard read/write/clear through `xclip`.
 - `daemon/desktop/windows.py` owns native EWMH/Xlib window operations and the `wmctrl`
   compatibility adapter.
@@ -48,9 +48,32 @@ The compatibility and capture controllers use these CLI tools:
 
 - `xdotool` for compatibility mouse and keyboard input.
 - `wmctrl` when the native EWMH adapter is unavailable.
-- `maim` for screenshots, with fallbacks when unavailable.
+- `scrot` as the first file-capture fallback when in-process MSS capture is unavailable.
+- `maim` as the final file-capture fallback and the cursor-visible capture adapter.
 - `ffmpeg` for screen recording.
-- `xclip` and `xsel` for clipboard read and write.
+- `xclip` for clipboard read and write.
+
+Fallback decisions stay with the feature that can prove whether retrying through another
+implementation is safe:
+
+| Behavior | Preferred path | Compatibility path | Fallback boundary |
+|---|---|---|---|
+| Mouse and keyboard input | Persistent XTest/XKB | `xdotool` | Only before native emission starts; possibly partial input is terminal. |
+| Window operations | Native EWMH/Xlib | `wmctrl` | When the window manager does not advertise or complete the requested EWMH operation. |
+| Cursor-hidden capture | MSS default X11 capture | `scrot`, then `maim` | After an MSS session reset/retry cannot produce a valid frame. MSS itself uses XShm when available and falls back to XGetImage. |
+| Cursor-visible capture | `maim` | None | Missing or invalid cursor composition is terminal for the request. |
+| Change notification | XDamage hint | Source-hash polling | XDamage availability only selects when to capture; pixels/hashes remain the correctness check. |
+| Same-region runner preparation | Modal Connect runner | Explicit external runner | Only when Connect endpoint preparation is unavailable before dispatch. Workload failures are terminal. |
+| Warm allocation | Verified, exclusively claimed entry | Cold creation | Only for an owned candidate-rejection phase; ambiguous claims and incomplete cleanup are terminal. |
+
+These are not global retry chains. Each controller exposes the backend or reason selected for its
+own completed operation, and orchestration never replays work after dispatch may have started.
+The safety boundaries follow the upstream contracts: XTest is an input-synthesis protocol,
+EWMH window-manager requests are advisory, and MSS 10.2 selects XShm with an automatic XGetImage
+fallback. See the
+[XTEST protocol](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html),
+[EWMH specification](https://specifications.freedesktop.org/wm/latest-single/), and
+[MSS 10.2 release notes](https://python-mss.readthedocs.io/latest/release-history/v10.2.0.html).
 
 The observation transport and action execution remain stable primitives. The Alpha
 post-action visual-change feature composes them without creating another runtime layer:

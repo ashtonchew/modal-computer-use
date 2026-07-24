@@ -56,5 +56,5 @@ run above these desktop primitives when a task needs DOM or accessibility data. 
 do not replace the full desktop surface for native applications or visual-only interfaces.
 
 The repository contains measured Daytona and E2B comparisons in
-[the current provider benchmark](../docs/benchmark-results-2026-07-18-current.md). Read that report
+[the retained provider benchmark](../docs/benchmark-results-2026-07-18-provider-default.md). Read that report
 before you make performance claims.

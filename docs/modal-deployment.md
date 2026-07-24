@@ -138,10 +138,12 @@ select a supported narrow region explicitly in `ComputerConfig` after measuring 
 and accepting the narrower region's availability and pricing tradeoffs.
 
 Fallback to the current external attested endpoint happens only when the caller supplies an explicit
-`external_runner` and Connect preparation fails before dispatch. Without that callable, preparation
-errors propagate. Once runner dispatch starts, errors propagate and the helper never repeats the
-command. The command owns the persistent hot session and observation stream. A broker does not proxy
-action or frame bytes.
+`external_runner` and typed Connect endpoint preparation is unavailable before dispatch. Validation,
+placement, reserved-environment, and programming errors remain terminal. Without the explicit
+callable, preparation errors propagate. Once runner dispatch starts, every failure is terminal and
+the helper never repeats the command. Fallback attribution uses a stable semantic reason plus a
+sanitized exception type; it never returns raw exception text. The command owns the persistent hot
+session and observation stream. A broker does not proxy action or frame bytes.
 
 Use `run_modal_daemon_command()` for explicit diagnostics. It supports three paths:
 
@@ -168,9 +170,11 @@ out-of-capacity slots. Claimed slots remain owned by their consumers.
 so each fixed name is also the provider-side provisioning reservation. If concurrent fillers race,
 the loser accepts the winner only after a registry read confirms the same compatible reserved slot.
 `claim_warm_pool()` uses a non-blocking Modal Queue dequeue as the atomic claim point. A claim rejects
-an incompatible, invalid, finished, unready, or near-expiry Sandbox, terminates it with
-`wait=True`, and scans a bounded number of entries. A miss records the failed claim time and creates
-the normal cold fallback. Claimed capacity is one-shot and must be closed; it is never requeued.
+an incompatible, invalid, finished, unready, or near-expiry Sandbox, retires an owned live candidate
+with `wait=True`, and scans a bounded number of entries. Expected candidate rejection can continue
+to the normal cold fallback. Configuration/programming failures, ambiguous claim transitions, and
+incomplete retirement are terminal rather than being relabeled as pool misses. Claimed capacity is
+one-shot and must be closed; it is never requeued.
 
 Each Modal App and pool pair receives a distinct Queue. Each fixed slot uses its own partition.
 `fill_warm_pool()` rebuilds that partition from the Sandbox's durable lifecycle tags, because
