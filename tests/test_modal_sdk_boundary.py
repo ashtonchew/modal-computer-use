@@ -1410,6 +1410,21 @@ def test_modal_sandbox_exec_once_creates_ephemeral_runner(monkeypatch) -> None:
     assert result.returncode == 0
 
 
+def test_modal_sandbox_exec_once_keeps_runner_alive_for_exec_timeout(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    modal_sandbox_exec_once(
+        ("python", "-c", "print('ok')"),
+        app_name="computer-app",
+        image=object(),
+        timeout_seconds=300,
+        exec_timeout_seconds=450,
+    )
+
+    _, kwargs = FakeSandbox.create_calls[0]
+    assert kwargs["timeout"] >= 450
+
+
 def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     FakeSandbox.listed = [

@@ -529,13 +529,14 @@ def modal_sandbox_exec_once(
             profile=image_profile,
             browser=browser,
         )
+    runner_timeout_seconds = max(timeout_seconds, exec_timeout_seconds + 60)
     create_kwargs: dict[str, Any] = {
         "app": app,
         "image": image or default_image(profile="standard"),
         "cpu": cpu,
         "memory": memory_mib,
         "encrypted_ports": [],
-        "timeout": timeout_seconds,
+        "timeout": runner_timeout_seconds,
         "idle_timeout": idle_timeout_seconds,
         "name": name,
         "tags": tags,
