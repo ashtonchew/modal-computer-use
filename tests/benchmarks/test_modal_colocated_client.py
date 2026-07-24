@@ -139,7 +139,7 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
     class CreatedComputer:
         _sandbox = TargetSandbox()
         _requested_modal_region = "us-west"
-        _daemon_bearer_token = "test-loopback-token"  # noqa: S105 - synthetic auth fixture.
+        _daemon_bearer = "test-loopback-token"
         client = SimpleNamespace(
             base_url="https://target.example.modal.host",
             transport=SimpleNamespace(token="attested-token"),

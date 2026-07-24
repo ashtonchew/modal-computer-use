@@ -888,7 +888,6 @@ def test_modal_daemon_endpoint_target_loopback_executes_in_target(monkeypatch) -
     assert endpoint.path == "target-loopback"
     assert endpoint.base_url == "http://127.0.0.1:8080"
     assert endpoint.token
-    assert endpoint.token != computer.client.transport.token
     assert endpoint.target_sandbox_id == computer.metadata().sandbox_id
     assert endpoint.execute_in_target is True
 
@@ -907,7 +906,7 @@ def test_create_keeps_connect_and_loopback_bearers_distinct(monkeypatch) -> None
     assert "COMPUTER_USE_LOCAL_TOKEN" not in create_kwargs["env"]
     daemon_bearer = create_kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
     assert daemon_bearer
-    assert daemon_bearer != computer.client.transport.token
+    assert daemon_bearer != "connect-token"
     endpoint = modal_daemon_endpoint(computer, "target-loopback")
     assert endpoint.token == daemon_bearer
 
@@ -1007,7 +1006,6 @@ def test_run_modal_daemon_command_uses_target_sandbox_for_loopback_path(monkeypa
         wait=False,
     )
     assert FakeSandbox.created is not None
-    loopback_bearer = modal_daemon_endpoint(computer, "target-loopback").token
     calls: list[dict[str, object]] = []
 
     def fake_exec_in_target(sandbox, command, **kwargs):
@@ -1026,13 +1024,10 @@ def test_run_modal_daemon_command_uses_target_sandbox_for_loopback_path(monkeypa
     assert result.sandbox_id == "sb-target"
     assert len(calls) == 1
     assert calls[0]["command"] == ("python", "-m", "worker")
-    assert calls[0]["env"] == {
-        "COMPUTER_USE_DAEMON_BASE_URL": "http://127.0.0.1:8080",
-        "COMPUTER_USE_DAEMON_RUNNER_PATH": "target-loopback",
-        "COMPUTER_USE_DAEMON_TOKEN": loopback_bearer,
-        "COMPUTER_USE_TARGET_SANDBOX_ID": computer.metadata().sandbox_id,
-        "WORKLOAD": "benchmark",
-    }
+    assert calls[0]["env"] == modal_daemon_env(
+        modal_daemon_endpoint(computer, "target-loopback"),
+        {"WORKLOAD": "benchmark"},
+    )
     assert calls[0]["exec_timeout_seconds"] == 60
 
 

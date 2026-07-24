@@ -858,6 +858,10 @@ def modal_workspace_billing_report(
     )
 
 
+def _daemon_bearer_from_auth(auth: dict[str, str]) -> str:
+    return auth["COMPUTER_USE_TUNNEL_TOKEN"]
+
+
 class ComputerSandbox:
     def __init__(
         self,
@@ -871,9 +875,9 @@ class ComputerSandbox:
         self._sandbox = sandbox
         self._metadata = metadata
         self._requested_modal_region: str | None = None
-        self._daemon_bearer_token: str | None = None
+        self._daemon_bearer: str | None = None
         self.startup_timing = startup_timing
-        self._cleanup_on_readiness_failure = False
+        self._readiness_failure_cleanup: Literal["none", "client", "sandbox"] = "none"
         self._readiness_stage_count = 0
         self.lifecycle = LifecycleNamespace(client)
         self.mouse = MouseNamespace(client)
@@ -998,8 +1002,9 @@ class ComputerSandbox:
         http2 = config.network.daemon_http_version == "2"
         ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
         h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
-        daemon_bearer_token = _secrets.token_urlsafe(32)
-        env["COMPUTER_USE_TUNNEL_TOKEN"] = daemon_bearer_token
+        daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
+        env.update(daemon_auth)
+        tunnel_token = _daemon_bearer_from_auth(daemon_auth)
         create_kwargs: dict[str, Any] = {
             "app": app,
             "image": image,
@@ -1039,7 +1044,7 @@ class ComputerSandbox:
             ingress=config.ingress,
             connect_base_url=connect_base_url,
             connect_token=connect_token,
-            tunnel_token=daemon_bearer_token,
+            tunnel_token=tunnel_token,
         )
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
@@ -1060,8 +1065,8 @@ class ComputerSandbox:
             metadata=metadata,
         )
         computer.startup_timing = timing
-        computer._daemon_bearer_token = daemon_bearer_token
-        computer._cleanup_on_readiness_failure = True
+        computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
+        computer._readiness_failure_cleanup = "sandbox"
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         if wait and config.ingress == "attested-tunnel":
@@ -1077,13 +1082,13 @@ class ComputerSandbox:
                 metadata=metadata,
             )
             computer.startup_timing = timing
-            computer._daemon_bearer_token = daemon_bearer_token
-            computer._cleanup_on_readiness_failure = True
+            computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
+            computer._readiness_failure_cleanup = "sandbox"
             computer._readiness_stage_count = 1
             timing.mark("attestation_ready")
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         computer._requested_modal_region = config.runtime.modal_region
-        computer._cleanup_on_readiness_failure = False
+        computer._readiness_failure_cleanup = "none"
         return computer
 
     @classmethod
@@ -1134,25 +1139,24 @@ class ComputerSandbox:
             sandbox=sandbox,
             metadata=metadata,
         )
-        try:
-            if wait:
+        if wait:
+            computer._readiness_failure_cleanup = "client"
+            computer.wait_until_ready(timeout=readiness_timeout)
+            if ingress == "attested-tunnel":
+                computer.client.close()
+                connect_base_url, connect_token = _attested_tunnel_parts(
+                    sandbox,
+                    connect_base_url=connect_base_url,
+                    connect_token=connect_token,
+                )
+                computer = cls(
+                    DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
+                    sandbox=sandbox,
+                    metadata=metadata,
+                )
+                computer._readiness_failure_cleanup = "client"
                 computer.wait_until_ready(timeout=readiness_timeout)
-                if ingress == "attested-tunnel":
-                    computer.client.close()
-                    connect_base_url, connect_token = _attested_tunnel_parts(
-                        sandbox,
-                        connect_base_url=connect_base_url,
-                        connect_token=connect_token,
-                    )
-                    computer = cls(
-                        DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
-                        sandbox=sandbox,
-                        metadata=metadata,
-                    )
-                    computer.wait_until_ready(timeout=readiness_timeout)
-        except BaseException:
-            computer.client.close()
-            raise
+            computer._readiness_failure_cleanup = "none"
         return computer
 
     @classmethod
@@ -1261,10 +1265,13 @@ class ComputerSandbox:
                 last_error = exc
             if time.monotonic() >= deadline:
                 detail = _readiness_timeout_detail(last_payload, last_error)
-                if self._cleanup_on_readiness_failure:
+                if self._readiness_failure_cleanup != "none":
                     self.client.close()
-                    if self._sandbox is not None:
-                        _terminate_failed_sandbox(self._sandbox)
+                if (
+                    self._readiness_failure_cleanup == "sandbox"
+                    and self._sandbox is not None
+                ):
+                    _terminate_failed_sandbox(self._sandbox)
                 raise TimeoutError(
                     f"daemon did not become ready before timeout ({timeout:g}s){detail}"
                 )
@@ -1489,6 +1496,15 @@ class ComputerSandbox:
         self._sandbox.mount_image(path, image)
 
 
+def _required_loopback_bearer(computer: ComputerSandbox) -> str:
+    bearer = getattr(computer, "_daemon_bearer", None)
+    if not bearer:
+        raise SandboxUnavailableError(
+            "target-loopback requires an SDK-owned daemon bearer"
+        )
+    return bearer
+
+
 def modal_daemon_endpoint(
     computer: ComputerSandbox,
     path: ModalDaemonEndpointPath = "inherited",
@@ -1515,15 +1531,10 @@ def modal_daemon_endpoint(
             target_sandbox_id=target_sandbox_id,
         )
     if path == "target-loopback":
-        daemon_bearer_token = getattr(computer, "_daemon_bearer_token", None)
-        if not daemon_bearer_token:
-            raise SandboxUnavailableError(
-                "target-loopback requires an SDK-owned daemon bearer"
-            )
         return ModalDaemonEndpoint(
             path=path,
             base_url="http://127.0.0.1:8080",
-            token=daemon_bearer_token,
+            token=_required_loopback_bearer(computer),
             target_sandbox_id=target_sandbox_id,
             execute_in_target=True,
         )
@@ -1609,8 +1620,7 @@ def create_modal_benchmark_computer(
     if app_tags:
         _set_modal_object_tags(app, app_tags)
 
-    daemon_bearer_token = _secrets.token_urlsafe(32)
-    daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": daemon_bearer_token}
+    daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(daemon_auth)
     env["COMPUTER_USE_DAEMON_HOST"] = (
@@ -1678,12 +1688,12 @@ def create_modal_benchmark_computer(
             timing.mark("connect_endpoint_ready")
         elif transport == "encrypted-tunnel":
             base_url = _tunnel_url(sandbox, 8080)
-            token = daemon_bearer_token
+            token = _daemon_bearer_from_auth(daemon_auth)
             timing.mark("encrypted_tunnel_ready")
         else:
             address = _sandbox_i6pn_address(sandbox)
             base_url = f"http://[{address}]:8080"
-            token = daemon_bearer_token
+            token = _daemon_bearer_from_auth(daemon_auth)
             timing.mark("workspace_private_endpoint_ready")
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
@@ -1703,7 +1713,7 @@ def create_modal_benchmark_computer(
             metadata=metadata,
             startup_timing=timing,
         )
-        computer._daemon_bearer_token = daemon_bearer_token
+        computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
         computer._requested_modal_region = config.runtime.modal_region
         if wait and transport != "workspace-private-i6pn":
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
@@ -1778,8 +1788,7 @@ def create_modal_v2_tunnel_computer(
     app = runtime.App.lookup(app_name, **app_lookup_kwargs)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
-    daemon_bearer_token = _secrets.token_urlsafe(32)
-    tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": daemon_bearer_token}
+    tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(tunnel_auth)
     sandbox_tags = {**(tags or {}), **default_tags(config)}
@@ -1825,7 +1834,7 @@ def create_modal_v2_tunnel_computer(
         timing.mark("encrypted_tunnel_ready")
         client = client_factory(
             base_url=base_url,
-            token=daemon_bearer_token,
+            token=_daemon_bearer_from_auth(tunnel_auth),
             http2=False,
         )
         metadata = SandboxRef(
@@ -1842,7 +1851,7 @@ def create_modal_v2_tunnel_computer(
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = ComputerSandbox(client, sandbox=sandbox, metadata=metadata)
-        computer._daemon_bearer_token = daemon_bearer_token
+        computer._daemon_bearer = _daemon_bearer_from_auth(tunnel_auth)
         computer._requested_modal_region = config.runtime.modal_region
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)

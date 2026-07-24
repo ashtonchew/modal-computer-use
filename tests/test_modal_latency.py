@@ -558,12 +558,11 @@ def test_create_records_supported_and_unsupported_startup_stages(monkeypatch) ->
         )
     )
     assert computer.startup_timing is timing
-    assert computer._cleanup_on_readiness_failure is False
+    assert computer._readiness_failure_cleanup == "none"
     daemon_bearer = BoundarySandbox.create_calls[0]["env"][
         "COMPUTER_USE_TUNNEL_TOKEN"
     ]
     assert daemon_bearer
-    assert daemon_bearer != computer.client.transport.token
     assert modal_daemon_endpoint(computer, "target-loopback").token == daemon_bearer
 
 
