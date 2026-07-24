@@ -1,7 +1,7 @@
 # Fallback ownership benchmark, 2026-07-24
 
-This report validates the fallback-ownership cleanup on code revision
-`6d3d22d24ead251e8574d19815c3a751594fe621` against latest-main revision
+This report validates the fallback-ownership cleanup through code revision
+`6f06fc50e589fee11e477d536e994a4d07416bce` against latest-main revision
 `ca64daa1c59eba608ff5dce6becaa2aa32b9e599`.
 
 ## Environment and contract
@@ -65,12 +65,19 @@ of the contemporaneous main run.
 | Four move/click pairs | 12.60 ms | 23.79 ms | 30/30 |
 | Type 100 characters | 11.14 ms | 16.02 ms | 30/30 |
 | Type 1,000 characters | 66.10 ms | 93.50 ms | 30/30 |
-| SDK-default action → changed frame | 16.66 ms | 38.14 ms | 30/30 |
-| Auto-signal action → changed frame | 33.04 ms | 38.39 ms | 30/30 |
+| SDK-default action → changed frame | 13.05 ms | 41.92 ms | 30/30 |
+| Auto-signal action → changed frame | 32.28 ms | 44.97 ms | 30/30 |
 
-The final two rows are the clean-worktree confirmation at
-`456909e30917d69bd9080f1efb6d38eaedcde7a5`; the implementation is unchanged from the code revision
-named at the start of this report.
+The final two rows are the clean-worktree, post-review confirmation at the code revision named at
+the start of this report. The raw, ignored artifact is
+`benchmark-results/fallback-ownership-final-reviewed-loopback-observation-20260724.json`.
+It reports `ok=true`, zero failures, and `git_worktree_clean=true`.
+
+The earlier clean confirmation at `456909e30917d69bd9080f1efb6d38eaedcde7a5` measured 16.66/38.14
+ms for SDK-default p50/p95 and 33.04/38.39 ms for auto-signal. The reviewed rerun improved both p50s
+by 21.7% and 2.3%, respectively. The p95 tails moved by +9.9% and +17.1%; the benchmark therefore
+supports a no-p50-regression conclusion, while the p95 tail remains environment-sensitive rather
+than a claimed optimization result. All four runs completed 30/30.
 
 ## Same-run provider comparison
 
@@ -95,7 +102,9 @@ The secret-safe candidate artifact is
 `benchmark-data/provider-compare-fallback-ownership-2026-07-24-candidate.json`. The credential- and
 endpoint-bearing raw report remains ignored at
 `benchmark-results/candidates/provider-compare-fallback-ownership-20260724.json` and is bound by
-SHA-256 in the sanitized artifact.
+SHA-256 in the sanitized artifact. That provider comparison was recorded at `6d3d22d`; subsequent
+commits affect orchestration failure ownership, typed readiness errors, tests, and documentation,
+not daemon input, capture, or vendor-adapter hot paths.
 
 ## Observed harness limitations
 
