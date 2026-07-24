@@ -655,6 +655,24 @@ def test_sanitizer_aligns_provider_status_with_embedded_profile() -> None:
     assert "--status candidate" in commands["provider_default_normalize"]
 
 
+def test_sanitizer_does_not_rewrite_nested_raw_path_twice() -> None:
+    commands = {
+        "normalize": (
+            "uv run python scripts/sanitize_modal_optimization_benchmark.py "
+            "benchmark-results/run/raw.json benchmark-data/old.json"
+        ),
+    }
+
+    align_replay_manifest_paths(
+        commands,
+        raw_artifact_path="benchmark-results/run/retry/raw.json",
+        published_artifact_path="benchmark-data/new.json",
+    )
+
+    assert "benchmark-results/run/retry/raw.json" in commands["normalize"]
+    assert "retry/retry" not in commands["normalize"]
+
+
 def test_preregistration_freezes_commands_policies_and_dependency() -> None:
     config = ModalOptimizationConfig(region="us-west", image_revision="a" * 40)
     commands = {

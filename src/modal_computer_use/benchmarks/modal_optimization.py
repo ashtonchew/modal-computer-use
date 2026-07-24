@@ -1416,14 +1416,18 @@ def _align_replay_manifest_paths(
     old_prefix = f"{old_root}/"
     new_prefix = f"{new_root}/"
     old_published = match.group("published")
+    raw_placeholder = "\0modal-computer-use-raw-artifact\0"
+    if any(raw_placeholder in command for command in commands.values()):
+        raise ValueError("command manifest contains the raw artifact placeholder")
     for name, command in commands.items():
         commands[name] = (
-            command.replace(old_raw, raw_artifact_path)
+            command.replace(old_raw, raw_placeholder)
             .replace(old_prefix, new_prefix)
             .replace(
                 old_published,
                 published_artifact_path,
             )
+            .replace(raw_placeholder, raw_artifact_path)
         )
     if provider_artifact_status in {"candidate", "current_reference"}:
         provider_normalize = commands.get("provider_default_normalize")
