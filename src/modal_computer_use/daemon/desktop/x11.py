@@ -830,11 +830,16 @@ class X11DesktopBackend(MockDesktopBackend):
         return await self._clipboard.clear()
 
     async def release_all(self) -> ActionResult:
-        released = {"keys": sorted(self.held_keys), "buttons": sorted(self.held_buttons)}
-        await self._keyboard.release_all(self.held_keys)
-        for button in reversed(sorted(self.held_buttons)):
+        keys = sorted(self.held_keys)
+        buttons = sorted(self.held_buttons)
+        released = {"keys": keys, "buttons": buttons}
+        if keys:
+            await self._keyboard.release_all(keys)
+            self._last_input_backend = self._keyboard.backend_name
+        for button in reversed(buttons):
             with contextlib.suppress(Exception):
                 await self._mouse.up(button)
+            self._last_input_backend = self._mouse.backend_name
         self.held_keys.clear()
         self.held_buttons.clear()
         return ActionResult(ok=True, output=released)

@@ -583,7 +583,22 @@ class X11KeyboardController:
                 self._xtest.emit(ups)
             raise
         else:
+            self._finish_native_chord(ups)
+
+    def _finish_native_chord(self, ups: Sequence[KeyEvent]) -> None:
+        try:
             self._xtest.emit(ups)
+            self._active_backend = "xtest"
+        except (X11InputInjectionError, X11InputUnavailableError):
+            # Downs have already been delivered. A key-up retry is idempotent, but
+            # this operation must never be replayed through another adapter.
+            try:
+                self._xtest.emit(ups)
+                self._active_backend = "xtest"
+            except Exception as cleanup_exc:
+                raise X11InputInjectionError(
+                    "native chord release failed after key-down events were emitted"
+                ) from cleanup_exc
 
     def _emit_taps(self, events: Sequence[KeyEvent], keycodes: Iterable[int]) -> None:
         unique_keycodes = _deduplicate(keycodes)

@@ -377,6 +377,54 @@ def test_hotkey_honors_duration_and_preserves_preheld_modifier(monkeypatch) -> N
     assert session.pressed_keycodes() == frozenset({37})
 
 
+def test_positive_duration_press_never_replays_after_native_release_failure() -> None:
+    harness = KeyboardHarness(input_backend="auto")
+    original_emit = harness.session.emit
+    calls = 0
+
+    def disconnect_during_release(
+        events: Sequence[KeyEvent],
+        *,
+        preserve_pressed_keycodes: Iterable[int] = (),
+    ) -> None:
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            raise X11InputUnavailableError("display disconnected during release")
+        original_emit(events, preserve_pressed_keycodes=preserve_pressed_keycodes)
+
+    harness.session.emit = disconnect_during_release  # type: ignore[method-assign]
+
+    with pytest.raises(X11InputInjectionError, match="release failed"):
+        anyio.run(harness.controller.press, "a", ["ctrl"], 1)
+
+    assert harness.commands == []
+
+
+def test_positive_duration_hotkey_never_replays_after_native_release_failure() -> None:
+    harness = KeyboardHarness(input_backend="auto")
+    original_emit = harness.session.emit
+    calls = 0
+
+    def disconnect_during_release(
+        events: Sequence[KeyEvent],
+        *,
+        preserve_pressed_keycodes: Iterable[int] = (),
+    ) -> None:
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            raise X11InputUnavailableError("display disconnected during release")
+        original_emit(events, preserve_pressed_keycodes=preserve_pressed_keycodes)
+
+    harness.session.emit = disconnect_during_release  # type: ignore[method-assign]
+
+    with pytest.raises(X11InputInjectionError, match="release failed"):
+        anyio.run(harness.controller.hotkey, ["ctrl", "t"], 1)
+
+    assert harness.commands == []
+
+
 def test_partial_native_injection_cleans_up_and_never_replays_with_xdotool() -> None:
     session = FakeX11InputSession(fail_injection_once=True)
     harness = KeyboardHarness(input_backend="auto", session=session)
@@ -533,10 +581,40 @@ def test_backend_release_all_reconciles_keyboard_after_failed_release() -> None:
     backend._run = run  # type: ignore[method-assign]
 
     anyio.run(backend.key_down, "shift")
+    backend._last_input_backend = "xtest"
     released = anyio.run(backend.release_all)
+    assert backend.input_backend == "xdotool"
+
     anyio.run(backend.key_down, "shift")
 
     assert released.output == {"keys": ["shift"], "buttons": []}
     assert commands.count(("xdotool", "keyup", "shift")) == 2
     assert commands.count(("xdotool", "keydown", "shift")) == 2
     assert backend.held_keys == {"shift"}
+
+
+def test_release_all_attributes_the_final_mouse_cleanup_adapter() -> None:
+    class NativePointerSession:
+        failure = None
+
+        def available(self) -> bool:
+            return True
+
+        def emit(self, _events, **_kwargs) -> None:
+            return None
+
+    backend = X11DesktopBackend(input_backend="xdotool")
+    backend._mouse._configured_backend = "auto"
+    backend._mouse._xtest = NativePointerSession()  # type: ignore[assignment]
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    anyio.run(backend.key_down, "shift")
+    anyio.run(backend.mouse_down, "left")
+    released = anyio.run(backend.release_all)
+
+    assert released.output == {"keys": ["shift"], "buttons": ["left"]}
+    assert backend.input_backend == "xtest"
