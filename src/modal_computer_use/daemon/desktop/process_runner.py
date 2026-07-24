@@ -132,6 +132,7 @@ class IsolatedAsyncioProcessRunner:
         self._thread = threading.Thread(
             target=self._run_loop,
             name="computer-use-asyncio-process",
+            daemon=True,
         )
         self._thread.start()
         self._ready.wait()

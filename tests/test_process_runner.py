@@ -472,3 +472,11 @@ def test_isolated_asyncio_runner_close_rejects_new_work() -> None:
 
     with pytest.raises(RuntimeError, match="closed"):
         asyncio.run(runner.run("true"))
+
+
+def test_isolated_asyncio_runner_thread_cannot_block_process_shutdown() -> None:
+    runner = IsolatedAsyncioProcessRunner(max_active=1)
+    try:
+        assert runner._thread.daemon is True
+    finally:
+        runner.close()

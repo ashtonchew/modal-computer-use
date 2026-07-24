@@ -985,10 +985,12 @@ def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
 
     monkeypatch.setattr(process_runner_module.asyncio, "create_subprocess_exec", create_process)
 
-    with pytest.raises(TimeoutError):
-        anyio.run(run_command)
-
-    assert state == {"killed": True, "drained": True}
+    try:
+        with pytest.raises(TimeoutError):
+            anyio.run(run_command)
+        assert state == {"killed": True, "drained": True}
+    finally:
+        backend.close()
 
 
 def test_auto_backend_fails_closed_to_x11_on_posix_without_xdotool(monkeypatch) -> None:

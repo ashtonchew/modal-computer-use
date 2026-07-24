@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 
+import pytest
+
 from modal_computer_use.benchmarks import (
     COMMAND_ECHO_COMMAND,
     COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
@@ -33,7 +35,7 @@ def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_she
             return {
                 "ok": True,
                 "elapsed_ms": 12.5,
-                "output": {"returncode": 0},
+                "output": {"returncode": 0, "stdout": "42"},
             }
 
     client = TimedClient()
@@ -65,6 +67,36 @@ def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_she
     assert canonical["shell_mode"] == "non_login"
     assert canonical["daemon_samples_ms"] == [12.5]
     assert canonical["attribution"]["status"] == "measured"
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"returncode": 7, "stdout": "42"},
+        {"returncode": 0, "stdout": "wrong"},
+        {"returncode": 0},
+    ],
+)
+def test_command_benchmark_rejects_invalid_success_sentinel(output: dict[str, object]) -> None:
+    class InvalidCommandClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/commands/run"
+            return {"ok": True, "elapsed_ms": 12.5, "output": output}
+
+    payload = run_command_nonlogin_shell_echo_benchmark(
+        client=InvalidCommandClient(),
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["successful_iterations"] == 0
+    assert payload["samples_ms"] == []
+    assert payload["failures"][0]["message"] == (
+        "daemon command did not return the expected success sentinel"
+    )
 
 
 def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:

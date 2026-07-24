@@ -264,10 +264,24 @@ class DesktopBackend(ABC):
         return ActionResult(ok=True, message="browser prewarm not configured")
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:
+        stdout = (
+            "42"
+            if tuple(command)
+            in {
+                ("sh", "-c", "printf 42"),
+                ("sh", "-lc", "printf 42"),
+            }
+            else ""
+        )
         return ActionResult(
             ok=True,
             message="command not executed by mock backend",
-            output={"command": list(command)},
+            output={
+                "command": list(command),
+                "returncode": 0,
+                "stdout": stdout,
+                "stderr": "",
+            },
         )
 
 

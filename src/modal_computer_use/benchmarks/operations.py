@@ -220,8 +220,20 @@ class _CommandEchoBenchmark:
         )
         _ensure_ok_result(result)
         output = result.get("output") if isinstance(result, dict) else {}
+        returncode = output.get("returncode") if isinstance(output, dict) else None
+        stdout = output.get("stdout") if isinstance(output, dict) else None
+        if (
+            isinstance(returncode, bool)
+            or not isinstance(returncode, int)
+            or returncode != 0
+            or not isinstance(stdout, str)
+            or stdout.strip() != "42"
+        ):
+            raise RuntimeError(
+                "daemon command did not return the expected success sentinel"
+            )
         return {
-            "exit_code": output.get("returncode") if isinstance(output, dict) else None,
+            "exit_code": returncode,
             "daemon_ms": _extract_command_elapsed_ms(result),
             "transport_http_version": _transport_http_version(self._client),
         }
