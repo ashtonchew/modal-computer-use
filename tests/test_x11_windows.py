@@ -17,6 +17,7 @@ from modal_computer_use.daemon.desktop.windows import (
     normalize_window_id,
     parse_window_id,
 )
+from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend
 from modal_computer_use.models import X11Window
 
 
@@ -304,7 +305,7 @@ def test_window_backend_probe_prefers_native_and_lifecycle_closes_it(
     controller._commands.available = lambda: False  # type: ignore[method-assign]
     monkeypatch.setattr(windows_module.shutil, "which", lambda _name: None)
 
-    assert controller.probe_backend() == (True, None)
+    assert anyio.run(controller.probe_backend) == (True, None)
     assert controller.backend_name == "xlib-ewmh"
 
     controller.close()
@@ -319,12 +320,72 @@ def test_window_backend_probe_accepts_command_fallback(
         available=False,
         failure="XOpenDisplay failed",
     )
-    controller = _controller(native)
+    commands = CommandRecorder()
+    controller = _controller(native, commands)
     controller._commands.available = lambda: True  # type: ignore[method-assign]
     monkeypatch.setattr(windows_module.shutil, "which", lambda _name: "/usr/bin/tool")
 
-    assert controller.probe_backend() == (True, None)
+    assert anyio.run(controller.probe_backend) == (True, None)
     assert controller.backend_name == "wmctrl"
+    assert commands.calls == [("wmctrl", "-m")]
+
+
+def test_window_backend_probe_rejects_executables_when_window_manager_is_not_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = FakeNativeWindowAdapter(
+        available=False,
+        failure="EWMH properties are unavailable",
+    )
+    commands = CommandRecorder(
+        {
+            ("wmctrl", "-m"): subprocess.CompletedProcess(
+                (),
+                1,
+                "",
+                "Cannot get window manager info",
+            )
+        }
+    )
+    controller = _controller(native, commands)
+    monkeypatch.setattr(windows_module.shutil, "which", lambda _name: "/usr/bin/tool")
+
+    assert anyio.run(controller.probe_backend) == (
+        False,
+        "window manager is not responding",
+    )
+    assert controller.backend_name == "unavailable"
+    assert commands.calls == [("wmctrl", "-m")]
+
+
+def test_x11_readiness_rejects_command_fallback_when_window_manager_is_not_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = FakeNativeWindowAdapter(
+        available=False,
+        failure="EWMH properties are unavailable",
+    )
+    commands = CommandRecorder(
+        {
+            ("wmctrl", "-m"): subprocess.CompletedProcess(
+                (),
+                1,
+                "",
+                "Cannot get window manager info",
+            )
+        }
+    )
+    controller = _controller(native, commands)
+    backend = X11DesktopBackend(width=100, height=100)
+    backend._windows = controller
+    backend._mouse.probe_backend = lambda: (True, None)  # type: ignore[method-assign]
+    monkeypatch.setattr(windows_module.shutil, "which", lambda _name: "/usr/bin/tool")
+
+    ready, errors = anyio.run(backend.ready)
+
+    assert ready is False
+    assert errors == ["window manager is not responding"]
+    assert commands.calls == [("wmctrl", "-m")]
 
 
 def test_window_backend_probe_reports_unavailability(
@@ -338,7 +399,10 @@ def test_window_backend_probe_reports_unavailability(
     controller._commands.available = lambda: False  # type: ignore[method-assign]
     monkeypatch.setattr(windows_module.shutil, "which", lambda _name: None)
 
-    assert controller.probe_backend() == (False, "XOpenDisplay failed")
+    assert anyio.run(controller.probe_backend) == (
+        False,
+        "wmctrl/xdotool window fallback is unavailable",
+    )
 
 
 def test_window_id_parsing_and_canonical_formatting() -> None:

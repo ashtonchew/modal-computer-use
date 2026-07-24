@@ -623,6 +623,17 @@ class _CommandWindowAdapter:
     def available(self) -> bool:
         return shutil.which("wmctrl") is not None and shutil.which("xdotool") is not None
 
+    async def probe(self) -> tuple[bool, str | None]:
+        if not self.available():
+            return False, "wmctrl/xdotool window fallback is unavailable"
+        try:
+            result = await self._run("wmctrl", "-m", timeout=2, check=False)
+        except Exception:
+            return False, "window manager is not responding"
+        if result.returncode != 0:
+            return False, "window manager is not responding"
+        return True, None
+
     async def fallback_list(self) -> list[X11Window]:
         return await self._fallback_windows()
 
@@ -694,17 +705,20 @@ class X11WindowController:
     def backend_name(self) -> str:
         return self._backend_name
 
-    def probe_backend(self) -> tuple[bool, str | None]:
-        if self._native.available():
+    async def probe_backend(self) -> tuple[bool, str | None]:
+        if await asyncio.to_thread(self._native.available):
             self._backend_name = "xlib-ewmh"
             return True, None
-        if self._commands.available():
+        fallback_ready, fallback_error = await self._commands.probe()
+        if fallback_ready:
             self._backend_name = "wmctrl"
             return True, None
+        self._backend_name = "unavailable"
         return (
             False,
-            self._native.failure
-            or "native X11 window management and wmctrl/xdotool are unavailable",
+            fallback_error
+            or self._native.failure
+            or "native X11 window management is unavailable",
         )
 
     def close(self) -> None:

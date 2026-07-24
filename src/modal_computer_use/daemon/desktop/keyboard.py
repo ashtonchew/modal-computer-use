@@ -332,44 +332,93 @@ class X11KeyboardController:
 
     async def up(self, key: str) -> None:
         async with self._operation_lock:
-            normalized = normalize_key(key)
-            tracked = self._held_keys.get(normalized)
-            if tracked is not None and tracked.keycode is not None:
-                if tracked.owned:
-                    try:
-                        self._xtest.emit(
-                            [
-                                KeyEvent(tracked.keycode, False),
-                                *(
-                                    KeyEvent(keycode, False)
-                                    for keycode in reversed(tracked.owned_modifiers)
-                                ),
-                            ]
-                        )
-                        self._active_backend = "xtest"
-                    except X11InputUnavailableError:
-                        if self._configured_backend != "auto":
-                            raise
-                        self._active_backend = "xdotool"
-                        await self._run("xdotool", "keyup", normalized)
-            elif tracked is not None:
-                self._active_backend = "xdotool"
-                await self._run("xdotool", "keyup", normalized)
-            elif self._native_enabled():
+            await self._up_unlocked(key)
+
+    async def release_all(self, keys: Iterable[str] = ()) -> None:
+        """Best-effort release and reconcile every key owned by this controller."""
+        async with self._operation_lock:
+            targets = {
+                *(normalize_key(key) for key in keys),
+                *self._held_keys,
+            }
+            for normalized in reversed(sorted(targets)):
+                tracked = self._held_keys.get(normalized)
                 try:
-                    stroke = self._keymap.action_key(normalized)
-                    self._xtest.emit([KeyEvent(stroke.keycode, False)])
+                    await self._up_unlocked(normalized)
+                except Exception:
+                    # A release is idempotent, so one direct retry is safe even when
+                    # the first adapter may have delivered the event before failing.
+                    with contextlib.suppress(Exception):
+                        await self._retry_release_unlocked(normalized, tracked)
+                    self._held_keys.pop(normalized, None)
+                    with contextlib.suppress(Exception):
+                        await self._key_up_state(normalized)
+
+    async def _up_unlocked(self, key: str) -> None:
+        normalized = normalize_key(key)
+        tracked = self._held_keys.get(normalized)
+        if tracked is not None and tracked.keycode is not None:
+            if tracked.owned:
+                try:
+                    self._xtest.emit(
+                        [
+                            KeyEvent(tracked.keycode, False),
+                            *(
+                                KeyEvent(keycode, False)
+                                for keycode in reversed(tracked.owned_modifiers)
+                            ),
+                        ]
+                    )
                     self._active_backend = "xtest"
                 except X11InputUnavailableError:
                     if self._configured_backend != "auto":
                         raise
                     self._active_backend = "xdotool"
                     await self._run("xdotool", "keyup", normalized)
-            else:
+        elif tracked is not None:
+            self._active_backend = "xdotool"
+            await self._run("xdotool", "keyup", normalized)
+        elif self._native_enabled():
+            try:
+                stroke = self._keymap.action_key(normalized)
+                self._xtest.emit([KeyEvent(stroke.keycode, False)])
+                self._active_backend = "xtest"
+            except X11InputUnavailableError:
+                if self._configured_backend != "auto":
+                    raise
                 self._active_backend = "xdotool"
                 await self._run("xdotool", "keyup", normalized)
-            self._held_keys.pop(normalized, None)
-            await self._key_up_state(key)
+        else:
+            self._active_backend = "xdotool"
+            await self._run("xdotool", "keyup", normalized)
+        self._held_keys.pop(normalized, None)
+        await self._key_up_state(key)
+
+    async def _retry_release_unlocked(
+        self,
+        normalized: str,
+        tracked: _HeldKey | None,
+    ) -> None:
+        if tracked is not None and not tracked.owned:
+            return
+        if tracked is not None and tracked.keycode is not None:
+            try:
+                self._xtest.emit(
+                    [
+                        KeyEvent(tracked.keycode, False),
+                        *(
+                            KeyEvent(keycode, False)
+                            for keycode in reversed(tracked.owned_modifiers)
+                        ),
+                    ]
+                )
+                self._active_backend = "xtest"
+                return
+            except (X11InputInjectionError, X11InputUnavailableError):
+                if self._configured_backend != "auto":
+                    raise
+        self._active_backend = "xdotool"
+        await self._run("xdotool", "keyup", normalized)
 
     async def _type_text_unlocked(
         self,

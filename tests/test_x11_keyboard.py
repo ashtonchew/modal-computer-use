@@ -8,6 +8,7 @@ import pytest
 
 from modal_computer_use.daemon.desktop import keyboard as keyboard_module
 from modal_computer_use.daemon.desktop.keyboard import X11KeyboardController
+from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend
 from modal_computer_use.daemon.desktop.xtest import (
     KeyEvent,
     X11InputInjectionError,
@@ -514,3 +515,28 @@ def test_clipboard_is_restored_when_native_paste_fails() -> None:
         anyio.run(harness.controller.type_text, "secret", 0, "clipboard")
 
     assert harness.clipboard == "previous clipboard"
+
+
+def test_backend_release_all_reconciles_keyboard_after_failed_release() -> None:
+    backend = X11DesktopBackend(input_backend="xdotool")
+    commands: list[tuple[str, ...]] = []
+    fail_next_release = True
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        nonlocal fail_next_release
+        commands.append(args)
+        if args == ("xdotool", "keyup", "shift") and fail_next_release:
+            fail_next_release = False
+            raise RuntimeError("transient key release failure")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    anyio.run(backend.key_down, "shift")
+    released = anyio.run(backend.release_all)
+    anyio.run(backend.key_down, "shift")
+
+    assert released.output == {"keys": ["shift"], "buttons": []}
+    assert commands.count(("xdotool", "keyup", "shift")) == 2
+    assert commands.count(("xdotool", "keydown", "shift")) == 2
+    assert backend.held_keys == {"shift"}

@@ -603,7 +603,7 @@ class X11DesktopBackend(MockDesktopBackend):
         if not input_ready:
             return False, [input_error or "input backend is not ready"]
         self._last_input_backend = self._mouse.backend_name
-        windows_ready, windows_error = self._windows.probe_backend()
+        windows_ready, windows_error = await self._windows.probe_backend()
         if not windows_ready:
             return False, [windows_error or "window backend is not ready"]
 
@@ -831,9 +831,7 @@ class X11DesktopBackend(MockDesktopBackend):
 
     async def release_all(self) -> ActionResult:
         released = {"keys": sorted(self.held_keys), "buttons": sorted(self.held_buttons)}
-        for key in reversed(sorted(self.held_keys)):
-            with contextlib.suppress(Exception):
-                await self._keyboard.up(key)
+        await self._keyboard.release_all(self.held_keys)
         for button in reversed(sorted(self.held_buttons)):
             with contextlib.suppress(Exception):
                 await self._mouse.up(button)
