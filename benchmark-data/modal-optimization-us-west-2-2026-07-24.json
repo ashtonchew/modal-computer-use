@@ -1,0 +1,162 @@
+{
+  "benchmark": "modal-optimization-fixed-region-replication",
+  "schema_version": 1,
+  "generated_at": "2026-07-24T00:43:59.852295Z",
+  "provenance": {
+    "branch": "feat/colocated-region-inheritance",
+    "source_sha": "d7790daf2a81655610f1988b23cc6f5caddf7a16",
+    "dependency_sha": "37f977f80de93800c005caeec7ead5222b00b040",
+    "image_identity": "modal-computer-use-chromium:d7790daf2a81655610f1988b23cc6f5caddf7a16",
+    "modal_sdk_version": "1.5.2",
+    "preregistration_sha256": "223239049b1c01a8112b60e7abd3bef8d90af0b9da1c26f47dacc7a0c4fa791a",
+    "checkpoint_sha256": "9fce632f19dd49d2439bb79cc5af8ba8514b3d668c0d314162cd12e45179d291",
+    "raw_artifact_sha256": "04fce22a307d2d125bc21694bbf86dc520766f56013dbe5d63dfd8b79faa1adb"
+  },
+  "configuration": {
+    "browser": "chromium",
+    "cpu": 4.0,
+    "memory_mib": 8192,
+    "requested_region": "us-west-2",
+    "actual_regions": [
+      "us-west-2"
+    ],
+    "target_ingress": "attested-tunnel",
+    "warm_runner_path": "same-region-separate-modal-runner:connect",
+    "warm_action_transport": "persistent-hot-session",
+    "warm_observation_transport": "binary-envelope-causal-observation",
+    "readiness_timeout_seconds": 120.0,
+    "sandbox_timeout_seconds": 900,
+    "sample_policy": {
+      "independent_cold_attempts": 30,
+      "warm_action_attempts": 30,
+      "warm_claim_attempts": 30,
+      "warm_pool_target": 3,
+      "warm_idle_seconds": 30.0,
+      "replacement_samples": false
+    }
+  },
+  "metric_boundaries": {
+    "cold": "request to first valid authenticated frame",
+    "warm_action": "correlated click dispatch to first matching changed causal frame",
+    "warm_claim": "queue claim to first valid authenticated frame"
+  },
+  "results": {
+    "cold": {
+      "attempted": 30,
+      "valid": 30,
+      "failed": 0,
+      "timeout": 0,
+      "p50_ms": 11461.451187438797,
+      "p95_ms": 12909.515757864574
+    },
+    "warm_action": {
+      "attempted": 30,
+      "valid": 30,
+      "failed": 0,
+      "timeout": 0,
+      "p50_ms": 33.4125704999999,
+      "p95_ms": 37.72960520000003
+    },
+    "warm_claim": {
+      "attempted": 30,
+      "valid": 30,
+      "failed": 0,
+      "timeout": 0,
+      "p50_ms": 2012.422083527781,
+      "p95_ms": 2220.6211793527473,
+      "pool_hits": 30,
+      "pool_misses": 0,
+      "cold_fallbacks": 0
+    }
+  },
+  "cost_estimates": {
+    "on_demand": {
+      "duration_seconds": 383.1578389153583,
+      "estimated_usd": 0.1415078530682201,
+      "region_multiplier": 1.75,
+      "status": "partial",
+      "excluded": [
+        "runner_compute",
+        "control_plane",
+        "billing_adjustments"
+      ]
+    },
+    "warm_pool_idle": {
+      "idle_resource_seconds": 1453.435572,
+      "estimated_idle_usd": 0.53678282545104,
+      "status": "partial",
+      "excluded": [
+        "pool_startup_compute",
+        "claimed_session_compute",
+        "control_plane",
+        "billing_adjustments"
+      ]
+    }
+  },
+  "cleanup": {
+    "all_attempt_cleanups_succeeded": true,
+    "warm_target_cleanup_succeeded": true,
+    "warm_pool_fill_failures": [],
+    "run_level_pool_cleanup": {
+      "inspected": 0,
+      "terminated": 0,
+      "failure_types": []
+    },
+    "post_run_running_modal_containers": 0
+  },
+  "historical_context": {
+    "artifact": "benchmark-data/modal-optimization-results-2026-07-19.json",
+    "requested_region": "us-west",
+    "comparison_kind": "unpaired historical context; not a causal region A/B",
+    "metrics": {
+      "cold_p50": {
+        "historical_ms": 9032.339937490178,
+        "fixed_us_west_2_ms": 11461.451187438797,
+        "delta_ms": 2429.111249948619,
+        "delta_percent": 26.893487919627578
+      },
+      "cold_p95": {
+        "historical_ms": 12285.469552574796,
+        "fixed_us_west_2_ms": 12909.515757864574,
+        "delta_ms": 624.0462052897783,
+        "delta_percent": 5.079547042294297
+      },
+      "warm_action_p50": {
+        "historical_ms": 29.70698400000016,
+        "fixed_us_west_2_ms": 33.4125704999999,
+        "delta_ms": 3.705586499999743,
+        "delta_percent": 12.473788991840173
+      },
+      "warm_action_p95": {
+        "historical_ms": 40.432678049999986,
+        "fixed_us_west_2_ms": 37.72960520000003,
+        "delta_ms": -2.7030728499999555,
+        "delta_percent": -6.685366837826756
+      },
+      "warm_claim_p50": {
+        "historical_ms": 1841.9828329933807,
+        "fixed_us_west_2_ms": 2012.422083527781,
+        "delta_ms": 170.43925053440034,
+        "delta_percent": 9.25303143338323
+      },
+      "warm_claim_p95": {
+        "historical_ms": 2233.5194608633174,
+        "fixed_us_west_2_ms": 2220.6211793527473,
+        "delta_ms": -12.898281510570087,
+        "delta_percent": -0.5774868648596665
+      }
+    }
+  },
+  "provider_context": {
+    "artifact": "benchmark-data/provider-compare-2026-07-18-current.json",
+    "artifact_sha256": "29a54416209302ad81379498fd888d3e8e96ded7c02ffbeb6f9dee6ce4dff3a6",
+    "harness_commit": "74edc6317ea4bac61ef512d7a68060445cf42720",
+    "status": "current_reference",
+    "fresh_measurement": false
+  },
+  "interpretation": {
+    "raw_transport_result": "Separate matched-Connect evidence reduced the colocated zero-byte transport floor from 43.081 ms in broad us-west to 1.253 ms in narrow us-west-2.",
+    "full_workload_result": "The fixed narrow-region replication did not reduce the full warm action p50 relative to the historical broad-region run.",
+    "decision": "Keep narrow-region placement explicit and experimental. Do not silently make us-west-2 the default optimization region from this unpaired evidence."
+  }
+}

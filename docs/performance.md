@@ -845,6 +845,30 @@ is actually narrow enough. It does not make the ephemeral runner itself a produc
 proof point for a future hosted model-loop/control-plane shape and carries Modal's narrow-region
 availability and pricing tradeoffs.
 
+A July 24 fixed-region replication then tested whether that 1.253ms transport floor improves the
+complete optimized Modal workload. It used the exact named Chromium image at revision `d7790da`,
+4 CPU / 8192 MiB targets, `us-west-2` for both target and separate runner, a persistent hot action
+session, causal binary-envelope observations, and 30 attempts per metric. All 90 measurements were
+valid, every measured placement was `us-west-2`, and the post-run Modal container inventory was
+empty.
+
+| Complete workload metric | Historical broad `us-west` | Fixed `us-west-2` | Unpaired delta |
+| --- | ---: | ---: | ---: |
+| Cold request → first authenticated frame p50 | 9,032.340ms | 11,461.451ms | +26.9% |
+| Cold request → first authenticated frame p95 | 12,285.470ms | 12,909.516ms | +5.1% |
+| Warm action → matching changed causal frame p50 | 29.707ms | 33.413ms | +12.5% |
+| Warm action → matching changed causal frame p95 | 40.433ms | 37.730ms | -6.7% |
+| Warm-pool claim → first authenticated frame p50 | 1,841.983ms | 2,012.422ms | +9.3% |
+| Warm-pool claim → first authenticated frame p95 | 2,233.519ms | 2,220.621ms | -0.6% |
+
+The broad run is historical context, not a paired causal region A/B, so these deltas are directional.
+They do show that the large raw transport-floor reduction did not produce a lower complete warm
+action p50. Once the transport floor is near 1ms, desktop action execution, visual change
+detection, capture, encoding, and observation handling dominate this benchmark. Keep `us-west-2`
+as an explicit experiment or deployment choice; this evidence does not justify silently changing
+the optimization default from a broad region to one narrow region. The compact evidence record is
+[`benchmark-data/modal-optimization-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimization-us-west-2-2026-07-24.json).
+
 For application code, the same pattern is available as a co-located runner Sandbox. The target
 desktop sandbox and runner sandbox are created with the same requested region selector, and the
 runner talks directly to the target daemon. Use `run_modal_daemon_command()` or
