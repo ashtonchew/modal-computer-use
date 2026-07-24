@@ -567,6 +567,7 @@ For interpretation notes and one captured live run set, see:
 
 - [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
 - [Provider-default benchmark reference, 2026-07-18](benchmark-results-2026-07-18-provider-default.md)
+- [Fallback ownership and current provider comparison, 2026-07-24](benchmark-results-2026-07-24-fallback-ownership.md)
 - [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
 - [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
 - [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
