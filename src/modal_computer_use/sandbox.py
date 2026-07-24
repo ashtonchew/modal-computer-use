@@ -16,6 +16,7 @@ from ._version import __version__
 from .client import DaemonClient
 from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
 from .errors import (
+    BrowserReadinessError,
     ConfigConflictError,
     ModalNotInstalledError,
     SandboxAmbiguousError,
@@ -85,6 +86,7 @@ class ModalDaemonCommandResult:
     requested_region: str
     fallback_used: bool
     fallback_reason: str | None = None
+    fallback_error_type: str | None = None
 
 
 @dataclass
@@ -559,15 +561,25 @@ def modal_sandbox_exec_once(
         stdout = _read_modal_process_stream(getattr(process, "stdout", ""))
         stderr = _read_modal_process_stream(getattr(process, "stderr", ""))
         returncode = _modal_process_returncode(process)
-        return ModalSandboxExecResult(
+        result = ModalSandboxExecResult(
             sandbox_id=getattr(runner, "object_id", "unknown"),
             returncode=returncode,
             stdout=stdout,
             stderr=stderr,
         )
-    finally:
+    except BaseException as exc:
         if hasattr(runner, "terminate"):
-            runner.terminate()
+            try:
+                runner.terminate(wait=True)
+            except Exception as cleanup_exc:
+                exc.add_note(
+                    "runner cleanup also failed: "
+                    f"terminate ({type(cleanup_exc).__name__})"
+                )
+        raise
+    if hasattr(runner, "terminate"):
+        runner.terminate(wait=True)
+    return result
 
 
 def modal_sandbox_exec_in_place(
@@ -847,6 +859,10 @@ def modal_workspace_billing_report(
     )
 
 
+def _daemon_bearer_from_auth(auth: dict[str, str]) -> str:
+    return auth["COMPUTER_USE_TUNNEL_TOKEN"]
+
+
 class ComputerSandbox:
     def __init__(
         self,
@@ -860,8 +876,9 @@ class ComputerSandbox:
         self._sandbox = sandbox
         self._metadata = metadata
         self._requested_modal_region: str | None = None
+        self._daemon_bearer: str | None = None
         self.startup_timing = startup_timing
-        self._cleanup_on_readiness_failure = False
+        self._readiness_failure_cleanup: Literal["none", "client", "sandbox"] = "none"
         self._readiness_stage_count = 0
         self.lifecycle = LifecycleNamespace(client)
         self.mouse = MouseNamespace(client)
@@ -986,9 +1003,9 @@ class ComputerSandbox:
         http2 = config.network.daemon_http_version == "2"
         ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
         h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
-        tunnel_token = _secrets.token_urlsafe(32) if config.ingress == "tunnel" else None
-        if tunnel_token:
-            env["COMPUTER_USE_TUNNEL_TOKEN"] = tunnel_token
+        daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
+        env.update(daemon_auth)
+        tunnel_token = _daemon_bearer_from_auth(daemon_auth)
         create_kwargs: dict[str, Any] = {
             "app": app,
             "image": image,
@@ -1049,7 +1066,8 @@ class ComputerSandbox:
             metadata=metadata,
         )
         computer.startup_timing = timing
-        computer._cleanup_on_readiness_failure = True
+        computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
+        computer._readiness_failure_cleanup = "sandbox"
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         if wait and config.ingress == "attested-tunnel":
@@ -1065,12 +1083,13 @@ class ComputerSandbox:
                 metadata=metadata,
             )
             computer.startup_timing = timing
-            computer._cleanup_on_readiness_failure = True
+            computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
+            computer._readiness_failure_cleanup = "sandbox"
             computer._readiness_stage_count = 1
             timing.mark("attestation_ready")
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         computer._requested_modal_region = config.runtime.modal_region
-        computer._cleanup_on_readiness_failure = False
+        computer._readiness_failure_cleanup = "none"
         return computer
 
     @classmethod
@@ -1091,7 +1110,9 @@ class ComputerSandbox:
         if base_url:
             computer = cls(DaemonClient(base_url=base_url, token=token, http2=http2))
             if wait:
+                computer._readiness_failure_cleanup = "client"
                 computer.wait_until_ready(timeout=readiness_timeout)
+                computer._readiness_failure_cleanup = "none"
             return computer
         try:
             import modal
@@ -1122,6 +1143,7 @@ class ComputerSandbox:
             metadata=metadata,
         )
         if wait:
+            computer._readiness_failure_cleanup = "client"
             computer.wait_until_ready(timeout=readiness_timeout)
             if ingress == "attested-tunnel":
                 computer.client.close()
@@ -1135,7 +1157,9 @@ class ComputerSandbox:
                     sandbox=sandbox,
                     metadata=metadata,
                 )
+                computer._readiness_failure_cleanup = "client"
                 computer.wait_until_ready(timeout=readiness_timeout)
+            computer._readiness_failure_cleanup = "none"
         return computer
 
     @classmethod
@@ -1244,13 +1268,23 @@ class ComputerSandbox:
                 last_error = exc
             if time.monotonic() >= deadline:
                 detail = _readiness_timeout_detail(last_payload, last_error)
-                if self._cleanup_on_readiness_failure:
-                    self.client.close()
-                    if self._sandbox is not None:
-                        _terminate_failed_sandbox(self._sandbox)
-                raise TimeoutError(
+                timeout_error = TimeoutError(
                     f"daemon did not become ready before timeout ({timeout:g}s){detail}"
                 )
+                if self._readiness_failure_cleanup != "none":
+                    try:
+                        self.client.close()
+                    except Exception as exc:
+                        timeout_error.add_note(
+                            "readiness cleanup also failed: "
+                            f"client.close ({type(exc).__name__})"
+                        )
+                if (
+                    self._readiness_failure_cleanup == "sandbox"
+                    and self._sandbox is not None
+                ):
+                    _terminate_failed_sandbox(self._sandbox)
+                raise timeout_error
             time.sleep(interval)
 
     def terminate(self, *, wait: bool = False) -> None:
@@ -1320,14 +1354,18 @@ class ComputerSandbox:
             return
         status = self.browser.status()
         if status.get("configured_browser") != config.browser.kind:
-            raise RuntimeError("configured browser does not match the requested browser")
+            raise BrowserReadinessError(
+                "configured browser does not match the requested browser"
+            )
         if not config.browser.prewarm:
             return
         prewarm_result = status.get("prewarm_result")
         if not isinstance(prewarm_result, dict) or prewarm_result.get("ok") is not True:
-            raise RuntimeError("browser prewarm did not succeed")
+            raise BrowserReadinessError("browser prewarm did not succeed")
         if not isinstance(status.get("windows"), int) or status["windows"] < 1:
-            raise RuntimeError("browser prewarm did not create a browser window")
+            raise BrowserReadinessError(
+                "browser prewarm did not create a browser window"
+            )
         if timing is not None:
             timing.mark("browser_ready")
 
@@ -1472,6 +1510,15 @@ class ComputerSandbox:
         self._sandbox.mount_image(path, image)
 
 
+def _required_loopback_bearer(computer: ComputerSandbox) -> str:
+    bearer = getattr(computer, "_daemon_bearer", None)
+    if not bearer:
+        raise SandboxUnavailableError(
+            "target-loopback requires an SDK-owned daemon bearer"
+        )
+    return bearer
+
+
 def modal_daemon_endpoint(
     computer: ComputerSandbox,
     path: ModalDaemonEndpointPath = "inherited",
@@ -1501,7 +1548,7 @@ def modal_daemon_endpoint(
         return ModalDaemonEndpoint(
             path=path,
             base_url="http://127.0.0.1:8080",
-            token=computer.client.transport.token,
+            token=_required_loopback_bearer(computer),
             target_sandbox_id=target_sandbox_id,
             execute_in_target=True,
         )
@@ -1655,12 +1702,12 @@ def create_modal_benchmark_computer(
             timing.mark("connect_endpoint_ready")
         elif transport == "encrypted-tunnel":
             base_url = _tunnel_url(sandbox, 8080)
-            token = next(iter(daemon_auth.values()))
+            token = _daemon_bearer_from_auth(daemon_auth)
             timing.mark("encrypted_tunnel_ready")
         else:
             address = _sandbox_i6pn_address(sandbox)
             base_url = f"http://[{address}]:8080"
-            token = next(iter(daemon_auth.values()))
+            token = _daemon_bearer_from_auth(daemon_auth)
             timing.mark("workspace_private_endpoint_ready")
         metadata = SandboxRef(
             sandbox_id=getattr(sandbox, "object_id", "unknown"),
@@ -1680,6 +1727,7 @@ def create_modal_benchmark_computer(
             metadata=metadata,
             startup_timing=timing,
         )
+        computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
         computer._requested_modal_region = config.runtime.modal_region
         if wait and transport != "workspace-private-i6pn":
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
@@ -1800,7 +1848,7 @@ def create_modal_v2_tunnel_computer(
         timing.mark("encrypted_tunnel_ready")
         client = client_factory(
             base_url=base_url,
-            token=next(iter(tunnel_auth.values())),
+            token=_daemon_bearer_from_auth(tunnel_auth),
             http2=False,
         )
         metadata = SandboxRef(
@@ -1817,6 +1865,7 @@ def create_modal_v2_tunnel_computer(
             artifacts_dir=config.storage.artifacts_dir,
         )
         computer = ComputerSandbox(client, sandbox=sandbox, metadata=metadata)
+        computer._daemon_bearer = _daemon_bearer_from_auth(tunnel_auth)
         computer._requested_modal_region = config.runtime.modal_region
         if wait:
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
@@ -1936,8 +1985,9 @@ def run_modal_daemon_command_with_fallback(
     )
     try:
         endpoint = modal_daemon_endpoint(computer, "connect")
-        runner_env = modal_daemon_env(endpoint, env)
     except Exception as exc:
+        if not _is_connect_preparation_failure(exc):
+            raise
         if external_runner is None:
             raise
         endpoint = modal_daemon_endpoint(computer, "inherited")
@@ -1952,8 +2002,10 @@ def run_modal_daemon_command_with_fallback(
             selected_path="external",
             requested_region=selected_region,
             fallback_used=True,
-            fallback_reason=exc.__class__.__name__,
+            fallback_reason="connect_endpoint_unavailable",
+            fallback_error_type=type(exc).__name__,
         )
+    runner_env = modal_daemon_env(endpoint, env)
     result = exec_once(
         command_tuple,
         app_name=app_name,
@@ -1975,6 +2027,41 @@ def run_modal_daemon_command_with_fallback(
         selected_path="same-region-connect",
         requested_region=selected_region,
         fallback_used=False,
+    )
+
+
+def _is_connect_preparation_failure(exc: Exception) -> bool:
+    if isinstance(exc, SandboxUnavailableError):
+        return True
+    return _is_modal_availability_error(exc)
+
+
+def _is_modal_availability_error(exc: Exception) -> bool:
+    try:
+        from modal.exception import (
+            ConnectionError as ModalConnectionError,
+        )
+        from modal.exception import (
+            InternalFailure,
+            NotFoundError,
+            SandboxTerminatedError,
+            ServiceError,
+        )
+        from modal.exception import (
+            TimeoutError as ModalTimeoutError,
+        )
+    except ImportError:
+        return False
+    return isinstance(
+        exc,
+        (
+            ModalConnectionError,
+            InternalFailure,
+            NotFoundError,
+            SandboxTerminatedError,
+            ServiceError,
+            ModalTimeoutError,
+        ),
     )
 
 
@@ -2388,11 +2475,12 @@ def _readiness_timeout_detail(payload: object | None, error: Exception | None) -
     if isinstance(payload, dict):
         errors = payload.get("errors")
         if isinstance(errors, list) and errors:
-            return f"; last /readyz errors: {', '.join(str(item) for item in errors)}"
+            suffix = "" if len(errors) == 1 else "s"
+            return f"; last /readyz reported {len(errors)} error{suffix}"
         if payload:
-            return f"; last /readyz response: {payload}"
+            return "; last /readyz response was not ready"
     if error is not None:
-        return f"; last error: {type(error).__name__}: {error}"
+        return f"; last error type: {type(error).__name__}"
     return ""
 
 

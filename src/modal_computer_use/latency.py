@@ -11,6 +11,7 @@ from time import monotonic
 from typing import Any
 
 from .config import ComputerConfig
+from .errors import FrameValidationError
 
 _MODAL_CPU_RATE = 0.00003942
 _MODAL_MEMORY_RATE = 0.00000667
@@ -203,7 +204,18 @@ class WarmPoolClaim:
             return
         try:
             self.computer.terminate(wait=True)
-        finally:
+        except BaseException as exc:
+            try:
+                self.computer.detach()
+            except Exception as cleanup_exc:
+                exc.add_note(
+                    "claim cleanup also failed: "
+                    f"detach ({type(cleanup_exc).__name__})"
+                )
+            else:
+                self._closed = True
+            raise
+        else:
             self.computer.detach()
             self._closed = True
 
@@ -232,7 +244,7 @@ def validate_first_frame(
     image_format: str,
 ) -> bytes:
     if not payload:
-        raise ValueError("first frame is empty")
+        raise FrameValidationError("first frame is empty")
     try:
         from PIL import Image
 
@@ -241,12 +253,16 @@ def validate_first_frame(
             actual_format = (image.format or "").lower()
             actual_size = image.size
     except Exception as exc:
-        raise ValueError("first frame could not be decoded") from exc
+        raise FrameValidationError("first frame could not be decoded") from exc
     expected_format = image_format.lower().replace("jpg", "jpeg")
     if actual_format.lower().replace("jpg", "jpeg") != expected_format:
-        raise ValueError("first frame content type does not match the requested format")
+        raise FrameValidationError(
+            "first frame content type does not match the requested format"
+        )
     if actual_size != (expected_width, expected_height):
-        raise ValueError("first frame geometry does not match the configured desktop")
+        raise FrameValidationError(
+            "first frame geometry does not match the configured desktop"
+        )
     return payload
 
 

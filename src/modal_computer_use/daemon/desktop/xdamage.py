@@ -4,13 +4,16 @@ import ctypes
 import ctypes.util
 import os
 import select
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 X_DAMAGE_REPORT_DELTA_RECTANGLES = 1
 X_DAMAGE_REPORT_NON_EMPTY = 3
 _MAX_DAMAGE_RECTS = 64
+ChangeSignal = Literal["poll", "xdamage", "auto"]
+ActiveChangeSignal = Literal["poll", "xdamage"]
 
 
 class XDamageUnavailableError(RuntimeError):
@@ -390,6 +393,83 @@ class XDamageWatcher:
             return tuple(rect for rect in rects if rect.valid())
         finally:
             self._x11.XFree(ctypes.cast(rect_ptr, ctypes.c_void_p))
+
+
+@dataclass(frozen=True)
+class PreparedChangeSignal:
+    requested: ChangeSignal
+    active: ActiveChangeSignal
+    watcher: XDamageWatcher | None = None
+    unavailable_reason: str | None = None
+
+    @property
+    def wait_watcher(self) -> XDamageWatcher | None:
+        return self.watcher if self.active == "xdamage" else None
+
+    @property
+    def reusable_watcher(self) -> XDamageWatcher | None:
+        return self.watcher
+
+    def metadata(self, result: XDamageWaitResult | None) -> dict[str, object]:
+        if self.active == "poll":
+            available: bool | None = False if self.requested != "poll" else None
+        else:
+            available = None if result is None else result.available
+        return {
+            "change_signal_requested": self.requested,
+            "change_signal_active": self.active,
+            "change_signal_available": available,
+            "change_signal_detected": None if result is None else result.detected,
+            "change_signal_wait_ms": None if result is None else result.wait_ms,
+            "change_signal_reason": (
+                result.reason if result is not None else self.unavailable_reason
+            ),
+            "change_signal_version": None if result is None else result.version,
+        }
+
+    def close(self) -> None:
+        if self.watcher is not None:
+            self.watcher.close()
+
+
+def prepare_change_signal(
+    requested: ChangeSignal,
+    *,
+    display: str | None,
+    watcher: XDamageWatcher | None = None,
+    watcher_factory: Callable[..., XDamageWatcher] = XDamageWatcher,
+) -> PreparedChangeSignal:
+    if requested == "poll":
+        return PreparedChangeSignal(requested=requested, active="poll")
+    if not isinstance(display, str) or not display:
+        return PreparedChangeSignal(
+            requested=requested,
+            active="poll",
+            unavailable_reason="backend has no X11 display",
+        )
+    prepared_watcher = watcher or watcher_factory(display=display)
+    try:
+        prepared_watcher.arm()
+    except Exception:
+        unavailable_reason = prepared_watcher.failure or "XDamage unavailable"
+        if requested == "auto":
+            return PreparedChangeSignal(
+                requested=requested,
+                active="poll",
+                watcher=prepared_watcher,
+                unavailable_reason=unavailable_reason,
+            )
+        return PreparedChangeSignal(
+            requested=requested,
+            active="xdamage",
+            watcher=prepared_watcher,
+            unavailable_reason=unavailable_reason,
+        )
+    return PreparedChangeSignal(
+        requested=requested,
+        active="xdamage",
+        watcher=prepared_watcher,
+    )
 
 
 def _rect_from_damage_event(event: _XEvent) -> XDamageRect | None:

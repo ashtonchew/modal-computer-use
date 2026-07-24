@@ -54,6 +54,16 @@ need to know whether a Modal noVNC URL exists.
 
 Capability reads report cached state and do not trigger a new input probe.
 
+Successful direct primitive responses also attribute the implementation used for that operation:
+
+- Direct mouse routes return `X-Computer-Use-Input-Backend`.
+- Direct window routes return `X-Computer-Use-Window-Backend`.
+- Raw screenshot routes return `X-Computer-Use-Capture-Backend`.
+
+Use these response headers for concurrent diagnostics and benchmarks. The legacy `input_backend`
+capability reports the last observed process state. It does not identify a specific request.
+Attribution headers do not change response bodies or SDK return models.
+
 ## Input failure and cleanup contracts
 
 Direct primitive failures use `{code, message, details}`. Batch item failures use the same `code`
@@ -150,12 +160,13 @@ adds `zoom`. Older versions reject newer actions instead of accepting them silen
 
 ## Modal attach and reuse
 
-Modal mode supports three explicit attach paths:
+The SDK supports four explicit attach paths:
 
 ```python
 ComputerSandbox.attach(sandbox_id="sb-...")
 ComputerSandbox.attach(name="desktop-1", app_name="modal-computer-use")
 ComputerSandbox.attach(run_id="support-ticket-123")
+ComputerSandbox.attach(base_url="https://daemon.example", token="...")
 ```
 
 `run_id` is the canonical sandbox lifetime identifier. `request_id` is only a deprecated
@@ -195,6 +206,10 @@ existing sandbox configuration.
 terminate a sandbox. Pass `wait=True` to poll `/readyz` after attaching. `attach_or_create(...)`
 defaults to `wait=True` for both reused and newly-created sandboxes, so resumable workflows get a
 desktop-ready handle unless they explicitly pass `wait=False`.
+If readiness times out, `attach(...)` closes the client it created but does not terminate the
+existing target. This cleanup applies equally to Modal handles and direct `base_url` attachments.
+The readiness timeout remains the primary error if client cleanup also fails; only the cleanup
+exception type is attached as diagnostic context.
 
 Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does
@@ -339,12 +354,27 @@ creation config must pass `modal_region` because their placement policy is unkno
 latency-sensitive session in one command; creating a fresh runner for every action would put runner
 allocation back on the hot path.
 
+An external fallback requires an explicit `external_runner`. The fallback is available only when
+Connect endpoint preparation fails before dispatch. In this case,
+`ModalDaemonCommandResult.fallback_used` is true and `fallback_reason` is
+`connect_endpoint_unavailable`. The `fallback_error_type` field contains only the exception class.
+
+Modal connection, service, timeout, documented retriable-internal, missing-target, and
+terminated-Sandbox errors can use this fallback. Authentication, permission, validation, version,
+quota, configuration, environment, programming, dispatch, and workload errors are terminal. The
+helper does not replay these commands externally.
+
 Use `run_modal_daemon_command(computer, command, path=...)` for explicit diagnostics.
 `path="inherited"` passes the target client's current daemon URL/token into a separate runner,
 `path="connect"` creates a fresh Modal Connect Token for that runner, and
 `path="target-loopback"` executes inside the target sandbox against `http://127.0.0.1:8080`.
+The loopback path uses the target daemon's application bearer instead of an ingress token. The SDK
+does not place these tokens in public sandbox metadata or benchmark logs.
 The helper owns the reserved daemon env keys and rejects user overrides so benchmark or workload
 metadata cannot accidentally replace the daemon endpoint or bearer token.
+Warm-pool browser validation raises `BrowserReadinessError`. Frame validation raises
+`FrameValidationError`. These types remain compatible with `RuntimeError` and `ValueError`.
+Orchestration can therefore distinguish candidate rejection from unrelated programming errors.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an

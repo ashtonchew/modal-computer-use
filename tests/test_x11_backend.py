@@ -782,6 +782,59 @@ def test_x11_screenshot_show_cursor_uses_file_capture_when_mss_available(monkeyp
     assert backend.commands == [("maim", backend.commands[0][-1])]
 
 
+def test_x11_screenshot_readiness_owns_cursor_capture_probe(monkeypatch) -> None:
+    commands: list[tuple[str, ...]] = []
+
+    async def run(*args: str, **_kwargs):
+        commands.append(args)
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    async def cursor_position() -> Point:
+        return Point(x=0, y=0)
+
+    monkeypatch.setattr(
+        screenshots_module.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name == "maim" else None,
+    )
+    controller = screenshots_module.X11ScreenshotController(
+        run=run,
+        width=10,
+        height=10,
+        display=":99",
+        cursor_position=cursor_position,
+    )
+
+    ready, error = anyio.run(controller.probe)
+
+    assert ready is True
+    assert error is None
+    assert commands == [("maim", commands[0][-1])]
+
+
+def test_x11_screenshot_readiness_requires_maim_but_not_scrot(monkeypatch) -> None:
+    async def run(*_args: str, **_kwargs):
+        raise AssertionError("capture should not run without maim")
+
+    async def cursor_position() -> Point:
+        return Point(x=0, y=0)
+
+    monkeypatch.setattr(screenshots_module.shutil, "which", lambda _name: None)
+    controller = screenshots_module.X11ScreenshotController(
+        run=run,
+        width=10,
+        height=10,
+        display=":99",
+        cursor_position=cursor_position,
+    )
+
+    ready, error = anyio.run(controller.probe)
+
+    assert ready is False
+    assert error == "missing required tools: maim"
+
+
 def test_mss_capture_session_reuses_screenshotter(monkeypatch) -> None:
     instances = []
 
@@ -807,28 +860,59 @@ def test_mss_capture_session_reuses_screenshotter(monkeypatch) -> None:
     assert instances[0].grabs == 2
 
 
-def test_mss_capture_session_falls_back_when_xshm_open_fails(monkeypatch) -> None:
-    backends = []
+def test_mss_capture_session_prefers_xshm_and_reopens_once(monkeypatch) -> None:
+    kwargs_seen: list[dict[str, object]] = []
+    instances = []
 
     class FakeMSS:
         def __init__(self, **kwargs):
-            backend = kwargs.get("backend")
-            backends.append(backend)
-            if backend == "xshmgetimage":
-                raise RuntimeError("xshm unavailable")
+            kwargs_seen.append(kwargs)
+            self.closed = False
+            self.instance = len(instances)
+            instances.append(self)
 
         def grab(self, _monitor):
+            if self.instance == 0:
+                raise RuntimeError("stale display connection")
             return _fake_mss_capture((10, 10)).shot
 
         def close(self):
-            pass
+            self.closed = True
 
     monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(MSS=FakeMSS))
 
     session = screenshots_module._MSSCaptureSession(display=":99")
 
     assert session.grab(Region(x=0, y=0, width=10, height=10)) is not None
-    assert backends == ["xshmgetimage", None]
+    assert kwargs_seen == [
+        {"display": ":99", "backend": "xshmgetimage"},
+        {"display": ":99", "backend": "xshmgetimage"},
+    ]
+    assert instances[0].closed is True
+    assert instances[1].closed is False
+
+
+def test_mss_capture_session_returns_none_after_one_reopen(monkeypatch) -> None:
+    instances = []
+
+    class FakeMSS:
+        def __init__(self, **_kwargs):
+            self.closed = False
+            instances.append(self)
+
+        def grab(self, _monitor):
+            raise RuntimeError("capture unavailable")
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(MSS=FakeMSS))
+
+    session = screenshots_module._MSSCaptureSession(display=":99")
+
+    assert session.grab(Region(x=0, y=0, width=10, height=10)) is None
+    assert len(instances) == 2
+    assert all(instance.closed for instance in instances)
 
 
 def test_x11_screenshot_tiny_positive_scale_returns_minimum_dimensions() -> None:
@@ -1027,3 +1111,77 @@ def test_native_readiness_requires_public_xdotool_compatibility_path(monkeypatch
     assert errors == ["missing required tools: xdotool"]
     assert backend.input_backend == "xtest"
     assert backend.available_input_backends == ("xtest",)
+
+
+def test_x11_readiness_delegates_screenshot_probe_and_does_not_require_xsel_or_scrot(
+    monkeypatch,
+) -> None:
+    backend = X11DesktopBackend(input_backend="xtest")
+    monkeypatch.setattr(backend._input, "available", lambda: True)
+    backend._windows._backend_name = "xlib-ewmh"
+
+    async def cache_input_backends() -> None:
+        backend._available_input_backends = ("xtest", "xdotool")
+
+    async def probe_windows() -> tuple[bool, str | None]:
+        return True, None
+
+    async def probe_screenshots() -> tuple[bool, str | None]:
+        return True, None
+
+    backend._cache_available_input_backends = cache_input_backends  # type: ignore[method-assign]
+    backend._windows.probe_backend = probe_windows  # type: ignore[method-assign]
+    backend._screenshots.probe = probe_screenshots  # type: ignore[attr-defined,method-assign]
+    monkeypatch.setattr(
+        x11_module.shutil,
+        "which",
+        lambda name: None if name in {"xsel", "scrot"} else f"/usr/bin/{name}",
+    )
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    ready, errors = anyio.run(backend.ready)
+
+    assert ready is True
+    assert errors == []
+
+
+def test_x11_readiness_surfaces_screenshot_probe_failure(monkeypatch) -> None:
+    backend = X11DesktopBackend(input_backend="xtest")
+    monkeypatch.setattr(backend._input, "available", lambda: True)
+    backend._windows._backend_name = "xlib-ewmh"
+
+    async def cache_input_backends() -> None:
+        backend._available_input_backends = ("xtest", "xdotool")
+
+    async def probe_windows() -> tuple[bool, str | None]:
+        return True, None
+
+    async def probe_screenshots() -> tuple[bool, str | None]:
+        return False, "screenshot capture failed"
+
+    backend._cache_available_input_backends = cache_input_backends  # type: ignore[method-assign]
+    backend._windows.probe_backend = probe_windows  # type: ignore[method-assign]
+    backend._screenshots.probe = probe_screenshots  # type: ignore[attr-defined,method-assign]
+    monkeypatch.setattr(x11_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    async def run(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run  # type: ignore[method-assign]
+
+    ready, errors = anyio.run(backend.ready)
+
+    assert ready is False
+    assert errors == ["screenshot capture failed"]
+
+
+def test_x11_window_backend_reports_controller_backend() -> None:
+    backend = X11DesktopBackend()
+
+    backend._windows._backend_name = "wmctrl"
+
+    assert backend.window_backend == "wmctrl"

@@ -185,11 +185,12 @@ This result supports action-path claims, not a universal provider ranking. E2B r
 for product startup, both competitors remain faster for command execution, and E2B is faster for
 the default screenshot call. Modal's advantage is concentrated in native input and daemon batching.
 
-The secret-safe candidate artifact is
+The secret-safe PR evidence is
 `benchmark-data/provider-compare-native-x11-2026-07-24-candidate.json`. Its raw artifact SHA-256 is
 `7befb822232442cd4dcf46fcd12cf684855a134262885d4c759ce2af643421eb`; the raw report remains
-untracked. The candidate is eligible and complete but is not promoted as the repository's current
-reference until PR review and merge.
+untracked. The artifact name records its status when captured. The implementation was subsequently
+merged in PR #124; this dated report remains historical evidence rather than a moving current
+reference.
 
 ## Diagnostic findings during the run
 

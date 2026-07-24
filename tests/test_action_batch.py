@@ -13,6 +13,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputStateConflictError,
     X11InputUnavailableError,
 )
+from modal_computer_use.daemon.routes import actions as action_routes
 from modal_computer_use.models import ActionResult, CoordinateSpace, sha256_bytes
 
 
@@ -468,6 +469,91 @@ def test_action_batch_observe_change_raw_screenshot_returns_image_and_change_hea
     assert change_result["source_sha256"] == after.sha256
     assert change_timing["baseline_capture_ms"] == 0.0
     assert change_timing["total_ms"] >= 0.0
+
+
+def test_action_batch_observe_change_auto_without_display_reports_poll_fallback(
+    test_client,
+    app,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": "auto",
+        },
+    )
+
+    change_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
+    )
+    assert response.status_code == 200
+    assert change_result["change_signal_requested"] == "auto"
+    assert change_result["change_signal_active"] == "poll"
+    assert change_result["change_signal_available"] is False
+    assert change_result["change_signal_detected"] is None
+    assert change_result["change_signal_reason"] == "backend has no X11 display"
+
+
+def test_action_batch_observe_change_explicit_xdamage_preserves_unavailable_result(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    class FakeXDamageWatcher:
+        failure = "XDamage extension unavailable"
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.closed = False
+
+        def arm(self) -> None:
+            raise RuntimeError(self.failure)
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=False,
+                detected=False,
+                wait_ms=1.25,
+                reason=self.failure,
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    app.state.backend.display = ":99"
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "change_timeout_ms": 25,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
+    )
+    assert response.status_code == 200
+    assert change_result["attempts"] == 0
+    assert change_result["change_signal_requested"] == "xdamage"
+    assert change_result["change_signal_active"] == "xdamage"
+    assert change_result["change_signal_available"] is False
+    assert change_result["change_signal_detected"] is False
+    assert change_result["change_signal_wait_ms"] == 1.25
+    assert change_result["change_signal_reason"] == "XDamage extension unavailable"
 
 
 def test_type_action_failure_redacts_typed_text(test_client, app) -> None:

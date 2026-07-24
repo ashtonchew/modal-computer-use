@@ -44,8 +44,15 @@ and restores the previous clipboard. `method="clipboard"` forces that behavior, 
 
 ### Which input backend is actually in use?
 
-Inspect `/v1/capabilities`. `input_backend_configured` is the requested policy, while the legacy
-`input_backend` field is the adapter most recently selected and can change when `auto` falls back.
+For a specific successful direct mouse request, inspect
+`X-Computer-Use-Input-Backend`. Direct window requests similarly return
+`X-Computer-Use-Window-Backend`, and raw screenshots return
+`X-Computer-Use-Capture-Backend`.
+
+Use `/v1/capabilities` for process-level configuration and readiness. `input_backend_configured`
+is the requested policy, while the legacy `input_backend` field is the adapter most recently
+selected and can change when `auto` falls back. It cannot reliably attribute one request while
+other requests are running.
 `input_backends_supported` describes implementations built into the backend;
 `input_backends_available` describes the latest readiness probe and is empty before that probe.
 An installed `xdotool` executable is listed as available only after a bounded command probe reaches

@@ -24,7 +24,6 @@ DESKTOP_APT_PACKAGES = [
     "scrot",
     "ffmpeg",
     "xclip",
-    "xsel",
     "x11-utils",
     "x11-xserver-utils",
     "dbus-x11",

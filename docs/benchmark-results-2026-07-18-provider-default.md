@@ -1,6 +1,7 @@
 # Provider Benchmark Current Reference, 2026-07-18
 
-This is the current reference for the neutral `provider-default` SDK comparison. It measures each
+This is the retained 2026-07-18 reference for the neutral `provider-default` SDK comparison. It
+measures each
 provider's on-demand product lifecycle and default warm action APIs from the same external caller.
 It is a correctness and provenance foundation, not the separately planned
 `modal-platform-optimized` profile.
@@ -101,7 +102,8 @@ and 1.18x for command echo. The Modal optimized arm has 30 measured iterations a
 
 The Modal default column is the historical provider-default reference. The Daytona and E2B cells are
 the dated three-sample provider-default reference from this page, not a contemporaneous rerun, so
-treat the cross-provider ratios as the current reference rather than a randomized paired experiment.
+treat the cross-provider ratios as historical reference evidence rather than a randomized paired
+experiment.
 
 The largest wins come from removing the external ingress floor while retaining daemon-native
 batching. Move-and-click fell from 169.1ms provider-default to 4.6ms optimized: daemon work was

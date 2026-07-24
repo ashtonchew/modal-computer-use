@@ -6,11 +6,9 @@ import contextlib
 import os
 import shutil
 import subprocess
-import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Literal, cast
 
 from PIL import Image, ImageDraw
@@ -634,6 +632,10 @@ class X11DesktopBackend(MockDesktopBackend):
     def available_input_backends(self) -> tuple[str, ...]:
         return self._available_input_backends
 
+    @property
+    def window_backend(self) -> str:
+        return self._windows.backend_name
+
     def close(self) -> None:
         self._windows.close()
         self._input.close()
@@ -653,7 +655,7 @@ class X11DesktopBackend(MockDesktopBackend):
         if not windows_ready:
             return False, [windows_error or "window backend is not ready"]
 
-        required_tools = {"maim", "xclip", "xsel", "xdotool", "xdpyinfo", "ffmpeg"}
+        required_tools = {"xclip", "xdotool", "xdpyinfo", "ffmpeg"}
         if self._windows.backend_name != "xlib-ewmh":
             required_tools.update(("wmctrl", "xdotool"))
         missing = [tool for tool in sorted(required_tools) if shutil.which(tool) is None]
@@ -662,14 +664,9 @@ class X11DesktopBackend(MockDesktopBackend):
         result = await self._run("xdpyinfo", timeout=2, check=False)
         if result.returncode != 0:
             return False, ["xdpyinfo could not reach display"]
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-            temp_path = Path(handle.name)
-        try:
-            shot = await self._run("maim", str(temp_path), timeout=3, check=False)
-            if shot.returncode != 0 or not temp_path.exists() or temp_path.stat().st_size == 0:
-                return False, ["screenshot capture failed"]
-        finally:
-            temp_path.unlink(missing_ok=True)
+        screenshots_ready, screenshot_error = await self._screenshots.probe()
+        if not screenshots_ready:
+            return False, [screenshot_error or "screenshot capture failed"]
         return True, []
 
     async def _cache_available_input_backends(self) -> None:

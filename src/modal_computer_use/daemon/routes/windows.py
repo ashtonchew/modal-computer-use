@@ -4,7 +4,7 @@ import asyncio
 import re
 import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_input_action
@@ -13,24 +13,39 @@ from modal_computer_use.daemon.schemas import WaitForWindowRequest
 from modal_computer_use.models import ActionResult, X11Window
 
 router = APIRouter(prefix="/v1/windows")
+_WINDOW_BACKEND_HEADER = "X-Computer-Use-Window-Backend"
 
 
 @router.get("")
-async def list_windows(request: Request) -> list[X11Window]:
+async def list_windows(request: Request, response: Response) -> list[X11Window]:
     await ensure_desktop_ready(request)
-    return await request.app.state.backend.windows()
+    backend = request.app.state.backend
+    windows = await backend.windows()
+    _report_window_backend(response, getattr(backend, "window_backend", None))
+    return windows
+
+
+def _report_window_backend(response: Response, backend_name: object) -> None:
+    if isinstance(backend_name, str) and backend_name:
+        response.headers[_WINDOW_BACKEND_HEADER] = backend_name
 
 
 @router.get("/active")
-async def active(request: Request) -> X11Window | None:
+async def active(request: Request, response: Response) -> X11Window | None:
     await ensure_desktop_ready(request)
-    return await request.app.state.backend.active_window()
+    backend = request.app.state.backend
+    window = await backend.active_window()
+    _report_window_backend(response, getattr(backend, "window_backend", None))
+    return window
 
 
 @router.post("/{window_id}/activate")
-async def activate(window_id: str, request: Request) -> ActionResult:
+async def activate(window_id: str, request: Request, response: Response) -> ActionResult:
     async def operation() -> ActionResult:
-        return await request.app.state.backend.activate_window(window_id)
+        backend = request.app.state.backend
+        result = await backend.activate_window(window_id)
+        _report_window_backend(response, getattr(backend, "window_backend", None))
+        return result
 
     return await run_input_action(
         request,
@@ -41,9 +56,12 @@ async def activate(window_id: str, request: Request) -> ActionResult:
 
 
 @router.post("/{window_id}/close")
-async def close(window_id: str, request: Request) -> ActionResult:
+async def close(window_id: str, request: Request, response: Response) -> ActionResult:
     async def operation() -> ActionResult:
-        return await request.app.state.backend.close_window(window_id)
+        backend = request.app.state.backend
+        result = await backend.close_window(window_id)
+        _report_window_backend(response, getattr(backend, "window_backend", None))
+        return result
 
     return await run_input_action(
         request,
@@ -54,12 +72,17 @@ async def close(window_id: str, request: Request) -> ActionResult:
 
 
 @router.post("/wait-for")
-async def wait_for(payload: WaitForWindowRequest, request: Request) -> X11Window:
+async def wait_for(
+    payload: WaitForWindowRequest, request: Request, response: Response
+) -> X11Window:
     deadline = time.monotonic() + payload.timeout
     pattern = re.compile(payload.title_regex) if payload.title_regex else None
     while True:
         await ensure_desktop_ready(request, force=True)
-        for window in await request.app.state.backend.windows():
+        backend = request.app.state.backend
+        windows = await backend.windows()
+        _report_window_backend(response, getattr(backend, "window_backend", None))
+        for window in windows:
             if pattern and not pattern.search(window.title):
                 continue
             if payload.class_name is not None and window.class_name != payload.class_name:

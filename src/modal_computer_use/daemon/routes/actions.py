@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
@@ -12,7 +11,11 @@ from fastapi import APIRouter, Header, Request, Response
 from modal_computer_use.daemon.actions import ActionBatchContext, run_with_screenshot_bytes
 from modal_computer_use.daemon.actions import run as run_batch
 from modal_computer_use.daemon.actions import validate as validate_batch
-from modal_computer_use.daemon.desktop.xdamage import XDamageWaitResult, XDamageWatcher
+from modal_computer_use.daemon.desktop.xdamage import (
+    XDamageWaitResult,
+    XDamageWatcher,
+    prepare_change_signal,
+)
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_screenshot_capture
 from modal_computer_use.daemon.routes.screenshots import (
@@ -30,14 +33,6 @@ from modal_computer_use.models import (
 )
 
 router = APIRouter(prefix="/v1/actions")
-
-
-@dataclass(frozen=True)
-class _PreparedActionChangeSignal:
-    requested: str
-    active: str
-    watcher: XDamageWatcher | None = None
-    unavailable_reason: str | None = None
 
 
 @router.post("/validate")
@@ -112,7 +107,11 @@ async def run_observe_change_raw_screenshot(
     )
     region = _resolve_change_detection_region(request, payload)
     signal_prepare_started = perf_counter()
-    change_signal = _prepare_action_change_signal(request, payload.change_signal)
+    change_signal = prepare_change_signal(
+        payload.change_signal,
+        display=getattr(request.app.state.backend, "display", None),
+        watcher_factory=XDamageWatcher,
+    )
     signal_prepare_ms = _elapsed_ms(signal_prepare_started)
     baseline_started = perf_counter()
     baseline_sha256 = payload.previous_source_sha256
@@ -154,10 +153,10 @@ async def run_observe_change_raw_screenshot(
             capture_delay_wall_ms = _elapsed_ms(capture_delay_started)
         wait_started = perf_counter()
         signal_wait_wall_ms = 0.0
-        if change_signal.watcher is not None:
+        if change_signal.wait_watcher is not None:
             signal_wait_started = perf_counter()
             signal_result = await asyncio.to_thread(
-                change_signal.watcher.wait,
+                change_signal.wait_watcher.wait,
                 payload.change_timeout_ms,
             )
             signal_wait_wall_ms = _elapsed_ms(signal_wait_started)
@@ -190,8 +189,7 @@ async def run_observe_change_raw_screenshot(
 
         shot = await run_screenshot_capture(request, operation)
     finally:
-        if change_signal.watcher is not None:
-            change_signal.watcher.close()
+        change_signal.close()
     screenshot_ms = _elapsed_ms(screenshot_started)
     change_timing = {
         "baseline_capture_ms": baseline_capture_ms,
@@ -211,13 +209,7 @@ async def run_observe_change_raw_screenshot(
         "source_sha256": source_sha256,
         "change_detection": payload.change_detection,
         "change_detection_region": region.model_dump(mode="json") if region is not None else None,
-        "change_signal_requested": change_signal.requested,
-        "change_signal_active": change_signal.active,
-        "change_signal_available": _change_signal_available(signal_result, change_signal),
-        "change_signal_detected": None if signal_result is None else signal_result.detected,
-        "change_signal_wait_ms": None if signal_result is None else signal_result.wait_ms,
-        "change_signal_reason": _change_signal_reason(signal_result, change_signal),
-        "change_signal_version": None if signal_result is None else signal_result.version,
+        **change_signal.metadata(signal_result),
     }
     headers = {
         **_screenshot_headers(shot),
@@ -247,43 +239,6 @@ async def _capture_source_sha256(request: Request, *, region: Region | None) -> 
 
     shot = await run_screenshot_capture(request, operation)
     return shot.sha256
-
-
-def _prepare_action_change_signal(
-    request: Request,
-    requested: str,
-) -> _PreparedActionChangeSignal:
-    if requested == "poll":
-        return _PreparedActionChangeSignal(requested=requested, active="poll")
-    display = getattr(request.app.state.backend, "display", None)
-    if not isinstance(display, str) or not display:
-        return _PreparedActionChangeSignal(
-            requested=requested,
-            active="poll",
-            unavailable_reason="backend has no X11 display",
-        )
-    watcher = XDamageWatcher(display=display)
-    try:
-        watcher.arm()
-    except Exception:
-        if requested == "auto":
-            watcher.close()
-            return _PreparedActionChangeSignal(
-                requested=requested,
-                active="poll",
-                unavailable_reason=watcher.failure or "XDamage unavailable",
-            )
-        return _PreparedActionChangeSignal(
-            requested=requested,
-            active="xdamage",
-            watcher=watcher,
-            unavailable_reason=watcher.failure or "XDamage unavailable",
-        )
-    return _PreparedActionChangeSignal(
-        requested=requested,
-        active="xdamage",
-        watcher=watcher,
-    )
 
 
 def _resolve_change_detection_region(
@@ -340,26 +295,6 @@ def _change_poll_sleep_ms(
     if poll_strategy != "adaptive":
         return poll_interval_ms
     return min(4 * (2 ** max(attempt - 1, 0)), poll_interval_ms)
-
-
-def _change_signal_available(
-    result: XDamageWaitResult | None,
-    signal: _PreparedActionChangeSignal,
-) -> bool | None:
-    if signal.active == "poll":
-        return False if signal.requested != "poll" else None
-    if result is None:
-        return None
-    return result.available
-
-
-def _change_signal_reason(
-    result: XDamageWaitResult | None,
-    signal: _PreparedActionChangeSignal,
-) -> str | None:
-    if result is not None:
-        return result.reason
-    return signal.unavailable_reason
 
 
 def _json_header(payload: dict[str, Any]) -> str:

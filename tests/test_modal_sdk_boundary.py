@@ -875,20 +875,40 @@ def test_modal_daemon_endpoint_creates_connect_token() -> None:
     assert endpoint.execute_in_target is False
 
 
-def test_modal_daemon_endpoint_target_loopback_executes_in_target() -> None:
-    computer = ComputerSandbox(
-        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
-        sandbox=FakeSandboxObject(sandbox_id="sb-target"),
-        metadata=fake_sandbox_ref(),
+def test_modal_daemon_endpoint_target_loopback_executes_in_target(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(ingress="connect"),
+        image=object(),
+        wait=False,
     )
 
     endpoint = modal_daemon_endpoint(computer, "target-loopback")
 
     assert endpoint.path == "target-loopback"
     assert endpoint.base_url == "http://127.0.0.1:8080"
-    assert endpoint.token == "attested-token"  # noqa: S105 - synthetic token fixture.
-    assert endpoint.target_sandbox_id == "sb-target"
+    assert endpoint.token
+    assert endpoint.target_sandbox_id == computer.metadata().sandbox_id
     assert endpoint.execute_in_target is True
+
+
+def test_create_keeps_connect_and_loopback_bearers_distinct(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(ingress="connect"),
+        image=object(),
+        wait=False,
+    )
+
+    assert FakeSandbox.created is not None
+    _, create_kwargs = FakeSandbox.create_calls[0]
+    assert "COMPUTER_USE_LOCAL_TOKEN" not in create_kwargs["env"]
+    daemon_bearer = create_kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
+    assert daemon_bearer
+    assert daemon_bearer != "connect-token"
+    endpoint = modal_daemon_endpoint(computer, "target-loopback")
+    assert endpoint.token == daemon_bearer
 
 
 def test_modal_daemon_endpoint_modal_paths_require_modal_sandbox() -> None:
@@ -978,13 +998,14 @@ def test_run_modal_daemon_command_uses_separate_runner_for_inherited_path() -> N
     ]
 
 
-def test_run_modal_daemon_command_uses_target_sandbox_for_loopback_path() -> None:
-    target = FakeSandboxObject(sandbox_id="sb-target")
-    computer = ComputerSandbox(
-        DaemonClient(base_url="https://daemon.example.modal.host", token="attested-token"),
-        sandbox=target,
-        metadata=fake_sandbox_ref(),
+def test_run_modal_daemon_command_uses_target_sandbox_for_loopback_path(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(ingress="connect"),
+        image=object(),
+        wait=False,
     )
+    assert FakeSandbox.created is not None
     calls: list[dict[str, object]] = []
 
     def fake_exec_in_target(sandbox, command, **kwargs):
@@ -1001,20 +1022,13 @@ def test_run_modal_daemon_command_uses_target_sandbox_for_loopback_path() -> Non
     )
 
     assert result.sandbox_id == "sb-target"
-    assert calls == [
-        {
-            "sandbox": target,
-            "command": ("python", "-m", "worker"),
-            "env": {
-                "COMPUTER_USE_DAEMON_BASE_URL": "http://127.0.0.1:8080",
-                "COMPUTER_USE_DAEMON_RUNNER_PATH": "target-loopback",
-                "COMPUTER_USE_DAEMON_TOKEN": "attested-token",
-                "COMPUTER_USE_TARGET_SANDBOX_ID": "sb-target",
-                "WORKLOAD": "benchmark",
-            },
-            "exec_timeout_seconds": 60,
-        }
-    ]
+    assert len(calls) == 1
+    assert calls[0]["command"] == ("python", "-m", "worker")
+    assert calls[0]["env"] == modal_daemon_env(
+        modal_daemon_endpoint(computer, "target-loopback"),
+        {"WORKLOAD": "benchmark"},
+    )
+    assert calls[0]["exec_timeout_seconds"] == 60
 
 
 def test_create_passes_browser_profile_prewarm_and_gpu_env(monkeypatch) -> None:
@@ -1283,7 +1297,8 @@ def test_wait_until_ready_timeout_reports_last_readyz_errors() -> None:
     try:
         ComputerSandbox(FakeClient()).wait_until_ready(timeout=0, interval=0)
     except TimeoutError as exc:
-        assert "window manager is not responding" in str(exc)
+        assert "last /readyz reported 1 error" in str(exc)
+        assert "window manager is not responding" not in str(exc)
     else:
         raise AssertionError("expected readiness timeout")
 
@@ -1291,12 +1306,14 @@ def test_wait_until_ready_timeout_reports_last_readyz_errors() -> None:
 def test_wait_until_ready_timeout_reports_transient_error() -> None:
     class FakeClient:
         def get_json(self, path: str) -> dict[str, object]:
-            raise ConnectionError("connection refused")
+            raise ConnectionError("connection refused at https://fixture.invalid?detail=raw-value")
 
     try:
         ComputerSandbox(FakeClient()).wait_until_ready(timeout=0, interval=0)
     except TimeoutError as exc:
-        assert "ConnectionError: connection refused" in str(exc)
+        assert "last error type: ConnectionError" in str(exc)
+        assert "fixture.invalid" not in str(exc)
+        assert "detail=raw-value" not in str(exc)
     else:
         raise AssertionError("expected readiness timeout")
 
@@ -1310,6 +1327,109 @@ def test_attach_by_run_id_lists_by_tags(monkeypatch) -> None:
     ComputerSandbox.attach(run_id="run-123")
 
     assert FakeSandbox.list_calls == [{"computer-use.run_id": "run-123"}]
+
+
+def test_attach_closes_new_client_when_readiness_fails_without_terminating_target(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    target = FakeSandboxObject(sandbox_id="sb-target")
+    FakeSandbox.from_id_result = target
+    clients: list[object] = []
+
+    class FailingClient:
+        def __init__(self, base_url: str, **kwargs: object) -> None:
+            self.base_url = base_url
+            self.transport = SimpleNamespace(token=kwargs.get("token"))
+            self.closed = False
+            clients.append(self)
+
+        def get_json(self, path: str) -> dict[str, object]:
+            raise ConnectionError("diagnostic endpoint failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    ticks = iter((0.0, 1.0))
+    monkeypatch.setattr("modal_computer_use.sandbox.DaemonClient", FailingClient)
+    monkeypatch.setattr("modal_computer_use.sandbox.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("modal_computer_use.sandbox.time.sleep", lambda *_: None)
+
+    with pytest.raises(TimeoutError):
+        ComputerSandbox.attach(
+            sandbox_id="sb-target",
+            ingress="connect",
+            wait=True,
+            readiness_timeout=0.5,
+        )
+
+    assert len(clients) == 1
+    assert clients[0].closed is True
+    assert target.terminate_wait_calls == []
+
+
+def test_attach_by_base_url_closes_new_client_when_readiness_fails(monkeypatch) -> None:
+    clients: list[object] = []
+
+    class FailingClient:
+        def __init__(self, base_url: str, **kwargs: object) -> None:
+            self.base_url = base_url
+            self.closed = False
+            clients.append(self)
+
+        def get_json(self, path: str) -> dict[str, object]:
+            raise ConnectionError("diagnostic endpoint failed")
+
+        def close(self) -> None:
+            self.closed = True
+
+    ticks = iter((0.0, 1.0))
+    monkeypatch.setattr("modal_computer_use.sandbox.DaemonClient", FailingClient)
+    monkeypatch.setattr("modal_computer_use.sandbox.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("modal_computer_use.sandbox.time.sleep", lambda *_: None)
+
+    with pytest.raises(TimeoutError):
+        ComputerSandbox.attach(
+            base_url="https://fixture.invalid",
+            wait=True,
+            readiness_timeout=0.5,
+        )
+
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+
+def test_attach_preserves_readiness_timeout_when_client_cleanup_fails(
+    monkeypatch,
+) -> None:
+    class CleanupFailure(RuntimeError):
+        pass
+
+    class FailingClient:
+        def __init__(self, base_url: str, **kwargs: object) -> None:
+            self.base_url = base_url
+
+        def get_json(self, path: str) -> dict[str, object]:
+            raise ConnectionError("diagnostic endpoint failed")
+
+        def close(self) -> None:
+            raise CleanupFailure("cleanup diagnostic payload")
+
+    ticks = iter((0.0, 1.0))
+    monkeypatch.setattr("modal_computer_use.sandbox.DaemonClient", FailingClient)
+    monkeypatch.setattr("modal_computer_use.sandbox.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("modal_computer_use.sandbox.time.sleep", lambda *_: None)
+
+    with pytest.raises(TimeoutError) as raised:
+        ComputerSandbox.attach(
+            base_url="https://fixture.invalid",
+            wait=True,
+            readiness_timeout=0.5,
+        )
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert notes == ["readiness cleanup also failed: client.close (CleanupFailure)"]
+    assert "cleanup diagnostic payload" not in " ".join(notes)
 
 
 def test_attach_by_run_id_ambiguous_matches_fail(monkeypatch) -> None:
@@ -1407,6 +1527,7 @@ def test_modal_sandbox_exec_once_creates_ephemeral_runner(monkeypatch) -> None:
         }
     ]
     assert FakeSandbox.created.terminated is True
+    assert FakeSandbox.created.terminate_wait_calls == [True]
     assert result.returncode == 0
 
 
@@ -1423,6 +1544,38 @@ def test_modal_sandbox_exec_once_keeps_runner_alive_for_exec_timeout(monkeypatch
 
     _, kwargs = FakeSandbox.create_calls[0]
     assert kwargs["timeout"] >= 450
+
+
+def test_modal_sandbox_exec_once_preserves_command_failure_when_cleanup_fails(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    class CommandFailure(RuntimeError):
+        pass
+
+    class CleanupFailure(RuntimeError):
+        pass
+
+    def fail_command(self: FakeSandboxObject, *args: str, **kwargs: object) -> object:
+        raise CommandFailure("command failed")
+
+    def fail_cleanup(self: FakeSandboxObject, *, wait: bool = False) -> None:
+        raise CleanupFailure("cleanup diagnostic payload")
+
+    monkeypatch.setattr(FakeSandboxObject, "exec", fail_command)
+    monkeypatch.setattr(FakeSandboxObject, "terminate", fail_cleanup)
+
+    with pytest.raises(CommandFailure) as raised:
+        modal_sandbox_exec_once(
+            ("python", "-c", "raise SystemExit(1)"),
+            app_name="computer-app",
+            image=object(),
+        )
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert notes == ["runner cleanup also failed: terminate (CleanupFailure)"]
+    assert "cleanup diagnostic payload" not in " ".join(notes)
 
 
 def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:

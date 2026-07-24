@@ -33,6 +33,14 @@ class AuthenticationError(ComputerUseError):
     """Raised when daemon authentication fails."""
 
 
+class BrowserReadinessError(ComputerUseError, RuntimeError):
+    """Raised when the configured browser has not reached its required ready state."""
+
+
+class FrameValidationError(ComputerUseError, ValueError):
+    """Raised when an observed frame is empty, invalid, or incompatible."""
+
+
 class DaemonHTTPError(ComputerUseError):
     """Raised when the daemon returns a non-successful HTTP response."""
 

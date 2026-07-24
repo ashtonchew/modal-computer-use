@@ -132,8 +132,9 @@ multiple lossless PNG patch rectangles when that saves enough pixels over one bo
 When the native `xxhash` wheel is available, tile hashes use XXH3; otherwise the daemon falls back
 to BLAKE2b. Frame metadata includes `tile_hash_backend`, `source_version`, `emit_version`,
 `delivery`, and patch fields such as `patch_count` and `patch_rects` so benchmark artifacts show
-which path ran. Large dirty regions still fall back to keyframes. Cursor-visible, scaled, JPEG, and
-WebP streams use the encoded screenshot fallback path.
+which path ran. Large dirty regions still fall back to keyframes. Cursor-hidden scaled, JPEG, and
+WebP frames use MSS pixel capture plus in-memory encoding; cursor-visible frames use the
+file-capture path so the desktop cursor can be composed.
 
 The SDK facade is:
 
@@ -565,7 +566,8 @@ Typing failures are redacted against the typed payload before they are included 
 For interpretation notes and one captured live run set, see:
 
 - [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
-- [Current corrected provider benchmark reference, 2026-07-18](benchmark-results-2026-07-18-current.md)
+- [Provider-default benchmark reference, 2026-07-18](benchmark-results-2026-07-18-provider-default.md)
+- [Fallback ownership and current provider comparison, 2026-07-24](benchmark-results-2026-07-24-fallback-ownership.md)
 - [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
 - [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
 - [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
@@ -920,7 +922,7 @@ rows retained daemon/client attribution:
 This is the optimized Modal column for the warm operation comparison, not a replacement for the
 provider-default baseline or for cold startup. The full table, including the dated Daytona/E2B
 reference and its non-contemporaneous caveat, is in
-[the current provider benchmark results](benchmark-results-2026-07-18-current.md#modal-optimized-configuration).
+[the 2026-07-18 provider benchmark results](benchmark-results-2026-07-18-provider-default.md#modal-optimized-configuration).
 The compact machine-readable record is
 [`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
 
@@ -1382,13 +1384,17 @@ When the caller needs to wait for the next paint instead of capturing immediatel
 X11 images with DAMAGE support; set `change_signal="poll"` when the caller needs source-hash
 verification instead of event-driven paint detection.
 
-For raw PNG screenshots at native scale without the cursor, the daemon first tries an in-process
-MSS/XShm capture and falls back to `scrot`, then `maim`, if the fast capture is unavailable.
-MSS avoids a screenshot subprocess and uses the X11 shared-memory path, which is fastest for the
-raw observation hot path. `scrot` remains a portable native PNG fallback, while `maim` remains the
-compatibility path for cursor-visible, scaled, re-encoded, and JSON screenshots. For JSON PNG
-screenshots at native scale, the daemon still compares the native `maim` PNG with its Pillow RGB
-re-encode and returns the smaller valid payload.
+For cursor-hidden screenshots, the daemon first uses one in-process MSS session. After an open or
+grab failure, it resets and reopens the session once. If the retry fails, the daemon uses `scrot`
+and then `maim`.
+
+The daemon selects the XShm-preferred MSS implementation on Linux. MSS can use XGetImage when
+shared-memory capture is unavailable. The daemon does not add another fallback between these MSS
+internals.
+
+Native raw PNG can use MSS PNG bytes directly. Scaled, JPEG, WebP, and JSON captures use MSS pixels
+with in-memory Pillow encoding. The first file-capture fallback is `scrot`. The final fallback is
+`maim`, which is also the required cursor-visible adapter.
 Raw screenshot responses include `x-computer-use-capture-backend` (`mss`, `scrot`, `maim`, or
 `unknown`) so benchmark artifacts can attribute the capture path directly instead of inferring it
 from timing.

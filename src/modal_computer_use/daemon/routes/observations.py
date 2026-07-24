@@ -30,9 +30,11 @@ from modal_computer_use.daemon.desktop.tile_diff import (
     tile_hashes_rgb,
 )
 from modal_computer_use.daemon.desktop.xdamage import (
+    PreparedChangeSignal,
     XDamageRect,
     XDamageWaitResult,
     XDamageWatcher,
+    prepare_change_signal,
 )
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import (
@@ -86,15 +88,6 @@ class _StreamState:
     xdamage_display: str | None = None
     dirty_frame_producer: _DirtyFrameProducer | None = None
     dirty_frame_display: str | None = None
-
-
-@dataclass
-class _PreparedChangeSignal:
-    requested: str
-    active: str
-    watcher: XDamageWatcher | None = None
-    unavailable_reason: str | None = None
-    prearmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -494,10 +487,9 @@ async def _handle_observation_message(
                 capture_region=producer_capture_region,
             )
             change_signal = (
-                _PreparedChangeSignal(
+                PreparedChangeSignal(
                     requested=stream_request.change_signal,
                     active="xdamage",
-                    prearmed=True,
                 )
                 if dirty_producer is not None
                 else _prepare_change_signal(websocket, state, stream_request.change_signal)
@@ -744,7 +736,7 @@ async def _send_changed_frame(
     full_frame_fallback: bool,
     region: Region | None,
     region_baseline_sha256: str | None,
-    change_signal: _PreparedChangeSignal,
+    change_signal: PreparedChangeSignal,
     dirty_producer: _DirtyFrameProducer | None,
     dirty_frame_producer_wait_ms: int | None,
     dirty_region_confirmation: Literal["auto", "off"],
@@ -913,11 +905,11 @@ async def _send_changed_frame(
                     or dirty_producer.failure
                     or "no_changed_frame"
                 )
-        if not dirty_producer_used and change_signal.watcher is not None:
+        if not dirty_producer_used and change_signal.wait_watcher is not None:
             signal_wait_started = perf_counter()
             signal_wait_started_at = signal_wait_started
             signal_result = await asyncio.to_thread(
-                change_signal.watcher.wait,
+                change_signal.wait_watcher.wait,
                 timeout_ms,
             )
             signal_wait_ended_at = perf_counter()
@@ -1205,13 +1197,7 @@ async def _send_changed_frame(
             "change_region_detected": region_detected,
             "change_wait_ms": wait_ms,
             "change_timeout_reached": not (change_detected or region_detected),
-            "change_signal_requested": change_signal.requested,
-            "change_signal_active": change_signal.active,
-            "change_signal_available": _change_signal_available(signal_result, change_signal),
-            "change_signal_detected": None if signal_result is None else signal_result.detected,
-            "change_signal_wait_ms": None if signal_result is None else signal_result.wait_ms,
-            "change_signal_reason": _change_signal_reason(signal_result, change_signal),
-            "change_signal_version": None if signal_result is None else signal_result.version,
+            **change_signal.metadata(signal_result),
             "dirty_frame_producer": dirty_producer is not None,
             "dirty_frame_producer_used": dirty_producer_used,
             "dirty_frame_producer_fallback_reason": dirty_producer_fallback_reason,
@@ -1654,64 +1640,26 @@ def _tile_aligned_region_for_frame(
 def _prepare_change_signal(
     websocket: WebSocket,
     state: _StreamState,
-    requested: str,
-) -> _PreparedChangeSignal:
-    if requested == "poll":
-        return _PreparedChangeSignal(requested=requested, active="poll")
+    requested: Literal["poll", "xdamage", "auto"],
+) -> PreparedChangeSignal:
     display = getattr(websocket.app.state.backend, "display", None)
-    if not isinstance(display, str) or not display:
-        return _PreparedChangeSignal(
-            requested=requested,
-            active="poll",
-            unavailable_reason="backend has no X11 display",
-        )
-    if state.xdamage_watcher is None or state.xdamage_display != display:
+    if requested == "poll":
+        return prepare_change_signal(requested, display=display)
+    if isinstance(display, str) and display and state.xdamage_display != display:
         if state.xdamage_watcher is not None:
             state.xdamage_watcher.close()
-        state.xdamage_watcher = XDamageWatcher(display=display)
-        state.xdamage_display = display
-    watcher = state.xdamage_watcher
-    try:
-        watcher.arm()
-    except Exception:
-        if requested == "auto":
-            return _PreparedChangeSignal(
-                requested=requested,
-                active="poll",
-                unavailable_reason=watcher.failure or "XDamage unavailable",
-            )
-        return _PreparedChangeSignal(
-            requested=requested,
-            active="xdamage",
-            watcher=watcher,
-            unavailable_reason=watcher.failure or "XDamage unavailable",
-        )
-    return _PreparedChangeSignal(
-        requested=requested,
-        active="xdamage",
-        watcher=watcher,
-        prearmed=True,
+        state.xdamage_watcher = None
+        state.xdamage_display = None
+    prepared = prepare_change_signal(
+        requested,
+        display=display,
+        watcher=state.xdamage_watcher,
+        watcher_factory=XDamageWatcher,
     )
-
-
-def _change_signal_available(
-    result: XDamageWaitResult | None,
-    signal: _PreparedChangeSignal,
-) -> bool | None:
-    if signal.active == "poll":
-        return False if signal.requested != "poll" else None
-    if result is None:
-        return None
-    return result.available
-
-
-def _change_signal_reason(
-    result: XDamageWaitResult | None,
-    signal: _PreparedChangeSignal,
-) -> str | None:
-    if result is not None:
-        return result.reason
-    return signal.unavailable_reason
+    if prepared.reusable_watcher is not None:
+        state.xdamage_watcher = prepared.reusable_watcher
+        state.xdamage_display = display
+    return prepared
 
 
 def _change_poll_sleep_ms(
