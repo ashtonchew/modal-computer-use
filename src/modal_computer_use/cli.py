@@ -61,8 +61,11 @@ def _add_subprocess_backend_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--subprocess-backend",
         choices=["asyncio", "threaded", "isolated-asyncio"],
-        default="asyncio",
-        help="daemon subprocess execution backend for created sandboxes; defaults to asyncio",
+        default="isolated-asyncio",
+        help=(
+            "daemon subprocess execution backend for created sandboxes; "
+            "defaults to isolated-asyncio"
+        ),
     )
 
 

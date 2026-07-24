@@ -48,7 +48,7 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     assert settings.desktop_dpi == 96
     assert settings.post_action_delay_ms == 0
     assert settings.readiness_cache_ttl_ms == 1_000
-    assert settings.subprocess_backend == "asyncio"
+    assert settings.subprocess_backend == "isolated-asyncio"
 
 
 def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:

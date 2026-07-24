@@ -557,7 +557,7 @@ class X11DesktopBackend(MockDesktopBackend):
         browser_launch_args: Sequence[str] = (),
         browser_gpu_mode: str = "auto",
         input_backend: str = "auto",
-        subprocess_backend: str = "asyncio",
+        subprocess_backend: str = "isolated-asyncio",
         process_runner: ProcessRunner | None = None,
     ) -> None:
         super().__init__(width=width, height=height)
@@ -1020,7 +1020,7 @@ def choose_backend(
     browser_launch_args: Sequence[str] = (),
     browser_gpu_mode: str = "auto",
     input_backend: str = "auto",
-    subprocess_backend: str = "asyncio",
+    subprocess_backend: str = "isolated-asyncio",
 ) -> DesktopBackend:
     if kind == "mock":
         return MockDesktopBackend(width=width, height=height)

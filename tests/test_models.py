@@ -28,7 +28,7 @@ def test_runtime_modal_region_rejects_empty_string() -> None:
 
 
 def test_action_subprocess_backend_defaults_and_validates() -> None:
-    assert ComputerConfig().actions.subprocess_backend == "asyncio"
+    assert ComputerConfig().actions.subprocess_backend == "isolated-asyncio"
     assert (
         ComputerConfig(actions={"subprocess_backend": "threaded"}).actions.subprocess_backend
         == "threaded"

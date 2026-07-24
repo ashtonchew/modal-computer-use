@@ -152,7 +152,7 @@ def run_warm_action_attempts(
             runner_cpu=1.0,
             runner_memory_mib=1024,
             input_rate_limit_per_sec=0,
-            subprocess_backend="asyncio",
+            subprocess_backend="isolated-asyncio",
             image_profile=f"named:{config.image_revision}",
             surfaces=["daemon-observation-stream"],
             observation_cases=[OPTIMIZED_ACTION_CASE],

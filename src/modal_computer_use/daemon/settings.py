@@ -154,7 +154,10 @@ class DaemonSettings:
         default_factory=lambda: os.getenv("COMPUTER_USE_INPUT_BACKEND", "auto")
     )
     subprocess_backend: str = field(
-        default_factory=lambda: os.getenv("COMPUTER_USE_SUBPROCESS_BACKEND", "asyncio")
+        default_factory=lambda: os.getenv(
+            "COMPUTER_USE_SUBPROCESS_BACKEND",
+            "isolated-asyncio",
+        )
     )
     otel_enabled: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_OTEL_ENABLED", False)

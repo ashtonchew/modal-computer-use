@@ -1034,6 +1034,14 @@ def test_choose_backend_wires_selected_subprocess_backend(subprocess_backend: st
         backend.close()
 
 
+def test_x11_backend_defaults_to_isolated_asyncio_subprocesses() -> None:
+    backend = choose_backend("x11", width=100, height=100, display=":99")
+    try:
+        assert backend.subprocess_backend == "isolated-asyncio"
+    finally:
+        backend.close()
+
+
 def test_input_backend_metadata_separates_policy_support_availability_and_last_use(
     monkeypatch,
 ) -> None:

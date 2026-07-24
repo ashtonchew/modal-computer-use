@@ -46,6 +46,15 @@ def test_benchmark_sdk_mock_local_outputs_json(capsys) -> None:
     assert "Bearer" not in captured.out
 
 
+def test_benchmark_sdk_help_reports_isolated_asyncio_default(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "sdk", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "defaults to isolated-asyncio" in captured.out
+
+
 def test_daemon_ingress_metadata_identifies_modal_tunnel() -> None:
     ingress = benchmark_daemon_surface._daemon_ingress_metadata(
         mode="http",
@@ -349,8 +358,6 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
             "4096",
             "--daemon-http-version",
             "2",
-            "--subprocess-backend",
-            "isolated-asyncio",
             "--iterations",
             "1",
         ]
