@@ -6,7 +6,12 @@ Group covers daemon readiness, X11 desktop, input, screenshots, recordings, arti
 
 ### `/healthz` passes but `/readyz` fails
 
-`/healthz` only confirms the daemon process is alive. `/readyz` checks Xvfb, the window manager, the screenshot pipeline, required CLI tools (`xdotool`, `wmctrl`, `maim` or its fallback), and noVNC when enabled. Hit `/readyz` directly and read the per-check failure list.
+`/healthz` only confirms the daemon process is alive. `/readyz` checks Xvfb, native X11 input, the
+window manager, the screenshot pipeline, and noVNC when enabled. `xdotool` remains required while
+the explicit compatibility typing method and automatic pre-emission fallback are supported;
+`wmctrl` is required only when the native EWMH adapter cannot verify a live, self-referencing
+`_NET_SUPPORTING_WM_CHECK` owner plus listing, activation, and close support. Hit `/readyz`
+directly and read the per-check failure list.
 
 ### Sandbox fails readiness on Modal
 
@@ -24,11 +29,18 @@ The window manager often hasn't drawn yet when the daemon starts. Wait for `/rea
 
 ### Keyboard input not appearing
 
-The target window probably is not focused. Activate it first with `windows.activate(...)`, then send keys. If multiple Xvfb sessions are present, `xdotool` may be typing into the wrong one; verify `DISPLAY`.
+The target window probably is not focused. Activate it first with `windows.activate(...)`, then send
+keys. If multiple Xvfb sessions are present, verify `DISPLAY`. For diagnosis, force
+`COMPUTER_USE_INPUT_BACKEND=xtest` to fail closed when the native adapter cannot open the intended
+display, or force `xdotool` to isolate compatibility-path behavior.
 
 ### Unicode typing issues
 
-`xdotool type` falls back to keysym lookup for non-ASCII characters and may drop unsupported codepoints. For long Unicode strings, paste through the clipboard: `clipboard.set_text(text)` then `keyboard.hotkey("ctrl", "v")`.
+XTest injects keycodes rather than Unicode text. `method="keystrokes"` therefore requires every
+character to be representable by the active XKB layout. Use `method="auto"` for normal SDK calls:
+layout-mapped text uses native keystrokes, while long or unmapped Unicode text uses clipboard paste
+and restores the previous clipboard. `method="clipboard"` forces that behavior, and legacy
+`method="xdotool"` forces the compatibility path.
 
 ## Adapters
 

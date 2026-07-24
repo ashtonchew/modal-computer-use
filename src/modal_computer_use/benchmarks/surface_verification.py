@@ -66,7 +66,7 @@ def _verify_daemon_type_readback(client: DaemonClient) -> dict[str, Any]:
                 {
                     "type": "type",
                     "text": text,
-                    "method": "xdotool",
+                    "method": "keystrokes",
                     "delay_ms": 10,
                 }
             ],

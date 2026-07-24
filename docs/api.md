@@ -29,6 +29,12 @@ Namespaces on `ComputerSandbox`:
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verified with
 `uv run python scripts/export_openapi.py --check`.
+
+Keyboard typing accepts `method="auto" | "keystrokes" | "clipboard" | "xdotool"`.
+`keystrokes` is the canonical direct-input behavior and uses the configured native or compatibility
+input adapter; `auto` uses clipboard paste for long or active-layout-unmapped Unicode text.
+`xdotool` remains a legacy explicit compatibility request. The daemon default input adapter is
+`auto`, which prefers the persistent XTest/XKB path and falls back before emission when necessary.
 For Modal-created sandboxes, noVNC tunnel URLs are owned by Modal orchestration; use
 `ComputerSandbox.debug_urls()` rather than the daemon-only `computer.debug.urls()` helper when you
 need to know whether a Modal noVNC URL exists.

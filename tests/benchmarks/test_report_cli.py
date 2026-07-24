@@ -50,13 +50,18 @@ def test_benchmark_report_mock_local_outputs_release_report(capsys) -> None:
     assert typing["daemon_summary_ms"]["mean"] is not None
     assert typing["overhead_summary_ms"]["mean"] is not None
     assert typing["attribution"]["status"] == "measured"
-    assert typing["request"] == {"character_count": 100, "method": "xdotool"}
+    assert typing["request"] == {
+        "character_count": 100,
+        "method": "keystrokes",
+        "delay_ms": 0,
+    }
     typing_1000 = payload["benchmarks"]["type_1000_chars"]
     assert typing_1000["status"] == "ok"
     assert len(typing_1000["samples_ms"]) == 2
     assert typing_1000["request"] == {
         "character_count": 1000,
-        "method": "xdotool",
+        "method": "keystrokes",
+        "delay_ms": 0,
         "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
     }
     assert (

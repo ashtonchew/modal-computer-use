@@ -3409,6 +3409,7 @@
             "default": "auto",
             "enum": [
               "auto",
+              "keystrokes",
               "xdotool",
               "clipboard"
             ],
@@ -3469,6 +3470,7 @@
             "default": "auto",
             "enum": [
               "auto",
+              "keystrokes",
               "xdotool",
               "clipboard"
             ],

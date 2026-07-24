@@ -13,20 +13,53 @@ Benchmark reports use it to split total SDK round-trip latency from daemon execu
 derive client/network/transport overhead. Older daemons that do not return timing are reported as
 `attribution.status="unavailable"` rather than failed.
 
-## Pointer input hot path
+## Native X11 input hot path
 
 The X11 daemon supports `COMPUTER_USE_INPUT_BACKEND=auto|xtest|xdotool`.
 
 - `auto` is the default. It probes the XTest extension and uses a persistent X connection for
-  pointer actions when available, otherwise it falls back to `xdotool`.
+  mouse and keyboard actions when available, otherwise it falls back to `xdotool`.
 - `xtest` requires XTest and fails readiness if the extension cannot be opened. Use it for
   benchmark runs that must prove the persistent backend is active.
 - `xdotool` preserves the older subprocess-backed behavior and remains the compatibility fallback.
 
-The XTest backend currently covers mouse movement, click, button down/up, scroll, and drag movement.
-Keyboard input still uses the existing keyboard path because text, layouts, modifiers, and clipboard
-restore semantics need separate treatment. Action benchmark observations include `input_backend`
-when a measured action used a pointer backend, and summarized cases include `input_backends`.
+One shared `X11InputSession` owns the display connection and serializes raw XTest events. Mouse
+behavior owns pointer movement, native `XQueryPointer` readback, scrolling, dragging, and modified
+click sequencing. Keyboard behavior owns active-XKB-layout resolution, held-key state, hotkeys, and
+typing strategy. `method="keystrokes"` is the canonical direct-typing request;
+`method="xdotool"` remains an explicit compatibility request. Text not representable by the active
+XKB layout uses the clipboard path in `auto` mode.
+
+Window discovery and control are native but separate from input: the window module uses Xlib and
+EWMH properties/messages, with `wmctrl` retained as a rollout fallback. Readiness can omit `wmctrl`
+only after the native probe verifies a live `_NET_SUPPORTING_WM_CHECK` owner plus listing,
+activation, and close support. It continues to require `xdotool` while the explicit compatibility
+typing method and automatic pre-emission fallbacks remain part of the public interface; native
+operations do not shell out to it. Automatic fallback is allowed only before native emission;
+possibly partial input is reported as an error and never replayed.
+
+Action benchmark observations report the adapter that actually handled the most recent input action
+as `input_backend`, and summarized cases include `input_backends`. Benchmark typing cases use
+`method="keystrokes"` so `--input-backend xtest` and `--input-backend xdotool` form a meaningful
+A/B test.
+
+Run both arms from the same caller and Modal profile, without changing region, ingress, resources,
+browser, iteration count, or image revision:
+
+```bash
+uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http \
+  --input-backend xtest --iterations 10 --output benchmark-input-xtest.json
+
+uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http \
+  --input-backend xdotool --iterations 10 --output benchmark-input-xdotool.json
+```
+
+Compare `daemon_summary_ms` for `move_click`, `move_click_sequence`, `type_100_chars`, and
+`type_1000_chars`. Typing speed cases explicitly set `delay_ms=0`; delay accuracy belongs in
+functional tests and would otherwise dominate adapter throughput. Total `summary_ms` also includes
+the selected Modal ingress and is useful for end-to-end impact, but it can hide a daemon-local input
+improvement. Confirm each native case reports `input_backends=["xtest"]`; otherwise the run did not
+measure the intended adapter.
 
 ## Screenshot hot paths
 
@@ -515,10 +548,10 @@ The current report includes:
 - `move_click`: one deterministic move+click action batch.
 - `move_click_sequence`: four deterministic move+click pairs that avoid same-coordinate no-op
   moves in provider SDKs that synchronize cursor movement.
-- `type_100_chars`: one deterministic 100-character typing action with safe length/method
-  metadata only.
-- `type_1000_chars`: one deterministic 1000-character typing action with safe length/method
-  metadata only.
+- `type_100_chars`: one deterministic 100-character, zero-delay typing action with safe
+  length/method/delay metadata only.
+- `type_1000_chars`: one deterministic 1000-character, zero-delay typing action with safe
+  length/method/delay metadata only.
 - `recording_start_stop`: recording start and stop call latency plus safe file metadata.
 - `sandbox_exec`: explicit live Modal `Sandbox.exec` comparison for the same move+click hot path,
   or `not_measured` when not requested.
@@ -531,6 +564,7 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
+- [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
 - [Current corrected provider benchmark reference, 2026-07-18](benchmark-results-2026-07-18-current.md)
 - [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
 - [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)

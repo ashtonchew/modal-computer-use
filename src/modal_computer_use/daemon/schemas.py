@@ -72,7 +72,7 @@ class TextRequest(Schema):
 
 class TypeRequest(TextRequest):
     delay_ms: int = Field(default=10, ge=0, le=10_000)
-    method: Literal["auto", "xdotool", "clipboard"] = "auto"
+    method: Literal["auto", "keystrokes", "xdotool", "clipboard"] = "auto"
 
     @field_validator("text")
     @classmethod
