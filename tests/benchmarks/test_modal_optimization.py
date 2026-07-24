@@ -623,6 +623,7 @@ def test_sanitizer_aligns_historical_replay_paths_with_published_artifact() -> N
         commands,
         raw_artifact_path="benchmark-results/new/raw.json",
         published_artifact_path="benchmark-data/new.json",
+        provider_artifact_status="candidate",
     )
 
     assert all(
@@ -630,6 +631,27 @@ def test_sanitizer_aligns_historical_replay_paths_with_published_artifact() -> N
     )
     assert "benchmark-results/new/raw.json" in commands["normalize"]
     assert "benchmark-data/new.json" in commands["normalize"]
+
+
+def test_sanitizer_aligns_provider_status_with_embedded_profile() -> None:
+    commands = {
+        "normalize": (
+            "uv run python scripts/sanitize_modal_optimization_benchmark.py "
+            "benchmark-results/old/raw.json benchmark-data/old.json"
+        ),
+        "provider_default_normalize": (
+            "provider normalize --status current_reference"
+        ),
+    }
+
+    align_replay_manifest_paths(
+        commands,
+        raw_artifact_path="benchmark-results/new/raw.json",
+        published_artifact_path="benchmark-data/new.json",
+        provider_artifact_status="candidate",
+    )
+
+    assert "--status candidate" in commands["provider_default_normalize"]
 
 
 def test_preregistration_freezes_commands_policies_and_dependency() -> None:

@@ -1049,6 +1049,10 @@ def sanitize_modal_optimization_benchmark(
             command_manifest,
             raw_artifact_path=raw_artifact_path,
             published_artifact_path=published_artifact_path,
+            provider_artifact_status=_mapping(
+                profiles.get(PROFILE_PROVIDER_DEFAULT),
+                PROFILE_PROVIDER_DEFAULT,
+            ).get("artifact_status"),
         )
         _add_region_attestation_command(
             command_manifest,
@@ -1392,6 +1396,7 @@ def _align_replay_manifest_paths(
     *,
     raw_artifact_path: str,
     published_artifact_path: str | None,
+    provider_artifact_status: Any = None,
 ) -> None:
     if published_artifact_path is None:
         return
@@ -1415,6 +1420,14 @@ def _align_replay_manifest_paths(
             old_published,
             published_artifact_path,
         )
+    if provider_artifact_status in {"candidate", "current_reference"}:
+        provider_normalize = commands.get("provider_default_normalize")
+        if provider_normalize is not None:
+            commands["provider_default_normalize"] = re.sub(
+                r"--status(?:=|\s+)\S+",
+                f"--status {provider_artifact_status}",
+                provider_normalize,
+            )
 
 
 def _validate_preregistration_binding(
