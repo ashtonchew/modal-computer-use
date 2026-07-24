@@ -29,9 +29,55 @@ Namespaces on `ComputerSandbox`:
 The daemon exposes `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, and `/v1/*` primitive routes.
 The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verified with
 `uv run python scripts/export_openapi.py --check`.
+
+Keyboard typing accepts `method="auto" | "keystrokes" | "clipboard" | "xdotool"`.
+`keystrokes` is the canonical direct-input behavior and uses the configured native or compatibility
+input adapter; `auto` uses clipboard paste for long or active-layout-unmapped Unicode text.
+`xdotool` remains a legacy explicit compatibility request. The daemon default input adapter is
+`auto`, which prefers the persistent XTest/XKB path and falls back before emission when necessary.
 For Modal-created sandboxes, noVNC tunnel URLs are owned by Modal orchestration; use
 `ComputerSandbox.debug_urls()` rather than the daemon-only `computer.debug.urls()` helper when you
 need to know whether a Modal noVNC URL exists.
+
+## Input capabilities
+
+`GET /v1/capabilities` separates input configuration from runtime observation:
+
+- `input_backend` is the legacy observational field. It reports the most recently selected input
+  adapter and may change while the daemon runs or be `null` before an adapter is observed.
+- `input_backend_configured` is the requested policy: `auto`, `xtest`, `xdotool`, or `mock`.
+- `input_backends_supported` lists implementations provided by the desktop backend. It does not
+  claim that their runtime dependencies are ready.
+- `input_backends_available` is the most recent readiness probe's usable set. It is empty before
+  the first probe and whenever the probe has not observed a usable adapter. `xdotool` appears only
+  after a bounded, display-aware command probe succeeds; finding its executable is not sufficient.
+
+Capability reads report cached state and do not trigger a new input probe.
+
+## Input failure and cleanup contracts
+
+Direct primitive failures use `{code, message, details}`. Batch item failures use the same `code`
+as `error_code` and place `{"code": code, ...details}` in `output`.
+
+Native input preserves whether replay is safe:
+
+| Code | HTTP | Meaning |
+|---|---:|---|
+| `input_backend_unavailable` | 503 | Input emission did not start. Details identify the selected `input_backend`, with `retry_safe=true` and `emission_state="not_started"`. |
+| `input_may_be_partial` | 500 | Input emission may have started. Details identify the selected `input_backend` and use `emission_state="possibly_partial"`. `retry_safe` is false for presses, typing, clicks, and drags, but true for idempotent key/button releases. |
+| `input_state_conflict` | 409 | The target key or button was already held, so emission did not start. Release or change the conflicting state before retrying. |
+
+`retry_safe` describes duplicate-execution safety only. It is not a promise that the condition is
+transient or a recommendation to retry automatically. In particular, callers must not replay an
+`input_may_be_partial` press, typing, click, or drag operation through another adapter. A
+key/button release is idempotent and explicitly reports `retry_safe=true`.
+
+`input.release_all` retains successfully released controls in `output.keys` and `output.buttons`.
+If cleanup is incomplete it fails with `code="release_all_incomplete"`, lists controls still held
+under `output.remaining`, and includes bounded per-control failure metadata in `output.failures`.
+Raw adapter exception messages are not returned. When batch error handling performs secondary
+cleanup, incomplete cleanup is attached under the primary item's `output.cleanup`; it never
+replaces the original action or timeout code.
 
 ## Experimental observations
 

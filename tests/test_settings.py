@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from modal_computer_use.daemon import __main__ as daemon_main
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 
@@ -49,6 +51,52 @@ def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:
     settings = DaemonSettings(desktop_width=456)
 
     assert settings.desktop_width == 456
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "setting"),
+    [
+        ("backend", "x-11", "COMPUTER_USE_BACKEND"),
+        ("input_backend", "x-test", "COMPUTER_USE_INPUT_BACKEND"),
+    ],
+)
+def test_daemon_settings_reject_invalid_backend_choices(
+    field: str,
+    value: str,
+    setting: str,
+) -> None:
+    with pytest.raises(ValueError, match=rf"^{setting} must be one of: "):
+        DaemonSettings(**{field: value})
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("COMPUTER_USE_BACKEND", "x-11"),
+        ("COMPUTER_USE_INPUT_BACKEND", "x-test"),
+    ],
+)
+def test_daemon_settings_reject_invalid_backend_environment(
+    monkeypatch,
+    setting: str,
+    value: str,
+) -> None:
+    monkeypatch.setenv(setting, value)
+
+    with pytest.raises(ValueError, match=rf"^{setting} must be one of: "):
+        get_settings()
+
+
+@pytest.mark.parametrize("backend", ["auto", "mock", "x11"])
+@pytest.mark.parametrize("input_backend", ["auto", "xdotool", "xtest"])
+def test_daemon_settings_accept_valid_backend_choices(
+    backend: str,
+    input_backend: str,
+) -> None:
+    settings = DaemonSettings(backend=backend, input_backend=input_backend)
+
+    assert settings.backend == backend
+    assert settings.input_backend == input_backend
 
 
 def test_daemon_entrypoint_reads_host_and_port_environment(monkeypatch) -> None:

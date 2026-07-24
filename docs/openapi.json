@@ -669,6 +669,31 @@
             ],
             "title": "Input Backend"
           },
+          "input_backend_configured": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Backend Configured"
+          },
+          "input_backends_available": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Backends Available",
+            "type": "array"
+          },
+          "input_backends_supported": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Backends Supported",
+            "type": "array"
+          },
           "primitives": {
             "items": {
               "type": "string"
@@ -3409,6 +3434,7 @@
             "default": "auto",
             "enum": [
               "auto",
+              "keystrokes",
               "xdotool",
               "clipboard"
             ],
@@ -3469,6 +3495,7 @@
             "default": "auto",
             "enum": [
               "auto",
+              "keystrokes",
               "xdotool",
               "clipboard"
             ],

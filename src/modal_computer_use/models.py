@@ -400,7 +400,7 @@ class TypeAction(BaseAction):
     type: Literal["type"] = "type"
     text: str
     delay_ms: int = Field(default=10, ge=0, le=10_000)
-    method: Literal["auto", "xdotool", "clipboard"] = "auto"
+    method: Literal["auto", "keystrokes", "xdotool", "clipboard"] = "auto"
 
     @field_validator("text")
     @classmethod
@@ -552,6 +552,9 @@ class Capabilities(StrictBaseModel):
     image_profile: str
     vnc_enabled: bool
     input_backend: str | None = None
+    input_backend_configured: str | None = None
+    input_backends_supported: list[str] = Field(default_factory=list)
+    input_backends_available: list[str] = Field(default_factory=list)
 
 
 class TraceEntry(StrictBaseModel):

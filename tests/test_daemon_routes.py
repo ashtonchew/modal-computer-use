@@ -3,9 +3,16 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.desktop.xtest import (
+    X11InputInjectionError,
+    X11InputReleaseError,
+    X11InputStateConflictError,
+    X11InputUnavailableError,
+)
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult, ProcessStatus, Screenshot
 
@@ -17,6 +24,9 @@ def test_health_version_capabilities(test_client) -> None:
     caps = test_client.get("/v1/capabilities").json()
     assert "mouse" in caps["primitives"]
     assert caps["input_backend"] == "mock"
+    assert caps["input_backend_configured"] == "mock"
+    assert caps["input_backends_supported"] == ["mock"]
+    assert caps["input_backends_available"] == ["mock"]
     for primitive in ("input", "lifecycle", "processes", "session", "debug"):
         assert primitive in caps["primitives"]
 
@@ -83,6 +93,52 @@ def test_clipboard_and_release_all(test_client) -> None:
     released = test_client.post("/v1/input/release-all").json()
     assert released["ok"] is True
     assert "left" in released["output"]["buttons"]
+
+
+def test_direct_release_all_reports_incomplete_cleanup(test_client, app) -> None:
+    async def incomplete_release() -> ActionResult:
+        return ActionResult(
+            ok=False,
+            message="failed to release all held input",
+            output={
+                "code": "release_all_incomplete",
+                "keys": [],
+                "buttons": [],
+                "remaining": {"keys": ["shift"], "buttons": []},
+                "failures": [
+                    {
+                        "kind": "key",
+                        "value": "shift",
+                        "input_backend": "xtest",
+                        "code": "key_release_failed",
+                    }
+                ],
+            },
+        )
+
+    app.state.backend.release_all = incomplete_release
+
+    response = test_client.post("/v1/input/release-all")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "release_all_incomplete",
+        "message": "failed to release all held input",
+        "details": {
+            "code": "release_all_incomplete",
+            "keys": [],
+            "buttons": [],
+            "remaining": {"keys": ["shift"], "buttons": []},
+            "failures": [
+                {
+                    "kind": "key",
+                    "value": "shift",
+                    "input_backend": "xtest",
+                    "code": "key_release_failed",
+                }
+            ],
+        },
+    }
 
 
 def test_action_budget_blocks_direct_release_all_before_backend_call(tmp_path) -> None:
@@ -154,6 +210,145 @@ def test_direct_action_result_failure_returns_http_error(test_client, app) -> No
     assert response.status_code == 400
     assert response.json()["code"] == "denied"
     assert response.json()["message"] == "mouse down refused"
+
+
+@pytest.mark.parametrize(
+    ("exception", "status_code", "code", "retry_safe", "emission_state", "message"),
+    [
+        (
+            X11InputUnavailableError,
+            503,
+            "input_backend_unavailable",
+            True,
+            "not_started",
+            "native input backend is unavailable before input emission",
+        ),
+        (
+            X11InputInjectionError,
+            500,
+            "input_may_be_partial",
+            False,
+            "possibly_partial",
+            "input may have been partially applied",
+        ),
+    ],
+)
+def test_direct_native_input_failure_preserves_retry_contract(
+    test_client,
+    app,
+    exception,
+    status_code: int,
+    code: str,
+    retry_safe: bool,
+    emission_state: str,
+    message: str,
+) -> None:
+    sentinel = "SENTINEL_TYPED_TEXT_MUST_NOT_LEAK"
+
+    async def fail_move(x: int, y: int):
+        del x, y
+        raise exception(sentinel)
+
+    app.state.backend.mouse_move = fail_move
+
+    response = test_client.post("/v1/mouse/move", json={"x": 1, "y": 1})
+
+    assert response.status_code == status_code
+    assert response.headers["x-computer-use-error-code"] == code
+    assert response.json() == {
+        "code": code,
+        "message": message,
+        "details": {
+            "input_backend": "xtest",
+            "retry_safe": retry_safe,
+            "emission_state": emission_state,
+        },
+    }
+    assert sentinel not in response.text
+
+
+def test_direct_release_failure_is_retry_safe_and_preserves_backend(test_client, app) -> None:
+    async def fail_up(button: str, x: int | None = None, y: int | None = None):
+        del button, x, y
+        raise X11InputReleaseError(
+            "private release details",
+            input_backend="xdotool",
+        )
+
+    app.state.backend.mouse_up = fail_up
+
+    response = test_client.post("/v1/mouse/up", json={"button": "left"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "code": "input_may_be_partial",
+        "message": "input release may have been partially applied",
+        "details": {
+            "input_backend": "xdotool",
+            "retry_safe": True,
+            "emission_state": "possibly_partial",
+        },
+    }
+    assert "private release details" not in response.text
+
+
+def test_direct_unavailable_failure_preserves_xdotool_identity(test_client, app) -> None:
+    async def fail_move(x: int, y: int):
+        del x, y
+        raise X11InputUnavailableError(
+            "private adapter details",
+            input_backend="xdotool",
+        )
+
+    app.state.backend.mouse_move = fail_move
+
+    response = test_client.post("/v1/mouse/move", json={"x": 1, "y": 1})
+
+    assert response.status_code == 503
+    assert response.json()["details"]["input_backend"] == "xdotool"
+    assert "private adapter details" not in response.text
+
+
+def test_direct_partial_failure_preserves_xdotool_identity(test_client, app) -> None:
+    async def fail_move(x: int, y: int):
+        del x, y
+        raise X11InputInjectionError(
+            "private adapter details",
+            input_backend="xdotool",
+        )
+
+    app.state.backend.mouse_move = fail_move
+
+    response = test_client.post("/v1/mouse/move", json={"x": 1, "y": 1})
+
+    assert response.status_code == 500
+    assert response.json()["details"] == {
+        "input_backend": "xdotool",
+        "retry_safe": False,
+        "emission_state": "possibly_partial",
+    }
+    assert "private adapter details" not in response.text
+
+
+def test_direct_input_state_conflict_is_retry_safe(test_client, app) -> None:
+    async def fail_move(x: int, y: int):
+        del x, y
+        raise X11InputStateConflictError("private state details")
+
+    app.state.backend.mouse_move = fail_move
+
+    response = test_client.post("/v1/mouse/move", json={"x": 1, "y": 1})
+
+    assert response.status_code == 409
+    assert response.headers["x-computer-use-error-code"] == "input_state_conflict"
+    assert response.json() == {
+        "code": "input_state_conflict",
+        "message": "input target is already held",
+        "details": {
+            "retry_safe": True,
+            "emission_state": "not_started",
+        },
+    }
 
 
 def test_readyz_checks_x11vnc_when_vnc_enabled(tmp_path) -> None:

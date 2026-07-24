@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "modal-colocated-client",
+  "status": "accepted",
+  "generated_at": "2026-07-24T14:00:36.382401+00:00",
+  "provenance": {
+    "git_revision": "474331688b4e448638467f60ace59efad59aeb9c",
+    "git_worktree_clean": true,
+    "modal_profile": "auto-alphafold3",
+    "modal_region": "us-west-2",
+    "target_cpu": 4.0,
+    "target_memory_gib": 8.0,
+    "runner_cpu": 1.0,
+    "runner_memory_gib": 1.0
+  },
+  "configuration": {
+    "surface": "daemon-http",
+    "runner_path": "target-loopback",
+    "input_backend": "xtest",
+    "input_rate_limit_per_sec": 0,
+    "browser": "chromium",
+    "iterations": 30,
+    "warmup_iterations": 1
+  },
+  "verification": {
+    "status": "ok",
+    "failures": [],
+    "input_backend_observed": "xtest",
+    "cursor_readback": "ok",
+    "typing_readback": "ok"
+  },
+  "results": {
+    "screenshot_full": {
+      "operation_p50_ms": 33.648583,
+      "daemon_p50_ms": 21.976681,
+      "overhead_p50_ms": 11.553149
+    },
+    "move_click": {
+      "operation_p50_ms": 4.573322,
+      "daemon_p50_ms": 1.347053,
+      "overhead_p50_ms": 3.075451
+    },
+    "move_click_sequence": {
+      "operation_p50_ms": 11.133104,
+      "daemon_p50_ms": 6.813183,
+      "overhead_p50_ms": 4.093001
+    },
+    "type_100_chars": {
+      "operation_p50_ms": 9.672208,
+      "daemon_p50_ms": 5.910625,
+      "overhead_p50_ms": 3.424729
+    },
+    "type_1000_chars": {
+      "operation_p50_ms": 32.779731,
+      "daemon_p50_ms": 27.932113,
+      "overhead_p50_ms": 4.27372
+    }
+  },
+  "limitations": [
+    "Daytona and E2B comparisons reuse the earlier provider-default run and are not contemporaneous or paired.",
+    "Raw samples remain ignored under benchmark-results/."
+  ]
+}

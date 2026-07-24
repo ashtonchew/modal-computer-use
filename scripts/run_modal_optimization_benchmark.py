@@ -35,6 +35,10 @@ from modal_computer_use.sandbox import create_modal_v2_tunnel_computer
 DEPENDENCY_SHA = "37f977f80de93800c005caeec7ead5222b00b040"
 BASE_BENCHMARK_SOURCE_SHA = "8c21cf1338fd747dca57bca6941c307270069712"
 DEFAULT_RAW_ROOT = Path("benchmark-results/modal-optimization-2026-07-19")
+DEFAULT_PREREGISTRATION = DEFAULT_RAW_ROOT / "preregistration.json"
+DEFAULT_PUBLISHED_ARTIFACT = Path(
+    "benchmark-data/modal-optimization-results-2026-07-19.json"
+)
 
 
 def main() -> int:
@@ -48,8 +52,9 @@ def main() -> int:
     preregister.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_RAW_ROOT / "preregistration.json",
+        default=DEFAULT_PREREGISTRATION,
     )
+    preregister.add_argument("--artifact-output", type=Path)
 
     region = subparsers.add_parser("region")
     region.add_argument("--source-sha", required=True)
@@ -164,6 +169,12 @@ def _v2_config(args: argparse.Namespace) -> ModalOptimizationConfig:
 
 
 def _preregister(args: argparse.Namespace) -> int:
+    if args.output.exists():
+        raise RuntimeError("preregistration output already exists; refusing stale evidence")
+    artifact_output = _preregistration_artifact_output(
+        output=args.output,
+        artifact_output=args.artifact_output,
+    )
     _require_dependency(args.source_sha, args.dependency_sha, require_clean=True)
     config = _config(args)
     region_selection_source_sha = args.region_selection_source_sha or args.source_sha
@@ -172,6 +183,8 @@ def _preregister(args: argparse.Namespace) -> int:
         args.source_sha,
         region_selection_source_sha=region_selection_source_sha,
         provider_default_source_sha=provider_default_source_sha,
+        root=args.output.parent,
+        artifact_output=artifact_output,
     )
     payload = build_preregistration(
         config,
@@ -198,6 +211,21 @@ def _preregister(args: argparse.Namespace) -> int:
     args.output.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     print(json.dumps({"status": "preregistered", "output": str(args.output)}))
     return 0
+
+
+def _preregistration_artifact_output(
+    *,
+    output: Path,
+    artifact_output: Path | None,
+) -> Path:
+    if artifact_output is not None:
+        return artifact_output
+    if output == DEFAULT_PREREGISTRATION:
+        return DEFAULT_PUBLISHED_ARTIFACT
+    raise ValueError(
+        "--artifact-output is required when --output is not the canonical "
+        f"{DEFAULT_PREREGISTRATION.as_posix()}"
+    )
 
 
 def _run_region(args: argparse.Namespace) -> int:
@@ -466,19 +494,22 @@ def _commands(
     *,
     region_selection_source_sha: str,
     provider_default_source_sha: str,
+    root: Path = DEFAULT_RAW_ROOT,
+    artifact_output: Path = DEFAULT_PUBLISHED_ARTIFACT,
 ) -> dict[str, str]:
-    root = "benchmark-results/modal-optimization-2026-07-19"
+    root_text = root.as_posix()
     return {
         "region_selection": (
             "uv run python scripts/run_modal_optimization_benchmark.py region "
             f"--source-sha {region_selection_source_sha} "
-            f"--output {root}/region-selection.json"
+            f"--output {root_text}/region-selection.json"
         ),
         "region_selection_attest": (
             "uv run python scripts/run_modal_optimization_benchmark.py attest-region "
-            f"{root}/region-selection.json {root}/region-selection-attested.json "
+            f"{root_text}/region-selection.json "
+            f"{root_text}/region-selection-attested.json "
             f"--source-sha {region_selection_source_sha} "
-            f"--raw-artifact-path {root}/region-selection.json"
+            f"--raw-artifact-path {root_text}/region-selection.json"
         ),
         "provider_default": (
             "uv run computer-use benchmark compare --create-modal-sandbox "
@@ -486,12 +517,13 @@ def _commands(
             "--modal-ingress attested-tunnel --resource-profile browser "
             "--browser chromium --iterations 3 --env-file "
             "/Users/ashtonchew/projects/modal-computer-use/.env "
-            f"--output {root}/provider-default-raw.json --json"
+            f"--output {root_text}/provider-default-raw.json --json"
         ),
         "provider_default_normalize": (
             "uv run python scripts/sanitize_provider_benchmark.py "
-            f"{root}/provider-default-raw.json {root}/provider-default-sanitized.json "
-            f"--raw-artifact-path {root}/provider-default-raw.json "
+            f"{root_text}/provider-default-raw.json "
+            f"{root_text}/provider-default-sanitized.json "
+            f"--raw-artifact-path {root_text}/provider-default-raw.json "
             f"--harness-commit {provider_default_source_sha} --status current_reference "
             "--scope \"provider-default verification for Modal, Daytona, and E2B "
             "without warm pools\""
@@ -504,16 +536,17 @@ def _commands(
             f"--source-sha {source_sha} --dependency-sha {DEPENDENCY_SHA} "
             f"--region-selection-source-sha {region_selection_source_sha} "
             f"--provider-default-source-sha {provider_default_source_sha} "
-            f"--region-selection {root}/region-selection-attested.json "
-            f"--provider-default {root}/provider-default-sanitized.json "
-            f"--preregistration {root}/preregistration.json --output {root}/raw.json"
+            f"--region-selection {root_text}/region-selection-attested.json "
+            f"--provider-default {root_text}/provider-default-sanitized.json "
+            f"--preregistration {root_text}/preregistration.json "
+            f"--output {root_text}/raw.json"
         ),
         "normalize": (
             "uv run python scripts/sanitize_modal_optimization_benchmark.py "
-            f"{root}/raw.json benchmark-data/modal-optimization-results-2026-07-19.json "
-            f"--raw-artifact-path {root}/raw.json --harness-commit {source_sha} "
-            f"--preregistration {root}/preregistration.json "
-            f"--region-evidence {root}/region-selection-attested.json"
+            f"{root_text}/raw.json {artifact_output.as_posix()} "
+            f"--raw-artifact-path {root_text}/raw.json --harness-commit {source_sha} "
+            f"--preregistration {root_text}/preregistration.json "
+            f"--region-evidence {root_text}/region-selection-attested.json"
         ),
     }
 

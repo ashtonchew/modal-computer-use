@@ -40,6 +40,11 @@ See `examples/novnc_view_only.py` for a view-only pattern that reports only whet
 
 Structured logs redact typed text, clipboard text, screenshot bytes, tokens, provider keys, noVNC URLs, and artifact bytes. They retain lengths, hashes, dimensions, action types, elapsed time, and `call_id` so traces remain useful for debugging.
 
+Compatibility typing passes text to `xdotool type --file -` through subprocess stdin. Typed text is
+not included in subprocess argv, where it could otherwise be exposed by process-list or
+`/proc/<pid>/cmdline` inspection. The plaintext still necessarily exists in daemon memory and the
+stdin pipe while the action runs; this is exposure reduction, not encryption.
+
 Optional OpenTelemetry is disabled by default. When `COMPUTER_USE_OTEL_ENABLED=true` and
 `opentelemetry-api` is installed by the application image, spans are emitted at SDK request,
 daemon route, action execution, artifact write/sync, and trace replay boundaries. Span attributes

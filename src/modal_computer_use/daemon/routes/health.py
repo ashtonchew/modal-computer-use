@@ -43,6 +43,7 @@ async def version(request: Request) -> VersionInfo:
 
 @router.get("/v1/capabilities")
 async def capabilities(request: Request) -> Capabilities:
+    backend = request.app.state.backend
     return Capabilities(
         primitives=[
             "mouse",
@@ -89,5 +90,14 @@ async def capabilities(request: Request) -> Capabilities:
         },
         image_profile=request.app.state.settings.image_profile,
         vnc_enabled=request.app.state.settings.vnc_mode != "off",
-        input_backend=getattr(request.app.state.backend, "input_backend", None),
+        input_backend=getattr(backend, "input_backend", None),
+        input_backend_configured=getattr(backend, "configured_input_backend", None),
+        input_backends_supported=_sorted_strings(getattr(backend, "supported_input_backends", ())),
+        input_backends_available=_sorted_strings(getattr(backend, "available_input_backends", ())),
     )
+
+
+def _sorted_strings(value: object) -> list[str]:
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return sorted(item for item in value if isinstance(item, str))
+    return []

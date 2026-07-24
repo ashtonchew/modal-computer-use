@@ -6,7 +6,12 @@ Group covers daemon readiness, X11 desktop, input, screenshots, recordings, arti
 
 ### `/healthz` passes but `/readyz` fails
 
-`/healthz` only confirms the daemon process is alive. `/readyz` checks Xvfb, the window manager, the screenshot pipeline, required CLI tools (`xdotool`, `wmctrl`, `maim` or its fallback), and noVNC when enabled. Hit `/readyz` directly and read the per-check failure list.
+`/healthz` only confirms the daemon process is alive. `/readyz` checks Xvfb, native X11 input, the
+window manager, the screenshot pipeline, and noVNC when enabled. `xdotool` remains required while
+the explicit compatibility typing method and automatic pre-emission fallback are supported;
+`wmctrl` is required only when the native EWMH adapter cannot verify a live, self-referencing
+`_NET_SUPPORTING_WM_CHECK` owner plus listing, activation, and close support. Hit `/readyz`
+directly and read the per-check failure list.
 
 ### Sandbox fails readiness on Modal
 
@@ -24,11 +29,38 @@ The window manager often hasn't drawn yet when the daemon starts. Wait for `/rea
 
 ### Keyboard input not appearing
 
-The target window probably is not focused. Activate it first with `windows.activate(...)`, then send keys. If multiple Xvfb sessions are present, `xdotool` may be typing into the wrong one; verify `DISPLAY`.
+The target window probably is not focused. Activate it first with `windows.activate(...)`, then send
+keys. If multiple Xvfb sessions are present, verify `DISPLAY`. For diagnosis, force
+`COMPUTER_USE_INPUT_BACKEND=xtest` to fail closed when the native adapter cannot open the intended
+display, or force `xdotool` to isolate compatibility-path behavior.
 
 ### Unicode typing issues
 
-`xdotool type` falls back to keysym lookup for non-ASCII characters and may drop unsupported codepoints. For long Unicode strings, paste through the clipboard: `clipboard.set_text(text)` then `keyboard.hotkey("ctrl", "v")`.
+XTest injects keycodes rather than Unicode text. `method="keystrokes"` therefore requires every
+character to be representable by the active XKB layout. Use `method="auto"` for normal SDK calls:
+layout-mapped text uses native keystrokes, while long or unmapped Unicode text uses clipboard paste
+and restores the previous clipboard. `method="clipboard"` forces that behavior, and legacy
+`method="xdotool"` forces the compatibility path.
+
+### Which input backend is actually in use?
+
+Inspect `/v1/capabilities`. `input_backend_configured` is the requested policy, while the legacy
+`input_backend` field is the adapter most recently selected and can change when `auto` falls back.
+`input_backends_supported` describes implementations built into the backend;
+`input_backends_available` describes the latest readiness probe and is empty before that probe.
+An installed `xdotool` executable is listed as available only after a bounded command probe reaches
+the configured `DISPLAY`.
+
+An `input_backend_unavailable` error guarantees emission did not start and identifies the selected
+adapter in `details.input_backend`, so `details.retry_safe` is true with respect to duplicate input.
+An `input_may_be_partial` error means emission may already have started. Presses, typing, clicks,
+and drags must not be replayed through another adapter; idempotent key/button releases explicitly
+report `details.retry_safe=true`. Neither value guarantees that retrying will resolve the
+underlying display problem.
+
+If `input.release_all` returns `release_all_incomplete`, inspect `output.remaining` for controls
+that are still tracked as held. Stop sending new input until the display/backend problem is
+resolved and cleanup succeeds.
 
 ## Adapters
 

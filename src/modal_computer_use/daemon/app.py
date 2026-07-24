@@ -16,7 +16,12 @@ from modal_computer_use.daemon.auth import AuthMiddleware
 from modal_computer_use.daemon.budget_policy import BudgetPolicy
 from modal_computer_use.daemon.desktop import choose_backend
 from modal_computer_use.daemon.desktop.recordings import RecordingRegistry
-from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.desktop.xtest import (
+    X11InputInjectionError,
+    X11InputStateConflictError,
+    X11InputUnavailableError,
+)
+from modal_computer_use.daemon.errors import DaemonError, public_input_error
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.readiness import ReadinessCache
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
@@ -81,8 +86,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 message="browser prewarm failed",
                 output={"error": type(exc).__name__},
             )
-    yield
-    await supervisor.stop()
+    try:
+        yield
+    finally:
+        try:
+            await supervisor.stop()
+        finally:
+            app.state.backend.close()
 
 
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
@@ -160,6 +170,23 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
             },
         )
 
+    @app.exception_handler(X11InputUnavailableError)
+    @app.exception_handler(X11InputInjectionError)
+    @app.exception_handler(X11InputStateConflictError)
+    async def native_input_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        mapped_error = public_input_error(exc)
+        if mapped_error is None:  # pragma: no cover - decorators constrain the exception types.
+            raise exc
+        return _error_response(
+            status_code=mapped_error.status_code,
+            code=mapped_error.code,
+            content={
+                "code": mapped_error.code,
+                "message": mapped_error.message,
+                "details": mapped_error.details,
+            },
+        )
+
     @app.exception_handler(ArtifactPathError)
     async def artifact_path_error_handler(
         _request: Request, exc: ArtifactPathError
@@ -222,6 +249,17 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        mapped_error = public_input_error(exc)
+        if mapped_error is not None:
+            return _error_response(
+                status_code=mapped_error.status_code,
+                code=mapped_error.code,
+                content={
+                    "code": mapped_error.code,
+                    "message": mapped_error.message,
+                    "details": mapped_error.details,
+                },
+            )
         return _error_response(
             status_code=500,
             code="internal_error",

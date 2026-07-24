@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.models import ActionResult
 from modal_computer_use.tracing import load_trace
 
 
@@ -332,6 +333,75 @@ def test_action_timeout_releases_input_and_stops_batch(tmp_path) -> None:
     }
     assert app.state.backend.held_buttons == set()
     assert app.state.action_count == 1
+
+
+def test_release_all_timeout_runs_secondary_cleanup_with_diagnostics(tmp_path) -> None:
+    app = _app(tmp_path, default_action_timeout_ms=10)
+    app.state.backend.held_keys.update(("a", "b"))
+    calls = 0
+    prefix_cancelled = False
+
+    async def release_all() -> ActionResult:
+        nonlocal calls, prefix_cancelled
+        calls += 1
+        if calls == 1:
+            app.state.backend.held_keys.remove("a")
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                prefix_cancelled = True
+                raise
+        await asyncio.sleep(0.02)
+        return ActionResult(
+            ok=False,
+            message="failed to release all held input",
+            output={
+                "code": "release_all_incomplete",
+                "keys": [],
+                "buttons": [],
+                "remaining": {"keys": ["b"], "buttons": []},
+                "failures": [
+                    {
+                        "kind": "key",
+                        "value": "b",
+                        "input_backend": "xtest",
+                        "code": "key_release_failed",
+                    }
+                ],
+            },
+        )
+
+    app.state.backend.release_all = release_all
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={"actions": [{"type": "release_all"}]},
+        )
+
+    item = response.json()["results"][0]
+    assert calls == 2
+    assert prefix_cancelled is True
+    assert app.state.backend.held_keys == {"b"}
+    assert item["error_code"] == "timeout"
+    assert item["output"] == {
+        "code": "timeout",
+        "timeout_ms": 10,
+        "scope": "action",
+        "cleanup": {
+            "code": "release_all_incomplete",
+            "keys": [],
+            "buttons": [],
+            "remaining": {"keys": ["b"], "buttons": []},
+            "failures": [
+                {
+                    "kind": "key",
+                    "value": "b",
+                    "input_backend": "xtest",
+                    "code": "key_release_failed",
+                }
+            ],
+        },
+    }
 
 
 def test_action_timeout_continue_on_error_executes_next_action(tmp_path) -> None:

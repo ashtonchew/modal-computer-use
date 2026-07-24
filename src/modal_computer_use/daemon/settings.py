@@ -43,22 +43,16 @@ def _json_list_env(name: str) -> list[str]:
 class DaemonSettings:
     run_id: str | None = field(default_factory=lambda: os.getenv("COMPUTER_USE_RUN_ID") or None)
     display: str = field(default_factory=lambda: os.getenv("DISPLAY", ":99"))
-    desktop_width: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_WIDTH", 1024)
-    )
+    desktop_width: int = field(default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_WIDTH", 1024))
     desktop_height: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_HEIGHT", 768)
     )
     desktop_dpi: int = field(default_factory=lambda: _int_env("COMPUTER_USE_DESKTOP_DPI", 96))
-    display_depth: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_DISPLAY_DEPTH", 24)
-    )
+    display_depth: int = field(default_factory=lambda: _int_env("COMPUTER_USE_DISPLAY_DEPTH", 24))
     window_manager: str = field(
         default_factory=lambda: os.getenv("COMPUTER_USE_WINDOW_MANAGER", "xfce")
     )
-    browser: str | None = field(
-        default_factory=lambda: os.getenv("COMPUTER_USE_BROWSER") or None
-    )
+    browser: str | None = field(default_factory=lambda: os.getenv("COMPUTER_USE_BROWSER") or None)
     browser_prewarm: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_BROWSER_PREWARM", False)
     )
@@ -84,13 +78,12 @@ class DaemonSettings:
         default_factory=lambda: _bool_env("COMPUTER_USE_ARTIFACTS_VOLUME_MOUNTED", False)
     )
     recordings_dir: Path = field(
-        default_factory=lambda: _path_env(
-            "COMPUTER_USE_RECORDINGS_DIR", "/home/desktop/recordings"
-        )
+        default_factory=lambda: _path_env("COMPUTER_USE_RECORDINGS_DIR", "/home/desktop/recordings")
     )
     runtime_dir: Path = field(
         default_factory=lambda: _path_env(
-            "COMPUTER_USE_RUNTIME_DIR", "/tmp/modal-computer-use"  # noqa: S108
+            "COMPUTER_USE_RUNTIME_DIR",
+            "/tmp/modal-computer-use",  # noqa: S108
         )
     )
     trace_dir: Path = field(
@@ -182,7 +175,24 @@ class DaemonSettings:
         default_factory=lambda: os.getenv("COMPUTER_USE_IMAGE_PROFILE", "standard")
     )
 
+    def __post_init__(self) -> None:
+        _require_choice(
+            "COMPUTER_USE_BACKEND",
+            self.backend,
+            {"auto", "mock", "x11"},
+        )
+        _require_choice(
+            "COMPUTER_USE_INPUT_BACKEND",
+            self.input_backend,
+            {"auto", "xdotool", "xtest"},
+        )
 
 
 def get_settings() -> DaemonSettings:
     return DaemonSettings()
+
+
+def _require_choice(name: str, value: str, allowed: set[str]) -> None:
+    if value not in allowed:
+        choices = ", ".join(sorted(allowed))
+        raise ValueError(f"{name} must be one of: {choices}")

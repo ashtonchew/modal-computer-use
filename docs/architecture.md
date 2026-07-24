@@ -20,25 +20,34 @@ The daemon supervises these processes:
 - A window manager (XFCE by default) handles window placement and focus.
 - `x11vnc` plus `noVNC` provide optional remote view, off by default.
 
-It also drives these CLI tools per request through feature-local X11 controllers. The daemon-facing
+It drives native X11 adapters and compatibility CLI tools through feature-local controllers. The daemon-facing
 backend seam remains `DesktopBackend`/`X11DesktopBackend` in `daemon/desktop/x11.py`, while the
 behavior lives next to the feature that owns it:
 
-- `daemon/desktop/mouse.py` owns `xdotool` pointer, click, drag, scroll, and button state.
-- `daemon/desktop/keyboard.py` owns key normalization, xdotool key commands, clipboard-paste
-  typing fallback, and held-key state.
+- `daemon/desktop/xtest.py` owns the persistent Xlib/XTest session and distinguishes failure before
+  input emission from failure after emission may have started.
+- `daemon/desktop/mouse.py` owns native XTest pointer/button input, the `xdotool` compatibility
+  adapter, and held-button state.
+- `daemon/desktop/keyboard.py` owns XKB key mapping, native XTest input, the `xdotool`
+  compatibility adapter, clipboard-paste typing fallback, and held-key state.
 - `daemon/desktop/screenshots.py` owns `maim` capture, scaling, encoding, coordinate-space
   metadata, and screenshot artifact writes.
 - `daemon/desktop/clipboard.py` owns clipboard read/write/clear through `xclip`.
-- `daemon/desktop/windows.py` owns `wmctrl` parsing and window activation/close commands.
+- `daemon/desktop/windows.py` owns native EWMH/Xlib window operations and the `wmctrl`
+  compatibility adapter.
 - `daemon/desktop/apps.py` and `daemon/desktop/browser.py` own application spawn and browser URL
   opening/wait behavior.
 - `daemon/desktop/display.py` owns display metadata exposed by the backend.
 
-Those controllers use these CLI tools:
+Native input uses one persistent display connection rather than spawning a process per event.
+With `COMPUTER_USE_INPUT_BACKEND=auto`, compatibility fallback is allowed only when the native
+adapter reports that emission did not start. A possibly partial native operation is returned as a
+non-replayable error.
 
-- `xdotool` for mouse and keyboard input.
-- `wmctrl` for window listing, activation, and close.
+The compatibility and capture controllers use these CLI tools:
+
+- `xdotool` for compatibility mouse and keyboard input.
+- `wmctrl` when the native EWMH adapter is unavailable.
 - `maim` for screenshots, with fallbacks when unavailable.
 - `ffmpeg` for screen recording.
 - `xclip` and `xsel` for clipboard read and write.

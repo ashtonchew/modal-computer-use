@@ -129,11 +129,13 @@ class _TypeCharsBenchmark:
         text: str,
         *,
         method: str,
+        delay_ms: int,
         timeout_ms: int | None = None,
     ) -> None:
         self._client = client
         self._text = text
         self._method = method
+        self._delay_ms = delay_ms
         self._timeout_ms = timeout_ms
 
     def run(self) -> dict[str, Any]:
@@ -141,6 +143,7 @@ class _TypeCharsBenchmark:
             "type": "type",
             "text": self._text,
             "method": self._method,
+            "delay_ms": self._delay_ms,
         }
         if self._timeout_ms is not None:
             action["timeout_ms"] = self._timeout_ms
@@ -155,6 +158,7 @@ class _TypeCharsBenchmark:
         return {
             "daemon_ms": _extract_daemon_ms(result),
             "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _input_backend_result(result),
         }
 
 class _CommandEchoBenchmark:
