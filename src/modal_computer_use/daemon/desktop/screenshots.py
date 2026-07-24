@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
@@ -82,6 +83,21 @@ class X11ScreenshotController:
         self.display = display
         self._cursor_position = cursor_position
         self._mss = _MSSCaptureSession(display=display)
+
+    async def probe(self) -> tuple[bool, str | None]:
+        """Verify that the public cursor-visible screenshot path can capture."""
+        if shutil.which("maim") is None:
+            return False, "missing required tools: maim"
+        try:
+            captured = await self.capture_bytes(
+                ScreenshotOptions(format="png", show_cursor=True),
+                prefer_native_png=True,
+            )
+        except Exception:
+            return False, "screenshot capture failed"
+        if not captured.data:
+            return False, "screenshot capture failed"
+        return True, None
 
     async def capture(
         self,
@@ -375,7 +391,6 @@ class _MSSCaptureSession:
     def __init__(self, *, display: str) -> None:
         self._display = display
         self._screenshotter: Any | None = None
-        self._prefer_xshm = True
 
     def grab(self, source: Region) -> _MSSCapture | None:
         monitor = {
@@ -384,30 +399,19 @@ class _MSSCaptureSession:
             "width": source.width,
             "height": source.height,
         }
-        for attempt in range(2):
+        for _ in range(2):
             try:
-                screenshotter = self._screenshotter or self._open(prefer_xshm=self._prefer_xshm)
+                screenshotter = self._screenshotter or self._open()
                 self._screenshotter = screenshotter
                 shot = screenshotter.grab(monitor)
                 return _MSSCapture(shot=shot, width=source.width, height=source.height)
             except Exception:
                 self._reset()
-                if attempt == 0 and self._prefer_xshm:
-                    self._prefer_xshm = False
-                    continue
-                return None
         return None
 
-    def _open(self, *, prefer_xshm: bool) -> Any:
+    def _open(self) -> Any:
         import mss
 
-        if prefer_xshm:
-            try:
-                return mss.MSS(display=self._display, backend="xshmgetimage")
-            except TypeError:
-                return mss.MSS(display=self._display)
-            except Exception:
-                return mss.MSS(display=self._display)
         return mss.MSS(display=self._display)
 
     def _reset(self) -> None:

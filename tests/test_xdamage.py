@@ -1,6 +1,96 @@
 from __future__ import annotations
 
-from modal_computer_use.daemon.desktop.xdamage import XDamageRect, XDamageWatcher
+from modal_computer_use.daemon.desktop.xdamage import (
+    XDamageRect,
+    XDamageWaitResult,
+    XDamageWatcher,
+    prepare_change_signal,
+)
+
+
+class _FakeWatcher:
+    def __init__(self, *, arm_error: str | None = None) -> None:
+        self.arm_error = arm_error
+        self.failure = arm_error
+        self.armed = 0
+        self.closed = False
+
+    def arm(self) -> None:
+        self.armed += 1
+        if self.arm_error is not None:
+            raise RuntimeError(self.arm_error)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_prepare_change_signal_poll_does_not_create_watcher() -> None:
+    created: list[str] = []
+
+    prepared = prepare_change_signal(
+        "poll",
+        display=":99",
+        watcher_factory=lambda *, display: created.append(display) or _FakeWatcher(),
+    )
+
+    assert created == []
+    assert prepared.wait_watcher is None
+    assert prepared.metadata(None) == {
+        "change_signal_requested": "poll",
+        "change_signal_active": "poll",
+        "change_signal_available": None,
+        "change_signal_detected": None,
+        "change_signal_wait_ms": None,
+        "change_signal_reason": None,
+        "change_signal_version": None,
+    }
+
+
+def test_prepare_change_signal_auto_falls_back_and_retains_watcher_for_owner() -> None:
+    watcher = _FakeWatcher(arm_error="XDamage extension unavailable")
+
+    prepared = prepare_change_signal("auto", display=":99", watcher=watcher)
+
+    assert prepared.active == "poll"
+    assert prepared.wait_watcher is None
+    assert prepared.reusable_watcher is watcher
+    assert prepared.metadata(None)["change_signal_available"] is False
+    assert prepared.metadata(None)["change_signal_reason"] == "XDamage extension unavailable"
+    prepared.close()
+    assert watcher.closed is True
+
+
+def test_prepare_change_signal_explicit_xdamage_preserves_unavailable_wait_result() -> None:
+    watcher = _FakeWatcher(arm_error="XDamage extension unavailable")
+    wait_result = XDamageWaitResult(
+        available=False,
+        detected=False,
+        wait_ms=1.25,
+        reason="XDamage extension unavailable",
+    )
+
+    prepared = prepare_change_signal("xdamage", display=":99", watcher=watcher)
+
+    assert prepared.active == "xdamage"
+    assert prepared.wait_watcher is watcher
+    assert prepared.metadata(wait_result) == {
+        "change_signal_requested": "xdamage",
+        "change_signal_active": "xdamage",
+        "change_signal_available": False,
+        "change_signal_detected": False,
+        "change_signal_wait_ms": 1.25,
+        "change_signal_reason": "XDamage extension unavailable",
+        "change_signal_version": None,
+    }
+
+
+def test_prepare_change_signal_without_display_preserves_auto_fallback_metadata() -> None:
+    prepared = prepare_change_signal("auto", display=None)
+
+    assert prepared.active == "poll"
+    assert prepared.reusable_watcher is None
+    assert prepared.metadata(None)["change_signal_available"] is False
+    assert prepared.metadata(None)["change_signal_reason"] == "backend has no X11 display"
 
 
 def test_xdamage_arm_syncs_before_draining_stale_events(monkeypatch) -> None:
