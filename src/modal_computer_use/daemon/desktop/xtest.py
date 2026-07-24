@@ -234,20 +234,25 @@ class X11InputSession:
         events: Sequence[X11InputEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None:
         sequence = tuple(events)
         preserved = frozenset(preserve_pressed_keycodes)
+        rejected = frozenset(reject_pressed_keycodes)
         self._validate_events(sequence)
-        for keycode in preserved:
+        for keycode in preserved | rejected:
             self._validate_keycode(keycode)
 
         with self._lock:
             display = self._ensure_open()
-            already_pressed = (
-                self._query_pressed_keycodes(display).intersection(preserved)
-                if preserved
+            pressed = (
+                self._query_pressed_keycodes(display)
+                if preserved or rejected
                 else frozenset()
             )
+            if pressed.intersection(rejected):
+                raise X11InputUnavailableError("typing target key is already held")
+            already_pressed = pressed.intersection(preserved)
             filtered = tuple(
                 event
                 for event in sequence

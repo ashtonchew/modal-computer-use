@@ -150,7 +150,10 @@ class FakeX11InputSession:
         events: Sequence[KeyEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None:
+        if self._pressed.intersection(reject_pressed_keycodes):
+            raise X11InputUnavailableError("typing target key is already held")
         already_pressed = self._pressed.intersection(preserve_pressed_keycodes)
         filtered = [event for event in events if event.keycode not in already_pressed]
         if self._fail_injection_once:
@@ -443,12 +446,17 @@ def test_positive_duration_press_never_replays_after_native_release_failure() ->
         events: Sequence[KeyEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None:
         nonlocal calls
         calls += 1
         if calls >= 2:
             raise X11InputUnavailableError("display disconnected during release")
-        original_emit(events, preserve_pressed_keycodes=preserve_pressed_keycodes)
+        original_emit(
+            events,
+            preserve_pressed_keycodes=preserve_pressed_keycodes,
+            reject_pressed_keycodes=reject_pressed_keycodes,
+        )
 
     harness.session.emit = disconnect_during_release  # type: ignore[method-assign]
 
@@ -467,12 +475,17 @@ def test_positive_duration_hotkey_never_replays_after_native_release_failure() -
         events: Sequence[KeyEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None:
         nonlocal calls
         calls += 1
         if calls >= 2:
             raise X11InputUnavailableError("display disconnected during release")
-        original_emit(events, preserve_pressed_keycodes=preserve_pressed_keycodes)
+        original_emit(
+            events,
+            preserve_pressed_keycodes=preserve_pressed_keycodes,
+            reject_pressed_keycodes=reject_pressed_keycodes,
+        )
 
     harness.session.emit = disconnect_during_release  # type: ignore[method-assign]
 
@@ -567,8 +580,9 @@ def test_auto_typing_falls_back_when_first_native_emit_is_unavailable() -> None:
         _events: Sequence[KeyEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None:
-        del preserve_pressed_keycodes
+        del preserve_pressed_keycodes, reject_pressed_keycodes
         raise X11InputUnavailableError("display disconnected")
 
     harness.session.emit = unavailable  # type: ignore[method-assign]
@@ -601,6 +615,23 @@ def test_typing_never_silently_drops_an_already_held_target_key() -> None:
     assert forced.session.emissions == []
 
 
+def test_typing_rejects_target_pressed_between_preflight_and_locked_emit() -> None:
+    session = FakeX11InputSession()
+
+    def race(_keycodes: Iterable[int] | None = None) -> frozenset[int]:
+        session._pressed.add(38)
+        return frozenset()
+
+    session.pressed_keycodes = race  # type: ignore[method-assign]
+    harness = KeyboardHarness(input_backend="auto", session=session)
+
+    result = anyio.run(harness.controller.type_text, "a", 0, "keystrokes")
+
+    assert result.output["method"] == "xdotool"
+    assert harness.commands == [("xdotool", "type", "--delay", "0", "a")]
+    assert harness.session.emissions == []
+
+
 def test_delayed_typing_never_replays_after_native_progress() -> None:
     harness = KeyboardHarness(input_backend="auto")
     original_emit = harness.session.emit
@@ -610,12 +641,17 @@ def test_delayed_typing_never_replays_after_native_progress() -> None:
         events: Sequence[KeyEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise X11InputUnavailableError("display disconnected")
-        original_emit(events, preserve_pressed_keycodes=preserve_pressed_keycodes)
+        original_emit(
+            events,
+            preserve_pressed_keycodes=preserve_pressed_keycodes,
+            reject_pressed_keycodes=reject_pressed_keycodes,
+        )
 
     harness.session.emit = disconnect_after_first  # type: ignore[method-assign]
 

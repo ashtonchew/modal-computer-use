@@ -114,6 +114,7 @@ class NativeKeyboardSession(Protocol):
         events: Sequence[KeyEvent],
         *,
         preserve_pressed_keycodes: Iterable[int] = (),
+        reject_pressed_keycodes: Iterable[int] = (),
     ) -> None: ...
 
 
@@ -671,6 +672,7 @@ class X11KeyboardController:
                 preserve_pressed_keycodes=(
                     keycode for keycode in unique_keycodes if keycode not in targets
                 ),
+                reject_pressed_keycodes=targets,
             )
             self._active_backend = "xtest"
         except X11InputInjectionError:
