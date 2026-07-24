@@ -23,7 +23,9 @@ Process each `computer_call` as follows:
 4. Set `previous_response_id` to the ID of the previous response.
 5. Stop when the response has no `computer_call`.
 
-Set limits for turns, actions, action time, and total time. See
+Set limits for turns, actions, action time, and total time. Count every provider response as one
+turn. If the final allowed response requests an action, stop before executing it because the loop
+cannot return the required action output within its turn budget. See
 [examples/03_openai_computer_loop.py](../examples/03_openai_computer_loop.py) for a complete loop.
 
 Do not use the deprecated `computer-use-preview` model or the `computer_use_preview` tool in new

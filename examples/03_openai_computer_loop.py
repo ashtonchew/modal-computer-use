@@ -49,19 +49,27 @@ def run_openai_computer_loop(
     adapter = OpenAIAdapter(computer)
     started_at = monotonic()
     action_count = 0
-    response = client.responses.create(
-        model=model,
-        tools=[COMPUTER_TOOL],
-        input=task,
-    )
+    previous_response_id: str | None = None
+    next_input: str | list[dict[str, Any]] = task
 
-    for _ in range(max_turns):
+    for turn in range(max_turns):
+        _check_deadline(started_at, max_elapsed_seconds)
+        request: dict[str, Any] = {
+            "model": model,
+            "tools": [COMPUTER_TOOL],
+            "input": next_input,
+        }
+        if previous_response_id is not None:
+            request["previous_response_id"] = previous_response_id
+        response = client.responses.create(**request)
         _check_deadline(started_at, max_elapsed_seconds)
         calls = [
             item for item in response.output if getattr(item, "type", None) == "computer_call"
         ]
         if not calls:
             return response
+        if turn == max_turns - 1:
+            raise RuntimeError(f"OpenAI computer loop exceeded {max_turns} turns")
 
         outputs: list[dict[str, Any]] = []
         for call in calls:
@@ -70,14 +78,24 @@ def run_openai_computer_loop(
             action_count += sum(_native_action_count(action) for action in actions)
             if action_count > max_actions:
                 raise RuntimeError(f"OpenAI computer loop exceeded {max_actions} actions")
-            batch = adapter.apply_many(
-                actions,
-                screenshot_after=True,
-                max_action_timeout_ms=max_action_timeout_ms,
-            )
-            if not batch.ok:
-                raise RuntimeError(f"computer action batch failed: {batch.results}")
-            screenshot = batch.screenshot or computer.screenshots.full()
+            for action in actions:
+                native_count = _native_action_count(action)
+                timeout_ms = _remaining_action_timeout_ms(
+                    started_at=started_at,
+                    max_elapsed_seconds=max_elapsed_seconds,
+                    max_action_timeout_ms=max_action_timeout_ms,
+                    native_action_count=native_count,
+                )
+                bounded_action = {**action, "timeout_ms": timeout_ms}
+                batch = adapter.apply_many(
+                    [bounded_action],
+                    max_action_timeout_ms=timeout_ms,
+                )
+                if not batch.ok:
+                    raise RuntimeError(f"computer action batch failed: {batch.results}")
+                _check_deadline(started_at, max_elapsed_seconds)
+            screenshot = computer.screenshots.full()
+            _check_deadline(started_at, max_elapsed_seconds)
             outputs.append(
                 openai_computer_call_output(
                     screenshot,
@@ -86,12 +104,8 @@ def run_openai_computer_loop(
                 )
             )
 
-        response = client.responses.create(
-            model=model,
-            tools=[COMPUTER_TOOL],
-            previous_response_id=response.id,
-            input=outputs,
-        )
+        previous_response_id = response.id
+        next_input = outputs
 
     raise RuntimeError(f"OpenAI computer loop exceeded {max_turns} turns")
 
@@ -106,7 +120,7 @@ def _provider_dict(value: Any) -> dict[str, Any]:
 
 def _native_action_count(action: dict[str, Any]) -> int:
     if action.get("type") == "keypress" and isinstance(action.get("keys"), list):
-        return len(action["keys"])
+        return max(1, len(action["keys"]))
     if action.get("type") == "scroll":
         return max(
             1,
@@ -120,6 +134,24 @@ def _check_deadline(started_at: float, max_elapsed_seconds: float) -> None:
         raise RuntimeError(
             f"OpenAI computer loop exceeded {max_elapsed_seconds:g} seconds"
         )
+
+
+def _remaining_action_timeout_ms(
+    *,
+    started_at: float,
+    max_elapsed_seconds: float,
+    max_action_timeout_ms: int,
+    native_action_count: int,
+) -> int:
+    remaining_ms = int(
+        (max_elapsed_seconds - (monotonic() - started_at)) * 1000
+    )
+    per_action_ms = remaining_ms // native_action_count
+    if per_action_ms < 1:
+        raise RuntimeError(
+            f"OpenAI computer loop exceeded {max_elapsed_seconds:g} seconds"
+        )
+    return min(max_action_timeout_ms, per_action_ms)
 
 
 def main() -> None:

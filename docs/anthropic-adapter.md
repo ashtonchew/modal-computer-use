@@ -164,6 +164,8 @@ including failures. Put all tool results in the next user message. Mark a failed
 `is_error`. Return a screenshot after a graphical action and text for `cursor_position`.
 
 Stop when Claude does not request a tool. Set limits for turns, actions, action time, and total time.
+Count every provider response as one turn. If the final allowed response requests a tool, stop
+before executing it because the loop cannot return the required tool result within its turn budget.
 See [examples/anthropic_message_server.py](../examples/anthropic_message_server.py) for a complete
 loop.
 

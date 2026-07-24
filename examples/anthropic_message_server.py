@@ -70,7 +70,7 @@ def run_anthropic_computer_loop(
     messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
     started_at = monotonic()
     action_count = 0
-    for _ in range(max_turns):
+    for turn in range(max_turns):
         _check_deadline(started_at, max_elapsed_seconds)
         response = client.beta.messages.create(
             model=model,
@@ -93,6 +93,8 @@ def run_anthropic_computer_loop(
             raise RuntimeError(
                 "Anthropic returned stop_reason='tool_use' without a tool_use block"
             )
+        if turn == max_turns - 1:
+            raise RuntimeError(f"Anthropic computer loop exceeded {max_turns} turns")
         if action_count + len(tool_uses) > max_actions:
             raise RuntimeError(f"Anthropic computer loop exceeded {max_actions} actions")
 

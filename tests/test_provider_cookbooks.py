@@ -57,6 +57,7 @@ class _Actions:
     def __init__(self) -> None:
         self.applied: list[Any] = []
         self.batches: list[list[Any]] = []
+        self.batch_timeouts: list[int | None] = []
 
     def apply(self, action: Any, *, source: str = "sdk") -> ActionResult:
         self.applied.append((action, source))
@@ -73,8 +74,9 @@ class _Actions:
         source: str = "sdk",
         max_action_timeout_ms: int | None = None,
     ) -> ActionBatchResult:
-        del continue_on_error, source, max_action_timeout_ms
+        del continue_on_error, source
         self.batches.append(actions)
+        self.batch_timeouts.append(max_action_timeout_ms)
         return ActionBatchResult(
             ok=True,
             results=[
@@ -128,16 +130,137 @@ def test_openai_cookbook_preserves_action_order_and_response_chain() -> None:
         client=client,
         computer=computer,
         task="Inspect the page",
+        max_turns=2,
     )
 
     assert response.output_text == "done"
-    assert [action.type for action in computer.actions.batches[0]] == ["move", "click"]
+    assert [
+        action.type
+        for batch in computer.actions.batches
+        for action in batch
+    ] == ["move", "click"]
     assert create.calls[0]["tools"] == [{"type": "computer"}]
     assert create.calls[1]["previous_response_id"] == "resp_1"
     output = create.calls[1]["input"][0]
     assert output["type"] == "computer_call_output"
     assert output["call_id"] == "call_1"
     assert output["output"]["detail"] == "original"
+
+
+def test_openai_cookbook_counts_initial_response_toward_turn_limit() -> None:
+    example = _load_example("03_openai_computer_loop.py")
+    computer = _Computer()
+    create = _CreateQueue(
+        [
+            SimpleNamespace(
+                id="resp_1",
+                output=[
+                    SimpleNamespace(
+                        type="computer_call",
+                        call_id="call_1",
+                        actions=[{"type": "click", "x": 10, "y": 20}],
+                    )
+                ],
+            ),
+            SimpleNamespace(id="resp_2", output=[], output_text="discarded"),
+        ]
+    )
+    client = SimpleNamespace(responses=SimpleNamespace(create=create.create))
+
+    with pytest.raises(RuntimeError, match="exceeded 1 turns"):
+        example.run_openai_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            max_turns=1,
+        )
+
+    assert len(create.calls) == 1
+    assert computer.actions.batches == []
+
+
+def test_openai_cookbook_bounds_expanded_actions_by_remaining_time() -> None:
+    example = _load_example("03_openai_computer_loop.py")
+    computer = _Computer()
+    create = _CreateQueue(
+        [
+            SimpleNamespace(
+                id="resp_1",
+                output=[
+                    SimpleNamespace(
+                        type="computer_call",
+                        call_id="call_1",
+                        actions=[
+                            {
+                                "type": "keypress",
+                                "keys": ["CTRL", "C"],
+                                "timeout_ms": 30_000,
+                            },
+                        ],
+                    )
+                ],
+            ),
+            SimpleNamespace(id="resp_2", output=[], output_text="done"),
+        ]
+    )
+    client = SimpleNamespace(responses=SimpleNamespace(create=create.create))
+    example.monotonic = lambda: 0.0
+
+    example.run_openai_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        max_turns=2,
+        max_elapsed_seconds=1.0,
+    )
+
+    assert computer.actions.batch_timeouts == [500]
+    assert computer.actions.batches[0][0].timeout_ms == 500
+    assert computer.actions.batches[0][1].timeout_ms == 500
+
+
+def test_openai_cookbook_stops_between_actions_after_deadline() -> None:
+    example = _load_example("03_openai_computer_loop.py")
+    computer = _Computer()
+    clock = [0.0]
+    original_run = computer.actions.run
+
+    def advancing_run(*args: Any, **kwargs: Any) -> ActionBatchResult:
+        result = original_run(*args, **kwargs)
+        clock[0] = 1.1
+        return result
+
+    computer.actions.run = advancing_run
+    example.monotonic = lambda: clock[0]
+    create = _CreateQueue(
+        [
+            SimpleNamespace(
+                id="resp_1",
+                output=[
+                    SimpleNamespace(
+                        type="computer_call",
+                        call_id="call_1",
+                        actions=[
+                            {"type": "move", "x": 10, "y": 20},
+                            {"type": "click", "x": 10, "y": 20},
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    client = SimpleNamespace(responses=SimpleNamespace(create=create.create))
+
+    with pytest.raises(RuntimeError, match="exceeded 1 seconds"):
+        example.run_openai_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            max_turns=2,
+            max_elapsed_seconds=1.0,
+        )
+
+    assert len(computer.actions.batches) == 1
 
 
 def test_anthropic_cookbook_preserves_assistant_content_and_tool_ids() -> None:
@@ -322,6 +445,32 @@ def test_anthropic_cookbook_checks_batch_budget_before_execution() -> None:
             display_width_px=1280,
             display_height_px=800,
             max_actions=1,
+        )
+
+    assert computer.actions.applied == []
+
+
+def test_anthropic_cookbook_stops_before_tools_on_final_allowed_turn() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    tool_use = SimpleNamespace(
+        type="tool_use",
+        id="tool_1",
+        input={"action": "left_click", "coordinate": [10, 20]},
+    )
+    create = _CreateQueue(
+        [SimpleNamespace(stop_reason="tool_use", content=[tool_use])]
+    )
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
+
+    with pytest.raises(RuntimeError, match="exceeded 1 turns"):
+        example.run_anthropic_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            display_width_px=1280,
+            display_height_px=800,
+            max_turns=1,
         )
 
     assert computer.actions.applied == []
