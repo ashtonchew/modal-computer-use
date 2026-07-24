@@ -799,7 +799,8 @@ from the external caller, then creates an ephemeral Modal runner sandbox with th
 region selector and runs the same surfaces against the target daemon URL. Treat it as an architecture
 experiment: it measures whether co-locating the caller/model loop is likely to help before adding any
 hosted control-plane shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor
-attribution, and add
+attribution. Add `daemon-http` when comparing the exact screenshot, move/click, typing, and command
+boundaries used by the provider-default table from an optimized same-region caller, and add
 `daemon-observation-stream` when the question is action-to-first-changed-frame latency under the
 Alpha observation contract. This is one measured part of an agent loop, not semantic readiness or
 end-to-end loop latency.

@@ -679,6 +679,26 @@ def test_action_attempt_rows_preserve_measured_failures_and_timeouts() -> None:
     case = {
         "iterations": 4,
         "action_to_frame_samples_ms": [10.0, 30.0],
+        "sample_observations": [
+            {
+                "iteration": 0,
+                "sample_ms": 10.1,
+                "benchmark_timing_ms": {
+                    "action_to_frame_ms": 10.0,
+                    "action_daemon_ms": 2.0,
+                },
+                "change_stage_timing_ms": {"server_pre_emit_ms": 8.0},
+            },
+            {
+                "iteration": 1,
+                "sample_ms": 30.1,
+                "benchmark_timing_ms": {
+                    "action_to_frame_ms": 30.0,
+                    "action_daemon_ms": 3.0,
+                },
+                "change_stage_timing_ms": {"server_pre_emit_ms": 25.0},
+            },
+        ],
         "failures": [
             {"phase": "measure", "iteration": 1, "error_type": "TimeoutError"},
             {"phase": "measure", "iteration": 3, "error_type": "RuntimeError"},
@@ -698,6 +718,17 @@ def test_action_attempt_rows_preserve_measured_failures_and_timeouts() -> None:
         "phase": "measure",
         "error_type": "TimeoutError",
     }
+    assert attempts[0]["successful_sample_ordinal"] == 0
+    assert attempts[0]["observation_sample"]["benchmark_timing_ms"][
+        "action_daemon_ms"
+    ] == 2.0
+    assert "iteration" not in attempts[0]["observation_sample"]
+    assert "observation_sample" not in attempts[1]
+    assert attempts[2]["successful_sample_ordinal"] == 1
+    assert attempts[2]["observation_sample"]["change_stage_timing_ms"][
+        "server_pre_emit_ms"
+    ] == 25.0
+    assert "observation_sample" not in attempts[3]
 
 
 def test_action_attempt_rows_reject_hidden_or_extra_samples() -> None:
@@ -705,6 +736,41 @@ def test_action_attempt_rows_reject_hidden_or_extra_samples() -> None:
         action_attempts_from_case(
             {"iterations": 2, "action_to_frame_samples_ms": [1.0], "failures": []},
             expected_attempts=2,
+        )
+
+
+@pytest.mark.parametrize(
+    ("sample_observations", "message"),
+    [
+        ([], "observation accounting"),
+        ([None], "must be objects"),
+        (
+            [{"benchmark_timing_ms": {}}],
+            "timing does not match",
+        ),
+        (
+            [{"benchmark_timing_ms": {"action_to_frame_ms": float("nan")}}],
+            "timing does not match",
+        ),
+        (
+            [{"benchmark_timing_ms": {"action_to_frame_ms": 2.0}}],
+            "timing does not match",
+        ),
+    ],
+)
+def test_action_attempt_rows_reject_misattributed_observation_timing(
+    sample_observations,
+    message,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        action_attempts_from_case(
+            {
+                "iterations": 1,
+                "action_to_frame_samples_ms": [1.0],
+                "sample_observations": sample_observations,
+                "failures": [],
+            },
+            expected_attempts=1,
         )
 
 
@@ -1001,6 +1067,22 @@ def test_warm_action_uses_separate_connect_runner_and_retains_timeout() -> None:
                     "cases": {
                         OPTIMIZED_ACTION_CASE: {
                             "action_to_frame_samples_ms": [10.0],
+                            "sample_observations": [
+                                {
+                                    "iteration": 0,
+                                    "benchmark_timing_ms": {
+                                        "action_to_frame_ms": 10.0,
+                                        "action_daemon_ms": 2.0,
+                                    },
+                                    "change_stage_timing_ms": {
+                                        "server_pre_emit_ms": 8.0
+                                    },
+                                }
+                            ],
+                            "action_daemon_summary_ms": {"p50": 2.0, "count": 1},
+                            "change_stage_timing_summary_ms": {
+                                "server_pre_emit_ms": {"p50": 8.0, "count": 1}
+                            },
                             "failures": [
                                 {
                                     "phase": "measure",
@@ -1029,6 +1111,15 @@ def test_warm_action_uses_separate_connect_runner_and_retains_timeout() -> None:
     assert runner_paths == ["connect"]
     assert metadata["runner_path"] == "same-region-separate-modal-runner:connect"
     assert metadata["target_loopback"] is False
+    assert attempts[0]["observation_sample"]["benchmark_timing_ms"][
+        "action_daemon_ms"
+    ] == 2.0
+    assert metadata["observation_timing_summaries"] == {
+        "action_daemon_summary_ms": {"p50": 2.0, "count": 1},
+        "change_stage_timing_summary_ms": {
+            "server_pre_emit_ms": {"p50": 8.0, "count": 1}
+        },
+    }
 
 
 def test_v2_warm_action_uses_inherited_encrypted_tunnel_endpoint() -> None:
@@ -1117,6 +1208,21 @@ def test_built_live_artifact_passes_the_publication_sanitizer() -> None:
     }
     attempts = _artifact()["profiles"]
     config = ModalOptimizationConfig(region="us-west", image_revision="a" * 40)
+    warm_attempts = copy.deepcopy(
+        attempts[PROFILE_MODAL_ON_DEMAND]["warm_action_attempts"]
+    )
+    warm_attempts[0].update(
+        {
+            "successful_sample_ordinal": 0,
+            "observation_sample": {
+                "benchmark_timing_ms": {
+                    "action_to_frame_ms": warm_attempts[0]["elapsed_ms"],
+                    "action_daemon_ms": 2.0,
+                },
+                "change_stage_timing_ms": {"server_pre_emit_ms": 8.0},
+            },
+        }
+    )
     raw = build_modal_optimization_artifact(
         config,
         source_sha="a" * 40,
@@ -1125,10 +1231,13 @@ def test_built_live_artifact_passes_the_publication_sanitizer() -> None:
         preregistration_sha256="d" * 64,
         provider_default_payload=provider,
         cold_attempts=attempts[PROFILE_MODAL_ON_DEMAND]["cold_attempts"],
-        warm_action_attempts=attempts[PROFILE_MODAL_ON_DEMAND]["warm_action_attempts"],
+        warm_action_attempts=warm_attempts,
         warm_action_metadata={
             "target_resource_duration_seconds": 1.0,
             "target_cleanup": {"attempted": True, "succeeded": True, "error_type": None},
+            "observation_timing_summaries": {
+                "action_daemon_summary_ms": {"p50": 2.0, "count": 1}
+            },
         },
         claim_attempts=attempts[PROFILE_MODAL_WARM_AVAILABILITY]["claim_attempts"],
         claim_metadata={"pool_target_size": 3},
@@ -1144,3 +1253,10 @@ def test_built_live_artifact_passes_the_publication_sanitizer() -> None:
 
     assert sanitized["profiles"][PROFILE_MODAL_WARM_AVAILABILITY]["pool_hit_count"] == 30
     assert sanitized["provenance"]["raw_artifact_tracked"] is False
+    sanitized_on_demand = sanitized["profiles"][PROFILE_MODAL_ON_DEMAND]
+    assert sanitized_on_demand["warm_action_attempts"][0]["observation_sample"][
+        "change_stage_timing_ms"
+    ] == {"server_pre_emit_ms": 8.0}
+    assert sanitized_on_demand["execution"]["observation_timing_summaries"][
+        "action_daemon_summary_ms"
+    ]["p50"] == 2.0

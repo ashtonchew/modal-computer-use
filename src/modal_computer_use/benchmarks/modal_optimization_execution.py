@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 from typing import Any
@@ -169,6 +170,7 @@ def run_warm_action_attempts(
             case,
             expected_attempts=config.warm_action_attempts,
         )
+        observation_timing_summaries = _observation_timing_summaries(case)
         duration = max(0.0, clock() - started)
     except Exception as exc:
         duration = max(0.0, clock() - started)
@@ -182,6 +184,7 @@ def run_warm_action_attempts(
             for index in range(config.warm_action_attempts)
         ]
         actual_region = None
+        observation_timing_summaries = {}
     finally:
         cleanup = _cleanup_computer(computer)
     for attempt in attempts:
@@ -202,6 +205,7 @@ def run_warm_action_attempts(
         "target_loopback": False,
         "action_transport": "persistent-hot-session",
         "observation_transport": "binary-envelope-causal-observation",
+        "observation_timing_summaries": observation_timing_summaries,
     }
 
 
@@ -332,6 +336,32 @@ def _runner_action_case(result: dict[str, Any]) -> dict[str, Any]:
     )
     cases = _mapping(observation.get("cases"), "observation cases")
     return _mapping(cases.get(OPTIMIZED_ACTION_CASE), OPTIMIZED_ACTION_CASE)
+
+
+_OBSERVATION_TIMING_SUMMARY_KEYS = (
+    "action_to_frame_summary_ms",
+    "receive_frame_summary_ms",
+    "action_daemon_summary_ms",
+    "change_wait_summary_ms",
+    "change_signal_wait_summary_ms",
+    "change_stage_timing_summary_ms",
+    "action_observe_attribution_summary_ms",
+    "server_emit_timing_summary_ms",
+    "client_receive_timing_summary_ms",
+    "daemon_summary_ms",
+    "overhead_summary_ms",
+    "receive_minus_server_pre_emit_summary_ms",
+    "receive_minus_server_pre_emit_and_send_summary_ms",
+    "dirty_region_confirmation_capture_timing_summary_ms",
+)
+
+
+def _observation_timing_summaries(case: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(value)
+        for key in _OBSERVATION_TIMING_SUMMARY_KEYS
+        if isinstance((value := case.get(key)), dict)
+    }
 
 
 def _cleanup_computer(computer: Any | None) -> dict[str, Any]:

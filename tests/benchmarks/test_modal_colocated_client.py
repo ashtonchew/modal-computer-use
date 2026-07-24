@@ -307,6 +307,52 @@ def test_modal_colocated_comparison_prefers_sdk_default_causal_case() -> None:
     }
 
 
+def test_modal_colocated_comparison_reports_boundary_matched_daemon_http_cases() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-http"],
+        daemon_http_p50={
+            "screenshot_full": 240.0,
+            "move_click": 169.0,
+            "move_click_sequence": 173.0,
+            "type_100_chars": 975.0,
+            "type_1000_chars": 8589.0,
+            "command_echo": 250.0,
+        },
+    )
+    colocated_result = _surface_result(
+        transport_p50=2.0,
+        observation_p50=30.0,
+        environment={},
+        surfaces=["daemon-http"],
+        daemon_http_p50={
+            "screenshot_full": 25.0,
+            "move_click": 4.0,
+            "move_click_sequence": 18.0,
+            "type_100_chars": 810.0,
+            "type_1000_chars": 8010.0,
+            "command_echo": 82.0,
+        },
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    cases = comparison["surfaces"]["daemon-http"]["cases"]
+    assert cases["move_click"] == {
+        "surface": "daemon-http",
+        "metric": "operation_p50_ms",
+        "case": "move_click",
+        "external_p50_ms": 169.0,
+        "colocated_p50_ms": 4.0,
+        "delta_ms": -165.0,
+        "ratio_vs_external": pytest.approx(4.0 / 169.0),
+    }
+    assert cases["move_click_sequence"]["colocated_p50_ms"] == 18.0
+    assert cases["command_echo"]["external_p50_ms"] == 250.0
+
+
 def test_modal_colocated_comparison_surfaces_paired_observation_cases() -> None:
     external = _surface_result(
         transport_p50=50.0,
@@ -532,8 +578,21 @@ def _surface_result(
     sdk_default_observation_p50: float | None = None,
     envelope_observation_p50: float | None = None,
     paired_region_radius: bool = False,
+    daemon_http_p50: dict[str, float] | None = None,
 ) -> dict[str, object]:
     surface_results: dict[str, object] = {}
+    if "daemon-http" in surfaces:
+        surface_results["daemon-http"] = {
+            "status": "ok",
+            "metadata": {"environment": environment},
+            "cases": {
+                case_name: {
+                    "status": "ok",
+                    "summary_ms": {"p50": p50},
+                }
+                for case_name, p50 in (daemon_http_p50 or {}).items()
+            },
+        }
     if "daemon-transport-floor" in surfaces:
         surface_results["daemon-transport-floor"] = {
             "status": "ok",
