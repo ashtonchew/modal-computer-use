@@ -153,6 +153,9 @@ class DaemonSettings:
     input_backend: str = field(
         default_factory=lambda: os.getenv("COMPUTER_USE_INPUT_BACKEND", "auto")
     )
+    subprocess_backend: str = field(
+        default_factory=lambda: os.getenv("COMPUTER_USE_SUBPROCESS_BACKEND", "asyncio")
+    )
     otel_enabled: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_OTEL_ENABLED", False)
     )
@@ -185,6 +188,11 @@ class DaemonSettings:
             "COMPUTER_USE_INPUT_BACKEND",
             self.input_backend,
             {"auto", "xdotool", "xtest"},
+        )
+        _require_choice(
+            "COMPUTER_USE_SUBPROCESS_BACKEND",
+            self.subprocess_backend,
+            {"asyncio", "isolated-asyncio", "threaded"},
         )
 
 

@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 from modal_computer_use.artifacts import ArtifactStore
+from modal_computer_use.daemon.desktop import process_runner as process_runner_module
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
 from modal_computer_use.daemon.desktop.x11 import (
@@ -961,20 +962,20 @@ def _fake_mss_capture(
 
 def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
     backend = X11DesktopBackend(width=100, height=100)
-    state = {"killed": False, "waited": False}
+    state = {"killed": False, "drained": False}
 
     class HangingProcess:
         returncode = None
 
         async def communicate(self, _input=None):
+            if state["killed"]:
+                state["drained"] = True
+                return b"", b""
             await anyio.sleep_forever()
 
         def kill(self):
             state["killed"] = True
             self.returncode = -9
-
-        async def wait(self):
-            state["waited"] = True
 
     async def create_process(*_args, **_kwargs):
         return HangingProcess()
@@ -982,12 +983,12 @@ def test_x11_run_kills_subprocess_on_timeout(monkeypatch) -> None:
     async def run_command():
         return await backend._run("xdotool", "mousemove", "1", "2", timeout=0.01)
 
-    monkeypatch.setattr(x11_module.asyncio, "create_subprocess_exec", create_process)
+    monkeypatch.setattr(process_runner_module.asyncio, "create_subprocess_exec", create_process)
 
     with pytest.raises(TimeoutError):
         anyio.run(run_command)
 
-    assert state == {"killed": True, "waited": True}
+    assert state == {"killed": True, "drained": True}
 
 
 def test_auto_backend_fails_closed_to_x11_on_posix_without_xdotool(monkeypatch) -> None:
@@ -1013,6 +1014,24 @@ def test_x11_backend_rejects_unknown_input_backend() -> None:
         match="unsupported input backend 'native'; expected one of: auto, xtest, xdotool",
     ):
         X11DesktopBackend(input_backend="native")
+
+
+@pytest.mark.parametrize(
+    "subprocess_backend",
+    ["asyncio", "threaded", "isolated-asyncio"],
+)
+def test_choose_backend_wires_selected_subprocess_backend(subprocess_backend: str) -> None:
+    backend = choose_backend(
+        "x11",
+        width=100,
+        height=100,
+        display=":99",
+        subprocess_backend=subprocess_backend,
+    )
+    try:
+        assert backend.subprocess_backend == subprocess_backend
+    finally:
+        backend.close()
 
 
 def test_input_backend_metadata_separates_policy_support_availability_and_last_use(

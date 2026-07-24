@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import contextlib
 import os
@@ -21,6 +20,12 @@ from modal_computer_use.daemon.desktop.clipboard import X11ClipboardController
 from modal_computer_use.daemon.desktop.display import StaticDisplayController
 from modal_computer_use.daemon.desktop.keyboard import X11KeyboardController
 from modal_computer_use.daemon.desktop.mouse import X11MouseController
+from modal_computer_use.daemon.desktop.process_runner import (
+    AsyncioProcessRunner,
+    IsolatedAsyncioProcessRunner,
+    ProcessRunner,
+    ThreadedProcessRunner,
+)
 from modal_computer_use.daemon.desktop.screenshots import (
     CapturedRawScreenshot,
     CapturedScreenshot,
@@ -552,6 +557,8 @@ class X11DesktopBackend(MockDesktopBackend):
         browser_launch_args: Sequence[str] = (),
         browser_gpu_mode: str = "auto",
         input_backend: str = "auto",
+        subprocess_backend: str = "asyncio",
+        process_runner: ProcessRunner | None = None,
     ) -> None:
         super().__init__(width=width, height=height)
         self.display = display
@@ -561,6 +568,8 @@ class X11DesktopBackend(MockDesktopBackend):
         self._available_input_backends: tuple[str, ...] = ()
         self._last_input_backend: str | None = None
         self._input = X11InputSession(display=display)
+        self._subprocess_backend = _normalize_subprocess_backend(subprocess_backend)
+        self._process_runner = process_runner or _create_process_runner(self._subprocess_backend)
         self._display = StaticDisplayController(width=width, height=height, display=display)
         self._apps = X11AppController(spawn=lambda *args: self._spawn(*args))
         self._windows = X11WindowController(
@@ -639,6 +648,11 @@ class X11DesktopBackend(MockDesktopBackend):
     def close(self) -> None:
         self._windows.close()
         self._input.close()
+        self._process_runner.close()
+
+    @property
+    def subprocess_backend(self) -> str:
+        return self._subprocess_backend
 
     async def ready(self) -> tuple[bool, list[str]]:
         await self._cache_available_input_backends()
@@ -698,34 +712,13 @@ class X11DesktopBackend(MockDesktopBackend):
     ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["DISPLAY"] = self.display
-        process = await asyncio.create_subprocess_exec(
+        return await self._process_runner.run(
             *args,
             env=env,
-            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            timeout=timeout,
+            input_text=input_text,
+            check=check,
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(input_text.encode() if input_text is not None else None),
-                timeout=timeout,
-            )
-        except (TimeoutError, asyncio.CancelledError):
-            if process.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    process.kill()
-                with contextlib.suppress(Exception):
-                    await process.wait()
-            raise
-        completed = subprocess.CompletedProcess(
-            args,
-            process.returncode or 0,
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
-        )
-        if check and completed.returncode != 0:
-            raise RuntimeError(f"{args[0]} failed: {completed.stderr}")
-        return completed
 
     async def _spawn(self, *args: str) -> subprocess.Popen[str]:
         env = dict(os.environ)
@@ -1027,6 +1020,7 @@ def choose_backend(
     browser_launch_args: Sequence[str] = (),
     browser_gpu_mode: str = "auto",
     input_backend: str = "auto",
+    subprocess_backend: str = "asyncio",
 ) -> DesktopBackend:
     if kind == "mock":
         return MockDesktopBackend(width=width, height=height)
@@ -1040,6 +1034,7 @@ def choose_backend(
             browser_launch_args=browser_launch_args,
             browser_gpu_mode=browser_gpu_mode,
             input_backend=input_backend,
+            subprocess_backend=subprocess_backend,
         )
     if kind != "auto":
         raise ValueError(f"unsupported desktop backend {kind!r}; expected one of: auto, mock, x11")
@@ -1054,6 +1049,7 @@ def choose_backend(
         browser_launch_args=browser_launch_args,
         browser_gpu_mode=browser_gpu_mode,
         input_backend=input_backend,
+        subprocess_backend=subprocess_backend,
     )
 
 
@@ -1061,6 +1057,27 @@ def _normalize_input_backend(value: str) -> Literal["auto", "xtest", "xdotool"]:
     if value in {"auto", "xtest", "xdotool"}:
         return cast("Literal['auto', 'xtest', 'xdotool']", value)
     raise ValueError(f"unsupported input backend {value!r}; expected one of: auto, xtest, xdotool")
+
+
+def _normalize_subprocess_backend(
+    value: str,
+) -> Literal["asyncio", "isolated-asyncio", "threaded"]:
+    if value in {"asyncio", "isolated-asyncio", "threaded"}:
+        return cast("Literal['asyncio', 'isolated-asyncio', 'threaded']", value)
+    raise ValueError(
+        "unsupported subprocess backend "
+        f"{value!r}; expected one of: asyncio, isolated-asyncio, threaded"
+    )
+
+
+def _create_process_runner(
+    backend: Literal["asyncio", "isolated-asyncio", "threaded"],
+) -> ProcessRunner:
+    if backend == "threaded":
+        return ThreadedProcessRunner()
+    if backend == "isolated-asyncio":
+        return IsolatedAsyncioProcessRunner()
+    return AsyncioProcessRunner()
 
 
 async def _empty_windows() -> list[X11Window]:
