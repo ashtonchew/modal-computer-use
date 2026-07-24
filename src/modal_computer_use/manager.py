@@ -11,7 +11,7 @@ from uuid import uuid4
 import httpx
 
 from .config import ComputerConfig
-from .errors import AuthenticationError, DaemonHTTPError, SandboxUnavailableError
+from .errors import DaemonHTTPError, SandboxUnavailableError
 from .latency import (
     WarmPoolClaim,
     WarmPoolClaimMetrics,
@@ -24,7 +24,12 @@ from .latency import (
 )
 from .models import SandboxCleanupItem, SandboxCleanupResult, SandboxRef
 from .registry import SandboxRegistry
-from .sandbox import ComputerSandbox, ConfigMismatchPolicy, ReusePolicy
+from .sandbox import (
+    ComputerSandbox,
+    ConfigMismatchPolicy,
+    ReusePolicy,
+    _is_modal_availability_error,
+)
 
 
 class ComputerSandboxManager:
@@ -398,12 +403,8 @@ class ComputerSandboxManager:
             try:
                 live_tags = computer.tags()
             except Exception as exc:
-                reason = _warm_candidate_exception_reason(exc, phase="tags")
                 _detach_warm_candidate(computer, primary=exc)
-                if reason is None:
-                    raise
-                rejection_reasons.append(reason)
-                continue
+                raise
             live_tag_reason = _warm_claim_tag_rejection_reason(live_tags, entry)
             if live_tag_reason is not None:
                 rejection_reasons.append(live_tag_reason)
@@ -458,6 +459,7 @@ class ComputerSandboxManager:
                 continue
 
             claim_transition_started = False
+            candidate_identity_verified = True
             try:
                 with _warm_slot_lock(_warm_lock_target(computer)) as acquired:
                     if not acquired:
@@ -467,12 +469,9 @@ class ComputerSandboxManager:
                     try:
                         live_tags = computer.tags()
                     except Exception as exc:
-                        reason = _warm_candidate_exception_reason(exc, phase="tags")
+                        candidate_identity_verified = False
                         _detach_warm_candidate(computer, primary=exc)
-                        if reason is None:
-                            raise
-                        rejection_reasons.append(reason)
-                        continue
+                        raise
                     live_tag_reason = _warm_claim_tag_rejection_reason(live_tags, entry)
                     if live_tag_reason is not None:
                         rejection_reasons.append(live_tag_reason)
@@ -516,6 +515,8 @@ class ComputerSandboxManager:
                         ),
                     )
             except Exception as exc:
+                if not candidate_identity_verified:
+                    raise
                 _retire_warm_candidate(computer, primary=exc)
                 if claim_transition_started:
                     raise
@@ -632,11 +633,8 @@ class ComputerSandboxManager:
         try:
             live_tag_reason = _warm_claim_tag_rejection_reason(computer.tags(), entry)
         except Exception as exc:
-            reason = _warm_candidate_exception_reason(exc, phase="tags")
             _detach_warm_candidate(computer, primary=exc)
-            if reason is None:
-                raise
-            return
+            raise
         if live_tag_reason is not None:
             _detach_warm_candidate(computer)
             return
@@ -645,7 +643,6 @@ class ComputerSandboxManager:
 
 WarmCandidatePhase = Literal[
     "attach",
-    "tags",
     "poll",
     "browser",
     "first_frame",
@@ -661,17 +658,15 @@ def _warm_candidate_exception_reason(
     operational = isinstance(
         exc,
         (
-            AuthenticationError,
-            DaemonHTTPError,
             SandboxUnavailableError,
             TimeoutError,
-            httpx.HTTPError,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            httpx.TimeoutException,
         ),
-    ) or _is_modal_provider_error(exc)
+    ) or _is_daemon_availability_error(exc) or _is_modal_availability_error(exc)
     if phase == "attach" and operational:
         return "attach_unavailable"
-    if phase == "tags" and operational:
-        return "tags_unavailable"
     if phase == "poll" and operational:
         return "candidate_unavailable"
     if phase == "browser" and (operational or isinstance(exc, RuntimeError)):
@@ -683,12 +678,13 @@ def _warm_candidate_exception_reason(
     return None
 
 
-def _is_modal_provider_error(exc: Exception) -> bool:
-    try:
-        from modal.exception import Error as ModalError
-    except ImportError:
+def _is_daemon_availability_error(exc: Exception) -> bool:
+    if not isinstance(exc, DaemonHTTPError):
         return False
-    return isinstance(exc, ModalError)
+    status_code = exc.status_code
+    return status_code in {404, 408, 410, 425, 429} or (
+        status_code is not None and status_code >= 500
+    )
 
 
 def _retire_warm_candidate(

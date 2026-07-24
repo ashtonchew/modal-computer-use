@@ -2019,11 +2019,36 @@ def run_modal_daemon_command_with_fallback(
 def _is_connect_preparation_failure(exc: Exception) -> bool:
     if isinstance(exc, SandboxUnavailableError):
         return True
+    return _is_modal_availability_error(exc)
+
+
+def _is_modal_availability_error(exc: Exception) -> bool:
     try:
-        from modal.exception import Error as ModalError
+        from modal.exception import (
+            ConnectionError as ModalConnectionError,
+        )
+        from modal.exception import (
+            InternalFailure,
+            NotFoundError,
+            SandboxTerminatedError,
+            ServiceError,
+        )
+        from modal.exception import (
+            TimeoutError as ModalTimeoutError,
+        )
     except ImportError:
         return False
-    return isinstance(exc, ModalError)
+    return isinstance(
+        exc,
+        (
+            ModalConnectionError,
+            InternalFailure,
+            NotFoundError,
+            SandboxTerminatedError,
+            ServiceError,
+            ModalTimeoutError,
+        ),
+    )
 
 
 def _resolve_modal_runner_region(

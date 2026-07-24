@@ -7,7 +7,11 @@ from typing import Any, ClassVar
 import pytest
 
 from modal_computer_use import ComputerConfig, ComputerSandbox, SandboxRef
-from modal_computer_use.errors import ConfigConflictError, SandboxUnavailableError
+from modal_computer_use.errors import (
+    ConfigConflictError,
+    DaemonHTTPError,
+    SandboxUnavailableError,
+)
 from modal_computer_use.latency import (
     SessionStartupTiming,
     WarmPoolClaim,
@@ -404,6 +408,96 @@ def test_same_region_runner_does_not_fallback_for_unexpected_preparation_error(
             external_runner=external_runner,
         )
     assert external_calls == 0
+
+
+def test_same_region_runner_does_not_fallback_for_terminal_modal_errors(
+    monkeypatch,
+) -> None:
+    modal_exception = pytest.importorskip("modal.exception")
+
+    for error_type in (
+        modal_exception.AuthError,
+        modal_exception.PermissionDeniedError,
+        modal_exception.InvalidError,
+        modal_exception.VersionError,
+    ):
+        external_calls = 0
+
+        def endpoint(
+            _computer: object,
+            path: str,
+            *,
+            error_type: type[Exception] = error_type,
+        ) -> SimpleNamespace:
+            if path == "connect":
+                raise error_type("terminal Modal failure")
+            raise AssertionError("terminal failures must not prepare external fallback")
+
+        def external_runner(*args: object, **kwargs: object) -> ModalSandboxExecResult:
+            nonlocal external_calls
+            external_calls += 1
+            raise AssertionError("terminal failures must not dispatch external fallback")
+
+        monkeypatch.setattr("modal_computer_use.sandbox.modal_daemon_endpoint", endpoint)
+
+        with pytest.raises(error_type, match="terminal Modal failure"):
+            run_modal_daemon_command_with_fallback(
+                SimpleNamespace(),
+                ("python", "worker.py"),
+                modal_region="us-east",
+                external_runner=external_runner,
+            )
+
+        assert external_calls == 0
+
+
+def test_same_region_runner_falls_back_for_modal_availability_errors(monkeypatch) -> None:
+    modal_exception = pytest.importorskip("modal.exception")
+
+    for error_type in (
+        modal_exception.ConnectionError,
+        modal_exception.InternalFailure,
+        modal_exception.NotFoundError,
+        modal_exception.SandboxTerminatedError,
+        modal_exception.ServiceError,
+        modal_exception.TimeoutError,
+    ):
+        attempts: list[str] = []
+
+        def endpoint(
+            _computer: object,
+            path: str,
+            *,
+            error_type: type[Exception] = error_type,
+            attempts: list[str] = attempts,
+        ) -> SimpleNamespace:
+            attempts.append(path)
+            if path == "connect":
+                raise error_type("Modal endpoint unavailable")
+            return SimpleNamespace(
+                path=path,
+                base_url="https://external.example",
+                token="test-token",
+                target_sandbox_id="sb-target",
+            )
+
+        monkeypatch.setattr("modal_computer_use.sandbox.modal_daemon_endpoint", endpoint)
+
+        result = run_modal_daemon_command_with_fallback(
+            SimpleNamespace(),
+            ("python", "worker.py"),
+            modal_region="us-east",
+            external_runner=lambda *args, **kwargs: ModalSandboxExecResult(
+                sandbox_id="sb-external",
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            ),
+        )
+
+        assert attempts == ["connect", "inherited"]
+        assert result.selected_path == "external"
+        assert result.fallback_error_type == error_type.__name__
 
 
 def test_same_region_runner_does_not_fallback_for_invalid_runner_environment(
@@ -1554,6 +1648,168 @@ def test_claim_warm_pool_does_not_fallback_for_unexpected_attach_failure(
         )
 
     assert cold_creates == 0
+
+
+def test_claim_warm_pool_does_not_fallback_for_terminal_modal_attach_error(
+    monkeypatch,
+) -> None:
+    modal_exception = pytest.importorskip("modal.exception")
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: (_ for _ in ()).throw(
+            modal_exception.AuthError("invalid Modal credentials")
+        ),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("terminal attach errors must not create cold fallback"),
+    )
+
+    with pytest.raises(modal_exception.AuthError, match="invalid Modal credentials"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+
+def test_claim_warm_pool_does_not_fallback_for_daemon_authentication_failure(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: (_ for _ in ()).throw(
+            DaemonHTTPError("unauthorized", status_code=401)
+        ),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("daemon authentication errors must remain terminal"),
+    )
+
+    with pytest.raises(DaemonHTTPError, match="unauthorized"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+
+def test_claim_warm_pool_keeps_unverified_tag_failure_terminal(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class UnverifiedComputer(FakeComputer):
+        def tags(self) -> dict[str, str]:
+            raise SandboxUnavailableError("live tags unavailable")
+
+    warm = UnverifiedComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("unverified ownership must not create cold fallback"),
+    )
+
+    with pytest.raises(SandboxUnavailableError, match="live tags unavailable"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    assert warm.terminated == []
+    assert warm.detached is True
+
+
+def test_claim_warm_pool_keeps_failed_locked_tag_recheck_terminal(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class RecheckFailureComputer(FakeComputer):
+        tag_reads = 0
+
+        def tags(self) -> dict[str, str]:
+            self.tag_reads += 1
+            if self.tag_reads == 2:
+                raise SandboxUnavailableError("locked tag recheck unavailable")
+            return super().tags()
+
+    warm = RecheckFailureComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("ambiguous locked ownership must remain terminal"),
+    )
+
+    with pytest.raises(SandboxUnavailableError, match="locked tag recheck unavailable"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    assert warm.terminated == []
+    assert warm.detached is True
+
+
+def test_claim_warm_pool_keeps_discard_tag_failure_terminal(monkeypatch) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    now = datetime(2026, 7, 18, tzinfo=UTC)
+    entry = WarmPoolEntry.from_dict(
+        {
+            **_claim_entry(config, now=now).as_dict(),
+            "expires_at": (now + timedelta(seconds=10)).isoformat(),
+        }
+    )
+
+    class DiscardTagFailureComputer(FakeComputer):
+        def tags(self) -> dict[str, str]:
+            raise SandboxUnavailableError("discard tag read unavailable")
+
+    warm = DiscardTagFailureComputer(
+        "sb-warm",
+        remote_tags=_warm_entry_tags(entry),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("ambiguous discard must not create cold fallback"),
+    )
+
+    with pytest.raises(SandboxUnavailableError, match="discard tag read unavailable"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: now,
+        )
+
+    assert warm.terminated == []
+    assert warm.detached is True
 
 
 def test_claim_warm_pool_records_browser_rejection_before_cold_fallback(

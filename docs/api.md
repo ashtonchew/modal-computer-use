@@ -352,9 +352,11 @@ allocation back on the hot path.
 When an explicit `external_runner` is supplied, `ModalDaemonCommandResult.fallback_used` can become
 true only if Connect endpoint preparation is unavailable before dispatch. In that case
 `fallback_reason` is the stable semantic value `connect_endpoint_unavailable`, while
-`fallback_error_type` contains only the sanitized exception class. Validation, configuration,
-environment, programming, runner-dispatch, and workload failures are terminal and do not replay the
-command externally.
+`fallback_error_type` contains only the sanitized exception class. The typed availability set
+contains Modal connection, service, timeout, documented retriable-internal, missing-target, and
+terminated-Sandbox errors. Authentication, permission, validation, version, quota, configuration,
+environment, programming, runner-dispatch, and workload failures are terminal and do not replay
+the command externally.
 
 Use `run_modal_daemon_command(computer, command, path=...)` for explicit diagnostics.
 `path="inherited"` passes the target client's current daemon URL/token into a separate runner,

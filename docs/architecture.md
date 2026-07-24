@@ -63,8 +63,8 @@ implementation is safe:
 | Cursor-hidden capture | MSS XShm-preferred capture | `scrot`, then `maim` | After an MSS session reset/retry cannot produce a valid frame. MSS itself falls back from XShm to XGetImage. |
 | Cursor-visible capture | `maim` | None | Missing or invalid cursor composition is terminal for the request. |
 | Change notification | XDamage hint | Source-hash polling | XDamage availability only selects when to capture; pixels/hashes remain the correctness check. |
-| Same-region runner preparation | Modal Connect runner | Explicit external runner | Only when Connect endpoint preparation is unavailable before dispatch. Workload failures are terminal. |
-| Warm allocation | Verified, exclusively claimed entry | Cold creation | Only for an owned candidate-rejection phase; ambiguous claims and incomplete cleanup are terminal. |
+| Same-region runner preparation | Modal Connect runner | Explicit external runner | Only for explicit endpoint-availability failures before dispatch. Modal authentication, permission, validation, version, and quota errors are terminal. |
+| Warm allocation | Verified, exclusively claimed entry | Cold creation | Only for an owned candidate-rejection phase. Failed live-tag verification, ambiguous claims, and incomplete cleanup are terminal. |
 
 These are not global retry chains. Each controller exposes the backend or reason selected for its
 own completed operation, and orchestration never replays work after dispatch may have started.
@@ -74,6 +74,9 @@ fallback. See the
 [XTEST protocol](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html),
 [EWMH specification](https://specifications.freedesktop.org/wm/latest-single/), and
 [MSS 10.2 release notes](https://python-mss.readthedocs.io/latest/release-history/v10.2.0.html).
+Modal availability handling follows its documented specialized exception types rather than the
+catch-all `modal.exception.Error` base; see the
+[Modal exception reference](https://modal.com/docs/sdk/py/latest/modal.exception).
 
 The observation transport and action execution remain stable primitives. The Alpha
 post-action visual-change feature composes them without creating another runtime layer:
