@@ -307,7 +307,18 @@ def _with_held_key(payload: dict[str, Any], key: object) -> dict[str, Any]:
         return payload
     if not isinstance(key, str):
         raise ActionValidationError("scroll action text modifier must be a string")
-    return {"type": "hold_key", "key": key, "actions": [payload]}
+    common = {
+        field: value
+        for field in ("metadata", "call_id", "sequence", "timeout_ms")
+        if (value := payload.get(field)) is not None
+    }
+    nested = {field: value for field, value in payload.items() if field not in common}
+    return {
+        "type": "hold_key",
+        "key": key,
+        "actions": [nested],
+        **common,
+    }
 
 
 def _duration_ms(action: dict[str, Any]) -> int:

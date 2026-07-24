@@ -79,7 +79,11 @@ def run_anthropic_computer_loop(
             betas=[version.beta_header],
             tools=[tool],
             messages=messages,
+            timeout=_remaining_request_timeout_seconds(
+                started_at, max_elapsed_seconds
+            ),
         )
+        _check_deadline(started_at, max_elapsed_seconds)
         messages.append({"role": "assistant", "content": response.content})
         tool_uses = [
             block for block in response.content if getattr(block, "type", None) == "tool_use"
@@ -177,6 +181,18 @@ def _remaining_action_timeout_ms(
             f"Anthropic computer loop exceeded {max_elapsed_seconds:g} seconds"
         )
     return min(max_action_timeout_ms, remaining_ms)
+
+
+def _remaining_request_timeout_seconds(
+    started_at: float,
+    max_elapsed_seconds: float,
+) -> float:
+    remaining = max_elapsed_seconds - (monotonic() - started_at)
+    if remaining <= 0:
+        raise RuntimeError(
+            f"Anthropic computer loop exceeded {max_elapsed_seconds:g} seconds"
+        )
+    return remaining
 
 
 def _tool_result(

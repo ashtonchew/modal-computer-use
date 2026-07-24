@@ -244,9 +244,17 @@ def _modifier_keys(action: dict[str, Any]) -> list[str]:
 
 
 def _with_modifiers(payload: dict[str, Any], modifiers: list[str]) -> dict[str, Any]:
-    wrapped = payload
+    if not modifiers:
+        return payload
+    common = {
+        key: value
+        for key in ("metadata", "call_id", "sequence", "timeout_ms")
+        if (value := payload.get(key)) is not None
+    }
+    wrapped = {key: value for key, value in payload.items() if key not in common}
     for key in reversed(modifiers):
         wrapped = {"type": "hold_key", "key": key, "actions": [wrapped]}
+    wrapped.update(common)
     return wrapped
 
 

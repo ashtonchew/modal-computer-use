@@ -58,6 +58,9 @@ def run_openai_computer_loop(
             "model": model,
             "tools": [COMPUTER_TOOL],
             "input": next_input,
+            "timeout": _remaining_request_timeout_seconds(
+                started_at, max_elapsed_seconds
+            ),
         }
         if previous_response_id is not None:
             request["previous_response_id"] = previous_response_id
@@ -152,6 +155,18 @@ def _remaining_action_timeout_ms(
             f"OpenAI computer loop exceeded {max_elapsed_seconds:g} seconds"
         )
     return min(max_action_timeout_ms, per_action_ms)
+
+
+def _remaining_request_timeout_seconds(
+    started_at: float,
+    max_elapsed_seconds: float,
+) -> float:
+    remaining = max_elapsed_seconds - (monotonic() - started_at)
+    if remaining <= 0:
+        raise RuntimeError(
+            f"OpenAI computer loop exceeded {max_elapsed_seconds:g} seconds"
+        )
+    return remaining
 
 
 def main() -> None:

@@ -218,6 +218,9 @@ def test_openai_ga_scroll_buttons_and_modifier_fields() -> None:
                 "scroll_x": -250,
                 "scroll_y": 600,
                 "keys": ["SHIFT"],
+                "call_id": "call_scroll",
+                "sequence": 2,
+                "timeout_ms": 1234,
             },
         ]
     )
@@ -229,8 +232,14 @@ def test_openai_ga_scroll_buttons_and_modifier_fields() -> None:
     assert actions[2]["type"] == "hold_key"
     assert actions[2]["actions"][0]["direction"] == "down"
     assert actions[2]["actions"][0]["amount"] == 6
+    assert actions[2]["call_id"] == "call_scroll"
+    assert actions[2]["sequence"] == 2
+    assert actions[2]["timeout_ms"] == 1234
+    assert PROVIDER_ACTION_METADATA_KEY in actions[2]["metadata"]
+    assert "timeout_ms" not in actions[2]["actions"][0]
     assert actions[3]["actions"][0]["direction"] == "left"
     assert actions[3]["actions"][0]["amount"] == 2
+    assert actions[3]["timeout_ms"] == 1234
 
 
 def test_openai_multi_native_actions_require_batch_path() -> None:
@@ -449,12 +458,20 @@ def test_anthropic_current_modifiers_and_duration_validation() -> None:
             "scroll_direction": "down",
             "scroll_amount": 3,
             "text": "shift",
+            "call_id": "call_scroll",
+            "sequence": 2,
+            "timeout_ms": 1234,
         }
     )
 
     assert click["modifiers"] == ["shift"]
     assert scroll["type"] == "hold_key"
     assert scroll["actions"][0]["direction"] == "down"
+    assert scroll["call_id"] == "call_scroll"
+    assert scroll["sequence"] == 2
+    assert scroll["timeout_ms"] == 1234
+    assert PROVIDER_ACTION_METADATA_KEY in scroll["metadata"]
+    assert "timeout_ms" not in scroll["actions"][0]
     with pytest.raises(ActionValidationError, match="between 0 and 100"):
         adapter.normalize({"action": "wait", "duration": 101})
 

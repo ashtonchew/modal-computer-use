@@ -140,6 +140,7 @@ def test_openai_cookbook_preserves_action_order_and_response_chain() -> None:
         for action in batch
     ] == ["move", "click"]
     assert create.calls[0]["tools"] == [{"type": "computer"}]
+    assert create.calls[0]["timeout"] <= 300.0
     assert create.calls[1]["previous_response_id"] == "resp_1"
     output = create.calls[1]["input"][0]
     assert output["type"] == "computer_call_output"
@@ -292,6 +293,7 @@ def test_anthropic_cookbook_preserves_assistant_content_and_tool_ids() -> None:
 
     assert response.content[0].text == "done"
     assert create.calls[0]["betas"] == ["computer-use-2025-11-24"]
+    assert create.calls[0]["timeout"] <= 300.0
     assert create.calls[0]["tools"] == [
         {
             "type": "computer_20251124",
@@ -368,6 +370,33 @@ def test_anthropic_cookbook_caps_provider_timeout_by_remaining_time() -> None:
     )
 
     assert computer.actions.applied[0][0].timeout_ms == 1000
+
+
+def test_anthropic_cookbook_rejects_terminal_response_after_deadline() -> None:
+    example = _load_example("anthropic_message_server.py")
+    computer = _Computer()
+    clock = [0.0]
+    calls: list[dict[str, Any]] = []
+
+    def create(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        clock[0] = 1.1
+        return SimpleNamespace(stop_reason="end_turn", content=[])
+
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create)))
+    example.monotonic = lambda: clock[0]
+
+    with pytest.raises(RuntimeError, match="exceeded 1 seconds"):
+        example.run_anthropic_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            display_width_px=1280,
+            display_height_px=800,
+            max_elapsed_seconds=1.0,
+        )
+
+    assert calls[0]["timeout"] == 1.0
 
 
 def test_anthropic_cookbook_returns_all_results_when_one_action_fails() -> None:
