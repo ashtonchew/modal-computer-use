@@ -222,3 +222,149 @@ def test_tzafon_competitive_context_matches_provider_reference() -> None:
     assert "sb-" not in serialized
     assert "run_" not in serialized
     assert "api_key" not in serialized.lower()
+
+
+def test_coordinate_command_provider_reference_is_complete_and_secret_safe() -> None:
+    reference_path = (
+        REPO_ROOT
+        / "benchmark-data/provider-compare-coordinate-command-2026-07-24.json"
+    )
+    payload = json.loads(reference_path.read_text())
+
+    validate_sanitized_provider_benchmark(payload)
+    assert payload["ok"] is True
+    assert payload["provenance"]["status"] == "current_reference"
+    assert payload["provenance"]["harness_state"] == "clean"
+    for provider in ("modal-daemon", "daytona", "e2b", "tzafon"):
+        result = payload["providers"][provider]
+        assert result["status"] == "ok"
+        for case, semantics in (
+            ("coordinate_click", "coordinate-click-v1"),
+            ("coordinate_click_sequence", "coordinate-click-v1"),
+            ("command_nonlogin_shell_echo", "shell-command-echo-v2"),
+        ):
+            measured = result["cases"][case]
+            assert measured["status"] == "ok"
+            assert measured["successful_iterations"] == 3
+            assert measured["benchmark_semantics"] == semantics
+        command = result["cases"]["command_nonlogin_shell_echo"]
+        assert command["shell_mode"] == "non_login"
+        assert command["command"]["argv"] == ["sh", "-c", "printf 42"]
+
+    serialized = reference_path.read_text()
+    for forbidden in (
+        "modal.host",
+        "sb-",
+        "modal_run_id",
+        "sandbox_id",
+        "api_key",
+        "access_token",
+    ):
+        assert forbidden not in serialized.lower()
+
+
+def test_tzafon_coordinate_command_context_matches_allowlisted_sources() -> None:
+    reference_path = (
+        REPO_ROOT
+        / "benchmark-data/provider-compare-coordinate-command-2026-07-24.json"
+    )
+    context_path = (
+        REPO_ROOT
+        / "benchmark-data/tzafon-coordinate-command-context-2026-07-24.json"
+    )
+    reference = json.loads(reference_path.read_text())
+    context = json.loads(context_path.read_text())
+
+    assert context["status"] == "candidate"
+    assert context["provenance"]["source_sha"] == reference["provenance"][
+        "harness_commit"
+    ]
+    assert context["provenance"]["provider_reference_sha256"] == hashlib.sha256(
+        reference_path.read_bytes()
+    ).hexdigest()
+    assert context["provenance"]["provider_raw_artifact_sha256"] == reference[
+        "provenance"
+    ]["raw_artifact_sha256"]
+
+    for case, providers in context["provider_default_results_ms"].items():
+        for provider, result in providers.items():
+            summary = reference["providers"][provider]["cases"][case]["summary_ms"]
+            assert result == {"p50": summary["p50"], "p95": summary["p95"]}
+
+    for name in ("provider_default", "modal_optimized"):
+        config = dict(context["configuration"][name])
+        expected = config.pop("safe_configuration_sha256")
+        serialized_config = json.dumps(
+            config, sort_keys=True, separators=(",", ":")
+        ).encode()
+        assert hashlib.sha256(serialized_config).hexdigest() == expected
+
+    raw_sources = {
+        "modal_optimized": (
+            REPO_ROOT
+            / context["provenance"]["modal_optimized_raw_artifact"],
+            context["provenance"]["modal_optimized_raw_artifact_sha256"],
+        ),
+        **{
+            backend: (
+                REPO_ROOT
+                / "benchmark-results/candidates"
+                / f"subprocess-ab-{backend}-clean-2026-07-24.json",
+                arm["raw_artifact_sha256"],
+            )
+            for backend, arm in context["subprocess_runner_ab"].items()
+            if isinstance(arm, dict)
+        },
+    }
+    for raw_path, expected_sha256 in raw_sources.values():
+        if raw_path.exists():
+            assert hashlib.sha256(raw_path.read_bytes()).hexdigest() == expected_sha256
+
+    optimized_path = raw_sources["modal_optimized"][0]
+    if optimized_path.exists():
+        optimized = json.loads(optimized_path.read_text())["runs"][
+            "modal_colocated_runner"
+        ]["surfaces"]["daemon-http"]["cases"]
+        for case in ("coordinate_click", "coordinate_click_sequence"):
+            assert context["modal_optimized_results_ms"][case] == {
+                key: optimized[case]["summary_ms"][key] for key in ("p50", "p95")
+            }
+        command = optimized["command_nonlogin_shell_echo"]
+        for label, raw_key in (
+            ("total", "summary_ms"),
+            ("daemon", "daemon_summary_ms"),
+            ("caller_transport_overhead", "overhead_summary_ms"),
+        ):
+            assert context["modal_optimized_results_ms"][
+                "command_nonlogin_shell_echo"
+            ][label] == {key: command[raw_key][key] for key in ("p50", "p95")}
+
+    for backend, arm in context["subprocess_runner_ab"].items():
+        if not isinstance(arm, dict):
+            continue
+        raw_path = raw_sources[backend][0]
+        if not raw_path.exists():
+            continue
+        command = json.loads(raw_path.read_text())["runs"]["modal_colocated_runner"][
+            "surfaces"
+        ]["daemon-http"]["cases"]["command_nonlogin_shell_echo"]
+        for label, raw_key in (
+            ("total", "summary_ms"),
+            ("daemon", "daemon_summary_ms"),
+            ("caller_transport_overhead", "overhead_summary_ms"),
+        ):
+            assert arm[label] == {
+                key: command[raw_key][key] for key in ("p50", "p95")
+            }
+
+    serialized = context_path.read_text().lower()
+    for forbidden in (
+        "modal.host",
+        "sb-",
+        "run_",
+        "api_key",
+        "access_token",
+        "base_url",
+        "bearer",
+    ):
+        assert forbidden not in serialized
