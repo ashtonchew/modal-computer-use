@@ -14,7 +14,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputUnavailableError,
 )
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.models import ActionResult, ProcessStatus, Screenshot
+from modal_computer_use.models import ActionResult, Point, ProcessStatus, Screenshot
 
 
 def test_health_version_capabilities(test_client) -> None:
@@ -29,6 +29,62 @@ def test_health_version_capabilities(test_client) -> None:
     assert caps["input_backends_available"] == ["mock"]
     for primitive in ("input", "lifecycle", "processes", "session", "debug"):
         assert primitive in caps["primitives"]
+
+
+@pytest.mark.parametrize("backend_used", ["xtest", "xdotool"])
+def test_direct_mouse_move_reports_the_backend_used_without_changing_its_body(
+    test_client,
+    app,
+    monkeypatch,
+    backend_used: str,
+) -> None:
+    selected_backend = "before-operation"
+
+    monkeypatch.setattr(
+        type(app.state.backend),
+        "input_backend",
+        property(lambda _backend: selected_backend),
+    )
+
+    async def move(x: int, y: int) -> Point:
+        nonlocal selected_backend
+        selected_backend = backend_used
+        return Point(x=x, y=y)
+
+    app.state.backend.mouse_move = move
+
+    response = test_client.post("/v1/mouse/move", json={"x": 7, "y": 9})
+
+    assert response.status_code == 200
+    assert response.json() == {"x": 7, "y": 9}
+    assert response.headers["x-computer-use-input-backend"] == backend_used
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("POST", "/v1/mouse/click", {"x": 7, "y": 9}),
+        (
+            "POST",
+            "/v1/mouse/drag",
+            {"start_x": 1, "start_y": 2, "end_x": 7, "end_y": 9},
+        ),
+        ("POST", "/v1/mouse/scroll", {"direction": "down", "amount": 2}),
+        ("POST", "/v1/mouse/down", {"button": "left"}),
+        ("POST", "/v1/mouse/up", {"button": "left"}),
+        ("GET", "/v1/mouse/position", None),
+    ],
+)
+def test_each_direct_mouse_route_reports_its_backend(
+    test_client,
+    method: str,
+    path: str,
+    payload: dict[str, object] | None,
+) -> None:
+    response = test_client.request(method, path, json=payload)
+
+    assert response.status_code == 200
+    assert response.headers["x-computer-use-input-backend"] == "mock"
 
 
 def test_status_and_screenshot(test_client) -> None:

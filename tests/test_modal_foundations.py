@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from modal_computer_use.benchmarks.provenance import benchmark_provenance
 from modal_computer_use.config import ComputerConfig, ImageConfig, NetworkConfig
 from modal_computer_use.image import (
+    DESKTOP_APT_PACKAGES,
     _named_image_recipe,
     _published_named_image_identities,
     named_image,
@@ -18,6 +19,11 @@ from modal_computer_use.image import (
 from modal_computer_use.sandbox import modal_billing_report
 
 REVISION = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_desktop_image_omits_unused_xsel_package() -> None:
+    assert "xclip" in DESKTOP_APT_PACKAGES
+    assert "xsel" not in DESKTOP_APT_PACKAGES
 
 
 def test_network_config_uses_current_modal_names_and_legacy_aliases() -> None:
