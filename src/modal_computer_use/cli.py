@@ -1472,6 +1472,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 runner_cpu=args.runner_cpu,
                 runner_memory_mib=args.runner_memory_mib,
                 input_rate_limit_per_sec=args.input_rate_limit_per_sec,
+                subprocess_backend=args.subprocess_backend,
                 image_profile=args.image_profile,
                 surfaces=_modal_colocated_surfaces(args),
                 observation_cases=_modal_colocated_observation_cases(args),

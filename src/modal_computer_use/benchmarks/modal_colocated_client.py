@@ -55,6 +55,7 @@ class ModalColocatedClientBenchmarkConfig:
     runner_cpu: float | None
     runner_memory_mib: int | None
     input_rate_limit_per_sec: int
+    subprocess_backend: Literal["asyncio", "threaded", "isolated-asyncio"]
     image_profile: str | None
     surfaces: list[BenchmarkSurface]
     observation_cases: list[str] | None
@@ -938,6 +939,7 @@ def _modal_colocated_environment_metadata(
         "browser": config.browser,
         "gpu": config.gpu,
         "input_rate_limit_per_sec": config.input_rate_limit_per_sec,
+        "subprocess_backend": config.subprocess_backend,
         "image_profile": config.image_profile,
         "provenance": benchmark_provenance(
             caller_path="modal-colocated-client",

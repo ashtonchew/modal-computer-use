@@ -741,6 +741,7 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
 
     def fake_run_modal_colocated_client_benchmark(config):
         calls.append(config)
+        assert config.subprocess_backend == "threaded"
         target_config = config.target_config_factory("modal_colocated_test-target")
         assert target_config.runtime.modal_region == "us-west"
         assert target_config.actions.input_rate_limit_per_sec == 0
