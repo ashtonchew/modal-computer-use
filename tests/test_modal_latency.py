@@ -1774,6 +1774,88 @@ def test_claim_warm_pool_keeps_failed_locked_tag_recheck_terminal(monkeypatch) -
     assert warm.detached is True
 
 
+def test_claim_warm_pool_does_not_retire_after_busy_slot_detach_failure(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class DetachFailure(RuntimeError):
+        pass
+
+    class BusySlotComputer(FakeComputer):
+        def exec(self, *args: str, **kwargs: Any) -> FakeProcess:
+            return FakeProcess(running=False, returncode=75)
+
+        def detach(self) -> None:
+            raise DetachFailure("busy candidate detach failed")
+
+    warm = BusySlotComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("unowned candidate failures must remain terminal"),
+    )
+
+    with pytest.raises(DetachFailure, match="busy candidate detach failed"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    assert warm.terminated == []
+
+
+def test_claim_warm_pool_does_not_retire_mismatched_locked_candidate(
+    monkeypatch,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class DetachFailure(RuntimeError):
+        pass
+
+    class MismatchedCandidate(FakeComputer):
+        tag_reads = 0
+
+        def tags(self) -> dict[str, str]:
+            self.tag_reads += 1
+            tags = super().tags()
+            if self.tag_reads == 2:
+                tags["computer-use.pool_queue_identity"] = "queue-other"
+            return tags
+
+        def detach(self) -> None:
+            raise DetachFailure("mismatched candidate detach failed")
+
+    warm = MismatchedCandidate("sb-warm", remote_tags=_warm_entry_tags(entry))
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("mismatched candidate failures must remain terminal"),
+    )
+
+    with pytest.raises(DetachFailure, match="mismatched candidate detach failed"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
+    assert warm.terminated == []
+
+
 def test_claim_warm_pool_keeps_discard_tag_failure_terminal(monkeypatch) -> None:
     manager = ComputerSandboxManager(app_name="computer-app")
     config = _pool_config()

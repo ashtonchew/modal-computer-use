@@ -464,24 +464,28 @@ class ComputerSandboxManager:
                 continue
 
             claim_transition_started = False
-            candidate_identity_verified = True
+            candidate_termination_authorized = False
+            client_cleanup_attempted = False
             try:
                 with _warm_slot_lock(_warm_lock_target(computer)) as acquired:
                     if not acquired:
                         rejection_reasons.append("slot_busy")
+                        client_cleanup_attempted = True
                         _detach_warm_candidate(computer)
                         continue
                     try:
                         live_tags = computer.tags()
                     except Exception as exc:
-                        candidate_identity_verified = False
+                        client_cleanup_attempted = True
                         _detach_warm_candidate(computer, primary=exc)
                         raise
                     live_tag_reason = _warm_claim_tag_rejection_reason(live_tags, entry)
                     if live_tag_reason is not None:
                         rejection_reasons.append(live_tag_reason)
+                        client_cleanup_attempted = True
                         _detach_warm_candidate(computer)
                         continue
+                    candidate_termination_authorized = True
                     claim_transition_started = True
                     computer.set_tags(
                         {
@@ -520,7 +524,9 @@ class ComputerSandboxManager:
                         ),
                     )
             except Exception as exc:
-                if not candidate_identity_verified:
+                if not candidate_termination_authorized:
+                    if not client_cleanup_attempted:
+                        _detach_warm_candidate(computer, primary=exc)
                     raise
                 _retire_warm_candidate(computer, primary=exc)
                 if claim_transition_started:

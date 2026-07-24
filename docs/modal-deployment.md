@@ -181,7 +181,9 @@ target. Configuration/programming failures, ambiguous claim transitions, and inc
 are likewise terminal rather than being relabeled as pool misses. Claimed capacity is one-shot and
 must be closed; it is never requeued. Browser and first-frame rejection use the feature-owned
 `BrowserReadinessError` and `FrameValidationError` types; generic `RuntimeError` and `ValueError`
-remain terminal.
+remain terminal. A candidate may be terminated only after the slot lock is held and its live tags
+still match the dequeued entry; detach failures while declining a busy or mismatched slot propagate
+without terminating capacity that another claimant may own.
 
 Each Modal App and pool pair receives a distinct Queue. Each fixed slot uses its own partition.
 `fill_warm_pool()` rebuilds that partition from the Sandbox's durable lifecycle tags, because
