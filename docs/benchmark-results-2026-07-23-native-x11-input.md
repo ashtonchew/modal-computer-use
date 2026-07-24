@@ -48,7 +48,51 @@ The native implementation is the canonical fast path. `xdotool` remains useful a
 compatibility adapter and as an automatic fallback when native preflight fails before any event is
 emitted.
 
-## Fully optimized Modal harness, 2026-07-24
+## Fully optimized Modal operation harness, 2026-07-24
+
+The native-X11 branch was stacked on the canonical colocated-region harness and run at clean merge
+revision `39b23ff07f4c26a31c10941b7a9f14edea4a5a78`. The run used a 4 CPU / 8192 MiB Chromium target
+and a separate 1 CPU / 1024 MiB Connect runner, both requested in `us-west-2`. It forced XTest,
+disabled input throttling, used one warmup, and measured 30 iterations of every selected public
+daemon operation.
+
+The run returned `ok=true` with zero failures. Every selected operation completed 30/30 samples,
+all input cases reported `xtest`, external and colocated cursor/typing readbacks passed, runner
+preflight passed, and the post-run Modal container inventory was empty.
+
+| Public operation, p50 | Modal optimized XTest | Daytona default | E2B default | Modal vs Daytona | Modal vs E2B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full screenshot | **37.7 ms** | 214.2 ms | 177.0 ms | **5.69x** | **4.70x** |
+| Move + click | **4.1 ms** | 347.0 ms | 279.5 ms | **84.28x** | **67.89x** |
+| Four move/click pairs | **9.6 ms** | 1,429.5 ms | 1,122.1 ms | **149.59x** | **117.42x** |
+| Type 100 characters | **23.9 ms** | 634.6 ms | 4,100.7 ms | **26.51x** | **171.34x** |
+| Type 1,000 characters | **189.6 ms** | 5,371.1 ms | 41,520.4 ms | **28.33x** | **219.02x** |
+| Command echo | 80.6 ms | 120.9 ms | **62.9 ms** | **1.50x** | 0.78x |
+
+The Daytona and E2B columns reuse the distinct fresh provider-default run at `cebdaa3`, which used
+three measured product lifecycles per provider. The operation boundaries match, but the samples are
+not contemporaneous or paired, so these are descriptive best-system ratios rather than isolated
+provider causal effects.
+
+The same-run external Connect control used the same target and operation boundaries. Moving the
+caller into the selected region reduced screenshot p50 from 76.8 ms to 37.7 ms, move/click from
+31.4 ms to 4.1 ms, four move/click pairs from 35.6 ms to 9.6 ms, 100-character typing from 50.4 ms
+to 23.9 ms, 1,000-character typing from 203.7 ms to 189.6 ms, and command echo from 104.6 ms to
+80.6 ms.
+
+Against the parent optimized Modal artifact, the native-X11 path was 30.1x faster for 100-character
+typing and 34.5x faster for 1,000-character typing. Screenshot was 1.03x faster, move/click 1.11x
+faster, command echo 1.16x faster, and the four-click sequence was 0.97x as fast. Those historical
+comparisons are unpaired and should be read as directional; the controlled native-vs-compatibility
+A/B above isolates adapter cost.
+
+The secret-safe compact evidence is
+`benchmark-data/modal-optimized-native-x11-us-west-2-2026-07-24.json`. The credential-bearing raw
+report remains ignored at
+`benchmark-results/native-x11-colocated-us-west-2-2026-07-24.json`, bound by SHA-256 in the compact
+artifact.
+
+## Optimized action-to-frame and availability harness, 2026-07-24
 
 The provider-default comparison below measures every provider through its public SDK from the local
 macOS caller. It is intentionally neutral, but it is not Modal's optimized production shape. The
@@ -66,11 +110,12 @@ target and consumed the binary causal-observation envelope.
 | Warm-pool claim to first authenticated frame | 1,597.4 ms | 1,765.4 ms | 30/30 | 0 |
 | Cold request to first authenticated frame | 11,195.0 ms | 12,712.9 ms | 30/30 | 0 |
 
-The 34.6 ms result is the optimized screenshot-sensitive agent-loop result: timing starts
+The 34.6 ms result is a separate optimized screenshot-sensitive agent-loop result: timing starts
 immediately before correlated input dispatch and stops only after the matching causal observation
 contains a changed, reconstructable frame. It should not be confused with the 211.6 ms
 provider-default `screenshot_full` RPC below, which crosses the external attested HTTP/1.1 tunnel
-from the local caller and returns a full PNG.
+from the local caller and returns a full PNG, or with the 37.7 ms fully optimized standalone
+screenshot operation above.
 
 For context, the immediately preceding neutral provider run at commit
 `cebdaa3ea91c8360b3f634d373d7aeb8a6579267` reported the following public-SDK action latencies. The
