@@ -65,12 +65,12 @@ of the contemporaneous main run.
 | Four move/click pairs | 12.60 ms | 23.79 ms | 30/30 |
 | Type 100 characters | 11.14 ms | 16.02 ms | 30/30 |
 | Type 1,000 characters | 66.10 ms | 93.50 ms | 30/30 |
-| SDK-default action → changed frame | 12.39 ms | 30.71 ms | 30/30 |
-| Auto-signal action → changed frame | 33.13 ms | 40.99 ms | 30/30 |
+| SDK-default action → changed frame | 16.66 ms | 38.14 ms | 30/30 |
+| Auto-signal action → changed frame | 33.04 ms | 38.39 ms | 30/30 |
 
-The final two rows were repeated on the exact final capture commit. The raw artifact recorded a
-dirty flag solely because the generated sanitized provider candidate had not yet been committed;
-the result was therefore followed by a clean-worktree confirmation before PR publication.
+The final two rows are the clean-worktree confirmation at
+`456909e30917d69bd9080f1efb6d38eaedcde7a5`; the implementation is unchanged from the code revision
+named at the start of this report.
 
 ## Same-run provider comparison
 
@@ -108,4 +108,3 @@ SHA-256 in the sanitized artifact.
 - Historical and contemporaneous hosts showed materially different stable screenshot floors.
   Performance conclusions use the immediate main-vs-feature ablation, not the more favorable older
   baseline.
-
