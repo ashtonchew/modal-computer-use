@@ -11,7 +11,12 @@ from uuid import uuid4
 import httpx
 
 from .config import ComputerConfig
-from .errors import DaemonHTTPError, SandboxUnavailableError
+from .errors import (
+    BrowserReadinessError,
+    DaemonHTTPError,
+    FrameValidationError,
+    SandboxUnavailableError,
+)
 from .latency import (
     WarmPoolClaim,
     WarmPoolClaimMetrics,
@@ -669,9 +674,13 @@ def _warm_candidate_exception_reason(
         return "attach_unavailable"
     if phase == "poll" and operational:
         return "candidate_unavailable"
-    if phase == "browser" and (operational or isinstance(exc, RuntimeError)):
+    if phase == "browser" and (
+        operational or isinstance(exc, BrowserReadinessError)
+    ):
         return "browser_not_ready"
-    if phase == "first_frame" and (operational or isinstance(exc, ValueError)):
+    if phase == "first_frame" and (
+        operational or isinstance(exc, FrameValidationError)
+    ):
         return "first_frame_invalid"
     if phase == "claim_lock" and operational:
         return "claim_lock_unavailable"

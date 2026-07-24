@@ -8,8 +8,10 @@ import pytest
 
 from modal_computer_use import ComputerConfig, ComputerSandbox, SandboxRef
 from modal_computer_use.errors import (
+    BrowserReadinessError,
     ConfigConflictError,
     DaemonHTTPError,
+    FrameValidationError,
     SandboxUnavailableError,
 )
 from modal_computer_use.latency import (
@@ -1821,7 +1823,7 @@ def test_claim_warm_pool_records_browser_rejection_before_cold_fallback(
 
     class UnreadyComputer(FakeComputer):
         def ensure_browser_ready(self, config: ComputerConfig) -> None:
-            raise RuntimeError("browser prewarm did not succeed")
+            raise BrowserReadinessError("browser prewarm did not succeed")
 
     warm = UnreadyComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
     cold = FakeComputer("sb-cold")
@@ -1856,7 +1858,7 @@ def test_claim_warm_pool_records_first_frame_rejection_before_cold_fallback(
 
     class InvalidFrameComputer(FakeComputer):
         def first_valid_frame(self, config: ComputerConfig) -> bytes:
-            raise ValueError("first frame could not be decoded")
+            raise FrameValidationError("first frame could not be decoded")
 
     warm = InvalidFrameComputer("sb-warm", remote_tags=_warm_entry_tags(entry))
     cold = FakeComputer("sb-cold")
@@ -1878,6 +1880,57 @@ def test_claim_warm_pool_records_first_frame_rejection_before_cold_fallback(
 
     assert claim.computer is cold
     assert claim.metrics.rejection_reasons == ("first_frame_invalid",)
+    assert warm.terminated == [True]
+    assert warm.detached is True
+
+
+@pytest.mark.parametrize(
+    ("phase", "error"),
+    [
+        ("browser", RuntimeError("browser programming failure")),
+        ("first_frame", ValueError("frame programming failure")),
+    ],
+)
+def test_claim_warm_pool_keeps_generic_phase_errors_terminal(
+    monkeypatch,
+    phase: str,
+    error: Exception,
+) -> None:
+    manager = ComputerSandboxManager(app_name="computer-app")
+    config = _pool_config()
+    entry = _claim_entry(config)
+
+    class ProgrammingFailureComputer(FakeComputer):
+        def ensure_browser_ready(self, config: ComputerConfig) -> None:
+            if phase == "browser":
+                raise error
+
+        def first_valid_frame(self, config: ComputerConfig) -> bytes:
+            if phase == "first_frame":
+                raise error
+            return super().first_valid_frame(config)
+
+    warm = ProgrammingFailureComputer(
+        "sb-warm",
+        remote_tags=_warm_entry_tags(entry),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.attach",
+        lambda **kwargs: warm,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.manager.ComputerSandbox.create",
+        lambda **kwargs: pytest.fail("generic phase failures must not create cold fallback"),
+    )
+
+    with pytest.raises(type(error), match="programming failure"):
+        manager.claim_warm_pool(
+            config=config,
+            policy=WarmPoolPolicy(pool_name="prod", capacity=1),
+            queue=FakeQueue([entry.as_dict()]),
+            now=lambda: entry.ready_at + timedelta(seconds=10),
+        )
+
     assert warm.terminated == [True]
     assert warm.detached is True
 

@@ -12,7 +12,13 @@ from .config import (
     RuntimeConfig,
     StorageConfig,
 )
-from .errors import ConfigConflictError, SandboxAmbiguousError, SandboxUnavailableError
+from .errors import (
+    BrowserReadinessError,
+    ConfigConflictError,
+    FrameValidationError,
+    SandboxAmbiguousError,
+    SandboxUnavailableError,
+)
 from .hot_session import HotSessionClient
 from .latency import (
     SessionStartupTiming,
@@ -79,6 +85,7 @@ __all__ = [
     "ArtifactInfo",
     "ArtifactSyncResult",
     "BrowserConfig",
+    "BrowserReadinessError",
     "BudgetConfig",
     "ComputerAction",
     "ComputerConfig",
@@ -92,6 +99,7 @@ __all__ = [
     "DesktopConfig",
     "DisplayGeometry",
     "DisplayInfo",
+    "FrameValidationError",
     "HotSessionClient",
     "ImageConfig",
     "ModalDaemonCommandResult",

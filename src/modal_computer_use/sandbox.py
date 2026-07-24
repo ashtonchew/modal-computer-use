@@ -16,6 +16,7 @@ from ._version import __version__
 from .client import DaemonClient
 from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
 from .errors import (
+    BrowserReadinessError,
     ConfigConflictError,
     ModalNotInstalledError,
     SandboxAmbiguousError,
@@ -1344,14 +1345,18 @@ class ComputerSandbox:
             return
         status = self.browser.status()
         if status.get("configured_browser") != config.browser.kind:
-            raise RuntimeError("configured browser does not match the requested browser")
+            raise BrowserReadinessError(
+                "configured browser does not match the requested browser"
+            )
         if not config.browser.prewarm:
             return
         prewarm_result = status.get("prewarm_result")
         if not isinstance(prewarm_result, dict) or prewarm_result.get("ok") is not True:
-            raise RuntimeError("browser prewarm did not succeed")
+            raise BrowserReadinessError("browser prewarm did not succeed")
         if not isinstance(status.get("windows"), int) or status["windows"] < 1:
-            raise RuntimeError("browser prewarm did not create a browser window")
+            raise BrowserReadinessError(
+                "browser prewarm did not create a browser window"
+            )
         if timing is not None:
             timing.mark("browser_ready")
 

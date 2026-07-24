@@ -179,7 +179,9 @@ to the normal cold fallback. A failed live-tag read is terminal because ownershi
 after the queue entry has been consumed; the client detaches without terminating an unverified
 target. Configuration/programming failures, ambiguous claim transitions, and incomplete retirement
 are likewise terminal rather than being relabeled as pool misses. Claimed capacity is one-shot and
-must be closed; it is never requeued.
+must be closed; it is never requeued. Browser and first-frame rejection use the feature-owned
+`BrowserReadinessError` and `FrameValidationError` types; generic `RuntimeError` and `ValueError`
+remain terminal.
 
 Each Modal App and pool pair receives a distinct Queue. Each fixed slot uses its own partition.
 `fill_warm_pool()` rebuilds that partition from the Sandbox's durable lifecycle tags, because

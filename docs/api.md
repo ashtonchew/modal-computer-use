@@ -366,6 +366,10 @@ The loopback path uses the target daemon's application bearer rather than an ing
 are never placed in public sandbox metadata or benchmark logs.
 The helper owns the reserved daemon env keys and rejects user overrides so benchmark or workload
 metadata cannot accidentally replace the daemon endpoint or bearer token.
+Warm-pool browser and frame validation failures are exposed as `BrowserReadinessError` and
+`FrameValidationError`. Both preserve compatibility with `RuntimeError` and `ValueError`
+respectively, while allowing orchestration to distinguish expected candidate rejection from
+unrelated programming failures.
 The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
 Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
 benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
