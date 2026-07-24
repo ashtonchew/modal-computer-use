@@ -167,10 +167,7 @@ class E2BDriver:
         run = getattr(commands, "run", None)
         if not callable(run):
             raise RuntimeError("E2B sandbox commands did not expose run")
-        try:
-            result = run("sh -lc 'printf 42'", timeout=30)
-        except TypeError:
-            result = run("sh -lc 'printf 42'")
+        result = run("sh -lc 'printf 42'", timeout=30)
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("E2B command exited nonzero")
@@ -184,10 +181,7 @@ class E2BDriver:
         if not callable(run):
             raise RuntimeError("E2B sandbox commands did not expose run")
         command = shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND)
-        try:
-            result = run(command, timeout=30)
-        except TypeError:
-            result = run(command)
+        result = run(command, timeout=30)
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("E2B command exited nonzero")

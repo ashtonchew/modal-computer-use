@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from modal_computer_use.benchmarks.provider_comparison.daytona import DaytonaDriver
 from modal_computer_use.benchmarks.provider_comparison.e2b import E2BDriver
 
@@ -56,3 +58,16 @@ def test_e2b_canonical_command_uses_nonlogin_shell_with_honest_metadata() -> Non
             "transport_shape": "command_string",
         },
     }
+
+
+def test_e2b_canonical_command_rejects_sdk_without_timeout_support() -> None:
+    class NoTimeoutCommands:
+        def run(self, command: str):
+            return SimpleNamespace(exit_code=0, stdout="42")
+
+    driver = object.__new__(E2BDriver)
+
+    with pytest.raises(TypeError):
+        driver.command_nonlogin_shell_echo(
+            SimpleNamespace(commands=NoTimeoutCommands())
+        )

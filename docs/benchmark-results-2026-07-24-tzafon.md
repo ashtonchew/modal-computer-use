@@ -94,8 +94,8 @@ Computers primitives.
 
 The provider-default run pinned `tzafon==2.44.1`, used a nonpersistent desktop, requested inline
 screenshots, and retained the SDK's default two retries. Its product-create-to-first-validated-
-screenshot p50 was 317.8 ms, versus 1,267.4 ms for E2B, 10,238.4 ms for Modal's neutral external
-path, and 10,566.3 ms for Daytona.
+screenshot p50 was 331.42 ms, versus 1,262.31 ms for E2B, 13,814.65 ms for Modal's neutral external
+path, and 10,637.69 ms for Daytona.
 
 Those lifecycle values do not reproduce or contradict Tzafon's separately published 71 ms desktop
 number. That number used server-side TTFB minus TLS handshake over five runs; this harness measures
