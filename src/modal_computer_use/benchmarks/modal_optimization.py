@@ -341,6 +341,20 @@ def action_attempts_from_case(
         for observation in sample_observations:
             if not isinstance(observation, dict):
                 raise ValueError("action sample observations must be objects")
+    if not samples and len(failures) == 1 and isinstance(failures[0], dict):
+        case_failure = failures[0]
+        phase = case_failure.get("phase")
+        error_type = case_failure.get("error_type", case_failure.get("type"))
+        if phase in {"setup", "warmup"} and _nonempty_text(error_type):
+            status = "timeout" if "timeout" in error_type.lower() else "failed"
+            return [
+                _attempt_row(
+                    index,
+                    status=status,
+                    failure={"phase": phase, "error_type": error_type},
+                )
+                for index in range(expected_attempts)
+            ]
     measured_failures: dict[int, dict[str, Any]] = {}
     for failure in failures:
         if not isinstance(failure, dict) or failure.get("phase") != "measure":

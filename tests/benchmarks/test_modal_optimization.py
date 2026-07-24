@@ -739,6 +739,31 @@ def test_action_attempt_rows_reject_hidden_or_extra_samples() -> None:
         )
 
 
+def test_action_attempt_rows_preserve_case_setup_failure() -> None:
+    attempts = action_attempts_from_case(
+        {
+            "iterations": 30,
+            "action_to_frame_samples_ms": [],
+            "sample_observations": [],
+            "failures": [
+                {
+                    "phase": "setup",
+                    "iteration": 0,
+                    "type": "TimeoutError",
+                    "message": "redacted fixture",
+                }
+            ],
+        },
+        expected_attempts=30,
+    )
+
+    assert len(attempts) == 30
+    assert {attempt["status"] for attempt in attempts} == {"timeout"}
+    assert {tuple(attempt["failure"].items()) for attempt in attempts} == {
+        (("phase", "setup"), ("error_type", "TimeoutError"))
+    }
+
+
 @pytest.mark.parametrize(
     ("sample_observations", "message"),
     [
