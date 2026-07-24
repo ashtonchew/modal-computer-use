@@ -192,6 +192,8 @@ def _promote_accounting_metadata(result: dict[str, Any]) -> None:
     for key in (
         "semantic",
         "benchmark_semantics",
+        "shell_mode",
+        "command",
         "logical_action_count",
         "provider_action_count",
         "provider_sdk_call_count",

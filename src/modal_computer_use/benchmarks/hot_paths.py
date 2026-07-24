@@ -5,6 +5,8 @@ from typing import Any
 from ..client import DaemonClient
 from .constants import (
     COMMAND_ECHO_COMMAND,
+    COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
     COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_ACTIONS,
@@ -360,14 +362,66 @@ def run_command_echo_benchmark(
         operation=benchmark.run,
         failures=failures,
     )
-    result = _case_result("command_echo", iterations, samples, failures)
+    result = _attributed_case_result(
+        "command_echo",
+        iterations,
+        samples,
+        observations,
+        failures,
+    )
     result.update(
         {
-            "command": {"argv": list(COMMAND_ECHO_COMMAND), "timeout_seconds": 30},
+            "command": {
+                "argv": list(COMMAND_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "argv",
+            },
+            "shell_mode": "login",
             "last_result": observations[-1] if observations else None,
         }
     )
     return result
+
+
+def run_command_nonlogin_shell_echo_benchmark(
+    *,
+    client: DaemonClient,
+    iterations: int,
+    warmup_iterations: int = 1,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be >= 1")
+
+    failures: list[dict[str, Any]] = []
+    benchmark = _CommandEchoBenchmark(client, COMMAND_NONLOGIN_SHELL_ECHO_COMMAND)
+    samples, observations = _measure_observed_case(
+        name="command_nonlogin_shell_echo",
+        iterations=iterations,
+        warmup_iterations=warmup_iterations,
+        operation=benchmark.run,
+        failures=failures,
+    )
+    result = _attributed_case_result(
+        "command_nonlogin_shell_echo",
+        iterations,
+        samples,
+        observations,
+        failures,
+    )
+    result.update(
+        {
+            "benchmark_semantics": COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+            "shell_mode": "non_login",
+            "command": {
+                "argv": list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "argv",
+            },
+            "last_result": observations[-1] if observations else None,
+        }
+    )
+    return result
+
 
 def run_recording_start_stop_benchmark(
     *,

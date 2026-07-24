@@ -4,16 +4,67 @@ import base64
 import json
 
 from modal_computer_use.benchmarks import (
+    COMMAND_ECHO_COMMAND,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     TYPE_1000_CHARS_TEXT,
     TYPE_1000_CHARS_TIMEOUT_MS,
     TYPING_BENCHMARK_TEXT,
     run_click_then_screenshot_benchmark,
+    run_command_echo_benchmark,
+    run_command_nonlogin_shell_echo_benchmark,
     run_coordinate_click_benchmark,
     run_coordinate_click_sequence_benchmark,
     run_move_click_sequence_benchmark,
     run_type_100_chars_benchmark,
     run_type_1000_chars_benchmark,
 )
+
+
+def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_shell() -> None:
+    seen_commands: list[list[str]] = []
+
+    class TimedClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/commands/run"
+            assert headers is None
+            seen_commands.append(json["command"])
+            return {
+                "ok": True,
+                "elapsed_ms": 12.5,
+                "output": {"returncode": 0},
+            }
+
+    client = TimedClient()
+    legacy = run_command_echo_benchmark(
+        client=client,
+        iterations=1,
+        warmup_iterations=0,
+    )
+    canonical = run_command_nonlogin_shell_echo_benchmark(
+        client=client,
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert seen_commands == [
+        list(COMMAND_ECHO_COMMAND),
+        list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+    ]
+    assert legacy["command"]["argv"] == ["sh", "-lc", "printf 42"]
+    assert legacy["shell_mode"] == "login"
+    assert legacy["daemon_samples_ms"] == [12.5]
+    assert legacy["attribution"]["status"] == "measured"
+    assert canonical["command"] == {
+        "argv": ["sh", "-c", "printf 42"],
+        "timeout_seconds": 30,
+        "transport_shape": "argv",
+    }
+    assert canonical["benchmark_semantics"] == "shell-command-echo-v2"
+    assert canonical["shell_mode"] == "non_login"
+    assert canonical["daemon_samples_ms"] == [12.5]
+    assert canonical["attribution"]["status"] == "measured"
 
 
 def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:

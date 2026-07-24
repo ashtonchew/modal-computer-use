@@ -257,6 +257,14 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
     assert product_case["first_observation_api"] == "computer_use.screenshot.take_full_screen"
     assert cases["cold_create_to_ready"]["canonical_case"] == "product_create_to_first_screenshot"
     assert cases["cold_create_to_ready"]["deprecated"] is True
+    command_case = cases["command_nonlogin_shell_echo"]
+    assert command_case["benchmark_semantics"] == "shell-command-echo-v2"
+    assert command_case["shell_mode"] == "non_login"
+    assert command_case["command"] == {
+        "argv": ["sh", "-c", "printf 42"],
+        "timeout_seconds": 30,
+        "transport_shape": "command_string",
+    }
 
 
 def test_modal_product_readiness_uses_all_orchestration_samples() -> None:

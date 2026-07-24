@@ -164,6 +164,7 @@ def test_tzafon_happy_path_runs_all_canonical_cases_and_readbacks(monkeypatch) -
         "type_100_chars",
         "type_1000_chars",
         "command_echo",
+        "command_nonlogin_shell_echo",
     }.issubset(provider["cases"])
     assert all(provider["cases"][case]["status"] == "ok" for case in provider["cases"])
     assert provider["verification"]["cursor_position"]["status"] == "ok"
@@ -362,6 +363,26 @@ def test_tzafon_command_echo_uses_exec_sync() -> None:
     assert computers.exec.calls == [
         ("computer-1", "sh -lc 'printf 42'", 30),
     ]
+
+
+def test_tzafon_canonical_command_uses_nonlogin_shell_with_honest_metadata() -> None:
+    driver, computers = _driver()
+
+    result = driver.command_nonlogin_shell_echo("computer-1")
+
+    assert computers.exec.calls == [
+        ("computer-1", "sh -c 'printf 42'", 30),
+    ]
+    assert result == {
+        "exit_code": 0,
+        "benchmark_semantics": "shell-command-echo-v2",
+        "shell_mode": "non_login",
+        "command": {
+            "argv": ["sh", "-c", "printf 42"],
+            "timeout_seconds": 30,
+            "transport_shape": "command_string",
+        },
+    }
 
 
 def test_tzafon_cleanup_runs_after_normal_and_failing_setup(monkeypatch) -> None:

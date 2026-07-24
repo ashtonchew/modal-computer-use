@@ -7,9 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import modal_computer_use.daemon.readiness as readiness
+import modal_computer_use.daemon.routes.commands as command_routes
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
-from modal_computer_use.models import Point
+from modal_computer_use.models import ActionResult, Point
 
 
 def test_direct_mouse_routes_reject_out_of_bounds_coordinates(test_client) -> None:
@@ -1161,6 +1162,28 @@ def test_command_run_rejects_invalid_argv_before_backend(test_client, app, comma
 
     assert response.status_code == 422
     assert called is False
+
+
+def test_command_run_elapsed_ms_covers_full_route_work(monkeypatch, test_client, app) -> None:
+    async def run_command(_command, timeout=30.0):
+        return ActionResult(
+            ok=True,
+            elapsed_ms=1.0,
+            output={"returncode": 0, "stdout": "42"},
+        )
+
+    ticks = iter((10.0, 10.025))
+    monkeypatch.setattr(command_routes, "perf_counter", lambda: next(ticks))
+    app.state.backend.run_command = run_command
+
+    response = test_client.post(
+        "/v1/commands/run",
+        json={"command": ["sh", "-c", "printf 42"], "timeout": 30},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["elapsed_ms"] == pytest.approx(25.0)
+    assert response.json()["output"] == {"returncode": 0, "stdout": "42"}
 
 
 def test_direct_keyboard_type_rejects_unknown_method(test_client) -> None:

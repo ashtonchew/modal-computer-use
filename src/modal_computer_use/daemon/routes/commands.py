@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -14,6 +15,8 @@ router = APIRouter(prefix="/v1/commands")
 
 @router.post("/run")
 async def run(payload: CommandRunRequest, request: Request) -> ActionResult:
+    started = perf_counter()
+
     async def operation() -> ActionResult:
         result = await request.app.state.backend.run_command(
             payload.command,
@@ -26,12 +29,13 @@ async def run(payload: CommandRunRequest, request: Request) -> ActionResult:
             output=_sanitize_command_output(result.output),
         )
 
-    return await run_input_action(
+    result = await run_input_action(
         request,
         operation,
         fallback_code="command_failed",
         fallback_message="command failed",
     )
+    return result.model_copy(update={"elapsed_ms": (perf_counter() - started) * 1000})
 
 
 def _sanitize_command_output(value: Any) -> Any:

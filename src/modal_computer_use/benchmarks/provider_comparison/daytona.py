@@ -5,6 +5,8 @@ import shlex
 from typing import Any
 
 from ..constants import (
+    COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
     COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
@@ -95,6 +97,7 @@ def run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[str
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
+            "command_nonlogin_shell_echo",
         ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -216,6 +219,25 @@ class DaytonaDriver:
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
         return {"exit_code": exit_code}
+
+    def command_nonlogin_shell_echo(self, sandbox: Any) -> dict[str, Any]:
+        command = shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND)
+        result = sandbox.process.exec(command, timeout=30)
+        exit_code = provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("Daytona command exited nonzero")
+        if provider_stdout(result).strip() != "42":
+            raise RuntimeError("Daytona command output did not match the expected sentinel")
+        return {
+            "exit_code": exit_code,
+            "benchmark_semantics": COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+            "shell_mode": "non_login",
+            "command": {
+                "argv": list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "command_string",
+            },
+        }
 
     def _create_sandbox(self) -> Any:
         create = self._client.create

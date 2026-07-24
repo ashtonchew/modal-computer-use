@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import shlex
 from typing import Any
 
 from ..constants import (
+    COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
     COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
@@ -80,6 +83,7 @@ def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, An
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
+            "command_nonlogin_shell_echo",
         ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -171,6 +175,34 @@ class E2BDriver:
         if exit_code not in (None, 0):
             raise RuntimeError("E2B command exited nonzero")
         return {"exit_code": exit_code}
+
+    def command_nonlogin_shell_echo(self, sandbox: Any) -> dict[str, Any]:
+        commands = getattr(sandbox, "commands", None)
+        if commands is None:
+            raise RuntimeError("E2B sandbox did not expose commands")
+        run = getattr(commands, "run", None)
+        if not callable(run):
+            raise RuntimeError("E2B sandbox commands did not expose run")
+        command = shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND)
+        try:
+            result = run(command, timeout=30)
+        except TypeError:
+            result = run(command)
+        exit_code = provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("E2B command exited nonzero")
+        if provider_stdout(result).strip() != "42":
+            raise RuntimeError("E2B command output did not match the expected sentinel")
+        return {
+            "exit_code": exit_code,
+            "benchmark_semantics": COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+            "shell_mode": "non_login",
+            "command": {
+                "argv": list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "command_string",
+            },
+        }
 
     def _create_sandbox(self) -> Any:
         create = self._sandbox_cls.create

@@ -205,17 +205,37 @@ class _TypeCharsBenchmark:
         }
 
 class _CommandEchoBenchmark:
-    def __init__(self, client: DaemonClient) -> None:
+    def __init__(
+        self,
+        client: DaemonClient,
+        command: tuple[str, ...] = COMMAND_ECHO_COMMAND,
+    ) -> None:
         self._client = client
+        self._command = command
 
     def run(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/commands/run",
-            json={"command": list(COMMAND_ECHO_COMMAND), "timeout": 30},
+            json={"command": list(self._command), "timeout": 30},
         )
         _ensure_ok_result(result)
         output = result.get("output") if isinstance(result, dict) else {}
-        return {"exit_code": output.get("returncode") if isinstance(output, dict) else None}
+        return {
+            "exit_code": output.get("returncode") if isinstance(output, dict) else None,
+            "daemon_ms": _extract_command_elapsed_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
+
+
+def _extract_command_elapsed_ms(result: dict[str, Any]) -> float | None:
+    elapsed_ms = result.get("elapsed_ms")
+    if elapsed_ms is None:
+        return None
+    if isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int | float):
+        raise RuntimeError("daemon command elapsed_ms was malformed")
+    if elapsed_ms < 0:
+        raise RuntimeError("daemon command elapsed_ms was negative")
+    return float(elapsed_ms)
 
 class _ScreenshotBenchmark:
     def __init__(self, client: DaemonClient, request: dict[str, Any], *, raw: bool = False) -> None:

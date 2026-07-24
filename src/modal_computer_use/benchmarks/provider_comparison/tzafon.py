@@ -7,6 +7,8 @@ from typing import Any
 
 from ..constants import (
     COMMAND_ECHO_COMMAND,
+    COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
     COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
@@ -131,6 +133,7 @@ def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str,
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
+            "command_nonlogin_shell_echo",
         ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -284,6 +287,25 @@ class TzafonDriver:
         if provider_stdout(result).strip() != "42":
             raise RuntimeError("Tzafon command output did not match the expected sentinel")
         return {"exit_code": provider_exit_code(result)}
+
+    def command_nonlogin_shell_echo(self, computer: Any) -> dict[str, Any]:
+        result = self._exec(
+            computer,
+            shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+            timeout=30,
+        )
+        if provider_stdout(result).strip() != "42":
+            raise RuntimeError("Tzafon command output did not match the expected sentinel")
+        return {
+            "exit_code": provider_exit_code(result),
+            "benchmark_semantics": COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+            "shell_mode": "non_login",
+            "command": {
+                "argv": list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "command_string",
+            },
+        }
 
     def verify_readbacks(self, computer: Any) -> dict[str, Any]:
         def run_command(command: str, timeout: int) -> str:

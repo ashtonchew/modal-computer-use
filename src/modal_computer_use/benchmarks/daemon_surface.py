@@ -94,6 +94,11 @@ def _run_daemon_http_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
         ),
+        "command_nonlogin_shell_echo": core.run_command_nonlogin_shell_echo_benchmark(
+            client=client,
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+        ),
         "recording_start_stop": core.run_recording_start_stop_benchmark(
             client=client,
             iterations=iterations,
