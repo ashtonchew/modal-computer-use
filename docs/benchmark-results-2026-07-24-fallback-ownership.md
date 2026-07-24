@@ -1,7 +1,7 @@
 # Fallback ownership benchmark, 2026-07-24
 
 This report validates the fallback-ownership cleanup through code revision
-`6f06fc50e589fee11e477d536e994a4d07416bce` against latest-main revision
+`5f880c509a13605aca5df5f91fa8a5e56160d03b` against latest-main revision
 `ca64daa1c59eba608ff5dce6becaa2aa32b9e599`.
 
 ## Environment and contract
@@ -65,19 +65,20 @@ of the contemporaneous main run.
 | Four move/click pairs | 12.60 ms | 23.79 ms | 30/30 |
 | Type 100 characters | 11.14 ms | 16.02 ms | 30/30 |
 | Type 1,000 characters | 66.10 ms | 93.50 ms | 30/30 |
-| SDK-default action → changed frame | 13.05 ms | 41.92 ms | 30/30 |
-| Auto-signal action → changed frame | 32.28 ms | 44.97 ms | 30/30 |
+| SDK-default action → changed frame | 12.53 ms | 33.85 ms | 30/30 |
+| Auto-signal action → changed frame | 33.33 ms | 38.06 ms | 30/30 |
 
 The final two rows are the clean-worktree, post-review confirmation at the code revision named at
 the start of this report. The raw, ignored artifact is
-`benchmark-results/fallback-ownership-final-reviewed-loopback-observation-20260724.json`.
+`benchmark-results/fallback-ownership-pr-head-loopback-observation-20260724.json`.
 It reports `ok=true`, zero failures, and `git_worktree_clean=true`.
 
-The earlier clean confirmation at `456909e30917d69bd9080f1efb6d38eaedcde7a5` measured 16.66/38.14
-ms for SDK-default p50/p95 and 33.04/38.39 ms for auto-signal. The reviewed rerun improved both p50s
-by 21.7% and 2.3%, respectively. The p95 tails moved by +9.9% and +17.1%; the benchmark therefore
-supports a no-p50-regression conclusion, while the p95 tail remains environment-sensitive rather
-than a claimed optimization result. All four runs completed 30/30.
+The preceding clean confirmation at `6f06fc50e589fee11e477d536e994a4d07416bce` measured 13.05/41.92
+ms for SDK-default p50/p95 and 32.28/44.97 ms for auto-signal. At PR head, the p50 changes were
+-4.0% and +3.3%, respectively, while both p95 values improved. This supports the intended
+no-regression conclusion; the review-only changes between those revisions affect warm-pool and
+readiness-failure ownership rather than the daemon input/capture hot path. Both runs completed
+30/30.
 
 ## Same-run provider comparison
 
