@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-warm-action-stage-attribution",
+  "generated_at": "2026-07-24T02:37:41.569211Z",
+  "status": "measured",
+  "provenance": {
+    "source_sha": "51dc0631259d012cabda9ab00392970f69fcb506",
+    "image_identity": "modal-computer-use-chromium:51dc0631259d012cabda9ab00392970f69fcb506",
+    "git_worktree_clean": true,
+    "raw_artifact_sha256": "b940e3c6a1e34bb082259bf1750505891fd564d49a647d3de1cdedce841b2e3c"
+  },
+  "configuration": {
+    "requested_region": "us-west-2",
+    "runner_path": "connect",
+    "metric_boundary": "correlated click dispatch to first matching changed causal frame",
+    "measured_iterations": 30
+  },
+  "summary_ms": {
+    "action_to_frame": {
+      "p50": 30.178822499999924,
+      "p95": 39.9479952500001
+    },
+    "action_daemon": {
+      "p50": 0.7779169999997393,
+      "p95": 0.9433285499991226
+    },
+    "action_wall": {
+      "p50": 0.995768000000119,
+      "p95": 1.1737785499994935
+    },
+    "request_to_capture_start": {
+      "p50": 15.670355000000136,
+      "p95": 21.051714750000272
+    },
+    "change_signal_wait": {
+      "p50": 13.608501500000258,
+      "p95": 19.003358950000845
+    },
+    "capture_wall": {
+      "p50": 5.943806999998635,
+      "p95": 7.087132399999783
+    },
+    "request_to_pre_emit": {
+      "p50": 28.38130150000051,
+      "p95": 37.814695249999716
+    },
+    "receive_minus_server_pre_emit": {
+      "p50": 1.8819945000001503,
+      "p95": 2.38710859999953
+    },
+    "change_wait": {
+      "p50": 25.711155999999846,
+      "p95": 36.18842014999952
+    },
+    "daemon_observation_total": {
+      "p50": 28.3668610000003,
+      "p95": 37.80426429999979
+    },
+    "client_and_transport_overhead": {
+      "p50": 1.9140249999998211,
+      "p95": 2.440643599999805
+    }
+  },
+  "verification": {
+    "attempted": 30,
+    "valid": 30,
+    "failed": 0,
+    "timeout": 0,
+    "actual_regions": [
+      "us-west-2"
+    ],
+    "post_run_modal_container_inventory": []
+  },
+  "interpretation": {
+    "dominant_interval": "daemon-side change wait and observation preparation",
+    "transport_conclusion": "Only about 1.9 ms p50 remains after server pre-emit; caller placement is no longer the dominant causal-frame cost.",
+    "non_additive_warning": "The reported timing groups are overlapping intervals and must not be summed into a waterfall.",
+    "boundary_warning": "This click-to-changed-frame metric is not the action-only move-and-click operation in the competitive table."
+  }
+}

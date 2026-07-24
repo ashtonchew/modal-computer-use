@@ -870,6 +870,45 @@ as an explicit experiment or deployment choice; this evidence does not justify s
 the optimization default from a broad region to one narrow region. The compact evidence record is
 [`benchmark-data/modal-optimization-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimization-us-west-2-2026-07-24.json).
 
+A follow-up exact-boundary run measured the provider-comparison operations from a separate Connect
+runner with the same `us-west-2` selector. Every selected case completed 30/30 samples with no
+failures. The important action results were 4.573ms p50 for one move/click batch and 9.236ms for
+four move/click pairs, compared with 169.149ms and 173.485ms on the historical external-caller
+Modal default. The optimized action rows retained daemon/client attribution:
+
+| Exact operation | Modal default p50 | Modal optimized p50 | Optimized daemon p50 | Optimized client/transport p50 |
+| --- | ---: | ---: | ---: | ---: |
+| Move and click | 169.149ms | 4.573ms | 0.993ms | 3.543ms |
+| Four move/click pairs | 173.485ms | 9.236ms | 5.161ms | 4.080ms |
+
+This is the optimized Modal column for the warm operation comparison, not a replacement for the
+provider-default baseline or for cold startup. The full table, including the dated Daytona/E2B
+reference and its non-contemporaneous caveat, is in
+[the current provider benchmark results](benchmark-results-2026-07-18-current.md#modal-optimized-configuration).
+The compact machine-readable record is
+[`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
+
+The observation-inclusive metric remains a different boundary. A fresh 30/30 valid same-region run
+measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
+Its retained intervals show that the network is no longer the main cost:
+
+| Causal observation interval | p50 | p95 | Meaning |
+| --- | ---: | ---: | --- |
+| Action daemon call | 0.778ms | 0.943ms | Action route execution only. |
+| Action wall time inside observation request | 0.996ms | 1.174ms | Overlaps the action daemon call. |
+| Request to capture start | 15.670ms | 21.052ms | Includes action, signal preparation, and visual-change wait. |
+| Change-signal wait | 13.609ms | 19.003ms | Wait for a relevant desktop mutation. |
+| Capture wall time | 5.944ms | 7.087ms | Capture work after the signal. |
+| Request to server pre-emit | 28.381ms | 37.815ms | Nearly the complete daemon observation interval. |
+| Server pre-emit to client receive | 1.882ms | 2.387ms | Remaining delivery/client receive interval. |
+| Click to changed causal frame | 30.179ms | 39.948ms | Complete measured boundary. |
+
+These intervals overlap and must not be added together. They show why a 1ms-class action route can
+still produce a roughly 30ms changed-frame result: visual-change detection and observation
+preparation dominate, while only about 1.9ms p50 remains after server pre-emit. The compact evidence
+record is
+[`benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json`](../benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json).
+
 For application code, the same pattern is available as a co-located runner Sandbox. The target
 desktop sandbox and runner sandbox are created with the same requested region selector, and the
 runner talks directly to the target daemon. Use `run_modal_daemon_command()` or
