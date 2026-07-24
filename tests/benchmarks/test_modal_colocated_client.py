@@ -139,6 +139,7 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
     class CreatedComputer:
         _sandbox = TargetSandbox()
         _requested_modal_region = "us-west"
+        _daemon_bearer_token = "daemon-bearer"  # noqa: S105 - synthetic auth fixture.
         client = SimpleNamespace(
             base_url="https://target.example.modal.host",
             transport=SimpleNamespace(token="attested-token"),
@@ -187,7 +188,7 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
     def fake_exec_in_target(sandbox, command, **kwargs):
         assert sandbox is CreatedComputer._sandbox
         assert kwargs["env"]["COMPUTER_USE_DAEMON_BASE_URL"] == "http://127.0.0.1:8080"
-        assert kwargs["env"]["COMPUTER_USE_DAEMON_TOKEN"] == "attested-token"  # noqa: S105
+        assert kwargs["env"]["COMPUTER_USE_DAEMON_TOKEN"] == "daemon-bearer"  # noqa: S105
         assert kwargs["env"]["COMPUTER_USE_DAEMON_RUNNER_PATH"] == "target-loopback"
         metadata = json.loads(kwargs["env"]["COMPUTER_USE_BENCHMARK_METADATA_JSON"])
         path = metadata["modal_runner_path"]
