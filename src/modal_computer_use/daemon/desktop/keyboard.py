@@ -152,6 +152,8 @@ class XkbKeymapResolver:
                 f"key is not mapped in the active XKB group: {key!r}"
             )
         keysym = self._session.resolve_keysym(_KEYSYM_NAMES.get(normalized, normalized))
+        if keysym <= 0:
+            raise X11InputUnavailableError(f"key is not mapped by the X server: {key!r}")
         match = self._find_keysym(keysym, mapping)
         if match is None:
             raise X11InputUnavailableError(f"key is not mapped by the X server: {key!r}")

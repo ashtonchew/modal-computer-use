@@ -290,6 +290,16 @@ def test_character_press_does_not_resolve_from_an_inactive_xkb_group() -> None:
     assert harness.session.emissions == []
 
 
+def test_unknown_semantic_key_never_matches_empty_active_group_slots() -> None:
+    harness = KeyboardHarness(input_backend="xtest")
+
+    with pytest.raises(X11InputUnavailableError, match="not mapped"):
+        anyio.run(harness.controller.press, "not-a-real-key")
+
+    assert harness.commands == []
+    assert harness.session.emissions == []
+
+
 def test_forced_native_press_searches_the_active_group_instead_of_global_lookup() -> None:
     session = FakeX11InputSession()
     session.group = 1
