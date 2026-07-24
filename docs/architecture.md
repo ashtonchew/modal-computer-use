@@ -60,7 +60,7 @@ implementation is safe:
 |---|---|---|---|
 | Mouse and keyboard input | Persistent XTest/XKB | `xdotool` | Only before native emission starts; possibly partial input is terminal. |
 | Window operations | Native EWMH/Xlib | `wmctrl` | When the window manager does not advertise or complete the requested EWMH operation. |
-| Cursor-hidden capture | MSS default X11 capture | `scrot`, then `maim` | After an MSS session reset/retry cannot produce a valid frame. MSS itself uses XShm when available and falls back to XGetImage. |
+| Cursor-hidden capture | MSS XShm-preferred capture | `scrot`, then `maim` | After an MSS session reset/retry cannot produce a valid frame. MSS itself falls back from XShm to XGetImage. |
 | Cursor-visible capture | `maim` | None | Missing or invalid cursor composition is terminal for the request. |
 | Change notification | XDamage hint | Source-hash polling | XDamage availability only selects when to capture; pixels/hashes remain the correctness check. |
 | Same-region runner preparation | Modal Connect runner | Explicit external runner | Only when Connect endpoint preparation is unavailable before dispatch. Workload failures are terminal. |

@@ -860,7 +860,7 @@ def test_mss_capture_session_reuses_screenshotter(monkeypatch) -> None:
     assert instances[0].grabs == 2
 
 
-def test_mss_capture_session_uses_default_backend_and_reopens_once(monkeypatch) -> None:
+def test_mss_capture_session_prefers_xshm_and_reopens_once(monkeypatch) -> None:
     kwargs_seen: list[dict[str, object]] = []
     instances = []
 
@@ -884,7 +884,10 @@ def test_mss_capture_session_uses_default_backend_and_reopens_once(monkeypatch) 
     session = screenshots_module._MSSCaptureSession(display=":99")
 
     assert session.grab(Region(x=0, y=0, width=10, height=10)) is not None
-    assert kwargs_seen == [{"display": ":99"}, {"display": ":99"}]
+    assert kwargs_seen == [
+        {"display": ":99", "backend": "xshmgetimage"},
+        {"display": ":99", "backend": "xshmgetimage"},
+    ]
     assert instances[0].closed is True
     assert instances[1].closed is False
 

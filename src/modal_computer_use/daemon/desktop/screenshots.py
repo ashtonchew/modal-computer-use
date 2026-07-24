@@ -412,7 +412,7 @@ class _MSSCaptureSession:
     def _open(self) -> Any:
         import mss
 
-        return mss.MSS(display=self._display)
+        return mss.MSS(display=self._display, backend="xshmgetimage")
 
     def _reset(self) -> None:
         if self._screenshotter is not None:

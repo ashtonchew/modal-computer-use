@@ -1385,9 +1385,9 @@ verification instead of event-driven paint detection.
 
 For cursor-hidden screenshots, the daemon first tries one in-process MSS session, resets and
 reopens that session once after an open or grab failure, and then falls back to `scrot` followed by
-`maim`. MSS selects its default Linux implementation: XShm when available, with an internal
-XGetImage fallback when shared-memory capture cannot be used. The daemon does not select those two
-MSS internals itself. Native raw PNG can use MSS PNG bytes directly; scaled, JPEG, WebP, and JSON
+`maim`. The daemon explicitly selects MSS's XShm-preferred Linux implementation, which internally
+falls back to XGetImage when shared-memory capture cannot be used. The daemon does not implement a
+second fallback between those MSS internals. Native raw PNG can use MSS PNG bytes directly; scaled, JPEG, WebP, and JSON
 captures use MSS pixels plus in-memory Pillow encoding. `scrot` is the first portable file fallback
 and `maim` is the final fallback plus the required cursor-visible adapter.
 Raw screenshot responses include `x-computer-use-capture-backend` (`mss`, `scrot`, `maim`, or
