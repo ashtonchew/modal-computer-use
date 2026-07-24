@@ -57,6 +57,15 @@ from .state import new_run_id
 from .tracing import ComputerTrace
 
 
+def _add_subprocess_backend_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--subprocess-backend",
+        choices=["asyncio", "threaded", "isolated-asyncio"],
+        default="asyncio",
+        help="daemon subprocess execution backend for created sandboxes; defaults to asyncio",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="computer-use")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -183,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to auto"
         ),
     )
+    _add_subprocess_backend_argument(sdk_parser)
     sdk_parser.add_argument("--image-profile", dest="image_profile")
     sdk_parser.add_argument("--image-variant", dest="image_profile")
     sdk_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -294,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
     )
+    _add_subprocess_backend_argument(compare_parser)
     compare_parser.add_argument("--image-profile", dest="image_profile")
     compare_parser.add_argument("--image-variant", dest="image_profile")
     compare_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -371,6 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for the created benchmark sandbox; defaults to auto",
     )
+    _add_subprocess_backend_argument(ingress_ab_parser)
     ingress_ab_parser.add_argument("--image-profile", dest="image_profile")
     ingress_ab_parser.add_argument("--image-variant", dest="image_profile")
     ingress_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -429,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
     )
+    _add_subprocess_backend_argument(region_ab_parser)
     region_ab_parser.add_argument("--image-profile", dest="image_profile")
     region_ab_parser.add_argument("--image-variant", dest="image_profile")
     region_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -540,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for the target benchmark sandbox; defaults to auto",
     )
+    _add_subprocess_backend_argument(colocated_parser)
     colocated_parser.add_argument("--image-profile", dest="image_profile")
     colocated_parser.add_argument("--image-variant", dest="image_profile")
     colocated_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -1410,6 +1424,7 @@ def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str,
         "browser": args.browser,
         "gpu": args.gpu,
         "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
+        "subprocess_backend": args.subprocess_backend,
         "image_profile": args.image_profile,
     }
 
@@ -1607,6 +1622,7 @@ def _modal_benchmark_config(
     config.resources.memory_mib = args.modal_memory_mib
     config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
     config.actions.input_backend = args.input_backend
+    config.actions.subprocess_backend = args.subprocess_backend
     if args.browser:
         config.browser = BrowserConfig(kind=args.browser, prewarm=False)
     return config
@@ -1788,6 +1804,7 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
         "input_rate_limit_per_sec": getattr(args, "input_rate_limit_per_sec", None),
+        "subprocess_backend": getattr(args, "subprocess_backend", None),
         "image_profile": getattr(args, "image_profile", None),
         "provenance": benchmark_provenance(
             caller_path="external-caller",

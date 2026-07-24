@@ -164,6 +164,51 @@ def test_provider_compare_parser_accepts_repeated_tzafon_provider(
     assert payload["providers"]["tzafon"]["status"] == "not_measured"
 
 
+def test_provider_compare_subprocess_backend_reaches_created_modal_config(
+    monkeypatch, capsys
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_created_modal_comparison(args, **kwargs):
+        seen["config"] = cli._modal_benchmark_config(args, run_id="compare-test")
+        return {
+            "ok": True,
+            "benchmark": "provider-compare",
+            "metadata": {"environment": cli._benchmark_environment_metadata(args)},
+            "providers": {},
+            "failures": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_benchmark_compare_created_modal_sandbox",
+        fake_created_modal_comparison,
+    )
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "modal-daemon",
+            "--create-modal-sandbox",
+            "--subprocess-backend",
+            "threaded",
+            "--token",
+            "benchmark-secret-token",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert seen["config"].actions.subprocess_backend == "threaded"
+    assert payload["metadata"]["environment"]["subprocess_backend"] == "threaded"
+    assert "benchmark-secret-token" not in captured.out
+
+
 def test_provider_compare_env_file_whitelists_tzafon_key(
     monkeypatch, tmp_path
 ) -> None:

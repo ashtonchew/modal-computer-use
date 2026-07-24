@@ -2238,6 +2238,7 @@ def _daemon_environment(
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
         "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
         "COMPUTER_USE_INPUT_BACKEND": config.actions.input_backend,
+        "COMPUTER_USE_SUBPROCESS_BACKEND": config.actions.subprocess_backend,
         "COMPUTER_USE_DAEMON_HTTP_VERSION": config.network.daemon_http_version,
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
         "COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY": "true",
