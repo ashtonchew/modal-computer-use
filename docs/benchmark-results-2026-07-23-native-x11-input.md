@@ -221,3 +221,23 @@ After the implementation was rebased onto current `origin/main`, the full local 
 919 tests and 10 credential-gated skips; Ruff, mypy, and the checked-in OpenAPI check also passed.
 A fresh one-iteration forced-XTest Modal smoke returned `ok=true`, attributed mouse and typing cases
 to `xtest`, and passed both cursor-position and controlled typing readback verification.
+
+## Final reviewed revision, 2026-07-24
+
+The complete fallback-safety and XKB-resolution tranche was committed as
+`474331688b4e448638467f60ace59efad59aeb9c` and rerun through the same fully optimized
+30-sample colocated harness. The worktree was clean, the active profile remained
+`auto-alphafold3`, every input sample reported `xtest`, and cursor and typing readbacks passed.
+
+| Public operation, p50 | Final reviewed run | Prior optimized run | Change |
+| --- | ---: | ---: | ---: |
+| Full screenshot | **33.65 ms** | 38.32 ms | **12.2% faster** |
+| Move + click | 4.57 ms | **3.70 ms** | 23.6% slower |
+| Four move/click pairs | 11.13 ms | **8.55 ms** | 30.2% slower |
+| Type 100 characters | **9.67 ms** | 10.01 ms | **3.4% faster** |
+| Type 1,000 characters | **32.78 ms** | 52.14 ms | **37.1% faster** |
+
+The input change is therefore a decisive long-text win, a small 100-character win, and neutral
+to noisy for already-sub-12-ms mouse operations; no further mouse optimization is accepted from
+this run without a paired ablation. The final compact evidence is
+`benchmark-data/modal-native-x11-final-us-west-2-2026-07-24.json`; raw samples remain ignored.
