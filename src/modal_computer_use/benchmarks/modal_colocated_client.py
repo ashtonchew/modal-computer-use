@@ -24,6 +24,7 @@ ModalColocatedRunnerPath = Literal["inherited", "connect", "target-loopback"]
 
 DEFAULT_MODAL_COLOCATED_SURFACES: tuple[BenchmarkSurface, ...] = ("daemon-transport-floor",)
 MODAL_COLOCATED_ALLOWED_SURFACES: tuple[BenchmarkSurface, ...] = (
+    "daemon-http",
     "daemon-transport-floor",
     "daemon-observation-stream",
 )
@@ -250,7 +251,6 @@ def run_modal_colocated_runner_benchmark(
         path=runner_path,
         app_name=config.app_name,
         runner_name=modal_colocated_runner_name(config.name),
-        modal_region=config.modal_region,
         env=env,
         app_tags={"benchmark": "modal-colocated-client", "benchmark_run_id": run_id},
         tags={
@@ -385,6 +385,8 @@ def modal_colocated_runner_name(name: str | None) -> str | None:
 def _runner_exec_timeout_seconds(config: ModalColocatedClientBenchmarkConfig) -> int:
     if "daemon-observation-stream" in config.surfaces:
         return max(900, config.iterations * 90)
+    if "daemon-http" in config.surfaces:
+        return max(450, config.iterations * 15)
     return 240
 
 
@@ -437,6 +439,12 @@ def modal_colocated_comparison(
     colocated_result: dict[str, Any],
 ) -> dict[str, Any]:
     surfaces: dict[str, Any] = {}
+    daemon_http = _daemon_http_case_comparisons(external_result, colocated_result)
+    if daemon_http:
+        surfaces["daemon-http"] = {
+            "metric": "operation_p50_ms",
+            "cases": daemon_http,
+        }
     transport = _metric_comparison(
         external_result,
         colocated_result,
@@ -478,6 +486,63 @@ def modal_colocated_comparison(
     if diagnosis is not None:
         result["diagnosis"] = diagnosis
     return result
+
+
+_COMPETITIVE_DAEMON_HTTP_CASES = (
+    "screenshot_full",
+    "move_click",
+    "move_click_sequence",
+    "type_100_chars",
+    "type_1000_chars",
+    "command_echo",
+)
+
+
+def _daemon_http_case_comparisons(
+    external_result: dict[str, Any],
+    colocated_result: dict[str, Any],
+) -> dict[str, Any]:
+    rows: dict[str, Any] = {}
+    for case_name in _COMPETITIVE_DAEMON_HTTP_CASES:
+        external = _daemon_http_case_p50(external_result, case_name)
+        colocated = _daemon_http_case_p50(colocated_result, case_name)
+        if external is None and colocated is None:
+            continue
+        external_p50 = None if external is None else external["p50_ms"]
+        colocated_p50 = None if colocated is None else colocated["p50_ms"]
+        delta_ms = (
+            None
+            if external_p50 is None or colocated_p50 is None
+            else colocated_p50 - external_p50
+        )
+        rows[case_name] = {
+            "surface": "daemon-http",
+            "metric": "operation_p50_ms",
+            "case": case_name,
+            "external_p50_ms": external_p50,
+            "colocated_p50_ms": colocated_p50,
+            "delta_ms": delta_ms,
+            "ratio_vs_external": (
+                None
+                if external_p50 in (None, 0) or colocated_p50 is None
+                else colocated_p50 / external_p50
+            ),
+        }
+    return rows
+
+
+def _daemon_http_case_p50(
+    result: dict[str, Any],
+    case_name: str,
+) -> dict[str, Any] | None:
+    surface = _dict_value(_dict_value(result.get("surfaces")).get("daemon-http"))
+    cases = _dict_value(surface.get("cases"))
+    case = _dict_value(cases.get(case_name))
+    summary = _dict_value(case.get("summary_ms"))
+    value = summary.get("p50")
+    if not isinstance(value, int | float):
+        return None
+    return {"case": case_name, "p50_ms": float(value)}
 
 
 def modal_colocated_latency_diagnosis(

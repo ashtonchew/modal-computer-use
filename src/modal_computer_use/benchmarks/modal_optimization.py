@@ -53,6 +53,7 @@ _PROVIDER_NAMES = {
 }
 _REGION_MULTIPLIERS = {
     "us-west": 1.75,
+    "us-west-2": 1.75,
     "us-east": 1.75,
     "eu-west": 1.75,
     "ap-southeast": 1.75,
@@ -331,6 +332,29 @@ def action_attempts_from_case(
     failures = case.get("failures")
     if not isinstance(samples, list) or not isinstance(failures, list):
         raise ValueError("case samples and failures must be lists")
+    sample_observations = case.get("sample_observations")
+    if sample_observations is not None:
+        if not isinstance(sample_observations, list):
+            raise ValueError("action sample observations must be a list")
+        if len(sample_observations) != len(samples):
+            raise ValueError("action sample observation accounting does not match samples")
+        for observation in sample_observations:
+            if not isinstance(observation, dict):
+                raise ValueError("action sample observations must be objects")
+    if not samples and len(failures) == 1 and isinstance(failures[0], dict):
+        case_failure = failures[0]
+        phase = case_failure.get("phase")
+        error_type = case_failure.get("error_type", case_failure.get("type"))
+        if phase in {"setup", "warmup"} and _nonempty_text(error_type):
+            status = "timeout" if "timeout" in error_type.lower() else "failed"
+            return [
+                _attempt_row(
+                    index,
+                    status=status,
+                    failure={"phase": phase, "error_type": error_type},
+                )
+                for index in range(expected_attempts)
+            ]
     measured_failures: dict[int, dict[str, Any]] = {}
     for failure in failures:
         if not isinstance(failure, dict) or failure.get("phase") != "measure":
@@ -347,15 +371,36 @@ def action_attempts_from_case(
         measured_failures[iteration] = failure
     if len(samples) + len(measured_failures) != expected_attempts:
         raise ValueError("action sample accounting does not match expected attempts")
-    sample_iterator = iter(samples)
+    sample_iterator = iter(enumerate(samples))
     attempts: list[dict[str, Any]] = []
     for index in range(expected_attempts):
         failure = measured_failures.get(index)
         if failure is None:
-            elapsed = next(sample_iterator)
+            successful_sample_ordinal, elapsed = next(sample_iterator)
             if not _is_nonnegative_finite(elapsed):
                 raise ValueError("action samples must be finite and nonnegative")
-            attempts.append(_attempt_row(index, status="valid", elapsed_ms=float(elapsed)))
+            attempt = _attempt_row(index, status="valid", elapsed_ms=float(elapsed))
+            if sample_observations is not None:
+                observation = copy.deepcopy(sample_observations[successful_sample_ordinal])
+                benchmark_timing = observation.get("benchmark_timing_ms")
+                action_to_frame_ms = (
+                    benchmark_timing.get("action_to_frame_ms")
+                    if isinstance(benchmark_timing, dict)
+                    else None
+                )
+                if not _is_nonnegative_finite(action_to_frame_ms) or not math.isclose(
+                    float(action_to_frame_ms),
+                    float(elapsed),
+                    rel_tol=1e-9,
+                    abs_tol=1e-6,
+                ):
+                    raise ValueError(
+                        "action sample observation timing does not match its elapsed sample"
+                    )
+                observation.pop("iteration", None)
+                attempt["successful_sample_ordinal"] = successful_sample_ordinal
+                attempt["observation_sample"] = observation
+            attempts.append(attempt)
             continue
         error_type = failure.get("error_type", failure.get("type"))
         if not _nonempty_text(error_type):

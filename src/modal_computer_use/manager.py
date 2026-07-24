@@ -432,6 +432,7 @@ class ComputerSandboxManager:
                         },
                         remove={"computer-use.pool_queue_identity"},
                     )
+                    computer._requested_modal_region = config.runtime.modal_region
                     remaining = max(
                         0.0,
                         (entry.expires_at - claimed_at).total_seconds()

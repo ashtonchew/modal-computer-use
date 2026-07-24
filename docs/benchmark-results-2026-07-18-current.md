@@ -76,6 +76,44 @@ startup, full screenshot, typing, and command echo. These losses remain part of 
 than being hidden. Daytona's move/click samples were outlier-sensitive, so use its p50 rather than
 its mean for the headline ratio.
 
+## Modal-Optimized Configuration
+
+The platform-optimized Modal result uses the same operation boundaries as the table above, but moves
+the caller into a separate Modal runner with the same narrow `us-west-2` selector as the target and
+uses the daemon Connect path directly. It is an explicit deployment configuration, not a silent
+replacement for the provider-default external caller.
+
+| Case | Modal default | Same-run external Connect | Modal optimized | Daytona default | E2B default | Optimized comparison |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Full screenshot | 240.0 ms | 80.0 ms | **39.0 ms** | 163.0 ms | 192.8 ms | **4.18x / 4.95x faster** |
+| Move and click | 169.1 ms | 32.4 ms | **4.6 ms** | 340.2 ms | 218.0 ms | **74.39x / 47.68x faster** |
+| Four move/click pairs | 173.5 ms | 37.1 ms | **9.2 ms** | 1343.2 ms | 878.6 ms | **145.43x / 95.12x faster** |
+| Type 100 characters | 975.0 ms | 742.1 ms | 720.5 ms | **617.0 ms** | 4074.4 ms | Daytona 1.17x faster; Modal 5.65x faster than E2B |
+| Type 1000 characters | 8589.5 ms | 6557.1 ms | 6531.4 ms | **5253.9 ms** | 41172.9 ms | Daytona 1.24x faster; Modal 6.30x faster than E2B |
+| Command echo | 250.3 ms | 110.7 ms | 93.8 ms | 90.9 ms | **61.4 ms** | Daytona 1.03x and E2B 1.53x faster |
+
+The same-run external Connect control and Modal optimized arm use matching operation boundaries from
+one raw artifact. Co-location reduced those p50s by 2.05x for screenshot, 7.08x for move-and-click,
+4.01x for four move/click pairs, 1.03x for 100-character typing, 1.004x for 1000-character typing,
+and 1.18x for command echo. The Modal optimized arm has 30 measured iterations after one warmup,
+30/30 valid samples for every row, and zero failures. `Type 100 characters` is the standard
+100-character operation; it does not mean 100 benchmark iterations.
+
+The Modal default column is the historical provider-default reference. The Daytona and E2B cells are
+the dated three-sample provider-default reference from this page, not a contemporaneous rerun, so
+treat the cross-provider ratios as the current reference rather than a randomized paired experiment.
+
+The largest wins come from removing the external ingress floor while retaining daemon-native
+batching. Move-and-click fell from 169.1ms provider-default to 4.6ms optimized: daemon work was
+0.99ms p50 and remaining client/transport overhead was 3.54ms. Four pairs fell from 173.5ms to
+9.2ms, with 5.16ms in the daemon and 4.08ms of remaining overhead. Typing remains dominated by
+daemon-side key generation, so co-location removes only a small fraction and Daytona still leads.
+Command echo is effectively flat against Daytona at p50 and has a noisy 278.9ms p95, so it is not
+an optimized Modal win.
+
+The compact evidence record is
+[`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
+
 ## Startup Scope
 
 | Provider | Sample 1 | Sample 2 | Sample 3 | p50 |

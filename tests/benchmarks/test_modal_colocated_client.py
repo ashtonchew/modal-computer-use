@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,7 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
     surfaces = ["daemon-transport-floor", "daemon-observation-stream"]
 
     class CreatedComputer:
+        _requested_modal_region = "us-west"
         client = SimpleNamespace(
             base_url="https://target.example.modal.host",
             transport=SimpleNamespace(token="target-token"),
@@ -136,6 +138,7 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
 
     class CreatedComputer:
         _sandbox = TargetSandbox()
+        _requested_modal_region = "us-west"
         client = SimpleNamespace(
             base_url="https://target.example.modal.host",
             transport=SimpleNamespace(token="attested-token"),
@@ -252,6 +255,15 @@ def test_modal_colocated_runner_failure_is_structured_without_output() -> None:
     assert "secret" not in json.dumps(result)
 
 
+def test_daemon_http_runner_timeout_covers_full_input_matrix() -> None:
+    config = replace(
+        _config(surfaces=["daemon-http"]),
+        iterations=30,
+    )
+
+    assert colocated._runner_exec_timeout_seconds(config) >= 450
+
+
 def test_modal_colocated_latency_diagnosis_identifies_daemon_bound() -> None:
     external = _surface_result(
         transport_p50=50.0,
@@ -303,6 +315,52 @@ def test_modal_colocated_comparison_prefers_sdk_default_causal_case() -> None:
         "delta_ms": -27.0,
         "ratio_vs_external": 0.4,
     }
+
+
+def test_modal_colocated_comparison_reports_boundary_matched_daemon_http_cases() -> None:
+    external = _surface_result(
+        transport_p50=50.0,
+        observation_p50=80.0,
+        environment={},
+        surfaces=["daemon-http"],
+        daemon_http_p50={
+            "screenshot_full": 240.0,
+            "move_click": 169.0,
+            "move_click_sequence": 173.0,
+            "type_100_chars": 975.0,
+            "type_1000_chars": 8589.0,
+            "command_echo": 250.0,
+        },
+    )
+    colocated_result = _surface_result(
+        transport_p50=2.0,
+        observation_p50=30.0,
+        environment={},
+        surfaces=["daemon-http"],
+        daemon_http_p50={
+            "screenshot_full": 25.0,
+            "move_click": 4.0,
+            "move_click_sequence": 18.0,
+            "type_100_chars": 810.0,
+            "type_1000_chars": 8010.0,
+            "command_echo": 82.0,
+        },
+    )
+
+    comparison = colocated.modal_colocated_comparison(external, colocated_result)
+
+    cases = comparison["surfaces"]["daemon-http"]["cases"]
+    assert cases["move_click"] == {
+        "surface": "daemon-http",
+        "metric": "operation_p50_ms",
+        "case": "move_click",
+        "external_p50_ms": 169.0,
+        "colocated_p50_ms": 4.0,
+        "delta_ms": -165.0,
+        "ratio_vs_external": pytest.approx(4.0 / 169.0),
+    }
+    assert cases["move_click_sequence"]["colocated_p50_ms"] == 18.0
+    assert cases["command_echo"]["external_p50_ms"] == 250.0
 
 
 def test_modal_colocated_comparison_surfaces_paired_observation_cases() -> None:
@@ -530,8 +588,21 @@ def _surface_result(
     sdk_default_observation_p50: float | None = None,
     envelope_observation_p50: float | None = None,
     paired_region_radius: bool = False,
+    daemon_http_p50: dict[str, float] | None = None,
 ) -> dict[str, object]:
     surface_results: dict[str, object] = {}
+    if "daemon-http" in surfaces:
+        surface_results["daemon-http"] = {
+            "status": "ok",
+            "metadata": {"environment": environment},
+            "cases": {
+                case_name: {
+                    "status": "ok",
+                    "summary_ms": {"p50": p50},
+                }
+                for case_name, p50 in (daemon_http_p50 or {}).items()
+            },
+        }
     if "daemon-transport-floor" in surfaces:
         surface_results["daemon-transport-floor"] = {
             "status": "ok",

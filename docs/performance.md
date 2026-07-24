@@ -795,10 +795,12 @@ uv run computer-use benchmark modal-colocated-client --iterations 30 \
 ```
 
 This creates one target desktop sandbox in the selected region, runs the selected benchmark surfaces
-from the external caller, then creates an ephemeral Modal runner sandbox in the same region and runs
-the same surfaces against the target daemon URL. Treat it as an architecture experiment: it measures
-whether co-locating the caller/model loop is likely to help before adding any hosted control-plane
-shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor attribution, and add
+from the external caller, then creates an ephemeral Modal runner sandbox with the same requested
+region selector and runs the same surfaces against the target daemon URL. Treat it as an architecture
+experiment: it measures whether co-locating the caller/model loop is likely to help before adding any
+hosted control-plane shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor
+attribution. Add `daemon-http` when comparing the exact screenshot, move/click, typing, and command
+boundaries used by the provider-default table from an optimized same-region caller, and add
 `daemon-observation-stream` when the question is action-to-first-changed-frame latency under the
 Alpha observation contract. This is one measured part of an agent loop, not semantic readiness or
 end-to-end loop latency.
@@ -810,8 +812,8 @@ Use runner paths to separate caller placement from target ingress:
 
 | Runner path | Caller location | Target daemon path | Use |
 | --- | --- | --- | --- |
-| `inherited` | Separate same-region Modal runner sandbox | The same URL/token as the external caller | Backward-compatible baseline. |
-| `connect` | Separate same-region Modal runner sandbox | Fresh Modal Connect Token URL/token for the same target sandbox | Tests Modal's documented HTTP/WebSocket Sandbox path from inside Modal. |
+| `inherited` | Separate Modal runner with the target's requested region selector | The same URL/token as the external caller | Backward-compatible baseline. |
+| `connect` | Separate Modal runner with the target's requested region selector | Fresh Modal Connect Token URL/token for the same target sandbox | Tests Modal's documented HTTP/WebSocket Sandbox path from inside Modal. |
 | `target-loopback` | The target desktop sandbox itself via `Sandbox.exec` | `http://127.0.0.1:8080` plus the daemon bearer token | Measures the daemon/client loopback floor without tunnel or Connect ingress. |
 
 `target-loopback` is not a separate runner sandbox: `127.0.0.1` only reaches the target daemon from
@@ -821,22 +823,101 @@ The benchmark uses the SDK-owned `run_modal_daemon_command()` helper for these p
 selection, Connect Token creation, loopback execution, and reserved daemon environment variables stay
 in the Modal SDK boundary instead of benchmark-local code.
 
-A May 29, 2026 `modal-colocated-client` run with a `us-west` target and a development-laptop
-external caller measured:
+A July 23, 2026 `modal-colocated-client` rerun at revision `ebd1ed0` used Connect on both arms,
+30 measured iterations, and the inherited target-region policy:
 
-| Caller path | Fastest 0B p50 | Ratio vs external |
-| --- | ---: | ---: |
-| External caller -> `us-west` target | 29.4ms | 1.00x |
-| Same-region Modal runner -> `us-west` target | 1.7ms | 0.06x |
+```bash
+uv run computer-use benchmark modal-colocated-client --iterations 30 \
+  --modal-region us-west-2 --modal-ingress connect --runner-path connect \
+  --surface daemon-transport-floor --caller-region-label dev-laptop-us-west
+```
 
-This points to caller/ingress placement as the dominant remaining floor for remote SDK control
-loops. It does not make the ephemeral runner itself a product surface; it is a proof point for a
-future hosted model-loop/control-plane shape.
+| Target and runner selector | External Connect p50 | Co-located Connect p50 | Result |
+| --- | ---: | ---: | --- |
+| Broad `us-west` | 25.736ms | 43.081ms | Co-located was 1.67x slower |
+| Narrow `us-west-2` | 29.911ms | 1.253ms | Co-located was 23.87x faster; 28.658ms / 95.8% removed |
+
+Both narrow-region arms completed 30/30 samples and were classified stable. The metric is the
+fastest matched zero-byte daemon transport-floor case, not a complete action, screenshot, or model
+loop. The broad-region negative control matters: inheriting `us-west` preserves scheduling policy,
+but it does not prove that the target and runner landed in one concrete provider region. The
+`us-west-2` result points to caller/ingress placement as the dominant transport floor once placement
+is actually narrow enough. It does not make the ephemeral runner itself a product surface; it is a
+proof point for a future hosted model-loop/control-plane shape and carries Modal's narrow-region
+availability and pricing tradeoffs.
+
+A July 24 fixed-region replication then tested whether that 1.253ms transport floor improves the
+complete optimized Modal workload. It used the exact named Chromium image at revision `d7790da`,
+4 CPU / 8192 MiB targets, `us-west-2` for both target and separate runner, a persistent hot action
+session, causal binary-envelope observations, and 30 attempts per metric. All 90 measurements were
+valid, every measured placement was `us-west-2`, and the post-run Modal container inventory was
+empty.
+
+| Complete workload metric | Historical broad `us-west` | Fixed `us-west-2` | Unpaired delta |
+| --- | ---: | ---: | ---: |
+| Cold request → first authenticated frame p50 | 9,032.340ms | 11,461.451ms | +26.9% |
+| Cold request → first authenticated frame p95 | 12,285.470ms | 12,909.516ms | +5.1% |
+| Warm action → matching changed causal frame p50 | 29.707ms | 33.413ms | +12.5% |
+| Warm action → matching changed causal frame p95 | 40.433ms | 37.730ms | -6.7% |
+| Warm-pool claim → first authenticated frame p50 | 1,841.983ms | 2,012.422ms | +9.3% |
+| Warm-pool claim → first authenticated frame p95 | 2,233.519ms | 2,220.621ms | -0.6% |
+
+The broad run is historical context, not a paired causal region A/B, so these deltas are directional.
+They do show that the large raw transport-floor reduction did not produce a lower complete warm
+action p50. Once the transport floor is near 1ms, desktop action execution, visual change
+detection, capture, encoding, and observation handling dominate this benchmark. Keep `us-west-2`
+as an explicit experiment or deployment choice; this evidence does not justify silently changing
+the optimization default from a broad region to one narrow region. The compact evidence record is
+[`benchmark-data/modal-optimization-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimization-us-west-2-2026-07-24.json).
+
+A follow-up exact-boundary run measured the provider-comparison operations from a separate Connect
+runner with the same `us-west-2` selector. Every selected case completed 30/30 samples with no
+failures. Against the same-run external Connect control, co-location reduced one move/click batch
+from 32.373ms to 4.573ms (7.08x) and four move/click pairs from 37.058ms to 9.236ms (4.01x).
+The historical provider-default values were 169.149ms and 173.485ms respectively, but those larger
+historical-to-optimized ratios also include ingress and run-date differences. The optimized action
+rows retained daemon/client attribution:
+
+| Exact operation | Modal default p50 | Modal optimized p50 | Optimized daemon p50 | Optimized client/transport p50 |
+| --- | ---: | ---: | ---: | ---: |
+| Move and click | 169.149ms | 4.573ms | 0.993ms | 3.543ms |
+| Four move/click pairs | 173.485ms | 9.236ms | 5.161ms | 4.080ms |
+
+This is the optimized Modal column for the warm operation comparison, not a replacement for the
+provider-default baseline or for cold startup. The full table, including the dated Daytona/E2B
+reference and its non-contemporaneous caveat, is in
+[the current provider benchmark results](benchmark-results-2026-07-18-current.md#modal-optimized-configuration).
+The compact machine-readable record is
+[`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
+
+The observation-inclusive metric remains a different boundary. A fresh 30/30 valid same-region run
+measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
+Its retained intervals show that the network is no longer the main cost:
+
+| Causal observation interval | p50 | p95 | Meaning |
+| --- | ---: | ---: | --- |
+| Action daemon call | 0.778ms | 0.943ms | Action route execution only. |
+| Action wall time inside observation request | 0.996ms | 1.174ms | Overlaps the action daemon call. |
+| Request to capture start | 15.670ms | 21.052ms | Includes action, signal preparation, and visual-change wait. |
+| Change-signal wait | 13.609ms | 19.003ms | Wait for a relevant desktop mutation. |
+| Capture wall time | 5.944ms | 7.087ms | Capture work after the signal. |
+| Request to server pre-emit | 28.381ms | 37.815ms | Nearly the complete daemon observation interval. |
+| Server pre-emit to client receive | 1.882ms | 2.387ms | Remaining delivery/client receive interval. |
+| Click to changed causal frame | 30.179ms | 39.948ms | Complete measured boundary. |
+
+These intervals overlap and must not be added together. They show why a 1ms-class action route can
+still produce a roughly 30ms changed-frame result: visual-change detection and observation
+preparation dominate, while only about 1.9ms p50 remains after server pre-emit. The compact evidence
+record is
+[`benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json`](../benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json).
 
 For application code, the same pattern is available as a co-located runner Sandbox. The target
-desktop sandbox and runner sandbox are created in the same Modal region, and the runner talks
-directly to the target daemon. Use `run_modal_daemon_command()` or
+desktop sandbox and runner sandbox are created with the same requested region selector, and the
+runner talks directly to the target daemon. Use `run_modal_daemon_command()` or
 `examples/modal_colocated_runner.py` as the minimal shape before building a hosted control plane.
+When the target was created with an explicit `runtime.modal_region`, the SDK runner helpers inherit
+that requested selector. An explicit conflicting region is rejected by the production helper;
+targets attached without trustworthy creation config must provide the runner region.
 
 If a runner can reach `/healthz`, `/v1/version`, and `/v1/capabilities` but times out opening
 `/v1/observations/stream`, the failure is likely specific to WebSocket ingress rather than daemon

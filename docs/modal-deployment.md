@@ -122,12 +122,26 @@ daemon connection details through its environment, talks directly to the target 
 terminated after the workload. See `examples/modal_colocated_runner.py`.
 
 Use `run_modal_daemon_command_with_fallback()` for the production path. It creates a fresh Connect
-Token, runs the workload in the explicitly measured Modal region, and falls back to the current
-external attested endpoint only when the caller supplies an explicit `external_runner` and Connect
-preparation fails before dispatch. Without that callable, preparation errors propagate. Once runner
-dispatch starts, errors propagate and the helper never repeats the command. The command owns the persistent
-hot session and observation stream. A broker does not proxy action or frame bytes. The helper
-requires a region and has no built-in region default.
+Token and runs the workload in the target's requested Modal region. For a target created by
+`ComputerSandbox.create()`, or reused through `attach_or_create()` with a matching config hash, the
+helper inherits `runtime.modal_region`; callers should specify the placement once in
+`ComputerConfig`. A conflicting explicit runner region raises `ConfigConflictError` rather than
+silently breaking co-location. A target attached by ID, name, URL, or a deliberately mismatched
+config has unknown creation policy, so its runner still requires an explicit `modal_region`.
+
+The helper never guesses from the external caller's location or from the target's observed concrete
+runtime region. Modal placement selectors such as `us-west` are scheduling policy, while an observed
+region such as `us-west-2` is runtime evidence and is not automatically reusable as that policy.
+Broad selectors preserve scheduling flexibility and therefore do not guarantee that two Sandboxes
+land in one concrete provider region. If the workload needs that stronger co-location guarantee,
+select a supported narrow region explicitly in `ComputerConfig` after measuring the real topology
+and accepting the narrower region's availability and pricing tradeoffs.
+
+Fallback to the current external attested endpoint happens only when the caller supplies an explicit
+`external_runner` and Connect preparation fails before dispatch. Without that callable, preparation
+errors propagate. Once runner dispatch starts, errors propagate and the helper never repeats the
+command. The command owns the persistent hot session and observation stream. A broker does not proxy
+action or frame bytes.
 
 Use `run_modal_daemon_command()` for explicit diagnostics. It supports three paths:
 
@@ -141,6 +155,8 @@ The helper injects `COMPUTER_USE_DAEMON_BASE_URL`, `COMPUTER_USE_DAEMON_RUNNER_P
 `COMPUTER_USE_DAEMON_TOKEN` when present, and `COMPUTER_USE_TARGET_SANDBOX_ID` when available. User
 environment values cannot override those reserved keys. `target-loopback` is intentionally not a
 same-region runner: `127.0.0.1` only reaches the target daemon from inside the target sandbox.
+Separate diagnostic runner paths also inherit a known target request when `modal_region` is omitted;
+an explicit diagnostic region remains available for intentional cross-region measurements.
 
 ## Warm capacity
 
