@@ -325,7 +325,13 @@ def test_tzafon_coordinate_command_context_matches_allowlisted_sources() -> None
         optimized = json.loads(optimized_path.read_text())["runs"][
             "modal_colocated_runner"
         ]["surfaces"]["daemon-http"]["cases"]
-        for case in ("coordinate_click", "coordinate_click_sequence"):
+        for case in (
+            "screenshot_full",
+            "coordinate_click",
+            "coordinate_click_sequence",
+            "type_100_chars",
+            "type_1000_chars",
+        ):
             assert context["modal_optimized_results_ms"][case] == {
                 key: optimized[case]["summary_ms"][key] for key in ("p50", "p95")
             }
