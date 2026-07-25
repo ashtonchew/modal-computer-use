@@ -8,12 +8,12 @@ has 30 measured iterations. Values are p50 / p95 milliseconds.
 
 | `coordinate-click-v1` case | Modal default | Daytona | E2B | Tzafon | Modal optimized |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| One coordinate click | 75.48 / 75.86 | 215.14 / 215.21 | 216.28 / 217.02 | 163.68 / 166.57 | **4.12 / 4.81** |
-| Four-click sequence | 79.56 / 79.77 | 846.14 / 854.18 | 873.19 / 882.25 | 483.72 / 484.36 | **7.49 / 8.54** |
+| One coordinate click | 78.49 / 79.19 | 200.47 / 206.22 | 217.93 / 219.17 | 175.21 / 176.94 | **5.41 / 6.47** |
+| Four-click sequence | 80.56 / 81.15 | 831.98 / 834.62 | 882.31 / 883.76 | 500.28 / 508.64 | **9.55 / 12.62** |
 
 | `shell-command-echo-v2` | Modal default | Daytona | E2B | Tzafon | Modal optimized |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `sh -c 'printf 42'` | 76.78 / 77.09 | 115.47 / 119.83 | **57.90 / 58.28** | 68.20 / 70.29 | **9.62 / 11.04** |
+| `sh -c 'printf 42'` | 80.57 / 80.84 | 102.67 / 104.97 | **56.84 / 59.27** | 79.77 / 79.97 | **13.44 / 21.37** |
 
 The bold values identify the lowest provider-default result and, separately, the selected optimized
 Modal result; the optimized arm is not a provider-default product path. Every displayed case
@@ -24,9 +24,9 @@ The rest of the fresh warm-operation p50 context is:
 
 | Case | Modal default | Daytona | E2B | Tzafon | Modal optimized |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Full screenshot, native/default format | **116.40** | 191.68 | 195.75 | 190.00 | **39.64** |
-| Type 100 characters | **78.24** | 631.53 | 4,085.28 | 119.74 | **10.91** |
-| Type 1,000 characters | **98.74** | 5,263.92 | 40,988.98 | 216.85 | **55.29** |
+| Full screenshot, native/default format | **123.89** | 190.42 | 203.91 | 146.51 | **39.22** |
+| Type 100 characters | **83.28** | 628.11 | 4,094.11 | 128.41 | **12.06** |
+| Type 1,000 characters | **113.84** | 5,248.67 | 40,955.32 | 165.08 | **55.96** |
 
 The screenshot row is intentionally native/default rather than resolution- and codec-normalized;
 the boundary is detailed below. The typing rows use the same controlled readback contract across
@@ -55,16 +55,17 @@ using the daemon's measured route timing. The selected 30-sample result was:
 
 | Stage | p50 ms | p95 ms |
 | --- | ---: | ---: |
-| Total request | 9.62 | 11.04 |
-| Daemon route, including process execution | 6.62 | 7.46 |
-| Caller/transport overhead | 3.02 | 3.59 |
+| Total request | 13.44 | 21.37 |
+| Daemon route, including process execution | 8.82 | 13.41 |
+| Caller/transport overhead | 4.61 | 8.18 |
 
 The daemon route still includes admission to the configured process runner, child creation,
 stdin/stdout/stderr handling, waiting, and cleanup. The timing does not claim that the shell program
 itself took the full daemon duration.
 
 A clean 10-sample-per-arm ablation held region, Connect runner path, HTTP version, browser, surface,
-and input throttling constant:
+and input throttling constant. It predates the later process-group safety fix, so it is retained as
+directional evidence about event-loop selection rather than the final selected-runner latency:
 
 | Subprocess runner | Total p50 / p95 ms | Daemon p50 / p95 ms | Caller/transport p50 / p95 ms |
 | --- | ---: | ---: | ---: |
@@ -106,8 +107,8 @@ Computers primitives.
 
 The provider-default run pinned `tzafon==2.44.1`, used a nonpersistent desktop, requested inline
 screenshots, and retained the SDK's default two retries. Its product-create-to-first-validated-
-screenshot p50 was 266.13 ms, versus 2,055.56 ms for E2B, 19,129.82 ms for Modal's neutral external
-path, and 10,774.33 ms for Daytona.
+screenshot p50 was 339.89 ms, versus 1,259.23 ms for E2B, 9,516.81 ms for Modal's neutral external
+path, and 11,224.56 ms for Daytona.
 
 Those lifecycle values do not reproduce or contradict Tzafon's separately published 71 ms desktop
 number. That number used server-side TTFB minus TLS handshake over five runs; this harness measures

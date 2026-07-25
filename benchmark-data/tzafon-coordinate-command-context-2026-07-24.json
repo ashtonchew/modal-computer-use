@@ -1,17 +1,19 @@
 {
   "schema_version": 1,
   "benchmark": "tzafon-coordinate-command-context",
-  "generated_at": "2026-07-25T00:07:07.245199+00:00",
+  "generated_at": "2026-07-25T00:34:06.400012+00:00",
   "status": "candidate",
   "scope": "Canonical coordinate-click-v1 and shell-command-echo-v2 provider comparison, selected Modal optimized arm, and subprocess-runner A/B",
   "provenance": {
-    "source_sha": "435d80e19d0e667d0f56131b0398f252d393ec4d",
+    "source_sha": "54948c88f34be96708fef4f95a4cf1456a2507f4",
     "harness_state": "clean",
     "provider_reference": "benchmark-data/provider-compare-coordinate-command-2026-07-24.json",
-    "provider_reference_sha256": "e2e07c190020931e43f8ff971cdd7c71b70e432e649a0914ca85d0cd7ef8f101",
-    "provider_raw_artifact_sha256": "c3ac5d1d871cd243668ee5f5114214ae785ae1707f288437792fd1cd39fc4e6e",
-    "modal_optimized_raw_artifact": "benchmark-results/candidates/modal-optimized-isolated-rebased-final-2026-07-24.json",
-    "modal_optimized_raw_artifact_sha256": "a40a252d165844ae32399d6f203e3272fe07ce399e9a39e6bbbcab0e9f4f7d1a"
+    "provider_reference_sha256": "c9e727eee5bfa823d7319cc91cf15434e8460977898ec0db13a17ff4c72bb35a",
+    "provider_raw_artifact_sha256": "b2463a8c3aac870ec3442e157d424cbec3dbf4636a33ce1b7ba87095ec1f5859",
+    "modal_optimized_raw_artifact": "benchmark-results/candidates/modal-optimized-isolated-process-group-final-2026-07-24.json",
+    "modal_optimized_raw_artifact_sha256": "c100347bbb4e92d6c58140746f8aa9b8f07b5e175328f5bd26ce1e8d3a621887",
+    "subprocess_runner_ab_source_sha": "1c3317ce9ef5bbc83b31f839137b2ca5e783b445",
+    "subprocess_runner_ab_status": "historical_pre_process_group_safety"
   },
   "configuration": {
     "provider_default": {
@@ -64,110 +66,110 @@
   "provider_default_results_ms": {
     "screenshot_full": {
       "modal-daemon": {
-        "p50": 116.40229204203933,
-        "p95": 118.18961638491601
+        "p50": 123.89154103584588,
+        "p95": 125.45675343135372
       },
       "daytona": {
-        "p50": 191.68358389288187,
-        "p95": 192.75852054124698
+        "p50": 190.42162504047155,
+        "p95": 208.30196186434478
       },
       "e2b": {
-        "p50": 195.7494579255581,
-        "p95": 204.60583339445293
+        "p50": 203.90575006604195,
+        "p95": 212.16418780386448
       },
       "tzafon": {
-        "p50": 190.00125001184642,
-        "p95": 199.67767474008724
+        "p50": 146.5079999761656,
+        "p95": 164.712786860764
       }
     },
     "coordinate_click": {
       "modal-daemon": {
-        "p50": 75.47595805954188,
-        "p95": 75.86198325734586
+        "p50": 78.49083398468792,
+        "p95": 79.19317052001134
       },
       "daytona": {
-        "p50": 215.14300000853837,
-        "p95": 215.20997529150918
+        "p50": 200.4687919979915,
+        "p95": 206.21562954038382
       },
       "e2b": {
-        "p50": 216.27658291254193,
-        "p95": 217.01930796261877
+        "p50": 217.92812494095415,
+        "p95": 219.16622434509918
       },
       "tzafon": {
-        "p50": 163.6845829198137,
-        "p95": 166.56844585668296
+        "p50": 175.20645796321332,
+        "p95": 176.9398957840167
       }
     },
     "coordinate_click_sequence": {
       "modal-daemon": {
-        "p50": 79.55579203553498,
-        "p95": 79.77051669731736
+        "p50": 80.56412497535348,
+        "p95": 81.15324976388365
       },
       "daytona": {
-        "p50": 846.1384170223027,
-        "p95": 854.1758669307455
+        "p50": 831.984292017296,
+        "p95": 834.6247416571714
       },
       "e2b": {
-        "p50": 873.1854159850627,
-        "p95": 882.2465043514967
+        "p50": 882.308500004001,
+        "p95": 883.7630493799224
       },
       "tzafon": {
-        "p50": 483.7211669655517,
-        "p95": 484.3619670253247
+        "p50": 500.2802920062095,
+        "p95": 508.63750387215987
       }
     },
     "type_100_chars": {
       "modal-daemon": {
-        "p50": 78.23874999303371,
-        "p95": 78.28371219802648
+        "p50": 83.28474999871105,
+        "p95": 84.29319992428645
       },
       "daytona": {
-        "p50": 631.5272079082206,
-        "p95": 632.0748958154581
+        "p50": 628.1099580228329,
+        "p95": 639.4935333519243
       },
       "e2b": {
-        "p50": 4085.2786250179633,
-        "p95": 4184.3679500045255
+        "p50": 4094.1078340401873,
+        "p95": 4116.2073708255775
       },
       "tzafon": {
-        "p50": 119.73833304364234,
-        "p95": 120.28440890135244
+        "p50": 128.41100001242012,
+        "p95": 133.04266274208203
       }
     },
     "type_1000_chars": {
       "modal-daemon": {
-        "p50": 98.73824997339398,
-        "p95": 103.43482436146587
+        "p50": 113.83733304683119,
+        "p95": 115.52993329241872
       },
       "daytona": {
-        "p50": 5263.915749965236,
-        "p95": 5302.6199871790595
+        "p50": 5248.66583396215,
+        "p95": 5275.00947114313
       },
       "e2b": {
-        "p50": 40988.978083012626,
-        "p95": 41335.54877075367
+        "p50": 40955.32191696111,
+        "p95": 41226.46296675084
       },
       "tzafon": {
-        "p50": 216.84662508778274,
-        "p95": 220.12945058522746
+        "p50": 165.0792920263484,
+        "p95": 168.4688791865483
       }
     },
     "command_nonlogin_shell_echo": {
       "modal-daemon": {
-        "p50": 76.7816249281168,
-        "p95": 77.09156245691702
+        "p50": 80.56758402381092,
+        "p95": 80.84084559231997
       },
       "daytona": {
-        "p50": 115.46750005800277,
-        "p95": 119.83077477198094
+        "p50": 102.66845894511789,
+        "p95": 104.96803366113454
       },
       "e2b": {
-        "p50": 57.90295801125467,
-        "p95": 58.283808222040534
+        "p50": 56.83845898602158,
+        "p95": 59.26718374248594
       },
       "tzafon": {
-        "p50": 68.20304098073393,
-        "p95": 70.29134165495634
+        "p50": 79.76754195988178,
+        "p95": 79.96786672156304
       }
     }
   },
@@ -195,37 +197,37 @@
   },
   "modal_optimized_results_ms": {
     "screenshot_full": {
-      "p50": 39.64339550000062,
-      "p95": 41.66035735000051
+      "p50": 39.21611400000069,
+      "p95": 41.28837549999904
     },
     "coordinate_click": {
-      "p50": 4.124871500000182,
-      "p95": 4.813593550000572
+      "p50": 5.408914000000209,
+      "p95": 6.470640699998942
     },
     "coordinate_click_sequence": {
-      "p50": 7.49249050000067,
-      "p95": 8.539236250000837
+      "p50": 9.554895499999105,
+      "p95": 12.619320050000127
     },
     "type_100_chars": {
-      "p50": 10.909186000000126,
-      "p95": 11.343994099999932
+      "p50": 12.064886000000108,
+      "p95": 14.300997599999121
     },
     "type_1000_chars": {
-      "p50": 55.290771000001016,
-      "p95": 60.405699699999516
+      "p50": 55.95530649999958,
+      "p95": 63.739842599999704
     },
     "command_nonlogin_shell_echo": {
       "total": {
-        "p50": 9.615412499999643,
-        "p95": 11.03502054999943
+        "p50": 13.44040599999996,
+        "p95": 21.373226949999502
       },
       "daemon": {
-        "p50": 6.6220050000112,
-        "p95": 7.459108150005987
+        "p50": 8.822268499983466,
+        "p95": 13.412695649996916
       },
       "caller_transport_overhead": {
-        "p50": 3.0184180000096816,
-        "p95": 3.5873670999960083
+        "p50": 4.610299499999471,
+        "p95": 8.175828649991686
       }
     }
   },
@@ -298,6 +300,7 @@
     "Tzafon returned a 1280x720 JPEG after a 1024x768 request. A strict all-provider native 1280x720 JPEG comparison is impossible because not every provider exposes a native JPEG screenshot primitive at that resolution.",
     "The coordinate benchmark compares one destination click. Tzafon supports that coordinate click but exposes no public move-only primitive.",
     "The subprocess-runner A/B is a portable-shell ablation. It benefits command execution and other subprocess-backed compatibility paths, but not native XTest input, native Xlib window operations, MSS screenshots, or command runtime itself.",
+    "The three-arm subprocess A/B predates the process-group safety fix and is retained as directional event-loop evidence; final selected-runner latency is measured separately at the current source SHA.",
     "The provider-default and optimized values are separate configurations. Ratios describe these runs, not a universal provider ranking."
   ]
 }
