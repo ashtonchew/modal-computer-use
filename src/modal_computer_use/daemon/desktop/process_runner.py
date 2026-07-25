@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import signal
 import subprocess
 import threading
 from collections.abc import Callable, Mapping
@@ -48,6 +50,7 @@ class AsyncioProcessRunner:
             stdin=asyncio.subprocess.PIPE if input_text is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=os.name == "posix",
         )
         self._processes.add(process)
         try:
@@ -57,9 +60,7 @@ class AsyncioProcessRunner:
                     timeout=timeout,
                 )
             except (TimeoutError, asyncio.CancelledError):
-                if process.returncode is None:
-                    with contextlib.suppress(ProcessLookupError):
-                        process.kill()
+                _kill_process_group(process)
                 await _finish_asyncio_process(process)
                 raise
             return _completed_result(args, process.returncode, stdout, stderr, check=check)
@@ -69,9 +70,7 @@ class AsyncioProcessRunner:
     def close(self) -> None:
         self._closed = True
         for process in tuple(self._processes):
-            if process.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    process.kill()
+            _kill_process_group(process)
 
 
 RemoteRunnerFactory = Callable[[], ProcessRunner]
@@ -295,10 +294,9 @@ class _OwnedProcess:
         with self._lock:
             self._cancel_requested = True
             process = self._process
-        if process is None or process.poll() is not None:
+        if process is None:
             return
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
+        _kill_process_group(process)
 
 
 class ThreadedProcessRunner:
@@ -399,6 +397,7 @@ class ThreadedProcessRunner:
             stdin=subprocess.PIPE if input_text is not None else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            start_new_session=os.name == "posix",
         )
         owned.attach(process)
         input_bytes = input_text.encode() if input_text is not None else None
@@ -417,9 +416,7 @@ async def _finish_asyncio_process(process: asyncio.subprocess.Process) -> None:
         try:
             await asyncio.shield(cleanup)
         except asyncio.CancelledError:
-            if process.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    process.kill()
+            _kill_process_group(process)
             continue
     with contextlib.suppress(Exception):
         cleanup.result()
@@ -449,6 +446,25 @@ async def _await_cleanup_ack(cleanup: ConcurrentFuture[None]) -> None:
         except asyncio.CancelledError:
             continue
     wrapped.result()
+
+
+def _kill_process_group(process: Any) -> None:
+    pid = getattr(process, "pid", None)
+    if os.name == "posix" and isinstance(pid, int) and not isinstance(pid, bool):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        else:
+            return
+
+    poll = getattr(process, "poll", None)
+    returncode = poll() if callable(poll) else getattr(process, "returncode", None)
+    if returncode is not None:
+        return
+
+    with contextlib.suppress(ProcessLookupError):
+        process.kill()
 
 
 def _completed_result(

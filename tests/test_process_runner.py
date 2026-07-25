@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -118,6 +120,62 @@ def test_threaded_runner_timeout_kills_drains_and_reaps() -> None:
         runner.close()
 
     assert state == {"calls": 2, "killed": True}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-specific")
+def test_threaded_runner_timeout_kills_inherited_pipe_process_group(monkeypatch) -> None:
+    state: dict[str, Any] = {
+        "calls": 0,
+        "direct_kill": False,
+        "group_kill": None,
+        "start_new_session": None,
+    }
+
+    class TimedOutProcess:
+        args = ("sh",)
+        pid = 4242
+        returncode: int | None = None
+
+        def communicate(self, _input=None, timeout=None):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                self.returncode = 0
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            self.returncode = -signal.SIGKILL
+            return b"", b""
+
+        def kill(self) -> None:
+            state["direct_kill"] = True
+            self.returncode = -signal.SIGKILL
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    def create_process(*_args, **kwargs):
+        state["start_new_session"] = kwargs["start_new_session"]
+        return TimedOutProcess()
+
+    def kill_group(process_group: int, signal_number: int) -> None:
+        state["group_kill"] = (process_group, signal_number)
+
+    monkeypatch.setattr(os, "killpg", kill_group)
+    runner = ThreadedProcessRunner(
+        max_workers=1,
+        max_pending=0,
+        popen_factory=create_process,
+    )
+    try:
+        with pytest.raises(TimeoutError):
+            asyncio.run(runner.run("sh", timeout=0.01))
+    finally:
+        runner.close()
+
+    assert state == {
+        "calls": 2,
+        "direct_kill": False,
+        "group_kill": (4242, signal.SIGKILL),
+        "start_new_session": True,
+    }
 
 
 def test_threaded_runner_cancellation_kills_drains_and_reraises() -> None:
@@ -317,6 +375,57 @@ def test_isolated_asyncio_runner_timeout_kills_drains_and_reaps() -> None:
         runner.close()
 
     assert result.stdout == "reaped\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-specific")
+def test_isolated_asyncio_runner_timeout_kills_inherited_pipe_process_group(
+    monkeypatch,
+) -> None:
+    state: dict[str, Any] = {
+        "calls": 0,
+        "direct_kill": False,
+        "group_kill": None,
+        "start_new_session": None,
+    }
+
+    class InheritedPipeProcess:
+        pid = 4242
+        returncode: int | None = None
+
+        async def communicate(self, _input=None):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                self.returncode = 0
+                await asyncio.Future()
+            self.returncode = -signal.SIGKILL
+            return b"", b""
+
+        def kill(self) -> None:
+            state["direct_kill"] = True
+            self.returncode = -signal.SIGKILL
+
+    async def create_process(*_args, **kwargs):
+        state["start_new_session"] = kwargs["start_new_session"]
+        return InheritedPipeProcess()
+
+    def kill_group(process_group: int, signal_number: int) -> None:
+        state["group_kill"] = (process_group, signal_number)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+    monkeypatch.setattr(os, "killpg", kill_group)
+    runner = IsolatedAsyncioProcessRunner(max_active=1)
+    try:
+        with pytest.raises(TimeoutError):
+            asyncio.run(runner.run("sh", timeout=0.01))
+    finally:
+        runner.close()
+
+    assert state == {
+        "calls": 2,
+        "direct_kill": False,
+        "group_kill": (4242, signal.SIGKILL),
+        "start_new_session": True,
+    }
 
 
 def test_isolated_asyncio_runner_cancellation_waits_for_cleanup_acknowledgment() -> None:
