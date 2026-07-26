@@ -28,8 +28,16 @@ For each call, the feature:
 - Issues the requested action batch once.
 - Correlates the observation with the action request.
 - Preserves action success or failure metadata.
-- Returns a reconstructable frame with its geometry and format.
+- Returns the same captured frame that the detector used to confirm the change. The route derives
+  the requested format, quality, and scale from that capture.
 - Distinguishes a detected change from an unchanged frame or timeout.
+- Reports a timeout when pixel verification completes after the change deadline. The returned
+  frame and source hash still describe that completed capture.
+- Applies the change deadline through pixel capture and hash verification. Image encoding occurs
+  after this decision. Encoding time remains part of the end-to-end request latency.
+- Uses full-resolution source pixels for verification. Requested format, quality, and scale do not
+  change the detection result. If native raw pixels are unavailable, the daemon verifies a
+  full-resolution lossless PNG capture and derives the response from that capture.
 - Measures `ActionObservationResult.elapsed_ms` from immediately before the action-observe request
   is sent until the correlated frame is received.
 - Preserves explicit `wait` actions and caller-supplied timing.
@@ -106,7 +114,11 @@ actions. They do not decide when an application is settled.
 - The first paint can occur before the application reaches its usable final state.
 - Regional detection can miss an effect outside the selected region.
 - XDamage is a wake-up hint, not semantic proof. Captured pixels and hashes determine whether a
-  change occurred.
+  change occurred. If an XDamage event has no changed pixels, the daemon waits again until the
+  change deadline.
+- A cursor-visible request includes the rendered cursor in the verified returned frame. Cursor
+  motion can therefore cause a detected change. Cursor-visible requests use pixel polling because
+  cursor-only movement does not reliably produce an XDamage event.
 - A timeout can return a valid correlated frame without proving action failure.
 - Keyboard and desktop-wide actions usually need a broader observation region than pointer-local
   actions.
@@ -116,6 +128,10 @@ actions. They do not decide when an application is settled.
 `action_to_first_changed_frame_ms` starts immediately before the correlated action-observe request
 is sent. It ends when the correlated changed frame is received. The metric measures the first
 detected visual response, not application settle or task completion.
+
+Count a latency sample only when `action_result.ok` is true, the captured pixels differ from the
+selected baseline, and pixel verification completes by the change deadline. Record failed actions,
+unchanged frames, and timeout trials as failures or exclusions. Do not replace those trials.
 
 | Measurement | Starts | Ends | Use it to measure |
 | --- | --- | --- | --- |

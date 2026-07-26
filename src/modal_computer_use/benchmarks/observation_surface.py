@@ -42,6 +42,12 @@ CLICK_TOGGLE_SETTLE_MS = 16
 CLICK_TOGGLE_CHANGE_TIMEOUT_MS = 200
 CLICK_TOGGLE_READY_TIMEOUT_MS = 10_000
 CLICK_TOGGLE_HTTP_LOG_PATH = "/tmp/modal-computer-use-observation-http.log"  # noqa: S108
+
+
+class FirstChangedFrameNotObservedError(RuntimeError):
+    pass
+
+
 CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES: tuple[str, ...] = (
     "observation_transport_probe_0b",
     "observation_transport_probe_5kb",
@@ -2253,7 +2259,9 @@ def _run_observation_action_click_observe_change_http_raw_benchmark(
         name="observation_action_click_observe_change_http_raw",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
-        operation=lambda: _run_click_toggle_observe_change_http_raw(client),
+        operation=lambda: _require_http_raw_first_changed_frame(
+            _run_click_toggle_observe_change_http_raw(client)
+        ),
         failures=failures,
     )
     result = _case_result(
@@ -3092,6 +3100,22 @@ def _run_click_toggle_observe_change_http_raw(client: DaemonClient) -> dict[str,
         "change_timing_ms": _json_timing_header(headers, "x-computer-use-change-timing-ms"),
         "screenshot_daemon_timing_ms": _timing_header(headers),
     }
+
+
+def _require_http_raw_first_changed_frame(observation: dict[str, Any]) -> dict[str, Any]:
+    action_result = observation.get("action_result")
+    if not isinstance(action_result, dict) or action_result.get("ok") is not True:
+        raise FirstChangedFrameNotObservedError("first changed frame action did not succeed")
+    change_result = observation.get("change_result")
+    if not isinstance(change_result, dict):
+        raise FirstChangedFrameNotObservedError(
+            "first changed frame response did not include change metadata"
+        )
+    if change_result.get("detected") is not True or change_result.get("timeout_reached") is True:
+        raise FirstChangedFrameNotObservedError(
+            "first changed frame was not observed before the deadline"
+        )
+    return observation
 
 
 def _collect_first_frame(base_url: str, token: str | None) -> dict[str, Any]:
