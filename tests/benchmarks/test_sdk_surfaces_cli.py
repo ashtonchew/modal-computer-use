@@ -46,6 +46,15 @@ def test_benchmark_sdk_mock_local_outputs_json(capsys) -> None:
     assert "Bearer" not in captured.out
 
 
+def test_benchmark_sdk_help_reports_isolated_asyncio_default(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", "sdk", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "defaults to isolated-asyncio" in captured.out
+
+
 def test_daemon_ingress_metadata_identifies_modal_tunnel() -> None:
     ingress = benchmark_daemon_surface._daemon_ingress_metadata(
         mode="http",
@@ -374,6 +383,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert config.ingress == "attested-tunnel"
     assert config.network.daemon_http_version == "2"
     assert config.actions.input_rate_limit_per_sec == 0
+    assert config.actions.subprocess_backend == "isolated-asyncio"
     assert config.browser.kind == "chromium"
     assert config.browser.gpu_mode is None
     environment = payload["surfaces"]["daemon-http"]["metadata"]["environment"]
@@ -384,6 +394,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
     assert environment["modal_ingress"] == "attested-tunnel"
     assert environment["daemon_http_version"] == "2"
     assert environment["input_rate_limit_per_sec"] == 0
+    assert environment["subprocess_backend"] == "isolated-asyncio"
     assert environment["modal_cpu_count"] == 2
     assert environment["modal_memory_gib"] == 4
     assert environment["modal_sandbox_id"] == "sb-gpu"
@@ -494,6 +505,8 @@ def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch,
             "1",
             "--modal-cpu",
             "2",
+            "--subprocess-backend",
+            "threaded",
         ]
     )
 
@@ -503,6 +516,7 @@ def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch,
     assert exit_code == 0
     assert config.ingress == "tunnel"
     assert config.resources.cpu == 2
+    assert config.actions.subprocess_backend == "threaded"
     assert len(benchmark_calls) == 2
     assert benchmark_calls[0]["base_url"] == benchmark_calls[1]["base_url"]
     assert benchmark_calls[0]["environment_metadata"]["modal_ingress_ab_role"] == (
@@ -511,8 +525,14 @@ def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch,
     assert benchmark_calls[1]["environment_metadata"]["modal_ingress_ab_role"] == (
         "attested-minted-token"
     )
+    assert all(
+        call["environment_metadata"]["subprocess_backend"] == "threaded"
+        for call in benchmark_calls
+    )
     assert payload["benchmark"] == "modal-ingress-ab"
     assert payload["comparison"]["move_click"]["delta_ms"] == 10.0
+    assert "connect-token" not in captured.out
+    assert "minted-token" not in captured.out
     assert closed == ["close:connect-token", "close:minted-token", "terminate", "detach"]
 
 
@@ -620,6 +640,8 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
             "dev-laptop-us-west",
             "--name",
             "region-ab",
+            "--subprocess-backend",
+            "isolated-asyncio",
         ]
     )
 
@@ -629,6 +651,10 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
     assert exit_code == 0
     assert [config.runtime.modal_region for config in configs] == [None, "us-west"]
     assert [config.ingress for config in configs] == ["attested-tunnel", "attested-tunnel"]
+    assert [config.actions.subprocess_backend for config in configs] == [
+        "isolated-asyncio",
+        "isolated-asyncio",
+    ]
     assert [call["name"] for call in created] == ["region-ab-default", "region-ab-us-west"]
     assert created[0]["tags"] == {
         "benchmark": "modal-region-ab",
@@ -638,6 +664,9 @@ def test_benchmark_modal_region_ab_compares_transport_floor_by_region(
     assert len(benchmark_calls) == 2
     assert benchmark_calls[0]["surfaces"] == ["daemon-transport-floor"]
     assert benchmark_calls[1]["surfaces"] == ["daemon-transport-floor"]
+    assert [
+        call["environment_metadata"]["subprocess_backend"] for call in benchmark_calls
+    ] == ["isolated-asyncio", "isolated-asyncio"]
     assert payload["benchmark"] == "modal-region-ab"
     assert payload["metadata"]["regions"] == ["default", "us-west"]
     assert payload["metadata"]["caller_region_label"] == "dev-laptop-us-west"
@@ -719,9 +748,11 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
 
     def fake_run_modal_colocated_client_benchmark(config):
         calls.append(config)
+        assert config.subprocess_backend == "threaded"
         target_config = config.target_config_factory("modal_colocated_test-target")
         assert target_config.runtime.modal_region == "us-west"
         assert target_config.actions.input_rate_limit_per_sec == 0
+        assert target_config.actions.subprocess_backend == "threaded"
         return {
             "ok": True,
             "benchmark": "modal-colocated-client",
@@ -764,6 +795,8 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
             "inherited,connect",
             "--runner-path",
             "target-loopback",
+            "--subprocess-backend",
+            "threaded",
         ]
     )
 

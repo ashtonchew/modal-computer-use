@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "benchmark": "tzafon-competitive-context",
+  "generated_at": "2026-07-24T20:06:31.357244+00:00",
+  "status": "candidate",
+  "scope": "Fresh provider-default Modal, Daytona, E2B, and Tzafon results plus a separate fresh Modal same-region optimized arm",
+  "provenance": {
+    "source_sha": "4f861eeb12981669a9abda1e5ad71daff102b2b5",
+    "git_worktree_clean": true,
+    "provider_reference": "benchmark-data/provider-compare-2026-07-24-current.json",
+    "provider_reference_sha256": "9269ac1c17612a3ed91ffd2f4b7b2656e8eac3b45c65c1323678a59fb924816e",
+    "provider_raw_artifact_path": "benchmark-results/candidates/provider-compare-tzafon-2026-07-24.json",
+    "provider_raw_artifact_sha256": "fd43265dcf3a3c54496ea59eb0608e92cc5e3c375184f8fad725c42891e28ddd",
+    "modal_optimized_raw_artifact_path": "benchmark-results/candidates/modal-optimized-tzafon-context-2026-07-24.json",
+    "modal_optimized_raw_artifact_sha256": "ad9d52378a005a1f246d850fce4b34c0ca5ccc15e5b0c188582bbb00ec9cba6e"
+  },
+  "configuration": {
+    "provider_default": {
+      "caller": "external development machine; geographic location not independently recorded",
+      "modal_ingress": "attested-tunnel",
+      "modal_input_backend": "xtest",
+      "modal_browser": "chromium",
+      "warmup_iterations": 1,
+      "measured_iterations": 3
+    },
+    "modal_optimized": {
+      "modal_region": "us-west-2",
+      "caller": "separate same-region Modal runner",
+      "runner_path": "connect",
+      "target_ingress": "connect",
+      "http_version": "1.1",
+      "browser": "chromium",
+      "target_cpu": 4.0,
+      "target_memory_mib": 8192,
+      "runner_cpu": 1.0,
+      "runner_memory_mib": 1024,
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "typing_method": "keystrokes",
+      "typing_delay_ms": 0,
+      "warmup_iterations": 1,
+      "measured_iterations": 30
+    },
+    "tzafon": {
+      "sdk": "tzafon==2.44.1",
+      "computer_kind": "desktop",
+      "persistent": false,
+      "requested_resolution": "1024x768",
+      "observed_resolution": "1280x720",
+      "screenshot_format": "jpeg",
+      "sdk_default_max_retries": 2,
+      "move_click_semantics": "one coordinate click because no standalone pointer-move action is exposed",
+      "sequence_semantics": "four coordinate clicks in one native batch request"
+    }
+  },
+  "commands": {
+    "provider_default": "uv run computer-use benchmark compare --create-modal-sandbox --provider modal-daemon --provider daytona --provider e2b --provider tzafon --modal-ingress attested-tunnel --resource-profile browser --browser chromium --input-backend xtest --iterations 3 --env-file /path/to/.env --output benchmark-results/candidates/provider-compare-tzafon-2026-07-24.json --json",
+    "modal_optimized": "uv run computer-use benchmark modal-colocated-client --iterations 30 --modal-region us-west-2 --modal-ingress connect --runner-path connect --surface daemon-http --caller-region-label dev-laptop-us-west --browser chromium --modal-cpu 4 --modal-memory-mib 8192 --runner-cpu 1 --runner-memory-mib 1024 --input-rate-limit-per-sec 0 --input-backend xtest --output benchmark-results/candidates/modal-optimized-tzafon-context-2026-07-24.json --json"
+  },
+  "startup": {
+    "metric": "product create call to first validated full-screen screenshot decoded by the caller",
+    "modal_default_p50_ms": 10238.360167015344,
+    "modal_default_p95_ms": 12778.549903864041,
+    "daytona_p50_ms": 10566.306583001278,
+    "daytona_p95_ms": 10582.35343361739,
+    "e2b_p50_ms": 1267.446166020818,
+    "e2b_p95_ms": 1272.2706538042985,
+    "tzafon_p50_ms": 317.7815000526607,
+    "tzafon_p95_ms": 339.2015000223182
+  },
+  "results": {
+    "screenshot_full": {
+      "modal_optimized_p50_ms": 38.82683050000013,
+      "modal_optimized_p95_ms": 49.10212979999978,
+      "modal_default_p50_ms": 198.30591708887368,
+      "daytona_p50_ms": 193.01799999084324,
+      "e2b_p50_ms": 185.65133307129145,
+      "tzafon_p50_ms": 149.60754197090864,
+      "modal_optimized_vs_daytona": 4.971253061483929,
+      "modal_optimized_vs_e2b": 4.78152171270562,
+      "modal_optimized_vs_tzafon": 3.85319996621687
+    },
+    "move_click": {
+      "modal_optimized_p50_ms": 5.44805399999948,
+      "modal_optimized_p95_ms": 6.329301099998741,
+      "modal_default_p50_ms": 155.19708301872015,
+      "daytona_p50_ms": 354.7452499624342,
+      "e2b_p50_ms": 211.8714170064777,
+      "tzafon_p50_ms": 169.77429203689098,
+      "modal_optimized_vs_daytona": 65.11412147575409,
+      "modal_optimized_vs_e2b": 38.88937536347803,
+      "modal_optimized_vs_tzafon": 31.16237321379472
+    },
+    "move_click_sequence": {
+      "modal_optimized_p50_ms": 9.820527000000467,
+      "modal_optimized_p95_ms": 11.163315100000304,
+      "modal_default_p50_ms": 150.2930000424385,
+      "daytona_p50_ms": 1415.1164999930188,
+      "e2b_p50_ms": 838.0636250367388,
+      "tzafon_p50_ms": 490.686499979347,
+      "modal_optimized_vs_daytona": 144.0978167457766,
+      "modal_optimized_vs_e2b": 85.33794826252185,
+      "modal_optimized_vs_tzafon": 49.96539391209083
+    },
+    "type_100_chars": {
+      "modal_optimized_p50_ms": 10.569592500000446,
+      "modal_optimized_p95_ms": 11.957054100000342,
+      "modal_default_p50_ms": 153.6307499045506,
+      "daytona_p50_ms": 621.3886659825221,
+      "e2b_p50_ms": 4057.4434999143705,
+      "tzafon_p50_ms": 124.87212498672307,
+      "modal_optimized_vs_daytona": 58.7902197726635,
+      "modal_optimized_vs_e2b": 383.87889598527084,
+      "modal_optimized_vs_tzafon": 11.81427997216712
+    },
+    "type_1000_chars": {
+      "modal_optimized_p50_ms": 53.92872300000029,
+      "modal_optimized_p95_ms": 57.93685065000007,
+      "modal_default_p50_ms": 192.58491694927216,
+      "daytona_p50_ms": 5306.548750028014,
+      "e2b_p50_ms": 40904.83125008177,
+      "tzafon_p50_ms": 159.34537502471358,
+      "modal_optimized_vs_daytona": 98.39930291002784,
+      "modal_optimized_vs_e2b": 758.4980502891112,
+      "modal_optimized_vs_tzafon": 2.954740371373391
+    },
+    "command_echo": {
+      "modal_optimized_p50_ms": 91.4236809999993,
+      "modal_optimized_p95_ms": 258.4041813499991,
+      "modal_default_p50_ms": 190.03395806066692,
+      "daytona_p50_ms": 111.96870903950185,
+      "e2b_p50_ms": 55.42479199357331,
+      "tzafon_p50_ms": 86.0379160149023,
+      "modal_optimized_vs_daytona": 1.2247232644187964,
+      "modal_optimized_vs_e2b": 0.6062410896972495,
+      "modal_optimized_vs_tzafon": 0.941090044437206
+    }
+  },
+  "verification": {
+    "provider_default_failure_count": 0,
+    "provider_default_successful_iterations_per_case": 3,
+    "provider_default_cursor_readbacks": "passed for all four providers",
+    "provider_default_typing_readbacks": "passed for all four providers",
+    "modal_optimized_failure_count": 0,
+    "modal_optimized_successful_iterations_per_case": 30,
+    "modal_optimized_cursor_readback": "passed",
+    "modal_optimized_typing_readback": "passed",
+    "modal_optimized_input_backend": "xtest"
+  },
+  "limitations": [
+    "The Tzafon tweet's 63 ms browser, 71 ms desktop, and 188 ms E2B values measure server-side TTFB minus TLS handshake over five runs. They are not comparable to this create-to-decoded-screenshot lifecycle or to the warm operation cases.",
+    "Tzafon desktop returned 1280x720 JPEG screenshots despite a 1024x768 create request, while Modal, Daytona, and E2B returned 1024x768 PNG screenshots. Screenshot latency is therefore not pixel- or codec-normalized.",
+    "Tzafon does not expose a standalone pointer-move action. Its move/click case is one coordinate click, and its eight-logical-action sequence is four coordinate clicks in one native batch.",
+    "The provider-default values are contemporaneous within one external-caller run. The Modal optimized arm is a distinct same-region runner configuration and not a provider-default product path.",
+    "Requested narrow-region placement is recorded, but this harness does not independently attest the runner's physical availability zone.",
+    "The Modal optimized command p95 contains retained high outliers; p50 and the full raw distribution remain available in the ignored raw artifact.",
+    "Tzafon public pricing depends on resource usage not exposed by this run, so its cost remains unknown rather than estimated."
+  ]
+}

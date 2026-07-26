@@ -42,6 +42,19 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     )
     assert payload["providers"]["modal-daemon"]["cases"]["command_echo"]["status"] == "ok"
     assert payload["providers"]["modal-daemon"]["cases"]["screenshot_full"]["status"] == "ok"
+    coordinate_click = payload["providers"]["modal-daemon"]["cases"]["coordinate_click"]
+    coordinate_sequence = payload["providers"]["modal-daemon"]["cases"][
+        "coordinate_click_sequence"
+    ]
+    assert coordinate_click["semantic"] == "coordinate_click"
+    assert coordinate_click["benchmark_semantics"] == "coordinate-click-v1"
+    assert coordinate_click["logical_action_count"] == 1
+    assert coordinate_click["provider_action_count"] == 1
+    assert coordinate_sequence["semantic"] == "coordinate_click_sequence"
+    assert coordinate_sequence["benchmark_semantics"] == "coordinate-click-v1"
+    assert coordinate_sequence["logical_action_count"] == 4
+    assert coordinate_sequence["provider_action_count"] == 4
+    assert coordinate_sequence["native_batch"] is True
     assert (
         payload["providers"]["modal-daemon"]["cases"]["click_then_screenshot"]["status"] == "ok"
     )
@@ -104,10 +117,18 @@ def test_benchmark_compare_external_providers_skip_without_credentials(
 ) -> None:
     monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
     monkeypatch.delenv("E2B_API_KEY", raising=False)
+    monkeypatch.delenv("TZAFON_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(
-        ["benchmark", "compare", "--providers", "daytona,e2b", "--iterations", "1"]
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "daytona,e2b,tzafon",
+            "--iterations",
+            "1",
+        ]
     )
 
     captured = capsys.readouterr()
@@ -116,8 +137,94 @@ def test_benchmark_compare_external_providers_skip_without_credentials(
     assert payload["ok"] is True
     assert payload["providers"]["daytona"]["status"] == "not_measured"
     assert payload["providers"]["e2b"]["status"] == "not_measured"
+    assert payload["providers"]["tzafon"]["status"] == "not_measured"
     assert "DAYTONA_API_KEY is not set" in captured.out
     assert "E2B_API_KEY is not set" in captured.out
+    assert "TZAFON_API_KEY is not set" in captured.out
+
+
+def test_provider_compare_cli_accepts_tzafon() -> None:
+    args = SimpleNamespace(providers="tzafon", provider=[])
+
+    assert cli._compare_providers(args) == ["tzafon"]
+    assert cli._has_live_external_provider(["tzafon"]) is True
+
+
+def test_provider_compare_parser_accepts_repeated_tzafon_provider(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("TZAFON_API_KEY", raising=False)
+
+    exit_code = cli.main(
+        ["benchmark", "compare", "--provider", "tzafon", "--iterations", "1"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["providers"]["tzafon"]["status"] == "not_measured"
+
+
+def test_provider_compare_subprocess_backend_reaches_created_modal_config(
+    monkeypatch, capsys
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_created_modal_comparison(args, **kwargs):
+        seen["config"] = cli._modal_benchmark_config(args, run_id="compare-test")
+        return {
+            "ok": True,
+            "benchmark": "provider-compare",
+            "metadata": {"environment": cli._benchmark_environment_metadata(args)},
+            "providers": {},
+            "failures": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_benchmark_compare_created_modal_sandbox",
+        fake_created_modal_comparison,
+    )
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "modal-daemon",
+            "--create-modal-sandbox",
+            "--subprocess-backend",
+            "threaded",
+            "--token",
+            "benchmark-secret-token",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert seen["config"].actions.subprocess_backend == "threaded"
+    assert payload["metadata"]["environment"]["subprocess_backend"] == "threaded"
+    assert "benchmark-secret-token" not in captured.out
+
+
+def test_provider_compare_env_file_whitelists_tzafon_key(
+    monkeypatch, tmp_path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "TZAFON_API_KEY=tzafon-test-secret\n"
+        "NOT_A_BENCHMARK_SECRET=must-not-load\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TZAFON_API_KEY", raising=False)
+    monkeypatch.delenv("NOT_A_BENCHMARK_SECRET", raising=False)
+
+    cli._load_benchmark_env_file(env_file)
+
+    assert __import__("os").environ["TZAFON_API_KEY"] == "tzafon-test-secret"
+    assert "NOT_A_BENCHMARK_SECRET" not in __import__("os").environ
 
 
 def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
@@ -195,6 +302,14 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
     assert product_case["first_observation_api"] == "computer_use.screenshot.take_full_screen"
     assert cases["cold_create_to_ready"]["canonical_case"] == "product_create_to_first_screenshot"
     assert cases["cold_create_to_ready"]["deprecated"] is True
+    command_case = cases["command_nonlogin_shell_echo"]
+    assert command_case["benchmark_semantics"] == "shell-command-echo-v2"
+    assert command_case["shell_mode"] == "non_login"
+    assert command_case["command"] == {
+        "argv": ["sh", "-c", "printf 42"],
+        "timeout_seconds": 30,
+        "transport_shape": "command_string",
+    }
 
 
 def test_modal_product_readiness_uses_all_orchestration_samples() -> None:

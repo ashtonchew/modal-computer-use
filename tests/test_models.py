@@ -27,6 +27,23 @@ def test_runtime_modal_region_rejects_empty_string() -> None:
         ComputerConfig(runtime={"modal_region": "   "})
 
 
+def test_action_subprocess_backend_defaults_and_validates() -> None:
+    assert ComputerConfig().actions.subprocess_backend == "isolated-asyncio"
+    assert (
+        ComputerConfig(actions={"subprocess_backend": "threaded"}).actions.subprocess_backend
+        == "threaded"
+    )
+    assert (
+        ComputerConfig(
+            actions={"subprocess_backend": "isolated-asyncio"}
+        ).actions.subprocess_backend
+        == "isolated-asyncio"
+    )
+
+    with pytest.raises(ValidationError):
+        ComputerConfig(actions={"subprocess_backend": "process-pool"})
+
+
 def test_region_validation() -> None:
     with pytest.raises(ValidationError):
         Region(x=0, y=0, width=0, height=10)

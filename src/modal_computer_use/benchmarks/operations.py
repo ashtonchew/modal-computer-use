@@ -9,9 +9,11 @@ from ..client import DaemonClient
 from .constants import (
     ACTION_BATCH_ACTIONS,
     COMMAND_ECHO_COMMAND,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
     SANDBOX_EXEC_MOVE_CLICK_COMMAND,
+    coordinate_click_target,
 )
 from .safety import (
     _ensure_ok_result,
@@ -88,6 +90,47 @@ class _MoveClickSequenceBenchmark:
             "input_backend": _input_backend_result(result),
         }
 
+
+class _CoordinateClickBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+        self._index = 0
+
+    def run(self) -> dict[str, Any]:
+        x, y = coordinate_click_target(self._index)
+        self._index += 1
+        result = self._client.post_json(
+            "/v1/actions/run",
+            json={
+                "actions": [{"type": "click", "x": x, "y": y, "button": "left"}],
+                "source": "benchmark",
+            },
+        )
+        _ensure_ok_result(result)
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _input_backend_result(result),
+        }
+
+
+class _CoordinateClickSequenceBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+    def run(self) -> dict[str, Any]:
+        result = self._client.post_json(
+            "/v1/actions/run",
+            json={"actions": COORDINATE_CLICK_SEQUENCE_ACTIONS, "source": "benchmark"},
+        )
+        _ensure_ok_result(result)
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _input_backend_result(result),
+        }
+
+
 class _ClickScreenshotRawBenchmark:
     def __init__(self, client: DaemonClient, request: dict[str, Any]) -> None:
         self._client = client
@@ -162,17 +205,49 @@ class _TypeCharsBenchmark:
         }
 
 class _CommandEchoBenchmark:
-    def __init__(self, client: DaemonClient) -> None:
+    def __init__(
+        self,
+        client: DaemonClient,
+        command: tuple[str, ...] = COMMAND_ECHO_COMMAND,
+    ) -> None:
         self._client = client
+        self._command = command
 
     def run(self) -> dict[str, Any]:
         result = self._client.post_json(
             "/v1/commands/run",
-            json={"command": list(COMMAND_ECHO_COMMAND), "timeout": 30},
+            json={"command": list(self._command), "timeout": 30},
         )
         _ensure_ok_result(result)
         output = result.get("output") if isinstance(result, dict) else {}
-        return {"exit_code": output.get("returncode") if isinstance(output, dict) else None}
+        returncode = output.get("returncode") if isinstance(output, dict) else None
+        stdout = output.get("stdout") if isinstance(output, dict) else None
+        if (
+            isinstance(returncode, bool)
+            or not isinstance(returncode, int)
+            or returncode != 0
+            or not isinstance(stdout, str)
+            or stdout.strip() != "42"
+        ):
+            raise RuntimeError(
+                "daemon command did not return the expected success sentinel"
+            )
+        return {
+            "exit_code": returncode,
+            "daemon_ms": _extract_command_elapsed_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+        }
+
+
+def _extract_command_elapsed_ms(result: dict[str, Any]) -> float | None:
+    elapsed_ms = result.get("elapsed_ms")
+    if elapsed_ms is None:
+        return None
+    if isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int | float):
+        raise RuntimeError("daemon command elapsed_ms was malformed")
+    if elapsed_ms < 0:
+        raise RuntimeError("daemon command elapsed_ms was negative")
+    return float(elapsed_ms)
 
 class _ScreenshotBenchmark:
     def __init__(self, client: DaemonClient, request: dict[str, Any], *, raw: bool = False) -> None:

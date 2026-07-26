@@ -4,7 +4,16 @@ import os
 import shlex
 from typing import Any
 
-from ..constants import MOVE_CLICK_SEQUENCE_ACTIONS, PROVIDER_BENCHMARK_TEXT, TYPE_1000_CHARS_TEXT
+from ..constants import (
+    COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
+    COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
+    MOVE_CLICK_SEQUENCE_ACTIONS,
+    PROVIDER_BENCHMARK_TEXT,
+    TYPE_1000_CHARS_TEXT,
+    coordinate_click_target,
+)
 from ..lifecycle import CleanupError
 from ..safety import _safe_base_url
 from .live import (
@@ -83,9 +92,12 @@ def run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[str
             "screenshot_full",
             "move_click",
             "move_click_sequence",
+            "coordinate_click",
+            "coordinate_click_sequence",
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
+            "command_nonlogin_shell_echo",
         ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -105,6 +117,7 @@ class DaytonaDriver:
     ) -> None:
         self._module = daytona_module
         self._snapshot = snapshot
+        self._coordinate_click_index = 0
         config_cls = getattr(daytona_module, "DaytonaConfig", None)
         client_cls = daytona_module.Daytona
         if config_cls is None:
@@ -177,6 +190,19 @@ class DaytonaDriver:
                 )
         return {"action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS)}
 
+    def coordinate_click(self, sandbox: Any) -> dict[str, Any]:
+        x, y = coordinate_click_target(self._coordinate_click_index)
+        self._coordinate_click_index += 1
+        mouse = provider_computer_use(sandbox).mouse
+        call_first_available(mouse, ("click", "left_click"), x, y)
+        return _coordinate_click_result()
+
+    def coordinate_click_sequence(self, sandbox: Any) -> dict[str, Any]:
+        mouse = provider_computer_use(sandbox).mouse
+        for action in COORDINATE_CLICK_SEQUENCE_ACTIONS:
+            call_first_available(mouse, ("click", "left_click"), action["x"], action["y"])
+        return _coordinate_click_sequence_result()
+
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         keyboard = provider_computer_use(sandbox).keyboard
         call_first_available(keyboard, ("type", "write"), PROVIDER_BENCHMARK_TEXT)
@@ -193,6 +219,25 @@ class DaytonaDriver:
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
         return {"exit_code": exit_code}
+
+    def command_nonlogin_shell_echo(self, sandbox: Any) -> dict[str, Any]:
+        command = shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND)
+        result = sandbox.process.exec(command, timeout=30)
+        exit_code = provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("Daytona command exited nonzero")
+        if provider_stdout(result).strip() != "42":
+            raise RuntimeError("Daytona command output did not match the expected sentinel")
+        return {
+            "exit_code": exit_code,
+            "benchmark_semantics": COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+            "shell_mode": "non_login",
+            "command": {
+                "argv": list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "command_string",
+            },
+        }
 
     def _create_sandbox(self) -> Any:
         create = self._client.create
@@ -283,4 +328,33 @@ def _daytona_default_resource_metadata() -> dict[str, Any]:
             "Daytona default sandbox resources are documented as 1 vCPU, 1 GiB memory, "
             "and 3 GiB disk; storage estimate does not account for account-level free allowance"
         ],
+    }
+
+
+def _coordinate_click_result() -> dict[str, Any]:
+    return {
+        "semantic": "coordinate_click",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": 1,
+        "provider_action_count": 1,
+        "provider_sdk_call_count": 1,
+        "transport_request_count": 1,
+        "request_count_source": "harness_direct",
+        "native_batch": False,
+        "batching": "single_request",
+    }
+
+
+def _coordinate_click_sequence_result() -> dict[str, Any]:
+    count = len(COORDINATE_CLICK_SEQUENCE_ACTIONS)
+    return {
+        "semantic": "coordinate_click_sequence",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": count,
+        "provider_action_count": count,
+        "provider_sdk_call_count": count,
+        "transport_request_count": count,
+        "request_count_source": "harness_direct",
+        "native_batch": False,
+        "batching": "sequential_requests",
     }

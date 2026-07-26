@@ -114,6 +114,9 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
         "ratio_vs_external": 0.3125,
     }
     runner_environment = result["runs"]["modal_colocated_runner"]["metadata"]["environment"]
+    external_environment = result["runs"]["external_caller"]["metadata"]["environment"]
+    assert external_environment["subprocess_backend"] == "isolated-asyncio"
+    assert runner_environment["subprocess_backend"] == "isolated-asyncio"
     assert runner_environment["modal_runner_sandbox_id"] == "sb-runner"
     assert runner_environment["caller_region_label"] == "modal-runner:us-west"
     assert "target-token" not in json.dumps(result)
@@ -558,6 +561,7 @@ def _config(
         runner_cpu=None,
         runner_memory_mib=None,
         input_rate_limit_per_sec=0,
+        subprocess_backend="isolated-asyncio",
         image_profile=None,
         surfaces=surfaces,  # type: ignore[arg-type]
         observation_cases=None,

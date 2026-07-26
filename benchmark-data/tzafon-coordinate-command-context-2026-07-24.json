@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "benchmark": "tzafon-coordinate-command-context",
+  "generated_at": "2026-07-25T00:34:06.400012+00:00",
+  "status": "candidate",
+  "scope": "Canonical coordinate-click-v1 and shell-command-echo-v2 provider comparison, selected Modal optimized arm, and subprocess-runner A/B",
+  "provenance": {
+    "source_sha": "54948c88f34be96708fef4f95a4cf1456a2507f4",
+    "harness_state": "clean",
+    "provider_reference": "benchmark-data/provider-compare-coordinate-command-2026-07-24.json",
+    "provider_reference_sha256": "c9e727eee5bfa823d7319cc91cf15434e8460977898ec0db13a17ff4c72bb35a",
+    "provider_raw_artifact_sha256": "b2463a8c3aac870ec3442e157d424cbec3dbf4636a33ce1b7ba87095ec1f5859",
+    "modal_optimized_raw_artifact": "benchmark-results/candidates/modal-optimized-isolated-process-group-final-2026-07-24.json",
+    "modal_optimized_raw_artifact_sha256": "c100347bbb4e92d6c58140746f8aa9b8f07b5e175328f5bd26ce1e8d3a621887",
+    "subprocess_runner_ab_source_sha": "1c3317ce9ef5bbc83b31f839137b2ca5e783b445",
+    "subprocess_runner_ab_status": "historical_pre_process_group_safety"
+  },
+  "configuration": {
+    "provider_default": {
+      "providers": [
+        "modal-daemon",
+        "daytona",
+        "e2b",
+        "tzafon"
+      ],
+      "semantics": [
+        "coordinate-click-v1",
+        "shell-command-echo-v2"
+      ],
+      "warmup_iterations": 1,
+      "iterations": 3,
+      "safe_configuration_sha256": "99f0dab352db212859b823ffb565357176637214139b4cedad01c423e1c76d8d"
+    },
+    "modal_optimized": {
+      "modal_region": "us-west-2",
+      "runner_path": "connect",
+      "surface": "daemon-http",
+      "daemon_http_version": "1.1",
+      "browser": "chromium",
+      "input_rate_limit_per_sec": 0,
+      "subprocess_backend": "isolated-asyncio",
+      "iterations": 30,
+      "safe_configuration_sha256": "9a1c2840a41289584d9fa16aa9e14374ea23b07b4c091591c4a9598f747b0b52"
+    }
+  },
+  "semantics": {
+    "coordinate_click": {
+      "benchmark_semantics": "coordinate-click-v1",
+      "logical_action_count": 1
+    },
+    "coordinate_click_sequence": {
+      "benchmark_semantics": "coordinate-click-v1",
+      "logical_action_count": 4
+    },
+    "command_nonlogin_shell_echo": {
+      "benchmark_semantics": "shell-command-echo-v2",
+      "shell_mode": "non_login",
+      "argv": [
+        "sh",
+        "-c",
+        "printf 42"
+      ],
+      "timeout_seconds": 30
+    }
+  },
+  "provider_default_results_ms": {
+    "screenshot_full": {
+      "modal-daemon": {
+        "p50": 123.89154103584588,
+        "p95": 125.45675343135372
+      },
+      "daytona": {
+        "p50": 190.42162504047155,
+        "p95": 208.30196186434478
+      },
+      "e2b": {
+        "p50": 203.90575006604195,
+        "p95": 212.16418780386448
+      },
+      "tzafon": {
+        "p50": 146.5079999761656,
+        "p95": 164.712786860764
+      }
+    },
+    "coordinate_click": {
+      "modal-daemon": {
+        "p50": 78.49083398468792,
+        "p95": 79.19317052001134
+      },
+      "daytona": {
+        "p50": 200.4687919979915,
+        "p95": 206.21562954038382
+      },
+      "e2b": {
+        "p50": 217.92812494095415,
+        "p95": 219.16622434509918
+      },
+      "tzafon": {
+        "p50": 175.20645796321332,
+        "p95": 176.9398957840167
+      }
+    },
+    "coordinate_click_sequence": {
+      "modal-daemon": {
+        "p50": 80.56412497535348,
+        "p95": 81.15324976388365
+      },
+      "daytona": {
+        "p50": 831.984292017296,
+        "p95": 834.6247416571714
+      },
+      "e2b": {
+        "p50": 882.308500004001,
+        "p95": 883.7630493799224
+      },
+      "tzafon": {
+        "p50": 500.2802920062095,
+        "p95": 508.63750387215987
+      }
+    },
+    "type_100_chars": {
+      "modal-daemon": {
+        "p50": 83.28474999871105,
+        "p95": 84.29319992428645
+      },
+      "daytona": {
+        "p50": 628.1099580228329,
+        "p95": 639.4935333519243
+      },
+      "e2b": {
+        "p50": 4094.1078340401873,
+        "p95": 4116.2073708255775
+      },
+      "tzafon": {
+        "p50": 128.41100001242012,
+        "p95": 133.04266274208203
+      }
+    },
+    "type_1000_chars": {
+      "modal-daemon": {
+        "p50": 113.83733304683119,
+        "p95": 115.52993329241872
+      },
+      "daytona": {
+        "p50": 5248.66583396215,
+        "p95": 5275.00947114313
+      },
+      "e2b": {
+        "p50": 40955.32191696111,
+        "p95": 41226.46296675084
+      },
+      "tzafon": {
+        "p50": 165.0792920263484,
+        "p95": 168.4688791865483
+      }
+    },
+    "command_nonlogin_shell_echo": {
+      "modal-daemon": {
+        "p50": 80.56758402381092,
+        "p95": 80.84084559231997
+      },
+      "daytona": {
+        "p50": 102.66845894511789,
+        "p95": 104.96803366113454
+      },
+      "e2b": {
+        "p50": 56.83845898602158,
+        "p95": 59.26718374248594
+      },
+      "tzafon": {
+        "p50": 79.76754195988178,
+        "p95": 79.96786672156304
+      }
+    }
+  },
+  "capability_matrix": {
+    "modal-daemon": {
+      "coordinate_click": "one native request",
+      "coordinate_click_sequence": "four actions in one native batch request",
+      "command_transport": "argv"
+    },
+    "daytona": {
+      "coordinate_click": "one native request",
+      "coordinate_click_sequence": "four sequential requests",
+      "command_transport": "command_string"
+    },
+    "e2b": {
+      "coordinate_click": "one SDK call and two pinned-SDK transport requests",
+      "coordinate_click_sequence": "four SDK calls and eight pinned-SDK transport requests",
+      "command_transport": "command_string"
+    },
+    "tzafon": {
+      "coordinate_click": "one native coordinate-click request; no public move-only action",
+      "coordinate_click_sequence": "four actions in one native batch request",
+      "command_transport": "command_string"
+    }
+  },
+  "modal_optimized_results_ms": {
+    "screenshot_full": {
+      "p50": 39.21611400000069,
+      "p95": 41.28837549999904
+    },
+    "coordinate_click": {
+      "p50": 5.408914000000209,
+      "p95": 6.470640699998942
+    },
+    "coordinate_click_sequence": {
+      "p50": 9.554895499999105,
+      "p95": 12.619320050000127
+    },
+    "type_100_chars": {
+      "p50": 12.064886000000108,
+      "p95": 14.300997599999121
+    },
+    "type_1000_chars": {
+      "p50": 55.95530649999958,
+      "p95": 63.739842599999704
+    },
+    "command_nonlogin_shell_echo": {
+      "total": {
+        "p50": 13.44040599999996,
+        "p95": 21.373226949999502
+      },
+      "daemon": {
+        "p50": 8.822268499983466,
+        "p95": 13.412695649996916
+      },
+      "caller_transport_overhead": {
+        "p50": 4.610299499999471,
+        "p95": 8.175828649991686
+      }
+    }
+  },
+  "subprocess_runner_ab": {
+    "metric": "modal-colocated shell-command-echo-v2 milliseconds",
+    "iterations_per_arm": 10,
+    "asyncio": {
+      "raw_artifact_sha256": "a2cc11c190a9ad52e1f18ddf5f02efce5d03c839811b0be0d5cd40506b0f729b",
+      "safe_configuration_sha256": "fc74debcd3c71288759a08162737b8c9439996a7e8f685308e976f55e76b1e05",
+      "total": {
+        "p50": 55.91819900000017,
+        "p95": 248.67433339999985
+      },
+      "daemon": {
+        "p50": 49.79603150000145,
+        "p95": 242.13695620000345
+      },
+      "caller_transport_overhead": {
+        "p50": 6.166154999996287,
+        "p95": 6.9487461500019645
+      }
+    },
+    "threaded": {
+      "raw_artifact_sha256": "d6a77646894d558e36ce83e05a23923aa15f2c78b92a4ad43390ab7d267b4e1f",
+      "safe_configuration_sha256": "cc22335b8392b5f1cbb8748744f32d012ad250c517abc30fda8d822ad677aa6f",
+      "total": {
+        "p50": 9.665098499999747,
+        "p95": 10.836484250000167
+      },
+      "daemon": {
+        "p50": 5.343471000010425,
+        "p95": 6.168544999997039
+      },
+      "caller_transport_overhead": {
+        "p50": 4.370879500003255,
+        "p95": 5.22611419999679
+      }
+    },
+    "isolated-asyncio": {
+      "raw_artifact_sha256": "12e4376f2279817aa452e53090a0a95b4e6e6bae5e2964084e7fa7a8569f2f73",
+      "safe_configuration_sha256": "bcc5cd77192371aee418066bdf90c2b49923e044358b77ca5922da008bddc2ea",
+      "total": {
+        "p50": 9.856098000000202,
+        "p95": 10.631365050000152
+      },
+      "daemon": {
+        "p50": 6.6801245000007725,
+        "p95": 7.438896350002011
+      },
+      "caller_transport_overhead": {
+        "p50": 3.0740719999964305,
+        "p95": 3.5017403499972843
+      }
+    }
+  },
+  "verification": {
+    "provider_default_failures": 0,
+    "provider_default_successful_iterations_per_case": 3,
+    "provider_default_cursor_readback": "passed for all four providers",
+    "provider_default_typing_readback": "passed for all four providers",
+    "modal_optimized_failures": 0,
+    "modal_optimized_successful_iterations_per_case": 30,
+    "modal_optimized_cursor_readback": "passed",
+    "modal_optimized_typing_readback": "passed",
+    "subprocess_runner_ab_failures": 0,
+    "subprocess_runner_ab_successful_iterations_per_case": 10
+  },
+  "limitations": [
+    "Provider-default arms have three measured samples; the optimized arm has 30 and each subprocess A/B arm has 10.",
+    "Tzafon returned a 1280x720 JPEG after a 1024x768 request. A strict all-provider native 1280x720 JPEG comparison is impossible because not every provider exposes a native JPEG screenshot primitive at that resolution.",
+    "The coordinate benchmark compares one destination click. Tzafon supports that coordinate click but exposes no public move-only primitive.",
+    "The subprocess-runner A/B is a portable-shell ablation. It benefits command execution and other subprocess-backed compatibility paths, but not native XTest input, native Xlib window operations, MSS screenshots, or command runtime itself.",
+    "The three-arm subprocess A/B predates the process-group safety fix and is retained as directional event-loop evidence; final selected-runner latency is measured separately at the current source SHA.",
+    "The provider-default and optimized values are separate configurations. Ratios describe these runs, not a universal provider ranking."
+  ]
+}

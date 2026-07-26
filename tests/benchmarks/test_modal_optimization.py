@@ -1232,6 +1232,7 @@ def test_warm_action_uses_separate_connect_runner_and_retains_timeout() -> None:
             pass
 
     def runner(_config, **kwargs):
+        assert _config.subprocess_backend == "isolated-asyncio"
         runner_paths.append(kwargs["runner_path"])
         return {
             "surfaces": {

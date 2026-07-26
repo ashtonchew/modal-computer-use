@@ -193,10 +193,10 @@ def _type_readback_result_command() -> str:
     )
 
 def _expected_sequence_cursor_position() -> tuple[int, int]:
-    for action in reversed(core.MOVE_CLICK_SEQUENCE_ACTIONS):
-        if action["type"] == "move":
+    for action in reversed(core.COORDINATE_CLICK_SEQUENCE_ACTIONS):
+        if action["type"] == "click":
             return int(action["x"]), int(action["y"])
-    raise RuntimeError("move/click sequence did not include a move action")
+    raise RuntimeError("coordinate-click sequence did not include a click action")
 
 def _parse_xdotool_position(output: str) -> tuple[int, int] | None:
     values = _parse_key_value_output(output)

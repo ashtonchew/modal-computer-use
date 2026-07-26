@@ -57,6 +57,18 @@ from .state import new_run_id
 from .tracing import ComputerTrace
 
 
+def _add_subprocess_backend_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--subprocess-backend",
+        choices=["asyncio", "threaded", "isolated-asyncio"],
+        default="isolated-asyncio",
+        help=(
+            "daemon subprocess execution backend for created sandboxes; "
+            "defaults to isolated-asyncio"
+        ),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="computer-use")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -183,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to auto"
         ),
     )
+    _add_subprocess_backend_argument(sdk_parser)
     sdk_parser.add_argument("--image-profile", dest="image_profile")
     sdk_parser.add_argument("--image-variant", dest="image_profile")
     sdk_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -245,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             "generic",
             "daytona",
             "e2b",
+            "tzafon",
         ],
         help="provider to benchmark; may be passed more than once",
     )
@@ -293,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
     )
+    _add_subprocess_backend_argument(compare_parser)
     compare_parser.add_argument("--image-profile", dest="image_profile")
     compare_parser.add_argument("--image-variant", dest="image_profile")
     compare_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -370,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for the created benchmark sandbox; defaults to auto",
     )
+    _add_subprocess_backend_argument(ingress_ab_parser)
     ingress_ab_parser.add_argument("--image-profile", dest="image_profile")
     ingress_ab_parser.add_argument("--image-variant", dest="image_profile")
     ingress_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -428,6 +444,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for created benchmark sandboxes; defaults to auto",
     )
+    _add_subprocess_backend_argument(region_ab_parser)
     region_ab_parser.add_argument("--image-profile", dest="image_profile")
     region_ab_parser.add_argument("--image-variant", dest="image_profile")
     region_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -539,6 +556,7 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         help="daemon pointer input backend for the target benchmark sandbox; defaults to auto",
     )
+    _add_subprocess_backend_argument(colocated_parser)
     colocated_parser.add_argument("--image-profile", dest="image_profile")
     colocated_parser.add_argument("--image-variant", dest="image_profile")
     colocated_parser.add_argument("--iterations", type=_positive_int, default=5)
@@ -1409,6 +1427,7 @@ def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str,
         "browser": args.browser,
         "gpu": args.gpu,
         "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
+        "subprocess_backend": args.subprocess_backend,
         "image_profile": args.image_profile,
     }
 
@@ -1456,6 +1475,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 runner_cpu=args.runner_cpu,
                 runner_memory_mib=args.runner_memory_mib,
                 input_rate_limit_per_sec=args.input_rate_limit_per_sec,
+                subprocess_backend=args.subprocess_backend,
                 image_profile=args.image_profile,
                 surfaces=_modal_colocated_surfaces(args),
                 observation_cases=_modal_colocated_observation_cases(args),
@@ -1606,6 +1626,7 @@ def _modal_benchmark_config(
     config.resources.memory_mib = args.modal_memory_mib
     config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
     config.actions.input_backend = args.input_backend
+    config.actions.subprocess_backend = args.subprocess_backend
     if args.browser:
         config.browser = BrowserConfig(kind=args.browser, prewarm=False)
     return config
@@ -1677,7 +1698,7 @@ def _compare_providers(
         values.extend(args.provider)
     if not values:
         return list(DEFAULT_COMPARE_PROVIDERS)
-    allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b"}
+    allowed = set(DEFAULT_COMPARE_PROVIDERS) | {"modal-exec", "daytona", "e2b", "tzafon"}
     invalid = [provider for provider in values if provider not in allowed]
     if invalid:
         if parser is not None:
@@ -1687,7 +1708,7 @@ def _compare_providers(
 
 
 def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:
-    return any(provider in {"daytona", "e2b"} for provider in providers)
+    return any(provider in {"daytona", "e2b", "tzafon"} for provider in providers)
 
 
 def _load_benchmark_env_file(env_file: Path | None) -> None:
@@ -1709,6 +1730,8 @@ _BENCHMARK_ENV_KEYS = frozenset(
         "DAYTONA_SNAPSHOT",
         "E2B_API_KEY",
         "E2B_TEMPLATE",
+        "LIGHTCONE_BASE_URL",
+        "TZAFON_API_KEY",
     }
 )
 
@@ -1785,6 +1808,7 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
         "input_rate_limit_per_sec": getattr(args, "input_rate_limit_per_sec", None),
+        "subprocess_backend": getattr(args, "subprocess_backend", None),
         "image_profile": getattr(args, "image_profile", None),
         "provenance": benchmark_provenance(
             caller_path="external-caller",

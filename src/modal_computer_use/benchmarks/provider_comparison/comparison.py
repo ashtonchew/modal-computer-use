@@ -24,6 +24,7 @@ from .results import (
     dict_value,
     provider_not_measured,
 )
+from .tzafon import run_tzafon_provider
 
 ProviderMode = Literal["mock-local", "http", "provider-live"]
 
@@ -184,6 +185,13 @@ def run_provider(
                 "live E2B benchmarks are disabled in mock-local mode",
             )
         return run_e2b_provider(iterations=iterations, warmup_iterations=warmup_iterations)
+    if provider == "tzafon":
+        if mode == "mock-local":
+            return provider_not_measured(
+                provider,
+                "live Tzafon benchmarks are disabled in mock-local mode",
+            )
+        return run_tzafon_provider(iterations=iterations, warmup_iterations=warmup_iterations)
     return provider_not_measured(str(provider), "unknown provider")
 
 

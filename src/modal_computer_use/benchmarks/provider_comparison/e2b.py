@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 import os
+import shlex
 from typing import Any
 
-from ..constants import MOVE_CLICK_SEQUENCE_ACTIONS, PROVIDER_BENCHMARK_TEXT, TYPE_1000_CHARS_TEXT
+from ..constants import (
+    COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
+    COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+    COORDINATE_CLICK_SEQUENCE_ACTIONS,
+    MOVE_CLICK_SEQUENCE_ACTIONS,
+    PROVIDER_BENCHMARK_TEXT,
+    TYPE_1000_CHARS_TEXT,
+    coordinate_click_target,
+)
 from ..lifecycle import CleanupError
 from .live import (
     cleanup_provider_sandbox,
@@ -68,9 +78,12 @@ def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, An
             "screenshot_full",
             "move_click",
             "move_click_sequence",
+            "coordinate_click",
+            "coordinate_click_sequence",
             "type_100_chars",
             "type_1000_chars",
             "command_echo",
+            "command_nonlogin_shell_echo",
         ),
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -83,6 +96,7 @@ class E2BDriver:
         self._sandbox_cls = e2b_module.Sandbox
         self._template = template
         self._move_click_count = 0
+        self._coordinate_click_index = 0
 
     def create_lifecycle_session(self) -> Any:
         return self._create_sandbox()
@@ -122,6 +136,22 @@ class E2BDriver:
                 call_first_available(sandbox, ("left_click", "leftClick"))
         return {"action_count": len(MOVE_CLICK_SEQUENCE_ACTIONS)}
 
+    def coordinate_click(self, sandbox: Any) -> dict[str, Any]:
+        x, y = coordinate_click_target(self._coordinate_click_index)
+        self._coordinate_click_index += 1
+        call_first_available(sandbox, ("left_click", "leftClick"), x, y)
+        return _coordinate_click_result()
+
+    def coordinate_click_sequence(self, sandbox: Any) -> dict[str, Any]:
+        for action in COORDINATE_CLICK_SEQUENCE_ACTIONS:
+            call_first_available(
+                sandbox,
+                ("left_click", "leftClick"),
+                action["x"],
+                action["y"],
+            )
+        return _coordinate_click_sequence_result()
+
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         call_first_available(sandbox, ("write", "type"), PROVIDER_BENCHMARK_TEXT)
         return {"character_count": len(PROVIDER_BENCHMARK_TEXT), "method": "provider_default"}
@@ -137,14 +167,36 @@ class E2BDriver:
         run = getattr(commands, "run", None)
         if not callable(run):
             raise RuntimeError("E2B sandbox commands did not expose run")
-        try:
-            result = run("sh -lc 'printf 42'", timeout=30)
-        except TypeError:
-            result = run("sh -lc 'printf 42'")
+        result = run("sh -lc 'printf 42'", timeout=30)
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("E2B command exited nonzero")
         return {"exit_code": exit_code}
+
+    def command_nonlogin_shell_echo(self, sandbox: Any) -> dict[str, Any]:
+        commands = getattr(sandbox, "commands", None)
+        if commands is None:
+            raise RuntimeError("E2B sandbox did not expose commands")
+        run = getattr(commands, "run", None)
+        if not callable(run):
+            raise RuntimeError("E2B sandbox commands did not expose run")
+        command = shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND)
+        result = run(command, timeout=30)
+        exit_code = provider_exit_code(result)
+        if exit_code not in (None, 0):
+            raise RuntimeError("E2B command exited nonzero")
+        if provider_stdout(result).strip() != "42":
+            raise RuntimeError("E2B command output did not match the expected sentinel")
+        return {
+            "exit_code": exit_code,
+            "benchmark_semantics": COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
+            "shell_mode": "non_login",
+            "command": {
+                "argv": list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+                "timeout_seconds": 30,
+                "transport_shape": "command_string",
+            },
+        }
 
     def _create_sandbox(self) -> Any:
         create = self._sandbox_cls.create
@@ -194,3 +246,32 @@ class E2BDriver:
         if exit_code not in (None, 0):
             raise RuntimeError("provider readback command exited nonzero")
         return provider_stdout(result)
+
+
+def _coordinate_click_result() -> dict[str, Any]:
+    return {
+        "semantic": "coordinate_click",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": 1,
+        "provider_action_count": 1,
+        "provider_sdk_call_count": 1,
+        "transport_request_count": 2,
+        "request_count_source": "pinned_sdk_implementation",
+        "native_batch": False,
+        "batching": "single_sdk_call",
+    }
+
+
+def _coordinate_click_sequence_result() -> dict[str, Any]:
+    count = len(COORDINATE_CLICK_SEQUENCE_ACTIONS)
+    return {
+        "semantic": "coordinate_click_sequence",
+        "benchmark_semantics": COORDINATE_CLICK_BENCHMARK_SEMANTICS,
+        "logical_action_count": count,
+        "provider_action_count": count,
+        "provider_sdk_call_count": count,
+        "transport_request_count": count * 2,
+        "request_count_source": "pinned_sdk_implementation",
+        "native_batch": False,
+        "batching": "sequential_requests",
+    }

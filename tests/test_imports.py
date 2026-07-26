@@ -18,7 +18,7 @@ def test_cli_import_does_not_require_optional_provider_packages() -> None:
 import importlib.abc
 import sys
 
-blocked = {"modal", "openai", "anthropic", "daytona", "e2b_desktop"}
+blocked = {"modal", "openai", "anthropic", "daytona", "e2b_desktop", "tzafon"}
 
 class Blocker(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path, target=None):

@@ -111,6 +111,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         browser_launch_args=settings.browser_launch_args,
         browser_gpu_mode=settings.browser_gpu_mode,
         input_backend=settings.input_backend,
+        subprocess_backend=settings.subprocess_backend,
     )
     app.state.input_lock = asyncio.Lock()
     app.state.readiness_cache = ReadinessCache(settings.readiness_cache_ttl_ms)
