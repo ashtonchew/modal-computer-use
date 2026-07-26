@@ -450,8 +450,13 @@ wait for a keyframe.
 For one-shot turns evaluating first-visual-change without maintaining an observation stream, use
 `actions.run_and_observe_change_screenshot_bytes(...)` or
 `POST /v1/actions/run/observe-change/raw-screenshot`. With `change_signal="auto"`, the daemon uses
-XDamage as the paint signal when available, then captures one final binary screenshot. If XDamage is
-unavailable, or if callers set `change_signal="poll"`, the route falls back to source-hash polling.
+XDamage as a capture wake-up when available. It verifies captured pixels against the selected
+baseline. An unchanged wake-up does not report a change. The daemon waits again for the remaining
+deadline. The binary response contains the verified capture in the requested format and scale. If
+XDamage is unavailable, or if callers set `change_signal="poll"`, the route uses source-hash
+polling. Cursor-visible requests also use polling because cursor-only movement does not reliably
+emit XDamage. Detection uses full-resolution source pixels before response format, quality, or scale
+is applied.
 This route is intentionally a one-shot binary response, not a replacement for stream patch/delta
 state. It has the same Alpha semantic limitation: the first detected change is not settle or
 application readiness.

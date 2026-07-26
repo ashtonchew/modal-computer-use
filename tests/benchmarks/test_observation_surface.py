@@ -59,6 +59,82 @@ def test_daemon_observation_surface_rejects_unknown_case(monkeypatch) -> None:
         )
 
 
+def test_http_raw_first_change_case_excludes_unchanged_timeout_trials(monkeypatch) -> None:
+    observations = iter(
+        [
+            {
+                "size_bytes": 100,
+                "action_result": {"ok": True},
+                "change_result": {"detected": True, "timeout_reached": False},
+                "change_timing_ms": {"total_ms": 10.0},
+            },
+            {
+                "size_bytes": 100,
+                "action_result": {"ok": True},
+                "change_result": {"detected": False, "timeout_reached": True},
+                "change_timing_ms": {"total_ms": 100.0},
+            },
+        ]
+    )
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    monkeypatch.setattr(
+        observation_surface,
+        "_run_click_toggle_observe_change_http_raw",
+        lambda _client: next(observations),
+    )
+
+    result = observation_surface._run_observation_action_click_observe_change_http_raw_benchmark(
+        client=object(),  # type: ignore[arg-type]
+        iterations=2,
+        warmup_iterations=0,
+    )
+
+    assert result["status"] == "failed"
+    assert result["successful_iterations"] == 1
+    assert len(result["samples_ms"]) == 1
+    assert result["last_result"]["change_result"]["detected"] is True
+    assert result["failures"] == [
+        {
+            "case": "observation_action_click_observe_change_http_raw",
+            "phase": "measure",
+            "iteration": 1,
+            "type": "FirstChangedFrameNotObservedError",
+            "message": "first changed frame was not observed before the deadline",
+            "elapsed_ms": result["failures"][0]["elapsed_ms"],
+        }
+    ]
+
+
+def test_http_raw_first_change_case_rejects_failed_action_with_incidental_change(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(observation_surface, "_open_click_toggle_page", lambda _client: None)
+    monkeypatch.setattr(
+        observation_surface,
+        "_run_click_toggle_observe_change_http_raw",
+        lambda _client: {
+            "size_bytes": 100,
+            "action_result": {"ok": False},
+            "change_result": {"detected": True, "timeout_reached": False},
+            "change_timing_ms": {"total_ms": 10.0},
+        },
+    )
+
+    result = observation_surface._run_observation_action_click_observe_change_http_raw_benchmark(
+        client=object(),  # type: ignore[arg-type]
+        iterations=1,
+        warmup_iterations=0,
+    )
+
+    assert result["status"] == "failed"
+    assert result["successful_iterations"] == 0
+    assert result["samples_ms"] == []
+    assert result["failures"][0]["type"] == "FirstChangedFrameNotObservedError"
+    assert result["failures"][0]["message"] == (
+        "first changed frame action did not succeed"
+    )
+
+
 def test_transport_probe_setup_failure_returns_failed_case(monkeypatch) -> None:
     def fake_transport(*_args, **_kwargs):
         raise TimeoutError("timed out while waiting for handshake response")

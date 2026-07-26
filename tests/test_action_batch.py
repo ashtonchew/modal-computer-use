@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 from datetime import UTC, datetime
+from io import BytesIO
 
 import pytest
 from PIL import Image
 
-from modal_computer_use.daemon.desktop.screenshots import CapturedRawScreenshot
+from modal_computer_use.daemon.desktop.screenshots import (
+    CapturedRawScreenshot,
+    CapturedScreenshot,
+    encode_image,
+)
 from modal_computer_use.daemon.desktop.xtest import (
     X11InputInjectionError,
     X11InputStateConflictError,
@@ -547,13 +553,825 @@ def test_action_batch_observe_change_explicit_xdamage_preserves_unavailable_resu
         base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
     )
     assert response.status_code == 200
-    assert change_result["attempts"] == 0
+    assert change_result["attempts"] == 1
     assert change_result["change_signal_requested"] == "xdamage"
     assert change_result["change_signal_active"] == "xdamage"
     assert change_result["change_signal_available"] is False
     assert change_result["change_signal_detected"] is False
     assert change_result["change_signal_wait_ms"] == 1.25
     assert change_result["change_signal_reason"] == "XDamage extension unavailable"
+
+
+def test_action_batch_observe_change_xdamage_does_not_report_unchanged_pixels(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    unchanged = _raw_screenshot_bytes("white")
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                reason=None,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return unchanged
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": unchanged.sha256,
+            "change_timeout_ms": 1,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
+    )
+    assert response.status_code == 200
+    assert change_result["change_signal_detected"] is True
+    assert change_result["detected"] is False
+    assert change_result["timeout_reached"] is True
+    assert change_result["source_sha256"] == unchanged.sha256
+
+
+@pytest.mark.parametrize(
+    ("screenshot_options", "expected_format", "expected_size"),
+    [
+        ({"format": "png", "show_cursor": False}, "PNG", (8, 8)),
+        (
+            {"format": "jpeg", "quality": 80, "scale": 0.5, "show_cursor": False},
+            "JPEG",
+            (4, 4),
+        ),
+    ],
+)
+def test_action_batch_observe_change_returns_the_verified_changed_frame(
+    test_client,
+    app,
+    monkeypatch,
+    screenshot_options,
+    expected_format: str,
+    expected_size: tuple[int, int],
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before.sha256,
+            "screenshot_options": screenshot_options,
+            "change_timeout_ms": 25,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    with Image.open(BytesIO(response.content)) as returned_image:
+        returned_rgb = returned_image.convert("RGB")
+        assert returned_image.format == expected_format
+        assert returned_rgb.size == expected_size
+        assert max(returned_rgb.getpixel((0, 0))) <= 2
+    assert response.status_code == 200
+    assert change_result["detected"] is True
+    assert change_result["timeout_reached"] is False
+    assert change_result["attempts"] == 1
+    assert change_result["source_sha256"] == after.sha256
+
+
+def test_action_batch_observe_change_xdamage_waits_again_after_unchanged_event(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    captures = iter([before, after])
+    waits = iter([0.1, 0.2])
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=next(waits),
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 25,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert change_result["detected"] is True
+    assert change_result["timeout_reached"] is False
+    assert change_result["attempts"] == 2
+    assert change_result["change_signal_detected"] is True
+    assert change_result["change_signal_wait_ms"] == pytest.approx(0.3)
+    assert change_result["source_sha256"] == after.sha256
+
+
+def test_action_batch_observe_change_xdamage_uses_real_deadline_after_false_event(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    unchanged = _raw_screenshot_bytes("white")
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            self.calls = 0
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, timeout_ms: int):
+            self.calls += 1
+            if self.calls == 1:
+                return action_routes.XDamageWaitResult(
+                    available=True,
+                    detected=True,
+                    wait_ms=0.1,
+                    version="1.1",
+                )
+            import time
+
+            time.sleep(timeout_ms / 1000)
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=False,
+                wait_ms=float(timeout_ms),
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return unchanged
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": unchanged.sha256,
+            "change_timeout_ms": 5,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    action_result = json.loads(
+        base64.b64decode(response.headers["x-computer-use-action-result"]).decode("utf-8")
+    )
+    assert response.status_code == 200
+    assert action_result["ok"] is True
+    assert change_result["detected"] is False
+    assert change_result["timeout_reached"] is True
+    assert change_result["attempts"] == 2
+    assert change_result["change_signal_detected"] is True
+    assert change_result["source_sha256"] == unchanged.sha256
+
+
+@pytest.mark.parametrize("deadline_path", ["xdamage_signal", "xdamage_timeout", "poll"])
+def test_action_batch_observe_change_rejects_pixel_proof_completed_after_deadline(
+    test_client,
+    app,
+    monkeypatch,
+    deadline_path: str,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+
+    class ControlledClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=deadline_path == "xdamage_signal",
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    clock = ControlledClock()
+    original_capture = action_routes._capture_source_frame
+
+    async def capture_after_deadline(*args, **kwargs):
+        frame = await original_capture(*args, **kwargs)
+        clock.now = 0.006
+        return frame
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "perf_counter", clock)
+    monkeypatch.setattr(action_routes, "_capture_source_frame", capture_after_deadline)
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 5,
+            "change_signal": "poll" if deadline_path == "poll" else "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    with Image.open(BytesIO(response.content)) as returned_image:
+        assert returned_image.convert("RGB").getpixel((0, 0)) == (0, 0, 0)
+    assert response.status_code == 200
+    assert change_result["source_sha256"] == after.sha256
+    assert change_result["detected"] is False
+    assert change_result["timeout_reached"] is True
+
+
+def test_action_batch_observe_change_xdamage_captures_missing_baseline_before_action(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    captures = iter([before, after])
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return next(captures)
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "change_timeout_ms": 25,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert change_result["detected"] is True
+    assert change_result["baseline_source_sha256"] == before.sha256
+    assert change_result["source_sha256"] == after.sha256
+
+
+def test_action_batch_observe_change_region_returns_verified_full_frame(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    after = _raw_screenshot_bytes("black")
+    region = {"x": 0, "y": 0, "width": 4, "height": 4}
+    before_region_sha256 = sha256_bytes(Image.new("RGB", (4, 4), "white").tobytes())
+    after_region_sha256 = sha256_bytes(Image.new("RGB", (4, 4), "black").tobytes())
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before_region_sha256,
+            "change_detection": "region",
+            "change_detection_region": region,
+            "change_timeout_ms": 25,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    with Image.open(BytesIO(response.content)) as returned_image:
+        assert returned_image.size == (8, 8)
+        assert returned_image.convert("RGB").getpixel((7, 7)) == (0, 0, 0)
+    assert response.status_code == 200
+    assert change_result["detected"] is True
+    assert change_result["source_sha256"] == after_region_sha256
+
+
+def test_action_batch_observe_change_returns_cursor_visible_canonical_pixels(
+    test_client,
+    app,
+) -> None:
+    image = Image.new("RGB", (8, 8), "blue")
+    data = encode_image(image, "png", 100)
+    returned = CapturedScreenshot(
+        format="png",
+        width=8,
+        height=8,
+        data=data,
+        sha256=sha256_bytes(data),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=8,
+            desktop_height=8,
+            image_width=8,
+            image_height=8,
+        ),
+        cursor_visible=True,
+        capture_backend="test-cursor",
+    )
+
+    async def screenshot_bytes(options, *_args, **_kwargs):
+        assert options.format == "png"
+        assert options.scale == 1.0
+        assert options.show_cursor is True
+        return returned
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": "0" * 64,
+            "screenshot_options": {
+                "format": "jpeg",
+                "quality": 80,
+                "scale": 0.5,
+                "show_cursor": True,
+            },
+            "change_timeout_ms": 25,
+            "change_signal": "xdamage",
+        },
+    )
+
+    assert response.status_code == 200
+    with Image.open(BytesIO(response.content)) as returned_image:
+        assert returned_image.format == "JPEG"
+        assert returned_image.size == (4, 4)
+        assert returned_image.convert("RGB").getpixel((0, 0))[2] >= 250
+    assert response.headers["x-computer-use-capture-backend"] == "test-cursor"
+    assert _change_result(response)["detected"] is True
+
+
+@pytest.mark.parametrize("cpu_helper", ["regional_hash", "raw_encode"])
+def test_action_batch_observe_change_offloads_cpu_heavy_frame_work(
+    test_client,
+    app,
+    monkeypatch,
+    cpu_helper: str,
+) -> None:
+    after = _raw_screenshot_bytes("black")
+    event_loop_threads: list[int] = []
+    helper_threads: list[int] = []
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        event_loop_threads.append(threading.get_ident())
+        return after
+
+    request: dict[str, object] = {
+        "actions": [{"type": "move", "x": 10, "y": 20}],
+        "change_timeout_ms": 25,
+        "change_signal": "xdamage",
+    }
+    if cpu_helper == "regional_hash":
+        original_helper = action_routes._raw_detection_sha256
+
+        def record_helper_thread(*args, **kwargs):
+            helper_threads.append(threading.get_ident())
+            return original_helper(*args, **kwargs)
+
+        monkeypatch.setattr(action_routes, "_raw_detection_sha256", record_helper_thread)
+        request.update(
+            {
+                "previous_source_sha256": sha256_bytes(
+                    Image.new("RGB", (4, 4), "white").tobytes()
+                ),
+                "change_detection": "region",
+                "change_detection_region": {"x": 0, "y": 0, "width": 4, "height": 4},
+            }
+        )
+    else:
+        original_helper = action_routes._encode_verified_screenshot
+
+        def record_helper_thread(*args, **kwargs):
+            helper_threads.append(threading.get_ident())
+            return original_helper(*args, **kwargs)
+
+        monkeypatch.setattr(action_routes, "_encode_verified_screenshot", record_helper_thread)
+        request["previous_source_sha256"] = _raw_screenshot_bytes("white").sha256
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json=request,
+    )
+
+    assert response.status_code == 200
+    assert _change_result(response)["detected"] is True
+    assert len(event_loop_threads) == 1
+    assert len(helper_threads) == 1
+    assert helper_threads[0] != event_loop_threads[0]
+
+
+def test_action_batch_observe_change_deadline_ends_after_pixel_verification_before_encoding(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+
+    class ControlledClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    class FakeXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+
+        def arm(self) -> None:
+            pass
+
+        def wait(self, _timeout_ms: int):
+            return action_routes.XDamageWaitResult(
+                available=True,
+                detected=True,
+                wait_ms=0.1,
+                version="1.1",
+            )
+
+        def close(self) -> None:
+            pass
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return after
+
+    clock = ControlledClock()
+    original_encode = action_routes._encode_verified_screenshot
+
+    def encode_after_deadline(*args, **kwargs):
+        clock.now = 0.006
+        return original_encode(*args, **kwargs)
+
+    app.state.backend.display = ":99"
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    monkeypatch.setattr(action_routes, "perf_counter", clock)
+    monkeypatch.setattr(action_routes, "XDamageWatcher", FakeXDamageWatcher)
+    monkeypatch.setattr(action_routes, "_encode_verified_screenshot", encode_after_deadline)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": before.sha256,
+            "change_timeout_ms": 5,
+            "change_signal": "xdamage",
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert change_result["source_sha256"] == after.sha256
+    assert change_result["detected"] is True
+    assert change_result["timeout_reached"] is False
+
+
+@pytest.mark.parametrize("change_signal", ["poll", "auto", "xdamage"])
+def test_action_batch_observe_change_cursor_visible_uses_pixel_polling(
+    test_client,
+    app,
+    monkeypatch,
+    change_signal: str,
+) -> None:
+    watcher_instances: list[object] = []
+
+    class UnexpectedXDamageWatcher:
+        failure = None
+
+        def __init__(self, *, display: str) -> None:
+            self.display = display
+            watcher_instances.append(self)
+
+        def arm(self) -> None:
+            raise AssertionError("cursor-visible observation must not arm XDamage")
+
+        def wait(self, _timeout_ms: int):
+            raise AssertionError("cursor-visible observation must not wait for XDamage")
+
+        def close(self) -> None:
+            pass
+
+    app.state.backend.display = ":99"
+    monkeypatch.setattr(action_routes, "XDamageWatcher", UnexpectedXDamageWatcher)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 20, "y": 20}],
+            "screenshot_options": {"format": "png", "show_cursor": True},
+            "change_timeout_ms": 25,
+            "poll_interval_ms": 1,
+            "change_signal": change_signal,
+        },
+    )
+
+    change_result = _change_result(response)
+    assert response.status_code == 200
+    assert watcher_instances == []
+    assert change_result["detected"] is True
+    assert change_result["timeout_reached"] is False
+    assert change_result["change_signal_requested"] == change_signal
+    assert change_result["change_signal_active"] == "poll"
+    assert change_result["change_signal_detected"] is None
+    if change_signal == "poll":
+        assert change_result["change_signal_available"] is None
+        assert change_result["change_signal_reason"] is None
+    else:
+        assert change_result["change_signal_available"] is False
+        assert change_result["change_signal_reason"] == (
+            "cursor-visible screenshots require pixel polling"
+        )
+
+
+def test_action_batch_observe_change_uses_canonical_pixels_before_lossy_scaled_output(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    before = Image.new("RGB", (8, 8), "white")
+    after = before.copy()
+    after.putpixel((0, 0), (0, 0, 0))
+    canonical_frames = iter(
+        [_captured_test_screenshot(before), _captured_test_screenshot(after)]
+    )
+    requested_options: list[object] = []
+
+    class ControlledClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ControlledClock()
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return None
+
+    async def screenshot_bytes(options, *_args, **_kwargs):
+        requested_options.append(options)
+        frame = next(canonical_frames)
+        if len(requested_options) == 2:
+            clock.now = 0.004
+        return frame
+
+    original_encode = action_routes._encode_verified_screenshot
+
+    def encode_after_deadline(*args, **kwargs):
+        clock.now = 0.006
+        return original_encode(*args, **kwargs)
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+    monkeypatch.setattr(action_routes, "perf_counter", clock)
+    monkeypatch.setattr(action_routes, "_encode_verified_screenshot", encode_after_deadline)
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "screenshot_options": {
+                "format": "jpeg",
+                "quality": 1,
+                "scale": 0.125,
+                "show_cursor": False,
+            },
+            "change_timeout_ms": 5,
+            "poll_interval_ms": 1,
+            "change_signal": "poll",
+        },
+    )
+
+    change_result = _change_result(response)
+    with Image.open(BytesIO(response.content)) as returned_image:
+        assert returned_image.format == "JPEG"
+        assert returned_image.size == (1, 1)
+    assert response.status_code == 200
+    assert change_result["detected"] is True
+    assert change_result["timeout_reached"] is False
+    assert change_result["baseline_source_sha256"] == sha256_bytes(before.tobytes())
+    assert change_result["source_sha256"] == sha256_bytes(after.tobytes())
+    assert len(requested_options) == 2
+    assert all(option.format == "png" for option in requested_options)
+    assert all(option.scale == 1.0 for option in requested_options)
+    assert all(option.show_cursor is False for option in requested_options)
+
+
+def test_action_batch_observe_change_derives_response_from_verified_canonical_pixels(
+    test_client,
+    app,
+) -> None:
+    before = Image.new("RGB", (8, 8), "white")
+    after = Image.new("RGB", (8, 8), "blue")
+    canonical_after = _captured_test_screenshot(after)
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        return None
+
+    async def screenshot_bytes(options, *_args, **_kwargs):
+        assert options.format == "png"
+        assert options.scale == 1.0
+        return canonical_after
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    app.state.backend.screenshot_bytes = screenshot_bytes
+
+    response = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json={
+            "actions": [{"type": "move", "x": 10, "y": 20}],
+            "previous_source_sha256": sha256_bytes(before.tobytes()),
+            "screenshot_options": {"format": "png", "scale": 0.5, "show_cursor": False},
+            "change_timeout_ms": 25,
+            "change_signal": "poll",
+        },
+    )
+
+    with Image.open(BytesIO(response.content)) as returned_image:
+        assert returned_image.format == "PNG"
+        assert returned_image.size == (4, 4)
+        assert returned_image.convert("RGB").getpixel((0, 0)) == (0, 0, 255)
+    assert response.status_code == 200
+    assert response.headers["x-computer-use-capture-backend"] == "test-canonical"
+    assert _change_result(response)["source_sha256"] == sha256_bytes(after.tobytes())
 
 
 def test_type_action_failure_redacts_typed_text(test_client, app) -> None:
@@ -592,6 +1410,32 @@ def _raw_screenshot_bytes(color: str) -> CapturedRawScreenshot:
         cursor_visible=False,
         capture_backend="test-raw",
         timings_ms={"total_ms": 0.0},
+    )
+
+
+def _captured_test_screenshot(image: Image.Image) -> CapturedScreenshot:
+    data = encode_image(image, "png", 90)
+    return CapturedScreenshot(
+        format="png",
+        width=image.width,
+        height=image.height,
+        data=data,
+        sha256=sha256_bytes(data),
+        captured_at=datetime.now(UTC),
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=image.width,
+            desktop_height=image.height,
+            image_width=image.width,
+            image_height=image.height,
+        ),
+        cursor_visible=False,
+        capture_backend="test-canonical",
+    )
+
+
+def _change_result(response) -> dict[str, object]:
+    return json.loads(
+        base64.b64decode(response.headers["x-computer-use-change-result"]).decode("utf-8")
     )
 
 
