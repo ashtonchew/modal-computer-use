@@ -920,8 +920,7 @@ def validate_sanitized_modal_optimized_input(payload: dict[str, Any]) -> None:
     runner = _mapping(placement.get("runner"), "optimized runner placement")
     if (
         set(runner) != {"cloud", "region"}
-        or not isinstance(runner.get("cloud"), str)
-        or not runner.get("cloud")
+        or runner.get("cloud") != configuration.get("modal_cloud_provider")
         or runner.get("region") != "us-west-2"
         or placement.get("product_targets_verified") != 31
         or placement.get("warm_target_verified") is not True
@@ -1398,10 +1397,9 @@ def _validated_sanitized_provenance(payload: dict[str, Any]) -> dict[str, Any]:
 def _validate_sanitized_optimized_configuration(
     configuration: dict[str, Any], *, evidence_harness_sha: str
 ) -> None:
-    cloud_provider = configuration.get("modal_cloud_provider")
     expected = {
         "modal_region": "us-west-2",
-        "modal_cloud_provider": cloud_provider,
+        "modal_cloud_provider": "CLOUD_PROVIDER_AWS",
         "modal_runner_kind": "modal-function",
         "modal_ingress": "connect",
         "daemon_http_version": "1.1",
@@ -1422,8 +1420,6 @@ def _validate_sanitized_optimized_configuration(
     }
     if configuration != expected:
         raise ProviderResultsError("sanitized optimized configuration is not exact")
-    if not isinstance(cloud_provider, str) or not cloud_provider.strip():
-        raise ProviderResultsError("sanitized optimized placement requires an observed cloud")
 
 
 def _sample_quantiles(case: dict[str, Any]) -> tuple[float, float]:

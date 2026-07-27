@@ -115,7 +115,7 @@ uv run computer-use benchmark modal-optimized-provider \
   --browser chromium \
   --iterations 30 \
   --warmup-iterations 1 \
-  --output benchmark-results/modal-optimized.json
+  --output benchmark-results/modal-optimized-provider-2026-07-26.json
 ```
 
 This command runs one warmup and 30 fresh create-to-validated-screenshot samples, then uses a
@@ -157,7 +157,7 @@ uv run computer-use benchmark compare \
   --subprocess-backend isolated-asyncio \
   --iterations 3 \
   --env-file .env \
-  --output benchmark-results/candidates/provider-default.json
+  --output benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json
 ```
 
 Provider-default means the documented public SDK path and its default provider configuration.
@@ -205,7 +205,7 @@ uv run computer-use benchmark modal-colocated-client \
   --input-backend xtest \
   --subprocess-backend isolated-asyncio \
   --iterations 30 \
-  --output benchmark-results/modal-observation.json
+  --output benchmark-results/modal-observation-2026-07-26.json
 ```
 
 Sanitize the raw provider-default artifact before combining it. `current_reference` requires the
@@ -215,9 +215,9 @@ declared harness commit to equal `HEAD` and the tracked worktree to be clean:
 evidence_harness_sha="$(git rev-parse HEAD)"
 
 uv run python scripts/sanitize_provider_benchmark.py \
-  benchmark-results/candidates/provider-default.json \
-  benchmark-data/provider-default.json \
-  --raw-artifact-path benchmark-results/candidates/provider-default.json \
+  benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json \
+  benchmark-data/provider-compare-coordinate-command-2026-07-26.json \
+  --raw-artifact-path benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json \
   --harness-commit "$evidence_harness_sha" \
   --status current_reference \
   --scope "provider-default SDK paths, one warmup and three measured iterations"
@@ -229,10 +229,10 @@ screenshots, command output, and raw failure content:
 
 ```bash
 uv run python scripts/sanitize_modal_provider_inputs.py \
-  benchmark-results/modal-optimized.json \
-  benchmark-results/modal-observation.json \
-  benchmark-data/modal-optimized-provider.json \
-  benchmark-data/modal-observation.json \
+  benchmark-results/modal-optimized-provider-2026-07-26.json \
+  benchmark-results/modal-observation-2026-07-26.json \
+  benchmark-data/modal-optimized-provider-2026-07-26.json \
+  benchmark-data/modal-observation-2026-07-26.json \
   --evidence-harness-sha "$evidence_harness_sha"
 ```
 
@@ -247,16 +247,17 @@ policy treats as secrets.
 report_source_sha="$(git rev-parse HEAD)"
 
 uv run python scripts/sanitize_provider_results.py \
-  benchmark-data/provider-default.json \
-  benchmark-data/modal-optimized-provider.json \
-  benchmark-data/modal-observation.json \
-  benchmark-data/provider-results.json \
+  benchmark-data/provider-compare-coordinate-command-2026-07-26.json \
+  benchmark-data/modal-optimized-provider-2026-07-26.json \
+  benchmark-data/modal-observation-2026-07-26.json \
+  benchmark-data/provider-results-2026-07-26.json \
   --report-source-sha "$report_source_sha" \
   --evidence-harness-sha "$evidence_harness_sha"
 
 uv run computer-use benchmark provider-results \
-  benchmark-data/provider-results.json \
-  --format markdown
+  benchmark-data/provider-results-2026-07-26.json \
+  --format markdown \
+  --output docs/benchmark-results-2026-07-26-provider-results.md
 ```
 
 After generation, rerun all three sanitizer commands with `--check` to verify that the tracked

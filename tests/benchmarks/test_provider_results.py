@@ -513,6 +513,18 @@ def test_reporting_policy_keeps_small_sample_p95_machine_only() -> None:
             "configuration",
         ),
         (
+            lambda _p, o, _x: o["configuration"].update(
+                modal_cloud_provider="CLOUD_PROVIDER_GCP"
+            ),
+            "configuration",
+        ),
+        (
+            lambda _p, o, _x: o["placement"]["runner"].update(
+                cloud="CLOUD_PROVIDER_GCP"
+            ),
+            "placement",
+        ),
+        (
             lambda _p, _o, x: x["provenance"].update(evidence_harness_sha="a" * 40),
             "observation source",
         ),
