@@ -501,6 +501,11 @@ def main(argv: list[str] | None = None) -> int:
     colocated_parser.add_argument("--runner-cpu", type=float)
     colocated_parser.add_argument("--runner-memory-mib", type=int)
     colocated_parser.add_argument(
+        "--runner-only",
+        action="store_true",
+        help="measure selected runner paths without the external caller comparison",
+    )
+    colocated_parser.add_argument(
         "--surface",
         action="append",
         choices=list(MODAL_COLOCATED_ALLOWED_SURFACES),
@@ -1513,6 +1518,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 observation_cases=_modal_colocated_observation_cases(args),
                 runner_paths=_modal_colocated_runner_paths(args),
                 iterations=args.iterations,
+                include_external_caller=not args.runner_only,
             )
         )
     except ValueError as exc:

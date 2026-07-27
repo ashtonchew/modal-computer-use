@@ -213,6 +213,7 @@ def _optimized_artifact() -> dict[str, object]:
             "primary_runner_path": "connect",
             "runner_paths": ["connect"],
             "surfaces": ["daemon-http"],
+            "external_caller_included": False,
         },
         "runs": {"modal_colocated_runner": run},
     }
@@ -246,6 +247,7 @@ def _observation_artifact() -> dict[str, object]:
             "primary_runner_path": "connect",
             "runner_paths": ["connect"],
             "surfaces": ["daemon-observation-stream"],
+            "external_caller_included": False,
             "modal_region": "us-west-2",
             "modal_ingress": "connect",
             "daemon_http_version": "1.1",
@@ -355,6 +357,14 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
             "readback",
         ),
         (lambda _p, o, _x: o["metadata"].update(primary_runner_path="inherited"), "Connect"),
+        (
+            lambda _p, o, _x: o["metadata"].update(external_caller_included=True),
+            "runner-only",
+        ),
+        (
+            lambda _p, _o, x: x["metadata"].update(external_caller_included=True),
+            "runner-only",
+        ),
         (
             lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["surfaces"][
                 "daemon-observation-stream"
@@ -502,6 +512,33 @@ def test_builder_rejects_observation_outside_exact_topology() -> None:
         build_provider_results(
             _provider_artifact(),
             _optimized_artifact(),
+            observation,
+            input_sha256=("1" * 64, "2" * 64, "3" * 64),
+            source_sha=HARNESS_SHA,
+            expected_harness_commit=HARNESS_SHA,
+        )
+
+
+@pytest.mark.parametrize("artifact_name", ["optimized", "observation"])
+@pytest.mark.parametrize("contradiction", ["external_run", "comparison", "metadata_comparison"])
+def test_builder_rejects_structurally_external_runner_only_evidence(
+    artifact_name: str,
+    contradiction: str,
+) -> None:
+    optimized = _optimized_artifact()
+    observation = _observation_artifact()
+    artifact = optimized if artifact_name == "optimized" else observation
+    if contradiction == "external_run":
+        artifact["runs"]["external_caller"] = {"ok": True}
+    elif contradiction == "comparison":
+        artifact["comparison"] = {"ratio": 1.0}
+    else:
+        artifact["metadata"]["comparison"] = "external versus runner"
+
+    with pytest.raises(ProviderResultsError, match="runner-only"):
+        build_provider_results(
+            _provider_artifact(),
+            optimized,
             observation,
             input_sha256=("1" * 64, "2" * 64, "3" * 64),
             source_sha=HARNESS_SHA,

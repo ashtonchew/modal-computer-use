@@ -22,6 +22,10 @@ CLEANUP_BOUNDARY = (
     "are terminal in the producer, but this combined artifact does not independently "
     "prove cleanup beyond those recorded outcomes."
 )
+RUNNER_ONLY_BOUNDARY = (
+    "Modal optimized and experimental evidence measures only the selected same-region runner; "
+    "the unrelated external caller diagnostic is not executed or included."
+)
 
 _COLUMNS = (
     ("modal_optimized", "Modal optimized"),
@@ -149,6 +153,7 @@ def build_provider_results(
             "native_screenshot_caveat": NATIVE_SCREENSHOT_CAVEAT,
             "cleanup": CLEANUP_BOUNDARY,
             "tzafon_settle": OPAQUE_TZAFON_SETTLE_SENTENCE,
+            "runner_only_evidence": RUNNER_ONLY_BOUNDARY,
         },
         "sample_counts": {"provider_defaults": 3, "modal_optimized": 30, "experiment": 30},
     }
@@ -252,6 +257,7 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
         "native_screenshot_caveat": NATIVE_SCREENSHOT_CAVEAT,
         "cleanup": CLEANUP_BOUNDARY,
         "tzafon_settle": OPAQUE_TZAFON_SETTLE_SENTENCE,
+        "runner_only_evidence": RUNNER_ONLY_BOUNDARY,
     }
     if boundaries != expected_boundaries:
         raise ProviderResultsError("combined artifact boundaries are not exact")
@@ -294,6 +300,7 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
             "subprocess_backend": "isolated-asyncio",
             "measured_iterations": 30,
             "caller_topology": "separate same-region Modal runner",
+            "external_caller_included": False,
         },
         "provider_defaults": {
             "measured_iterations": 3,
@@ -366,6 +373,8 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
             "different caller topologies.",
             "",
             payload["boundaries"]["cleanup"],
+            "",
+            payload["boundaries"]["runner_only_evidence"],
             "",
         ]
     )
@@ -484,6 +493,23 @@ def _validate_provider_default_resources(value: Any) -> None:
             )
 
 
+def _validated_runner_only_runs(
+    payload: dict[str, Any], metadata: dict[str, Any], *, label: str
+) -> dict[str, Any]:
+    if metadata.get("external_caller_included") is not False:
+        raise ProviderResultsError(f"{label} evidence must be runner-only")
+    runs = _mapping(payload.get("runs"), f"{label} runs")
+    if (
+        "external_caller" in runs
+        or "comparison" in payload
+        or "comparison" in metadata
+    ):
+        raise ProviderResultsError(
+            f"{label} runner-only evidence cannot contain external comparison structure"
+        )
+    return runs
+
+
 def _validated_optimized_cases(
     payload: dict[str, Any], *, expected_harness_commit: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -497,8 +523,9 @@ def _validated_optimized_cases(
         raise ProviderResultsError("Modal optimized artifact must select only the Connect runner")
     if metadata.get("surfaces") != ["daemon-http"]:
         raise ProviderResultsError("Modal optimized artifact must select only daemon-http")
+    runs = _validated_runner_only_runs(payload, metadata, label="Modal optimized")
     run = _mapping(
-        _mapping(payload.get("runs"), "runs").get("modal_colocated_runner"), "optimized run"
+        runs.get("modal_colocated_runner"), "optimized run"
     )
     _require_ok(run, "Modal optimized runner")
     run_metadata = _mapping(run.get("metadata"), "optimized run metadata")
@@ -550,6 +577,7 @@ def _validated_optimized_cases(
         **expected,
         "measured_iterations": 30,
         "caller_topology": "separate same-region Modal runner",
+        "external_caller_included": False,
     }
 
 
@@ -566,6 +594,7 @@ def _validated_experiment(
         raise ProviderResultsError(
             "Modal observation experiment must select only the Connect runner"
         )
+    runs = _validated_runner_only_runs(payload, metadata, label="Modal observation")
     expected_topology = {
         "surfaces": ["daemon-observation-stream"],
         "modal_region": "us-west-2",
@@ -576,7 +605,7 @@ def _validated_experiment(
         if metadata.get(key) != value:
             raise ProviderResultsError(f"observation topology requires {key}={value!r}")
     run = _mapping(
-        _mapping(payload.get("runs"), "runs").get("modal_colocated_runner"), "observation run"
+        runs.get("modal_colocated_runner"), "observation run"
     )
     _require_ok(run, "Modal observation runner")
     if run.get("iterations") != 30:

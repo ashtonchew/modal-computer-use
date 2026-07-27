@@ -90,6 +90,7 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
     )
 
     assert result["ok"] is True
+    assert result["metadata"]["external_caller_included"] is True
     assert created["tags"] == {
         "benchmark": "modal-colocated-client",
         "benchmark_run_id": "modal_colocated_test",
@@ -125,6 +126,50 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
         "benchmark_run_id": "modal_colocated_test",
     }
     assert closed == ["terminate", "detach"]
+
+
+def test_modal_colocated_client_runner_only_omits_external_execution_and_failures() -> None:
+    class CreatedComputer:
+        _requested_modal_region = "us-west"
+        client = SimpleNamespace(
+            base_url="https://unused.example",
+            transport=SimpleNamespace(token="runner-token"),
+        )
+
+        def metadata(self):
+            return SimpleNamespace(sandbox_id="sb-target")
+
+        def terminate(self) -> None:
+            pass
+
+        def detach(self) -> None:
+            pass
+
+    runner = _surface_result(
+        transport_p50=12.0,
+        observation_p50=25.0,
+        environment={},
+        surfaces=["daemon-transport-floor"],
+    )
+
+    result = colocated.run_modal_colocated_client_benchmark(
+        replace(
+            _config(surfaces=["daemon-transport-floor"]),
+            include_external_caller=False,
+        ),
+        create_computer=lambda **_kwargs: CreatedComputer(),
+        surface_benchmark=lambda **_kwargs: pytest.fail("external caller must not execute"),
+        exec_once=lambda *_args, **_kwargs: _exec_result(runner, sandbox_id="sb-runner"),
+    )
+
+    assert result["ok"] is True
+    assert result["failures"] == []
+    assert result["metadata"]["external_caller_included"] is False
+    assert "comparison" not in result
+    assert "external_caller" not in result["runs"]
+    selected = result["runs"]["modal_colocated_runner"]
+    assert selected["ok"] is True
+    assert result["runs"]["modal_colocated_runner_paths"] == {"inherited": selected}
 
 
 def test_modal_colocated_client_runs_runner_path_matrix() -> None:

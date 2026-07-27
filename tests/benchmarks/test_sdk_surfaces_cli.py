@@ -805,6 +805,7 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
     assert exit_code == 0
     config = calls[0]
     assert config.name == "colocated"
+    assert config.include_external_caller is True
     assert config.modal_region == "us-west"
     assert config.surfaces == ["daemon-transport-floor", "daemon-observation-stream"]
     assert config.observation_cases == [
@@ -818,6 +819,31 @@ def test_benchmark_modal_colocated_client_compares_external_and_runner(
         "delta_ms": -18.0,
         "ratio_vs_external": 0.4,
     }
+
+
+def test_benchmark_modal_colocated_client_parses_runner_only(monkeypatch, capsys) -> None:
+    captured = {}
+
+    def fake_run(config):
+        captured["config"] = config
+        return {"ok": True, "benchmark": "modal-colocated-client", "failures": []}
+
+    monkeypatch.setattr(cli, "run_modal_colocated_client_benchmark", fake_run)
+
+    assert (
+        cli.main(
+            [
+                "benchmark",
+                "modal-colocated-client",
+                "--modal-region",
+                "us-west-2",
+                "--runner-only",
+            ]
+        )
+        == 0
+    )
+    assert captured["config"].include_external_caller is False
+    assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
 def test_benchmark_modal_colocated_client_observation_profile(monkeypatch, capsys) -> None:

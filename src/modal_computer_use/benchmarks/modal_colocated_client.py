@@ -61,6 +61,7 @@ class ModalColocatedClientBenchmarkConfig:
     observation_cases: list[str] | None
     runner_paths: list[ModalColocatedRunnerPath]
     iterations: int
+    include_external_caller: bool = True
 
 
 def run_modal_colocated_client_benchmark(
@@ -125,15 +126,17 @@ def run_modal_colocated_client_benchmark(
                 else None
             ),
         }
-        external_result = surface_benchmark(
-            surfaces=config.surfaces,
-            client=computer.client,
-            mode="http",
-            iterations=config.iterations,
-            base_url=computer.client.base_url,
-            environment_metadata=target_metadata,
-            observation_cases=config.observation_cases,
-        )
+        external_result = None
+        if config.include_external_caller:
+            external_result = surface_benchmark(
+                surfaces=config.surfaces,
+                client=computer.client,
+                mode="http",
+                iterations=config.iterations,
+                base_url=computer.client.base_url,
+                environment_metadata=target_metadata,
+                observation_cases=config.observation_cases,
+            )
         runner_results = run_modal_colocated_runner_paths(
             config,
             run_id=run_id,
@@ -144,15 +147,17 @@ def run_modal_colocated_client_benchmark(
         )
         primary_runner_path = config.runner_paths[0]
         colocated_result = runner_results[primary_runner_path]
-        comparison = modal_colocated_comparison(external_result, colocated_result)
-        if len(runner_results) > 1:
-            comparison["runner_paths"] = {
-                path: modal_colocated_comparison(external_result, result)
-                for path, result in runner_results.items()
-            }
-        return {
-            "ok": bool(external_result.get("ok"))
-            and all(bool(result.get("ok")) for result in runner_results.values()),
+        failures: list[dict[str, Any]] = [
+            failure
+            for result in runner_results.values()
+            for failure in result.get("failures", [])
+        ]
+        runs: dict[str, Any] = {
+            "modal_colocated_runner": colocated_result,
+            "modal_colocated_runner_paths": runner_results,
+        }
+        result: dict[str, Any] = {
+            "ok": all(bool(result.get("ok")) for result in runner_results.values()),
             "benchmark": "modal-colocated-client",
             "generated_at": datetime.now(UTC).isoformat(),
             "iterations": config.iterations,
@@ -165,23 +170,26 @@ def run_modal_colocated_client_benchmark(
                 "surfaces": config.surfaces,
                 "runner_paths": config.runner_paths,
                 "primary_runner_path": primary_runner_path,
-                "comparison": "external caller versus same-region Modal runner",
+                "external_caller_included": config.include_external_caller,
             },
-            "runs": {
-                "external_caller": external_result,
-                "modal_colocated_runner": colocated_result,
-                "modal_colocated_runner_paths": runner_results,
-            },
-            "comparison": comparison,
-            "failures": [
-                *external_result.get("failures", []),
-                *[
-                    failure
-                    for result in runner_results.values()
-                    for failure in result.get("failures", [])
-                ],
-            ],
+            "runs": runs,
+            "failures": failures,
         }
+        if external_result is not None:
+            comparison = modal_colocated_comparison(external_result, colocated_result)
+            if len(runner_results) > 1:
+                comparison["runner_paths"] = {
+                    path: modal_colocated_comparison(external_result, runner_result)
+                    for path, runner_result in runner_results.items()
+                }
+            result["ok"] = bool(external_result.get("ok")) and bool(result["ok"])
+            result["metadata"]["comparison"] = (
+                "external caller versus same-region Modal runner"
+            )
+            runs["external_caller"] = external_result
+            result["comparison"] = comparison
+            failures[:0] = external_result.get("failures", [])
+        return result
     finally:
         computer.terminate()
         computer.detach()
