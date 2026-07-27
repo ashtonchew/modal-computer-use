@@ -31,7 +31,7 @@ Configure the Sandbox through `ComputerConfig` and the creation arguments:
   `network.block_all` to Modal as `block_network`; it cannot be combined with any allowlist.
   Outbound allowlists restrict egress. The inbound CIDR allowlist restricts incoming tunnel and
   Connect traffic, not egress. All allowlists default to `None`; see
-  [Configuration](configuration.md#network-and-ingress) for the complete field contract.
+  [Configuration](configuration.md#network-and-ingress) for field definitions.
 - **Daemon ingress** defaults to an attested encrypted tunnel: Modal Connect authenticates the
   bootstrap request, then the daemon mints a short-lived bearer token for low-latency tunnel calls
   on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
@@ -61,7 +61,7 @@ revision="<full-git-sha>")` selects a revision-tagged standard, Firefox, or Chro
 from a clean commit to build and publish all three variants. Modal Image tags are mutable, so
 repository policy treats a full Git SHA tag as
 write-once. The publisher lists existing named Images, keeps existing target tags untouched, and
-publishes only missing variants. This makes retries safe after partial publication. Run one
+publishes only missing variants. A retry therefore publishes only variants still missing. Run one
 publisher at a time per Environment because the list and publish operations are not atomic.
 
 `modal.NetworkFileSystem` is intentionally unused. Persistent artifacts should use Modal Volumes
@@ -109,7 +109,7 @@ Existing sandboxes are checked against the requested config when their
 so incompatible desktop/runtime settings are not silently reused. Use
 `on_config_mismatch="reuse"` only for an intentional attach to the existing configuration.
 
-Attached metadata is limited to safe operational fields such as sandbox ID, app name, sandbox
+Attached metadata is limited to operational fields such as sandbox ID, app name, sandbox
 name, run ID, owner, creation time, config hash, tags, and artifact directory. Connect tokens are
 never stored there.
 
@@ -133,8 +133,8 @@ external fallback runner. The helper creates a fresh Connect Token and runs the 
 target's requested Modal region. For a target created by
 `ComputerSandbox.create()`, or reused through `attach_or_create()` with a matching config hash, the
 helper inherits `runtime.modal_region`; callers should specify the placement once in
-`ComputerConfig`. A conflicting explicit runner region raises `ConfigConflictError` rather than
-silently breaking co-location. A target attached by ID, name, URL, or a deliberately mismatched
+`ComputerConfig`. A conflicting explicit runner region raises `ConfigConflictError` and prevents
+the request. A target attached by ID, name, URL, or a deliberately mismatched
 config has unknown creation policy, so its runner still requires an explicit `modal_region`.
 
 The helper never guesses from the external caller's location or from the target's observed concrete
@@ -233,9 +233,9 @@ Use Connect Tokens or the attested tunnel default for daemon access, and treat r
 tokens as secrets.
 
 A Modal ASGI broker is a separate control-plane pattern. The broker may create, list, inspect, and
-terminate sessions, but it should return direct daemon or runner connection metadata instead of
-proxying screenshots and input actions. Proxying the hot path through the broker adds another
-network hop and hides the latency source. See the
+terminate sessions. It should return direct daemon or runner connection metadata and leave
+screenshots and input actions on the direct path. Proxying the hot path through the broker adds
+another network hop and hides the latency source. See the
 [session broker example](../examples/modal_session_broker.py) for a testable
 control-plane example based on Modal's ASGI, lifecycle, concurrency, and proxy-auth primitives.
 
@@ -287,6 +287,6 @@ visible through `Volume.read_file`. They restore snapshots with `snapshot_direct
 
 Use [Performance](performance.md) for placement, ingress, image, browser, and warm-capacity decision
 guidance. Use [Benchmarking](benchmarking.md) for reproducible commands, credentials, costs,
-cleanup, and reporting rules. The [current provider comparison](benchmark-results-2026-07-24-tzafon.md)
+cleanup, and reporting rules. The [current provider comparison](benchmark-results-2026-07-26-provider-results.md)
 records dated evidence and its measurement boundaries; do not treat those results as deployment
 defaults for a different caller or workload.

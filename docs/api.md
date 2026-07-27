@@ -205,7 +205,7 @@ existing target. This cleanup applies equally to Modal handles and direct `base_
 The readiness timeout remains the primary error if client cleanup also fails; only the cleanup
 exception type is attached as diagnostic context.
 
-Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available: sandbox ID,
+Attached `ComputerSandbox.metadata()` returns Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does
 not include connect tokens or noVNC URLs produced outside explicit debug helpers.
 
@@ -213,7 +213,7 @@ not include connect tokens or noVNC URLs produced outside explicit debug helpers
 find by run ID, terminate by sandbox ID, and inspect stale sandboxes for cleanup. It does not own
 prompts, provider policies, messages, or task loops.
 `cleanup_expired(ttl_seconds=..., owner=None, dry_run=True)` returns a `SandboxCleanupResult` with
-safe candidate, skipped, and error items. Missing or malformed creation timestamps are skipped;
+candidate, skipped, and error items. Missing or malformed creation timestamps are skipped;
 `dry_run=False` terminates only expired listed sandboxes with valid creation metadata.
 
 `ComputerSandbox.snapshot_directory(path)` and `ComputerSandbox.mount_image(path, image)` expose
@@ -230,7 +230,7 @@ Warm-pool browser validation raises `BrowserReadinessError`; first-frame validat
 `FrameValidationError`. These types remain compatible with `RuntimeError` and `ValueError`, so
 orchestration can distinguish expected candidate rejection from unrelated programming errors.
 
-The [Modal deployment guide](modal-deployment.md) owns configuration, image selection, attach and
+The [Modal deployment guide](modal-deployment.md) covers configuration, image selection, attach and
 recovery procedures, runner topology, warm capacity, persistent storage, and cleanup operations.
 
 ## Action, budget, and command contracts
@@ -254,7 +254,7 @@ Nested `hold_key` action trees are canonical only through `/v1/actions/run`; the
 Action budgets count attempted executable desktop actions after validation, including failed
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
 instead, and cursor-position queries do not consume the action budget. Successful action-route
-responses include safe timing metadata as `timing.daemon_ms`, measured inside the daemon for the
+responses include timing metadata as `timing.daemon_ms`, measured inside the daemon for the
 batch request. The timing object contains only elapsed milliseconds and no command strings,
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
 `actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a

@@ -1,6 +1,6 @@
 # Benchmark Data
 
-This directory contains tracked, sanitized, normalized benchmark references.
+This directory contains tracked benchmark references that have been sanitized and normalized.
 
 - Commit only artifacts that pass their repository validator and provenance gates.
 - Keep raw provider responses, credentials, preregistrations, rejected runs, and replay evidence in `benchmark-results/`.
@@ -17,7 +17,14 @@ This directory contains tracked, sanitized, normalized benchmark references.
 
 ## Combined provider report inputs
 
-The combined provider report uses this file flow:
+The current provider evidence is:
+
+- [`provider-compare-coordinate-command-2026-07-26.json`](provider-compare-coordinate-command-2026-07-26.json),
+  the sanitized provider-default input;
+- [`provider-results-2026-07-26.json`](provider-results-2026-07-26.json), the combined report
+  artifact.
+
+For a new run, use this file flow:
 
 | Role | Path | Tracking |
 | --- | --- | --- |
@@ -29,5 +36,9 @@ The combined provider report uses this file flow:
 
 Generate `provider-default.json` with `scripts/sanitize_provider_benchmark.py`. Generate
 `provider-results.json` with `scripts/sanitize_provider_results.py`; it binds all three inputs by
-SHA-256 and accepts only the eligible configuration and source revision. See
-[`docs/benchmarking.md`](../docs/benchmarking.md) for the complete commands and reporting policy.
+SHA-256 and records the evidence-harness and report-source revisions separately. See
+[`docs/benchmarking.md`](../docs/benchmarking.md) for the commands and reporting policy.
+
+Older tracked artifacts keep their original paths because reports, validators, and provenance
+records refer to them. Location does not indicate status. See the corresponding report's archive
+notice for its disposition.

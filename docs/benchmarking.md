@@ -1,7 +1,8 @@
 # Benchmarking
 
-This page owns the repository's general benchmark procedure and reporting policy. Dated reports own
-measured results. Experiment-specific methodology pages own any stricter gates for their experiment.
+This page defines the repository's general benchmark procedure and reporting policy. Dated reports
+contain measured results. Experiment-specific methodology pages add any stricter gates for their
+experiment.
 
 ## Choose a command
 
@@ -11,7 +12,7 @@ Run a credential-free release report against the in-process mock daemon:
 uv run computer-use benchmark report --mock-local --iterations 5
 ```
 
-Use `action-batch` for only the five-action batch versus separate-call comparison:
+Use `action-batch` to compare one five-action batch with five separate calls:
 
 ```bash
 uv run computer-use benchmark action-batch --mock-local --iterations 5
@@ -98,8 +99,8 @@ uv run computer-use benchmark modal-colocated-client \
   --output benchmark-results/modal-optimized.json
 ```
 
-First-visual-change measurements are experimental. They prove a hash-confirmed changed frame under
-the documented boundary, not application settle or semantic readiness. Read the
+First-visual-change measurements are experimental. They confirm a changed frame by its hash under
+the documented boundary. They do not measure application settle or semantic readiness. Read the
 [Alpha observation guide](experimental-visual-change-observation.md) before using that surface.
 
 ## Run the provider-default comparison
@@ -162,8 +163,8 @@ Before publishing an artifact:
 6. Regenerate with the validator's check mode when available so review detects drift.
 
 The combined provider report has stricter gates. Run all three measurements from the same clean,
-committed harness revision. The optimized command above produces its runner-only input. Produce the
-single-case observation input with:
+committed evidence-harness revision. The optimized command above produces its runner-only input.
+Produce the single-case observation input with:
 
 ```bash
 uv run computer-use benchmark modal-colocated-client \
@@ -196,9 +197,12 @@ uv run python scripts/sanitize_provider_benchmark.py \
   --scope "provider-default SDK paths, one warmup and three measured iterations"
 ```
 
-Generate the combined, secret-safe artifact. The generator verifies the exact provider list,
+Generate the combined artifact. The generator verifies the exact provider list,
 sample counts, runner-only topology, selected observation case, configuration, recorded failure
-outcomes, source revision, and absence of external comparison fields:
+outcomes, evidence-harness revision, report-source revision, and absence of external comparison
+fields. Generation requires the report-source revision to equal `HEAD`; later clean descendants can
+use `--check` against that immutable revision. The sanitizer also removes fields that repository
+policy treats as secrets.
 
 ```bash
 uv run python scripts/sanitize_provider_results.py \
@@ -206,15 +210,15 @@ uv run python scripts/sanitize_provider_results.py \
   benchmark-results/modal-optimized.json \
   benchmark-results/modal-observation.json \
   benchmark-data/provider-results.json \
-  --source-sha <full-source-sha> \
-  --expected-harness-commit <full-harness-sha>
+  --report-source-sha <full-report-source-sha> \
+  --evidence-harness-sha <full-evidence-harness-sha>
 
 uv run computer-use benchmark provider-results \
   benchmark-data/provider-results.json \
   --format markdown
 ```
 
-After generation, rerun both sanitizer commands with `--check` to prove that the tracked artifacts
+After generation, rerun both sanitizer commands with `--check` to verify that the tracked artifacts
 match their inputs. Keep the two raw Modal runner artifacts ignored; the combined artifact records
 their SHA-256 digests.
 
@@ -230,8 +234,8 @@ Apply this repository policy to human-facing tables:
   protocol explicitly permits replacement and reports it.
 - Keep exact raw observations in the linked artifact when they can be retained safely.
 
-The threshold of 20 is an editorial rule for this repository, not a claim that every 20-sample p95
-is stable. For small samples, percentile interpolation methods can produce materially different
+The threshold of 20 is an editorial rule for this repository. Twenty samples do not guarantee a
+stable p95. For small samples, percentile interpolation methods can produce materially different
 answers. The current benchmark implementation uses a zero-based fractional rank of
 `(percentile / 100) * (n - 1)` and linear interpolation between adjacent ordered observations. A
 dated artifact may retain that deterministic percentile for machine compatibility while the human
@@ -264,18 +268,19 @@ when practical, monitor the run, and inspect every provider console afterward.
 Treat cleanup failures as benchmark failures. Record them and check for leaked resources; do not
 hide cleanup time inside a lifecycle boundary unless the protocol explicitly measures it.
 
-Public-rate `cost_estimate` values are approximate context, not billing truth. Keep delayed Modal
-`billing_reconciliation` separate from the estimate. Billing rows can lag, cover full reporting
-intervals, omit unused tag keys, and include account adjustments outside the artifact. When several
-surfaces share one Sandbox, report one shared resource estimate unless a fair allocation is known.
+Public-rate `cost_estimate` values provide approximate context and do not replace billing data.
+Keep delayed Modal `billing_reconciliation` separate from the estimate. Billing rows can lag,
+cover full reporting intervals, omit unused tag keys, and include account adjustments outside the
+artifact. When several surfaces share one Sandbox, report one shared resource estimate unless a
+fair allocation is known.
 
 ## Find methodology and evidence
 
 - [Performance](performance.md) explains stable latency mechanisms.
-- [Modal V2 candidate methodology](modal-v2-candidate-benchmark.md) and
-  [optimized-frontier methodology](modal-optimized-frontier-benchmark.md) define stricter historical
-  experiment gates.
-- [Provider comparison report](benchmark-results-2026-07-24-tzafon.md) states its evidence status,
-  measurement boundaries, and provenance.
+- [Current provider results](benchmark-results-2026-07-26-provider-results.md) state their evidence
+  status, measurement boundaries, and provenance.
+- The archive retains the [Modal V2 candidate methodology](archive/benchmarks/modal-v2-candidate-benchmark.md)
+  and [optimized-frontier methodology](archive/benchmarks/modal-optimized-frontier-benchmark.md)
+  with their gated experiment results.
 - [Benchmark data policy](../benchmark-data/README.md) defines tracked artifact eligibility.
 - [Archive policy](archive/README.md) explains why evidence leaves the current set.

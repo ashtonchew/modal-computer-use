@@ -179,7 +179,7 @@ def test_documentation_map_links_each_current_top_level_doc_once() -> None:
     canonical = {
         path.resolve()
         for path in DOCS.glob("*.md")
-        if path.name != "README.md" and not path.name.startswith("benchmark-results-")
+        if path.name != "README.md"
     }
     linked = Counter()
     for target in _link_targets(DOC_MAP):

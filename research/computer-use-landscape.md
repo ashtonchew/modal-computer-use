@@ -55,6 +55,6 @@ Scrapybara and E2B Desktop are also close desktop-infrastructure competitors. Br
 run above these desktop primitives when a task needs DOM or accessibility data. Browser frameworks
 do not replace the full desktop surface for native applications or visual-only interfaces.
 
-The repository contains measured Daytona and E2B comparisons in
-[the retained provider benchmark](../docs/benchmark-results-2026-07-18-provider-default.md). Read that report
-before you make performance claims.
+The repository contains measured Modal, Daytona, E2B, and Tzafon comparisons in the
+[current provider report](../docs/benchmark-results-2026-07-26-provider-results.md). Read its
+measurement boundaries before making performance claims.

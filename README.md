@@ -4,8 +4,8 @@
 Python API covers mouse and keyboard input, screenshots, recordings, windows, artifacts, action
 batches, and optional provider adapters.
 
-The project is a daemon-first primitive layer, not an autonomous agent framework. Model loops
-belong in application code or examples.
+The project provides daemon-first control primitives. Autonomous agent orchestration and model
+loops stay in application code or examples.
 
 ## Install from source
 

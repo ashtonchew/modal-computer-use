@@ -1,5 +1,13 @@
 # Native X11 input benchmark, 2026-07-23
 
+> **Archive category:** Diagnostic  
+> **Date or revision:** 2026-07-23 to 2026-07-24  
+> **Question:** Did native XTest input reduce daemon execution time relative to the retained
+> `xdotool` adapter?  
+> **Disposition:** The report supported the native-input implementation and retains its exact A/B
+> context, including the dirty-worktree three-sample comparison. It is not the current
+> cross-provider reference.
+
 This benchmark validates the native X11 input implementation against the retained
 `xdotool` compatibility adapter. It was run from the same local checkout, caller, Modal profile,
 environment, image type, ingress, and benchmark contract for both arms.

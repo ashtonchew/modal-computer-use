@@ -1,5 +1,14 @@
 # Provider Benchmark Results, 2026-05-17
 
+> **Archive category:** Diagnostic  
+> **Date or revision:** 2026-05-17  
+> **Question:** How did the early Modal, Daytona, and E2B paths behave under the original
+> 10-iteration comparison?  
+> **Disposition:** The harness and measurement contracts predate the current provider report.
+> Preserve this report for ingress and payload-debugging context; use the
+> [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md) for current
+> evidence.
+
 > **Historical diagnostic.** The later
 > [2026-07-18 run](benchmark-results-2026-07-18.md) was rejected during review. Keep this report only for its original
 > ingress, payload-debugging, and 10-iteration context; do not combine its rows with current results.

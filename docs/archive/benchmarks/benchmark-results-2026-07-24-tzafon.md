@@ -1,6 +1,12 @@
 # Provider benchmark results, 2026-07-24
 
-This page is historical. See the [current provider results for 2026-07-26](benchmark-results-2026-07-26-provider-results.md).
+> **Archive category:** Superseded  
+> **Date or revision:** 2026-07-24  
+> **Question:** How did the first five-provider table compare provider-default paths with a
+> separately optimized Modal path?  
+> **Disposition:** The [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md)
+> replaces this table with exact-commit artifacts, the current hash-confirmed experiment, and the
+> small-sample display policy.
 
 ## Headline results
 
@@ -67,9 +73,9 @@ configured ingress; the other products use their public managed creation paths. 
 placement is recorded but not independently attested to a physical availability zone.
 
 The tracked provider source is
-[`benchmark-data/provider-compare-coordinate-command-2026-07-24.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-24.json).
+[`benchmark-data/provider-compare-coordinate-command-2026-07-24.json`](../../../benchmark-data/provider-compare-coordinate-command-2026-07-24.json).
 The prior compact context is
-[`benchmark-data/tzafon-coordinate-command-context-2026-07-24.json`](../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json).
+[`benchmark-data/tzafon-coordinate-command-context-2026-07-24.json`](../../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json).
 Raw artifacts remain ignored under `benchmark-results/candidates/`. The generated combined artifact
 binds each input digest and source/harness revision while excluding endpoints, resource and run
 identifiers, screenshot payloads, typed content, tokens, and raw failures.

@@ -1,9 +1,9 @@
 # Documentation Archive
 
-The archive preserves context. It does not define the current product contract, procedure, or
-benchmark result. Start at the [documentation map](../README.md) for maintained guidance.
+The archive preserves context. Current product contracts, procedures, and benchmark results remain
+in the maintained documentation. Start at the [documentation map](../README.md).
 
-Archive a document because of its status, not only its age:
+Archive status depends on evidence and relevance, not age alone:
 
 - **Superseded:** a named successor owns the current answer.
 - **Rejected:** review found a method, evidence, or eligibility failure that prevents the stated
@@ -34,3 +34,39 @@ in [benchmarking](../benchmarking.md). Machine-readable current evidence remains
   UV-first tooling revision. Specification v6 superseded it.
 - [Specification v6](spec/modal_computer_use_spec_v6.md) records the UV-first design before the
   active v7 contract.
+
+## Archived benchmarks
+
+Superseded reports:
+
+- [Provider-default reference, 2026-07-18](benchmarks/benchmark-results-2026-07-18-provider-default.md)
+  predates Tzafon and the current small-sample display policy.
+- [Tzafon provider comparison, 2026-07-24](benchmarks/benchmark-results-2026-07-24-tzafon.md)
+  predates the eligibility-gated combined artifact.
+
+Rejected reports:
+
+- [Provider benchmark diagnostic, 2026-07-18](benchmarks/benchmark-results-2026-07-18.md)
+  used asymmetric lifecycle and screenshot-payload boundaries.
+- [Modal optimized-frontier result, 2026-07-19](benchmarks/benchmark-results-2026-07-19-modal-optimized-frontier.md)
+  failed the clean pilot gate.
+
+Diagnostic reports:
+
+- [Early provider comparison, 2026-05-17](benchmarks/benchmark-results-2026-05-17.md)
+  retains ingress, payload, and 10-iteration context.
+- [Provider screenshot payload investigation, 2026-05-19](benchmarks/benchmark-results-2026-05-19.md)
+  explains format and byte-accounting differences.
+- [Modal V2 candidate result, 2026-07-19](benchmarks/benchmark-results-2026-07-19-modal-v2-candidate.md)
+  retains the placement-capability matrix that stopped performance sampling.
+- [Native X11 input result, 2026-07-23](benchmarks/benchmark-results-2026-07-23-native-x11-input.md)
+  records implementation-validation evidence.
+- [Fallback ownership result, 2026-07-24](benchmarks/benchmark-results-2026-07-24-fallback-ownership.md)
+  records cleanup and runner-path investigation.
+
+Historical protocols:
+
+- [Modal V2 candidate methodology](benchmarks/modal-v2-candidate-benchmark.md) defines the matched
+  placement and promotion gates used by its diagnostic result.
+- [Modal optimized-frontier methodology](benchmarks/modal-optimized-frontier-benchmark.md) defines
+  the asymmetric best-system protocol used by its rejected result.

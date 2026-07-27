@@ -1,7 +1,7 @@
 # Documentation
 
-Use this page to find the maintained answer for a task. Dated benchmark reports and specifications
-record evidence or design history; they do not replace the current guides.
+Use this page to find the maintained guide for a task. Dated benchmark reports record evidence, and
+specifications preserve design history.
 
 ## Start and operate
 
@@ -35,17 +35,14 @@ record evidence or design history; they do not replace the current guides.
 ## Benchmark
 
 - [Benchmarking](benchmarking.md): run benchmarks and interpret, retain, or publish their output.
-- [Provider comparison report](benchmark-results-2026-07-24-tzafon.md): provider-default and Modal
-  optimization evidence with its eligibility stated in the report.
-- [Native X11 input evidence](benchmark-results-2026-07-23-native-x11-input.md): implementation
-  validation for the native input path.
-- [Modal V2 candidate methodology](modal-v2-candidate-benchmark.md) and
-  [optimized-frontier methodology](modal-optimized-frontier-benchmark.md): experiment-specific
-  protocols and eligibility gates.
+- [Current provider results](benchmark-results-2026-07-26-provider-results.md): eligible
+  provider-default, Modal-optimized, and Modal-only experimental evidence.
+- [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
+  diagnostic, and historical reports and protocols.
 
-Dated reports own their evidence status, measurement boundaries, and provenance. Do not infer status
-from a filename or date. The [benchmark data policy](../benchmark-data/README.md) defines tracked
-artifact eligibility, and the [archive policy](archive/README.md) defines archive categories.
+Each dated report states its evidence status, measurement boundaries, and provenance. A filename or
+date alone does not indicate status. The [benchmark data policy](../benchmark-data/README.md) defines
+tracked artifact eligibility, and the [archive policy](archive/README.md) defines archive categories.
 
 ## Contribute and release
 

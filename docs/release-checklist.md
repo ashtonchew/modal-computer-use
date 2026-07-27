@@ -80,12 +80,13 @@ Confirm that:
   tests.
 - noVNC is off by default, and logs and examples do not expose tokens, noVNC URLs, typed or
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
-- GitHub private vulnerability reporting is enabled before `SECURITY.md` directs users to it.
+- Before a public release, GitHub private vulnerability reporting is enabled and the form linked
+  from `SECURITY.md` is tested without repository access.
 
 ## Protected Modal verification
 
 Run live tests only from a trusted developer machine or protected environment with Modal
-credentials. The complete protected v1 run is:
+credentials. The protected v1 run is:
 
 ```bash
 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
@@ -98,7 +99,7 @@ To run only the noVNC smoke:
 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest -m modal tests/test_modal_integration.py -q
 ```
 
-The GitHub Actions workflow exposes the complete run through `workflow_dispatch` with
+The GitHub Actions workflow exposes the same run through `workflow_dispatch` with
 `run_modal_smoke=true`. The protected `modal-smoke` environment must provide `MODAL_TOKEN_ID` and
 `MODAL_TOKEN_SECRET`; the job fails if either is missing. Use a restricted Modal service user, not
 a personal token.

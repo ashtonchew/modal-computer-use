@@ -571,13 +571,13 @@ Typing failures are redacted against the typed payload before they are included 
 For interpretation notes and one captured live run set, see:
 
 - [Current provider results, 2026-07-26](benchmark-results-2026-07-26-provider-results.md)
-- [Tzafon provider comparison, 2026-07-24](benchmark-results-2026-07-24-tzafon.md)
-- [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
-- [Provider-default benchmark reference, 2026-07-18](benchmark-results-2026-07-18-provider-default.md)
-- [Fallback ownership and current provider comparison, 2026-07-24](benchmark-results-2026-07-24-fallback-ownership.md)
-- [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
-- [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
-- [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
+- [Superseded Tzafon provider comparison, 2026-07-24](archive/benchmarks/benchmark-results-2026-07-24-tzafon.md)
+- [Native X11 input diagnostic, 2026-07-23](archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md)
+- [Superseded provider-default reference, 2026-07-18](archive/benchmarks/benchmark-results-2026-07-18-provider-default.md)
+- [Fallback ownership diagnostic, 2026-07-24](archive/benchmarks/benchmark-results-2026-07-24-fallback-ownership.md)
+- [Rejected provider benchmark diagnostic, 2026-07-18](archive/benchmarks/benchmark-results-2026-07-18.md)
+- [Early provider diagnostic, 2026-05-17](archive/benchmarks/benchmark-results-2026-05-17.md)
+- [Provider screenshot and visual diagnostic, 2026-05-19](archive/benchmarks/benchmark-results-2026-05-19.md)
 
 ## Benchmark action batching
 
@@ -930,7 +930,7 @@ rows retained daemon/client attribution:
 This is the optimized Modal column for the warm operation comparison, not a replacement for the
 provider-default baseline or for cold startup. The full table, including the dated Daytona/E2B
 reference and its non-contemporaneous caveat, is in
-[the 2026-07-18 provider benchmark results](benchmark-results-2026-07-18-provider-default.md#modal-optimized-configuration).
+[the 2026-07-18 provider benchmark results](archive/benchmarks/benchmark-results-2026-07-18-provider-default.md#modal-optimized-configuration).
 The compact machine-readable record is
 [`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
 
@@ -1102,15 +1102,15 @@ retry, and cleanup controls match. Pilot/full distributions report raw samples, 
 bootstrap confidence intervals, and ECDF-ready rows. Allocation throughput at concurrency 1, 5, and
 20 is a separate diagnostic; concurrency 50 requires an explicit capacity and cost gate.
 
-See [Modal V2 Candidate Benchmark Methodology](modal-v2-candidate-benchmark.md) and
-[Modal V2 Candidate Result, 2026-07-19](benchmark-results-2026-07-19-modal-v2-candidate.md).
+See the archived [Modal V2 candidate methodology](archive/benchmarks/modal-v2-candidate-benchmark.md)
+and [Modal V2 candidate result](archive/benchmarks/benchmark-results-2026-07-19-modal-v2-candidate.md).
 
 The separately preregistered follow-up compares each generation's fastest supported colocated path
 as a descriptive best-system experiment. It uses independent generation-matched runners and labels
 any V1/V2 quotient only as an `optimized-frontier-path-ratio`; the observed OCI/Azure placement
 asymmetry precludes a backend-causal interpretation. See
-[Modal Optimized-Frontier Benchmark Methodology](modal-optimized-frontier-benchmark.md) and
-[Modal Optimized-Frontier Result, 2026-07-19](benchmark-results-2026-07-19-modal-optimized-frontier.md).
+[Modal optimized-frontier methodology](archive/benchmarks/modal-optimized-frontier-benchmark.md)
+and [Modal optimized-frontier result](archive/benchmarks/benchmark-results-2026-07-19-modal-optimized-frontier.md).
 
 The corrected 2026-07-19 capability matrix was descriptive-only and stopped before measurement.
 Across `auto`, `aws`, `gcp`, and `oci` requests, all three V2 roles consistently landed on
