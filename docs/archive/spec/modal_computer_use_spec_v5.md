@@ -1,12 +1,17 @@
 # `modal-computer-use`: Daytona-style computer-use primitives on Modal
 
-> **Superseded by [modal_computer_use_spec_v6.md](modal_computer_use_spec_v6.md).** Kept for historical reference; do not edit.
+> **Archive category:** Superseded
+> **Date or revision:** 2026-05-11, v5
+> **Question:** How should the daemon-first Modal computer-use architecture incorporate the v4
+> implementation, API, and security review?
+> **Disposition:** [Specification v6](modal_computer_use_spec_v6.md) superseded this design with
+> UV-first tooling. Preserve the historical body; add corrections only as explicit notes.
 
-**Status:** implementation plan and technical specification  
-**Prepared:** 2026-05-11  
-**Revision:** v5, best-practice architecture and implementation patch after competitor/API/security review  
-**Recommended repository name:** `modal-computer-use`  
-**Recommended Python import name:** `modal_computer_use`  
+**Status:** implementation plan and technical specification
+**Prepared:** 2026-05-11
+**Revision:** v5, best-practice architecture and implementation patch after competitor/API/security review
+**Recommended repository name:** `modal-computer-use`
+**Recommended Python import name:** `modal_computer_use`
 **Alternative brand name:** `modal-compute-use`, though `modal-computer-use` better matches the accepted term used by Daytona, E2B, OpenAI, and Anthropic-style agent harnesses.
 
 **v5 delta:** this revision preserves the v4 daemon-first, primitive-first, Modal-native design, but applies the critique as concrete spec changes. v5 adds explicit liveness/readiness/version/capability endpoints; a local daemon/test mode; renamed and split public config models; a public `ComputerSandboxManager` instead of generic `SandboxManager`; stricter Connect Token and noVNC rules; a first-class coordinate-space model; provider-versioned OpenAI and Anthropic adapters; clipboard, browser, apps, windows, and stuck-input recovery primitives; artifact manifests with content hashes; an actionable trace/replay schema; budget controls; Volume sync semantics; compatibility fixtures; and a sharply scoped v0.1/v0.2/v1.0 roadmap.

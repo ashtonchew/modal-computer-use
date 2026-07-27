@@ -1,0 +1,455 @@
+{
+  "benchmark": "provider-results",
+  "boundaries": {
+    "cleanup": "Eligibility requires successful command and top-level outcomes. Cleanup errors are terminal in the producer, but this combined artifact does not independently prove cleanup beyond those recorded outcomes.",
+    "command": "The command case requests argv [\"sh\", \"-c\", \"printf '42\\n'\"] with non-login shell semantics and requires exit code 0 with exact stdout \"42\\n\".",
+    "lightcone_tzafon": "Lightcone is the computer infrastructure and public API; tzafon 2.44.1 is the pinned Python SDK package used for the Tzafon default column.",
+    "native_screenshot_caveat": "Full screenshots use each provider's native/default format and are not pixel- or codec-normalized.",
+    "product_create": "The lifecycle timer starts immediately before the public create call and ends after the first full-screen image is decoded, parsed, and validated. Cleanup is outside the timer.",
+    "runner_only_evidence": "Modal optimized and experimental evidence uses a Modal runner with the same requested Modal region as its target; the unrelated external caller diagnostic is not executed or included. Publishable optimized evidence separately requires every observed target cloud and region to match the runner.",
+    "tzafon_settle": "Tzafon settle semantics are opaque at this API boundary, so its action acknowledgement is not treated as equivalent to Modal\u2019s hash-confirmed first visual change.",
+    "warm_operations": "Warm-operation timers measure the selected public SDK or daemon request from the caller. They exclude target creation and cleanup."
+  },
+  "configuration": {
+    "modal_optimized": {
+      "browser": "chromium",
+      "browser_prewarm": false,
+      "caller_topology": "single Modal Function with the same requested Modal region",
+      "daemon_http_version": "1.1",
+      "external_caller_included": false,
+      "image_revision": "6b6a814f460c0d509ef2ebe797edb3b582573b63",
+      "input_rate_limit_per_sec": 0,
+      "measured_iterations": 30,
+      "modal_cloud_provider": "CLOUD_PROVIDER_AWS",
+      "modal_ingress": "connect",
+      "modal_region": "us-west-2",
+      "modal_runner_kind": "modal-function",
+      "observed_target_placement_match": true,
+      "runner_cpu": 4.0,
+      "runner_memory_mib": 8192,
+      "runner_startup_in_product_create_boundary": false,
+      "subprocess_backend": "isolated-asyncio",
+      "target_cpu": 4.0,
+      "target_memory_mib": 8192
+    },
+    "provider_defaults": {
+      "caller_topology": "external provider SDK caller",
+      "measured_iterations": 3
+    }
+  },
+  "evidence_date": "2026-07-26",
+  "experiment": {
+    "benchmark_semantics": "first-hash-confirmed-change-v1",
+    "case": "observation_action_click_observe_change_http_raw",
+    "change_timeout_ms": 200,
+    "eligibility": "30/30 successful actions with hash-confirmed changes and no replacement samples",
+    "experimental": true,
+    "iterations": 30,
+    "metric": "action_to_first_hash_confirmed_change_ms",
+    "p50_ms": 75.25425800000019,
+    "p95_ms": 88.78479595000036,
+    "provider": "Modal",
+    "replacement_samples": 0,
+    "successful_iterations": 30
+  },
+  "headline": {
+    "columns": [
+      "Modal optimized",
+      "Modal default",
+      "Daytona default",
+      "E2B default",
+      "Tzafon default"
+    ],
+    "rows": [
+      {
+        "case": "product_create_to_first_screenshot",
+        "label": "Product create to validated screenshot",
+        "values": {
+          "daytona": {
+            "max_ms": 10561.087917070836,
+            "min_ms": 10472.58495807182,
+            "p50_ms": 10549.673167057335,
+            "p95_ms": 10559.946442069486,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 2627.983457990922,
+            "min_ms": 1335.7678330503404,
+            "p50_ms": 1388.910457957536,
+            "p95_ms": 2504.0761579875834,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 10916.581292054616,
+            "min_ms": 7334.616082953289,
+            "p50_ms": 10101.33120790124,
+            "p95_ms": 10835.056283639278,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 65238.360806000004,
+            "min_ms": 8171.426558999997,
+            "p50_ms": 10246.355817500003,
+            "p95_ms": 17073.796791299985,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 316.2091670092195,
+            "min_ms": 277.03583298716694,
+            "p50_ms": 283.0262089846656,
+            "p95_ms": 312.89087120676413,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      },
+      {
+        "case": "screenshot_full",
+        "label": "Full screenshot native/default",
+        "values": {
+          "daytona": {
+            "max_ms": 609.1685410356149,
+            "min_ms": 574.1182920755818,
+            "p50_ms": 588.7419159989804,
+            "p95_ms": 607.1258785319515,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 201.1775840073824,
+            "min_ms": 190.51708292681724,
+            "p50_ms": 191.6965830605477,
+            "p95_ms": 200.22948391269892,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 127.4906659964472,
+            "min_ms": 126.10408291220665,
+            "p50_ms": 126.85620901174843,
+            "p95_ms": 127.42722029797733,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 34.83100599999034,
+            "min_ms": 18.704426999988755,
+            "p50_ms": 32.41596450004636,
+            "p95_ms": 34.71392835000984,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 139.28583299275488,
+            "min_ms": 106.47404205519706,
+            "p50_ms": 132.37583299633116,
+            "p95_ms": 138.5948329931125,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      },
+      {
+        "case": "coordinate_click",
+        "label": "One coordinate click",
+        "values": {
+          "daytona": {
+            "max_ms": 384.15908301249146,
+            "min_ms": 380.75708399992436,
+            "p50_ms": 381.63241697475314,
+            "p95_ms": 383.90641640871763,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 224.00350007228553,
+            "min_ms": 217.39258395973593,
+            "p50_ms": 221.14729089662433,
+            "p95_ms": 223.7178791547194,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 209.86945799086243,
+            "min_ms": 205.08712495211512,
+            "p50_ms": 209.0121670626104,
+            "p95_ms": 209.78372889803723,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 5.990438000026188,
+            "min_ms": 3.6712290000195935,
+            "p50_ms": 4.430036499996959,
+            "p95_ms": 5.064722250003228,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 157.76729094795883,
+            "min_ms": 153.2894589472562,
+            "p50_ms": 154.48587504215539,
+            "p95_ms": 157.43914935737848,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      },
+      {
+        "case": "coordinate_click_sequence",
+        "label": "Four coordinate clicks",
+        "values": {
+          "daytona": {
+            "max_ms": 1552.593290922232,
+            "min_ms": 1414.1155000543222,
+            "p50_ms": 1548.0020419927314,
+            "p95_ms": 1552.134166029282,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 912.6890000188723,
+            "min_ms": 886.7737499531358,
+            "p50_ms": 887.1934169437736,
+            "p95_ms": 910.1394417113625,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 228.8201249903068,
+            "min_ms": 225.29662493616343,
+            "p50_ms": 227.5567080359906,
+            "p95_ms": 228.69378329487517,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 8.797832000027483,
+            "min_ms": 6.038690000025326,
+            "p50_ms": 7.015278500034583,
+            "p95_ms": 8.4060055500089,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 483.22091600857675,
+            "min_ms": 465.5828749528155,
+            "p50_ms": 474.0043330239132,
+            "p95_ms": 482.2992577101104,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      },
+      {
+        "case": "type_100_chars",
+        "label": "Type 100",
+        "values": {
+          "daytona": {
+            "max_ms": 809.8858749726787,
+            "min_ms": 666.83533298783,
+            "p50_ms": 806.048458092846,
+            "p95_ms": 809.5021332846954,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 4117.333792033605,
+            "min_ms": 4080.0587499979883,
+            "p50_ms": 4104.686124948785,
+            "p95_ms": 4116.069025325123,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 254.24237502738833,
+            "min_ms": 248.40895901434124,
+            "p50_ms": 249.5703329332173,
+            "p95_ms": 253.77517081797123,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 11.38699899996709,
+            "min_ms": 9.162752999998247,
+            "p50_ms": 9.945586000014828,
+            "p95_ms": 10.622101750021784,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 116.69850000180304,
+            "min_ms": 105.05075007677078,
+            "p50_ms": 111.79920902941376,
+            "p95_ms": 116.20857090456411,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      },
+      {
+        "case": "type_1000_chars",
+        "label": "Type 1000",
+        "values": {
+          "daytona": {
+            "max_ms": 5540.475249988958,
+            "min_ms": 5395.29241702985,
+            "p50_ms": 5519.92395799607,
+            "p95_ms": 5538.420120789669,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 41426.718041999266,
+            "min_ms": 40867.35991691239,
+            "p50_ms": 41085.74570796918,
+            "p95_ms": 41392.62080859626,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 250.1653330400586,
+            "min_ms": 247.9942919453606,
+            "p50_ms": 248.08829196263105,
+            "p95_ms": 249.95762893231586,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 68.02468600000111,
+            "min_ms": 47.04533899996477,
+            "p50_ms": 49.583675500002755,
+            "p95_ms": 52.35128084997597,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 155.12408292852342,
+            "min_ms": 135.79383306205273,
+            "p50_ms": 145.77529090456665,
+            "p95_ms": 154.18920372612774,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      },
+      {
+        "case": "command_nonlogin_shell_echo",
+        "label": "Non-login shell command",
+        "values": {
+          "daytona": {
+            "max_ms": 290.6392909353599,
+            "min_ms": 286.1520419828594,
+            "p50_ms": 287.9742910154164,
+            "p95_ms": 290.37279094336554,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "e2b": {
+            "max_ms": 59.59449999500066,
+            "min_ms": 56.56287493184209,
+            "p50_ms": 59.175040922127664,
+            "p95_ms": 59.55255408771336,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal-daemon": {
+            "max_ms": 84.3114999588579,
+            "min_ms": 80.91345801949501,
+            "p50_ms": 83.89100001659244,
+            "p95_ms": 84.26944996463135,
+            "sample_count": 3,
+            "status": "measured"
+          },
+          "modal_optimized": {
+            "max_ms": 11.38604900000928,
+            "min_ms": 7.803241999965849,
+            "p50_ms": 8.978496999986874,
+            "p95_ms": 10.135554550015513,
+            "sample_count": 30,
+            "status": "measured"
+          },
+          "tzafon": {
+            "max_ms": 58.1317920004949,
+            "min_ms": 57.47100000735372,
+            "p50_ms": 58.028124971315265,
+            "p95_ms": 58.121425297576934,
+            "sample_count": 3,
+            "status": "measured"
+          }
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "evidence_harness_sha": "6b6a814f460c0d509ef2ebe797edb3b582573b63",
+    "inputs": [
+      {
+        "role": "sanitized_provider_defaults",
+        "sha256": "7a7fd1ff4b141f14d608e1ee3f2db558835f4e599082b8a3a818c445e408a161"
+      },
+      {
+        "role": "sanitized_modal_optimized",
+        "sha256": "e01db9f8aa38fbd46d206bff4b137ffc0c80cf0ce4f1a8b0204fbfc99ec8a5c2"
+      },
+      {
+        "role": "sanitized_modal_observation",
+        "sha256": "d1ac864a255a8941791701a2e5f30a72ec7f1a15b611bc98fdcc32805a1123b5"
+      }
+    ],
+    "minimum_eligible_evidence_sha": "e57ea35f04efdec4100ffa44196ee8599e9811b2",
+    "report_source_sha": "f5ba70404b4762e126e6b993f43e04ebc97b8a1e",
+    "safe_configuration_sha256": "1d7d4cd4d748c26ecb5cf25dc62ceddcd04c9ab299903161904475ce509f2da5"
+  },
+  "reporting_policy": {
+    "large_sample_display": "p50 / p95",
+    "p50_method": "statistics.median",
+    "p95_method": "linear interpolation on sorted values at rank 0.95*(n-1)",
+    "small_sample_display": "median [observed min\u2013max]",
+    "small_sample_threshold": 20
+  },
+  "request_topology": {
+    "daytona": {
+      "batching": "sequential_requests",
+      "provider_sdk_calls": 4,
+      "transport_requests": 4
+    },
+    "e2b": {
+      "batching": "sequential_requests",
+      "provider_sdk_calls": 4,
+      "transport_requests": 8
+    },
+    "modal-daemon": {
+      "batching": "single_request",
+      "provider_sdk_calls": 1,
+      "transport_requests": 1
+    },
+    "modal_optimized": {
+      "batching": "single_request",
+      "provider_sdk_calls": 1,
+      "transport_requests": 1
+    },
+    "tzafon": {
+      "batching": "single_request",
+      "provider_sdk_calls": 1,
+      "transport_requests": 1
+    }
+  },
+  "sample_counts": {
+    "experiment": 30,
+    "modal_optimized": 30,
+    "provider_defaults": 3
+  },
+  "schema_version": 4,
+  "status": "eligible",
+  "tracked_artifacts": {
+    "combined": "benchmark-data/provider-results-2026-07-26.json",
+    "modal_observation": "benchmark-data/modal-observation-2026-07-26.json",
+    "modal_optimized": "benchmark-data/modal-optimized-provider-2026-07-26.json",
+    "provider_defaults": "benchmark-data/provider-compare-coordinate-command-2026-07-26.json"
+  }
+}

@@ -24,6 +24,7 @@ class ProcessRunner(Protocol):
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]: ...
 
     def close(self) -> None: ...
@@ -41,6 +42,7 @@ class AsyncioProcessRunner:
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         if self._closed:
             raise RuntimeError("process runner is closed")
@@ -48,8 +50,8 @@ class AsyncioProcessRunner:
             *args,
             env=None if env is None else dict(env),
             stdin=asyncio.subprocess.PIPE if input_text is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE if capture_output else asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE if capture_output else asyncio.subprocess.DEVNULL,
             start_new_session=os.name == "posix",
         )
         self._processes.add(process)
@@ -148,6 +150,7 @@ class IsolatedAsyncioProcessRunner:
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         invocation = self._reserve()
 
@@ -159,6 +162,7 @@ class IsolatedAsyncioProcessRunner:
                 timeout,
                 input_text,
                 check,
+                capture_output,
             )
 
         try:
@@ -228,6 +232,7 @@ class IsolatedAsyncioProcessRunner:
         timeout: float,
         input_text: str | None,
         check: bool,
+        capture_output: bool,
     ) -> None:
         remote_runner = self._remote_runner
         if remote_runner is None:
@@ -241,6 +246,7 @@ class IsolatedAsyncioProcessRunner:
                 timeout=timeout,
                 input_text=input_text,
                 check=check,
+                capture_output=capture_output,
             )
         )
         invocation.attach(task)
@@ -329,6 +335,7 @@ class ThreadedProcessRunner:
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         owned = self._reserve()
         try:
@@ -340,6 +347,7 @@ class ThreadedProcessRunner:
                 timeout,
                 input_text,
                 check,
+                capture_output,
             )
         except BaseException:
             self._release(owned)
@@ -390,13 +398,14 @@ class ThreadedProcessRunner:
         timeout: float,
         input_text: str | None,
         check: bool,
+        capture_output: bool,
     ) -> subprocess.CompletedProcess[str]:
         process = self._popen_factory(
             args,
             env=env,
             stdin=subprocess.PIPE if input_text is not None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE if capture_output else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture_output else subprocess.DEVNULL,
             start_new_session=os.name == "posix",
         )
         owned.attach(process)
@@ -470,13 +479,13 @@ def _kill_process_group(process: Any) -> None:
 def _completed_result(
     args: tuple[str, ...],
     returncode: int | None,
-    stdout: bytes | str,
-    stderr: bytes | str,
+    stdout: bytes | str | None,
+    stderr: bytes | str | None,
     *,
     check: bool,
 ) -> subprocess.CompletedProcess[str]:
-    stdout_text = stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout
-    stderr_text = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr
+    stdout_text = stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout or ""
+    stderr_text = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr or ""
     completed = subprocess.CompletedProcess(
         args,
         0 if returncode is None else returncode,

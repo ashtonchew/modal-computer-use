@@ -1,5 +1,12 @@
 # Modal V2 Candidate Benchmark Methodology
 
+> **Archive category:** Historical
+> **Date or revision:** 2026-07-19 protocol
+> **Question:** How should V1 and V2 product, transport-matched, and private-network paths be gated
+> before measurement?
+> **Disposition:** The placement prerequisite failed for the associated run. Retain this protocol
+> with the descriptive capability result; no performance phase completed.
+
 This benchmark answers three separate questions without combining them into one provider ranking:
 
 1. What latency is available through Modal's public Sandbox product path?
@@ -74,7 +81,7 @@ Each primary sample is one independent target lifecycle:
 - `warm_action_to_frame_ms`: immediately before a correlated click on a persistent observation
   session until a matching first changed causal frame arrives in one binary envelope. This measures
   first visual response, not application settle or semantic readiness; see the
-  [Alpha observation contract](experimental-visual-change-observation.md).
+  [Alpha observation contract](../../experimental-visual-change-observation.md).
 
 The runner also verifies `/healthz`, `/readyz`, `/v1/version`, `/v1/capabilities`, browser identity,
 browser prewarm, frame geometry and format, action success, matching causal identifiers, visual

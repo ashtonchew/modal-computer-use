@@ -1,5 +1,13 @@
 # Provider Benchmark Current Reference, 2026-07-18
 
+> **Archive category:** Superseded
+> **Date or revision:** 2026-07-18; harness `74edc6317ea4bac61ef512d7a68060445cf42720`
+> **Question:** What did the neutral Modal, Daytona, and E2B default paths measure from one
+> external caller?
+> **Disposition:** The [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md)
+> replaces this reference with the five-provider table, current boundaries, and small-sample
+> display policy.
+
 This is the retained 2026-07-18 reference for the neutral `provider-default` SDK comparison. It
 measures each
 provider's on-demand product lifecycle and default warm action APIs from the same external caller.
@@ -114,7 +122,7 @@ Command echo is effectively flat against Daytona at p50 and has a noisy 278.9ms 
 an optimized Modal win.
 
 The compact evidence record is
-[`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
+[`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../../../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
 
 ## Startup Scope
 

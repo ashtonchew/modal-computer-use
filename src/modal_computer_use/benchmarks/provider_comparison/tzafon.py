@@ -7,6 +7,7 @@ from typing import Any
 
 from ..constants import (
     COMMAND_ECHO_COMMAND,
+    COMMAND_ECHO_STDOUT,
     COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
     COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
@@ -19,7 +20,7 @@ from ..constants import (
 from ..lifecycle import CleanupError
 from ..safety import _safe_url_origin
 from .live import run_product_provider_cases, wait_for_provider_screenshot_ready
-from .payloads import describe_screenshot_payload
+from .payloads import describe_screenshot_payload, validated_screenshot_size
 from .provider_sdk import (
     import_provider_module,
     package_version,
@@ -181,9 +182,7 @@ class TzafonDriver:
         _ensure_action_succeeded(result)
         inline_payload = _inline_screenshot_payload(result)
         payload = describe_screenshot_payload(inline_payload)
-        size_bytes = payload.get("decoded_size_bytes")
-        if not isinstance(size_bytes, int) or size_bytes <= 0:
-            raise RuntimeError("Tzafon screenshot did not contain valid inline image bytes")
+        size_bytes = validated_screenshot_size(payload, provider="Tzafon")
         width = payload.get("width")
         height = payload.get("height")
         if not isinstance(width, int) or width <= 0 or not isinstance(height, int) or height <= 0:
@@ -284,7 +283,7 @@ class TzafonDriver:
             shlex.join(COMMAND_ECHO_COMMAND),
             timeout=30,
         )
-        if provider_stdout(result).strip() != "42":
+        if provider_stdout(result) != COMMAND_ECHO_STDOUT:
             raise RuntimeError("Tzafon command output did not match the expected sentinel")
         return {"exit_code": provider_exit_code(result)}
 
@@ -294,7 +293,7 @@ class TzafonDriver:
             shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
             timeout=30,
         )
-        if provider_stdout(result).strip() != "42":
+        if provider_stdout(result) != COMMAND_ECHO_STDOUT:
             raise RuntimeError("Tzafon command output did not match the expected sentinel")
         return {
             "exit_code": provider_exit_code(result),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,6 +19,9 @@ def _run_daemon_http_surface(
     iterations: int,
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
+    typing_method: str,
+    typing_delay_ms: int,
+    before_action_iteration: Callable[[], None] | None,
 ) -> dict[str, Any]:
     ingress = _daemon_ingress_metadata(
         mode=mode,
@@ -30,12 +34,14 @@ def _run_daemon_http_surface(
             "daemon HTTP benchmark surface requires --mock-local or --base-url",
         )
     browser_status = _safe_browser_status_metadata(client)
+    pace = before_action_iteration or (lambda: None)
     action_batch = core.run_action_batch_benchmark(
         client=client,
         mode="mock-local" if mode == "mock-local" else "http",
         iterations=iterations,
         base_url=base_url,
         warmup_iterations=warmup_iterations,
+        before_iteration=pace,
     )
     cases = {
         "action_batch": core._report_action_batch(action_batch),
@@ -58,36 +64,52 @@ def _run_daemon_http_surface(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            before_iteration=pace,
         ),
         "click_then_screenshot": core.run_click_then_screenshot_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            before_iteration=pace,
         ),
         "move_click_sequence": core.run_move_click_sequence_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            before_iteration=pace,
         ),
         "coordinate_click": core.run_coordinate_click_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            before_iteration=pace,
         ),
         "coordinate_click_sequence": core.run_coordinate_click_sequence_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            before_iteration=pace,
         ),
         "type_100_chars": core.run_type_100_chars_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            method=typing_method,
+            delay_ms=typing_delay_ms,
+            before_iteration=pace,
         ),
         "type_1000_chars": core.run_type_1000_chars_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            method=typing_method,
+            delay_ms=typing_delay_ms,
+            timeout_ms=(
+                None
+                if typing_method == "auto" and typing_delay_ms == 10
+                else core.TYPE_1000_CHARS_TIMEOUT_MS
+            ),
+            before_iteration=pace,
         ),
         "command_echo": core.run_command_echo_benchmark(
             client=client,

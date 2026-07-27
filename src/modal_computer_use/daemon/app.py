@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from modal_computer_use import __version__
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.auth import AuthMiddleware
 from modal_computer_use.daemon.budget_policy import BudgetPolicy
@@ -98,7 +99,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     configure_logging()
     settings = settings or get_settings()
-    app = FastAPI(title="modal-computer-use daemon", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(
+        title="modal-computer-use daemon",
+        version=__version__,
+        lifespan=lifespan,
+    )
     app.state.settings = settings
     app.state.supervisor = Supervisor(settings)
     app.state.backend = choose_backend(

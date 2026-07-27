@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +11,7 @@ from PIL import Image
 
 from modal_computer_use import cli
 from modal_computer_use.benchmark_comparison import run_provider_comparison
-from modal_computer_use.benchmarks import daemon_surface
+from modal_computer_use.benchmarks import daemon_surface, measurement
 from modal_computer_use.benchmarks import lifecycle as benchmark_lifecycle
 from modal_computer_use.benchmarks.provider_comparison import (
     comparison,
@@ -19,6 +21,7 @@ from modal_computer_use.benchmarks.provider_comparison import (
     provider_sdk,
     results,
 )
+from modal_computer_use.daemon import budget_policy
 
 
 def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
@@ -42,6 +45,16 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     )
     assert payload["providers"]["modal-daemon"]["cases"]["command_echo"]["status"] == "ok"
     assert payload["providers"]["modal-daemon"]["cases"]["screenshot_full"]["status"] == "ok"
+    assert payload["providers"]["modal-daemon"]["cases"]["type_100_chars"]["request"] == {
+        "character_count": 100,
+        "method": "auto",
+        "delay_ms": 10,
+    }
+    assert payload["providers"]["modal-daemon"]["cases"]["type_1000_chars"]["request"] == {
+        "character_count": 1000,
+        "method": "auto",
+        "delay_ms": 10,
+    }
     coordinate_click = payload["providers"]["modal-daemon"]["cases"]["coordinate_click"]
     coordinate_sequence = payload["providers"]["modal-daemon"]["cases"][
         "coordinate_click_sequence"
@@ -209,6 +222,177 @@ def test_provider_compare_subprocess_backend_reaches_created_modal_config(
     assert "benchmark-secret-token" not in captured.out
 
 
+def test_provider_compare_created_modal_uses_public_computer_config_defaults(
+    monkeypatch, capsys
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_created_modal_comparison(args, **kwargs):
+        seen["config"] = cli._modal_benchmark_config(args, run_id="compare-defaults")
+        seen["environment"] = cli._benchmark_environment_metadata(args)
+        return {
+            "ok": True,
+            "benchmark": "provider-compare",
+            "metadata": {"environment": seen["environment"]},
+            "providers": {},
+            "failures": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_benchmark_compare_created_modal_sandbox",
+        fake_created_modal_comparison,
+    )
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "modal-daemon",
+            "--create-modal-sandbox",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    config = seen["config"]
+    defaults = cli.ComputerConfig(run_id="compare-defaults")
+    assert config.resources == defaults.resources
+    assert config.browser == defaults.browser
+    assert config.actions.input_rate_limit_per_sec == 20
+    assert seen["environment"]["resource_profile"] == "standard"
+    assert seen["environment"]["browser"] is None
+    assert seen["environment"]["input_rate_limit_per_sec"] == 20
+    assert seen["environment"]["action_case_pacing_ms"] == 1050
+    capsys.readouterr()
+
+
+def test_provider_compare_custom_rate_disables_default_pacing_metadata(
+    monkeypatch, capsys
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_created_modal_comparison(args, **kwargs):
+        del kwargs
+        seen.update(cli._benchmark_environment_metadata(args))
+        return {
+            "ok": True,
+            "benchmark": "provider-compare",
+            "metadata": {"environment": dict(seen)},
+            "providers": {},
+            "failures": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_benchmark_compare_created_modal_sandbox",
+        fake_created_modal_comparison,
+    )
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "modal-daemon",
+            "--create-modal-sandbox",
+            "--input-rate-limit-per-sec",
+            "0",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen["input_rate_limit_per_sec"] == 0
+    assert seen["action_case_pacing_ms"] is None
+    capsys.readouterr()
+
+
+def test_live_modal_provider_paces_action_cases_outside_case_timers(monkeypatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(comparison.time, "sleep", sleeps.append)
+
+    payload = cli._with_mock_local_client(
+        lambda client: comparison.run_provider(
+            "modal-daemon",
+            client=client,
+            mode="http",
+            base_url="http://testserver",
+            iterations=3,
+            warmup_iterations=1,
+            sandbox_exec_runner=None,
+            sandbox_exec_setup_failure=None,
+            environment_metadata={"action_case_pacing_ms": 1050},
+            modal_action_pacing_seconds=1.05,
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert sleeps == [1.05] * 36
+    assert "timeout_ms" not in payload["cases"]["type_100_chars"]["request"]
+    assert "timeout_ms" not in payload["cases"]["type_1000_chars"]["request"]
+
+
+def test_modal_default_pacing_drains_real_rate_window_outside_samples(monkeypatch) -> None:
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(budget_policy.time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(measurement.time, "perf_counter", lambda: clock.now)
+    state = SimpleNamespace(
+        settings=SimpleNamespace(
+            input_rate_limit_per_sec=20,
+            max_actions=None,
+            max_idle_seconds=None,
+        ),
+        action_count=0,
+        action_rate_window=deque(),
+        last_activity_at=0.0,
+    )
+    policy = budget_policy.BudgetPolicy(state)
+
+    def pace() -> None:
+        clock.now += 1.05
+
+    def eight_action_sequence() -> dict[str, str]:
+        for _ in range(8):
+            policy.reserve_action()
+            clock.now += 0.001
+        return {"status": "ok"}
+
+    failures: list[dict[str, object]] = []
+    samples, _ = measurement._measure_observed_case(
+        name="coordinate_click_sequence",
+        iterations=3,
+        warmup_iterations=1,
+        operation=eight_action_sequence,
+        failures=failures,
+        before_iteration=pace,
+    )
+
+    assert failures == []
+    assert samples == pytest.approx([8.0, 8.0, 8.0])
+    assert max(samples) < 1000
+
+
+def test_provider_default_documented_command_omits_modal_tuning() -> None:
+    command = (
+        Path("docs/benchmarking.md")
+        .read_text(encoding="utf-8")
+        .split("## Run the provider-default comparison", 1)[1]
+        .split("Provider-default means", 1)[0]
+    )
+
+    for option in (
+        "--browser",
+        "--resource-profile",
+        "--input-rate-limit-per-sec",
+        "--subprocess-backend",
+    ):
+        assert option not in command
+
+
 def test_provider_compare_env_file_whitelists_tzafon_key(
     monkeypatch, tmp_path
 ) -> None:
@@ -245,7 +429,9 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
 
         class Screenshot:
             def take_full_screen(self):
-                return b"png"
+                buffer = BytesIO()
+                Image.new("RGB", (2, 3), color="red").save(buffer, format="PNG")
+                return buffer.getvalue()
 
         mouse = Mouse()
         keyboard = Keyboard()
@@ -262,7 +448,7 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
 
         class Process:
             def exec(self, command, timeout=30):
-                return {"exit_code": 0, "stdout": "42"}
+                return {"exit_code": 0, "stdout": "42\n"}
 
         process = Process()
 
@@ -306,7 +492,7 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
     assert command_case["benchmark_semantics"] == "shell-command-echo-v2"
     assert command_case["shell_mode"] == "non_login"
     assert command_case["command"] == {
-        "argv": ["sh", "-c", "printf 42"],
+        "argv": ["sh", "-c", "printf '42\\n'"],
         "timeout_seconds": 30,
         "transport_shape": "command_string",
     }
@@ -345,10 +531,14 @@ def test_created_modal_comparison_collects_one_cold_sample_per_iteration(monkeyp
     def fake_create(*args, **kwargs):
         computer = FakeComputer(len(computers))
         computers.append(computer)
-        return computer, {"modal_cold_create_to_ready_ms": 1000.0 + computer.index}
+        return computer, {
+            "modal_cold_create_to_ready_ms": 1000.0 + computer.index,
+            "action_case_pacing_ms": 1050,
+        }
 
     def fake_run_provider_comparison(**kwargs):
         seen_metadata.update(kwargs["environment_metadata"])
+        assert kwargs["modal_action_pacing_seconds"] == 1.05
         assert kwargs["client"] is computers[-1].client
         assert [computer.terminate_calls for computer in computers] == [1, 1, 1, 0]
         assert [computer.detach_calls for computer in computers] == [1, 1, 1, 0]
@@ -728,6 +918,22 @@ def test_provider_payload_metadata_distinguishes_base64_transport_from_png_bytes
     assert metadata["format"] == "png"
     assert metadata["width"] == 2
     assert metadata["height"] == 3
+
+
+def test_provider_payload_rejects_image_with_truncated_pixel_data() -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (64, 64), color="red").save(buffer, format="PNG")
+    truncated_png = buffer.getvalue()[:64]
+
+    with pytest.raises(ValueError, match="fully decoded"):
+        payloads.describe_screenshot_payload(truncated_png)
+
+
+def test_provider_screenshot_validation_rejects_non_image_text() -> None:
+    metadata = payloads.describe_screenshot_payload("not-an-image")
+
+    with pytest.raises(RuntimeError, match="decoded image"):
+        payloads.validated_screenshot_size(metadata, provider="Example")
 
 
 def test_modal_product_readiness_rejects_partial_sample_metadata() -> None:

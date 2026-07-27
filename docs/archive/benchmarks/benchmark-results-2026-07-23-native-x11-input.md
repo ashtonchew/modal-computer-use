@@ -1,5 +1,13 @@
 # Native X11 input benchmark, 2026-07-23
 
+> **Archive category:** Diagnostic
+> **Date or revision:** 2026-07-23 to 2026-07-24
+> **Question:** Did native XTest input reduce daemon execution time relative to the retained
+> `xdotool` adapter?
+> **Disposition:** The report supported the native-input implementation and retains its exact A/B
+> context, including the dirty-worktree three-sample comparison. It is not the current
+> cross-provider reference.
+
 This benchmark validates the native X11 input implementation against the retained
 `xdotool` compatibility adapter. It was run from the same local checkout, caller, Modal profile,
 environment, image type, ingress, and benchmark contract for both arms.
@@ -94,6 +102,10 @@ report remains ignored at
 compact artifact.
 
 ## Optimized action-to-frame and availability harness, 2026-07-24
+
+The 34.6 / 51.0 ms action-observation result in this section is historical,
+pre-hash-verification evidence. It remains recorded with its original label and is not eligible for
+the current Modal-only experimental result.
 
 The provider-default comparison below measures every provider through its public SDK from the local
 macOS caller. It is intentionally neutral, but it is not Modal's optimized production shape. The

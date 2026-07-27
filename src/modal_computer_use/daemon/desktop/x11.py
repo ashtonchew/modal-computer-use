@@ -265,11 +265,11 @@ class DesktopBackend(ABC):
 
     async def run_command(self, command: Sequence[str], timeout: float = 30.0) -> ActionResult:
         stdout = (
-            "42"
+            "42\n"
             if tuple(command)
             in {
-                ("sh", "-c", "printf 42"),
-                ("sh", "-lc", "printf 42"),
+                ("sh", "-c", "printf '42\\n'"),
+                ("sh", "-lc", "printf '42\\n'"),
             }
             else ""
         )
@@ -723,6 +723,7 @@ class X11DesktopBackend(MockDesktopBackend):
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["DISPLAY"] = self.display
@@ -732,6 +733,7 @@ class X11DesktopBackend(MockDesktopBackend):
             timeout=timeout,
             input_text=input_text,
             check=check,
+            capture_output=capture_output,
         )
 
     async def _spawn(self, *args: str) -> subprocess.Popen[str]:

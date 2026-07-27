@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import shlex
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
@@ -10,6 +11,8 @@ from PIL import Image
 
 from modal_computer_use.benchmark_comparison import run_provider_comparison
 from modal_computer_use.benchmarks.constants import (
+    COMMAND_ECHO_COMMAND,
+    COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     PROVIDER_BENCHMARK_TEXT,
     TYPE_1000_CHARS_TEXT,
 )
@@ -29,7 +32,10 @@ class FakeExec:
 
     def sync(self, computer_id: str, *, command: str, timeout_seconds: int) -> Any:
         self.calls.append((computer_id, command, timeout_seconds))
-        if "printf 42" in command:
+        if command in {
+            shlex.join(COMMAND_ECHO_COMMAND),
+            shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
+        }:
             stdout = "42\n"
         elif "getmouselocation" in command or "XQueryPointer" in command:
             stdout = "X=16\nY=128\n"
@@ -231,7 +237,7 @@ def test_tzafon_screenshot_rejects_non_inline_screenshot_url() -> None:
         FakeComputers(screenshot_data="https://secret.invalid/screenshot?token=must-not-leak")
     )
 
-    with pytest.raises(RuntimeError, match="valid inline image bytes"):
+    with pytest.raises(RuntimeError, match="fully decoded image"):
         driver.screenshot_full("computer-1")
 
 
@@ -361,7 +367,7 @@ def test_tzafon_command_echo_uses_exec_sync() -> None:
 
     assert driver.command_echo("computer-1") == {"exit_code": 0}
     assert computers.exec.calls == [
-        ("computer-1", "sh -lc 'printf 42'", 30),
+        ("computer-1", "sh -lc 'printf '\"'\"'42\\n'\"'\"''", 30),
     ]
 
 
@@ -371,14 +377,14 @@ def test_tzafon_canonical_command_uses_nonlogin_shell_with_honest_metadata() -> 
     result = driver.command_nonlogin_shell_echo("computer-1")
 
     assert computers.exec.calls == [
-        ("computer-1", "sh -c 'printf 42'", 30),
+        ("computer-1", "sh -c 'printf '\"'\"'42\\n'\"'\"''", 30),
     ]
     assert result == {
         "exit_code": 0,
         "benchmark_semantics": "shell-command-echo-v2",
         "shell_mode": "non_login",
         "command": {
-            "argv": ["sh", "-c", "printf 42"],
+            "argv": ["sh", "-c", "printf '42\\n'"],
             "timeout_seconds": 30,
             "transport_shape": "command_string",
         },

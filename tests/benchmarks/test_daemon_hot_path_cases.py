@@ -35,7 +35,7 @@ def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_she
             return {
                 "ok": True,
                 "elapsed_ms": 12.5,
-                "output": {"returncode": 0, "stdout": "42"},
+                "output": {"returncode": 0, "stdout": "42\n"},
             }
 
     client = TimedClient()
@@ -54,12 +54,12 @@ def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_she
         list(COMMAND_ECHO_COMMAND),
         list(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
     ]
-    assert legacy["command"]["argv"] == ["sh", "-lc", "printf 42"]
+    assert legacy["command"]["argv"] == ["sh", "-lc", "printf '42\\n'"]
     assert legacy["shell_mode"] == "login"
     assert legacy["daemon_samples_ms"] == [12.5]
     assert legacy["attribution"]["status"] == "measured"
     assert canonical["command"] == {
-        "argv": ["sh", "-c", "printf 42"],
+        "argv": ["sh", "-c", "printf '42\\n'"],
         "timeout_seconds": 30,
         "transport_shape": "argv",
     }
@@ -72,8 +72,11 @@ def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_she
 @pytest.mark.parametrize(
     "output",
     [
-        {"returncode": 7, "stdout": "42"},
+        {"returncode": 7, "stdout": "42\n"},
         {"returncode": 0, "stdout": "wrong"},
+        {"returncode": 0, "stdout": "42"},
+        {"returncode": 0, "stdout": " 42"},
+        {"returncode": 0, "stdout": "42 "},
         {"returncode": 0},
     ],
 )
@@ -129,6 +132,7 @@ def test_type_100_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
         "delay_ms": 0,
     }
     assert payload["daemon_samples_ms"] == [12.5]
+    assert payload["resolved_methods"] == ["keystrokes"]
     assert payload["attribution"]["status"] == "measured"
     serialized = json.dumps(payload)
     assert TYPING_BENCHMARK_TEXT not in serialized
@@ -230,6 +234,7 @@ def test_type_1000_chars_benchmark_uses_safe_metadata_and_attribution() -> None:
         "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
     }
     assert payload["daemon_samples_ms"] == [125.0]
+    assert payload["resolved_methods"] == ["keystrokes"]
     assert payload["attribution"]["status"] == "measured"
     serialized = json.dumps(payload)
     assert TYPE_1000_CHARS_TEXT not in serialized

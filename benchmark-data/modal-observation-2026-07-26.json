@@ -1,0 +1,93 @@
+{
+  "benchmark": "sanitized-modal-observation",
+  "case": {
+    "benchmark_semantics": "first-hash-confirmed-change-v1",
+    "change_timeout_ms": 200,
+    "experimental": true,
+    "input_backend": "xtest",
+    "input_backends": null,
+    "iterations": 30,
+    "metric": "action_to_first_hash_confirmed_change_ms",
+    "replacement_samples": 0,
+    "resolved_methods": null,
+    "samples_ms": [
+      74.36518999999997,
+      79.83858299999991,
+      75.23915300000006,
+      89.96771500000023,
+      72.41808900000012,
+      70.54583099999957,
+      90.13401899999974,
+      75.26936300000031,
+      70.57567100000028,
+      87.33900600000055,
+      82.13008999999971,
+      72.255234,
+      73.20863899999975,
+      73.86203600000042,
+      68.44781499999985,
+      78.43194500000017,
+      71.55201600000005,
+      78.50076700000042,
+      71.8894540000008,
+      68.92095900000061,
+      75.27311199999964,
+      85.52021000000032,
+      72.01245999999983,
+      76.60707900000041,
+      83.35606400000017,
+      69.76687199999887,
+      81.9087869999997,
+      72.52235200000001,
+      78.57397999999982,
+      80.61006199999987
+    ],
+    "shell_mode": null,
+    "status": "ok",
+    "successful_iterations": 30,
+    "summary_ms": {
+      "max": 90.13401899999974,
+      "min": 68.44781499999985,
+      "p50": 75.25425800000019,
+      "p95": 88.78479595000036
+    }
+  },
+  "cleanup": {
+    "status": "not_recorded_in_source"
+  },
+  "configuration": {
+    "browser": "chromium",
+    "caller_topology": "Modal runner and target with the same requested Modal region",
+    "daemon_http_version": "1.1",
+    "external_caller_included": false,
+    "input_rate_limit_per_sec": 0,
+    "modal_ingress": "connect",
+    "modal_region": "us-west-2",
+    "primary_runner_path": "connect",
+    "runner_paths": [
+      "connect"
+    ],
+    "subprocess_backend": "isolated-asyncio",
+    "surface": "daemon-observation-stream"
+  },
+  "placement": {
+    "observed_match": "not_recorded_in_source",
+    "requested_runner_region": "us-west-2",
+    "requested_target_region": "us-west-2"
+  },
+  "provenance": {
+    "evidence_harness_sha": "6b6a814f460c0d509ef2ebe797edb3b582573b63",
+    "raw_sha256": "b1d62cfda8f8a2dc30c906dba35a926f85d1a15baf863c2bf4f4d2a552b06c8c"
+  },
+  "schema_version": 1,
+  "status": "eligible",
+  "success_attestation": {
+    "artifact_ok": true,
+    "failures": 0,
+    "last_action_ok": true,
+    "last_change_detected": true,
+    "last_hashes_distinct": true,
+    "last_timeout_reached": false,
+    "runner_ok": true
+  }
+}

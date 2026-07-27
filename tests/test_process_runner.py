@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -51,6 +52,65 @@ def test_process_runner_preserves_argv_env_stdin_and_output(runner_kind: str) ->
     assert result.returncode == 0
     assert result.stdout == "argv-ok:stdin-ok"
     assert result.stderr == "stderr"
+
+
+@pytest.mark.parametrize("runner_kind", ["asyncio", "threaded", "isolated-asyncio"])
+def test_process_runner_can_avoid_capturing_child_output(runner_kind: str) -> None:
+    runners = {
+        "asyncio": AsyncioProcessRunner,
+        "threaded": lambda: ThreadedProcessRunner(max_workers=1, max_pending=1),
+        "isolated-asyncio": lambda: IsolatedAsyncioProcessRunner(max_active=2),
+    }
+    runner = runners[runner_kind]()
+
+    async def exercise() -> subprocess.CompletedProcess[str]:
+        return await runner.run(
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.write('stdout'); sys.stderr.write('stderr')",
+            capture_output=False,
+        )
+
+    try:
+        result = asyncio.run(exercise())
+    finally:
+        runner.close()
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+@pytest.mark.skipif(os.name != "posix", reason="fork inheritance is POSIX-specific")
+@pytest.mark.parametrize("runner_kind", ["asyncio", "threaded", "isolated-asyncio"])
+def test_discarded_output_does_not_wait_for_daemon_child(runner_kind: str) -> None:
+    runners = {
+        "asyncio": AsyncioProcessRunner,
+        "threaded": lambda: ThreadedProcessRunner(max_workers=1, max_pending=1),
+        "isolated-asyncio": lambda: IsolatedAsyncioProcessRunner(max_active=2),
+    }
+    runner = runners[runner_kind]()
+
+    async def exercise() -> subprocess.CompletedProcess[str]:
+        return await runner.run(
+            sys.executable,
+            "-c",
+            (
+                "import os, time; child = os.fork(); "
+                "time.sleep(0.75) if child == 0 else None; "
+                "os._exit(0) if child == 0 else None"
+            ),
+            capture_output=False,
+        )
+
+    started = time.perf_counter()
+    try:
+        result = asyncio.run(exercise())
+    finally:
+        runner.close()
+
+    assert result.returncode == 0
+    assert time.perf_counter() - started < 0.5
 
 
 @pytest.mark.parametrize("runner_kind", ["asyncio", "threaded", "isolated-asyncio"])
@@ -339,8 +399,9 @@ class _ControlledRemoteRunner:
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        del env, timeout, input_text, check
+        del env, timeout, input_text, check, capture_output
         self.started.set()
         try:
             await asyncio.Future()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from ..client import DaemonClient
@@ -109,6 +110,7 @@ def run_move_click_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -121,6 +123,7 @@ def run_move_click_benchmark(
         warmup_iterations=warmup_iterations,
         operation=benchmark.run,
         failures=failures,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result("move_click", iterations, samples, observations, failures)
     result.update(
@@ -136,6 +139,7 @@ def run_move_click_sequence_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -148,6 +152,7 @@ def run_move_click_sequence_benchmark(
         warmup_iterations=warmup_iterations,
         operation=benchmark.run,
         failures=failures,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result(
         "move_click_sequence", iterations, samples, observations, failures
@@ -166,6 +171,7 @@ def run_coordinate_click_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -176,6 +182,7 @@ def run_coordinate_click_benchmark(
         warmup_iterations=warmup_iterations,
         operation=_CoordinateClickBenchmark(client).run,
         failures=failures,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result(
         "coordinate_click", iterations, samples, observations, failures
@@ -189,6 +196,7 @@ def run_coordinate_click_sequence_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -199,6 +207,7 @@ def run_coordinate_click_sequence_benchmark(
         warmup_iterations=warmup_iterations,
         operation=_CoordinateClickSequenceBenchmark(client).run,
         failures=failures,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result(
         "coordinate_click_sequence", iterations, samples, observations, failures
@@ -226,6 +235,7 @@ def run_click_then_screenshot_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -239,6 +249,7 @@ def run_click_then_screenshot_benchmark(
         warmup_iterations=warmup_iterations,
         operation=benchmark.run,
         failures=failures,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result(
         "click_then_screenshot",
@@ -273,6 +284,9 @@ def run_type_100_chars_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    method: str = TYPING_BENCHMARK_METHOD,
+    delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -281,8 +295,8 @@ def run_type_100_chars_benchmark(
     benchmark = _TypeCharsBenchmark(
         client,
         TYPING_BENCHMARK_TEXT,
-        method=TYPING_BENCHMARK_METHOD,
-        delay_ms=TYPING_BENCHMARK_DELAY_MS,
+        method=method,
+        delay_ms=delay_ms,
     )
     samples, observations = _measure_observed_case(
         name="type_100_chars",
@@ -291,6 +305,7 @@ def run_type_100_chars_benchmark(
         operation=benchmark.run,
         failures=failures,
         redacted_text=TYPING_BENCHMARK_TEXT,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result("type_100_chars", iterations, samples, observations, failures)
     result.update(
@@ -298,9 +313,16 @@ def run_type_100_chars_benchmark(
             "action_count": 1,
             "request": {
                 "character_count": len(TYPING_BENCHMARK_TEXT),
-                "method": TYPING_BENCHMARK_METHOD,
-                "delay_ms": TYPING_BENCHMARK_DELAY_MS,
+                "method": method,
+                "delay_ms": delay_ms,
             },
+            "resolved_methods": sorted(
+                {
+                    item["resolved_typing_method"]
+                    for item in observations
+                    if isinstance(item.get("resolved_typing_method"), str)
+                }
+            ),
         }
     )
     return result
@@ -310,6 +332,10 @@ def run_type_1000_chars_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    method: str = TYPING_BENCHMARK_METHOD,
+    delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
+    timeout_ms: int | None = TYPE_1000_CHARS_TIMEOUT_MS,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -318,9 +344,9 @@ def run_type_1000_chars_benchmark(
     benchmark = _TypeCharsBenchmark(
         client,
         TYPE_1000_CHARS_TEXT,
-        method=TYPING_BENCHMARK_METHOD,
-        delay_ms=TYPING_BENCHMARK_DELAY_MS,
-        timeout_ms=TYPE_1000_CHARS_TIMEOUT_MS,
+        method=method,
+        delay_ms=delay_ms,
+        timeout_ms=timeout_ms,
     )
     samples, observations = _measure_observed_case(
         name="type_1000_chars",
@@ -329,6 +355,7 @@ def run_type_1000_chars_benchmark(
         operation=benchmark.run,
         failures=failures,
         redacted_text=TYPE_1000_CHARS_TEXT,
+        before_iteration=before_iteration,
     )
     result = _attributed_case_result("type_1000_chars", iterations, samples, observations, failures)
     result.update(
@@ -336,10 +363,17 @@ def run_type_1000_chars_benchmark(
             "action_count": 1,
             "request": {
                 "character_count": len(TYPE_1000_CHARS_TEXT),
-                "method": TYPING_BENCHMARK_METHOD,
-                "delay_ms": TYPING_BENCHMARK_DELAY_MS,
-                "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
+                "method": method,
+                "delay_ms": delay_ms,
+                **({"timeout_ms": timeout_ms} if timeout_ms is not None else {}),
             },
+            "resolved_methods": sorted(
+                {
+                    item["resolved_typing_method"]
+                    for item in observations
+                    if isinstance(item.get("resolved_typing_method"), str)
+                }
+            ),
         }
     )
     return result

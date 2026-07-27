@@ -2272,6 +2272,16 @@ def _run_observation_action_click_observe_change_http_raw_benchmark(
     )
     result.update(
         {
+            "benchmark_semantics": "first-hash-confirmed-change-v1",
+            "metric": "action_to_first_hash_confirmed_change_ms",
+            "experimental": True,
+            "change_timeout_ms": CLICK_TOGGLE_CHANGE_TIMEOUT_MS,
+            "replacement_samples": 0,
+            "eligibility": (
+                "eligible only with all requested samples successful, action ok, detected "
+                "hash change before the deadline, distinct baseline/source hashes, and no "
+                "replacement samples"
+            ),
             "request": OBSERVATION_SCREENSHOT_OPTIONS,
             "transport_encoding": "http_binary",
             "actions": [_safe_action_metadata(CLICK_TOGGLE_ACTION)],
@@ -3070,7 +3080,7 @@ def _run_click_toggle_observe_change_http_raw(client: DaemonClient) -> dict[str,
         json={
             "actions": [CLICK_TOGGLE_ACTION],
             "screenshot_options": OBSERVATION_SCREENSHOT_OPTIONS,
-            "change_timeout_ms": 100,
+            "change_timeout_ms": CLICK_TOGGLE_CHANGE_TIMEOUT_MS,
             "poll_interval_ms": 8,
             "poll_strategy": "adaptive",
             "change_signal": "auto",
@@ -3114,6 +3124,22 @@ def _require_http_raw_first_changed_frame(observation: dict[str, Any]) -> dict[s
     if change_result.get("detected") is not True or change_result.get("timeout_reached") is True:
         raise FirstChangedFrameNotObservedError(
             "first changed frame was not observed before the deadline"
+        )
+    baseline_hash = change_result.get("baseline_source_sha256")
+    source_hash = change_result.get("source_sha256")
+    if (
+        not isinstance(baseline_hash, str)
+        or len(baseline_hash) != 64
+        or not isinstance(source_hash, str)
+        or len(source_hash) != 64
+        or baseline_hash == source_hash
+    ):
+        raise FirstChangedFrameNotObservedError(
+            "first changed frame did not include different baseline and source hashes"
+        )
+    if observation.get("input_backend") != "xtest":
+        raise FirstChangedFrameNotObservedError(
+            "first changed frame did not use the required XTest input backend"
         )
     return observation
 

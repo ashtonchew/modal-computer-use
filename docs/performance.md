@@ -570,13 +570,14 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
-- [Tzafon provider comparison, 2026-07-24](benchmark-results-2026-07-24-tzafon.md)
-- [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
-- [Provider-default benchmark reference, 2026-07-18](benchmark-results-2026-07-18-provider-default.md)
-- [Fallback ownership and current provider comparison, 2026-07-24](benchmark-results-2026-07-24-fallback-ownership.md)
-- [Rejected provider benchmark diagnostic, 2026-07-18](benchmark-results-2026-07-18.md)
-- [Provider benchmark results, 2026-05-17](benchmark-results-2026-05-17.md)
-- [Provider screenshot and visual diagnostics, 2026-05-19](benchmark-results-2026-05-19.md)
+- [Current provider results, 2026-07-26](benchmark-results-2026-07-26-provider-results.md)
+- [Superseded Tzafon provider comparison, 2026-07-24](archive/benchmarks/benchmark-results-2026-07-24-tzafon.md)
+- [Native X11 input diagnostic, 2026-07-23](archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md)
+- [Superseded provider-default reference, 2026-07-18](archive/benchmarks/benchmark-results-2026-07-18-provider-default.md)
+- [Fallback ownership diagnostic, 2026-07-24](archive/benchmarks/benchmark-results-2026-07-24-fallback-ownership.md)
+- [Rejected provider benchmark diagnostic, 2026-07-18](archive/benchmarks/benchmark-results-2026-07-18.md)
+- [Early provider diagnostic, 2026-05-17](archive/benchmarks/benchmark-results-2026-05-17.md)
+- [Provider screenshot and visual diagnostic, 2026-05-19](archive/benchmarks/benchmark-results-2026-05-19.md)
 
 ## Benchmark action batching
 
@@ -842,7 +843,8 @@ region selector and runs the same surfaces against the target daemon URL. Treat 
 experiment: it measures whether co-locating the caller/model loop is likely to help before adding any
 hosted control-plane shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor
 attribution. Add `daemon-http` when comparing the exact screenshot, move/click, typing, and command
-boundaries used by the provider-default table from an optimized same-region caller, and add
+boundaries used by the provider-default table from an optimized caller with the same requested
+Modal region, and add
 `daemon-observation-stream` when the question is action-to-first-changed-frame latency under the
 Alpha observation contract. This is one measured part of an agent loop, not semantic readiness or
 end-to-end loop latency.
@@ -928,12 +930,15 @@ rows retained daemon/client attribution:
 This is the optimized Modal column for the warm operation comparison, not a replacement for the
 provider-default baseline or for cold startup. The full table, including the dated Daytona/E2B
 reference and its non-contemporaneous caveat, is in
-[the 2026-07-18 provider benchmark results](benchmark-results-2026-07-18-provider-default.md#modal-optimized-configuration).
+[the 2026-07-18 provider benchmark results](archive/benchmarks/benchmark-results-2026-07-18-provider-default.md#modal-optimized-configuration).
 The compact machine-readable record is
 [`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
 
-The observation-inclusive metric remains a different boundary. A fresh 30/30 valid same-region run
+The observation-inclusive metric remains a different boundary. A fresh 30/30 valid run whose
+runner and target used the same requested Modal region
 measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
+This is historical, pre-hash-verification evidence and is not eligible for the current experimental
+result. See the [current hash-verified experiment](benchmark-results-2026-07-26-provider-results.md#modal-only-experimental-result).
 Its retained intervals show that the network is no longer the main cost:
 
 | Causal observation interval | p50 | p95 | Meaning |
@@ -954,7 +959,7 @@ record is
 [`benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json`](../benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json).
 
 For application code, the same pattern is available as a co-located runner Sandbox. The target
-desktop sandbox and runner sandbox are created with the same requested region selector, and the
+desktop sandbox and runner sandbox are created with the same requested Modal region, and the
 runner talks directly to the target daemon. Use `run_modal_daemon_command()` or
 `examples/modal_colocated_runner.py` as the minimal shape before building a hosted control plane.
 When the target was created with an explicit `runtime.modal_region`, the SDK runner helpers inherit
@@ -965,7 +970,7 @@ If a runner can reach `/healthz`, `/v1/version`, and `/v1/capabilities` but time
 `/v1/observations/stream`, the failure is likely specific to WebSocket ingress rather than daemon
 readiness. Modal documents Connect Tokens as the authenticated HTTP/WebSocket path and encrypted
 tunnels as raw forwarded ports where the application owns auth, so compare Connect Token and tunnel
-ingress before treating same-region placement as proven.
+ingress before treating identical placement as proven.
 
 A broker should stay off this hot path. Use a broker for session lifecycle, placement, auth, and
 cleanup; have it return direct daemon/runner connection metadata. Use `examples/modal_session_broker.py`
@@ -1008,7 +1013,7 @@ target-loopback or a hosted control-loop path for hot loops.
 A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 `daemon-observation-stream` selected measured:
 
-| Surface metric | External caller | Same-region Modal runner | Ratio vs external |
+| Surface metric | External caller | Same requested Modal region | Ratio vs external |
 | --- | ---: | ---: | ---: |
 | Fastest 0B transport floor p50 | 31.5ms | 31.1ms | 0.99x |
 | Causal action-to-frame p50 | 82.8ms | 52.5ms | 0.63x |
@@ -1097,15 +1102,15 @@ retry, and cleanup controls match. Pilot/full distributions report raw samples, 
 bootstrap confidence intervals, and ECDF-ready rows. Allocation throughput at concurrency 1, 5, and
 20 is a separate diagnostic; concurrency 50 requires an explicit capacity and cost gate.
 
-See [Modal V2 Candidate Benchmark Methodology](modal-v2-candidate-benchmark.md) and
-[Modal V2 Candidate Result, 2026-07-19](benchmark-results-2026-07-19-modal-v2-candidate.md).
+See the archived [Modal V2 candidate methodology](archive/benchmarks/modal-v2-candidate-benchmark.md)
+and [Modal V2 candidate result](archive/benchmarks/benchmark-results-2026-07-19-modal-v2-candidate.md).
 
 The separately preregistered follow-up compares each generation's fastest supported colocated path
 as a descriptive best-system experiment. It uses independent generation-matched runners and labels
 any V1/V2 quotient only as an `optimized-frontier-path-ratio`; the observed OCI/Azure placement
 asymmetry precludes a backend-causal interpretation. See
-[Modal Optimized-Frontier Benchmark Methodology](modal-optimized-frontier-benchmark.md) and
-[Modal Optimized-Frontier Result, 2026-07-19](benchmark-results-2026-07-19-modal-optimized-frontier.md).
+[Modal optimized-frontier methodology](archive/benchmarks/modal-optimized-frontier-benchmark.md)
+and [Modal optimized-frontier result](archive/benchmarks/benchmark-results-2026-07-19-modal-optimized-frontier.md).
 
 The corrected 2026-07-19 capability matrix was descriptive-only and stopped before measurement.
 Across `auto`, `aws`, `gcp`, and `oci` requests, all three V2 roles consistently landed on
@@ -1420,6 +1425,9 @@ from timing.
 If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. The daemon launches the configured browser at boot so the first `browser.open_url` does not pay startup cost.
 Use `examples/browser_profile.py` for an SDK-level pattern. Prewarm is optional and can be disabled
 with `BrowserConfig(prewarm=False)` for deterministic tests.
+For a named browser image, `prewarm=False` still selects an image with the configured browser
+installed. It skips only the startup launch. Named-image revision, desktop, resource-profile, and
+browser-kind validation still applies.
 
 Use `BrowserConfig(open_url_on_start="https://...")` when a workload always starts on the same
 page and you want startup to pay both browser creation and first navigation. Use
@@ -1468,7 +1476,7 @@ example, or benchmark profile. Set a nonzero delay only for screenshot-driven ag
 a short settle period before the next screenshot, or use explicit `wait` actions when the caller
 knows the condition it is waiting for. This is an explicit action/batch timing control; the Alpha
 first-visual-change composition does not remove, shorten, or bypass it. See the
-[synchronization decision ladder](experimental-visual-change-observation.md#synchronization-decision-ladder).
+[synchronization decision ladder](experimental-visual-change-observation.md#choose-a-synchronization-method).
 
 ## When in doubt
 

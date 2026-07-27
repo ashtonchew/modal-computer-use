@@ -1,10 +1,17 @@
 # `modal-computer-use`: Daytona-style computer-use primitives on Modal
 
-**Status:** implementation plan and technical specification  
-**Prepared:** 2026-05-11  
-**Revision:** v6, UV-first packaging/tooling update on top of v5 architecture  
-**Recommended repository name:** `modal-computer-use`  
-**Recommended Python import name:** `modal_computer_use`  
+> **Archive category:** Superseded
+> **Date or revision:** 2026-05-11, v6
+> **Question:** How should the v5 architecture use UV-first packaging and developer tooling?
+> **Disposition:** [Specification v7](../../spec/modal_computer_use_spec_v7.md) superseded this
+> design with the shipped-contract truth-up. Preserve the historical body; add corrections only as
+> explicit notes.
+
+**Status:** implementation plan and technical specification
+**Prepared:** 2026-05-11
+**Revision:** v6, UV-first packaging/tooling update on top of v5 architecture
+**Recommended repository name:** `modal-computer-use`
+**Recommended Python import name:** `modal_computer_use`
 **Alternative brand name:** `modal-compute-use`, though `modal-computer-use` better matches the accepted term used by Daytona, E2B, OpenAI, and Anthropic-style agent harnesses.
 
 **v5 delta:** this revision preserves the v4 daemon-first, primitive-first, Modal-native design, but applies the critique as concrete spec changes. v5 adds explicit liveness/readiness/version/capability endpoints; a local daemon/test mode; renamed and split public config models; a public `ComputerSandboxManager` instead of generic `SandboxManager`; stricter Connect Token and noVNC rules; a first-class coordinate-space model; provider-versioned OpenAI and Anthropic adapters; clipboard, browser, apps, windows, and stuck-input recovery primitives; artifact manifests with content hashes; an actionable trace/replay schema; budget controls; Volume sync semantics; compatibility fixtures; and a sharply scoped v0.1/v0.2/v1.0 roadmap.

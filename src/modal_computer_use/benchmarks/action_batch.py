@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,6 +20,7 @@ def run_action_batch_benchmark(
     iterations: int,
     base_url: str | None = None,
     warmup_iterations: int = 1,
+    before_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -31,6 +33,7 @@ def run_action_batch_benchmark(
         warmup_iterations=warmup_iterations,
         operation=benchmark.run_batch,
         failures=failures,
+        before_iteration=before_iteration,
     )
     separate_samples, separate_observations = _measure_observed_case(
         name="separate_5_actions",
@@ -38,6 +41,7 @@ def run_action_batch_benchmark(
         warmup_iterations=warmup_iterations,
         operation=benchmark.run_separate,
         failures=failures,
+        before_iteration=before_iteration,
     )
     batch_case = _attributed_case_result(
         "batch_5_actions", iterations, batch_samples, batch_observations, failures

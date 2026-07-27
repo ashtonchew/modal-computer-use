@@ -1,5 +1,12 @@
 # Modal Optimized-Frontier Benchmark Methodology
 
+> **Archive category:** Historical
+> **Date or revision:** 2026-07-19 protocol
+> **Question:** How should separately placed V1 and V2 optimized paths be compared without a
+> backend-causal claim?
+> **Disposition:** The protocol is retained with its rejected pilot result. The primary arms did
+> not pass the clean pilot gate, so the full experiment did not run.
+
 This benchmark compares each Modal Sandbox generation's fastest supported, predeclared production
 path. It is a **descriptive best-system comparison**, not a backend-generation experiment.
 
@@ -73,7 +80,7 @@ Every valid sample also verifies `/healthz`, `/v1/version`, `/v1/capabilities`, 
 prewarm, frame geometry, action success, causal identifiers, visual change, and measured runner
 placement. Verification failure produces a failed sample rather than a latency value. These bits
 verify the benchmark transport and observable; they do not prove a workload-specific next action is
-safe. See the [Alpha observation contract](experimental-visual-change-observation.md).
+safe. See the [Alpha observation contract](../../experimental-visual-change-observation.md).
 
 ## Placement and provenance
 

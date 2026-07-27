@@ -34,6 +34,10 @@ from .benchmarks.modal_colocated_client import (
     ModalColocatedClientBenchmarkConfig,
     run_modal_colocated_client_benchmark,
 )
+from .benchmarks.modal_optimized_provider import (
+    ModalOptimizedProviderConfig,
+    run_modal_optimized_provider_benchmark,
+)
 from .benchmarks.modal_region_ab import (
     DEFAULT_MODAL_REGION_AB_REGIONS,
     modal_region_ab_comparison,
@@ -41,6 +45,12 @@ from .benchmarks.modal_region_ab import (
 )
 from .benchmarks.observation_surface import CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
 from .benchmarks.provenance import benchmark_provenance
+from .benchmarks.provider_results import (
+    ProviderResultsError,
+    render_provider_results_json,
+    render_provider_results_markdown,
+    validate_provider_results,
+)
 from .benchmarks.surfaces import (
     run_sdk_surface_benchmark,
     run_sdk_surface_benchmark_mock_local,
@@ -48,6 +58,7 @@ from .benchmarks.surfaces import (
 from .client import DaemonClient
 from .config import BrowserConfig, ComputerConfig, ModalIngress
 from .errors import ModalNotInstalledError, SandboxUnavailableError
+from .latency import validate_first_frame
 from .sandbox import (
     ComputerSandbox,
     _connect_token_parts,
@@ -92,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark_parser = subparsers.add_parser("benchmark")
     benchmark_subparsers = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
+    provider_results_parser = benchmark_subparsers.add_parser("provider-results")
+    provider_results_parser.add_argument("combined", type=Path)
+    provider_results_parser.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown"
+    )
+    provider_results_parser.add_argument("--output", type=Path)
     action_batch_parser = benchmark_subparsers.add_parser("action-batch")
     action_batch_mode = action_batch_parser.add_mutually_exclusive_group(required=True)
     action_batch_mode.add_argument("--base-url")
@@ -295,10 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument(
         "--input-rate-limit-per-sec",
         type=int,
-        default=0,
         help=(
             "daemon input action rate limit for created benchmark sandboxes; "
-            "defaults to 0 so primitive latency runs do not measure throttling"
+            "when omitted, retains the public ComputerConfig default"
         ),
     )
     compare_parser.add_argument(
@@ -489,6 +505,11 @@ def main(argv: list[str] | None = None) -> int:
     colocated_parser.add_argument("--runner-cpu", type=float)
     colocated_parser.add_argument("--runner-memory-mib", type=int)
     colocated_parser.add_argument(
+        "--runner-only",
+        action="store_true",
+        help="measure selected runner paths without the external caller comparison",
+    )
+    colocated_parser.add_argument(
         "--surface",
         action="append",
         choices=list(MODAL_COLOCATED_ALLOWED_SURFACES),
@@ -562,6 +583,21 @@ def main(argv: list[str] | None = None) -> int:
     colocated_parser.add_argument("--iterations", type=_positive_int, default=5)
     colocated_parser.add_argument("--output", type=Path)
     colocated_parser.add_argument("--json", action="store_true", default=True)
+
+    optimized_provider_parser = benchmark_subparsers.add_parser("modal-optimized-provider")
+    optimized_provider_parser.add_argument("--modal-region", required=True)
+    optimized_provider_parser.add_argument("--image-revision", required=True)
+    optimized_provider_parser.add_argument("--modal-cpu", type=float, default=4.0)
+    optimized_provider_parser.add_argument("--modal-memory-mib", type=int, default=8192)
+    optimized_provider_parser.add_argument("--browser", choices=["chromium"], default="chromium")
+    optimized_provider_parser.add_argument("--iterations", type=_positive_int, default=30)
+    optimized_provider_parser.add_argument("--warmup-iterations", type=_nonnegative_int, default=1)
+    optimized_provider_parser.add_argument(
+        "--pilot",
+        action="store_true",
+        help="allow nonpublishable sample counts for a canary run",
+    )
+    optimized_provider_parser.add_argument("--output", type=Path)
 
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
@@ -669,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
         return _trace_replay(args)
     if args.benchmark_command == "action-batch":
         return _benchmark_action_batch(args)
+    if args.benchmark_command == "provider-results":
+        return _benchmark_provider_results(args)
     if args.benchmark_command == "sdk":
         return _benchmark_sdk(args)
     if args.benchmark_command == "compare":
@@ -692,7 +730,55 @@ def main(argv: list[str] | None = None) -> int:
                 "pass --browser chromium or --browser firefox"
             )
         return _benchmark_modal_colocated_client(args)
+    if args.benchmark_command == "modal-optimized-provider":
+        if not args.pilot and (args.iterations != 30 or args.warmup_iterations != 1):
+            optimized_provider_parser.error(
+                "nonpublishable counts require --pilot; publishable runs use 30 measured "
+                "and 1 warmup"
+            )
+        return _benchmark_modal_optimized_provider(args)
     return _benchmark_report(args)
+
+
+def _benchmark_provider_results(args: argparse.Namespace) -> int:
+    try:
+        payload = json.loads(args.combined.read_bytes())
+        if not isinstance(payload, dict):
+            raise ProviderResultsError("combined provider results artifact must be a JSON object")
+        validate_provider_results(payload)
+        output = (
+            render_provider_results_markdown(payload)
+            if args.format == "markdown"
+            else render_provider_results_json(payload)
+        )
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(output, encoding="utf-8")
+        else:
+            print(output, end="")
+    except (OSError, json.JSONDecodeError, ProviderResultsError) as exc:
+        raise SystemExit(str(exc)) from exc
+    return 0
+
+
+def _benchmark_modal_optimized_provider(args: argparse.Namespace) -> int:
+    config = ModalOptimizedProviderConfig(
+        region=args.modal_region,
+        image_revision=args.image_revision,
+        cpu=args.modal_cpu,
+        memory_mib=args.modal_memory_mib,
+        browser=args.browser,
+        iterations=args.iterations,
+        warmup_iterations=args.warmup_iterations,
+        pilot=args.pilot,
+    )
+    result = run_modal_optimized_provider_benchmark(config)
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result.get("ok") else 1
 
 
 def _trace_validate(path: Path) -> int:
@@ -1018,6 +1104,9 @@ def _benchmark_compare_created_modal_sandbox(
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
             precomputed_provider_results=precomputed_results,
+            modal_action_pacing_seconds=(
+                1.05 if metadata.get("action_case_pacing_ms") == 1050 else None
+            ),
         )
     except Exception as exc:
         final_cleanup_errors = _cleanup_modal_benchmark_computer(computer)
@@ -1078,7 +1167,11 @@ def _create_modal_benchmark_computer(
             )
             _raise_modal_cleanup_errors(_detach_modal_benchmark_computer(computer))
             final_ingress_ready_ms = (time.perf_counter() - started) * 1000
-        first_screenshot = _modal_first_raw_screenshot_metadata(final_computer.client)
+        first_screenshot = _modal_first_raw_screenshot_metadata(
+            final_computer.client,
+            expected_width=config.desktop.resolution[0],
+            expected_height=config.desktop.resolution[1],
+        )
         first_screenshot_ms = (time.perf_counter() - started) * 1000
         metadata = {
             **_benchmark_environment_metadata(args),
@@ -1123,30 +1216,30 @@ def _create_modal_benchmark_computer(
         raise
 
 
-def _modal_first_raw_screenshot_metadata(client: DaemonClient) -> dict[str, Any]:
+def _modal_first_raw_screenshot_metadata(
+    client: DaemonClient,
+    *,
+    expected_width: int,
+    expected_height: int,
+) -> dict[str, Any]:
     payload, headers = client.post_bytes_with_headers(
         "/v1/screenshots/full/raw",
         json={"format": "png", "show_cursor": False},
     )
-    if not payload:
-        raise RuntimeError("Modal raw screenshot was empty")
+    validate_first_frame(
+        payload,
+        expected_width=expected_width,
+        expected_height=expected_height,
+        image_format="png",
+    )
     return {
         "modal_first_raw_screenshot_size_bytes": len(payload),
-        "modal_first_raw_screenshot_width": _int_header(headers, "x-computer-use-width"),
-        "modal_first_raw_screenshot_height": _int_header(headers, "x-computer-use-height"),
+        "modal_first_raw_screenshot_width": expected_width,
+        "modal_first_raw_screenshot_height": expected_height,
         "modal_first_raw_screenshot_capture_backend": _str_header(
             headers, "x-computer-use-capture-backend"
         ),
     }
-
-
-def _int_header(headers: Any, name: str) -> int | None:
-    value = headers.get(name) if hasattr(headers, "get") else None
-    if not isinstance(value, str) or not value.isdigit():
-        return None
-    return int(value)
-
-
 def _str_header(headers: Any, name: str) -> str | None:
     value = headers.get(name) if hasattr(headers, "get") else None
     return value if isinstance(value, str) and value else None
@@ -1181,8 +1274,7 @@ def _detach_modal_benchmark_computer(computer: ComputerSandbox) -> list[CleanupE
 def _raise_modal_cleanup_errors(errors: list[CleanupError]) -> None:
     if errors:
         raise RuntimeError(
-            "Modal benchmark cleanup failed: "
-            + ", ".join(method for method, _exc in errors)
+            "Modal benchmark cleanup failed: " + ", ".join(method for method, _exc in errors)
         )
 
 
@@ -1460,9 +1552,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
             ModalColocatedClientBenchmarkConfig(
                 app_name=args.app_name,
                 name=args.name,
-                target_config_factory=lambda run_id: _modal_benchmark_config(
-                    args, run_id=run_id
-                ),
+                target_config_factory=lambda run_id: _modal_benchmark_config(args, run_id=run_id),
                 modal_region=args.modal_region,
                 caller_region_label=args.caller_region_label,
                 modal_ingress=args.modal_ingress,
@@ -1481,6 +1571,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 observation_cases=_modal_colocated_observation_cases(args),
                 runner_paths=_modal_colocated_runner_paths(args),
                 iterations=args.iterations,
+                include_external_caller=not args.runner_only,
             )
         )
     except ValueError as exc:
@@ -1620,11 +1711,13 @@ def _modal_benchmark_config(
     config.ingress = ingress or args.modal_ingress
     config.network.daemon_http_version = getattr(args, "daemon_http_version", "1.1")
     config.runtime.modal_region = modal_region if modal_region is not None else args.modal_region
-    config.resources.profile = _modal_benchmark_resource_profile(args)
+    if args.resource_profile or args.gpu or args.browser:
+        config.resources.profile = _modal_benchmark_resource_profile(args)
     config.resources.gpu = args.gpu
     config.resources.cpu = args.modal_cpu
     config.resources.memory_mib = args.modal_memory_mib
-    config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
+    if args.input_rate_limit_per_sec is not None:
+        config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
     config.actions.input_backend = args.input_backend
     config.actions.subprocess_backend = args.subprocess_backend
     if args.browser:
@@ -1656,7 +1749,7 @@ def _validate_modal_create_args(
         parser.error("--modal-cpu must be greater than 0")
     if args.modal_memory_mib is not None and args.modal_memory_mib < 128:
         parser.error("--modal-memory-mib must be at least 128")
-    if args.input_rate_limit_per_sec < 0:
+    if args.input_rate_limit_per_sec is not None and args.input_rate_limit_per_sec < 0:
         parser.error("--input-rate-limit-per-sec must be non-negative")
 
 
@@ -1755,6 +1848,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be nonnegative")
+    return parsed
+
+
 def _print_json(data: dict[str, Any]) -> None:
     print(_json_string(data))
 
@@ -1800,6 +1900,14 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         image_identity = f"inline:{browser or resource_profile or 'standard'}"
     else:
         image_identity = f"attached:{getattr(args, 'image_profile', None) or 'unavailable'}"
+    if benchmark_command == "compare" and creates_modal_resource:
+        public_defaults = ComputerConfig()
+        resource_profile = resource_profile or public_defaults.resources.profile
+        input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
+        if input_rate_limit is None:
+            input_rate_limit = public_defaults.actions.input_rate_limit_per_sec
+    else:
+        input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
     metadata: dict[str, Any] = {
         "modal_region": getattr(args, "modal_region", None),
         "modal_ingress": getattr(args, "modal_ingress", None),
@@ -1807,7 +1915,14 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "resource_profile": resource_profile,
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
-        "input_rate_limit_per_sec": getattr(args, "input_rate_limit_per_sec", None),
+        "input_rate_limit_per_sec": input_rate_limit,
+        "action_case_pacing_ms": (
+            1050
+            if benchmark_command == "compare"
+            and creates_modal_resource
+            and input_rate_limit == 20
+            else None
+        ),
         "subprocess_backend": getattr(args, "subprocess_backend", None),
         "image_profile": getattr(args, "image_profile", None),
         "provenance": benchmark_provenance(

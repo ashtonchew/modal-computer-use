@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -16,7 +17,10 @@ from modal_computer_use.image import (
     named_image_name,
     publish_named_images,
 )
-from modal_computer_use.sandbox import modal_billing_report
+from modal_computer_use.sandbox import (
+    modal_billing_report,
+    run_modal_benchmark_function_once,
+)
 
 REVISION = "0123456789abcdef0123456789abcdef01234567"
 
@@ -68,7 +72,7 @@ def test_block_all_requires_connect_ingress_without_vnc() -> None:
         ComputerConfig(network={"block_all": True})
 
 
-def test_named_image_config_requires_full_git_revision_and_browser() -> None:
+def test_named_image_config_requires_full_git_revision_and_browser_kind() -> None:
     config = ComputerConfig(
         resources={"profile": "browser"},
         browser={"kind": "firefox"},
@@ -90,12 +94,61 @@ def test_named_image_config_requires_full_git_revision_and_browser() -> None:
             desktop={"window_manager": "openbox"},
             image={"source": "named", "revision": REVISION},
         )
-    with pytest.raises(ValidationError, match=r"require browser\.prewarm"):
-        ComputerConfig(
-            resources={"profile": "browser"},
-            browser={"kind": "firefox", "prewarm": False},
-            image={"source": "named", "revision": REVISION},
-        )
+
+
+def test_named_browser_image_can_skip_browser_launch() -> None:
+    no_browser_launch = ComputerConfig(
+        resources={"profile": "browser"},
+        browser={"kind": "chromium", "prewarm": False},
+        image={"source": "named", "revision": REVISION},
+    )
+    assert no_browser_launch.browser is not None
+    assert no_browser_launch.browser.kind == "chromium"
+    assert no_browser_launch.browser.prewarm is False
+
+
+def test_modal_benchmark_function_uses_importable_image_module(monkeypatch) -> None:
+    function_options: dict[str, object] = {}
+
+    class FakeRemote:
+        def remote(self, config: object, *, run_tag: str) -> dict[str, bool]:
+            assert config == "config"
+            assert run_tag == "run-tag"
+            return {"ok": True}
+
+    class FakeApp:
+        def __init__(self, name: str) -> None:
+            assert name == "app-optimized-provider-runner"
+
+        def function(self, **kwargs: object):
+            function_options.update(kwargs)
+            return lambda _entrypoint: FakeRemote()
+
+        def run(self):
+            return nullcontext()
+
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(App=FakeApp))
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.named_image",
+        lambda **_kwargs: "named-image",
+    )
+
+    result = run_modal_benchmark_function_once(
+        lambda: {},
+        config="config",
+        run_tag="run-tag",
+        app_name="app",
+        region="us-west-2",
+        image_revision=REVISION,
+        cpu=4.0,
+        memory_mib=8192,
+        timeout_seconds=900,
+    )
+
+    assert result == {"ok": True}
+    assert function_options["serialized"] is False
+    assert function_options["include_source"] is False
+    assert function_options["single_use_containers"] is True
 
 
 @pytest.mark.parametrize(

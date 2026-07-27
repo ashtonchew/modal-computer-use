@@ -286,19 +286,7 @@ def cleanup_modal_benchmark_run(
     before, before_inventory = _list_modal_benchmark_sandboxes_with_inventory(
         runtime, app_id=app.app_id, run_id=run_id
     )
-    matched = []
-    for sandbox in before:
-        tags = sandbox.get_tags()
-        target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
-        runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
-        if (
-            isinstance(runner_run_id, str)
-            and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
-        ) or (
-            isinstance(target_run_id, str)
-            and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
-        ):
-            matched.append(sandbox)
+    matched = before
     terminated = 0
     failed = 0
     for sandbox in matched:
@@ -311,19 +299,7 @@ def cleanup_modal_benchmark_run(
     after, after_inventory = _list_modal_benchmark_sandboxes_with_inventory(
         runtime, app_id=app.app_id, run_id=run_id
     )
-    remaining = 0
-    for sandbox in after:
-        tags = sandbox.get_tags()
-        target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
-        runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
-        if (
-            isinstance(runner_run_id, str)
-            and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
-        ) or (
-            isinstance(target_run_id, str)
-            and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
-        ):
-            remaining += 1
+    remaining = len(after)
     result: dict[str, Any] = {
         "matched_sandboxes": len(matched),
         "terminated_sandboxes": terminated,
@@ -378,7 +354,12 @@ def _list_modal_benchmark_sandboxes_with_inventory(
 
 
 def _modal_benchmark_run_matches(sandbox: Any, run_id: str) -> bool:
-    tags = sandbox.get_tags()
+    try:
+        tags = sandbox.get_tags()
+    except Exception as exc:
+        if _is_modal_not_found_error(exc):
+            return False
+        raise
     target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
     runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
     return (
@@ -388,6 +369,14 @@ def _modal_benchmark_run_matches(sandbox: Any, run_id: str) -> bool:
         isinstance(target_run_id, str)
         and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
     )
+
+
+def _is_modal_not_found_error(exc: Exception) -> bool:
+    try:
+        from modal.exception import NotFoundError
+    except ImportError:
+        return False
+    return isinstance(exc, NotFoundError)
 
 
 class _TimedModalRuntime:
@@ -579,6 +568,54 @@ def modal_sandbox_exec_once(
         raise
     if hasattr(runner, "terminate"):
         runner.terminate(wait=True)
+    return result
+
+
+def run_modal_benchmark_function_once(
+    entrypoint: Callable[..., dict[str, Any]],
+    *,
+    config: object,
+    run_tag: str,
+    app_name: str,
+    region: str,
+    image_revision: str,
+    cpu: float,
+    memory_mib: int,
+    timeout_seconds: int,
+    retries: int = 0,
+) -> dict[str, Any]:
+    """Invoke one regional benchmark Function without including dispatch in its measurements."""
+    if retries != 0:
+        raise ValueError("benchmark Function retries must be disabled")
+    if not region.strip():
+        raise ValueError("benchmark Function region must be explicit")
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError("Modal benchmark Function requires the modal extra") from exc
+
+    app = modal.App(f"{app_name}-optimized-provider-runner")
+    image = named_image(revision=image_revision, profile="browser", browser="chromium")
+    remote = app.function(
+        image=image,
+        region=region,
+        cpu=cpu,
+        memory=memory_mib,
+        timeout=timeout_seconds,
+        retries=0,
+        min_containers=0,
+        max_containers=1,
+        single_use_containers=True,
+        # The named image owns this importable module. Avoid cloudpickling the
+        # function or mounting local source so the image revision is authoritative
+        # and the local caller and the Python 3.12 image may differ.
+        serialized=False,
+        include_source=False,
+    )(entrypoint)
+    with app.run():
+        result = remote.remote(config, run_tag=run_tag)
+    if not isinstance(result, dict):
+        raise SandboxUnavailableError("benchmark Function returned a non-object result")
     return result
 
 
