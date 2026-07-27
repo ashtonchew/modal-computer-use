@@ -49,6 +49,7 @@ def _warm_surface(iterations: int) -> dict[str, object]:
             "failures": [],
         }
         if name in {"type_100_chars", "type_1000_chars"}:
+            cases[name]["resolved_methods"] = ["keystrokes"]
             cases[name]["request"] = {
                 "character_count": 100 if name == "type_100_chars" else 1000,
                 "method": "keystrokes",

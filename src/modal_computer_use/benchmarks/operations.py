@@ -9,6 +9,7 @@ from ..client import DaemonClient
 from .constants import (
     ACTION_BATCH_ACTIONS,
     COMMAND_ECHO_COMMAND,
+    COMMAND_ECHO_STDOUT,
     COORDINATE_CLICK_SEQUENCE_ACTIONS,
     MOVE_CLICK_ACTIONS,
     MOVE_CLICK_SEQUENCE_ACTIONS,
@@ -198,10 +199,17 @@ class _TypeCharsBenchmark:
             },
         )
         _ensure_ok_result(result)
+        results = result.get("results") if isinstance(result, dict) else None
+        first_result = results[0] if isinstance(results, list) and results else None
+        output = first_result.get("output") if isinstance(first_result, dict) else None
+        resolved_method = output.get("method") if isinstance(output, dict) else None
         return {
             "daemon_ms": _extract_daemon_ms(result),
             "transport_http_version": _transport_http_version(self._client),
             "input_backend": _input_backend_result(result),
+            "resolved_typing_method": (
+                resolved_method if isinstance(resolved_method, str) else None
+            ),
         }
 
 class _CommandEchoBenchmark:
@@ -227,7 +235,7 @@ class _CommandEchoBenchmark:
             or not isinstance(returncode, int)
             or returncode != 0
             or not isinstance(stdout, str)
-            or stdout != "42"
+            or stdout != COMMAND_ECHO_STDOUT
         ):
             raise RuntimeError(
                 "daemon command did not return the expected success sentinel"

@@ -159,10 +159,16 @@ uv run computer-use benchmark compare \
 Provider-default means the documented public SDK path and its default provider configuration.
 For Modal that means the `ComputerConfig` defaults: standard resources, no browser profile, the
 20-actions-per-second input limit, `auto` typing with a 10 ms character delay, and default placement.
-The input limit counts actions, not typed characters. Record any override and do not label that
-provider arm as default. Only the separate Modal-optimized arm receives repository optimizations,
-including explicit `keystrokes` typing with zero delay. Keep provider-default and Modal-optimized
-columns separate because their caller topology, configuration, and sample count differ.
+For the 100- and 1000-character cases, `auto` resolves to clipboard, so the requested delay is not
+applied per character. When Modal retains the default input limit, its runner records and applies
+1.05 seconds of Modal-only pacing before every warmup and measured action invocation, including
+each action-batch subcase. The pacing is outside the timer and prevents earlier samples from
+crowding the next operation; the limit counts actions, not typed characters. The command workload
+requests `sh -c "printf '42\\n'"`, requires exit code 0 and stdout exactly `"42\n"`, and never
+strips whitespace. Record any override and do not label that provider arm as default. Only the
+separate Modal-optimized arm receives repository optimizations, including explicit `keystrokes`
+typing with zero delay. Keep provider-default and Modal-optimized columns separate because their
+caller topology, configuration, and sample count differ.
 
 ## Retain and publish artifacts
 

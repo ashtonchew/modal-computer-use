@@ -32,13 +32,13 @@ The lifecycle timer starts immediately before the public create call and ends af
 
 Warm-operation timers measure the selected public SDK or daemon request from the caller. They exclude target creation and cleanup.
 
-The command case requests argv ["sh", "-c", "printf 42"] with non-login shell semantics and requires exit code 0 with exact stdout 42.
+The command case requests argv ["sh", "-c", "printf '42\\n'"] with non-login shell semantics and requires exit code 0 with exact stdout "42\\n".
 
 Shell latency covers transport, authentication, request handling and admission, process spawn, output collection, process wait, cleanup, and exact-output validation.
 
 isolated-asyncio affects only subprocess-backed command and compatibility paths; it does not select the native input or screenshot implementation.
 
-Modal default typing uses the public TypeAction defaults (auto with a 10 ms character delay); Modal optimized explicitly uses keystrokes with zero delay. The default input rate limit is 20 actions per second, not characters per second.
+Modal default typing requests the public TypeAction defaults (auto with a 10 ms character delay); for these 100- and 1000-character inputs auto resolves to clipboard, so that delay is not applied per character. Modal optimized explicitly resolves to keystrokes with zero delay. Modal default uses 1.05 seconds of untimed pacing before every warmup and measured action invocation to respect the default 20-actions-per-second input limit.
 
 Full screenshots use each provider's native/default format and are not pixel- or codec-normalized.
 

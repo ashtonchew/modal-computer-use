@@ -7,6 +7,7 @@ from typing import Any
 
 from ..constants import (
     COMMAND_ECHO_COMMAND,
+    COMMAND_ECHO_STDOUT,
     COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
     COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
@@ -282,7 +283,7 @@ class TzafonDriver:
             shlex.join(COMMAND_ECHO_COMMAND),
             timeout=30,
         )
-        if provider_stdout(result) != "42":
+        if provider_stdout(result) != COMMAND_ECHO_STDOUT:
             raise RuntimeError("Tzafon command output did not match the expected sentinel")
         return {"exit_code": provider_exit_code(result)}
 
@@ -292,7 +293,7 @@ class TzafonDriver:
             shlex.join(COMMAND_NONLOGIN_SHELL_ECHO_COMMAND),
             timeout=30,
         )
-        if provider_stdout(result) != "42":
+        if provider_stdout(result) != COMMAND_ECHO_STDOUT:
             raise RuntimeError("Tzafon command output did not match the expected sentinel")
         return {
             "exit_code": provider_exit_code(result),

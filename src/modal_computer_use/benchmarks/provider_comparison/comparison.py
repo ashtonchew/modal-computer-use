@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -66,6 +67,7 @@ def run_provider_comparison(
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
     precomputed_provider_results: dict[str, dict[str, Any]] | None = None,
+    modal_action_pacing_seconds: float | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -88,6 +90,7 @@ def run_provider_comparison(
                     sandbox_exec_runner=sandbox_exec_runner,
                     sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                     environment_metadata=environment_metadata,
+                    modal_action_pacing_seconds=modal_action_pacing_seconds,
                 )
             except Exception as exc:
                 result = build_provider_result(
@@ -144,6 +147,7 @@ def run_provider(
     sandbox_exec_runner: Any,
     sandbox_exec_setup_failure: dict[str, Any] | None,
     environment_metadata: dict[str, Any] | None,
+    modal_action_pacing_seconds: float | None = None,
 ) -> dict[str, Any]:
     if provider == "modal-daemon":
         return _run_modal_daemon_provider(
@@ -153,6 +157,7 @@ def run_provider(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             environment_metadata=environment_metadata,
+            action_pacing_seconds=modal_action_pacing_seconds,
         )
     if provider == "modal-exec":
         surface_payload = run_sdk_surface_benchmark(
@@ -222,12 +227,20 @@ def _run_modal_daemon_provider(
     iterations: int,
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
+    action_pacing_seconds: float | None,
 ) -> dict[str, Any]:
     if client is None:
         return provider_not_measured(
             "modal-daemon",
             "modal-daemon comparison requires --mock-local or --base-url",
         )
+    pace = (
+        (lambda: time.sleep(action_pacing_seconds))
+        if isinstance(action_pacing_seconds, int | float)
+        and not isinstance(action_pacing_seconds, bool)
+        and action_pacing_seconds > 0
+        else None
+    )
     surface_payload = run_sdk_surface_benchmark(
         surfaces=["daemon-http"],
         client=client,
@@ -238,6 +251,7 @@ def _run_modal_daemon_provider(
         environment_metadata=environment_metadata,
         typing_method="auto",
         typing_delay_ms=10,
+        before_daemon_action_iteration=pace,
     )
     return project_surface_result("modal-daemon", surface_payload["surfaces"]["daemon-http"])
 

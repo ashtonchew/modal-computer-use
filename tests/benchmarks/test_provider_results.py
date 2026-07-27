@@ -91,6 +91,7 @@ def _provider_artifact() -> dict[str, object]:
             batching=batching,
         )
         if name == "modal-daemon":
+            cases["type_100_chars"]["resolved_methods"] = ["clipboard"]
             cases["type_100_chars"]["request"] = {
                 "character_count": 100,
                 "method": "auto",
@@ -100,8 +101,8 @@ def _provider_artifact() -> dict[str, object]:
                 "character_count": 1000,
                 "method": "auto",
                 "delay_ms": 10,
-                "timeout_ms": 30000,
             }
+            cases["type_1000_chars"]["resolved_methods"] = ["clipboard"]
         providers[name] = {
             "status": "ok",
             "provider": name,
@@ -150,6 +151,7 @@ def _provider_artifact() -> dict[str, object]:
                 "daemon_http_version": "1.1",
                 "resource_profile": "standard",
                 "input_rate_limit_per_sec": 20,
+                "action_case_pacing_ms": 1050,
                 "subprocess_backend": "isolated-asyncio",
                 "provenance": {
                     "git_revision": HARNESS_SHA,
@@ -228,12 +230,14 @@ def _raw_optimized_artifact() -> dict[str, object]:
         "method": "keystrokes",
         "delay_ms": 0,
     }
+    cases["type_100_chars"]["resolved_methods"] = ["keystrokes"]
     cases["type_1000_chars"]["request"] = {
         "character_count": 1000,
         "method": "keystrokes",
         "delay_ms": 0,
         "timeout_ms": 30000,
     }
+    cases["type_1000_chars"]["resolved_methods"] = ["keystrokes"]
     product_create = _case(100.0, iterations=30)
     product_create.update(
         {
@@ -443,7 +447,9 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
         "isolated-asyncio affects only subprocess-backed command and compatibility paths"
         in markdown
     )
-    assert "20 actions per second, not characters per second" in markdown
+    assert "20-actions-per-second input limit" in markdown
+    assert "auto resolves to clipboard" in markdown
+    assert "1.05 seconds of untimed pacing" in markdown
     assert "Tzafon experimental" not in markdown
     assert "not measured" not in markdown
     assert result["headline"]["rows"][0]["values"]["modal_optimized"]["sample_count"] == 30

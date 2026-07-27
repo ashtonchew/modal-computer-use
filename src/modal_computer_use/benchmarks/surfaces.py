@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Literal
 
 from .._version import __version__
@@ -37,6 +38,7 @@ def run_sdk_surface_benchmark(
     observation_cases: list[str] | None = None,
     typing_method: str = TYPING_BENCHMARK_METHOD,
     typing_delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
+    before_daemon_action_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -59,6 +61,7 @@ def run_sdk_surface_benchmark(
                 observation_cases=observation_cases,
                 typing_method=typing_method,
                 typing_delay_ms=typing_delay_ms,
+                before_daemon_action_iteration=before_daemon_action_iteration,
             )
         except Exception as exc:
             result = _surface_result(
@@ -114,6 +117,7 @@ def run_sdk_surface_benchmark_mock_local(
     observation_cases: list[str] | None = None,
     typing_method: str = TYPING_BENCHMARK_METHOD,
     typing_delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
+    before_daemon_action_iteration: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     return core._with_mock_local_client(
         lambda client: run_sdk_surface_benchmark(
@@ -128,6 +132,7 @@ def run_sdk_surface_benchmark_mock_local(
             observation_cases=observation_cases,
             typing_method=typing_method,
             typing_delay_ms=typing_delay_ms,
+            before_daemon_action_iteration=before_daemon_action_iteration,
         )
     )
 
@@ -145,6 +150,7 @@ def _run_surface(
     observation_cases: list[str] | None,
     typing_method: str,
     typing_delay_ms: int,
+    before_daemon_action_iteration: Callable[[], None] | None,
 ) -> dict[str, Any]:
     if surface == "daemon-http":
         return _run_daemon_http_surface(
@@ -156,6 +162,7 @@ def _run_surface(
             environment_metadata=environment_metadata,
             typing_method=typing_method,
             typing_delay_ms=typing_delay_ms,
+            before_action_iteration=before_daemon_action_iteration,
         )
     if surface == "daemon-hot-session":
         if client is None or mode == "mock-local":

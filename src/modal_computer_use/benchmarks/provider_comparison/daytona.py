@@ -5,6 +5,8 @@ import shlex
 from typing import Any
 
 from ..constants import (
+    COMMAND_ECHO_COMMAND,
+    COMMAND_ECHO_STDOUT,
     COMMAND_NONLOGIN_SHELL_ECHO_BENCHMARK_SEMANTICS,
     COMMAND_NONLOGIN_SHELL_ECHO_COMMAND,
     COORDINATE_CLICK_BENCHMARK_SEMANTICS,
@@ -212,11 +214,11 @@ class DaytonaDriver:
         return {"character_count": len(TYPE_1000_CHARS_TEXT), "method": "provider_default"}
 
     def command_echo(self, sandbox: Any) -> dict[str, Any]:
-        result = sandbox.process.exec("sh -lc 'printf 42'", timeout=30)
+        result = sandbox.process.exec(shlex.join(COMMAND_ECHO_COMMAND), timeout=30)
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
-        if provider_stdout(result) != "42":
+        if provider_stdout(result) != COMMAND_ECHO_STDOUT:
             raise RuntimeError("Daytona command output did not match the expected sentinel")
         return {"exit_code": exit_code}
 
@@ -226,7 +228,7 @@ class DaytonaDriver:
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
-        if provider_stdout(result) != "42":
+        if provider_stdout(result) != COMMAND_ECHO_STDOUT:
             raise RuntimeError("Daytona command output did not match the expected sentinel")
         return {
             "exit_code": exit_code,

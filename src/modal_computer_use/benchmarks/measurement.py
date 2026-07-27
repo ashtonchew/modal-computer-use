@@ -105,10 +105,13 @@ def _measure_observed_case(
     operation: Callable[[], Any],
     failures: list[dict[str, Any]],
     redacted_text: str | None = None,
+    before_iteration: Callable[[], None] | None = None,
 ) -> tuple[list[float], list[Any]]:
     samples: list[float] = []
     observations: list[Any] = []
     for warmup_index in range(warmup_iterations):
+        if before_iteration is not None:
+            before_iteration()
         try:
             operation()
         except Exception as exc:
@@ -123,6 +126,8 @@ def _measure_observed_case(
             )
             return samples, observations
     for iteration in range(iterations):
+        if before_iteration is not None:
+            before_iteration()
         start = time.perf_counter()
         try:
             observation = operation()

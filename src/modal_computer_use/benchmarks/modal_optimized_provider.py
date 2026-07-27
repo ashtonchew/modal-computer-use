@@ -45,6 +45,7 @@ _WARM_CASE_FIELDS = (
     "input_backends",
     "shell_mode",
     "request",
+    "resolved_methods",
 )
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 _UNSAFE_KEYS = {

@@ -41,9 +41,11 @@ SUBPROCESS_BACKEND_BOUNDARY = (
     "not select the native input or screenshot implementation."
 )
 TYPING_DEFAULT_BOUNDARY = (
-    "Modal default typing uses the public TypeAction defaults (auto with a 10 ms character "
-    "delay); Modal optimized explicitly uses keystrokes with zero delay. The default input rate "
-    "limit is 20 actions per second, not characters per second."
+    "Modal default typing requests the public TypeAction defaults (auto with a 10 ms character "
+    "delay); for these 100- and 1000-character inputs auto resolves to clipboard, so that delay "
+    "is not applied per character. Modal optimized explicitly resolves to keystrokes with zero "
+    "delay. Modal default uses 1.05 seconds of untimed pacing before every warmup and measured "
+    "action invocation to respect the default 20-actions-per-second input limit."
 )
 CLEANUP_BOUNDARY = (
     "Eligibility requires successful command and top-level outcomes. Cleanup errors "
@@ -59,8 +61,8 @@ WARM_OPERATION_BOUNDARY = (
     "They exclude target creation and cleanup."
 )
 COMMAND_BOUNDARY = (
-    "The command case requests argv [\"sh\", \"-c\", \"printf 42\"] with non-login shell "
-    "semantics and requires exit code 0 with exact stdout 42."
+    "The command case requests argv [\"sh\", \"-c\", \"printf '42\\n'\"] with non-login "
+    "shell semantics and requires exit code 0 with exact stdout \"42\\n\"."
 )
 LIGHTCONE_TZAFON_BOUNDARY = (
     "Lightcone is the computer infrastructure and public API; tzafon 2.44.1 is the pinned Python "
@@ -567,6 +569,7 @@ def _validated_provider_cases(payload: dict[str, Any]) -> dict[str, dict[str, An
         "daemon_http_version": "1.1",
         "resource_profile": "standard",
         "input_rate_limit_per_sec": 20,
+        "action_case_pacing_ms": 1050,
         "subprocess_backend": "isolated-asyncio",
     }
     for key, value in expected_environment.items():
@@ -627,11 +630,13 @@ def _validate_modal_default_typing(cases: dict[str, Any]) -> None:
         case = _mapping(cases.get(name), f"Modal default {name}")
         request = _mapping(case.get("request"), f"Modal default {name} request")
         expected = {"character_count": characters, "method": "auto", "delay_ms": 10}
-        if name == "type_1000_chars":
-            expected["timeout_ms"] = 30_000
         if request != expected:
             raise ProviderResultsError(
                 "Modal provider-default typing must use the public TypeAction defaults"
+            )
+        if case.get("resolved_methods") != ["clipboard"]:
+            raise ProviderResultsError(
+                "Modal provider-default auto typing must resolve to clipboard for long text"
             )
 
 
@@ -1257,6 +1262,10 @@ def _validated_optimized_cases(
                 raise ProviderResultsError(
                     "Modal optimized typing must retain explicit keystrokes with zero delay"
                 )
+            if case.get("resolved_methods") != ["keystrokes"]:
+                raise ProviderResultsError(
+                    "Modal optimized typing must resolve to keystrokes"
+                )
         cases[case_name] = case
     verification = _mapping(surface.get("verification"), "optimized verification")
     for name in ("cursor_position", "type_text"):
@@ -1410,6 +1419,7 @@ def _sanitized_case(case: dict[str, Any], *, name: str) -> dict[str, Any]:
         "benchmark_semantics": case.get("benchmark_semantics"),
         "input_backends": case.get("input_backends"),
         "shell_mode": case.get("shell_mode"),
+        "resolved_methods": case.get("resolved_methods"),
     }
 
 
@@ -1437,6 +1447,7 @@ def _validate_sanitized_case(
         "benchmark_semantics",
         "input_backends",
         "shell_mode",
+        "resolved_methods",
         *(extra_keys or set()),
     }
     _require_exact_keys(case, expected_keys, f"sanitized {name}")

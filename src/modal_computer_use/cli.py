@@ -1104,6 +1104,9 @@ def _benchmark_compare_created_modal_sandbox(
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
             precomputed_provider_results=precomputed_results,
+            modal_action_pacing_seconds=(
+                1.05 if metadata.get("action_case_pacing_ms") == 1050 else None
+            ),
         )
     except Exception as exc:
         final_cleanup_errors = _cleanup_modal_benchmark_computer(computer)
@@ -1913,6 +1916,13 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
         "input_rate_limit_per_sec": input_rate_limit,
+        "action_case_pacing_ms": (
+            1050
+            if benchmark_command == "compare"
+            and creates_modal_resource
+            and input_rate_limit == 20
+            else None
+        ),
         "subprocess_backend": getattr(args, "subprocess_backend", None),
         "image_profile": getattr(args, "image_profile", None),
         "provenance": benchmark_provenance(

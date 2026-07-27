@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +15,8 @@ from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.desktop import process_runner as process_runner_module
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
+from modal_computer_use.daemon.desktop.clipboard import X11ClipboardController
+from modal_computer_use.daemon.desktop.process_runner import AsyncioProcessRunner
 from modal_computer_use.daemon.desktop.x11 import (
     MockDesktopBackend,
     X11DesktopBackend,
@@ -25,7 +29,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputReleaseError,
     XTestUnavailableError,
 )
-from modal_computer_use.models import Point, Region, ScreenshotOptions
+from modal_computer_use.models import ActionResult, Point, Region, ScreenshotOptions
 
 
 class RecordingX11Backend(X11DesktopBackend):
@@ -36,6 +40,7 @@ class RecordingX11Backend(X11DesktopBackend):
             browser_profile_dir="/tmp/mcu-browser-test",
         )
         self.commands: list[tuple[str, ...]] = []
+        self.capture_output_options: list[bool] = []
         self.spawned: list[tuple[str, ...]] = []
 
     async def _run(
@@ -44,8 +49,10 @@ class RecordingX11Backend(X11DesktopBackend):
         timeout: float = 10.0,
         input_text: str | None = None,
         check: bool = True,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         self.commands.append(args)
+        self.capture_output_options.append(capture_output)
         stdout = (
             "X=12\nY=34\nSCREEN=0\nWINDOW=1\n"
             if args[:2] == ("xdotool", "getmouselocation")
@@ -443,9 +450,91 @@ def test_x11_keyboard_type_restores_clipboard_after_clipboard_paste() -> None:
     result = anyio.run(backend.keyboard_type, "x" * 81)
 
     assert result.ok is True
-    assert ("xclip", "-selection", "clipboard") in backend.commands
+    clipboard_writes = [
+        index
+        for index, command in enumerate(backend.commands)
+        if command == ("xclip", "-selection", "clipboard")
+    ]
+    assert clipboard_writes
+    assert all(backend.capture_output_options[index] is False for index in clipboard_writes)
     assert ("xdotool", "key", "ctrl+v") in backend.commands
     assert backend.clipboard == "previous clipboard"
+
+
+def test_x11_clipboard_set_propagates_process_failure() -> None:
+    async def fail(*_args: str, **_kwargs):
+        raise FileNotFoundError("xclip")
+
+    async def get_state() -> str:
+        return ""
+
+    async def set_state(text: str) -> ActionResult:
+        return ActionResult(ok=True, output={"length": len(text)})
+
+    controller = X11ClipboardController(
+        run=fail,
+        get_state=get_state,
+        set_state=set_state,
+        clear_state=lambda: set_state(""),
+    )
+
+    with pytest.raises(FileNotFoundError, match="xclip"):
+        anyio.run(controller.set, "x" * 81)
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or shutil.which("Xvfb") is None or shutil.which("xclip") is None,
+    reason="requires Xvfb and xclip",
+)
+def test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state() -> None:
+    xvfb_path = shutil.which("Xvfb")
+    assert xvfb_path is not None
+    xvfb = subprocess.Popen(  # noqa: S603 - trusted executable resolved by shutil.which.
+        [xvfb_path, "-displayfd", "1", "-screen", "0", "1024x768x24"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    assert xvfb.stdout is not None
+    display_number = xvfb.stdout.readline().strip()
+    assert display_number.isdigit()
+    display = f":{display_number}"
+    runner = AsyncioProcessRunner()
+    state = {"value": ""}
+
+    async def run(*args: str, **kwargs):
+        return await runner.run(*args, env={"DISPLAY": display}, **kwargs)
+
+    async def get_state() -> str:
+        return state["value"]
+
+    async def set_state(text: str) -> ActionResult:
+        state["value"] = text
+        return ActionResult(ok=True, output={"length": len(text)})
+
+    controller = X11ClipboardController(
+        run=run,
+        get_state=get_state,
+        set_state=set_state,
+        clear_state=lambda: set_state(""),
+    )
+    previous = "previous clipboard"
+    long_text = "0123456789" * 10
+
+    async def exercise() -> None:
+        await controller.set(previous)
+        assert await controller.get() == previous
+        await controller.set(long_text)
+        assert await controller.get() == long_text
+        await controller.set(previous)
+        assert await controller.get() == previous
+
+    try:
+        anyio.run(exercise)
+    finally:
+        runner.close()
+        xvfb.terminate()
+        xvfb.wait(timeout=5)
 
 
 def test_x11_cursor_position_reads_xdotool_shell_output() -> None:

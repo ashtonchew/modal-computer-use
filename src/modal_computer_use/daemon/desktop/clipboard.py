@@ -31,9 +31,21 @@ class X11ClipboardController:
         return await self._get_state()
 
     async def set(self, text: str) -> ActionResult:
-        await self._run("xclip", "-selection", "clipboard", input_text=text)
+        await self._run(
+            "xclip",
+            "-selection",
+            "clipboard",
+            input_text=text,
+            capture_output=False,
+        )
         return await self._set_state(text)
 
     async def clear(self) -> ActionResult:
-        await self._run("xclip", "-selection", "clipboard", input_text="")
+        await self._run(
+            "xclip",
+            "-selection",
+            "clipboard",
+            input_text="",
+            capture_output=False,
+        )
         return await self._clear_state()
