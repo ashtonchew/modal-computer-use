@@ -143,7 +143,13 @@ class StorageConfig(StrictBaseModel):
 
 class BrowserConfig(StrictBaseModel):
     kind: Literal["firefox", "chromium"] | None = None
-    prewarm: bool = True
+    prewarm: bool = Field(
+        default=True,
+        description=(
+            "Launch the selected browser during desktop startup; false keeps the "
+            "browser installed but does not launch it."
+        ),
+    )
     profile_dir: str | None = None
     launch_args: list[str] = Field(default_factory=list)
     open_url_on_start: str | None = None
@@ -237,12 +243,6 @@ class ComputerConfig(StrictBaseModel):
                 self.browser is None or self.browser.kind is None
             ):
                 raise ValueError("named image selection requires browser.kind")
-            if (
-                self.resources.profile in ("browser", "browser-gpu")
-                and self.browser is not None
-                and not self.browser.prewarm
-            ):
-                raise ValueError("named browser images require browser.prewarm")
         return self
 
 

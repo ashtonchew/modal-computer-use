@@ -68,7 +68,7 @@ def test_block_all_requires_connect_ingress_without_vnc() -> None:
         ComputerConfig(network={"block_all": True})
 
 
-def test_named_image_config_requires_full_git_revision_and_browser() -> None:
+def test_named_image_config_requires_full_git_revision_and_browser_kind() -> None:
     config = ComputerConfig(
         resources={"profile": "browser"},
         browser={"kind": "firefox"},
@@ -90,12 +90,16 @@ def test_named_image_config_requires_full_git_revision_and_browser() -> None:
             desktop={"window_manager": "openbox"},
             image={"source": "named", "revision": REVISION},
         )
-    with pytest.raises(ValidationError, match=r"require browser\.prewarm"):
-        ComputerConfig(
-            resources={"profile": "browser"},
-            browser={"kind": "firefox", "prewarm": False},
-            image={"source": "named", "revision": REVISION},
-        )
+
+
+def test_named_browser_image_can_skip_browser_launch() -> None:
+    no_browser_launch = ComputerConfig(
+        resources={"profile": "browser"},
+        browser={"kind": "firefox", "prewarm": False},
+        image={"source": "named", "revision": REVISION},
+    )
+    assert no_browser_launch.browser is not None
+    assert no_browser_launch.browser.prewarm is False
 
 
 @pytest.mark.parametrize(

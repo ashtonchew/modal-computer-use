@@ -8,7 +8,12 @@ import statistics
 from typing import Any
 from urllib.parse import urlsplit
 
-SCHEMA_VERSION = 2
+from .modal_optimized_provider import (
+    PRODUCT_CREATE_CASE,
+    validate_modal_optimized_provider_artifact,
+)
+
+SCHEMA_VERSION = 3
 MINIMUM_ELIGIBLE_SOURCE_SHA = "c6afa9d0384e664f5ccd7426014dcf5d20266e0e"
 OPAQUE_TZAFON_SETTLE_SENTENCE = (
     "Tzafon settle semantics are opaque at this API boundary, so its action "
@@ -24,8 +29,10 @@ CLEANUP_BOUNDARY = (
     "prove cleanup beyond those recorded outcomes."
 )
 RUNNER_ONLY_BOUNDARY = (
-    "Modal optimized and experimental evidence measures only the selected same-region runner; "
-    "the unrelated external caller diagnostic is not executed or included."
+    "Modal optimized and experimental evidence uses a Modal runner with the same requested "
+    "Modal region as its target; the unrelated external caller diagnostic is not executed "
+    "or included. Publishable optimized evidence separately requires every observed target "
+    "cloud and region to match the runner."
 )
 REPORTING_POLICY = {
     "small_sample_threshold": 20,
@@ -55,8 +62,10 @@ _SECRET_KEYS = {
     "access_key",
     "api_key",
     "authorization",
+    "artifact_bytes",
     "base_url",
     "bearer",
+    "clipboard_text",
     "credential",
     "credentials",
     "endpoint",
@@ -70,6 +79,7 @@ _SECRET_KEYS = {
     "secret_key",
     "token",
     "typed_content",
+    "typed_text",
 }
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}")
@@ -112,9 +122,6 @@ def build_provider_results(
     for case_name, label in _ROWS:
         values: dict[str, Any] = {}
         for key, _column_label in _COLUMNS:
-            if key == "modal_optimized" and case_name == "product_create_to_first_screenshot":
-                values[key] = {"status": "not_measured"}
-                continue
             case = (
                 optimized_cases[case_name]
                 if key == "modal_optimized"
@@ -208,13 +215,6 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
         _require_exact_keys(values, {key for key, _ in _COLUMNS}, f"headline values {case_name}")
         for provider_key, _ in _COLUMNS:
             value = _mapping(values.get(provider_key), f"headline {case_name} {provider_key}")
-            if (
-                case_name == "product_create_to_first_screenshot"
-                and provider_key == "modal_optimized"
-            ):
-                if value != {"status": "not_measured"}:
-                    raise ProviderResultsError("only Modal optimized create may be not_measured")
-                continue
             _require_exact_keys(
                 value,
                 {"status", "sample_count", "min_ms", "max_ms", "p50_ms", "p95_ms"},
@@ -302,15 +302,26 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
     expected_configuration = {
         "modal_optimized": {
             "modal_region": "us-west-2",
-            "modal_runner_path": "connect",
+            "modal_cloud_provider": configuration.get("modal_optimized", {}).get(
+                "modal_cloud_provider"
+            ),
+            "modal_runner_kind": "modal-function",
             "modal_ingress": "connect",
             "daemon_http_version": "1.1",
             "browser": "chromium",
+            "browser_prewarm": False,
+            "image_revision": provenance.get("evidence_harness_sha"),
+            "runner_cpu": 4.0,
+            "runner_memory_mib": 8192,
+            "target_cpu": 4.0,
+            "target_memory_mib": 8192,
             "input_rate_limit_per_sec": 0,
             "subprocess_backend": "isolated-asyncio",
             "measured_iterations": 30,
-            "caller_topology": "separate same-region Modal runner",
+            "caller_topology": "single Modal Function with the same requested Modal region",
+            "observed_target_placement_match": True,
             "external_caller_included": False,
+            "runner_startup_in_product_create_boundary": False,
         },
         "provider_defaults": {
             "measured_iterations": 3,
@@ -319,6 +330,9 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
     }
     if configuration != expected_configuration:
         raise ProviderResultsError("combined artifact configuration is not exact")
+    cloud_provider = expected_configuration["modal_optimized"]["modal_cloud_provider"]
+    if not isinstance(cloud_provider, str) or not cloud_provider.strip():
+        raise ProviderResultsError("combined artifact requires observed Modal cloud placement")
     configuration_digest = hashlib.sha256(
         json.dumps(configuration, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
@@ -524,53 +538,97 @@ def _validated_runner_only_runs(
 def _validated_optimized_cases(
     payload: dict[str, Any], *, expected_harness_commit: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    _require_ok(payload, "Modal optimized artifact")
-    if payload.get("iterations") != 30:
-        raise ProviderResultsError("Modal optimized artifact must use exactly 30 iterations")
+    try:
+        validate_modal_optimized_provider_artifact(payload, require_publishable=True)
+    except ValueError as exc:
+        raise ProviderResultsError(f"Modal optimized artifact is not publishable: {exc}") from exc
+    if payload.get("failures") != []:
+        raise ProviderResultsError("Modal optimized artifact has failures")
     metadata = _mapping(payload.get("metadata"), "Modal optimized metadata")
-    if metadata.get("primary_runner_path") != "connect" or metadata.get("runner_paths") != [
-        "connect"
-    ]:
-        raise ProviderResultsError("Modal optimized artifact must select only the Connect runner")
-    if metadata.get("surfaces") != ["daemon-http"]:
-        raise ProviderResultsError("Modal optimized artifact must select only daemon-http")
-    runs = _validated_runner_only_runs(payload, metadata, label="Modal optimized")
-    run = _mapping(
-        runs.get("modal_colocated_runner"), "optimized run"
-    )
+    if metadata.get("external_caller_included") is not False:
+        raise ProviderResultsError("Modal optimized evidence must be runner-only")
+    if (
+        metadata.get("caller_topology")
+        != "single-modal-function-same-requested-modal-region"
+    ):
+        raise ProviderResultsError("Modal optimized caller topology is invalid")
+    if metadata.get("runner_kind") != "modal-function" or metadata.get("runner_invocations") != 1:
+        raise ProviderResultsError("Modal optimized evidence requires one Modal Function runner")
+    if metadata.get("runner_startup_in_product_create_boundary") is not False:
+        raise ProviderResultsError("Modal Function startup must remain outside lifecycle samples")
+    runs = _mapping(payload.get("runs"), "Modal optimized runs")
+    if (
+        set(runs) != {"modal_optimized_runner"}
+        or "comparison" in payload
+        or "comparison" in metadata
+    ):
+        raise ProviderResultsError("Modal optimized runner-only evidence has invalid structure")
+    run = _mapping(runs.get("modal_optimized_runner"), "optimized run")
     _require_ok(run, "Modal optimized runner")
-    run_metadata = _mapping(run.get("metadata"), "optimized run metadata")
-    environment = _mapping(run_metadata.get("environment"), "optimized environment")
     expected = {
         "modal_region": "us-west-2",
-        "modal_runner_path": "connect",
         "modal_ingress": "connect",
         "daemon_http_version": "1.1",
         "browser": "chromium",
+        "browser_prewarm": False,
+        "image_revision": expected_harness_commit,
+        "runner_cpu": 4.0,
+        "runner_memory_mib": 8192,
+        "target_cpu": 4.0,
+        "target_memory_mib": 8192,
         "input_rate_limit_per_sec": 0,
         "subprocess_backend": "isolated-asyncio",
     }
     for key, value in expected.items():
-        if environment.get(key) != value:
+        if metadata.get(key) != value:
             raise ProviderResultsError(f"Modal optimized configuration requires {key}={value!r}")
-    provenance = _mapping(environment.get("provenance"), "optimized provenance")
+    provenance = _mapping(metadata.get("provenance"), "optimized provenance")
     if provenance.get("git_revision") != expected_harness_commit:
         raise ProviderResultsError("Modal optimized source does not match expected harness commit")
     if provenance.get("git_worktree_clean") is not True:
         raise ProviderResultsError("Modal optimized source must have a clean worktree")
-    preflight = run_metadata.get("runner_preflight")
+    if provenance.get("image_identity") != f"named:{expected_harness_commit}":
+        raise ProviderResultsError("Modal optimized image does not match expected harness commit")
+    product_create = _mapping(run.get("product_create"), "optimized product create")
+    _require_case(product_create, expected=30, label="optimized product create")
     if (
-        isinstance(preflight, dict)
-        and preflight.get("status") not in {None, "ok"}
-        and preflight.get("ok") is not True
+        product_create.get("warmup_iterations") != 1
+        or product_create.get("successful_warmup_iterations") != 1
+        or product_create.get("replacement_samples") != 0
+        or product_create.get("fresh_target_per_attempt") is not True
+        or product_create.get("targets_created") != 31
+        or product_create.get("target_attempts") != 31
+        or product_create.get("targets_reused") != 0
+        or product_create.get("target_placements_verified") != 31
     ):
-        raise ProviderResultsError("Modal optimized runner preflight failed")
+        raise ProviderResultsError("optimized product create lifecycle schedule is invalid")
+    lifecycle_cleanup = _mapping(product_create.get("cleanup"), "optimized lifecycle cleanup")
+    if lifecycle_cleanup != {"attempted": 31, "succeeded": 31, "failures": []}:
+        raise ProviderResultsError("optimized product create cleanup failed")
+    warm_cleanup = _mapping(run.get("warm_target_cleanup"), "optimized warm cleanup")
+    if warm_cleanup != {"attempted": True, "succeeded": True, "error_type": None}:
+        raise ProviderResultsError("optimized warm target cleanup failed")
+    if run.get("warm_target_placement_verified") is not True:
+        raise ProviderResultsError("optimized warm target placement was not verified")
+    placement = _mapping(run.get("runner_placement"), "optimized runner placement")
+    cloud_provider = placement.get("cloud")
+    if (
+        not isinstance(cloud_provider, str)
+        or not cloud_provider.strip()
+        or placement.get("region") != "us-west-2"
+        or set(placement) != {"cloud", "region"}
+    ):
+        raise ProviderResultsError("optimized runner placement is invalid")
     surfaces = _mapping(run.get("surfaces"), "optimized surfaces")
     surface = _mapping(surfaces.get("daemon-http"), "optimized daemon-http surface")
     _require_ok(surface, "optimized daemon-http surface", status_key=True)
-    cases = _mapping(surface.get("cases"), "optimized cases")
-    for case_name, _ in _ROWS[1:]:
-        case = _mapping(cases.get(case_name), f"optimized case {case_name}")
+    raw_cases = _mapping(surface.get("cases"), "optimized cases")
+    source_names = {name: name for name, _label in _ROWS[1:]}
+    if set(raw_cases) != set(source_names):
+        raise ProviderResultsError("optimized daemon-http cases are not exact")
+    cases = {PRODUCT_CREATE_CASE: product_create}
+    for case_name, source_name in source_names.items():
+        case = _mapping(raw_cases.get(source_name), f"optimized case {case_name}")
         _require_case(case, expected=30, label=f"optimized {case_name}")
         _require_case_semantics(case_name, case)
         if case_name in {
@@ -580,15 +638,20 @@ def _validated_optimized_cases(
             "type_1000_chars",
         } and case.get("input_backends") != ["xtest"]:
             raise ProviderResultsError(f"optimized {case_name} must use XTest")
+        cases[case_name] = case
     verification = _mapping(surface.get("verification"), "optimized verification")
     for name in ("cursor_position", "type_text"):
         if _mapping(verification.get(name), f"optimized {name}").get("status") != "ok":
             raise ProviderResultsError("Modal optimized cursor/type readback failed")
     return cases, {
         **expected,
+        "modal_cloud_provider": cloud_provider,
+        "modal_runner_kind": "modal-function",
         "measured_iterations": 30,
-        "caller_topology": "separate same-region Modal runner",
+        "caller_topology": "single Modal Function with the same requested Modal region",
+        "observed_target_placement_match": True,
         "external_caller_included": False,
+        "runner_startup_in_product_create_boundary": False,
     }
 
 
@@ -828,8 +891,6 @@ def _validate_safe_value(value: Any, *, key: str | None = None) -> None:
 
 
 def _format_value(value: dict[str, Any]) -> str:
-    if value.get("status") == "not_measured":
-        return "not measured"
     if value["sample_count"] < REPORTING_POLICY["small_sample_threshold"]:
         return (
             f"{value['p50_ms']:.2f} "

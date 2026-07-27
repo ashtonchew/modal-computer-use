@@ -34,6 +34,10 @@ from .benchmarks.modal_colocated_client import (
     ModalColocatedClientBenchmarkConfig,
     run_modal_colocated_client_benchmark,
 )
+from .benchmarks.modal_optimized_provider import (
+    ModalOptimizedProviderConfig,
+    run_modal_optimized_provider_benchmark,
+)
 from .benchmarks.modal_region_ab import (
     DEFAULT_MODAL_REGION_AB_REGIONS,
     modal_region_ab_comparison,
@@ -54,6 +58,7 @@ from .benchmarks.surfaces import (
 from .client import DaemonClient
 from .config import BrowserConfig, ComputerConfig, ModalIngress
 from .errors import ModalNotInstalledError, SandboxUnavailableError
+from .latency import validate_first_frame
 from .sandbox import (
     ComputerSandbox,
     _connect_token_parts,
@@ -580,6 +585,21 @@ def main(argv: list[str] | None = None) -> int:
     colocated_parser.add_argument("--output", type=Path)
     colocated_parser.add_argument("--json", action="store_true", default=True)
 
+    optimized_provider_parser = benchmark_subparsers.add_parser("modal-optimized-provider")
+    optimized_provider_parser.add_argument("--modal-region", required=True)
+    optimized_provider_parser.add_argument("--image-revision", required=True)
+    optimized_provider_parser.add_argument("--modal-cpu", type=float, default=4.0)
+    optimized_provider_parser.add_argument("--modal-memory-mib", type=int, default=8192)
+    optimized_provider_parser.add_argument("--browser", choices=["chromium"], default="chromium")
+    optimized_provider_parser.add_argument("--iterations", type=_positive_int, default=30)
+    optimized_provider_parser.add_argument("--warmup-iterations", type=_nonnegative_int, default=1)
+    optimized_provider_parser.add_argument(
+        "--pilot",
+        action="store_true",
+        help="allow nonpublishable sample counts for a canary run",
+    )
+    optimized_provider_parser.add_argument("--output", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -711,6 +731,13 @@ def main(argv: list[str] | None = None) -> int:
                 "pass --browser chromium or --browser firefox"
             )
         return _benchmark_modal_colocated_client(args)
+    if args.benchmark_command == "modal-optimized-provider":
+        if not args.pilot and (args.iterations != 30 or args.warmup_iterations != 1):
+            optimized_provider_parser.error(
+                "nonpublishable counts require --pilot; publishable runs use 30 measured "
+                "and 1 warmup"
+            )
+        return _benchmark_modal_optimized_provider(args)
     return _benchmark_report(args)
 
 
@@ -733,6 +760,26 @@ def _benchmark_provider_results(args: argparse.Namespace) -> int:
     except (OSError, json.JSONDecodeError, ProviderResultsError) as exc:
         raise SystemExit(str(exc)) from exc
     return 0
+
+
+def _benchmark_modal_optimized_provider(args: argparse.Namespace) -> int:
+    config = ModalOptimizedProviderConfig(
+        region=args.modal_region,
+        image_revision=args.image_revision,
+        cpu=args.modal_cpu,
+        memory_mib=args.modal_memory_mib,
+        browser=args.browser,
+        iterations=args.iterations,
+        warmup_iterations=args.warmup_iterations,
+        pilot=args.pilot,
+    )
+    result = run_modal_optimized_provider_benchmark(config)
+    output = _json_string(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result.get("ok") else 1
 
 
 def _trace_validate(path: Path) -> int:
@@ -1118,7 +1165,11 @@ def _create_modal_benchmark_computer(
             )
             _raise_modal_cleanup_errors(_detach_modal_benchmark_computer(computer))
             final_ingress_ready_ms = (time.perf_counter() - started) * 1000
-        first_screenshot = _modal_first_raw_screenshot_metadata(final_computer.client)
+        first_screenshot = _modal_first_raw_screenshot_metadata(
+            final_computer.client,
+            expected_width=config.desktop.resolution[0],
+            expected_height=config.desktop.resolution[1],
+        )
         first_screenshot_ms = (time.perf_counter() - started) * 1000
         metadata = {
             **_benchmark_environment_metadata(args),
@@ -1163,30 +1214,30 @@ def _create_modal_benchmark_computer(
         raise
 
 
-def _modal_first_raw_screenshot_metadata(client: DaemonClient) -> dict[str, Any]:
+def _modal_first_raw_screenshot_metadata(
+    client: DaemonClient,
+    *,
+    expected_width: int,
+    expected_height: int,
+) -> dict[str, Any]:
     payload, headers = client.post_bytes_with_headers(
         "/v1/screenshots/full/raw",
         json={"format": "png", "show_cursor": False},
     )
-    if not payload:
-        raise RuntimeError("Modal raw screenshot was empty")
+    validate_first_frame(
+        payload,
+        expected_width=expected_width,
+        expected_height=expected_height,
+        image_format="png",
+    )
     return {
         "modal_first_raw_screenshot_size_bytes": len(payload),
-        "modal_first_raw_screenshot_width": _int_header(headers, "x-computer-use-width"),
-        "modal_first_raw_screenshot_height": _int_header(headers, "x-computer-use-height"),
+        "modal_first_raw_screenshot_width": expected_width,
+        "modal_first_raw_screenshot_height": expected_height,
         "modal_first_raw_screenshot_capture_backend": _str_header(
             headers, "x-computer-use-capture-backend"
         ),
     }
-
-
-def _int_header(headers: Any, name: str) -> int | None:
-    value = headers.get(name) if hasattr(headers, "get") else None
-    if not isinstance(value, str) or not value.isdigit():
-        return None
-    return int(value)
-
-
 def _str_header(headers: Any, name: str) -> str | None:
     value = headers.get(name) if hasattr(headers, "get") else None
     return value if isinstance(value, str) and value else None
@@ -1790,6 +1841,13 @@ def _positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be nonnegative")
     return parsed
 
 

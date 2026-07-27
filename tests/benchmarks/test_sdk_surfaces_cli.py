@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 import modal_computer_use.benchmarks.billing as benchmark_billing
 import modal_computer_use.benchmarks.daemon_surface as benchmark_daemon_surface
@@ -275,7 +277,7 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
             def post_bytes_with_headers(self, path, *, json):
                 assert path == "/v1/screenshots/full/raw"
                 assert json == {"format": "png", "show_cursor": False}
-                return b"png", {
+                return _valid_png_bytes(), {
                     "x-computer-use-width": "1024",
                     "x-computer-use-height": "768",
                     "x-computer-use-capture-backend": "mss",
@@ -421,11 +423,43 @@ def test_benchmark_sdk_can_create_gpu_modal_sandbox(monkeypatch, capsys) -> None
         environment["modal_first_raw_screenshot_ms"]
         == environment["modal_cold_create_to_ready_ms"]
     )
-    assert environment["modal_first_raw_screenshot_size_bytes"] == 3
+    assert environment["modal_first_raw_screenshot_size_bytes"] == len(_valid_png_bytes())
     assert environment["modal_first_raw_screenshot_width"] == 1024
     assert environment["modal_first_raw_screenshot_height"] == 768
     assert environment["modal_first_raw_screenshot_capture_backend"] == "mss"
     assert closed == ["detach", "terminate", "detach"]
+
+
+def test_modal_first_raw_screenshot_requires_decoded_png_with_exact_geometry() -> None:
+    class Client:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+
+        def post_bytes_with_headers(self, path, *, json):
+            assert path == "/v1/screenshots/full/raw"
+            return self.payload, {
+                "x-computer-use-width": "1024",
+                "x-computer-use-height": "768",
+            }
+
+    metadata = cli._modal_first_raw_screenshot_metadata(
+        Client(_valid_png_bytes()),
+        expected_width=1024,
+        expected_height=768,
+    )
+    assert metadata["modal_first_raw_screenshot_width"] == 1024
+    with pytest.raises(ValueError, match="decoded"):
+        cli._modal_first_raw_screenshot_metadata(
+            Client(b"not-a-png"),
+            expected_width=1024,
+            expected_height=768,
+        )
+    with pytest.raises(ValueError, match="geometry"):
+        cli._modal_first_raw_screenshot_metadata(
+            Client(_valid_png_bytes(width=800, height=600)),
+            expected_width=1024,
+            expected_height=768,
+        )
 
 def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch, capsys) -> None:
     created: dict[str, object] = {}
@@ -925,6 +959,60 @@ def test_benchmark_modal_colocated_observation_requires_browser(capsys) -> None:
     assert "daemon-observation-stream requires a browser-capable target" in captured.err
 
 
+def test_benchmark_modal_optimized_provider_supports_explicit_pilot(monkeypatch, capsys) -> None:
+    calls = []
+
+    def fake_run(config):
+        calls.append(config)
+        return {
+            "schema_version": 1,
+            "benchmark": "modal-optimized-provider",
+            "ok": True,
+            "eligibility": "pilot_ineligible",
+        }
+
+    monkeypatch.setattr(cli, "run_modal_optimized_provider_benchmark", fake_run)
+    assert (
+        cli.main(
+            [
+                "benchmark",
+                "modal-optimized-provider",
+                "--modal-region",
+                "us-west-2",
+                "--image-revision",
+                "a" * 40,
+                "--iterations",
+                "1",
+                "--warmup-iterations",
+                "0",
+                "--pilot",
+            ]
+        )
+        == 0
+    )
+    assert calls[0].pilot is True
+    assert calls[0].cpu == 4.0
+    assert calls[0].memory_mib == 8192
+    assert json.loads(capsys.readouterr().out)["eligibility"] == "pilot_ineligible"
+
+
+def test_benchmark_modal_optimized_provider_rejects_small_publishable_run(capsys) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(
+            [
+                "benchmark",
+                "modal-optimized-provider",
+                "--modal-region",
+                "us-west-2",
+                "--image-revision",
+                "a" * 40,
+                "--iterations",
+                "1",
+            ]
+        )
+    assert "--pilot" in capsys.readouterr().err
+
+
 def test_benchmark_sdk_create_modal_sandbox_requires_daemon_http(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(
@@ -940,3 +1028,9 @@ def test_benchmark_sdk_create_modal_sandbox_requires_daemon_http(capsys) -> None
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
     assert "--create-modal-sandbox requires surface daemon-http" in captured.err
+
+
+def _valid_png_bytes(*, width: int = 1024, height: int = 768) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (width, height), color=(1, 2, 3)).save(buffer, format="PNG")
+    return buffer.getvalue()

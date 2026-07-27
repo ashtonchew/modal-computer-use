@@ -582,6 +582,50 @@ def modal_sandbox_exec_once(
     return result
 
 
+def run_modal_benchmark_function_once(
+    entrypoint: Callable[..., dict[str, Any]],
+    *,
+    config: object,
+    run_tag: str,
+    app_name: str,
+    region: str,
+    image_revision: str,
+    cpu: float,
+    memory_mib: int,
+    timeout_seconds: int,
+    retries: int = 0,
+) -> dict[str, Any]:
+    """Invoke one regional benchmark Function without including dispatch in its measurements."""
+    if retries != 0:
+        raise ValueError("benchmark Function retries must be disabled")
+    if not region.strip():
+        raise ValueError("benchmark Function region must be explicit")
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError("Modal benchmark Function requires the modal extra") from exc
+
+    app = modal.App(f"{app_name}-optimized-provider-runner")
+    image = named_image(revision=image_revision, profile="browser", browser="chromium")
+    remote = app.function(
+        image=image,
+        region=region,
+        cpu=cpu,
+        memory=memory_mib,
+        timeout=timeout_seconds,
+        retries=0,
+        min_containers=0,
+        max_containers=1,
+        single_use_containers=True,
+        serialized=True,
+    )(entrypoint)
+    with app.run():
+        result = remote.remote(config, run_tag=run_tag)
+    if not isinstance(result, dict):
+        raise SandboxUnavailableError("benchmark Function returned a non-object result")
+    return result
+
+
 def modal_sandbox_exec_in_place(
     sandbox: object,
     command: tuple[str, ...],

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import math
+import statistics
 import subprocess
 from pathlib import Path
 
@@ -22,12 +24,18 @@ HARNESS_SHA = "c6afa9d0384e664f5ccd7426014dcf5d20266e0e"
 
 
 def _case(value: float, *, iterations: int) -> dict[str, object]:
+    samples = [value] * (iterations - 1) + [value + 2]
+    ordered = sorted(samples)
+    rank = 0.95 * (len(ordered) - 1)
+    lower = math.floor(rank)
+    fraction = rank - lower
+    p95 = ordered[lower] + fraction * (ordered[math.ceil(rank)] - ordered[lower])
     return {
         "status": "ok",
         "iterations": iterations,
         "successful_iterations": iterations,
-        "samples_ms": [value] * (iterations - 1) + [value + 2],
-        "summary_ms": {"p50": value, "p95": value + 1},
+        "samples_ms": samples,
+        "summary_ms": {"p50": statistics.median(ordered), "p95": p95},
         "failures": [],
     }
 
@@ -175,23 +183,48 @@ def _optimized_artifact() -> dict[str, object]:
             1,
         )
     }
+    product_create = _case(100.0, iterations=30)
+    product_create.update(
+        {
+            "name": "product_create_to_first_screenshot",
+            "definition": "create through validated frame",
+            "warmup_iterations": 1,
+            "successful_warmup_iterations": 1,
+            "replacement_samples": 0,
+            "fresh_target_per_attempt": True,
+            "targets_created": 31,
+            "target_attempts": 31,
+            "targets_reused": 0,
+            "target_placements_verified": 31,
+            "cleanup": {"attempted": 31, "succeeded": 31, "failures": []},
+        }
+    )
     environment = {
         "modal_region": "us-west-2",
-        "modal_runner_path": "connect",
         "modal_ingress": "connect",
         "daemon_http_version": "1.1",
         "browser": "chromium",
+        "browser_prewarm": False,
+        "image_revision": HARNESS_SHA,
+        "runner_cpu": 4.0,
+        "runner_memory_mib": 8192,
+        "target_cpu": 4.0,
+        "target_memory_mib": 8192,
         "input_rate_limit_per_sec": 0,
         "subprocess_backend": "isolated-asyncio",
-        "provenance": {"git_revision": HARNESS_SHA, "git_worktree_clean": True},
+        "provenance": {
+            "git_revision": HARNESS_SHA,
+            "git_worktree_clean": True,
+            "image_identity": f"named:{HARNESS_SHA}",
+        },
     }
     run = {
         "ok": True,
         "failures": [],
-        "metadata": {
-            "environment": environment,
-            "runner_preflight": {"status": "ok"},
-        },
+        "product_create": product_create,
+        "runner_placement": {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
+        "warm_target_cleanup": {"attempted": True, "succeeded": True, "error_type": None},
+        "warm_target_placement_verified": True,
         "surfaces": {
             "daemon-http": {
                 "status": "ok",
@@ -205,17 +238,28 @@ def _optimized_artifact() -> dict[str, object]:
         },
     }
     return {
+        "schema_version": 1,
         "ok": True,
-        "benchmark": "modal-colocated-client",
+        "benchmark": "modal-optimized-provider",
+        "eligibility": "publishable",
         "iterations": 30,
+        "warmup_iterations": 1,
+        "replacement_samples": 0,
         "failures": [],
         "metadata": {
-            "primary_runner_path": "connect",
-            "runner_paths": ["connect"],
-            "surfaces": ["daemon-http"],
+            **environment,
+            "caller_topology": "single-modal-function-same-requested-modal-region",
+            "runner_kind": "modal-function",
+            "runner_invocations": 1,
+            "runner_startup_in_product_create_boundary": False,
             "external_caller_included": False,
         },
-        "runs": {"modal_colocated_runner": run},
+        "runs": {"modal_optimized_runner": run},
+        "runner_dispatch": {
+            "elapsed_ms": 100.0,
+            "included_in_product_create_samples": False,
+        },
+        "final_cleanup": {"cleanup_succeeded": True, "remaining_sandboxes": 0},
     }
 
 
@@ -319,7 +363,8 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
     assert markdown.count("## Modal-only experimental result") == 1
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in markdown
     assert "Tzafon experimental" not in markdown
-    assert "not measured" in markdown
+    assert "not measured" not in markdown
+    assert result["headline"]["rows"][0]["values"]["modal_optimized"]["sample_count"] == 30
     for banned in (
         "canoni" + "cal protocol",
         "porta" + "ble",
@@ -383,7 +428,7 @@ def test_reporting_policy_keeps_small_sample_p95_machine_only() -> None:
             ),
             "readback",
         ),
-        (lambda _p, o, _x: o["metadata"].update(primary_runner_path="inherited"), "Connect"),
+        (lambda _p, o, _x: o["metadata"].update(runner_kind="modal-sandbox"), "Function"),
         (
             lambda _p, o, _x: o["metadata"].update(external_caller_included=True),
             "runner-only",
@@ -437,16 +482,20 @@ def test_reporting_policy_keeps_small_sample_p95_machine_only() -> None:
             "p95",
         ),
         (
-            lambda _p, o, _x: o["runs"]["modal_colocated_runner"]["metadata"]["environment"][
-                "provenance"
-            ].update(git_worktree_clean=False),
+            lambda _p, o, _x: o["metadata"]["provenance"].update(git_worktree_clean=False),
             "clean",
         ),
         (
-            lambda _p, o, _x: o["runs"]["modal_colocated_runner"]["metadata"]["environment"][
-                "provenance"
-            ].update(git_revision="a" * 40),
+            lambda _p, o, _x: o["metadata"]["provenance"].update(git_revision="a" * 40),
             "optimized source",
+        ),
+        (
+            lambda _p, o, _x: o["metadata"].update(image_revision="d" * 40),
+            "image_revision",
+        ),
+        (
+            lambda _p, o, _x: o["metadata"].update(target_cpu=99.0),
+            "target_cpu",
         ),
         (
             lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["metadata"]["environment"][
@@ -575,7 +624,8 @@ def test_builder_rejects_structurally_external_runner_only_evidence(
     else:
         artifact["metadata"]["comparison"] = "external versus runner"
 
-    with pytest.raises(ProviderResultsError, match="runner-only"):
+    expected_message = "runner-only" if artifact_name == "observation" else "publishable"
+    with pytest.raises(ProviderResultsError, match=expected_message):
         build_provider_results(
             _provider_artifact(),
             optimized,
@@ -593,6 +643,19 @@ def test_combined_artifact_rejects_secret_or_resource_fields(bad: dict[str, str]
     result = _build()
     result["provenance"].update(bad)
     with pytest.raises(ProviderResultsError):
+        validate_provider_results(result)
+
+
+def test_combined_artifact_binds_image_revision_to_evidence_commit() -> None:
+    result = _build()
+    result["configuration"]["modal_optimized"]["image_revision"] = "d" * 40
+    result["provenance"]["safe_configuration_sha256"] = hashlib.sha256(
+        json.dumps(
+            result["configuration"], separators=(",", ":"), sort_keys=True
+        ).encode()
+    ).hexdigest()
+
+    with pytest.raises(ProviderResultsError, match="configuration is not exact"):
         validate_provider_results(result)
 
 
@@ -754,7 +817,7 @@ def test_offline_cli_renders_markdown_json_and_output(tmp_path: Path, capsys) ->
         )
         == 0
     )
-    assert json.loads(output.read_text())["schema_version"] == 2
+    assert json.loads(output.read_text())["schema_version"] == 3
     artifact.write_text("{}", encoding="utf-8")
     with pytest.raises((ProviderResultsError, SystemExit)):
         cli.main(["benchmark", "provider-results", str(artifact)])

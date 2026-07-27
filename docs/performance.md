@@ -843,7 +843,8 @@ region selector and runs the same surfaces against the target daemon URL. Treat 
 experiment: it measures whether co-locating the caller/model loop is likely to help before adding any
 hosted control-plane shape. Keep `daemon-transport-floor` in the matrix for raw receive-floor
 attribution. Add `daemon-http` when comparing the exact screenshot, move/click, typing, and command
-boundaries used by the provider-default table from an optimized same-region caller, and add
+boundaries used by the provider-default table from an optimized caller with the same requested
+Modal region, and add
 `daemon-observation-stream` when the question is action-to-first-changed-frame latency under the
 Alpha observation contract. This is one measured part of an agent loop, not semantic readiness or
 end-to-end loop latency.
@@ -933,7 +934,8 @@ reference and its non-contemporaneous caveat, is in
 The compact machine-readable record is
 [`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
 
-The observation-inclusive metric remains a different boundary. A fresh 30/30 valid same-region run
+The observation-inclusive metric remains a different boundary. A fresh 30/30 valid run whose
+runner and target used the same requested Modal region
 measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
 This is historical, pre-hash-verification evidence and is not eligible for the current experimental
 result. See the [current hash-verified experiment](benchmark-results-2026-07-26-provider-results.md#modal-only-experiment).
@@ -957,7 +959,7 @@ record is
 [`benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json`](../benchmark-data/modal-warm-action-stage-attribution-us-west-2-2026-07-24.json).
 
 For application code, the same pattern is available as a co-located runner Sandbox. The target
-desktop sandbox and runner sandbox are created with the same requested region selector, and the
+desktop sandbox and runner sandbox are created with the same requested Modal region, and the
 runner talks directly to the target daemon. Use `run_modal_daemon_command()` or
 `examples/modal_colocated_runner.py` as the minimal shape before building a hosted control plane.
 When the target was created with an explicit `runtime.modal_region`, the SDK runner helpers inherit
@@ -968,7 +970,7 @@ If a runner can reach `/healthz`, `/v1/version`, and `/v1/capabilities` but time
 `/v1/observations/stream`, the failure is likely specific to WebSocket ingress rather than daemon
 readiness. Modal documents Connect Tokens as the authenticated HTTP/WebSocket path and encrypted
 tunnels as raw forwarded ports where the application owns auth, so compare Connect Token and tunnel
-ingress before treating same-region placement as proven.
+ingress before treating identical placement as proven.
 
 A broker should stay off this hot path. Use a broker for session lifecycle, placement, auth, and
 cleanup; have it return direct daemon/runner connection metadata. Use `examples/modal_session_broker.py`
