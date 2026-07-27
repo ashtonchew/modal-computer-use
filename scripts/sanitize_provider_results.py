@@ -24,11 +24,15 @@ def main(argv: list[str] | None = None) -> int:
         "modal_observation", type=Path, help="ignored raw Modal observation artifact"
     )
     parser.add_argument("output", type=Path)
-    parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--expected-harness-commit", required=True)
+    parser.add_argument("--report-source-sha", required=True)
+    parser.add_argument("--evidence-harness-sha", required=True)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
-    _verify_source_revision(args.source_sha)
+    _verify_source_revisions(
+        args.report_source_sha,
+        args.evidence_harness_sha,
+        check=args.check,
+    )
 
     paths = (args.provider, args.modal_optimized, args.modal_observation)
     raw_bytes = tuple(path.read_bytes() for path in paths)
@@ -40,8 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         payloads[1],
         payloads[2],
         input_sha256=tuple(hashlib.sha256(item).hexdigest() for item in raw_bytes),
-        source_sha=args.source_sha,
-        expected_harness_commit=args.expected_harness_commit,
+        report_source_sha=args.report_source_sha,
+        evidence_harness_sha=args.evidence_harness_sha,
     )
     rendered = render_provider_results_json(result)
     if args.check:
@@ -53,20 +57,42 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _verify_source_revision(source_sha: str) -> None:
-    if _git_output("rev-parse", "HEAD") != source_sha:
-        raise RuntimeError("source SHA must match HEAD")
+def _verify_source_revisions(
+    report_source_sha: str, evidence_harness_sha: str, *, check: bool = False
+) -> None:
+    head_sha = _git_output("rev-parse", "HEAD")
     try:
         _git_output(
             "merge-base",
             "--is-ancestor",
             MINIMUM_ELIGIBLE_SOURCE_SHA,
-            source_sha,
+            evidence_harness_sha,
         )
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
-            "source SHA is older than or unrelated to the minimum eligible source"
+            "evidence SHA is older than or unrelated to the minimum eligible source"
         ) from exc
+    try:
+        _git_output(
+            "merge-base",
+            "--is-ancestor",
+            evidence_harness_sha,
+            report_source_sha,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError("evidence SHA must be an ancestor of the report source") from exc
+    if check:
+        try:
+            _git_output(
+                "merge-base",
+                "--is-ancestor",
+                report_source_sha,
+                head_sha,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError("report source must be an ancestor of HEAD") from exc
+    elif head_sha != report_source_sha:
+        raise RuntimeError("report source SHA must match HEAD")
     if _git_output("status", "--porcelain", "--untracked-files=no"):
         raise RuntimeError("provider results require a clean tracked worktree")
 

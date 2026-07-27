@@ -26,7 +26,7 @@ def _case(value: float, *, iterations: int) -> dict[str, object]:
         "status": "ok",
         "iterations": iterations,
         "successful_iterations": iterations,
-        "samples_ms": [value] * iterations,
+        "samples_ms": [value] * (iterations - 1) + [value + 2],
         "summary_ms": {"p50": value, "p95": value + 1},
         "failures": [],
     }
@@ -290,8 +290,8 @@ def _build() -> dict[str, object]:
     return build_provider_results(
         *inputs,
         input_sha256=tuple(hashlib.sha256(item).hexdigest() for item in raw),
-        source_sha=HARNESS_SHA,
-        expected_harness_commit=HARNESS_SHA,
+        report_source_sha=HARNESS_SHA,
+        evidence_harness_sha=HARNESS_SHA,
     )
 
 
@@ -334,6 +334,33 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
         for item in (_provider_artifact(), _optimized_artifact(), _observation_artifact())
     ]
     assert render_provider_results_json(result).endswith("\n")
+
+
+def test_reporting_policy_keeps_small_sample_p95_machine_only() -> None:
+    result = _build()
+    policy = result["reporting_policy"]
+    assert policy == {
+        "small_sample_threshold": 20,
+        "small_sample_display": "median [observed min–max]",  # noqa: RUF001
+        "large_sample_display": "p50 / p95",
+        "p50_method": "statistics.median",
+        "p95_method": (
+            "linear interpolation on sorted values at rank 0.95*(n-1)"
+        ),
+    }
+    default_value = result["headline"]["rows"][1]["values"]["modal-daemon"]
+    assert set(default_value) == {
+        "status",
+        "sample_count",
+        "min_ms",
+        "max_ms",
+        "p50_ms",
+        "p95_ms",
+    }
+    markdown = render_provider_results_markdown(result)
+    assert "10.00 [10.00–12.00]" in markdown  # noqa: RUF001
+    assert "10.00 / 11.00" not in markdown
+    assert default_value["p95_ms"] == pytest.approx(11.8)
 
 
 @pytest.mark.parametrize(
@@ -416,10 +443,22 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
             "clean",
         ),
         (
+            lambda _p, o, _x: o["runs"]["modal_colocated_runner"]["metadata"]["environment"][
+                "provenance"
+            ].update(git_revision="a" * 40),
+            "optimized source",
+        ),
+        (
             lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["metadata"]["environment"][
                 "provenance"
             ].update(git_worktree_clean=False),
             "clean",
+        ),
+        (
+            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["metadata"]["environment"][
+                "provenance"
+            ].update(git_revision="a" * 40),
+            "observation source",
         ),
     ],
 )
@@ -436,21 +475,22 @@ def test_builder_rejects_ineligible_inputs(mutator, match: str) -> None:
             optimized,
             observation,
             input_sha256=("1" * 64, "2" * 64, "3" * 64),
-            source_sha=HARNESS_SHA,
-            expected_harness_commit=HARNESS_SHA,
+            report_source_sha=HARNESS_SHA,
+            evidence_harness_sha=HARNESS_SHA,
         )
 
 
-def test_builder_rejects_source_sha_different_from_expected_harness() -> None:
-    with pytest.raises(ProviderResultsError, match="source SHA"):
-        build_provider_results(
-            _provider_artifact(),
-            _optimized_artifact(),
-            _observation_artifact(),
-            input_sha256=("1" * 64, "2" * 64, "3" * 64),
-            source_sha="a" * 40,
-            expected_harness_commit=HARNESS_SHA,
-        )
+def test_builder_allows_report_source_to_follow_evidence_commit() -> None:
+    result = build_provider_results(
+        _provider_artifact(),
+        _optimized_artifact(),
+        _observation_artifact(),
+        input_sha256=("1" * 64, "2" * 64, "3" * 64),
+        report_source_sha="a" * 40,
+        evidence_harness_sha=HARNESS_SHA,
+    )
+    assert result["provenance"]["report_source_sha"] == "a" * 40
+    assert result["provenance"]["evidence_harness_sha"] == HARNESS_SHA
 
 
 @pytest.mark.parametrize(
@@ -500,8 +540,8 @@ def test_builder_rejects_nondefault_provider_evidence(mutator, match: str) -> No
             _optimized_artifact(),
             _observation_artifact(),
             input_sha256=("1" * 64, "2" * 64, "3" * 64),
-            source_sha=HARNESS_SHA,
-            expected_harness_commit=HARNESS_SHA,
+            report_source_sha=HARNESS_SHA,
+            evidence_harness_sha=HARNESS_SHA,
         )
 
 
@@ -514,8 +554,8 @@ def test_builder_rejects_observation_outside_exact_topology() -> None:
             _optimized_artifact(),
             observation,
             input_sha256=("1" * 64, "2" * 64, "3" * 64),
-            source_sha=HARNESS_SHA,
-            expected_harness_commit=HARNESS_SHA,
+            report_source_sha=HARNESS_SHA,
+            evidence_harness_sha=HARNESS_SHA,
         )
 
 
@@ -541,8 +581,8 @@ def test_builder_rejects_structurally_external_runner_only_evidence(
             optimized,
             observation,
             input_sha256=("1" * 64, "2" * 64, "3" * 64),
-            source_sha=HARNESS_SHA,
-            expected_harness_commit=HARNESS_SHA,
+            report_source_sha=HARNESS_SHA,
+            evidence_harness_sha=HARNESS_SHA,
         )
 
 
@@ -589,18 +629,37 @@ def test_sanitizer_source_verification_rejects_unrelated_commit(monkeypatch) -> 
     def fake_git_output(*args: str) -> str:
         calls.append(args)
         if args == ("rev-parse", "HEAD"):
-            return "a" * 40
+            return "b" * 40
         raise subprocess.CalledProcessError(1, ["git", *args])
 
     monkeypatch.setattr(module, "_git_output", fake_git_output)
     with pytest.raises(RuntimeError, match="minimum eligible"):
-        module._verify_source_revision("a" * 40)
+        module._verify_source_revisions("b" * 40, "a" * 40)
     assert calls[-1] == (
         "merge-base",
         "--is-ancestor",
         HARNESS_SHA,
         "a" * 40,
     )
+
+
+def test_sanitizer_source_verification_rejects_evidence_after_report(monkeypatch) -> None:
+    script = Path("scripts/sanitize_provider_results.py")
+    spec = importlib.util.spec_from_file_location("sanitize_provider_results_ancestry_test", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def fake_git_output(*args: str) -> str:
+        if args == ("rev-parse", "HEAD"):
+            return "b" * 40
+        if args == ("merge-base", "--is-ancestor", HARNESS_SHA, HARNESS_SHA):
+            return ""
+        raise subprocess.CalledProcessError(1, ["git", *args])
+
+    monkeypatch.setattr(module, "_git_output", fake_git_output)
+    with pytest.raises(RuntimeError, match="ancestor of the report source"):
+        module._verify_source_revisions("b" * 40, HARNESS_SHA)
 
 
 def test_sanitizer_source_verification_rejects_dirty_tracked_worktree(monkeypatch) -> None:
@@ -621,7 +680,58 @@ def test_sanitizer_source_verification_rejects_dirty_tracked_worktree(monkeypatc
 
     monkeypatch.setattr(module, "_git_output", fake_git_output)
     with pytest.raises(RuntimeError, match="clean tracked worktree"):
-        module._verify_source_revision(HARNESS_SHA)
+        module._verify_source_revisions(HARNESS_SHA, HARNESS_SHA)
+
+
+def test_sanitizer_check_accepts_clean_descendant_of_report_source(monkeypatch) -> None:
+    script = Path("scripts/sanitize_provider_results.py")
+    spec = importlib.util.spec_from_file_location("sanitize_provider_results_check_test", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report_sha = "b" * 40
+    head_sha = "c" * 40
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git_output(*args: str) -> str:
+        calls.append(args)
+        if args == ("rev-parse", "HEAD"):
+            return head_sha
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            return ""
+        if args == ("status", "--porcelain", "--untracked-files=no"):
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module, "_git_output", fake_git_output)
+    module._verify_source_revisions(report_sha, HARNESS_SHA, check=True)
+    assert ("merge-base", "--is-ancestor", report_sha, head_sha) in calls
+
+
+def test_sanitizer_check_rejects_report_source_not_ancestor_of_head(monkeypatch) -> None:
+    script = Path("scripts/sanitize_provider_results.py")
+    spec = importlib.util.spec_from_file_location(
+        "sanitize_provider_results_check_ancestry_test", script
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report_sha = "b" * 40
+    head_sha = "c" * 40
+
+    def fake_git_output(*args: str) -> str:
+        if args == ("rev-parse", "HEAD"):
+            return head_sha
+        if args in {
+            ("merge-base", "--is-ancestor", HARNESS_SHA, HARNESS_SHA),
+            ("merge-base", "--is-ancestor", HARNESS_SHA, report_sha),
+        }:
+            return ""
+        raise subprocess.CalledProcessError(1, ["git", *args])
+
+    monkeypatch.setattr(module, "_git_output", fake_git_output)
+    with pytest.raises(RuntimeError, match="report source must be an ancestor of HEAD"):
+        module._verify_source_revisions(report_sha, HARNESS_SHA, check=True)
 
 
 def test_offline_cli_renders_markdown_json_and_output(tmp_path: Path, capsys) -> None:
@@ -644,7 +754,7 @@ def test_offline_cli_renders_markdown_json_and_output(tmp_path: Path, capsys) ->
         )
         == 0
     )
-    assert json.loads(output.read_text())["schema_version"] == 1
+    assert json.loads(output.read_text())["schema_version"] == 2
     artifact.write_text("{}", encoding="utf-8")
     with pytest.raises((ProviderResultsError, SystemExit)):
         cli.main(["benchmark", "provider-results", str(artifact)])
@@ -662,8 +772,8 @@ def test_pre_fix_experiment_is_rejected() -> None:
             _optimized_artifact(),
             observation,
             input_sha256=("1" * 64, "2" * 64, "3" * 64),
-            source_sha=HARNESS_SHA,
-            expected_harness_commit=HARNESS_SHA,
+            report_source_sha=HARNESS_SHA,
+            evidence_harness_sha=HARNESS_SHA,
         )
 
 
@@ -682,9 +792,9 @@ def test_sanitizer_generation_is_deterministic_and_check_detects_drift(
     argv = [
         *(str(path) for path in paths),
         str(output),
-        "--source-sha",
+        "--report-source-sha",
         HARNESS_SHA,
-        "--expected-harness-commit",
+        "--evidence-harness-sha",
         HARNESS_SHA,
     ]
 
@@ -695,7 +805,11 @@ def test_sanitizer_generation_is_deterministic_and_check_detects_drift(
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setattr(module, "_verify_source_revision", lambda _source_sha: None)
+    monkeypatch.setattr(
+        module,
+        "_verify_source_revisions",
+        lambda _report_sha, _evidence_sha, **_kwargs: None,
+    )
 
     assert module.main(argv) == 0
     first = output.read_bytes()

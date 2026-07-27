@@ -4,10 +4,11 @@ import hashlib
 import json
 import math
 import re
+import statistics
 from typing import Any
 from urllib.parse import urlsplit
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MINIMUM_ELIGIBLE_SOURCE_SHA = "c6afa9d0384e664f5ccd7426014dcf5d20266e0e"
 OPAQUE_TZAFON_SETTLE_SENTENCE = (
     "Tzafon settle semantics are opaque at this API boundary, so its action "
@@ -26,6 +27,13 @@ RUNNER_ONLY_BOUNDARY = (
     "Modal optimized and experimental evidence measures only the selected same-region runner; "
     "the unrelated external caller diagnostic is not executed or included."
 )
+REPORTING_POLICY = {
+    "small_sample_threshold": 20,
+    "small_sample_display": "median [observed min–max]",  # noqa: RUF001
+    "large_sample_display": "p50 / p95",
+    "p50_method": "statistics.median",
+    "p95_method": "linear interpolation on sorted values at rank 0.95*(n-1)",
+}
 
 _COLUMNS = (
     ("modal_optimized", "Modal optimized"),
@@ -77,29 +85,27 @@ def build_provider_results(
     modal_observation_artifact: dict[str, Any],
     *,
     input_sha256: tuple[str, str, str],
-    source_sha: str,
-    expected_harness_commit: str,
+    report_source_sha: str,
+    evidence_harness_sha: str,
 ) -> dict[str, Any]:
     """Validate three source artifacts and return a secret-safe combined record."""
     _require_digest_tuple(input_sha256)
-    _require_commit(source_sha, "source_sha")
-    _require_commit(expected_harness_commit, "expected_harness_commit")
-    if source_sha != expected_harness_commit:
-        raise ProviderResultsError("source SHA must match the expected harness commit")
+    _require_commit(report_source_sha, "report_source_sha")
+    _require_commit(evidence_harness_sha, "evidence_harness_sha")
 
     provider_cases = _validated_provider_cases(provider_artifact)
     provider_harness_sha = _mapping(provider_artifact.get("provenance"), "provider provenance").get(
         "harness_commit"
     )
     _require_commit(provider_harness_sha, "provider harness commit")
-    if provider_harness_sha != expected_harness_commit:
-        raise ProviderResultsError("provider source does not match the expected harness commit")
+    if provider_harness_sha != evidence_harness_sha:
+        raise ProviderResultsError("provider source does not match the evidence harness commit")
     optimized_cases, optimized_config = _validated_optimized_cases(
-        modal_optimized_artifact, expected_harness_commit=expected_harness_commit
+        modal_optimized_artifact, expected_harness_commit=evidence_harness_sha
     )
     experiment = _validated_experiment(
         modal_observation_artifact,
-        expected_harness_commit=expected_harness_commit,
+        expected_harness_commit=evidence_harness_sha,
     )
 
     rows: list[dict[str, Any]] = []
@@ -132,10 +138,9 @@ def build_provider_results(
         "benchmark": "provider-results",
         "status": "eligible",
         "provenance": {
-            "source_sha": source_sha,
-            "expected_harness_commit": expected_harness_commit,
-            "provider_harness_sha": provider_harness_sha,
-            "minimum_eligible_source_sha": MINIMUM_ELIGIBLE_SOURCE_SHA,
+            "report_source_sha": report_source_sha,
+            "evidence_harness_sha": evidence_harness_sha,
+            "minimum_eligible_evidence_sha": MINIMUM_ELIGIBLE_SOURCE_SHA,
             "safe_configuration_sha256": configuration_sha256,
             "inputs": [
                 {"role": "sanitized_provider_defaults", "sha256": input_sha256[0]},
@@ -149,6 +154,7 @@ def build_provider_results(
             "rows": rows,
         },
         "experiment": experiment,
+        "reporting_policy": REPORTING_POLICY,
         "boundaries": {
             "native_screenshot_caveat": NATIVE_SCREENSHOT_CAVEAT,
             "cleanup": CLEANUP_BOUNDARY,
@@ -172,6 +178,7 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
             "configuration",
             "headline",
             "experiment",
+            "reporting_policy",
             "boundaries",
             "sample_counts",
         },
@@ -210,12 +217,21 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
                 continue
             _require_exact_keys(
                 value,
-                {"status", "p50_ms", "p95_ms"},
+                {"status", "sample_count", "min_ms", "max_ms", "p50_ms", "p95_ms"},
                 f"headline {case_name} {provider_key}",
             )
             if value.get("status") != "measured":
                 raise ProviderResultsError("headline measured values require measured status")
-            _require_summary_order(value.get("p50_ms"), value.get("p95_ms"), "headline summary")
+            expected_count = 30 if provider_key == "modal_optimized" else 3
+            if value.get("sample_count") != expected_count:
+                raise ProviderResultsError("headline sample count does not match its column")
+            minimum = _require_finite_nonnegative(value.get("min_ms"), "headline minimum")
+            maximum = _require_finite_nonnegative(value.get("max_ms"), "headline maximum")
+            p50, p95 = _require_summary_order(
+                value.get("p50_ms"), value.get("p95_ms"), "headline summary"
+            )
+            if not minimum <= p50 <= p95 <= maximum:
+                raise ProviderResultsError("headline statistics must remain within observed range")
     experiment = _mapping(payload.get("experiment"), "experiment")
     _require_exact_keys(
         experiment,
@@ -252,6 +268,8 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
     if any(experiment.get(key) != value for key, value in expected_experiment.items()):
         raise ProviderResultsError("combined artifact requires one Modal-only experiment")
     _require_summary_order(experiment.get("p50_ms"), experiment.get("p95_ms"), "experiment summary")
+    if payload.get("reporting_policy") != REPORTING_POLICY:
+        raise ProviderResultsError("combined artifact reporting policy is not exact")
     boundaries = _mapping(payload.get("boundaries"), "boundaries")
     expected_boundaries = {
         "native_screenshot_caveat": NATIVE_SCREENSHOT_CAVEAT,
@@ -268,26 +286,18 @@ def validate_provider_results(payload: dict[str, Any]) -> None:
     _require_exact_keys(
         provenance,
         {
-            "source_sha",
-            "expected_harness_commit",
-            "provider_harness_sha",
-            "minimum_eligible_source_sha",
+            "report_source_sha",
+            "evidence_harness_sha",
+            "minimum_eligible_evidence_sha",
             "safe_configuration_sha256",
             "inputs",
         },
         "provenance",
     )
-    _require_commit(provenance.get("source_sha"), "provenance source_sha")
-    _require_commit(provenance.get("expected_harness_commit"), "expected harness commit")
-    _require_commit(provenance.get("provider_harness_sha"), "provider harness SHA")
-    if not (
-        provenance.get("source_sha")
-        == provenance.get("expected_harness_commit")
-        == provenance.get("provider_harness_sha")
-    ):
-        raise ProviderResultsError("combined provenance source revisions must be equal")
-    if provenance.get("minimum_eligible_source_sha") != MINIMUM_ELIGIBLE_SOURCE_SHA:
-        raise ProviderResultsError("combined artifact has the wrong minimum source commit")
+    _require_commit(provenance.get("report_source_sha"), "report source SHA")
+    _require_commit(provenance.get("evidence_harness_sha"), "evidence harness SHA")
+    if provenance.get("minimum_eligible_evidence_sha") != MINIMUM_ELIGIBLE_SOURCE_SHA:
+        raise ProviderResultsError("combined artifact has the wrong minimum evidence commit")
     configuration = _mapping(payload.get("configuration"), "configuration")
     expected_configuration = {
         "modal_optimized": {
@@ -342,7 +352,8 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Provider benchmark results",
         "",
-        "Values are p50 / p95 milliseconds.",
+        "Provider-default values are median [observed min–max] milliseconds. Modal optimized "  # noqa: RUF001
+        "values are p50 / p95 milliseconds.",
         "",
         f"| Case | {' | '.join(headline['columns'])} |",
         f"| --- | {' | '.join('---:' for _ in headline['columns'])} |",
@@ -674,7 +685,7 @@ def _validated_experiment(
         raise ProviderResultsError(
             "observation experiment requires different baseline/source hashes"
         )
-    summary = _mapping(case.get("summary_ms"), "observation summary")
+    p50, p95 = _sample_quantiles(case)
     return {
         "provider": "Modal",
         "case": "observation_action_click_observe_change_http_raw",
@@ -688,19 +699,32 @@ def _validated_experiment(
         "iterations": 30,
         "successful_iterations": 30,
         "replacement_samples": 0,
-        "p50_ms": _number(summary.get("p50"), "experiment p50"),
-        "p95_ms": _number(summary.get("p95"), "experiment p95"),
+        "p50_ms": p50,
+        "p95_ms": p95,
     }
 
 
 def _summary_value(case: dict[str, Any]) -> dict[str, Any]:
-    summary = _mapping(case.get("summary_ms"), "case summary")
-    p50, p95 = _require_summary_order(summary.get("p50"), summary.get("p95"), "case summary")
+    samples = [_number(value, "case sample") for value in case["samples_ms"]]
+    p50, p95 = _sample_quantiles(case)
     return {
         "status": "measured",
+        "sample_count": len(samples),
+        "min_ms": min(samples),
+        "max_ms": max(samples),
         "p50_ms": p50,
         "p95_ms": p95,
     }
+
+
+def _sample_quantiles(case: dict[str, Any]) -> tuple[float, float]:
+    samples = sorted(_number(value, "case sample") for value in case["samples_ms"])
+    p50 = float(statistics.median(samples))
+    rank = 0.95 * (len(samples) - 1)
+    lower = math.floor(rank)
+    fraction = rank - lower
+    p95 = samples[lower] + fraction * (samples[math.ceil(rank)] - samples[lower])
+    return p50, p95
 
 
 def _require_case(case: dict[str, Any], *, expected: int, label: str) -> None:
@@ -806,4 +830,9 @@ def _validate_safe_value(value: Any, *, key: str | None = None) -> None:
 def _format_value(value: dict[str, Any]) -> str:
     if value.get("status") == "not_measured":
         return "not measured"
+    if value["sample_count"] < REPORTING_POLICY["small_sample_threshold"]:
+        return (
+            f"{value['p50_ms']:.2f} "
+            f"[{value['min_ms']:.2f}–{value['max_ms']:.2f}]"  # noqa: RUF001
+        )
     return f"{value['p50_ms']:.2f} / {value['p95_ms']:.2f}"
