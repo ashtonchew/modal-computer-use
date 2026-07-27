@@ -158,7 +158,7 @@ Anthropic tool versions are gated. `computer_20241022` supports the reference ac
 `left_mouse_down`, `left_mouse_up`, `hold_key`, `wait`, and `triple_click`. `computer_20251124`
 adds `zoom`. Older versions reject newer actions instead of accepting them silently.
 
-## Modal attach and reuse
+## Modal orchestration signatures
 
 The SDK supports four explicit attach paths:
 
@@ -176,13 +176,7 @@ configuration alias for compatibility boundaries.
 installed Modal SDK exposes it, and the daemon `/readyz` endpoint. `wait=False` returns after the
 connect token is created and does not poll daemon desktop readiness.
 
-`ComputerSandbox.snapshot_directory(path)` and `ComputerSandbox.mount_image(path, image)` expose
-Modal's documented directory snapshot flow for filesystem state. `snapshot_filesystem()` remains a
-compatibility helper for SDKs that expose it, but v1 examples restore directory snapshots by
-mounting them into a fresh normal computer-use sandbox instead of using the snapshot image as the
-whole desktop image.
-
-Use `attach_or_create` when a caller wants resumable run-scoped sandboxes:
+`ComputerSandbox.attach_or_create(...)` exposes resumable run-scoped attachment:
 
 ```python
 computer = ComputerSandbox.attach_or_create(
@@ -215,32 +209,31 @@ Attached `ComputerSandbox.metadata()` returns safe Modal metadata when available
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does
 not include connect tokens or noVNC URLs produced outside explicit debug helpers.
 
-## Modal manager lifecycle helpers
-
 `ComputerSandboxManager` is a thin Modal orchestration facade. It can create, attach, list,
 find by run ID, terminate by sandbox ID, and inspect stale sandboxes for cleanup. It does not own
 prompts, provider policies, messages, or task loops.
+`cleanup_expired(ttl_seconds=..., owner=None, dry_run=True)` returns a `SandboxCleanupResult` with
+safe candidate, skipped, and error items. Missing or malformed creation timestamps are skipped;
+`dry_run=False` terminates only expired listed sandboxes with valid creation metadata.
 
-```python
-from modal_computer_use import ComputerSandboxManager
+`ComputerSandbox.snapshot_directory(path)` and `ComputerSandbox.mount_image(path, image)` expose
+the directory snapshot and restore signatures. `snapshot_filesystem()` is a compatibility helper
+when the installed Modal SDK provides it.
 
-manager = ComputerSandboxManager(app_name="modal-computer-use")
-refs = manager.list(owner="alice")
-ref = manager.find_by_run_id("support-ticket-123")
+`run_modal_daemon_command(computer, command, path=...)` runs an explicit `inherited`, `connect`, or
+`target-loopback` path. `run_modal_daemon_command_with_fallback(..., external_runner=...)` may use
+the external runner only when endpoint preparation fails before dispatch; it never replays a
+command after dispatch begins. `ModalDaemonCommandResult` reports whether fallback was used, a
+stable reason, and a sanitized exception type without raw exception text.
 
-plan = manager.cleanup_expired(
-    ttl_seconds=3600,
-    owner="alice",
-    dry_run=True,  # default; does not terminate anything
-)
-```
+Warm-pool browser validation raises `BrowserReadinessError`; first-frame validation raises
+`FrameValidationError`. These types remain compatible with `RuntimeError` and `ValueError`, so
+orchestration can distinguish expected candidate rejection from unrelated programming errors.
 
-Cleanup uses the safe `computer-use.created_at` tag applied at sandbox creation. Missing or
-malformed creation timestamps are reported as skipped instead of guessed. Passing
-`dry_run=False` terminates only expired listed sandboxes with valid creation metadata and returns
-a `SandboxCleanupResult` containing counts plus safe per-sandbox candidate, skipped, and error
-items. Cleanup results do not include connect tokens, noVNC URLs, command output, artifact bytes,
-or provider credentials.
+The [Modal deployment guide](modal-deployment.md) owns configuration, image selection, attach and
+recovery procedures, runner topology, warm capacity, persistent storage, and cleanup operations.
+
+## Action, budget, and command contracts
 
 `/v1/computer/status` includes a budget snapshot for actions, screenshots, artifact bytes
 (including recordings), and recording seconds.
@@ -279,123 +272,25 @@ tools such as `xdotool`. Command stdout/stderr and process log tails remain avai
 authenticated callers for debugging, but known secret-bearing substrings such as bearer tokens,
 noVNC URLs, and artifact URIs are sanitized before the daemon returns them.
 
-Trace tooling is available through `ComputerTrace` and the `computer-use` CLI. Use
-`computer-use trace validate <path>` to validate trace NDJSON and
-`computer-use trace replay <path> --dry-run` to produce a replay plan without contacting a
-daemon, Modal, provider APIs, screenshots, or artifact storage. Use
-`computer-use trace replay <path> --base-url <daemon-url> --token <token>` for local replay, or
-`--target-run-id` / `--sandbox-id` for Modal-backed replay. Real replay validates first, skips
-redacted typed text, executes supported normalized actions through the target sandbox, redacts
-screenshot bytes/base64 in emitted results, and returns nonzero for validation or action failures.
+`ComputerTrace` represents validated trace entries. Replay skips redacted typed text and emits
+results with screenshot bytes and base64 payloads redacted. The [trace and replay guide](trace-replay.md)
+owns capture, validation, replay commands, target selection, and failure handling.
 
-Benchmark tooling is available through `computer-use benchmark report` and
-`computer-use benchmark action-batch`. Use
-`computer-use benchmark report --mock-local --iterations 5` for an in-process release-style
-report, or pass `--base-url`, optional `--token`, and optional `--output` for an already-running
-daemon. The report includes action-batch, move+click, full screenshot, compressed screenshot, and
-100-character typing, and recording start/stop benchmarks, plus explicit `not_measured` entries
-for Modal/Sandbox.exec unless requested, cold create, and warm attach cases. Add
-`--include-sandbox-exec --sandbox-id <id>` with `--base-url` to attach to an existing Modal
-Sandbox and compare the daemon move+click hot path with a live `Sandbox.exec` `xdotool`
-move+click command. This mode never creates a sandbox. It returns nonzero when any warmup or
-measured iteration fails. Use `--modal-region`, `--resource-profile`, `--browser`, `--gpu`, and
-`--image-profile` to attach caller-supplied environment labels to the report; these flags are
-metadata only and do not create or modify Modal resources. Recording benchmark output includes
-safe metadata such as status, format, size, duration, and stop method, but not recording bytes,
-raw paths, artifact URIs, stdout, stderr tails, raw command strings, or ffmpeg argv. Reported
-`base_url` values strip userinfo, query strings, and fragments before JSON is printed or written.
-Action benchmark cases also include `daemon_samples_ms`, `daemon_summary_ms`,
-`overhead_samples_ms`, `overhead_summary_ms`, and `attribution`. Missing daemon timing is reported
-as unavailable for compatibility with old daemons; malformed timing is a structured failure.
-
-`computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http` is the explicit
-mode that creates a fresh Modal CUA sandbox for benchmarking. In that mode `--gpu`, `--browser`,
-`--resource-profile`, `--modal-region`, `--modal-cpu`, and `--modal-memory-mib` are applied to the
-created `ComputerConfig`; the run records cold create-to-ready metadata, executes the warm daemon
-cases, then terminates and detaches the sandbox.
-For latency-sensitive Modal sandboxes, prefer the config surface rather than passthrough Modal
-kwargs:
-
-```python
-from modal_computer_use import ComputerConfig, ComputerSandbox
-
-computer = ComputerSandbox.create(
-    config=ComputerConfig(
-        runtime={"modal_region": "us-west"},
-        ingress="attested-tunnel",
-    )
-)
-```
-
-`runtime.modal_region=None` leaves placement to Modal. A region only affects newly created
-sandboxes; attaching or reusing an existing sandbox cannot relocate it. Because the region lives in
-`ComputerConfig`, it participates in the existing config-hash mismatch protection for reuse flows.
-SDK-owned co-located runner helpers retain that requested placement on a newly created target, or on
-an `attach_or_create()` result whose config hash matches. They do not infer placement from an
-observed runtime region. Broad selectors such as `us-west` preserve scheduling flexibility rather
-than guaranteeing one concrete provider region. Choose a supported narrow selector only after
-measuring it from the real caller environment and accepting its availability and pricing tradeoffs.
-Use `computer-use benchmark modal-region-ab` to compare fresh `daemon-transport-floor` runs across
-repeatable `--modal-region` values while holding ingress, HTTP version, image, and resource knobs
-fixed. Pass `--caller-region-label` to record where the benchmark caller or model loop ran; this is
-metadata only and does not affect Modal placement. Use
-`computer-use benchmark modal-region-summary <artifact.json>` to render the resulting JSON as a
-markdown table for benchmark notes and PR descriptions.
-Use `computer-use benchmark modal-colocated-client --modal-region <region>` when you need to test
-whether running the benchmark client from a runner with the same requested Modal region lowers the
-target sandbox's transport floor. Pass `--surface daemon-observation-stream` as well when you need
-an action-to-first-changed-frame comparison for the observation stream; that surface also requires
-a browser-capable target such as `--browser chromium`. It is not a semantic-readiness measurement;
-see the [Alpha guide](experimental-visual-change-observation.md).
-Application code can use `run_modal_daemon_command_with_fallback(computer, command)` for the
-production runner pattern. When the target has a known explicit `runtime.modal_region`, the helper
-inherits it and rejects a conflicting explicit runner region. Targets attached without a matching
-creation config must pass `modal_region` because their placement policy is unknown. Run the complete
-latency-sensitive session in one command; creating a fresh runner for every action would put runner
-allocation back on the hot path.
-
-An external fallback requires an explicit `external_runner`. The fallback is available only when
-Connect endpoint preparation fails before dispatch. In this case,
-`ModalDaemonCommandResult.fallback_used` is true and `fallback_reason` is
-`connect_endpoint_unavailable`. The `fallback_error_type` field contains only the exception class.
-
-Modal connection, service, timeout, documented retriable-internal, missing-target, and
-terminated-Sandbox errors can use this fallback. Authentication, permission, validation, version,
-quota, configuration, environment, programming, dispatch, and workload errors are terminal. The
-helper does not replay these commands externally.
-
-Use `run_modal_daemon_command(computer, command, path=...)` for explicit diagnostics.
-`path="inherited"` passes the target client's current daemon URL/token into a separate runner,
-`path="connect"` creates a fresh Modal Connect Token for that runner, and
-`path="target-loopback"` executes inside the target sandbox against `http://127.0.0.1:8080`.
-The loopback path uses the target daemon's application bearer instead of an ingress token. The SDK
-does not place these tokens in public sandbox metadata or benchmark logs.
-The helper owns the reserved daemon env keys and rejects user overrides so benchmark or workload
-metadata cannot accidentally replace the daemon endpoint or bearer token.
-Warm-pool browser validation raises `BrowserReadinessError`. Frame validation raises
-`FrameValidationError`. These types remain compatible with `RuntimeError` and `ValueError`.
-Orchestration can therefore distinguish candidate rejection from unrelated programming errors.
-The `type_100_chars` benchmark reports only safe request metadata: `character_count` and `method`.
-Use `computer-use benchmark action-batch --mock-local --iterations 5` to run only the action-batch
-benchmark against an in-process mock daemon, or pass `--base-url` and optional `--token` for an
-already-running daemon. The command emits JSON and returns nonzero when any warmup or measured
-iteration fails. It compares one five-action batch request with five separate action requests;
-`Sandbox.exec` is explicitly marked `not_measured` in this version.
+Benchmark commands are not part of the SDK contract. See [Benchmarking](benchmarking.md) for
+prerequisites, commands, cleanup, output, and reporting rules; see [Performance](performance.md)
+for interpretation and design guidance.
 
 Recording metadata includes the output path, `artifact_uri`, size, duration, SHA-256, status,
-ffmpeg argv, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
+`ffmpeg_args`, return code, stop method, and bounded ffmpeg diagnostics (`stderr_path`,
 `stderr_tail`, `error`) when a recording fails or emits useful stderr. The daemon stores
 diagnostics as files and returns only a short tail.
 
 `computer.artifacts.sync()` returns `ArtifactSyncResult`. In the built-in local/daemon store it is
 an explicit no-op that reports `persistent=false` unless the store was configured as persistent.
-When `storage.persist_artifacts=True` sets `COMPUTER_USE_ARTIFACTS_PERSISTENT=true`, the daemon
-runs Modal's documented Volume v2 `sync <artifacts_dir>` mountpoint command and reports `ok=true`
-only if that command succeeds. Local orchestration can then verify data through
-`Volume.read_file` or CLI `modal volume get`. Modal Volume v1 is not a supported immediate-sync
-target for this package. Already-mounted reader containers must use `Volume.reload()` /
-`Sandbox.reload_volumes()` before checking for committed changes. Reload can fail with open files,
-and concurrent writes to the same Volume paths are last-writer-wins, so production artifact paths
-should be run-scoped.
+With persistent storage configured, it reports `ok=true` only after the configured persistence
+operation succeeds. See [Modal deployment](modal-deployment.md) for Volume versions, mounts,
+commit visibility, reload behavior, and concurrency guidance.
 
-For the full route schemas and request/response models, see [spec/modal_computer_use_spec_v7.md](spec/modal_computer_use_spec_v7.md).
+For complete route schemas and request/response models, see the generated
+[OpenAPI schema](openapi.json). The active product specification is
+[modal-computer-use specification v7](spec/modal_computer_use_spec_v7.md).

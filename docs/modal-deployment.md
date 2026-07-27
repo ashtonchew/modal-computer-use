@@ -6,7 +6,7 @@
 python -m modal_computer_use.daemon
 ```
 
-## Readiness
+## Image and readiness
 
 The daemon listens on port `8080`. Modal waits for the port to accept connections via `modal.Probe.with_tcp(8080)`. SDK clients should poll `/readyz` rather than relying on the TCP probe, because `/healthz` only confirms the daemon process is alive, not that the desktop is up.
 
@@ -23,38 +23,43 @@ configured geometry.
 
 ## Sandbox configuration
 
-Per current Modal docs, configure the Sandbox with:
+Configure the Sandbox through `ComputerConfig` and the creation arguments:
 
 - **Connect Tokens** authenticate HTTP and WebSocket requests to the daemon on port `8080`. See [security.md](security.md).
-- **Network restrictions** use `block_network`, `outbound_cidr_allowlist`,
-  `outbound_domain_allowlist`, and `inbound_cidr_allowlist`. All allowlists default to `None`, so
-  general browser egress remains unrestricted unless a caller opts into a policy.
+- **Network restrictions** use `network.block_all`, `network.outbound_cidr_allowlist`,
+  `network.outbound_domain_allowlist`, and `network.inbound_cidr_allowlist`. The SDK passes
+  `network.block_all` to Modal as `block_network`; it cannot be combined with any allowlist.
+  Outbound allowlists restrict egress. The inbound CIDR allowlist restricts incoming tunnel and
+  Connect traffic, not egress. All allowlists default to `None`; see
+  [Configuration](configuration.md#network-and-ingress) for the complete field contract.
 - **Daemon ingress** defaults to an attested encrypted tunnel: Modal Connect authenticates the
   bootstrap request, then the daemon mints a short-lived bearer token for low-latency tunnel calls
   on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
   Connect, or `ingress="tunnel"` for a static daemon bearer token in trusted benchmark harnesses.
 - **Region placement** is controlled by `ComputerConfig(runtime={"modal_region": "..."})` for new
-  sandboxes. Leave it unset to let Modal choose placement. Pin it when latency matters and a
-  benchmark from the caller/model-loop environment shows a clear winner; live 2026-05-26
-  transport-floor runs from the current development environment measured `attested-tunnel` 0B
-  WebSocket p50 at `29.5ms` in `us-west` versus roughly `71ms` for default/`us-east`. Region is
-  part of `ComputerConfig`, so attach-or-create reuse with config-hash checks will not silently
-  reuse a sandbox created for a different region.
-- **noVNC** is exposed only with explicit `encrypted_ports=[6080]`. Do not expose it on the public internet; use it only when you need manual debugging through an access-controlled tunnel.
+  sandboxes. Leave it unset to let Modal choose placement. Pin it only after measuring from the
+  actual caller or model-loop environment. Region is part of `ComputerConfig`, so config-hash
+  checks prevent silent reuse of a sandbox created for a different requested region.
+- **Resources** use `ResourceConfig` for profile, CPU, memory, and GPU requests. Browser profiles
+  additionally use `BrowserConfig` for browser kind, prewarm, profile directory, launch arguments,
+  startup URL, and GPU mode.
+- **noVNC** is enabled with `ComputerConfig(expose_vnc="view_only")`. Use `"control"` only when the
+  viewer must send input. Do not expose noVNC to the public internet; use it only through an
+  access-controlled tunnel.
 - **Tags** are passed to `Sandbox.create(tags=...)` and used for `Sandbox.list(tags=...)` attach and
   recovery flows.
 
-The SDK passes the complete reserved and caller tag set during Sandbox creation. Built-in tags are
-string-only and limited to safe
-operational metadata such as `computer-use.run_id`, `computer-use.owner`,
+The SDK passes the resolved reserved and caller tag set during Sandbox creation. Built-in tags are
+string-only and limited to operational metadata such as `computer-use.run_id`, `computer-use.owner`,
 `computer-use.created_at`, `computer-use.config_hash`, and `computer-use.artifacts_dir`.
 The resolved set is validated against Modal's 10-tag Sandbox limit before allocation. The desktop
 window manager remains part of the configuration hash instead of consuming a separate tag.
 
 The inline Image builder is the default rollback path. `ImageConfig(source="named",
 revision="<full-git-sha>")` selects a revision-tagged standard, Firefox, or Chromium Image through
-`Image.from_name()`. Run `scripts/publish_modal_images.py` from a clean commit to build and publish
-all three variants. Modal Image tags are mutable, so repository policy treats a full Git SHA tag as
+`Image.from_name()`. Run [`scripts/publish_modal_images.py`](../scripts/publish_modal_images.py)
+from a clean commit to build and publish all three variants. Modal Image tags are mutable, so
+repository policy treats a full Git SHA tag as
 write-once. The publisher lists existing named Images, keeps existing target tags untouched, and
 publishes only missing variants. This makes retries safe after partial publication. Run one
 publisher at a time per Environment because the list and publish operations are not atomic.
@@ -69,16 +74,17 @@ Readers already running with the same Volume still need `Volume.reload()` or
 `computer.reload_volumes(timeout=55)`, which uses Modal 1.5.2 blocking reload behavior.
 
 Browser profiles are explicit. Use `ResourceConfig(profile="browser")` plus
-`BrowserConfig(kind="firefox" | "chromium", prewarm=True)` when browser startup dominates the
-measured workload. Use `profile="browser-gpu"` only with an explicit `gpu` value. The SDK passes
-`COMPUTER_USE_IMAGE_PROFILE`, `COMPUTER_USE_BROWSER`, and `COMPUTER_USE_BROWSER_PREWARM` into the
-daemon environment so `/v1/capabilities` and `/v1/computer/status` can report the selected profile.
+`BrowserConfig(kind="firefox", prewarm=True)` when Firefox startup dominates the measured workload;
+use `kind="chromium"` for Chromium. Use `profile="browser-gpu"` only with an explicit `gpu` value.
+The SDK passes `COMPUTER_USE_IMAGE_PROFILE`, `COMPUTER_USE_BROWSER`, and
+`COMPUTER_USE_BROWSER_PREWARM` into the daemon environment so `/v1/capabilities` and
+`/v1/computer/status` can report the selected profile.
 
 `ComputerSandbox.snapshot_directory(path)` delegates to Modal's documented
 `Sandbox.snapshot_directory(path)` API for a Modal-backed sandbox. Restore by creating a fresh
 normal computer-use sandbox and calling `computer.mount_image(path, snapshot_image)`, matching
-Modal's `mount_image` pattern. Do not use a directory snapshot as the whole desktop base image:
-live smoke on May 12, 2026 found that path did not reach desktop readiness. Both snapshot helpers
+Modal's `mount_image` pattern. Do not use a directory snapshot as the whole desktop base image;
+the supported restore contract mounts it into a normal computer-use image. Both snapshot helpers
 pass an explicit 30-day TTL and a 55-second timeout. Callers can override either value or pass
 `ttl=None` for indefinite retention. Store durable artifacts in a Volume or external system.
 
@@ -115,14 +121,16 @@ reject an incompatible reused sandbox.
 
 ## Co-located runners and brokers
 
-When the caller or model loop is the latency bottleneck, the lowest-risk production pattern is a
-short-lived co-located runner Sandbox. The external SDK process creates the target desktop sandbox,
-then starts a second runner Sandbox in the same Modal region. The runner receives only ephemeral
+When caller-to-Sandbox latency is material, one deployment option is a short-lived co-located
+runner Sandbox. The external SDK process creates the target desktop sandbox, then starts a second
+runner Sandbox in the same Modal region. The runner receives only ephemeral
 daemon connection details through its environment, talks directly to the target daemon, and is
-terminated after the workload. See `examples/modal_colocated_runner.py`.
+terminated after the workload. See the
+[co-located runner example](../examples/modal_colocated_runner.py).
 
-Use `run_modal_daemon_command_with_fallback()` for the production path. It creates a fresh Connect
-Token and runs the workload in the target's requested Modal region. For a target created by
+Use `run_modal_daemon_command_with_fallback()` for this topology when the application has an
+external fallback runner. The helper creates a fresh Connect Token and runs the workload in the
+target's requested Modal region. For a target created by
 `ComputerSandbox.create()`, or reused through `attach_or_create()` with a matching config hash, the
 helper inherits `runtime.modal_region`; callers should specify the placement once in
 `ComputerConfig`. A conflicting explicit runner region raises `ConfigConflictError` rather than
@@ -215,13 +223,9 @@ fallback.
 Claim metrics report pool hit or miss, every rejection reason, claim latency, total
 request-to-first-frame latency, remaining lifetime, configured pool size, idle resource-seconds,
 CPU core-seconds, memory GiB-seconds, public-rate estimated cost, and pending billed-cost status.
-Public-rate estimates apply Modal's documented 1.5x broad-region or 1.75x narrow-region multiplier
-when a container region is requested. Missing resource values keep both slot and aggregate estimates
-partial.
+Missing resource values keep both slot and aggregate estimates partial.
 Use the Workspace or Environment billing report after its data becomes available for reconciled
-cost. Compare Modal warm capacity only with the same Modal config created on demand. Keep normal
-provider-default warm actions for Daytona and E2B. Do not compare Modal warm claims with competitor
-cold creation.
+cost. Compare warm capacity only with the same configuration created on demand.
 
 This is a data-plane optimization, not a new daemon primitive. Keep user/model code in the runner
 or application layer; core SDK modules should only provide generic Sandbox orchestration helpers.
@@ -231,7 +235,8 @@ tokens as secrets.
 A Modal ASGI broker is a separate control-plane pattern. The broker may create, list, inspect, and
 terminate sessions, but it should return direct daemon or runner connection metadata instead of
 proxying screenshots and input actions. Proxying the hot path through the broker adds another
-network hop and hides the latency source. See `examples/modal_session_broker.py` for a testable
+network hop and hides the latency source. See the
+[session broker example](../examples/modal_session_broker.py) for a testable
 control-plane example based on Modal's ASGI, lifecycle, concurrency, and proxy-auth primitives.
 
 ## Cleanup
@@ -266,15 +271,22 @@ MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest tests/test_modal_integration.
 
 The test checks daemon readiness and process state without printing noVNC URLs or tokens.
 
-The protected v1 smoke tests exercise live manager attach/reuse/cleanup, honest Volume sync
-semantics, and directory snapshot restore:
+The protected v1 smoke tests exercise live manager attach/reuse/cleanup, Volume v2 sync behavior,
+and directory snapshot restore:
 
 ```bash
 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
   uv run pytest -m modal tests/test_modal_integration.py -q
 ```
 
-As of May 12, 2026, manager lifecycle passes live. Volume v2 sync commits with
-`sync <artifacts_dir>` and is visible through `Volume.read_file`. Snapshot restore uses Modal's
-documented `snapshot_directory` plus `mount_image` flow rather than treating a directory snapshot
-as the whole desktop image.
+The protected tests verify that Volume v2 sync commits with `sync <artifacts_dir>` and becomes
+visible through `Volume.read_file`. They restore snapshots with `snapshot_directory` plus
+`mount_image`, rather than treating a directory snapshot as the whole desktop image.
+
+## Performance and benchmark evidence
+
+Use [Performance](performance.md) for placement, ingress, image, browser, and warm-capacity decision
+guidance. Use [Benchmarking](benchmarking.md) for reproducible commands, credentials, costs,
+cleanup, and reporting rules. The [current provider comparison](benchmark-results-2026-07-24-tzafon.md)
+records dated evidence and its measurement boundaries; do not treat those results as deployment
+defaults for a different caller or workload.

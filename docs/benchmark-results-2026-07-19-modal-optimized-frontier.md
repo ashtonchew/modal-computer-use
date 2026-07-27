@@ -70,7 +70,7 @@ failed.
 Interpretation note: `Warm action to frame` is the historical result label for correlated
 action-to-first-changed-frame latency. It does not measure application settle, semantic readiness,
 or safety of a next action. The recorded samples, exclusions, and case identifiers are unchanged;
-see the [Alpha observation contract](experimental-visual-change-observation.md#benchmark-semantics).
+see the [Alpha observation contract](experimental-visual-change-observation.md#benchmark-the-signal).
 
 ## Diagnostic percentile table
 

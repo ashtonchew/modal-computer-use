@@ -77,15 +77,21 @@ jobs:
         run: uv python install 3.12
 
       - name: Build package
-        run: uv build
+        run: |
+          test ! -e dist/release
+          mkdir -p dist/release
+          uv build --out-dir dist/release
 
       - name: Validate package metadata
-        run: uvx --from 'twine>=6.2.0' twine check dist/*
+        run: uvx --from 'twine>=6.2.0' twine check dist/release/*
+
+      - name: Inspect distribution metadata
+        run: uv run python scripts/check_distribution_metadata.py dist/release/*
 
       - name: Validate wheel install
         run: |
           uv venv /tmp/mcu-wheel-smoke --python 3.12
-          uv pip install --python /tmp/mcu-wheel-smoke/bin/python dist/*.whl
+          uv pip install --python /tmp/mcu-wheel-smoke/bin/python dist/release/*.whl
           cd /tmp
           /tmp/mcu-wheel-smoke/bin/python - <<'PY'
           from pathlib import Path
@@ -157,7 +163,7 @@ jobs:
       - name: Validate sdist install
         run: |
           uv venv /tmp/mcu-sdist-smoke --python 3.12
-          uv pip install --python /tmp/mcu-sdist-smoke/bin/python dist/*.tar.gz
+          uv pip install --python /tmp/mcu-sdist-smoke/bin/python dist/release/*.tar.gz
           cd /tmp
           /tmp/mcu-sdist-smoke/bin/python -c "import modal_computer_use; assert modal_computer_use.__version__"
 
@@ -165,7 +171,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: distributions
-          path: dist/*
+          path: dist/release/*
 
   modal-smoke:
     name: Protected Modal smoke

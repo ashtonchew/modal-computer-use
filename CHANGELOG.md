@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Reworked the project introduction with source installation and local and Modal quickstarts.
+- Added a documentation map, a configuration reference, and link and configuration checks.
+- Added a security policy that requires private vulnerability reporting before a public release,
+  and clarified runtime security guidance.
+- Updated package metadata to use PEP 639 license fields and well-known project URLs.
+
 ## 0.1.0
 
 - Daemon-first Modal Sandbox computer-use primitives with local and Modal SDK paths.

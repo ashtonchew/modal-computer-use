@@ -3,9 +3,32 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TWINE_CHECK_COMMAND = "uvx --from 'twine>=6.2.0' twine check dist/*"
+TWINE_CHECK_COMMAND = "uvx --from 'twine>=6.2.0' twine check dist/release/*"
+METADATA_CHECK_COMMAND = (
+    "uv run python scripts/check_distribution_metadata.py dist/release/*"
+)
 UNPINNED_TWINE_CHECK_COMMAND = "uvx twine check dist/*"
 STALE_BENCHMARK_TEST_PATH = "tests/test_benchmark_cli.py"
+SHARED_CORE_COMMANDS = (
+    "uv sync --extra dev --extra modal",
+    "uv run python scripts/export_openapi.py --check",
+    "uv run ruff check .",
+    "uv run mypy src",
+    "uv run pytest -q",
+    "uv run computer-use benchmark report --mock-local --iterations 5 "
+    "--output benchmark-report.json",
+)
+SHARED_BOUNDARY_SCANS = (
+    '! rg "(^|[^A-Za-z0-9_])(import|from) +(openai|anthropic)" src',
+    '! rg "NetworkFileSystem" src',
+    '! rg -n "print\\([^\\n]*(vnc_url|debug\\.vnc_url|\\.uri|artifact_uri|token|'
+    'data_base64|raw_path|stdout|stderr)" examples docs README.md',
+)
+FRESH_DISTRIBUTION_COMMANDS = (
+    "test ! -e dist/release",
+    "mkdir -p dist/release",
+    "uv build --out-dir dist/release",
+)
 
 
 def test_release_checklist_matches_ci_package_metadata_checker() -> None:
@@ -16,7 +39,31 @@ def test_release_checklist_matches_ci_package_metadata_checker() -> None:
 
     assert TWINE_CHECK_COMMAND in workflow
     assert TWINE_CHECK_COMMAND in checklist
+    assert METADATA_CHECK_COMMAND in workflow
+    assert METADATA_CHECK_COMMAND in checklist
     assert UNPINNED_TWINE_CHECK_COMMAND not in checklist
+
+
+def test_release_build_uses_a_fresh_dedicated_output_directory() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "release-validation.yml").read_text(
+        encoding="utf-8"
+    )
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+
+    for command in FRESH_DISTRIBUTION_COMMANDS:
+        assert command in workflow
+        assert command in checklist
+
+
+def test_release_checklist_matches_commands_it_claims_to_share_with_ci() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "release-validation.yml").read_text(
+        encoding="utf-8"
+    )
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+
+    for command in (*SHARED_CORE_COMMANDS, *SHARED_BOUNDARY_SCANS):
+        assert command in workflow
+        assert command in checklist
 
 
 def test_release_docs_reference_existing_benchmark_cli_tests() -> None:
