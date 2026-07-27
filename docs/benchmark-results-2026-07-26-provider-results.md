@@ -6,13 +6,13 @@ Provider-default values are median [observed min–max] milliseconds. Modal opti
 
 | Case | Modal optimized | Modal default | Daytona default | E2B default | Tzafon default |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Product create to validated screenshot | 8889.47 / 9637.15 | 9343.54 [9046.85–11101.86] | 10619.98 [10531.73–10622.59] | 1319.16 [1312.85–1343.83] | 374.39 [369.80–605.66] |
-| Full screenshot native/default | 33.44 / 35.08 | 143.10 [139.86–144.05] | 212.18 [183.44–216.91] | 189.70 [188.55–191.86] | 220.61 [216.91–224.63] |
-| One coordinate click | 4.21 / 4.77 | 73.98 [73.21–74.62] | 255.13 [217.08–309.09] | 220.64 [219.21–220.86] | 198.47 [190.53–211.46] |
-| Four coordinate clicks | 7.54 / 8.60 | 77.99 [76.84–79.67] | 839.39 [828.18–844.55] | 913.45 [880.03–914.52] | 537.46 [528.02–569.39] |
-| Type 100 | 10.25 / 11.88 | 80.03 [79.44–82.39] | 633.18 [632.55–638.03] | 4083.03 [4082.96–4092.77] | 175.65 [172.06–183.03] |
-| Type 1000 | 50.76 / 53.32 | 119.44 [118.24–119.68] | 5380.17 [5365.04–5426.91] | 40890.06 [40802.10–40934.84] | 230.87 [221.25–256.96] |
-| Non-login shell command | 9.30 / 10.26 | 79.30 [78.05–79.94] | 111.33 [110.65–114.30] | 60.53 [58.54–60.75] | 149.29 [141.88–168.00] |
+| Product create to validated screenshot | 10246.36 / 17073.80 | 10101.33 [7334.62–10916.58] | 10549.67 [10472.58–10561.09] | 1388.91 [1335.77–2627.98] | 283.03 [277.04–316.21] |
+| Full screenshot native/default | 32.42 / 34.71 | 126.86 [126.10–127.49] | 588.74 [574.12–609.17] | 191.70 [190.52–201.18] | 132.38 [106.47–139.29] |
+| One coordinate click | 4.43 / 5.06 | 209.01 [205.09–209.87] | 381.63 [380.76–384.16] | 221.15 [217.39–224.00] | 154.49 [153.29–157.77] |
+| Four coordinate clicks | 7.02 / 8.41 | 227.56 [225.30–228.82] | 1548.00 [1414.12–1552.59] | 887.19 [886.77–912.69] | 474.00 [465.58–483.22] |
+| Type 100 | 9.95 / 10.62 | 249.57 [248.41–254.24] | 806.05 [666.84–809.89] | 4104.69 [4080.06–4117.33] | 111.80 [105.05–116.70] |
+| Type 1000 | 49.58 / 52.35 | 248.09 [247.99–250.17] | 5519.92 [5395.29–5540.48] | 41085.75 [40867.36–41426.72] | 145.78 [135.79–155.12] |
+| Non-login shell command | 8.98 / 10.14 | 83.89 [80.91–84.31] | 287.97 [286.15–290.64] | 59.18 [56.56–59.59] | 58.03 [57.47–58.13] |
 
 ## Tzafon claim boundary
 
@@ -20,7 +20,7 @@ Provider-default values are median [observed min–max] milliseconds. Modal opti
 
 ## Modal-only experimental result
 
-Action click to first hash-confirmed visual change: 70.88 / 83.49 ms p50 / p95 (30/30, no replacement samples).
+Action click to first hash-confirmed visual change: 75.25 / 88.78 ms p50 / p95 (30/30, no replacement samples).
 
 Tzafon settle semantics are opaque at this API boundary, so its action acknowledgement is not treated as equivalent to Modal’s hash-confirmed first visual change.
 
@@ -32,7 +32,7 @@ The lifecycle timer starts immediately before the public create call and ends af
 
 Warm-operation timers measure the selected public SDK or daemon request from the caller. They exclude target creation and cleanup.
 
-The command case requests argv ["sh", "-c", "printf '42\\n'"] with non-login shell semantics and requires exit code 0 with exact stdout "42\\n".
+The command case requests argv ["sh", "-c", "printf '42\n'"] with non-login shell semantics and requires exit code 0 with exact stdout "42\n".
 
 Shell latency covers transport, authentication, request handling and admission, process spawn, output collection, process wait, cleanup, and exact-output validation.
 
@@ -60,7 +60,7 @@ Modal optimized and experimental evidence uses a Modal runner with the same requ
 
 ## Evidence and reproducibility
 
-Evidence harness SHA: `e57ea35f04efdec4100ffa44196ee8599e9811b2`. Report source SHA: `31d9873b6d976ff6882fb3b90c91524186eabed7`.
+Evidence harness SHA: `6b6a814f460c0d509ef2ebe797edb3b582573b63`. Report source SHA: `f5ba70404b4762e126e6b993f43e04ebc97b8a1e`.
 
 Tracked inputs:
 

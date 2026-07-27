@@ -2,7 +2,7 @@
   "benchmark": "provider-results",
   "boundaries": {
     "cleanup": "Eligibility requires successful command and top-level outcomes. Cleanup errors are terminal in the producer, but this combined artifact does not independently prove cleanup beyond those recorded outcomes.",
-    "command": "The command case requests argv [\"sh\", \"-c\", \"printf 42\"] with non-login shell semantics and requires exit code 0 with exact stdout 42.",
+    "command": "The command case requests argv [\"sh\", \"-c\", \"printf '42\\n'\"] with non-login shell semantics and requires exit code 0 with exact stdout \"42\\n\".",
     "lightcone_tzafon": "Lightcone is the computer infrastructure and public API; tzafon 2.44.1 is the pinned Python SDK package used for the Tzafon default column.",
     "native_screenshot_caveat": "Full screenshots use each provider's native/default format and are not pixel- or codec-normalized.",
     "product_create": "The lifecycle timer starts immediately before the public create call and ends after the first full-screen image is decoded, parsed, and validated. Cleanup is outside the timer.",
@@ -17,7 +17,7 @@
       "caller_topology": "single Modal Function with the same requested Modal region",
       "daemon_http_version": "1.1",
       "external_caller_included": false,
-      "image_revision": "e57ea35f04efdec4100ffa44196ee8599e9811b2",
+      "image_revision": "6b6a814f460c0d509ef2ebe797edb3b582573b63",
       "input_rate_limit_per_sec": 0,
       "measured_iterations": 30,
       "modal_cloud_provider": "CLOUD_PROVIDER_AWS",
@@ -46,8 +46,8 @@
     "experimental": true,
     "iterations": 30,
     "metric": "action_to_first_hash_confirmed_change_ms",
-    "p50_ms": 70.88212249999958,
-    "p95_ms": 83.48867895000049,
+    "p50_ms": 75.25425800000019,
+    "p95_ms": 88.78479595000036,
     "provider": "Modal",
     "replacement_samples": 0,
     "successful_iterations": 30
@@ -66,42 +66,42 @@
         "label": "Product create to validated screenshot",
         "values": {
           "daytona": {
-            "max_ms": 10622.590375016443,
-            "min_ms": 10531.726415967569,
-            "p50_ms": 10619.976458023302,
-            "p95_ms": 10622.32898331713,
+            "max_ms": 10561.087917070836,
+            "min_ms": 10472.58495807182,
+            "p50_ms": 10549.673167057335,
+            "p95_ms": 10559.946442069486,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 1343.8297080574557,
-            "min_ms": 1312.8541669575498,
-            "p50_ms": 1319.1602079896256,
-            "p95_ms": 1341.3627580506727,
+            "max_ms": 2627.983457990922,
+            "min_ms": 1335.7678330503404,
+            "p50_ms": 1388.910457957536,
+            "p95_ms": 2504.0761579875834,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 11101.8612079788,
-            "min_ms": 9046.852166997269,
-            "p50_ms": 9343.541374895722,
-            "p95_ms": 10926.029224670492,
+            "max_ms": 10916.581292054616,
+            "min_ms": 7334.616082953289,
+            "p50_ms": 10101.33120790124,
+            "p95_ms": 10835.056283639278,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 10088.990969,
-            "min_ms": 7221.209644999994,
-            "p50_ms": 8889.471375999989,
-            "p95_ms": 9637.152254100003,
+            "max_ms": 65238.360806000004,
+            "min_ms": 8171.426558999997,
+            "p50_ms": 10246.355817500003,
+            "p95_ms": 17073.796791299985,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 605.6586250197142,
-            "min_ms": 369.79675001930445,
-            "p50_ms": 374.38895797822624,
-            "p95_ms": 582.5316583155654,
+            "max_ms": 316.2091670092195,
+            "min_ms": 277.03583298716694,
+            "p50_ms": 283.0262089846656,
+            "p95_ms": 312.89087120676413,
             "sample_count": 3,
             "status": "measured"
           }
@@ -112,42 +112,42 @@
         "label": "Full screenshot native/default",
         "values": {
           "daytona": {
-            "max_ms": 216.9124169740826,
-            "min_ms": 183.43508301768452,
-            "p50_ms": 212.181624956429,
-            "p95_ms": 216.43933777231723,
+            "max_ms": 609.1685410356149,
+            "min_ms": 574.1182920755818,
+            "p50_ms": 588.7419159989804,
+            "p95_ms": 607.1258785319515,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 191.86300004366785,
-            "min_ms": 188.55070893187076,
-            "p50_ms": 189.7046670783311,
-            "p95_ms": 191.64716674713418,
+            "max_ms": 201.1775840073824,
+            "min_ms": 190.51708292681724,
+            "p50_ms": 191.6965830605477,
+            "p95_ms": 200.22948391269892,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 144.05175007414073,
-            "min_ms": 139.8634579963982,
-            "p50_ms": 143.09841592330486,
-            "p95_ms": 143.95641665905714,
+            "max_ms": 127.4906659964472,
+            "min_ms": 126.10408291220665,
+            "p50_ms": 126.85620901174843,
+            "p95_ms": 127.42722029797733,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 36.3295249999851,
-            "min_ms": 26.10895499998378,
-            "p50_ms": 33.44233199996438,
-            "p95_ms": 35.08411100002604,
+            "max_ms": 34.83100599999034,
+            "min_ms": 18.704426999988755,
+            "p50_ms": 32.41596450004636,
+            "p95_ms": 34.71392835000984,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 224.63291697204113,
-            "min_ms": 216.91079100128263,
-            "p50_ms": 220.60549992602319,
-            "p95_ms": 224.23017526743934,
+            "max_ms": 139.28583299275488,
+            "min_ms": 106.47404205519706,
+            "p50_ms": 132.37583299633116,
+            "p95_ms": 138.5948329931125,
             "sample_count": 3,
             "status": "measured"
           }
@@ -158,42 +158,42 @@
         "label": "One coordinate click",
         "values": {
           "daytona": {
-            "max_ms": 309.08612499479204,
-            "min_ms": 217.0757920248434,
-            "p50_ms": 255.12775010429323,
-            "p95_ms": 303.69028750574216,
+            "max_ms": 384.15908301249146,
+            "min_ms": 380.75708399992436,
+            "p50_ms": 381.63241697475314,
+            "p95_ms": 383.90641640871763,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 220.86487500928342,
-            "min_ms": 219.2096250364557,
-            "p50_ms": 220.64395900815725,
-            "p95_ms": 220.8427834091708,
+            "max_ms": 224.00350007228553,
+            "min_ms": 217.39258395973593,
+            "p50_ms": 221.14729089662433,
+            "p95_ms": 223.7178791547194,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 74.61883302312344,
-            "min_ms": 73.2072499813512,
-            "p50_ms": 73.98387498687953,
-            "p95_ms": 74.55533721949905,
+            "max_ms": 209.86945799086243,
+            "min_ms": 205.08712495211512,
+            "p50_ms": 209.0121670626104,
+            "p95_ms": 209.78372889803723,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 5.088422000028459,
-            "min_ms": 3.7447949999886987,
-            "p50_ms": 4.214698499993119,
-            "p95_ms": 4.771681700006524,
+            "max_ms": 5.990438000026188,
+            "min_ms": 3.6712290000195935,
+            "p50_ms": 4.430036499996959,
+            "p95_ms": 5.064722250003228,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 211.46449993830174,
-            "min_ms": 190.53162494674325,
-            "p50_ms": 198.47125001251698,
-            "p95_ms": 210.16517494572327,
+            "max_ms": 157.76729094795883,
+            "min_ms": 153.2894589472562,
+            "p50_ms": 154.48587504215539,
+            "p95_ms": 157.43914935737848,
             "sample_count": 3,
             "status": "measured"
           }
@@ -204,42 +204,42 @@
         "label": "Four coordinate clicks",
         "values": {
           "daytona": {
-            "max_ms": 844.5512499893084,
-            "min_ms": 828.1790829496458,
-            "p50_ms": 839.3860829528421,
-            "p95_ms": 844.0347332856618,
+            "max_ms": 1552.593290922232,
+            "min_ms": 1414.1155000543222,
+            "p50_ms": 1548.0020419927314,
+            "p95_ms": 1552.134166029282,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 914.523332961835,
-            "min_ms": 880.0332089886069,
-            "p50_ms": 913.4519170038402,
-            "p95_ms": 914.4161913660355,
+            "max_ms": 912.6890000188723,
+            "min_ms": 886.7737499531358,
+            "p50_ms": 887.1934169437736,
+            "p95_ms": 910.1394417113625,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 79.67233296949416,
-            "min_ms": 76.83508296031505,
-            "p50_ms": 77.98737497068942,
-            "p95_ms": 79.50383716961369,
+            "max_ms": 228.8201249903068,
+            "min_ms": 225.29662493616343,
+            "p50_ms": 227.5567080359906,
+            "p95_ms": 228.69378329487517,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 9.4594320000283,
-            "min_ms": 6.710961000010229,
-            "p50_ms": 7.540830999971604,
-            "p95_ms": 8.596130000017865,
+            "max_ms": 8.797832000027483,
+            "min_ms": 6.038690000025326,
+            "p50_ms": 7.015278500034583,
+            "p95_ms": 8.4060055500089,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 569.3909170804545,
-            "min_ms": 528.0163750285283,
-            "p50_ms": 537.460417021066,
-            "p95_ms": 566.1978670745157,
+            "max_ms": 483.22091600857675,
+            "min_ms": 465.5828749528155,
+            "p50_ms": 474.0043330239132,
+            "p95_ms": 482.2992577101104,
             "sample_count": 3,
             "status": "measured"
           }
@@ -250,42 +250,42 @@
         "label": "Type 100",
         "values": {
           "daytona": {
-            "max_ms": 638.0264170002192,
-            "min_ms": 632.5473330216482,
-            "p50_ms": 633.1777500454336,
-            "p95_ms": 637.5415503047407,
+            "max_ms": 809.8858749726787,
+            "min_ms": 666.83533298783,
+            "p50_ms": 806.048458092846,
+            "p95_ms": 809.5021332846954,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 4092.765957931988,
-            "min_ms": 4082.9577909316868,
-            "p50_ms": 4083.0335000064224,
-            "p95_ms": 4091.7927121394314,
+            "max_ms": 4117.333792033605,
+            "min_ms": 4080.0587499979883,
+            "p50_ms": 4104.686124948785,
+            "p95_ms": 4116.069025325123,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 82.38854201044887,
-            "min_ms": 79.44170897826552,
-            "p50_ms": 80.0332500366494,
-            "p95_ms": 82.15301281306893,
+            "max_ms": 254.24237502738833,
+            "min_ms": 248.40895901434124,
+            "p50_ms": 249.5703329332173,
+            "p95_ms": 253.77517081797123,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 12.01822699999866,
-            "min_ms": 9.712138999987019,
-            "p50_ms": 10.252162499995165,
-            "p95_ms": 11.881719249998923,
+            "max_ms": 11.38699899996709,
+            "min_ms": 9.162752999998247,
+            "p50_ms": 9.945586000014828,
+            "p95_ms": 10.622101750021784,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 183.0278750276193,
-            "min_ms": 172.05829196609557,
-            "p50_ms": 175.6525000091642,
-            "p95_ms": 182.2903375257738,
+            "max_ms": 116.69850000180304,
+            "min_ms": 105.05075007677078,
+            "p50_ms": 111.79920902941376,
+            "p95_ms": 116.20857090456411,
             "sample_count": 3,
             "status": "measured"
           }
@@ -296,42 +296,42 @@
         "label": "Type 1000",
         "values": {
           "daytona": {
-            "max_ms": 5426.907457993366,
-            "min_ms": 5365.038500051014,
-            "p50_ms": 5380.170250078663,
-            "p95_ms": 5422.233737201896,
+            "max_ms": 5540.475249988958,
+            "min_ms": 5395.29241702985,
+            "p50_ms": 5519.92395799607,
+            "p95_ms": 5538.420120789669,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 40934.84220909886,
-            "min_ms": 40802.103415946476,
-            "p50_ms": 40890.06087498274,
-            "p95_ms": 40930.36407568725,
+            "max_ms": 41426.718041999266,
+            "min_ms": 40867.35991691239,
+            "p50_ms": 41085.74570796918,
+            "p95_ms": 41392.62080859626,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 119.68137498479337,
-            "min_ms": 118.23537503369153,
-            "p50_ms": 119.44158398546278,
-            "p95_ms": 119.6573958848603,
+            "max_ms": 250.1653330400586,
+            "min_ms": 247.9942919453606,
+            "p50_ms": 248.08829196263105,
+            "p95_ms": 249.95762893231586,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 69.31489000004376,
-            "min_ms": 47.291584999982206,
-            "p50_ms": 50.75846249999927,
-            "p95_ms": 53.31574079999655,
+            "max_ms": 68.02468600000111,
+            "min_ms": 47.04533899996477,
+            "p50_ms": 49.583675500002755,
+            "p95_ms": 52.35128084997597,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 256.96029199752957,
-            "min_ms": 221.2471249513328,
-            "p50_ms": 230.86783394683152,
-            "p95_ms": 254.35104619245976,
+            "max_ms": 155.12408292852342,
+            "min_ms": 135.79383306205273,
+            "p50_ms": 145.77529090456665,
+            "p95_ms": 154.18920372612774,
             "sample_count": 3,
             "status": "measured"
           }
@@ -342,42 +342,42 @@
         "label": "Non-login shell command",
         "values": {
           "daytona": {
-            "max_ms": 114.3027909565717,
-            "min_ms": 110.65225000493228,
-            "p50_ms": 111.33049998898059,
-            "p95_ms": 114.00556185981259,
+            "max_ms": 290.6392909353599,
+            "min_ms": 286.1520419828594,
+            "p50_ms": 287.9742910154164,
+            "p95_ms": 290.37279094336554,
             "sample_count": 3,
             "status": "measured"
           },
           "e2b": {
-            "max_ms": 60.753999976441264,
-            "min_ms": 58.54112503584474,
-            "p50_ms": 60.528542031534016,
-            "p95_ms": 60.73145418195054,
+            "max_ms": 59.59449999500066,
+            "min_ms": 56.56287493184209,
+            "p50_ms": 59.175040922127664,
+            "p95_ms": 59.55255408771336,
             "sample_count": 3,
             "status": "measured"
           },
           "modal-daemon": {
-            "max_ms": 79.94016702286899,
-            "min_ms": 78.05245800409466,
-            "p50_ms": 79.30454099550843,
-            "p95_ms": 79.87660442013294,
+            "max_ms": 84.3114999588579,
+            "min_ms": 80.91345801949501,
+            "p50_ms": 83.89100001659244,
+            "p95_ms": 84.26944996463135,
             "sample_count": 3,
             "status": "measured"
           },
           "modal_optimized": {
-            "max_ms": 11.937899000031393,
-            "min_ms": 8.32911099996636,
-            "p50_ms": 9.295731500003512,
-            "p95_ms": 10.262882649990956,
+            "max_ms": 11.38604900000928,
+            "min_ms": 7.803241999965849,
+            "p50_ms": 8.978496999986874,
+            "p95_ms": 10.135554550015513,
             "sample_count": 30,
             "status": "measured"
           },
           "tzafon": {
-            "max_ms": 168.00095804501325,
-            "min_ms": 141.88204193487763,
-            "p50_ms": 149.29395797662437,
-            "p95_ms": 166.13025803817436,
+            "max_ms": 58.1317920004949,
+            "min_ms": 57.47100000735372,
+            "p50_ms": 58.028124971315265,
+            "p95_ms": 58.121425297576934,
             "sample_count": 3,
             "status": "measured"
           }
@@ -386,24 +386,24 @@
     ]
   },
   "provenance": {
-    "evidence_harness_sha": "e57ea35f04efdec4100ffa44196ee8599e9811b2",
+    "evidence_harness_sha": "6b6a814f460c0d509ef2ebe797edb3b582573b63",
     "inputs": [
       {
         "role": "sanitized_provider_defaults",
-        "sha256": "164b3bb8df6bfc9514a9d6f66a90256200962eb07b8cb5585411b139d6161271"
+        "sha256": "7a7fd1ff4b141f14d608e1ee3f2db558835f4e599082b8a3a818c445e408a161"
       },
       {
         "role": "sanitized_modal_optimized",
-        "sha256": "17f9afbcd1fafdd4ba7fa0a8cf57887f3b0396e8a8b44d4c86bb16c5f4d3725d"
+        "sha256": "e01db9f8aa38fbd46d206bff4b137ffc0c80cf0ce4f1a8b0204fbfc99ec8a5c2"
       },
       {
         "role": "sanitized_modal_observation",
-        "sha256": "6441686a1b52983202745d4a07a615f3b0f5455c84b194585475ce409287071e"
+        "sha256": "d1ac864a255a8941791701a2e5f30a72ec7f1a15b611bc98fdcc32805a1123b5"
       }
     ],
     "minimum_eligible_evidence_sha": "e57ea35f04efdec4100ffa44196ee8599e9811b2",
-    "report_source_sha": "31d9873b6d976ff6882fb3b90c91524186eabed7",
-    "safe_configuration_sha256": "5b3d89543745a89c5c997d56f8cf19ec793ab9d8a93cef8260771c602e40da47"
+    "report_source_sha": "f5ba70404b4762e126e6b993f43e04ebc97b8a1e",
+    "safe_configuration_sha256": "1d7d4cd4d748c26ecb5cf25dc62ceddcd04c9ab299903161904475ce509f2da5"
   },
   "reporting_policy": {
     "large_sample_display": "p50 / p95",

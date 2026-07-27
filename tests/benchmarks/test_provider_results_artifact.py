@@ -8,12 +8,14 @@ from pathlib import Path
 
 from modal_computer_use.benchmarks.provider_results import (
     OPAQUE_TZAFON_SETTLE_SENTENCE,
+    build_provider_results,
+    render_provider_results_json,
     render_provider_results_markdown,
     validate_provider_results,
 )
 
-EVIDENCE_HARNESS_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
-REPORT_SOURCE_SHA = "31d9873b6d976ff6882fb3b90c91524186eabed7"
+EVIDENCE_HARNESS_SHA = "6b6a814f460c0d509ef2ebe797edb3b582573b63"
+REPORT_SOURCE_SHA = "f5ba70404b4762e126e6b993f43e04ebc97b8a1e"
 
 
 def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
@@ -26,6 +28,8 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
     optimized_bytes = optimized_path.read_bytes()
     observation_bytes = observation_path.read_bytes()
     provider = json.loads(provider_bytes)
+    optimized = json.loads(optimized_bytes)
+    observation = json.loads(observation_bytes)
     combined = json.loads(combined_path.read_text(encoding="utf-8"))
 
     validate_provider_results(combined)
@@ -44,12 +48,25 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
         )
     ]
 
+    rebuilt = build_provider_results(
+        provider,
+        optimized,
+        observation,
+        input_sha256=tuple(
+            hashlib.sha256(raw).hexdigest()
+            for raw in (provider_bytes, optimized_bytes, observation_bytes)
+        ),
+        report_source_sha=REPORT_SOURCE_SHA,
+        evidence_harness_sha=EVIDENCE_HARNESS_SHA,
+    )
+    assert render_provider_results_json(rebuilt) == combined_path.read_text(encoding="utf-8")
+
     rendered = render_provider_results_markdown(combined)
     report = report_path.read_text(encoding="utf-8")
     assert report == rendered
     assert report.count("| Case | Modal optimized |") == 1
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in report
-    assert "70.88 / 83.49 ms" in report
+    assert "75.25 / 88.78 ms" in report
     for forbidden in (
         "Tzafon experimental",
         "XDamage",
