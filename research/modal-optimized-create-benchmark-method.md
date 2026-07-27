@@ -191,7 +191,11 @@ be 1 second to 24 hours ([Modal Function timeouts](https://modal.com/docs/guide/
 
 1. Invoke one ephemeral, normal Modal Function with the pinned repository image and SDK 1.5.2. Set
    the runner container region and do not override routing. Invoke it once for the complete batch so
-   that one runner is the measurement instrument. Keep runner startup outside every `t0`.
+   that one runner is the measurement instrument. Keep runner startup outside every `t0`. Define the
+   Function from the importable module baked into the Python 3.12 image; do not serialize the local
+   function definition or mount caller source. Either would make the clean, revision-addressed image
+   non-authoritative, and serialization would also unnecessarily require compatible caller and image
+   Python versions.
 2. Prebuild and pin the named target image. Do not let image construction occur inside the measured
    `Sandbox.create` call. Modal recommends named images to avoid lazy build work in creation
    ([Modal named Sandbox images](https://modal.com/docs/guide/sandboxes#separating-image-builds-from-sandbox-creation)).

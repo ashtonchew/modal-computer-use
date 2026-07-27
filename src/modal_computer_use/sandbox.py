@@ -617,7 +617,11 @@ def run_modal_benchmark_function_once(
         min_containers=0,
         max_containers=1,
         single_use_containers=True,
-        serialized=True,
+        # The named image owns this importable module. Avoid cloudpickling the
+        # function or mounting local source so the image revision is authoritative
+        # and the local caller and the Python 3.12 image may differ.
+        serialized=False,
+        include_source=False,
     )(entrypoint)
     with app.run():
         result = remote.remote(config, run_tag=run_tag)
