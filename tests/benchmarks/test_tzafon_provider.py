@@ -30,7 +30,7 @@ class FakeExec:
     def sync(self, computer_id: str, *, command: str, timeout_seconds: int) -> Any:
         self.calls.append((computer_id, command, timeout_seconds))
         if "printf 42" in command:
-            stdout = "42\n"
+            stdout = "42"
         elif "getmouselocation" in command or "XQueryPointer" in command:
             stdout = "X=16\nY=128\n"
         elif "keypress_count" in command:
@@ -231,7 +231,7 @@ def test_tzafon_screenshot_rejects_non_inline_screenshot_url() -> None:
         FakeComputers(screenshot_data="https://secret.invalid/screenshot?token=must-not-leak")
     )
 
-    with pytest.raises(RuntimeError, match="valid inline image bytes"):
+    with pytest.raises(RuntimeError, match="fully decoded image"):
         driver.screenshot_full("computer-1")
 
 

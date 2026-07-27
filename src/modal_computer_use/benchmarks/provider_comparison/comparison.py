@@ -236,6 +236,8 @@ def _run_modal_daemon_provider(
         base_url=base_url,
         warmup_iterations=warmup_iterations,
         environment_metadata=environment_metadata,
+        typing_method="auto",
+        typing_delay_ms=10,
     )
     return project_surface_result("modal-daemon", surface_payload["surfaces"]["daemon-http"])
 

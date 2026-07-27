@@ -74,6 +74,9 @@ def test_command_benchmarks_preserve_legacy_and_attribute_canonical_nonlogin_she
     [
         {"returncode": 7, "stdout": "42"},
         {"returncode": 0, "stdout": "wrong"},
+        {"returncode": 0, "stdout": "42\n"},
+        {"returncode": 0, "stdout": " 42"},
+        {"returncode": 0, "stdout": "42 "},
         {"returncode": 0},
     ],
 )

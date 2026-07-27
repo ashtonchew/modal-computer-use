@@ -11,6 +11,23 @@ def describe_screenshot_payload(value: Any) -> dict[str, Any]:
     return _describe_screenshot_payload_at(value, source="provider_return_value")
 
 
+def validated_screenshot_size(payload: dict[str, Any], *, provider: str) -> int:
+    size_bytes = payload.get("decoded_size_bytes")
+    width = payload.get("width")
+    height = payload.get("height")
+    if (
+        not isinstance(size_bytes, int)
+        or size_bytes <= 0
+        or not isinstance(payload.get("format"), str)
+        or not isinstance(width, int)
+        or width <= 0
+        or not isinstance(height, int)
+        or height <= 0
+    ):
+        raise RuntimeError(f"{provider} screenshot did not contain a fully decoded image")
+    return size_bytes
+
+
 def _describe_screenshot_payload_at(value: Any, *, source: str) -> dict[str, Any]:
     if value is None:
         return {"source": source, "transport_size_bytes": 0, "decoded_size_bytes": 0}
@@ -73,10 +90,11 @@ def _decode_base64_payload(value: str) -> bytes | None:
 def _image_payload_metadata(payload: bytes) -> dict[str, Any]:
     try:
         with Image.open(BytesIO(payload)) as image:
+            image.load()
             return {
                 "format": image.format.lower() if image.format else None,
                 "width": image.width,
                 "height": image.height,
             }
-    except Exception:
-        return {}
+    except Exception as exc:
+        raise ValueError("provider screenshot pixels could not be fully decoded") from exc

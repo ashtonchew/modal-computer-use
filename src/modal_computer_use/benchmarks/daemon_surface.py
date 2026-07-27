@@ -18,6 +18,8 @@ def _run_daemon_http_surface(
     iterations: int,
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
+    typing_method: str,
+    typing_delay_ms: int,
 ) -> dict[str, Any]:
     ingress = _daemon_ingress_metadata(
         mode=mode,
@@ -83,11 +85,15 @@ def _run_daemon_http_surface(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            method=typing_method,
+            delay_ms=typing_delay_ms,
         ),
         "type_1000_chars": core.run_type_1000_chars_benchmark(
             client=client,
             iterations=iterations,
             warmup_iterations=warmup_iterations,
+            method=typing_method,
+            delay_ms=typing_delay_ms,
         ),
         "command_echo": core.run_command_echo_benchmark(
             client=client,

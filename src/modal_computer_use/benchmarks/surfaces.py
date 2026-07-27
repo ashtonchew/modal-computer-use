@@ -8,7 +8,12 @@ from ..hot_session import HotSessionClient
 from ..transports import HotSessionTransport
 from . import core
 from .adapter_surface import _run_adapter_surface
-from .constants import DEFAULT_SDK_BENCHMARK_SURFACES, BenchmarkSurface
+from .constants import (
+    DEFAULT_SDK_BENCHMARK_SURFACES,
+    TYPING_BENCHMARK_DELAY_MS,
+    TYPING_BENCHMARK_METHOD,
+    BenchmarkSurface,
+)
 from .daemon_surface import _run_daemon_http_surface
 from .hot_session_surface import _run_daemon_hot_session_surface
 from .observation_surface import _run_daemon_observation_surface
@@ -30,6 +35,8 @@ def run_sdk_surface_benchmark(
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
     observation_cases: list[str] | None = None,
+    typing_method: str = TYPING_BENCHMARK_METHOD,
+    typing_delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -50,6 +57,8 @@ def run_sdk_surface_benchmark(
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=environment_metadata,
                 observation_cases=observation_cases,
+                typing_method=typing_method,
+                typing_delay_ms=typing_delay_ms,
             )
         except Exception as exc:
             result = _surface_result(
@@ -103,6 +112,8 @@ def run_sdk_surface_benchmark_mock_local(
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
     observation_cases: list[str] | None = None,
+    typing_method: str = TYPING_BENCHMARK_METHOD,
+    typing_delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
 ) -> dict[str, Any]:
     return core._with_mock_local_client(
         lambda client: run_sdk_surface_benchmark(
@@ -115,6 +126,8 @@ def run_sdk_surface_benchmark_mock_local(
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=environment_metadata,
             observation_cases=observation_cases,
+            typing_method=typing_method,
+            typing_delay_ms=typing_delay_ms,
         )
     )
 
@@ -130,6 +143,8 @@ def _run_surface(
     sandbox_exec_setup_failure: dict[str, Any] | None,
     environment_metadata: dict[str, Any] | None,
     observation_cases: list[str] | None,
+    typing_method: str,
+    typing_delay_ms: int,
 ) -> dict[str, Any]:
     if surface == "daemon-http":
         return _run_daemon_http_surface(
@@ -139,6 +154,8 @@ def _run_surface(
             iterations=iterations,
             warmup_iterations=warmup_iterations,
             environment_metadata=environment_metadata,
+            typing_method=typing_method,
+            typing_delay_ms=typing_delay_ms,
         )
     if surface == "daemon-hot-session":
         if client is None or mode == "mock-local":

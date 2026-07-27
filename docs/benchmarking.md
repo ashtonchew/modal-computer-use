@@ -151,19 +151,18 @@ Do not commit the dotenv file. Do not print its contents.
 uv run computer-use benchmark compare \
   --create-modal-sandbox \
   --providers modal-daemon,daytona,e2b,tzafon \
-  --browser chromium \
-  --resource-profile browser \
-  --input-rate-limit-per-sec 0 \
-  --subprocess-backend isolated-asyncio \
   --iterations 3 \
   --env-file .env \
   --output benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json
 ```
 
 Provider-default means the documented public SDK path and its default provider configuration.
-Record any override and do not label that provider arm as default. Only Modal receives repository
-optimizations in the current comparison design. Keep provider-default and Modal-optimized columns
-separate because their caller topology, configuration, and sample count differ.
+For Modal that means the `ComputerConfig` defaults: standard resources, no browser profile, the
+20-actions-per-second input limit, `auto` typing with a 10 ms character delay, and default placement.
+The input limit counts actions, not typed characters. Record any override and do not label that
+provider arm as default. Only the separate Modal-optimized arm receives repository optimizations,
+including explicit `keystrokes` typing with zero delay. Keep provider-default and Modal-optimized
+columns separate because their caller topology, configuration, and sample count differ.
 
 ## Retain and publish artifacts
 

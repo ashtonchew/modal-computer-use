@@ -44,6 +44,7 @@ _WARM_CASE_FIELDS = (
     "benchmark_semantics",
     "input_backends",
     "shell_mode",
+    "request",
 )
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 _UNSAFE_KEYS = {
@@ -275,6 +276,8 @@ def run_modal_optimized_provider_in_runner(
                 "subprocess_backend": "isolated-asyncio",
                 "modal_runner_path": "connect",
             },
+            typing_method="keystrokes",
+            typing_delay_ms=0,
         )
         surfaces = _safe_warm_surfaces(warm_result)
         warm_failures.extend(_safe_failures(warm_result.get("failures", []), "warm_surface"))

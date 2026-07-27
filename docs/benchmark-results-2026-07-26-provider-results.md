@@ -24,6 +24,8 @@ Action click to first hash-confirmed visual change: 70.88 / 83.49 ms p50 / p95 (
 
 Tzafon settle semantics are opaque at this API boundary, so its action acknowledgement is not treated as equivalent to Modal’s hash-confirmed first visual change.
 
+The 200 ms change timeout is the maximum wait for a hash-confirmed first visual change, not a fixed wait, settle period, or application-readiness signal.
+
 ## Measurement and fairness boundaries
 
 The lifecycle timer starts immediately before the public create call and ends after the first full-screen image is decoded, parsed, and validated. Cleanup is outside the timer.
@@ -32,7 +34,15 @@ Warm-operation timers measure the selected public SDK or daemon request from the
 
 The command case requests argv ["sh", "-c", "printf 42"] with non-login shell semantics and requires exit code 0 with exact stdout 42.
 
+Shell latency covers transport, authentication, request handling and admission, process spawn, output collection, process wait, cleanup, and exact-output validation.
+
+isolated-asyncio affects only subprocess-backed command and compatibility paths; it does not select the native input or screenshot implementation.
+
+Modal default typing uses the public TypeAction defaults (auto with a 10 ms character delay); Modal optimized explicitly uses keystrokes with zero delay. The default input rate limit is 20 actions per second, not characters per second.
+
 Full screenshots use each provider's native/default format and are not pixel- or codec-normalized.
+
+Observed native/default screenshots were Tzafon 1280x720 JPEG and Modal, Daytona, and E2B 1024x768 PNG.
 
 Lightcone is the computer infrastructure and public API; tzafon 2.44.1 is the pinned Python SDK package used for the Tzafon default column.
 
@@ -42,7 +52,7 @@ p50 uses `statistics.median`. p95 uses linear interpolation on sorted values at 
 
 Four coordinate clicks use these request paths: Modal optimized 1 SDK / 1 transport; Modal default 1 SDK / 1 transport; Daytona default 4 SDK / 4 transport; E2B default 4 SDK / 8 transport; Tzafon default 1 SDK / 1 transport.
 
-Modal optimized excludes Modal Function startup from the product-create samples. Provider-default measurements use an external public-SDK caller; Modal optimized uses one Modal Function with the same requested region as its targets.
+Modal optimized excludes Modal Function startup from the product-create samples. Provider-default measurements use an external public-SDK caller; Modal optimized uses one Modal Function with the same requested Modal region as its targets.
 
 Eligibility requires successful command and top-level outcomes. Cleanup errors are terminal in the producer, but this combined artifact does not independently prove cleanup beyond those recorded outcomes.
 

@@ -312,10 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument(
         "--input-rate-limit-per-sec",
         type=int,
-        default=0,
         help=(
             "daemon input action rate limit for created benchmark sandboxes; "
-            "defaults to 0 so primitive latency runs do not measure throttling"
+            "when omitted, retains the public ComputerConfig default"
         ),
     )
     compare_parser.add_argument(
@@ -1709,11 +1708,13 @@ def _modal_benchmark_config(
     config.ingress = ingress or args.modal_ingress
     config.network.daemon_http_version = getattr(args, "daemon_http_version", "1.1")
     config.runtime.modal_region = modal_region if modal_region is not None else args.modal_region
-    config.resources.profile = _modal_benchmark_resource_profile(args)
+    if args.resource_profile or args.gpu or args.browser:
+        config.resources.profile = _modal_benchmark_resource_profile(args)
     config.resources.gpu = args.gpu
     config.resources.cpu = args.modal_cpu
     config.resources.memory_mib = args.modal_memory_mib
-    config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
+    if args.input_rate_limit_per_sec is not None:
+        config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
     config.actions.input_backend = args.input_backend
     config.actions.subprocess_backend = args.subprocess_backend
     if args.browser:
@@ -1745,7 +1746,7 @@ def _validate_modal_create_args(
         parser.error("--modal-cpu must be greater than 0")
     if args.modal_memory_mib is not None and args.modal_memory_mib < 128:
         parser.error("--modal-memory-mib must be at least 128")
-    if args.input_rate_limit_per_sec < 0:
+    if args.input_rate_limit_per_sec is not None and args.input_rate_limit_per_sec < 0:
         parser.error("--input-rate-limit-per-sec must be non-negative")
 
 
@@ -1896,6 +1897,14 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         image_identity = f"inline:{browser or resource_profile or 'standard'}"
     else:
         image_identity = f"attached:{getattr(args, 'image_profile', None) or 'unavailable'}"
+    if benchmark_command == "compare" and creates_modal_resource:
+        public_defaults = ComputerConfig()
+        resource_profile = resource_profile or public_defaults.resources.profile
+        input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
+        if input_rate_limit is None:
+            input_rate_limit = public_defaults.actions.input_rate_limit_per_sec
+    else:
+        input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
     metadata: dict[str, Any] = {
         "modal_region": getattr(args, "modal_region", None),
         "modal_ingress": getattr(args, "modal_ingress", None),
@@ -1903,7 +1912,7 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "resource_profile": resource_profile,
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
-        "input_rate_limit_per_sec": getattr(args, "input_rate_limit_per_sec", None),
+        "input_rate_limit_per_sec": input_rate_limit,
         "subprocess_backend": getattr(args, "subprocess_backend", None),
         "image_profile": getattr(args, "image_profile", None),
         "provenance": benchmark_provenance(

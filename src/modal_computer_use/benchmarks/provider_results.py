@@ -24,6 +24,27 @@ NATIVE_SCREENSHOT_CAVEAT = (
     "Full screenshots use each provider's native/default format and are not "
     "pixel- or codec-normalized."
 )
+OBSERVED_SCREENSHOT_BOUNDARY = (
+    "Observed native/default screenshots were Tzafon 1280x720 JPEG and Modal, Daytona, and E2B "
+    "1024x768 PNG."
+)
+CHANGE_TIMEOUT_BOUNDARY = (
+    "The 200 ms change timeout is the maximum wait for a hash-confirmed first visual change, "
+    "not a fixed wait, settle period, or application-readiness signal."
+)
+SHELL_LATENCY_BOUNDARY = (
+    "Shell latency covers transport, authentication, request handling and admission, process "
+    "spawn, output collection, process wait, cleanup, and exact-output validation."
+)
+SUBPROCESS_BACKEND_BOUNDARY = (
+    "isolated-asyncio affects only subprocess-backed command and compatibility paths; it does "
+    "not select the native input or screenshot implementation."
+)
+TYPING_DEFAULT_BOUNDARY = (
+    "Modal default typing uses the public TypeAction defaults (auto with a 10 ms character "
+    "delay); Modal optimized explicitly uses keystrokes with zero delay. The default input rate "
+    "limit is 20 actions per second, not characters per second."
+)
 CLEANUP_BOUNDARY = (
     "Eligibility requires successful command and top-level outcomes. Cleanup errors "
     "are terminal in the producer, but this combined artifact does not independently "
@@ -456,6 +477,8 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
             "",
             boundaries["tzafon_settle"],
             "",
+            CHANGE_TIMEOUT_BOUNDARY,
+            "",
             "## Measurement and fairness boundaries",
             "",
             boundaries["product_create"],
@@ -464,7 +487,15 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
             "",
             boundaries["command"],
             "",
+            SHELL_LATENCY_BOUNDARY,
+            "",
+            SUBPROCESS_BACKEND_BOUNDARY,
+            "",
+            TYPING_DEFAULT_BOUNDARY,
+            "",
             boundaries["native_screenshot_caveat"],
+            "",
+            OBSERVED_SCREENSHOT_BOUNDARY,
             "",
             boundaries["lightcone_tzafon"],
             "",
@@ -487,7 +518,7 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
             "",
             "Modal optimized excludes Modal Function startup from the product-create samples. "
             "Provider-default measurements use an external public-SDK caller; Modal optimized "
-            "uses one Modal Function with the same requested region as its targets.",
+            "uses one Modal Function with the same requested Modal region as its targets.",
             "",
             boundaries["cleanup"],
             "",
@@ -531,11 +562,11 @@ def _validated_provider_cases(payload: dict[str, Any]) -> dict[str, dict[str, An
         raise ProviderResultsError("provider artifact has the wrong exact provider list")
     environment = _mapping(metadata.get("environment"), "provider environment")
     expected_environment = {
-        "browser": "chromium",
+        "browser": None,
         "modal_ingress": "attested-tunnel",
         "daemon_http_version": "1.1",
-        "resource_profile": "browser",
-        "input_rate_limit_per_sec": 0,
+        "resource_profile": "standard",
+        "input_rate_limit_per_sec": 20,
         "subprocess_backend": "isolated-asyncio",
     }
     for key, value in expected_environment.items():
@@ -569,8 +600,39 @@ def _validated_provider_cases(payload: dict[str, Any]) -> dict[str, dict[str, An
             case = _mapping(cases.get(case_name), f"provider {provider} case {case_name}")
             _require_case(case, expected=3, label=f"provider {provider} {case_name}")
             _require_case_semantics(case_name, case)
+        _validate_observed_screenshot(provider, cases.get("screenshot_full"))
+        if provider == "modal-daemon":
+            _validate_modal_default_typing(cases)
         result[provider] = cases
     return result
+
+
+def _validate_observed_screenshot(provider: str, value: Any) -> None:
+    case = _mapping(value, f"provider {provider} screenshot case")
+    observation = _mapping(case.get("last_result"), f"provider {provider} screenshot result")
+    payload = (
+        observation
+        if provider == "modal-daemon"
+        else _mapping(observation.get("payload"), f"provider {provider} screenshot payload")
+    )
+    expected = ("jpeg", 1280, 720) if provider == "tzafon" else ("png", 1024, 768)
+    if (payload.get("format"), payload.get("width"), payload.get("height")) != expected:
+        raise ProviderResultsError(
+            f"provider {provider} screenshot format and geometry do not match the observed run"
+        )
+
+
+def _validate_modal_default_typing(cases: dict[str, Any]) -> None:
+    for name, characters in (("type_100_chars", 100), ("type_1000_chars", 1000)):
+        case = _mapping(cases.get(name), f"Modal default {name}")
+        request = _mapping(case.get("request"), f"Modal default {name} request")
+        expected = {"character_count": characters, "method": "auto", "delay_ms": 10}
+        if name == "type_1000_chars":
+            expected["timeout_ms"] = 30_000
+        if request != expected:
+            raise ProviderResultsError(
+                "Modal provider-default typing must use the public TypeAction defaults"
+            )
 
 
 def _validate_provider_default_metadata(provider: str, value: Any) -> None:
@@ -1182,6 +1244,19 @@ def _validated_optimized_cases(
             "type_1000_chars",
         } and case.get("input_backends") != ["xtest"]:
             raise ProviderResultsError(f"optimized {case_name} must use XTest")
+        if case_name in {"type_100_chars", "type_1000_chars"}:
+            request = _mapping(case.get("request"), f"optimized {case_name} request")
+            expected_request = {
+                "character_count": 100 if case_name == "type_100_chars" else 1000,
+                "method": "keystrokes",
+                "delay_ms": 0,
+            }
+            if case_name == "type_1000_chars":
+                expected_request["timeout_ms"] = 30_000
+            if request != expected_request:
+                raise ProviderResultsError(
+                    "Modal optimized typing must retain explicit keystrokes with zero delay"
+                )
         cases[case_name] = case
     verification = _mapping(surface.get("verification"), "optimized verification")
     for name in ("cursor_position", "type_text"):

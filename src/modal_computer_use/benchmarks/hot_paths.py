@@ -273,6 +273,8 @@ def run_type_100_chars_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    method: str = TYPING_BENCHMARK_METHOD,
+    delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -281,8 +283,8 @@ def run_type_100_chars_benchmark(
     benchmark = _TypeCharsBenchmark(
         client,
         TYPING_BENCHMARK_TEXT,
-        method=TYPING_BENCHMARK_METHOD,
-        delay_ms=TYPING_BENCHMARK_DELAY_MS,
+        method=method,
+        delay_ms=delay_ms,
     )
     samples, observations = _measure_observed_case(
         name="type_100_chars",
@@ -298,8 +300,8 @@ def run_type_100_chars_benchmark(
             "action_count": 1,
             "request": {
                 "character_count": len(TYPING_BENCHMARK_TEXT),
-                "method": TYPING_BENCHMARK_METHOD,
-                "delay_ms": TYPING_BENCHMARK_DELAY_MS,
+                "method": method,
+                "delay_ms": delay_ms,
             },
         }
     )
@@ -310,6 +312,8 @@ def run_type_1000_chars_benchmark(
     client: DaemonClient,
     iterations: int,
     warmup_iterations: int = 1,
+    method: str = TYPING_BENCHMARK_METHOD,
+    delay_ms: int = TYPING_BENCHMARK_DELAY_MS,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -318,8 +322,8 @@ def run_type_1000_chars_benchmark(
     benchmark = _TypeCharsBenchmark(
         client,
         TYPE_1000_CHARS_TEXT,
-        method=TYPING_BENCHMARK_METHOD,
-        delay_ms=TYPING_BENCHMARK_DELAY_MS,
+        method=method,
+        delay_ms=delay_ms,
         timeout_ms=TYPE_1000_CHARS_TIMEOUT_MS,
     )
     samples, observations = _measure_observed_case(
@@ -336,8 +340,8 @@ def run_type_1000_chars_benchmark(
             "action_count": 1,
             "request": {
                 "character_count": len(TYPE_1000_CHARS_TEXT),
-                "method": TYPING_BENCHMARK_METHOD,
-                "delay_ms": TYPING_BENCHMARK_DELAY_MS,
+                "method": method,
+                "delay_ms": delay_ms,
                 "timeout_ms": TYPE_1000_CHARS_TIMEOUT_MS,
             },
         }

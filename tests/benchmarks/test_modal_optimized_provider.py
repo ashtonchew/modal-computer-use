@@ -48,6 +48,13 @@ def _warm_surface(iterations: int) -> dict[str, object]:
             "summary_ms": {"p50": 1.0, "p95": 1.0},
             "failures": [],
         }
+        if name in {"type_100_chars", "type_1000_chars"}:
+            cases[name]["request"] = {
+                "character_count": 100 if name == "type_100_chars" else 1000,
+                "method": "keystrokes",
+                "delay_ms": 0,
+                **({"timeout_ms": 30000} if name == "type_1000_chars" else {}),
+            }
     return {
         "ok": True,
         "base_url": "https://must-not-serialize.invalid",
@@ -71,6 +78,7 @@ def test_runner_uses_fresh_targets_and_times_through_validated_frame() -> None:
     events: list[str] = []
     created: list[object] = []
     ticks = iter(float(value) for value in range(200))
+    warm_surface_kwargs: dict[str, object] = {}
 
     class Computer:
         client = SimpleNamespace(base_url="https://must-not-serialize.invalid")
@@ -102,11 +110,15 @@ def test_runner_uses_fresh_targets_and_times_through_validated_frame() -> None:
         assert kwargs["wait"] is True
         return computer
 
+    def benchmark_warm_surface(**kwargs):
+        warm_surface_kwargs.update(kwargs)
+        return _warm_surface(kwargs["iterations"])
+
     result = run_modal_optimized_provider_in_runner(
         _config(),
         runner_placement={"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
         create_computer=create_computer,
-        surface_benchmark=lambda **kwargs: _warm_surface(kwargs["iterations"]),
+        surface_benchmark=benchmark_warm_surface,
         clock=lambda: next(ticks),
     )
 
@@ -123,6 +135,8 @@ def test_runner_uses_fresh_targets_and_times_through_validated_frame() -> None:
     assert events.index("create:0") < events.index("frame:0") < events.index("placement:0")
     assert events.index("placement:0") < events.index("terminate:0") < events.index("detach:0")
     assert lifecycle["samples_ms"] == [1000.0] * 30
+    assert warm_surface_kwargs["typing_method"] == "keystrokes"
+    assert warm_surface_kwargs["typing_delay_ms"] == 0
     assert set(result["surfaces"]["daemon-http"]["cases"]) == {
         "screenshot_full",
         "coordinate_click",

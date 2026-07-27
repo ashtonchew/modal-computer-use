@@ -21,7 +21,7 @@ from .live import (
     run_product_provider_cases,
     wait_for_provider_screenshot_ready,
 )
-from .payloads import describe_screenshot_payload
+from .payloads import describe_screenshot_payload, validated_screenshot_size
 from .provider_sdk import (
     call_first_available,
     import_provider_module,
@@ -165,9 +165,7 @@ class DaytonaDriver:
             ("take_full_screen", "full_screen", "take"),
         )
         payload = describe_screenshot_payload(screenshot)
-        size_bytes = payload.get("decoded_size_bytes") or payload.get("transport_size_bytes") or 0
-        if size_bytes <= 0:
-            raise RuntimeError("Daytona screenshot was empty")
+        size_bytes = validated_screenshot_size(payload, provider="Daytona")
         return {"size_bytes": size_bytes, "payload": payload}
 
     def move_click(self, sandbox: Any) -> dict[str, Any]:
@@ -218,6 +216,8 @@ class DaytonaDriver:
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
+        if provider_stdout(result) != "42":
+            raise RuntimeError("Daytona command output did not match the expected sentinel")
         return {"exit_code": exit_code}
 
     def command_nonlogin_shell_echo(self, sandbox: Any) -> dict[str, Any]:
@@ -226,7 +226,7 @@ class DaytonaDriver:
         exit_code = provider_exit_code(result)
         if exit_code not in (None, 0):
             raise RuntimeError("Daytona command exited nonzero")
-        if provider_stdout(result).strip() != "42":
+        if provider_stdout(result) != "42":
             raise RuntimeError("Daytona command output did not match the expected sentinel")
         return {
             "exit_code": exit_code,

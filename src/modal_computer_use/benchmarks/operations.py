@@ -227,7 +227,7 @@ class _CommandEchoBenchmark:
             or not isinstance(returncode, int)
             or returncode != 0
             or not isinstance(stdout, str)
-            or stdout.strip() != "42"
+            or stdout != "42"
         ):
             raise RuntimeError(
                 "daemon command did not return the expected success sentinel"

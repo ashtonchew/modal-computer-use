@@ -49,7 +49,20 @@ def _provider_artifact() -> dict[str, object]:
     for index, name in enumerate(("modal-daemon", "daytona", "e2b", "tzafon"), 1):
         cases = {
             "product_create_to_first_screenshot": _case(index * 1000.0, iterations=3),
-            "screenshot_full": _case(index * 10.0, iterations=3),
+            "screenshot_full": {
+                **_case(index * 10.0, iterations=3),
+                "last_result": (
+                    {"format": "png", "width": 1024, "height": 768}
+                    if name == "modal-daemon"
+                    else {
+                        "payload": {
+                            "format": "jpeg" if name == "tzafon" else "png",
+                            "width": 1280 if name == "tzafon" else 1024,
+                            "height": 720 if name == "tzafon" else 768,
+                        }
+                    }
+                ),
+            },
             "coordinate_click": {
                 **_case(index * 11.0, iterations=3),
                 "benchmark_semantics": "coordinate-click-v1",
@@ -77,6 +90,18 @@ def _provider_artifact() -> dict[str, object]:
             transport_request_count=transport_requests,
             batching=batching,
         )
+        if name == "modal-daemon":
+            cases["type_100_chars"]["request"] = {
+                "character_count": 100,
+                "method": "auto",
+                "delay_ms": 10,
+            }
+            cases["type_1000_chars"]["request"] = {
+                "character_count": 1000,
+                "method": "auto",
+                "delay_ms": 10,
+                "timeout_ms": 30000,
+            }
         providers[name] = {
             "status": "ok",
             "provider": name,
@@ -120,11 +145,11 @@ def _provider_artifact() -> dict[str, object]:
         "metadata": {
             "providers": ["modal-daemon", "daytona", "e2b", "tzafon"],
             "environment": {
-                "browser": "chromium",
+                "browser": None,
                 "modal_ingress": "attested-tunnel",
                 "daemon_http_version": "1.1",
-                "resource_profile": "browser",
-                "input_rate_limit_per_sec": 0,
+                "resource_profile": "standard",
+                "input_rate_limit_per_sec": 20,
                 "subprocess_backend": "isolated-asyncio",
                 "provenance": {
                     "git_revision": HARNESS_SHA,
@@ -197,6 +222,17 @@ def _raw_optimized_artifact() -> dict[str, object]:
             ),
             1,
         )
+    }
+    cases["type_100_chars"]["request"] = {
+        "character_count": 100,
+        "method": "keystrokes",
+        "delay_ms": 0,
+    }
+    cases["type_1000_chars"]["request"] = {
+        "character_count": 1000,
+        "method": "keystrokes",
+        "delay_ms": 0,
+        "timeout_ms": 30000,
     }
     product_create = _case(100.0, iterations=30)
     product_create.update(
@@ -394,6 +430,20 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
     assert markdown.count("| Case | Modal optimized |") == 1
     assert markdown.count("## Modal-only experimental result") == 1
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in markdown
+    assert "Tzafon 1280x720 JPEG" in markdown
+    assert "Modal, Daytona, and E2B 1024x768 PNG" in markdown
+    assert "maximum wait for a hash-confirmed first visual change" in markdown
+    assert "not a fixed wait, settle period, or application-readiness signal" in markdown
+    assert "transport, authentication, request handling and admission" in markdown
+    assert (
+        "process spawn, output collection, process wait, cleanup, and exact-output validation"
+        in markdown
+    )
+    assert (
+        "isolated-asyncio affects only subprocess-backed command and compatibility paths"
+        in markdown
+    )
+    assert "20 actions per second, not characters per second" in markdown
     assert "Tzafon experimental" not in markdown
     assert "not measured" not in markdown
     assert result["headline"]["rows"][0]["values"]["modal_optimized"]["sample_count"] == 30

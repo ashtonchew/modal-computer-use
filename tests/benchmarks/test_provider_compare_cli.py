@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -42,6 +43,17 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     )
     assert payload["providers"]["modal-daemon"]["cases"]["command_echo"]["status"] == "ok"
     assert payload["providers"]["modal-daemon"]["cases"]["screenshot_full"]["status"] == "ok"
+    assert payload["providers"]["modal-daemon"]["cases"]["type_100_chars"]["request"] == {
+        "character_count": 100,
+        "method": "auto",
+        "delay_ms": 10,
+    }
+    assert payload["providers"]["modal-daemon"]["cases"]["type_1000_chars"]["request"] == {
+        "character_count": 1000,
+        "method": "auto",
+        "delay_ms": 10,
+        "timeout_ms": 30000,
+    }
     coordinate_click = payload["providers"]["modal-daemon"]["cases"]["coordinate_click"]
     coordinate_sequence = payload["providers"]["modal-daemon"]["cases"][
         "coordinate_click_sequence"
@@ -209,6 +221,69 @@ def test_provider_compare_subprocess_backend_reaches_created_modal_config(
     assert "benchmark-secret-token" not in captured.out
 
 
+def test_provider_compare_created_modal_uses_public_computer_config_defaults(
+    monkeypatch, capsys
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_created_modal_comparison(args, **kwargs):
+        seen["config"] = cli._modal_benchmark_config(args, run_id="compare-defaults")
+        seen["environment"] = cli._benchmark_environment_metadata(args)
+        return {
+            "ok": True,
+            "benchmark": "provider-compare",
+            "metadata": {"environment": seen["environment"]},
+            "providers": {},
+            "failures": [],
+        }
+
+    monkeypatch.setattr(
+        cli,
+        "_benchmark_compare_created_modal_sandbox",
+        fake_created_modal_comparison,
+    )
+
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "compare",
+            "--providers",
+            "modal-daemon",
+            "--create-modal-sandbox",
+            "--iterations",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    config = seen["config"]
+    defaults = cli.ComputerConfig(run_id="compare-defaults")
+    assert config.resources == defaults.resources
+    assert config.browser == defaults.browser
+    assert config.actions.input_rate_limit_per_sec == 20
+    assert seen["environment"]["resource_profile"] == "standard"
+    assert seen["environment"]["browser"] is None
+    assert seen["environment"]["input_rate_limit_per_sec"] == 20
+    capsys.readouterr()
+
+
+def test_provider_default_documented_command_omits_modal_tuning() -> None:
+    command = (
+        Path("docs/benchmarking.md")
+        .read_text(encoding="utf-8")
+        .split("## Run the provider-default comparison", 1)[1]
+        .split("Provider-default means", 1)[0]
+    )
+
+    for option in (
+        "--browser",
+        "--resource-profile",
+        "--input-rate-limit-per-sec",
+        "--subprocess-backend",
+    ):
+        assert option not in command
+
+
 def test_provider_compare_env_file_whitelists_tzafon_key(
     monkeypatch, tmp_path
 ) -> None:
@@ -245,7 +320,9 @@ def test_provider_comparison_labels_product_readiness_case(monkeypatch) -> None:
 
         class Screenshot:
             def take_full_screen(self):
-                return b"png"
+                buffer = BytesIO()
+                Image.new("RGB", (2, 3), color="red").save(buffer, format="PNG")
+                return buffer.getvalue()
 
         mouse = Mouse()
         keyboard = Keyboard()
@@ -728,6 +805,22 @@ def test_provider_payload_metadata_distinguishes_base64_transport_from_png_bytes
     assert metadata["format"] == "png"
     assert metadata["width"] == 2
     assert metadata["height"] == 3
+
+
+def test_provider_payload_rejects_image_with_truncated_pixel_data() -> None:
+    buffer = BytesIO()
+    Image.new("RGB", (64, 64), color="red").save(buffer, format="PNG")
+    truncated_png = buffer.getvalue()[:64]
+
+    with pytest.raises(ValueError, match="fully decoded"):
+        payloads.describe_screenshot_payload(truncated_png)
+
+
+def test_provider_screenshot_validation_rejects_non_image_text() -> None:
+    metadata = payloads.describe_screenshot_payload("not-an-image")
+
+    with pytest.raises(RuntimeError, match="decoded image"):
+        payloads.validated_screenshot_size(metadata, provider="Example")
 
 
 def test_modal_product_readiness_rejects_partial_sample_metadata() -> None:
