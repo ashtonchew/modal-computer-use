@@ -91,6 +91,9 @@ def test_modal_colocated_client_runs_selected_surfaces_for_external_and_runner()
 
     assert result["ok"] is True
     assert result["metadata"]["external_caller_included"] is True
+    assert result["metadata"]["comparison"] == (
+        "external caller versus runner with the same requested Modal region"
+    )
     assert created["tags"] == {
         "benchmark": "modal-colocated-client",
         "benchmark_run_id": "modal_colocated_test",

@@ -1013,7 +1013,7 @@ target-loopback or a hosted control-loop path for hot loops.
 A May 29, 2026 5x browser-target run with both `daemon-transport-floor` and
 `daemon-observation-stream` selected measured:
 
-| Surface metric | External caller | Same-region Modal runner | Ratio vs external |
+| Surface metric | External caller | Same requested Modal region | Ratio vs external |
 | --- | ---: | ---: | ---: |
 | Fastest 0B transport floor p50 | 31.5ms | 31.1ms | 0.99x |
 | Causal action-to-frame p50 | 82.8ms | 52.5ms | 0.63x |
@@ -1425,6 +1425,9 @@ from timing.
 If your agent always opens a browser, set `COMPUTER_USE_BROWSER_PREWARM=true`. The daemon launches the configured browser at boot so the first `browser.open_url` does not pay startup cost.
 Use `examples/browser_profile.py` for an SDK-level pattern. Prewarm is optional and can be disabled
 with `BrowserConfig(prewarm=False)` for deterministic tests.
+For a named browser image, `prewarm=False` still selects an image with the configured browser
+installed. It skips only the startup launch. Named-image revision, desktop, resource-profile, and
+browser-kind validation still applies.
 
 Use `BrowserConfig(open_url_on_start="https://...")` when a workload always starts on the same
 page and you want startup to pay both browser creation and first navigation. Use

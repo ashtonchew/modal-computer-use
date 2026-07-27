@@ -342,10 +342,10 @@ metadata only and does not affect Modal placement. Use
 `computer-use benchmark modal-region-summary <artifact.json>` to render the resulting JSON as a
 markdown table for benchmark notes and PR descriptions.
 Use `computer-use benchmark modal-colocated-client --modal-region <region>` when you need to test
-whether running the benchmark client from a runner with the same requested Modal region lowers the target sandbox's
-transport floor. Pass `--surface daemon-observation-stream` as well when you need an
-action-to-first-changed-frame comparison for the observation stream; that surface also requires a
-browser-capable target such as `--browser chromium`. It is not a semantic-readiness measurement;
+whether running the benchmark client from a runner with the same requested Modal region lowers the
+target sandbox's transport floor. Pass `--surface daemon-observation-stream` as well when you need
+an action-to-first-changed-frame comparison for the observation stream; that surface also requires
+a browser-capable target such as `--browser chromium`. It is not a semantic-readiness measurement;
 see the [Alpha guide](experimental-visual-change-observation.md).
 Application code can use `run_modal_daemon_command_with_fallback(computer, command)` for the
 production runner pattern. When the target has a known explicit `runtime.modal_region`, the helper

@@ -10,7 +10,7 @@ from modal_computer_use.benchmarks.provider_results import (
     validate_provider_results,
 )
 
-REPORT_SOURCE_SHA = "77738d506ed8bf7a8bc54b87dff91ec324d1f3ac"
+REPORT_SOURCE_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
 
 
 def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
@@ -23,8 +23,8 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
 
     validate_provider_results(combined)
     provenance = combined["provenance"]
-    assert provenance["report_source_sha"] != provenance["evidence_harness_sha"]
     assert provenance["report_source_sha"] == REPORT_SOURCE_SHA
+    assert provenance["evidence_harness_sha"] == REPORT_SOURCE_SHA
     assert provider["provenance"]["harness_commit"] == provenance[
         "evidence_harness_sha"
     ]
@@ -39,7 +39,7 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
     assert report.count("| Case | Modal optimized |") == 1
     assert table in report
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in report
-    assert "80.35 / 95.62 ms" in report
+    assert "70.88 / 83.49 ms" in report
     for forbidden in (
         "Tzafon experimental",
         "XDamage",

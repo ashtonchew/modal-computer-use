@@ -184,7 +184,7 @@ def run_modal_colocated_client_benchmark(
                 }
             result["ok"] = bool(external_result.get("ok")) and bool(result["ok"])
             result["metadata"]["comparison"] = (
-                "external caller versus same-region Modal runner"
+                "external caller versus runner with the same requested Modal region"
             )
             runs["external_caller"] = external_result
             result["comparison"] = comparison

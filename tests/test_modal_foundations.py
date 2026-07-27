@@ -99,10 +99,11 @@ def test_named_image_config_requires_full_git_revision_and_browser_kind() -> Non
 def test_named_browser_image_can_skip_browser_launch() -> None:
     no_browser_launch = ComputerConfig(
         resources={"profile": "browser"},
-        browser={"kind": "firefox", "prewarm": False},
+        browser={"kind": "chromium", "prewarm": False},
         image={"source": "named", "revision": REVISION},
     )
     assert no_browser_launch.browser is not None
+    assert no_browser_launch.browser.kind == "chromium"
     assert no_browser_launch.browser.prewarm is False
 
 
