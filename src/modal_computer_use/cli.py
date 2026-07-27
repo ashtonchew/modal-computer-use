@@ -41,6 +41,12 @@ from .benchmarks.modal_region_ab import (
 )
 from .benchmarks.observation_surface import CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
 from .benchmarks.provenance import benchmark_provenance
+from .benchmarks.provider_results import (
+    ProviderResultsError,
+    render_provider_results_json,
+    render_provider_results_markdown,
+    validate_provider_results,
+)
 from .benchmarks.surfaces import (
     run_sdk_surface_benchmark,
     run_sdk_surface_benchmark_mock_local,
@@ -92,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
 
     benchmark_parser = subparsers.add_parser("benchmark")
     benchmark_subparsers = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
+    provider_results_parser = benchmark_subparsers.add_parser("provider-results")
+    provider_results_parser.add_argument("combined", type=Path)
+    provider_results_parser.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown"
+    )
+    provider_results_parser.add_argument("--output", type=Path)
     action_batch_parser = benchmark_subparsers.add_parser("action-batch")
     action_batch_mode = action_batch_parser.add_mutually_exclusive_group(required=True)
     action_batch_mode.add_argument("--base-url")
@@ -669,6 +681,8 @@ def main(argv: list[str] | None = None) -> int:
         return _trace_replay(args)
     if args.benchmark_command == "action-batch":
         return _benchmark_action_batch(args)
+    if args.benchmark_command == "provider-results":
+        return _benchmark_provider_results(args)
     if args.benchmark_command == "sdk":
         return _benchmark_sdk(args)
     if args.benchmark_command == "compare":
@@ -693,6 +707,27 @@ def main(argv: list[str] | None = None) -> int:
             )
         return _benchmark_modal_colocated_client(args)
     return _benchmark_report(args)
+
+
+def _benchmark_provider_results(args: argparse.Namespace) -> int:
+    try:
+        payload = json.loads(args.combined.read_bytes())
+        if not isinstance(payload, dict):
+            raise ProviderResultsError("combined provider results artifact must be a JSON object")
+        validate_provider_results(payload)
+        output = (
+            render_provider_results_markdown(payload)
+            if args.format == "markdown"
+            else render_provider_results_json(payload)
+        )
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(output, encoding="utf-8")
+        else:
+            print(output, end="")
+    except (OSError, json.JSONDecodeError, ProviderResultsError) as exc:
+        raise SystemExit(str(exc)) from exc
+    return 0
 
 
 def _trace_validate(path: Path) -> int:
@@ -1181,8 +1216,7 @@ def _detach_modal_benchmark_computer(computer: ComputerSandbox) -> list[CleanupE
 def _raise_modal_cleanup_errors(errors: list[CleanupError]) -> None:
     if errors:
         raise RuntimeError(
-            "Modal benchmark cleanup failed: "
-            + ", ".join(method for method, _exc in errors)
+            "Modal benchmark cleanup failed: " + ", ".join(method for method, _exc in errors)
         )
 
 
@@ -1460,9 +1494,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
             ModalColocatedClientBenchmarkConfig(
                 app_name=args.app_name,
                 name=args.name,
-                target_config_factory=lambda run_id: _modal_benchmark_config(
-                    args, run_id=run_id
-                ),
+                target_config_factory=lambda run_id: _modal_benchmark_config(args, run_id=run_id),
                 modal_region=args.modal_region,
                 caller_region_label=args.caller_region_label,
                 modal_ingress=args.modal_ingress,

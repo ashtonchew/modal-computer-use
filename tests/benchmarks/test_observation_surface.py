@@ -64,8 +64,14 @@ def test_http_raw_first_change_case_excludes_unchanged_timeout_trials(monkeypatc
         [
             {
                 "size_bytes": 100,
+                "input_backend": "xtest",
                 "action_result": {"ok": True},
-                "change_result": {"detected": True, "timeout_reached": False},
+                "change_result": {
+                    "detected": True,
+                    "timeout_reached": False,
+                    "baseline_source_sha256": "a" * 64,
+                    "source_sha256": "b" * 64,
+                },
                 "change_timing_ms": {"total_ms": 10.0},
             },
             {
@@ -93,6 +99,12 @@ def test_http_raw_first_change_case_excludes_unchanged_timeout_trials(monkeypatc
     assert result["successful_iterations"] == 1
     assert len(result["samples_ms"]) == 1
     assert result["last_result"]["change_result"]["detected"] is True
+    assert result["benchmark_semantics"] == "first-hash-confirmed-change-v1"
+    assert result["metric"] == "action_to_first_hash_confirmed_change_ms"
+    assert result["experimental"] is True
+    assert result["change_timeout_ms"] == observation_surface.CLICK_TOGGLE_CHANGE_TIMEOUT_MS
+    assert result["replacement_samples"] == 0
+    assert "no replacement samples" in result["eligibility"]
     assert result["failures"] == [
         {
             "case": "observation_action_click_observe_change_http_raw",
@@ -103,6 +115,43 @@ def test_http_raw_first_change_case_excludes_unchanged_timeout_trials(monkeypatc
             "elapsed_ms": result["failures"][0]["elapsed_ms"],
         }
     ]
+
+
+def test_http_raw_first_change_rejects_unverified_hash_change() -> None:
+    with pytest.raises(
+        observation_surface.FirstChangedFrameNotObservedError,
+        match="different baseline and source hashes",
+    ):
+        observation_surface._require_http_raw_first_changed_frame(
+            {
+                "action_result": {"ok": True},
+                "change_result": {
+                    "detected": True,
+                    "timeout_reached": False,
+                    "baseline_source_sha256": "a" * 64,
+                    "source_sha256": "a" * 64,
+                },
+            }
+        )
+
+
+def test_http_raw_first_change_rejects_non_xtest_sample() -> None:
+    with pytest.raises(
+        observation_surface.FirstChangedFrameNotObservedError,
+        match="XTest",
+    ):
+        observation_surface._require_http_raw_first_changed_frame(
+            {
+                "input_backend": "xdotool",
+                "action_result": {"ok": True},
+                "change_result": {
+                    "detected": True,
+                    "timeout_reached": False,
+                    "baseline_source_sha256": "a" * 64,
+                    "source_sha256": "b" * 64,
+                },
+            }
+        )
 
 
 def test_http_raw_first_change_case_rejects_failed_action_with_incidental_change(

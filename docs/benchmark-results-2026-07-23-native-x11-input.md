@@ -95,6 +95,10 @@ compact artifact.
 
 ## Optimized action-to-frame and availability harness, 2026-07-24
 
+The 34.6 / 51.0 ms action-observation result in this section is historical,
+pre-hash-verification evidence. It remains recorded with its original label and is not eligible for
+the current Modal-only experimental result.
+
 The provider-default comparison below measures every provider through its public SDK from the local
 macOS caller. It is intentionally neutral, but it is not Modal's optimized production shape. The
 repository's dedicated optimization harness was therefore run separately against the exact

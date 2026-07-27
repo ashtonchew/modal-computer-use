@@ -934,6 +934,8 @@ The compact machine-readable record is
 
 The observation-inclusive metric remains a different boundary. A fresh 30/30 valid same-region run
 measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
+This is historical, pre-hash-verification evidence and is not eligible for the current experimental
+result.
 Its retained intervals show that the network is no longer the main cost:
 
 | Causal observation interval | p50 | p95 | Meaning |
