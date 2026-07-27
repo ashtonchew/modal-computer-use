@@ -1,9 +1,9 @@
 # Rejected Provider Benchmark Diagnostic, 2026-07-18
 
-> **Archive category:** Rejected  
-> **Date or revision:** 2026-07-18; harness `86c15252cc5be188f2b79fddad98a438a0331e85`  
+> **Archive category:** Rejected
+> **Date or revision:** 2026-07-18; harness `86c15252cc5be188f2b79fddad98a438a0331e85`
 > **Question:** Did the first corrected provider harness support lifecycle and screenshot-payload
-> comparisons?  
+> comparisons?
 > **Disposition:** No. External lifecycle samples included teardown while Modal did not, and the
 > Daytona payload counted base64 transport text. Retain the run only as rejected evidence.
 

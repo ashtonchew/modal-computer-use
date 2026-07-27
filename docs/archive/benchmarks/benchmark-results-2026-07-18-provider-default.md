@@ -1,9 +1,9 @@
 # Provider Benchmark Current Reference, 2026-07-18
 
-> **Archive category:** Superseded  
-> **Date or revision:** 2026-07-18; harness `74edc6317ea4bac61ef512d7a68060445cf42720`  
+> **Archive category:** Superseded
+> **Date or revision:** 2026-07-18; harness `74edc6317ea4bac61ef512d7a68060445cf42720`
 > **Question:** What did the neutral Modal, Daytona, and E2B default paths measure from one
-> external caller?  
+> external caller?
 > **Disposition:** The [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md)
 > replaces this reference with the five-provider table, current boundaries, and small-sample
 > display policy.

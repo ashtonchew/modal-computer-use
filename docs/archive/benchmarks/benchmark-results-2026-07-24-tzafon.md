@@ -1,9 +1,9 @@
 # Provider benchmark results, 2026-07-24
 
-> **Archive category:** Superseded  
-> **Date or revision:** 2026-07-24  
+> **Archive category:** Superseded
+> **Date or revision:** 2026-07-24
 > **Question:** How did the first five-provider table compare provider-default paths with a
-> separately optimized Modal path?  
+> separately optimized Modal path?
 > **Disposition:** The [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md)
 > replaces this table with exact-commit artifacts, the current hash-confirmed experiment, and the
 > small-sample display policy.

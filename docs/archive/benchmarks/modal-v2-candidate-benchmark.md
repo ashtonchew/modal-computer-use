@@ -1,9 +1,9 @@
 # Modal V2 Candidate Benchmark Methodology
 
-> **Archive category:** Historical  
-> **Date or revision:** 2026-07-19 protocol  
+> **Archive category:** Historical
+> **Date or revision:** 2026-07-19 protocol
 > **Question:** How should V1 and V2 product, transport-matched, and private-network paths be gated
-> before measurement?  
+> before measurement?
 > **Disposition:** The placement prerequisite failed for the associated run. Retain this protocol
 > with the descriptive capability result; no performance phase completed.
 

@@ -1,8 +1,8 @@
 # Modal Optimized-Frontier Result, 2026-07-19
 
-> **Archive category:** Rejected  
-> **Date or revision:** 2026-07-19; source `f8d24e63e9cadaf3224da464dd517f98ca020258`  
-> **Question:** Did the predeclared V1 and V2 optimized-frontier paths pass the pilot gate?  
+> **Archive category:** Rejected
+> **Date or revision:** 2026-07-19; source `f8d24e63e9cadaf3224da464dd517f98ca020258`
+> **Question:** Did the predeclared V1 and V2 optimized-frontier paths pass the pilot gate?
 > **Disposition:** No. Both primary arms missed the required valid-sample count, so no promoted
 > lifecycle, throughput, or path-ratio result exists.
 

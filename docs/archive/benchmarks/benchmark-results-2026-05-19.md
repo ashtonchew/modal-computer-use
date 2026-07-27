@@ -1,8 +1,8 @@
 # Provider Screenshot Payload Debug, 2026-05-19
 
-> **Archive category:** Diagnostic  
-> **Date or revision:** 2026-05-19  
-> **Question:** Why did provider screenshot payload sizes differ in the early comparison?  
+> **Archive category:** Diagnostic
+> **Date or revision:** 2026-05-19
+> **Question:** Why did provider screenshot payload sizes differ in the early comparison?
 > **Disposition:** This investigation explains base64 accounting and visual-workload differences.
 > It does not define a current provider result; use the
 > [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md) for current

@@ -1,9 +1,9 @@
 # Modal V2 Candidate Result, 2026-07-19
 
-> **Archive category:** Diagnostic  
-> **Date or revision:** 2026-07-19; source `ccf756154c8d7aa157ca6844b80d3042ea718df4`  
+> **Archive category:** Diagnostic
+> **Date or revision:** 2026-07-19; source `ccf756154c8d7aa157ca6844b80d3042ea718df4`
 > **Question:** Could V1 and V2 be placed in one observed provider-region stratum for a causal
-> latency comparison?  
+> latency comparison?
 > **Disposition:** No tested placement satisfied the prerequisite. The capability matrix remains
 > descriptive; performance sampling did not begin.
 

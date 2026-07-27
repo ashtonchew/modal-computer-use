@@ -1,9 +1,9 @@
 # Modal Optimized-Frontier Benchmark Methodology
 
-> **Archive category:** Historical  
-> **Date or revision:** 2026-07-19 protocol  
+> **Archive category:** Historical
+> **Date or revision:** 2026-07-19 protocol
 > **Question:** How should separately placed V1 and V2 optimized paths be compared without a
-> backend-causal claim?  
+> backend-causal claim?
 > **Disposition:** The protocol is retained with its rejected pilot result. The primary arms did
 > not pass the clean pilot gate, so the full experiment did not run.
 
