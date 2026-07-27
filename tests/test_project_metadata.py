@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tomllib
 from email.message import Message
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import pytest
+
+import modal_computer_use
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER_SPEC = importlib.util.spec_from_file_location(
@@ -29,19 +31,26 @@ def test_project_uses_current_license_and_url_metadata() -> None:
     assert metadata["build-system"]["requires"] == ["hatchling>=1.27"]
     assert metadata["project"]["license"] == "MIT"
     assert metadata["project"]["license-files"] == ["LICENSE"]
-    assert set(metadata["project"]["urls"]) == {
-        "Homepage",
-        "Documentation",
-        "Repository",
-        "Issues",
-        "Changelog",
+    assert metadata["project"]["urls"] == {
+        "Homepage": "https://github.com/ashtonchew/modal-computer-use",
+        "Documentation": (
+            "https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md"
+        ),
+        "Repository": "https://github.com/ashtonchew/modal-computer-use",
+        "Issues": "https://github.com/ashtonchew/modal-computer-use/issues",
+        "Changelog": (
+            "https://github.com/ashtonchew/modal-computer-use/blob/main/CHANGELOG.md"
+        ),
     }
-    assert all(
-        urlsplit(url).scheme == "https" and urlsplit(url).netloc == "github.com"
-        for url in metadata["project"]["urls"].values()
-    )
     assert (ROOT / metadata["project"]["readme"]).is_file()
     assert (ROOT / metadata["project"]["license-files"][0]).is_file()
+
+
+def test_project_version_matches_runtime_and_openapi() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    openapi = json.loads((ROOT / "docs" / "openapi.json").read_text(encoding="utf-8"))
+
+    assert project["version"] == modal_computer_use.__version__ == openapi["info"]["version"]
 
 
 def _core_metadata_bytes(*, version: str | None = None, duplicate_url: bool = False) -> bytes:

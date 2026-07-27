@@ -938,7 +938,7 @@ The observation-inclusive metric remains a different boundary. A fresh 30/30 val
 runner and target used the same requested Modal region
 measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
 This is historical, pre-hash-verification evidence and is not eligible for the current experimental
-result. See the [current hash-verified experiment](benchmark-results-2026-07-26-provider-results.md#modal-only-experiment).
+result. See the [current hash-verified experiment](benchmark-results-2026-07-26-provider-results.md#modal-only-experimental-result).
 Its retained intervals show that the network is no longer the main cost:
 
 | Causal observation interval | p50 | p95 | Meaning |

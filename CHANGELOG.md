@@ -7,6 +7,8 @@
 - Added a security policy that requires private vulnerability reporting before a public release,
   and clarified runtime security guidance.
 - Updated package metadata to use PEP 639 license fields and well-known project URLs.
+- Added the Modal optimized lifecycle benchmark, eligibility-gated tracked provider evidence, and a
+  current five-provider report.
 
 ## 0.1.0
 

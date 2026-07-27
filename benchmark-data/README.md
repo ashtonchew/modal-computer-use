@@ -21,6 +21,10 @@ The current provider evidence is:
 
 - [`provider-compare-coordinate-command-2026-07-26.json`](provider-compare-coordinate-command-2026-07-26.json),
   the sanitized provider-default input;
+- [`modal-optimized-provider-2026-07-26.json`](modal-optimized-provider-2026-07-26.json), the
+  allowlisted Modal optimized input with exact numeric samples;
+- [`modal-observation-2026-07-26.json`](modal-observation-2026-07-26.json), the allowlisted Modal
+  observation input with exact numeric samples;
 - [`provider-results-2026-07-26.json`](provider-results-2026-07-26.json), the combined report
   artifact.
 
@@ -30,13 +34,16 @@ For a new run, use this file flow:
 | --- | --- | --- |
 | Raw provider-default run | `benchmark-results/candidates/provider-default.json` | Ignored |
 | Sanitized provider-default run | `benchmark-data/provider-default.json` | Tracked |
-| Raw Modal optimized runner-only run | `benchmark-results/modal-optimized.json` | Ignored |
+| Raw Modal optimized provider run | `benchmark-results/modal-optimized.json` | Ignored |
+| Sanitized Modal optimized run | `benchmark-data/modal-optimized.json` | Tracked |
 | Raw Modal observation runner-only run | `benchmark-results/modal-observation.json` | Ignored |
+| Sanitized Modal observation run | `benchmark-data/modal-observation.json` | Tracked |
 | Combined provider results | `benchmark-data/provider-results.json` | Tracked |
 
-Generate `provider-default.json` with `scripts/sanitize_provider_benchmark.py`. Generate
-`provider-results.json` with `scripts/sanitize_provider_results.py`; it binds all three inputs by
-SHA-256 and records the evidence-harness and report-source revisions separately. See
+Generate `provider-default.json` with `scripts/sanitize_provider_benchmark.py`. Generate both
+allowlisted Modal inputs with `scripts/sanitize_modal_provider_inputs.py`, then generate
+`provider-results.json` with `scripts/sanitize_provider_results.py`. The combined artifact binds all
+three tracked inputs by SHA-256 and records the evidence-harness and report-source revisions. See
 [`docs/benchmarking.md`](../docs/benchmarking.md) for the commands and reporting policy.
 
 Older tracked artifacts keep their original paths because reports, validators, and provenance

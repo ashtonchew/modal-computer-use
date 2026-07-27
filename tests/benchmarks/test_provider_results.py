@@ -12,15 +12,19 @@ import pytest
 
 from modal_computer_use import cli
 from modal_computer_use.benchmarks.provider_results import (
+    MINIMUM_ELIGIBLE_SOURCE_SHA,
     OPAQUE_TZAFON_SETTLE_SENTENCE,
+    SCHEMA_VERSION,
     ProviderResultsError,
     build_provider_results,
     render_provider_results_json,
     render_provider_results_markdown,
+    sanitize_modal_observation_input,
+    sanitize_modal_optimized_input,
     validate_provider_results,
 )
 
-HARNESS_SHA = "c6afa9d0384e664f5ccd7426014dcf5d20266e0e"
+HARNESS_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
 
 
 def _case(value: float, *, iterations: int) -> dict[str, object]:
@@ -62,6 +66,17 @@ def _provider_artifact() -> dict[str, object]:
                 "shell_mode": "non_login",
             },
         }
+        sdk_calls, transport_requests, batching = {
+            "modal-daemon": (1, 1, "single_request"),
+            "daytona": (4, 4, "sequential_requests"),
+            "e2b": (4, 8, "sequential_requests"),
+            "tzafon": (1, 1, "single_request"),
+        }[name]
+        cases["coordinate_click_sequence"].update(
+            provider_sdk_call_count=sdk_calls,
+            transport_request_count=transport_requests,
+            batching=batching,
+        )
         providers[name] = {
             "status": "ok",
             "provider": name,
@@ -145,7 +160,7 @@ def _provider_artifact() -> dict[str, object]:
     }
 
 
-def _optimized_artifact() -> dict[str, object]:
+def _raw_optimized_artifact() -> dict[str, object]:
     cases = {
         name: {
             **_case(float(index), iterations=30),
@@ -263,7 +278,7 @@ def _optimized_artifact() -> dict[str, object]:
     }
 
 
-def _observation_artifact() -> dict[str, object]:
+def _raw_observation_artifact() -> dict[str, object]:
     case = {
         **_case(7.5, iterations=30),
         "benchmark_semantics": "first-hash-confirmed-change-v1",
@@ -305,6 +320,7 @@ def _observation_artifact() -> dict[str, object]:
                     "environment": {
                         "modal_region": "us-west-2",
                         "modal_runner_path": "connect",
+                        "modal_runner_region": "us-west-2",
                         "modal_ingress": "connect",
                         "daemon_http_version": "1.1",
                         "browser": "chromium",
@@ -326,6 +342,22 @@ def _observation_artifact() -> dict[str, object]:
             }
         },
     }
+
+
+def _optimized_artifact() -> dict[str, object]:
+    return sanitize_modal_optimized_input(
+        _raw_optimized_artifact(),
+        raw_sha256="2" * 64,
+        evidence_harness_sha=HARNESS_SHA,
+    )
+
+
+def _observation_artifact() -> dict[str, object]:
+    return sanitize_modal_observation_input(
+        _raw_observation_artifact(),
+        raw_sha256="3" * 64,
+        evidence_harness_sha=HARNESS_SHA,
+    )
 
 
 def _build() -> dict[str, object]:
@@ -428,46 +460,33 @@ def test_reporting_policy_keeps_small_sample_p95_machine_only() -> None:
             ),
             "readback",
         ),
-        (lambda _p, o, _x: o["metadata"].update(runner_kind="modal-sandbox"), "Function"),
         (
-            lambda _p, o, _x: o["metadata"].update(external_caller_included=True),
-            "runner-only",
+            lambda _p, o, _x: o["configuration"].update(modal_runner_kind="modal-sandbox"),
+            "configuration",
         ),
         (
-            lambda _p, _o, x: x["metadata"].update(external_caller_included=True),
-            "runner-only",
+            lambda _p, o, _x: o["configuration"].update(external_caller_included=True),
+            "configuration",
         ),
         (
-            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["surfaces"][
-                "daemon-observation-stream"
-            ]["cases"]["observation_action_click_observe_change_http_raw"].update(
-                replacement_samples=1
-            ),
-            "replacement",
+            lambda _p, _o, x: x["configuration"].update(external_caller_included=True),
+            "configuration",
         ),
         (
-            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["surfaces"][
-                "daemon-observation-stream"
-            ]["cases"]["observation_action_click_observe_change_http_raw"]["last_result"][
-                "change_result"
-            ].update(timeout_reached=True),
-            "timeout",
+            lambda _p, _o, x: x["case"].update(replacement_samples=1),
+            "semantics",
         ),
         (
-            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["surfaces"][
-                "daemon-observation-stream"
-            ]["cases"]["observation_action_click_observe_change_http_raw"]["last_result"][
-                "action_result"
-            ].update(ok=False),
-            "action failed",
+            lambda _p, _o, x: x["success_attestation"].update(last_timeout_reached=True),
+            "attestation",
         ),
         (
-            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["surfaces"][
-                "daemon-observation-stream"
-            ]["cases"]["observation_action_click_observe_change_http_raw"]["last_result"].update(
-                input_backend="xdotool"
-            ),
-            "XTest",
+            lambda _p, _o, x: x["success_attestation"].update(last_action_ok=False),
+            "attestation",
+        ),
+        (
+            lambda _p, _o, x: x["case"].update(input_backend="xdotool"),
+            "semantics",
         ),
         (
             lambda p, _o, _x: p["providers"]["modal-daemon"]["cases"]["screenshot_full"][
@@ -482,31 +501,19 @@ def test_reporting_policy_keeps_small_sample_p95_machine_only() -> None:
             "p95",
         ),
         (
-            lambda _p, o, _x: o["metadata"]["provenance"].update(git_worktree_clean=False),
-            "clean",
+            lambda _p, o, _x: o["provenance"].update(evidence_harness_sha="a" * 40),
+            "configuration",
         ),
         (
-            lambda _p, o, _x: o["metadata"]["provenance"].update(git_revision="a" * 40),
-            "optimized source",
+            lambda _p, o, _x: o["configuration"].update(image_revision="d" * 40),
+            "configuration",
         ),
         (
-            lambda _p, o, _x: o["metadata"].update(image_revision="d" * 40),
-            "image_revision",
+            lambda _p, o, _x: o["configuration"].update(target_cpu=99.0),
+            "configuration",
         ),
         (
-            lambda _p, o, _x: o["metadata"].update(target_cpu=99.0),
-            "target_cpu",
-        ),
-        (
-            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["metadata"]["environment"][
-                "provenance"
-            ].update(git_worktree_clean=False),
-            "clean",
-        ),
-        (
-            lambda _p, _o, x: x["runs"]["modal_colocated_runner"]["metadata"]["environment"][
-                "provenance"
-            ].update(git_revision="a" * 40),
+            lambda _p, _o, x: x["provenance"].update(evidence_harness_sha="a" * 40),
             "observation source",
         ),
     ],
@@ -596,8 +603,8 @@ def test_builder_rejects_nondefault_provider_evidence(mutator, match: str) -> No
 
 def test_builder_rejects_observation_outside_exact_topology() -> None:
     observation = _observation_artifact()
-    observation["metadata"]["modal_region"] = "us-east"
-    with pytest.raises(ProviderResultsError, match="modal_region"):
+    observation["configuration"]["modal_region"] = "us-east"
+    with pytest.raises(ProviderResultsError, match="configuration"):
         build_provider_results(
             _provider_artifact(),
             _optimized_artifact(),
@@ -618,14 +625,13 @@ def test_builder_rejects_structurally_external_runner_only_evidence(
     observation = _observation_artifact()
     artifact = optimized if artifact_name == "optimized" else observation
     if contradiction == "external_run":
-        artifact["runs"]["external_caller"] = {"ok": True}
+        artifact["external_run"] = {"ok": True}
     elif contradiction == "comparison":
         artifact["comparison"] = {"ratio": 1.0}
     else:
-        artifact["metadata"]["comparison"] = "external versus runner"
+        artifact["metadata_comparison"] = "external versus runner"
 
-    expected_message = "runner-only" if artifact_name == "observation" else "publishable"
-    with pytest.raises(ProviderResultsError, match=expected_message):
+    with pytest.raises(ProviderResultsError, match="unexpected or missing fields"):
         build_provider_results(
             _provider_artifact(),
             optimized,
@@ -701,7 +707,7 @@ def test_sanitizer_source_verification_rejects_unrelated_commit(monkeypatch) -> 
     assert calls[-1] == (
         "merge-base",
         "--is-ancestor",
-        HARNESS_SHA,
+        MINIMUM_ELIGIBLE_SOURCE_SHA,
         "a" * 40,
     )
 
@@ -817,7 +823,7 @@ def test_offline_cli_renders_markdown_json_and_output(tmp_path: Path, capsys) ->
         )
         == 0
     )
-    assert json.loads(output.read_text())["schema_version"] == 3
+    assert json.loads(output.read_text())["schema_version"] == SCHEMA_VERSION
     artifact.write_text("{}", encoding="utf-8")
     with pytest.raises((ProviderResultsError, SystemExit)):
         cli.main(["benchmark", "provider-results", str(artifact)])
@@ -825,11 +831,9 @@ def test_offline_cli_renders_markdown_json_and_output(tmp_path: Path, capsys) ->
 
 def test_pre_fix_experiment_is_rejected() -> None:
     observation = _observation_artifact()
-    case = observation["runs"]["modal_colocated_runner"]["surfaces"]["daemon-observation-stream"][
-        "cases"
-    ]["observation_action_click_observe_change_http_raw"]
+    case = observation["case"]
     del case["benchmark_semantics"]
-    with pytest.raises(ProviderResultsError, match="semantics"):
+    with pytest.raises(ProviderResultsError, match="unexpected or missing fields"):
         build_provider_results(
             _provider_artifact(),
             _optimized_artifact(),
@@ -882,3 +886,66 @@ def test_sanitizer_generation_is_deterministic_and_check_detects_drift(
     output.write_text("{}\n", encoding="utf-8")
     with pytest.raises(SystemExit):
         module.main([*argv, "--check"])
+
+
+@pytest.mark.parametrize("raw_factory", [_raw_optimized_artifact, _raw_observation_artifact])
+def test_modal_input_sanitizers_reject_dirty_raw_evidence(raw_factory) -> None:
+    raw = raw_factory()
+    if raw["benchmark"] == "modal-optimized-provider":
+        raw["metadata"]["provenance"]["git_worktree_clean"] = False
+        sanitizer = sanitize_modal_optimized_input
+    else:
+        raw["runs"]["modal_colocated_runner"]["metadata"]["environment"]["provenance"][
+            "git_worktree_clean"
+        ] = False
+        sanitizer = sanitize_modal_observation_input
+    with pytest.raises(ProviderResultsError, match="clean"):
+        sanitizer(raw, raw_sha256="4" * 64, evidence_harness_sha=HARNESS_SHA)
+
+
+def test_modal_input_sanitizer_is_deterministic_allowlisted_and_checkable(
+    tmp_path: Path,
+) -> None:
+    raw_paths = [tmp_path / "optimized-raw.json", tmp_path / "observation-raw.json"]
+    out_paths = [tmp_path / "optimized.json", tmp_path / "observation.json"]
+    for path, payload in zip(
+        raw_paths, (_raw_optimized_artifact(), _raw_observation_artifact()), strict=True
+    ):
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "sanitize_modal_provider_inputs_test", Path("scripts/sanitize_modal_provider_inputs.py")
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = [
+        *map(str, raw_paths),
+        *map(str, out_paths),
+        "--evidence-harness-sha",
+        HARNESS_SHA,
+    ]
+    assert module.main(argv) == 0
+    first = [path.read_bytes() for path in out_paths]
+    assert module.main(argv) == 0
+    assert [path.read_bytes() for path in out_paths] == first
+    assert module.main([*argv, "--check"]) == 0
+    rendered = b"".join(first).lower()
+    for forbidden in (
+        b"access_token",
+        b"api_key",
+        b"endpoint",
+        b"resource_id",
+        b"last_result",
+        b"source_sha256",
+        b"failure_text",
+        b"stdout",
+        b"stderr",
+    ):
+        assert forbidden not in rendered
+    out_paths[0].write_text("{}\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        module.main([*argv, "--check"])
+
+
+def test_minimum_eligible_revision_is_pinned_to_evidence_harness() -> None:
+    assert MINIMUM_ELIGIBLE_SOURCE_SHA == HARNESS_SHA

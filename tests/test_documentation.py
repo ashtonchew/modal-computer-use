@@ -175,6 +175,17 @@ def test_root_readme_repository_links_are_absolute_https() -> None:
     )
 
 
+def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+    section = source[
+        source.index("The combined provider report uses") : source.index(
+            "## Run the provider-default comparison"
+        )
+    ]
+
+    assert "uv run computer-use benchmark modal-optimized-provider" in section
+
+
 def test_documentation_map_links_each_current_top_level_doc_once() -> None:
     canonical = {
         path.resolve()

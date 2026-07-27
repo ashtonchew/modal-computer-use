@@ -79,8 +79,8 @@ uv run computer-use benchmark modal-region-summary \
   benchmark-results/modal-region-ab.json
 ```
 
-Use `modal-colocated-client` to measure a separate same-region Modal runner. `--runner-only` omits
-the unrelated external-caller diagnostic and its comparison fields:
+Use `modal-colocated-client` to measure a runner and target with the same requested Modal region.
+`--runner-only` omits the unrelated external-caller diagnostic and its comparison fields:
 
 ```bash
 uv run computer-use benchmark modal-colocated-client \
@@ -96,8 +96,31 @@ uv run computer-use benchmark modal-colocated-client \
   --input-backend xtest \
   --subprocess-backend isolated-asyncio \
   --iterations 30 \
+  --output benchmark-results/modal-runner.json
+```
+
+The combined provider report uses `modal-optimized-provider` for the optimized lifecycle and warm
+operation rows. From the clean evidence-harness commit, publish its revision-addressed Images into
+the active Modal environment used by the run, as described in
+[Modal deployment](modal-deployment.md), then run:
+
+```bash
+evidence_harness_sha="$(git rev-parse HEAD)"
+
+uv run computer-use benchmark modal-optimized-provider \
+  --modal-region us-west-2 \
+  --image-revision "$evidence_harness_sha" \
+  --modal-cpu 4 \
+  --modal-memory-mib 8192 \
+  --browser chromium \
+  --iterations 30 \
+  --warmup-iterations 1 \
   --output benchmark-results/modal-optimized.json
 ```
+
+This command runs one warmup and 30 fresh create-to-validated-screenshot samples, then uses a
+separate warm target for the six operation rows. It fails unless every required sample, placement
+check, and cleanup gate passes. The resources are billable.
 
 First-visual-change measurements are experimental. They confirm a changed frame by its hash under
 the documented boundary. They do not measure application settle or semantic readiness. Read the
@@ -163,7 +186,8 @@ Before publishing an artifact:
 6. Regenerate with the validator's check mode when available so review detects drift.
 
 The combined provider report has stricter gates. Run all three measurements from the same clean,
-committed evidence-harness revision. The optimized command above produces its runner-only input.
+committed evidence-harness revision. The `modal-optimized-provider` command above produces its
+optimized input.
 Produce the single-case observation input with:
 
 ```bash
@@ -188,13 +212,28 @@ Sanitize the raw provider-default artifact before combining it. `current_referen
 declared harness commit to equal `HEAD` and the tracked worktree to be clean:
 
 ```bash
+evidence_harness_sha="$(git rev-parse HEAD)"
+
 uv run python scripts/sanitize_provider_benchmark.py \
   benchmark-results/candidates/provider-default.json \
   benchmark-data/provider-default.json \
   --raw-artifact-path benchmark-results/candidates/provider-default.json \
-  --harness-commit <full-harness-sha> \
+  --harness-commit "$evidence_harness_sha" \
   --status current_reference \
   --scope "provider-default SDK paths, one warmup and three measured iterations"
+```
+
+Convert the two raw Modal artifacts into strictly allowlisted tracked inputs. This preserves the
+numeric samples and required attestations while excluding endpoints, resource identifiers, tokens,
+screenshots, command output, and raw failure content:
+
+```bash
+uv run python scripts/sanitize_modal_provider_inputs.py \
+  benchmark-results/modal-optimized.json \
+  benchmark-results/modal-observation.json \
+  benchmark-data/modal-optimized-provider.json \
+  benchmark-data/modal-observation.json \
+  --evidence-harness-sha "$evidence_harness_sha"
 ```
 
 Generate the combined artifact. The generator verifies the exact provider list,
@@ -205,22 +244,25 @@ use `--check` against that immutable revision. The sanitizer also removes fields
 policy treats as secrets.
 
 ```bash
+report_source_sha="$(git rev-parse HEAD)"
+
 uv run python scripts/sanitize_provider_results.py \
   benchmark-data/provider-default.json \
-  benchmark-results/modal-optimized.json \
-  benchmark-results/modal-observation.json \
+  benchmark-data/modal-optimized-provider.json \
+  benchmark-data/modal-observation.json \
   benchmark-data/provider-results.json \
-  --report-source-sha <full-report-source-sha> \
-  --evidence-harness-sha <full-evidence-harness-sha>
+  --report-source-sha "$report_source_sha" \
+  --evidence-harness-sha "$evidence_harness_sha"
 
 uv run computer-use benchmark provider-results \
   benchmark-data/provider-results.json \
   --format markdown
 ```
 
-After generation, rerun both sanitizer commands with `--check` to verify that the tracked artifacts
-match their inputs. Keep the two raw Modal runner artifacts ignored; the combined artifact records
-their SHA-256 digests.
+After generation, rerun all three sanitizer commands with `--check` to verify that the tracked
+artifacts match their inputs. Keep the two raw Modal runner artifacts ignored. The tracked
+allowlisted inputs bind their SHA-256 digests, and the combined artifact binds the exact bytes of
+all three tracked inputs.
 
 ## Report statistics
 

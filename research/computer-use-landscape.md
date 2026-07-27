@@ -1,7 +1,8 @@
 # Computer-use landscape
 
 This research note compares selected computer-use products that are relevant to this project. The
-information is current as of 2026-07-23.
+product and interface research is current as of 2026-07-23. The linked benchmark evidence was
+refreshed on 2026-07-26; that refresh did not revalidate every product and interface entry.
 
 The products have different roles:
 

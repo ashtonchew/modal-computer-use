@@ -7,9 +7,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from modal_computer_use.benchmarks.modal_optimized_provider import (
-    validate_modal_optimized_provider_artifact,
-)
 from modal_computer_use.benchmarks.provider_results import (
     MINIMUM_ELIGIBLE_SOURCE_SHA,
     build_provider_results,
@@ -25,10 +22,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "modal_optimized",
         type=Path,
-        help="raw modal-optimized-provider artifact",
+        help="tracked sanitized modal-optimized-provider input",
     )
     parser.add_argument(
-        "modal_observation", type=Path, help="raw Modal observation artifact"
+        "modal_observation", type=Path, help="tracked sanitized Modal observation input"
     )
     parser.add_argument("output", type=Path)
     parser.add_argument("--report-source-sha", required=True)
@@ -46,7 +43,6 @@ def main(argv: list[str] | None = None) -> int:
     payloads = tuple(json.loads(item) for item in raw_bytes)
     if not all(isinstance(item, dict) for item in payloads):
         raise ValueError("all provider result inputs must be JSON objects")
-    validate_modal_optimized_provider_artifact(payloads[1], require_publishable=True)
     result = build_provider_results(
         payloads[0],
         payloads[1],
