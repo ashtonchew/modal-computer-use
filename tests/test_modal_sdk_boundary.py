@@ -637,6 +637,84 @@ def test_candidate_run_cleanup_can_attest_both_listing_inventories() -> None:
     }
 
 
+def test_candidate_run_cleanup_treats_disappeared_handles_as_absent() -> None:
+    modal_exception = pytest.importorskip("modal.exception")
+    runtime = fake_modal()
+    matched = FakeSandboxObject(
+        sandbox_id="sb-matched",
+        tags={"computer-use.run_id": "run_exact-child"},
+    )
+
+    class DisappearedSandbox:
+        object_id = "sb-disappeared"
+
+        def get_tags(self) -> dict[str, str]:
+            raise modal_exception.NotFoundError("sandbox disappeared after listing")
+
+    class RaceSandbox:
+        list_calls = 0
+
+        @classmethod
+        def list(cls, *, app_id: str) -> list[object]:
+            assert app_id == "ap-candidate-app"
+            cls.list_calls += 1
+            return [matched] if cls.list_calls == 1 else [DisappearedSandbox()]
+
+        @classmethod
+        def _experimental_list(cls, *, app_id: str) -> list[object]:
+            assert app_id == "ap-candidate-app"
+            return []
+
+    runtime.Sandbox = RaceSandbox
+
+    result = cleanup_modal_benchmark_run(
+        app_name="candidate-app",
+        run_id="run_exact",
+        modal_runtime=runtime,
+        include_inventory=True,
+    )
+
+    assert result["cleanup_succeeded"] is True
+    assert result["matched_sandboxes"] == 1
+    assert result["terminated_sandboxes"] == 1
+    assert result["remaining_sandboxes"] == 0
+    assert matched.terminate_wait_calls == [True]
+    assert result["enumeration"] == {
+        "before": {"list": 1, "_experimental_list": 0},
+        "after": {"list": 0, "_experimental_list": 0},
+        "apis": ["Sandbox.list", "Sandbox._experimental_list"],
+    }
+
+
+def test_candidate_run_cleanup_propagates_other_tag_read_errors() -> None:
+    runtime = fake_modal()
+
+    class BrokenSandbox:
+        object_id = "sb-broken"
+
+        def get_tags(self) -> dict[str, str]:
+            raise RuntimeError("tag service unavailable")
+
+    class BrokenListing:
+        @classmethod
+        def list(cls, *, app_id: str) -> list[object]:
+            return [BrokenSandbox()]
+
+        @classmethod
+        def _experimental_list(cls, *, app_id: str) -> list[object]:
+            return []
+
+    runtime.Sandbox = BrokenListing
+
+    with pytest.raises(RuntimeError, match="tag service unavailable"):
+        cleanup_modal_benchmark_run(
+            app_name="candidate-app",
+            run_id="run_exact",
+            modal_runtime=runtime,
+            include_inventory=True,
+        )
+
+
 def test_candidate_placement_probe_can_observe_unpinned_cloud_and_cleans_up(
     monkeypatch,
 ) -> None:

@@ -286,19 +286,7 @@ def cleanup_modal_benchmark_run(
     before, before_inventory = _list_modal_benchmark_sandboxes_with_inventory(
         runtime, app_id=app.app_id, run_id=run_id
     )
-    matched = []
-    for sandbox in before:
-        tags = sandbox.get_tags()
-        target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
-        runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
-        if (
-            isinstance(runner_run_id, str)
-            and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
-        ) or (
-            isinstance(target_run_id, str)
-            and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
-        ):
-            matched.append(sandbox)
+    matched = before
     terminated = 0
     failed = 0
     for sandbox in matched:
@@ -311,19 +299,7 @@ def cleanup_modal_benchmark_run(
     after, after_inventory = _list_modal_benchmark_sandboxes_with_inventory(
         runtime, app_id=app.app_id, run_id=run_id
     )
-    remaining = 0
-    for sandbox in after:
-        tags = sandbox.get_tags()
-        target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
-        runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
-        if (
-            isinstance(runner_run_id, str)
-            and (runner_run_id == run_id or runner_run_id.startswith(f"{run_id}-"))
-        ) or (
-            isinstance(target_run_id, str)
-            and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
-        ):
-            remaining += 1
+    remaining = len(after)
     result: dict[str, Any] = {
         "matched_sandboxes": len(matched),
         "terminated_sandboxes": terminated,
@@ -378,7 +354,12 @@ def _list_modal_benchmark_sandboxes_with_inventory(
 
 
 def _modal_benchmark_run_matches(sandbox: Any, run_id: str) -> bool:
-    tags = sandbox.get_tags()
+    try:
+        tags = sandbox.get_tags()
+    except Exception as exc:
+        if _is_modal_not_found_error(exc):
+            return False
+        raise
     target_run_id = tags.get("computer-use.run_id") if isinstance(tags, dict) else None
     runner_run_id = tags.get("benchmark_run") if isinstance(tags, dict) else None
     return (
@@ -388,6 +369,14 @@ def _modal_benchmark_run_matches(sandbox: Any, run_id: str) -> bool:
         isinstance(target_run_id, str)
         and (target_run_id == run_id or target_run_id.startswith(f"{run_id}-"))
     )
+
+
+def _is_modal_not_found_error(exc: Exception) -> bool:
+    try:
+        from modal.exception import NotFoundError
+    except ImportError:
+        return False
+    return isinstance(exc, NotFoundError)
 
 
 class _TimedModalRuntime:
