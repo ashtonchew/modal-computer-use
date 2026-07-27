@@ -570,6 +570,7 @@ Typing failures are redacted against the typed payload before they are included 
 
 For interpretation notes and one captured live run set, see:
 
+- [Current provider results, 2026-07-26](benchmark-results-2026-07-26-provider-results.md)
 - [Tzafon provider comparison, 2026-07-24](benchmark-results-2026-07-24-tzafon.md)
 - [Native X11 input A/B, 2026-07-23](benchmark-results-2026-07-23-native-x11-input.md)
 - [Provider-default benchmark reference, 2026-07-18](benchmark-results-2026-07-18-provider-default.md)
@@ -935,7 +936,7 @@ The compact machine-readable record is
 The observation-inclusive metric remains a different boundary. A fresh 30/30 valid same-region run
 measured click dispatch to the first matching changed causal frame at 30.179ms p50 and 39.948ms p95.
 This is historical, pre-hash-verification evidence and is not eligible for the current experimental
-result.
+result. See the [current hash-verified experiment](benchmark-results-2026-07-26-provider-results.md#modal-only-experiment).
 Its retained intervals show that the network is no longer the main cost:
 
 | Causal observation interval | p50 | p95 | Meaning |
@@ -1470,7 +1471,7 @@ example, or benchmark profile. Set a nonzero delay only for screenshot-driven ag
 a short settle period before the next screenshot, or use explicit `wait` actions when the caller
 knows the condition it is waiting for. This is an explicit action/batch timing control; the Alpha
 first-visual-change composition does not remove, shorten, or bypass it. See the
-[synchronization decision ladder](experimental-visual-change-observation.md#synchronization-decision-ladder).
+[synchronization decision ladder](experimental-visual-change-observation.md#choose-a-synchronization-method).
 
 ## When in doubt
 
