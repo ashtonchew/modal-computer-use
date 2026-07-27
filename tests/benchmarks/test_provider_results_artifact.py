@@ -12,7 +12,8 @@ from modal_computer_use.benchmarks.provider_results import (
     validate_provider_results,
 )
 
-REPORT_SOURCE_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
+EVIDENCE_HARNESS_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
+REPORT_SOURCE_SHA = "31d9873b6d976ff6882fb3b90c91524186eabed7"
 
 
 def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
@@ -30,7 +31,7 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
     validate_provider_results(combined)
     provenance = combined["provenance"]
     assert provenance["report_source_sha"] == REPORT_SOURCE_SHA
-    assert provenance["evidence_harness_sha"] == REPORT_SOURCE_SHA
+    assert provenance["evidence_harness_sha"] == EVIDENCE_HARNESS_SHA
     assert provider["provenance"]["harness_commit"] == provenance[
         "evidence_harness_sha"
     ]

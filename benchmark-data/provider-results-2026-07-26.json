@@ -402,7 +402,7 @@
       }
     ],
     "minimum_eligible_evidence_sha": "e57ea35f04efdec4100ffa44196ee8599e9811b2",
-    "report_source_sha": "0d3fa1d73111d4f784eb101812f8114390a87967",
+    "report_source_sha": "31d9873b6d976ff6882fb3b90c91524186eabed7",
     "safe_configuration_sha256": "5b3d89543745a89c5c997d56f8cf19ec793ab9d8a93cef8260771c602e40da47"
   },
   "reporting_policy": {

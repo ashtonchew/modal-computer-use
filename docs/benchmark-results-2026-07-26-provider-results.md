@@ -50,7 +50,7 @@ Modal optimized and experimental evidence uses a Modal runner with the same requ
 
 ## Evidence and reproducibility
 
-Evidence harness SHA: `e57ea35f04efdec4100ffa44196ee8599e9811b2`. Report source SHA: `0d3fa1d73111d4f784eb101812f8114390a87967`.
+Evidence harness SHA: `e57ea35f04efdec4100ffa44196ee8599e9811b2`. Report source SHA: `31d9873b6d976ff6882fb3b90c91524186eabed7`.
 
 Tracked inputs:
 
