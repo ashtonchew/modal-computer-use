@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="380" viewBox="0 0 1120 380" role="img" aria-labelledby="title desc">
+  <title id="title">Creation is separate from the repeated computer-use loop</title>
+  <desc id="desc">A create and connect stage starts a repeated loop from screen to model to send action to new frame and back to screen.</desc>
+  <defs>
+    <style>
+      .bg { fill: #FAF8F2; }
+      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.4; }
+      .stage { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
+      .label {
+        fill: #292C2F;
+        font-family: Arial, sans-serif;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .small {
+        fill: #666B69;
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+      }
+      .arrow-label {
+        fill: #666B69;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+      }
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="380"/>
+
+  <rect class="stage" x="55" y="36" width="214" height="72" rx="8" stroke="#66856B" stroke-width="1.4"/>
+  <text class="label" x="162" y="67" text-anchor="middle">Create + connect</text>
+  <text class="small" x="162" y="91" text-anchor="middle">session setup</text>
+  <line x1="162" y1="108" x2="162" y2="156" stroke="#66856B" stroke-width="1.8"/>
+  <line x1="162" y1="156" x2="170" y2="156" stroke="#66856B" stroke-width="1.8"/>
+  <line x1="170" y1="156" x2="170" y2="197" stroke="#66856B" stroke-width="1.8"/>
+  <path d="M 165 197 L 170 205 L 175 197 Z" fill="#66856B"/>
+  <text class="arrow-label" x="178" y="144">starts once</text>
+
+  <text class="small" x="570" y="176" text-anchor="middle" letter-spacing="0.5">REPEATED EVERY TURN</text>
+
+  <rect class="box" x="80" y="205" width="180" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
+  <text class="label" x="170" y="251" text-anchor="middle">Screen</text>
+
+  <rect class="box" x="360" y="205" width="150" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
+  <text class="label" x="435" y="251" text-anchor="middle">Model</text>
+
+  <rect class="box" x="610" y="205" width="190" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
+  <text class="label" x="705" y="251" text-anchor="middle">Send action</text>
+
+  <rect class="box" x="900" y="205" width="160" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
+  <text class="label" x="980" y="251" text-anchor="middle">New frame</text>
+
+  <line x1="260" y1="245" x2="351" y2="245" stroke="#66856B" stroke-width="1.8"/>
+  <path d="M 351 240 L 360 245 L 351 250 Z" fill="#66856B"/>
+  <text class="arrow-label" x="310" y="230" text-anchor="middle">send pixels</text>
+
+  <line x1="510" y1="245" x2="601" y2="245" stroke="#66856B" stroke-width="1.8"/>
+  <path d="M 601 240 L 610 245 L 601 250 Z" fill="#66856B"/>
+  <text class="arrow-label" x="560" y="230" text-anchor="middle">infer</text>
+
+  <line x1="800" y1="245" x2="891" y2="245" stroke="#66856B" stroke-width="1.8"/>
+  <path d="M 891 240 L 900 245 L 891 250 Z" fill="#66856B"/>
+  <text class="arrow-label" x="850" y="230" text-anchor="middle">dispatch</text>
+
+  <line x1="980" y1="285" x2="980" y2="337" stroke="#66856B" stroke-width="1.8"/>
+  <line x1="980" y1="337" x2="170" y2="337" stroke="#66856B" stroke-width="1.8"/>
+  <line x1="170" y1="337" x2="170" y2="293" stroke="#66856B" stroke-width="1.8"/>
+  <path d="M 165 293 L 170 285 L 175 293 Z" fill="#66856B"/>
+  <text class="arrow-label" x="575" y="327" text-anchor="middle">render and observe</text>
+</svg>
