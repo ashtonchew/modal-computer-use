@@ -379,3 +379,73 @@ actual Modal usage records or an invoice.
 Also safe, when a shorter version is needed: “A persistent connection is not a separate compute
 resource, but the containers it keeps useful may remain billable. Faster completion can reduce
 resource-seconds at a fixed configuration; this benchmark did not measure a bill.”
+
+## X-facing title follow-up, 2026-07-28
+
+### Editorial pattern
+
+X's own Articles guide says a title should be specific, create curiosity, and promise value. It also
+recommends short paragraphs and one idea per paragraph for mobile scanning
+([X Articles](https://help.x.com/en/using-x/articles)). Recent Modal engineering and customer
+headlines usually put one legible outcome next to a concrete workload: “Scaling to 1 million
+concurrent sandboxes in seconds,” “One-second voice-to-voice latency with Modal, Pipecat, and open
+models,” “Run FLUX.1-dev three times faster,” “How Modal powered 250,000 Lovable app creations in a
+weekend,” and “How Reducto improved enterprise-scale document processing latency by 3x”
+([sandbox scale](https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds),
+[voice latency](https://modal.com/blog/low-latency-voice-bot),
+[FLUX](https://modal.com/blog/flux-3x-faster),
+[Lovable](https://modal.com/blog/lovable-case-study),
+[Reducto](https://modal.com/blog/reducto-case-study)).
+
+For this article, `4 ms` scans faster than `0.004 s`, matches the dominant unit in the warm-results
+sections, and avoids making readers convert units before they know the workload. One metric in the
+title is enough. The screenshot result belongs in the deck. “Fastest computer use” on its own would
+overstate the evidence: only the Modal arm was tuned, its warm rows had 30 samples, provider defaults
+had three, and the benchmark retained provider-native behavior. The tracked result supports “fastest
+path I tested” for the six dated warm-operation rows
+([provider report](../docs/benchmark-results-2026-07-26-provider-results.md),
+[draft](../docs/drafts/modal-optimized-low-latency.md)).
+
+### Ranked title and deck candidates
+
+1. **How I built 4 ms computer-use clicks on Modal**
+
+   *The warm path was the fastest I tested against the E2B, Daytona, Modal, and Tzafon defaults. Here
+   is the architecture behind its 32 ms screenshots.*
+
+   Best overall. The title is short, first-person, concrete, and easy to scan. The deck carries the
+   competitive result and its measured scope without asking the headline to hold every qualifier.
+
+2. **4 ms clicks on Modal: the fastest computer-use path I tested**
+
+   *I moved the caller closer, kept X11 state alive, and removed repeated work from the agent loop.*
+
+   Strongest competitive option. “I tested” prevents a universal record claim, although the colon
+   construction is denser on a mobile timeline.
+
+3. **How I built the fastest computer-use path I tested on Modal**
+
+   *Clicks took 4 ms and full screenshots took 32 ms on the tuned warm path.*
+
+   Closest safe version of the requested wording. The metric moves to the deck, and “I tested” keeps
+   the claim tied to the dated comparison.
+
+4. **How I got computer-use clicks down to 4 ms on Modal**
+
+   *A persistent X11 daemon and a shorter request route made the warm computer side feel immediate.*
+
+   Clear engineering promise with no competitive claim. “Got down to” is conversational but less
+   architecture-led than the first three.
+
+5. **Building a 4 ms computer-use path on Modal**
+
+   *What I measured, kept alive, and moved closer to cut latency inside the repeated agent loop.*
+
+   Clean Modal-blog shape, though it loses the first-person “How I built” hook and understates the
+   comparison that motivated the work.
+
+Recommendation: use candidate 1. It gives X readers one memorable number, keeps the unit consistent
+with the article, and lets the deck make the strongest competitive claim the evidence can support.
+
+Editorial reconciliation: the final humanizer pass chose candidate 4 because it reads more naturally
+aloud. The deck now carries the dated competitive scope and the 32 ms screenshot result.

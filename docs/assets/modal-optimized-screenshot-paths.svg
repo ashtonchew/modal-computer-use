@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="356" viewBox="0 0 1120 356" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="360" viewBox="0 0 860 360" role="img" aria-labelledby="title desc">
   <title id="title">Default and optimized Modal screenshot request paths</title>
   <desc id="desc">Two aligned request paths compare an external caller through an attested tunnel with a same requested region Modal Function runner through Connect.</desc>
   <defs>
@@ -14,84 +14,91 @@
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
       .row { fill: #292D2C; font-size: 15px; font-weight: 700; letter-spacing: 0.35px; }
-      .label { fill: #292D2C; font-size: 15px; font-weight: 600; }
-      .small { fill: #5D6360; font-size: 12.5px; }
-      .arrow-label { fill: #626865; font-size: 11.5px; font-weight: 500; }
+      .label { fill: #292D2C; font-size: 16px; font-weight: 600; }
+      .small { fill: #5D6360; font-size: 14px; }
+      .arrow-label { fill: #626865; font-size: 14px; font-weight: 500; }
       .path { stroke: #5F806E; stroke-width: 1.6; }
       .arrow { fill: #5F806E; }
     </style>
   </defs>
 
-  <rect class="bg" width="1120" height="356"/>
+  <rect class="bg" width="860" height="360"/>
 
-  <text class="row" x="20" y="102">DEFAULT</text>
-  <rect class="box" x="120" y="57" width="158" height="80" rx="7"/>
-  <text class="label" x="199" y="102" text-anchor="middle">External caller</text>
+  <text class="row" x="25" y="35">DEFAULT</text>
+  <rect class="box" x="15" y="55" width="110" height="80" rx="7"/>
+  <text class="label" x="70" y="91" text-anchor="middle">External</text>
+  <text class="label" x="70" y="112" text-anchor="middle">caller</text>
 
-  <rect class="box" x="328" y="57" width="158" height="80" rx="7"/>
-  <text class="label" x="407" y="102" text-anchor="middle">attested tunnel</text>
+  <rect class="box" x="190" y="55" width="105" height="80" rx="7"/>
+  <text class="label" x="242.5" y="91" text-anchor="middle">Attested</text>
+  <text class="label" x="242.5" y="112" text-anchor="middle">tunnel</text>
 
-  <rect class="box" x="536" y="57" width="142" height="80" rx="7"/>
-  <text class="label" x="607" y="102" text-anchor="middle">Warm daemon</text>
+  <rect class="box" x="365" y="55" width="95" height="80" rx="7"/>
+  <text class="label" x="412.5" y="91" text-anchor="middle">Warm</text>
+  <text class="label" x="412.5" y="112" text-anchor="middle">daemon</text>
 
-  <rect class="box" x="728" y="57" width="164" height="80" rx="7"/>
-  <text class="label" x="810" y="102" text-anchor="middle">Capture + encode</text>
+  <rect class="box" x="530" y="55" width="110" height="80" rx="7"/>
+  <text class="label" x="585" y="91" text-anchor="middle">Capture +</text>
+  <text class="label" x="585" y="112" text-anchor="middle">encode</text>
 
-  <rect class="result" x="942" y="47" width="158" height="100" rx="7"/>
-  <text class="label" x="1021" y="82" text-anchor="middle">1024x768 PNG</text>
-  <text class="small" x="1021" y="109" text-anchor="middle">126.86 ms median</text>
-  <text class="small" x="1021" y="130" text-anchor="middle">n=3</text>
+  <rect class="result" x="710" y="45" width="130" height="100" rx="7"/>
+  <text class="label" x="775" y="79" text-anchor="middle">1024x768 PNG</text>
+  <text class="small" x="775" y="107" text-anchor="middle">126.86 ms median</text>
+  <text class="small" x="775" y="130" text-anchor="middle">n=3</text>
 
-  <line class="path" x1="278" y1="97" x2="328" y2="97"/>
-  <path class="arrow" d="M 320 92 L 328 97 L 320 102 z"/>
-  <text class="arrow-label" x="303" y="84" text-anchor="middle">request</text>
+  <line class="path" x1="125" y1="95" x2="190" y2="95"/>
+  <path class="arrow" d="M 182 90 L 190 95 L 182 100 Z"/>
+  <text class="arrow-label" x="155" y="82" text-anchor="middle">Call</text>
 
-  <line class="path" x1="486" y1="97" x2="536" y2="97"/>
-  <path class="arrow" d="M 528 92 L 536 97 L 528 102 z"/>
-  <text class="arrow-label" x="511" y="84" text-anchor="middle">forward</text>
+  <line class="path" x1="295" y1="95" x2="365" y2="95"/>
+  <path class="arrow" d="M 357 90 L 365 95 L 357 100 Z"/>
+  <text class="arrow-label" x="330" y="82" text-anchor="middle">Route</text>
 
-  <line class="path" x1="678" y1="97" x2="728" y2="97"/>
-  <path class="arrow" d="M 720 92 L 728 97 L 720 102 z"/>
-  <text class="arrow-label" x="703" y="84" text-anchor="middle">capture</text>
+  <line class="path" x1="460" y1="95" x2="530" y2="95"/>
+  <path class="arrow" d="M 522 90 L 530 95 L 522 100 Z"/>
+  <text class="arrow-label" x="495" y="82" text-anchor="middle">Capture</text>
 
-  <line class="path" x1="892" y1="97" x2="942" y2="97"/>
-  <path class="arrow" d="M 934 92 L 942 97 L 934 102 z"/>
-  <text class="arrow-label" x="917" y="84" text-anchor="middle">return</text>
+  <line class="path" x1="640" y1="95" x2="710" y2="95"/>
+  <path class="arrow" d="M 702 90 L 710 95 L 702 100 Z"/>
+  <text class="arrow-label" x="675" y="82" text-anchor="middle">Return</text>
 
-  <text class="row" x="20" y="262">OPTIMIZED</text>
-  <rect class="box" x="120" y="207" width="158" height="100" rx="7"/>
-  <text class="label" x="199" y="241" text-anchor="middle">Modal Function</text>
-  <text class="label" x="199" y="262" text-anchor="middle">runner</text>
-  <text class="small" x="199" y="283" text-anchor="middle">same requested</text>
-  <text class="small" x="199" y="300" text-anchor="middle">Modal region</text>
+  <text class="row" x="25" y="200">OPTIMIZED</text>
+  <rect class="box" x="15" y="210" width="110" height="100" rx="7"/>
+  <text class="label" x="70" y="231" text-anchor="middle">Modal</text>
+  <text class="label" x="70" y="248" text-anchor="middle">Function</text>
+  <text class="label" x="70" y="265" text-anchor="middle">runner</text>
+  <text class="small" x="70" y="285" text-anchor="middle">Same requested</text>
+  <text class="small" x="70" y="303" text-anchor="middle">Modal region</text>
 
-  <rect class="box" x="328" y="217" width="158" height="80" rx="7"/>
-  <text class="label" x="407" y="262" text-anchor="middle">Connect</text>
+  <rect class="box" x="190" y="220" width="105" height="80" rx="7"/>
+  <text class="label" x="242.5" y="266" text-anchor="middle">Connect</text>
 
-  <rect class="box" x="536" y="217" width="142" height="80" rx="7"/>
-  <text class="label" x="607" y="262" text-anchor="middle">Warm daemon</text>
+  <rect class="box" x="365" y="220" width="95" height="80" rx="7"/>
+  <text class="label" x="412.5" y="256" text-anchor="middle">Warm</text>
+  <text class="label" x="412.5" y="277" text-anchor="middle">daemon</text>
 
-  <rect class="box" x="728" y="217" width="164" height="80" rx="7"/>
-  <text class="label" x="810" y="262" text-anchor="middle">Capture + encode</text>
+  <rect class="box" x="530" y="220" width="110" height="80" rx="7"/>
+  <text class="label" x="585" y="256" text-anchor="middle">Capture +</text>
+  <text class="label" x="585" y="277" text-anchor="middle">encode</text>
 
-  <rect class="result" x="942" y="207" width="158" height="100" rx="7"/>
-  <text class="label" x="1021" y="242" text-anchor="middle">1024x768 PNG</text>
-  <text class="small" x="1021" y="269" text-anchor="middle">32.42 ms p50</text>
-  <text class="small" x="1021" y="290" text-anchor="middle">n=30</text>
+  <rect class="result" x="710" y="210" width="130" height="100" rx="7"/>
+  <text class="label" x="775" y="244" text-anchor="middle">1024x768 PNG</text>
+  <text class="small" x="775" y="272" text-anchor="middle">32.42 ms p50</text>
+  <text class="small" x="775" y="295" text-anchor="middle">n=30</text>
 
-  <line class="path" x1="278" y1="257" x2="328" y2="257"/>
-  <path class="arrow" d="M 320 252 L 328 257 L 320 262 z"/>
-  <text class="arrow-label" x="303" y="244" text-anchor="middle">request</text>
+  <line class="path" x1="125" y1="260" x2="190" y2="260"/>
+  <path class="arrow" d="M 182 255 L 190 260 L 182 265 Z"/>
+  <text class="arrow-label" x="155" y="247" text-anchor="middle">Call</text>
 
-  <line class="path" x1="486" y1="257" x2="536" y2="257"/>
-  <path class="arrow" d="M 528 252 L 536 257 L 528 262 z"/>
-  <text class="arrow-label" x="511" y="244" text-anchor="middle">forward</text>
+  <line class="path" x1="295" y1="260" x2="365" y2="260"/>
+  <path class="arrow" d="M 357 255 L 365 260 L 357 265 Z"/>
+  <text class="arrow-label" x="330" y="247" text-anchor="middle">Route</text>
 
-  <line class="path" x1="678" y1="257" x2="728" y2="257"/>
-  <path class="arrow" d="M 720 252 L 728 257 L 720 262 z"/>
-  <text class="arrow-label" x="703" y="244" text-anchor="middle">capture</text>
+  <line class="path" x1="460" y1="260" x2="530" y2="260"/>
+  <path class="arrow" d="M 522 255 L 530 260 L 522 265 Z"/>
+  <text class="arrow-label" x="495" y="247" text-anchor="middle">Capture</text>
 
-  <line class="path" x1="892" y1="257" x2="942" y2="257"/>
-  <path class="arrow" d="M 934 252 L 942 257 L 934 262 z"/>
-  <text class="arrow-label" x="917" y="244" text-anchor="middle">return</text>
+  <line class="path" x1="640" y1="260" x2="710" y2="260"/>
+  <path class="arrow" d="M 702 255 L 710 260 L 702 265 Z"/>
+  <text class="arrow-label" x="675" y="247" text-anchor="middle">Return</text>
 </svg>

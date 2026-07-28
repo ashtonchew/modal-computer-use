@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="340" viewBox="0 0 1120 340" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="340" viewBox="0 0 860 340" role="img" aria-labelledby="title desc">
   <title id="title">Session setup feeds the repeated computer-use loop</title>
   <desc id="desc">Create and connect starts a loop from screenshot to model to UI actions to computer and back to an updated screenshot.</desc>
   <defs>
@@ -7,60 +7,58 @@
       .bg { fill: #FAF8F2; }
       .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.4; }
       .stage { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
-      .label {
-        fill: #292C2F;
-        font-family: Arial, sans-serif;
-        font-size: 16px;
-        font-weight: 600;
-      }
-      .small {
-        fill: #666B69;
-        font-family: Arial, sans-serif;
-        font-size: 13px;
-      }
+      .label,
+      .small,
       .arrow-label {
-        fill: #666B69;
-        font-family: Arial, sans-serif;
-        font-size: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
+      .label { fill: #292C2F; font-size: 17px; font-weight: 600; }
+      .small { fill: #666B69; font-size: 14px; }
+      .arrow-label { fill: #666B69; font-size: 14px; font-weight: 500; }
+      .path { stroke: #66856B; stroke-width: 1.8; }
+      .arrow { fill: #66856B; }
     </style>
   </defs>
-  <rect class="bg" width="1120" height="340"/>
 
-  <rect class="stage" x="63" y="28" width="214" height="72" rx="8" stroke="#66856B" stroke-width="1.4"/>
-  <text class="label" x="170" y="59" text-anchor="middle">Create and connect</text>
-  <text class="small" x="170" y="83" text-anchor="middle">Session setup</text>
-  <line x1="170" y1="100" x2="170" y2="167" stroke="#66856B" stroke-width="1.8"/>
-  <path d="M 165 167 L 170 175 L 175 167 Z" fill="#66856B"/>
-  <text class="arrow-label" x="182" y="139">Start session</text>
+  <rect class="bg" width="860" height="340"/>
 
-  <rect class="box" x="80" y="175" width="180" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
-  <text class="label" x="170" y="221" text-anchor="middle">Screenshot</text>
+  <rect class="stage" x="30" y="25" width="190" height="70" rx="8"/>
+  <text class="label" x="125" y="55" text-anchor="middle">Create + connect</text>
+  <text class="small" x="125" y="79" text-anchor="middle">Session setup</text>
+  <line class="path" x1="125" y1="95" x2="125" y2="156"/>
+  <path class="arrow" d="M 120 156 L 125 165 L 130 156 Z"/>
+  <text class="arrow-label" x="138" y="137">Start session</text>
 
-  <rect class="box" x="360" y="175" width="150" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
-  <text class="label" x="435" y="221" text-anchor="middle">Model</text>
+  <rect class="box" x="65" y="165" width="120" height="80" rx="8"/>
+  <text class="label" x="125" y="211" text-anchor="middle">Screenshot</text>
 
-  <rect class="box" x="610" y="175" width="190" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
-  <text class="label" x="705" y="221" text-anchor="middle">UI actions</text>
+  <rect class="box" x="285" y="165" width="100" height="80" rx="8"/>
+  <text class="label" x="335" y="211" text-anchor="middle">Model</text>
 
-  <rect class="box" x="900" y="175" width="160" height="80" rx="8" stroke="#A9AAA6" stroke-width="1.4"/>
-  <text class="label" x="980" y="221" text-anchor="middle">Computer</text>
+  <rect class="box" x="485" y="165" width="120" height="80" rx="8"/>
+  <text class="label" x="545" y="211" text-anchor="middle">UI actions</text>
 
-  <line x1="260" y1="215" x2="351" y2="215" stroke="#66856B" stroke-width="1.8"/>
-  <path d="M 351 210 L 360 215 L 351 220 Z" fill="#66856B"/>
-  <text class="arrow-label" x="310" y="199" text-anchor="middle">Send screenshot</text>
+  <rect class="box" x="705" y="165" width="120" height="80" rx="8"/>
+  <text class="label" x="765" y="211" text-anchor="middle">Computer</text>
 
-  <line x1="510" y1="215" x2="601" y2="215" stroke="#66856B" stroke-width="1.8"/>
-  <path d="M 601 210 L 610 215 L 601 220 Z" fill="#66856B"/>
-  <text class="arrow-label" x="560" y="199" text-anchor="middle">Return actions</text>
+  <line class="path" x1="185" y1="205" x2="276" y2="205"/>
+  <path class="arrow" d="M 276 200 L 285 205 L 276 210 Z"/>
+  <text class="arrow-label" x="235" y="179" text-anchor="middle">
+    <tspan x="235" dy="0">Send</tspan>
+    <tspan x="235" dy="15">screenshot</tspan>
+  </text>
 
-  <line x1="800" y1="215" x2="891" y2="215" stroke="#66856B" stroke-width="1.8"/>
-  <path d="M 891 210 L 900 215 L 891 220 Z" fill="#66856B"/>
-  <text class="arrow-label" x="850" y="199" text-anchor="middle">Execute actions</text>
+  <line class="path" x1="385" y1="205" x2="476" y2="205"/>
+  <path class="arrow" d="M 476 200 L 485 205 L 476 210 Z"/>
+  <text class="arrow-label" x="435" y="190" text-anchor="middle">Generate</text>
 
-  <line x1="980" y1="255" x2="980" y2="307" stroke="#66856B" stroke-width="1.8"/>
-  <line x1="980" y1="307" x2="170" y2="307" stroke="#66856B" stroke-width="1.8"/>
-  <line x1="170" y1="307" x2="170" y2="263" stroke="#66856B" stroke-width="1.8"/>
-  <path d="M 165 263 L 170 255 L 175 263 Z" fill="#66856B"/>
-  <text class="arrow-label" x="575" y="297" text-anchor="middle">Capture updated screen</text>
+  <line class="path" x1="605" y1="205" x2="696" y2="205"/>
+  <path class="arrow" d="M 696 200 L 705 205 L 696 210 Z"/>
+  <text class="arrow-label" x="655" y="190" text-anchor="middle">Execute</text>
+
+  <line class="path" x1="765" y1="245" x2="765" y2="305"/>
+  <line class="path" x1="765" y1="305" x2="125" y2="305"/>
+  <line class="path" x1="125" y1="305" x2="125" y2="254"/>
+  <path class="arrow" d="M 120 254 L 125 245 L 130 254 Z"/>
+  <text class="arrow-label" x="445" y="294" text-anchor="middle">Capture updated screen</text>
 </svg>
