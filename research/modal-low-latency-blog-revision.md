@@ -263,3 +263,119 @@ measured latency here, not a provider bill or model-token savings.”
    Function caller, Sandbox target, Image, region request, readiness, and authenticated daemon path.
 7. Then deliver the thesis and result, with “only Modal was tuned” close enough that readers cannot
    miss it.
+
+## Persistent connection and Modal cost follow-up, 2026-07-28
+
+### Answer
+
+Keeping one HTTP connection open does not, by itself, establish a higher Modal compute bill than
+the measured Modal default. The thing that consumes compute is the running Function or Sandbox
+container behind the connection. Modal says an active tunnel has no separate charge, while Sandbox
+CPU and memory are billed per second at the greater of requested and actual use
+([Tunnels](https://modal.com/docs/guide/tunnels#pricing),
+[Sandbox resources](https://modal.com/docs/guide/sandbox-resources#pay-for-what-you-use)). Modal's
+Connect documentation establishes authenticated HTTP and WebSocket access, but does not document a
+separate Connect-connection price
+([Sandbox networking](https://modal.com/docs/guide/sandbox-networking#connecting-to-sandboxes-with-http-and-websockets)).
+Do not broaden the tunnel statement into “all network transfer is free”: the cited pages do not make
+that claim.
+
+Keeping the *Sandbox target* running longer can increase billed resource-seconds. A persistent
+daemon is simply a process inside that running Sandbox, not a separately metered product in the
+evidence. Modal documents a five-minute default Sandbox maximum lifetime, configurable up to 24
+hours, and an optional `idle_timeout`. The Sandbox is considered active while an exec command runs,
+stdin is being written, or a TCP connection over one of its Tunnels is open
+([Sandbox lifecycle and timeouts](https://modal.com/docs/guide/sandboxes#lifecycle)). That last rule
+can make a tunnel connection indirectly affect lifetime when `idle_timeout` is configured. The docs
+do not say the same thing specifically about a Connect-token HTTP keep-alive, so the article should
+not claim that a Connect connection defeats `idle_timeout`.
+
+The *Modal Function runner* is another container and another resource-time term. Functions scale to
+zero by default when they have no inputs. Their containers normally remain idle for at most 60
+seconds, although the autoscaler may remove them sooner; increasing the window or maintaining warm
+containers can increase cost
+([Scaling out](https://modal.com/docs/guide/scale),
+[Cold-start performance](https://modal.com/docs/guide/cold-start#keep-containers-warm-for-longer-with-scaledown_window)).
+The optimized benchmark ran one Function invocation that owned the benchmark workflow. A reused
+HTTP session inside that active invocation should not be described as a second persistent service.
+Function execution has its own timeout, separate from post-input container idleness
+([Function timeouts](https://modal.com/docs/guide/timeouts)).
+
+### What the tracked evidence actually fixes
+
+The accepted default and optimized arms are not a controlled cost comparison:
+
+- **Modal default target.** The provider-default artifact says it used unmodified
+  `ComputerConfig` defaults. Tracked configuration sets the maximum Sandbox lifetime to 3,600
+  seconds, leaves `idle_timeout` unset, and passes `cpu=None`, `memory=None`, and `gpu=None` so Modal
+  chooses its provider defaults. The sanitized run explicitly records the resolved allocation as
+  unavailable. It does record 103.865268499 seconds of measured resource lifetime including cleanup
+  ([default artifact](../benchmark-data/provider-compare-coordinate-command-2026-07-26.json),
+  [`ComputerConfig` defaults](../src/modal_computer_use/config.py),
+  [configuration reference](../docs/configuration.md)). Current Modal documentation describes a
+  general default request of 0.125 physical CPU cores and 128 MiB, but those current docs must not be
+  retrofitted as a resolved allocation for this historical run
+  ([Modal resources](https://modal.com/docs/guide/resources)).
+- **Modal optimized target.** The accepted artifact records an explicit request of 4 physical CPU
+  cores and 8,192 MiB, Connect ingress, and requested `us-west-2`. The tracked harness configured a
+  900-second maximum Sandbox lifetime and no `idle_timeout`. It created 31 fresh targets for the
+  product-create samples, terminating each after its first validated screenshot, then created one
+  separate warm target, reused it for all warm operation samples, and terminated it after the suite
+  ([optimized artifact](../benchmark-data/modal-optimized-provider-2026-07-26.json),
+  [optimized harness](../src/modal_computer_use/benchmarks/modal_optimized_provider.py),
+  [benchmark procedure](../docs/benchmarking.md)). “Persistent” therefore means reuse within a
+  bounded benchmark phase, not a target left running indefinitely.
+- **Modal optimized runner.** The accepted artifact records a separate Function runner requesting 4
+  physical CPU cores and 8,192 MiB in the same requested region. For the accepted 30+1 schedule,
+  the harness gave that Function invocation a 4,650-second execution ceiling. A ceiling is not
+  actual runtime: the invocation returned when the benchmark and target cleanup finished. Function
+  startup was excluded from the optimized product-create timing
+  ([optimized artifact](../benchmark-data/modal-optimized-provider-2026-07-26.json),
+  [provider report](../docs/benchmark-results-2026-07-26-provider-results.md)).
+- **Missing optimized duration evidence.** The sanitized optimized artifact verifies target cleanup
+  and a final sweep with zero remaining Sandboxes, but it does not publish the target and runner
+  durations needed to total billed resource-seconds. The comparison therefore cannot say whether
+  persistent reuse cost more or less than the 103.865-second Modal-default run, and it cannot derive
+  dollar savings.
+
+### Billing variables that must remain separate
+
+Modal bills Sandbox CPU and memory each second using `max(request, actual)`. An idle process is not
+automatically free: its request and residual actual use still matter. The same resource guide
+applies the request-versus-actual rule to Function and Sandbox containers; GPU reservations have
+their own per-second rates on the live pricing page
+([CPU, memory, and disk](https://modal.com/docs/guide/resources#billing),
+[Modal pricing](https://modal.com/pricing)). Thus the relevant quantities are at least:
+
+1. target Sandbox billed CPU-, memory-, and any GPU-seconds;
+2. runner Function billed CPU-, memory-, and any GPU-seconds;
+3. each container's actual lifetime, including any billed idle tail;
+4. the applicable region multiplier; and
+5. any separately documented data-transfer charge, if a transfer path has one.
+
+An explicitly selected broad region currently multiplies base Function or Sandbox usage by 1.5,
+and a narrow region by 1.75. The optimized artifact requested a specific region for both runner and
+target, while the Modal-default artifact used provider-default placement. Apply a multiplier only
+through Modal's current documented classification and pricing, not by guessing from proximity
+([Region pricing](https://modal.com/docs/guide/region-selection#pricing)).
+
+Faster completion can lower resource-seconds at a fixed resource profile because Modal bills by the
+second with no minimum usage-time increment
+([Billing](https://modal.com/docs/guide/billing)). More requested resources can still cost more if
+their higher per-second rate outweighs the duration reduction. Conversely, keeping a target warm
+between closely spaced actions may avoid startup work and allow the overall job to finish sooner.
+Both are mechanisms, not results of this benchmark. The accepted evidence measures latency, not
+actual Modal usage records or an invoice.
+
+### Safe article wording
+
+> I kept one Sandbox daemon and its authenticated HTTP session warm across the repeated operation
+> samples. The connection itself is not the cost claim: Modal meters the Function runner and
+> Sandbox resources behind it by time and usage. Reuse can avoid repeated startup work, while a
+> longer-lived target can add idle resource-seconds. My optimized run also requested larger
+> resources, an explicit region, and a separate Function runner, so these latency measurements do
+> not show dollar savings versus Modal's measured default.
+
+Also safe, when a shorter version is needed: “A persistent connection is not a separate compute
+resource, but the containers it keeps useful may remain billable. Faster completion can reduce
+resource-seconds at a fixed configuration; this benchmark did not measure a bill.”
