@@ -20,25 +20,31 @@ For the benchmark client, I used a Modal Function, Python code running in an aut
 
 Creation happens once. I create the Sandbox, start the desktop, and validate its first frame. The agent then repeats screenshots, clicks, typing, and commands. Those warm operations determine how responsive a running agent feels.
 
-## A 29 ms screenshot starts with a shorter route
+## Move the caller before choosing the ingress
 
-The default Modal setup ran the benchmark client outside Modal and reached the warm daemon through an attested HTTP tunnel. Returning a full 1024x768 PNG took 230 ms p50.
+The default Modal setup ran the benchmark client outside Modal and reached the warm daemon through an attested HTTP tunnel. A full 1024x768 PNG took 230 ms p50. I moved the client into a Modal Function, requested `us-west-2` for the Function and target Sandbox, and used Connect for repeated requests. That configuration returned the PNG in 29 ms p50.
 
-An earlier three-sample diagnostic put median daemon capture and PNG encoding at about 23 ms, median end-to-end time at 127 ms, and the separately summarized remainder at 104 ms. Because those summaries came from separate samples, their medians cannot be added or used to isolate network time. Capture still accounted for only part of the delay.
+An earlier diagnostic reported about 23 ms for capture and PNG encoding. Separate summaries put the full request at 127 ms and the remainder at 104 ms. Their medians came from different samples, so they only show that capture was part of the delay.
 
-I moved the benchmark client into a Modal Function and requested `us-west-2` for both the Function and target Sandbox. Connect still carried the request between them.
+Those runs changed caller placement and ingress together. A separate Connect-only test held ingress fixed: one move-and-click fell from 32.4 ms with the external caller to 4.6 ms from a Function requesting the target's region. I then held that Function caller fixed and tested ingress.
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)
 
-I had already removed target-side setup inside the daemon. The compatibility path launches `scrot` or `maim`, moves the screenshot through a temporary file, and then reads it back. The optimized hot path keeps an MSS capture session open, reads the frame through shared memory when available, and encodes it in RAM.
+I ran both ingress paths from one Function to one warm target. They used the same image, resources, daemon, payloads, and persistent HTTP/1.1 clients. Both requested `us-west-2` and reported the same cloud and region. I alternated their order across 30 samples per arm. Connect authorization finished before tunnel warmup and took 237 ms, then 228 ms on confirmation, outside the recurring samples.
 
-X11 is the Linux display server that owns the desktop's pixels and input state. MSS is the screenshot library that reads those pixels. Its persistent session prefers XShm, an X11 extension that gives a local client shared-memory access to the frame. If MSS cannot capture after a reset and retry, the daemon falls back to the compatibility path.
+The first run favored the tunnel by 1.24% across the recurring p50s. Confirmation favored Connect by 0.02%. Screenshots and actions differed by less than 1 ms p50 in both runs, and every request succeeded. Neither run cleared the 10% selection threshold, so I kept Connect.
 
-Both final Modal paths were configured for MSS-first capture, so the 230 ms to 29 ms result does not isolate those earlier target-side gains. It measures the complete Function-runner path with the optimized daemon configuration against the default Modal setup.
+The tunnel led the zero-byte floor by 0.9 ms, then 0.3 ms. That probe did not select the winner. The screenshot A/B continued through in-memory frame validation, so its 84 to 87 ms results have a different boundary from the 29 ms provider row.
 
-The benchmark kept one Function invocation active while it ran the suite and reused one warm target Sandbox for the repeated operations. It did not maintain a warm Function pool. As a continuously allocated hypothetical, the requested 4 physical CPU cores and 8 GiB would cost about $32 for the Sandbox and $11 for a same-sized Function over 24 hours in `us-west-2` at current list rates. Actual CPU or memory usage above either request can raise the total. This estimate applies Modal's documented 1.75x regional multiplier and excludes GPU, image builds, storage, data transfer, plan fees, and credits.
+This separates caller placement from ingress selection. Moving the caller shortened the repeated route. Once placed there, Connect and the attested tunnel performed alike. Modal reported the requested cloud and region for both containers. I did not test their availability zone, host, or network class.
 
-Functions scale to zero when they have no inputs, and one concurrent I/O-bound runner could broker requests for several target Sandboxes. I have not built that shared runner. Each desktop would still be its own isolated, billable Sandbox, so long idle lifetimes would continue to cost money.
+I had also removed target-side setup. The compatibility path launches `scrot` or `maim`, writes a temporary file, and reads it back. The optimized path keeps an MSS capture session open, reads through shared memory when available, and encodes in RAM.
+
+X11 is the Linux display server that owns the desktop's pixels and input state. MSS is the screenshot library that reads them. Its session prefers XShm, which gives a local X11 client shared-memory access to the frame. After a failed reset and retry, the daemon falls back to the compatibility path.
+
+Both Modal paths used MSS-first capture. The 230 ms to 29 ms result therefore covers the Function-runner configuration against the default Modal setup.
+
+The A/B requested 4 CPU cores and 8 GiB to control resources. The Function bills only while active. A smaller I/O-bound runner could broker targets. I have not built it. Each desktop remains a billable Sandbox, so idle sessions cost money.
 
 ## Keep one X11 input session open
 
@@ -93,7 +99,7 @@ The generic subprocess helper gave `xclip` captured stdout and stderr pipes. Its
 
 ## Modal optimized was up to 650x faster than provider defaults
 
-I ran each warm operation 30 times. Only the Modal optimized path was tuned. The remaining columns show the provider defaults exercised by the harness. Each ratio divides the provider p50 by the Modal optimized p50.
+The July 28 Connect-backed optimized run measured each warm operation 30 times. Only that path was tuned. The remaining columns show the provider defaults exercised by the harness. Each ratio divides the provider p50 by the Modal optimized p50.
 
 The screenshot calls kept each provider's native format: Tzafon returned 1280x720 JPEG; Modal, Daytona, and E2B returned 1024x768 PNG. Modal optimized used direct XTest keystrokes with zero delay. Modal default's public `auto` mode selected clipboard for both strings; the harness could not observe the internal typing method or pacing behind the other provider SDKs.
 
@@ -124,9 +130,9 @@ After chasing these numbers, I now treat repeated setup inside an agent turn as 
 
 ## Source notes
 
-- Current warm measurements: [Modal optimized samples, 2026-07-28](../../benchmark-data/modal-optimized-provider-2026-07-28.json), [provider-default samples, 2026-07-28](../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json), [changed-frame samples, 2026-07-28](../../benchmark-data/modal-observation-2026-07-28.json), and [four-click batching A/B, 2026-07-29](../../benchmark-data/modal-action-batching-ab-2026-07-29.json). The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.
-- Historical diagnostics: [provider benchmark results, 2026-07-26](../benchmark-results-2026-07-26-provider-results.md), [combined sanitized result](../../benchmark-data/provider-results-2026-07-26.json), [native X11 input benchmark](../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md), and [command runner A/B context](../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json).
+- Current warm measurements: [Modal optimized samples, 2026-07-28](../../benchmark-data/modal-optimized-provider-2026-07-28.json), [provider-default samples, 2026-07-28](../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json), [changed-frame samples, 2026-07-28](../../benchmark-data/modal-observation-2026-07-28.json), [four-click batching A/B, 2026-07-29](../../benchmark-data/modal-action-batching-ab-2026-07-29.json), and [Connect versus attested-tunnel A/B, 2026-07-29](../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json). The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.
+- Historical diagnostics: [provider benchmark results, 2026-07-26](../benchmark-results-2026-07-26-provider-results.md), [combined sanitized result](../../benchmark-data/provider-results-2026-07-26.json), [Connect caller-placement evidence](../../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json), [native X11 input benchmark](../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md), and [command runner A/B context](../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json).
 - Implementation and contracts: [performance documentation](../performance.md), [benchmarking methodology](../benchmarking.md), [visual-change observation contract](../experimental-visual-change-observation.md), and [create-to-validated-screenshot method](../../research/modal-optimized-create-benchmark-method.md).
 - Product surfaces: [E2B Computer use](https://e2b.dev/docs/use-cases/computer-use), [E2B templates](https://e2b.dev/docs/template/quickstart), [Daytona Computer Use](https://www.daytona.io/docs/en/computer-use/), and [Daytona snapshots](https://www.daytona.io/docs/snapshots/).
-- Modal mechanics and cost: [Functions and Apps](https://modal.com/docs/guide/apps), [region selection](https://modal.com/docs/guide/region-selection), [Sandbox Connect](https://modal.com/docs/guide/sandbox-networking#connecting-to-sandboxes-with-http-and-websockets), [input concurrency](https://modal.com/docs/guide/concurrent-inputs), [Function scaling](https://modal.com/docs/guide/scale), [Sandbox resources](https://modal.com/docs/guide/sandbox-resources), [current list pricing](https://modal.com/pricing), and the tracked [provider and cost research memo](../../research/modal-computer-use-provider-cost-comparison-2026-07-29.md).
+- Modal mechanics and cost: [Functions and Apps](https://modal.com/docs/guide/apps), [region selection](https://modal.com/docs/guide/region-selection), [Sandbox Connect](https://modal.com/docs/guide/sandbox-networking#connecting-to-sandboxes-with-http-and-websockets), [encrypted tunnels](https://modal.com/docs/guide/tunnels), [input concurrency](https://modal.com/docs/guide/concurrent-inputs), [Function scaling](https://modal.com/docs/guide/scale), [Sandbox resources](https://modal.com/docs/guide/sandbox-resources), [current list pricing](https://modal.com/pricing), and the tracked [provider and cost research memo](../../research/modal-computer-use-provider-cost-comparison-2026-07-29.md).
 - External mechanisms: [OpenAI's GPT-5.6 Sol preview](https://openai.com/index/previewing-gpt-5-6-sol/), [OpenAI Computer use](https://developers.openai.com/api/docs/guides/tools-computer-use), [RustDesk self-hosting](https://rustdesk.com/docs/en/self-host/), and Modal's [sandbox architecture account](https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds).

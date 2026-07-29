@@ -133,6 +133,34 @@ uv run computer-use benchmark modal-action-batching-ab \
   --output benchmark-results/action-batching-ab/final.json
 ```
 
+Use `modal-optimized-ingress-ab` to compare Connect with the repository's attested-tunnel path from
+one Function to one warm target. The harness requests the same explicit region, image, and resources
+for the Function and target, verifies observed cloud and region placement, completes Connect
+authorization before tunnel warmup, and reuses one HTTP/1.1 client per arm. It alternates arm order
+for the zero-byte floor, full 1024x768 PNG, one move-and-click, and one ordered four-click batch.
+Counts other than two warmups and 30 measured samples per arm require `--pilot`.
+
+```bash
+evidence_harness_sha="$(git rev-parse HEAD)"
+test -z "$(git status --porcelain)"
+
+uv run python scripts/publish_modal_images.py --revision "$evidence_harness_sha"
+
+uv run computer-use benchmark modal-optimized-ingress-ab \
+  --modal-region us-west-2 \
+  --image-revision "$evidence_harness_sha" \
+  --modal-cpu 4 \
+  --modal-memory-mib 8192 \
+  --warmup-iterations 2 \
+  --iterations 30 \
+  --output benchmark-results/modal-optimized-ingress-ab/final.json
+```
+
+The selection gate uses the geometric p50 score across the screenshot and two action cases. A winner
+must improve that score by at least 10%, win at least two cases, and stay within 5% on any losing
+case. The zero-byte floor does not select ingress. Keep authorization latency separate from recurring
+samples, and run one bounded confirmation if the first result does not identify a winner.
+
 The combined provider report uses `modal-optimized-provider` for the optimized lifecycle and warm
 operation rows. From the clean evidence-harness commit, publish its revision-addressed Images into
 the active Modal environment used by the run, as described in
