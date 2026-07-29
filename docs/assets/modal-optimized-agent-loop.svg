@@ -7,10 +7,9 @@
       .bg { fill: #101411; }
       .box { fill: #1C231D; stroke: #657066; stroke-width: 1.4; }
       .setup { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
-      .label, .small, .group, .arrow-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .label, .small, .arrow-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
       .label { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
       .small { fill: #B9C2B8; font-size: 12px; }
-      .group { fill: #AACCB0; font-size: 14px; font-weight: 600; }
       .arrow-label { fill: #B9C2B8; font-size: 12px; font-weight: 500; }
       .path { fill: none; stroke: #91B89A; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     </style>
@@ -25,7 +24,6 @@
   <path class="path" d="M120 112 V176" marker-end="url(#arrow)"/>
   <text class="arrow-label" x="140" y="144">Start session</text>
 
-  <text class="group" x="336" y="148">Repeat each turn</text>
   <rect class="box" x="32" y="176" width="176" height="96" rx="8"/>
   <text class="label" x="120" y="229" text-anchor="middle">Current screen</text>
   <rect class="box" x="336" y="176" width="176" height="96" rx="8"/>
