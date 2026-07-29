@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">Changed pixels wake the loop before the application is ready</title>
+  <desc id="desc">Before one action, the detector records baseline pixel hash A and arms its watcher. An XDamage hint or poll timer triggers a source-resolution capture and comparison with hash A. An unchanged capture loops back until the deadline. A changed capture returns that same verified first changed frame. The end-to-end result measured 65 milliseconds p50 and 76 milliseconds p95, without retaining which trigger produced the check. Incidental or intermediate paints can stop detection, so the caller still checks a workload predicate for next-step readiness.</desc>
+  <defs>
+    <style>
+      .bg { fill: #FAF8F2; }
+      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.4; }
+      .result { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.6; }
+      .decision { fill: #F0EEE8; stroke: #66856B; stroke-width: 1.6; }
+      .label,
+      .small,
+      .metric,
+      .annotation-label,
+      .arrow-label {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      }
+      .label { fill: #292C2F; font-size: 16px; font-weight: 600; }
+      .small { fill: #626865; font-size: 13px; }
+      .metric { fill: #292C2F; font-size: 18px; font-weight: 700; }
+      .annotation-label { fill: #292C2F; font-size: 15px; font-weight: 600; }
+      .arrow-label { fill: #626865; font-size: 13px; font-weight: 500; }
+      .path { fill: none; stroke: #66856B; stroke-width: 2; stroke-linejoin: round; }
+      .path-neutral { fill: none; stroke: #7F8581; stroke-width: 1.8; stroke-linejoin: round; }
+      .path-dashed { fill: none; stroke: #7F8581; stroke-width: 1.8; stroke-dasharray: 6 6; }
+      .arrow { fill: #66856B; }
+      .arrow-neutral { fill: #7F8581; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="960" height="480"/>
+
+  <rect class="box" x="24" y="56" width="136" height="112" rx="8"/>
+  <text class="label" x="92" y="90" text-anchor="middle">Before action</text>
+  <text class="small" x="92" y="120" text-anchor="middle">Baseline hash A</text>
+  <text class="small" x="92" y="141" text-anchor="middle">Detector armed</text>
+
+  <rect class="box" x="192" y="56" width="112" height="112" rx="8"/>
+  <text class="label" x="248" y="105" text-anchor="middle">Run action</text>
+  <text class="small" x="248" y="134" text-anchor="middle">once</text>
+
+  <rect class="box" x="336" y="56" width="144" height="112" rx="8"/>
+  <text class="label" x="408" y="90" text-anchor="middle">Check trigger</text>
+  <text class="small" x="408" y="120" text-anchor="middle">XDamage hint</text>
+  <text class="small" x="408" y="141" text-anchor="middle">or poll timer</text>
+
+  <rect class="box" x="512" y="56" width="144" height="112" rx="8"/>
+  <text class="label" x="584" y="90" text-anchor="middle">Capture pixels</text>
+  <text class="small" x="584" y="120" text-anchor="middle">Source-resolution</text>
+  <text class="small" x="584" y="141" text-anchor="middle">hash B</text>
+
+  <path class="decision" d="M 732 60 L 776 112 L 732 164 L 688 112 Z"/>
+  <text class="label" x="732" y="118" text-anchor="middle">B ≠ A?</text>
+
+  <rect class="result" x="808" y="48" width="128" height="128" rx="8"/>
+  <text class="label" x="872" y="78" text-anchor="middle">First changed</text>
+  <text class="label" x="872" y="99" text-anchor="middle">frame</text>
+  <text class="metric" x="872" y="128" text-anchor="middle">65 / 76 ms</text>
+  <text class="small" x="872" y="150" text-anchor="middle">p50 / p95</text>
+  <text class="small" x="872" y="168" text-anchor="middle">end to end</text>
+
+  <line class="path" x1="160" y1="112" x2="192" y2="112"/>
+  <path class="arrow" d="M 184 107 L 192 112 L 184 117 Z"/>
+
+  <line class="path" x1="304" y1="112" x2="336" y2="112"/>
+  <path class="arrow" d="M 328 107 L 336 112 L 328 117 Z"/>
+
+  <line class="path" x1="480" y1="112" x2="512" y2="112"/>
+  <path class="arrow" d="M 504 107 L 512 112 L 504 117 Z"/>
+
+  <line class="path" x1="656" y1="112" x2="688" y2="112"/>
+  <path class="arrow" d="M 680 107 L 688 112 L 680 117 Z"/>
+
+  <line class="path" x1="776" y1="112" x2="808" y2="112"/>
+  <path class="arrow" d="M 800 107 L 808 112 L 800 117 Z"/>
+  <text class="arrow-label" x="792" y="94" text-anchor="middle">Yes</text>
+
+  <path class="path-neutral" d="M 732 164 V 240 H 408 V 168"/>
+  <path class="arrow-neutral" d="M 403 176 L 408 168 L 413 176 Z"/>
+  <text class="arrow-label" x="752" y="196">No</text>
+  <text class="arrow-label" x="570" y="226" text-anchor="middle">Wait again until deadline</text>
+
+  <path class="path-neutral" d="M 832 176 V 288 H 620 V 304"/>
+  <text class="annotation-label" x="376" y="316">Can stop on</text>
+  <text class="small" x="376" y="346">blink · cursor · animation · repaint</text>
+  <text class="small" x="376" y="369">or an intermediate paint</text>
+
+  <path class="path-dashed" d="M 872 176 V 344"/>
+  <path class="arrow-neutral" d="M 867 336 L 872 344 L 877 336 Z"/>
+  <text class="arrow-label" x="812" y="264" text-anchor="end">Caller still checks</text>
+
+  <rect class="box" x="720" y="344" width="216" height="96" rx="8"/>
+  <text class="label" x="828" y="378" text-anchor="middle">Workload predicate</text>
+  <text class="label" x="828" y="399" text-anchor="middle">passes</text>
+  <text class="small" x="828" y="424" text-anchor="middle">Next-step readiness</text>
+</svg>

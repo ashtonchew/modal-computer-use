@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="440" viewBox="0 0 960 440" role="img" aria-labelledby="title desc">
+  <title id="title">Subprocess I/O ownership before and after isolation</title>
+  <desc id="desc">Before isolation, the Uvicorn request event loop owns the subprocess transport, pipe reads, wait, and cleanup. After isolation, Uvicorn performs bounded admission and exchanges work and results across a thread-safe bridge with a persistent SelectorEventLoop on a private daemon thread, which owns that lifecycle. In both designs, the child remains a separate operating system process outside either event loop and thread.</desc>
+  <defs>
+    <style>
+      .bg { fill: #FAF8F2; }
+      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.25; }
+      .owned { fill: #FAF8F2; stroke: #A9AAA6; stroke-width: 1.15; }
+      .isolated { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
+      .isolated-inner { fill: #FAF8F2; stroke: #66856B; stroke-width: 1.15; }
+      .row,
+      .row-after,
+      .row-note,
+      .boundary-label,
+      .loop-label,
+      .label,
+      .small,
+      .arrow-label,
+      .arrow-label-after {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      }
+      .row { fill: #292C2F; font-size: 17px; font-weight: 700; }
+      .row-after { fill: #52705A; font-size: 17px; font-weight: 700; }
+      .row-note { fill: #626865; font-size: 14px; font-weight: 500; }
+      .boundary-label { fill: #292C2F; font-size: 14px; font-weight: 600; }
+      .loop-label { fill: #292C2F; font-size: 14px; font-weight: 600; }
+      .label { fill: #292C2F; font-size: 15px; font-weight: 600; }
+      .small { fill: #626865; font-size: 13px; }
+      .arrow-label { fill: #626865; font-size: 13px; font-weight: 500; }
+      .arrow-label-after { fill: #52705A; font-size: 13px; font-weight: 500; }
+      .path { stroke: #9A9D99; stroke-width: 1.5; }
+      .path-after { stroke: #66856B; stroke-width: 1.8; }
+      .arrow { fill: #9A9D99; }
+      .arrow-after { fill: #66856B; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="960" height="440"/>
+
+  <text class="row" x="32" y="30">Shared request loop</text>
+  <text class="row-note" x="204" y="30">(before)</text>
+
+  <rect class="box" x="32" y="76" width="128" height="80" rx="8"/>
+  <text class="label" x="96" y="111" text-anchor="middle">Command</text>
+  <text class="label" x="96" y="132" text-anchor="middle">request</text>
+
+  <rect class="box" x="208" y="52" width="512" height="128" rx="8"/>
+  <text class="boundary-label" x="228" y="76">Uvicorn request event loop</text>
+  <rect class="owned" x="228" y="92" width="472" height="64" rx="8"/>
+  <text class="label" x="464" y="119" text-anchor="middle">Subprocess lifecycle</text>
+  <text class="small" x="464" y="141" text-anchor="middle">transport · pipe reads · wait · cleanup</text>
+
+  <rect class="box" x="816" y="76" width="112" height="80" rx="8"/>
+  <text class="label" x="872" y="111" text-anchor="middle">Child</text>
+  <text class="label" x="872" y="132" text-anchor="middle">process</text>
+
+  <line class="path" x1="160" y1="116" x2="208" y2="116"/>
+  <path class="arrow" d="M 200 111 L 208 116 L 200 121 Z"/>
+  <text class="arrow-label" x="184" y="101" text-anchor="middle">Run</text>
+
+  <line class="path" x1="720" y1="102" x2="816" y2="102"/>
+  <path class="arrow" d="M 808 97 L 816 102 L 808 107 Z"/>
+  <text class="arrow-label" x="768" y="89" text-anchor="middle">Spawn</text>
+
+  <line class="path" x1="816" y1="140" x2="720" y2="140"/>
+  <path class="arrow" d="M 728 135 L 720 140 L 728 145 Z"/>
+  <text class="arrow-label" x="768" y="158" text-anchor="middle">Output + exit</text>
+
+  <text class="row-after" x="32" y="236">Isolated subprocess loop</text>
+  <text class="row-note" x="242" y="236">(after)</text>
+
+  <rect class="box" x="32" y="284" width="128" height="80" rx="8"/>
+  <text class="label" x="96" y="319" text-anchor="middle">Command</text>
+  <text class="label" x="96" y="340" text-anchor="middle">request</text>
+
+  <rect class="box" x="208" y="260" width="224" height="128" rx="8"/>
+  <text class="boundary-label" x="228" y="284">Uvicorn request event loop</text>
+  <rect class="owned" x="228" y="300" width="184" height="68" rx="8"/>
+  <text class="label" x="320" y="327" text-anchor="middle">Bounded admission</text>
+  <text class="small" x="320" y="350" text-anchor="middle">schedule · await result</text>
+
+  <text class="arrow-label" x="478" y="275" text-anchor="middle">Thread bridge</text>
+  <line class="path-after" x1="432" y1="310" x2="524" y2="310"/>
+  <path class="arrow-after" d="M 516 305 L 524 310 L 516 315 Z"/>
+  <text class="arrow-label-after" x="478" y="298" text-anchor="middle">Schedule</text>
+
+  <line class="path-after" x1="524" y1="354" x2="432" y2="354"/>
+  <path class="arrow-after" d="M 440 349 L 432 354 L 440 359 Z"/>
+  <text class="arrow-label-after" x="478" y="342" text-anchor="middle">Return result</text>
+
+  <rect class="isolated" x="524" y="248" width="196" height="140" rx="8"/>
+  <text class="boundary-label" x="544" y="273">Private daemon thread</text>
+  <rect class="isolated-inner" x="544" y="292" width="156" height="76" rx="8"/>
+  <text class="loop-label" x="622" y="316" text-anchor="middle">SelectorEventLoop</text>
+  <text class="small" x="622" y="340" text-anchor="middle">transport · pipe reads</text>
+  <text class="small" x="622" y="358" text-anchor="middle">wait · cleanup</text>
+
+  <rect class="box" x="816" y="284" width="112" height="80" rx="8"/>
+  <text class="label" x="872" y="319" text-anchor="middle">Child</text>
+  <text class="label" x="872" y="340" text-anchor="middle">process</text>
+
+  <line class="path-after" x1="160" y1="324" x2="208" y2="324"/>
+  <path class="arrow-after" d="M 200 319 L 208 324 L 200 329 Z"/>
+  <text class="arrow-label-after" x="184" y="309" text-anchor="middle">Run</text>
+
+  <line class="path-after" x1="720" y1="310" x2="816" y2="310"/>
+  <path class="arrow-after" d="M 808 305 L 816 310 L 808 315 Z"/>
+  <text class="arrow-label-after" x="768" y="297" text-anchor="middle">Spawn</text>
+
+  <line class="path-after" x1="816" y1="354" x2="720" y2="354"/>
+  <path class="arrow-after" d="M 728 349 L 720 354 L 728 359 Z"/>
+  <text class="arrow-label-after" x="768" y="376" text-anchor="middle">Output + exit</text>
+</svg>

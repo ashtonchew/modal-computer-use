@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="472" viewBox="0 0 960 472" role="img" aria-labelledby="title desc">
+  <title id="title">One action request serializes four ordered clicks</title>
+  <desc id="desc">The daemon admits one request containing four ordered clicks, preflight-validates all four actions before input, and acquires the shared input lock once, waiting only if another input request holds it. The clicks execute in list order inside that lock and release it afterward. A runtime failure may still occur after preflight validation; by default execution stops before the next action, without rolling back clicks already completed. The caller observed 13.64 milliseconds p50 for four clicks in one request. No optimized four-separate-request counterfactual was measured.</desc>
+  <defs>
+    <style>
+      .bg { fill: #FAF8F2; }
+      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.3; }
+      .stage { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
+      .enclosure { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.5; }
+      .label,
+      .small,
+      .section,
+      .metric,
+      .arrow-label {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      }
+      .label { fill: #292C2F; font-size: 16px; font-weight: 600; }
+      .small { fill: #626865; font-size: 14px; }
+      .section { fill: #292C2F; font-size: 18px; font-weight: 700; }
+      .metric { fill: #292C2F; font-size: 21px; font-weight: 700; }
+      .arrow-label { fill: #626865; font-size: 14px; font-weight: 500; }
+      .path { fill: none; stroke: #66856B; stroke-width: 1.8; stroke-linejoin: round; }
+      .arrow { fill: #66856B; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="960" height="472"/>
+
+  <rect class="box" x="24" y="24" width="168" height="72" rx="8"/>
+  <text class="label" x="108" y="53" text-anchor="middle">One action request</text>
+  <text class="small" x="108" y="76" text-anchor="middle">4 ordered clicks</text>
+
+  <line class="path" x1="108" y1="96" x2="108" y2="120"/>
+  <path class="arrow" d="M 103 112 L 108 120 L 113 112 Z"/>
+
+  <rect class="box" x="24" y="120" width="168" height="56" rx="8"/>
+  <text class="label" x="108" y="153" text-anchor="middle">Admit once</text>
+
+  <line class="path" x1="108" y1="176" x2="108" y2="200"/>
+  <path class="arrow" d="M 103 192 L 108 200 L 113 192 Z"/>
+
+  <rect class="box" x="24" y="200" width="168" height="72" rx="8"/>
+  <text class="label" x="108" y="229" text-anchor="middle">Preflight batch</text>
+  <text class="small" x="108" y="252" text-anchor="middle">All actions before input</text>
+
+  <line class="path" x1="108" y1="272" x2="108" y2="296"/>
+  <path class="arrow" d="M 103 288 L 108 296 L 113 288 Z"/>
+
+  <rect class="stage" x="24" y="296" width="168" height="56" rx="8"/>
+  <text class="label" x="108" y="329" text-anchor="middle">Acquire once</text>
+
+  <rect class="enclosure" x="224" y="24" width="712" height="344" rx="8"/>
+  <text class="section" x="256" y="60">One input lock across the batch</text>
+  <text class="small" x="904" y="60" text-anchor="end">Other input waits for this lock</text>
+  <text class="arrow-label" x="580" y="116" text-anchor="middle">Execute in list order</text>
+
+  <path class="path" d="M 192 324 H 208 V 180 H 256"/>
+  <path class="arrow" d="M 248 175 L 256 180 L 248 185 Z"/>
+
+  <rect class="box" x="256" y="152" width="96" height="56" rx="8"/>
+  <text class="label" x="304" y="185" text-anchor="middle">Click 1</text>
+
+  <line class="path" x1="352" y1="180" x2="384" y2="180"/>
+  <path class="arrow" d="M 376 175 L 384 180 L 376 185 Z"/>
+
+  <rect class="box" x="384" y="152" width="96" height="56" rx="8"/>
+  <text class="label" x="432" y="185" text-anchor="middle">Click 2</text>
+
+  <line class="path" x1="480" y1="180" x2="512" y2="180"/>
+  <path class="arrow" d="M 504 175 L 512 180 L 504 185 Z"/>
+
+  <rect class="box" x="512" y="152" width="96" height="56" rx="8"/>
+  <text class="label" x="560" y="185" text-anchor="middle">Click 3</text>
+
+  <line class="path" x1="608" y1="180" x2="640" y2="180"/>
+  <path class="arrow" d="M 632 175 L 640 180 L 632 185 Z"/>
+
+  <rect class="box" x="640" y="152" width="96" height="56" rx="8"/>
+  <text class="label" x="688" y="185" text-anchor="middle">Click 4</text>
+
+  <line class="path" x1="736" y1="180" x2="808" y2="180"/>
+  <path class="arrow" d="M 800 175 L 808 180 L 800 185 Z"/>
+
+  <rect class="stage" x="808" y="152" width="96" height="56" rx="8"/>
+  <text class="label" x="856" y="185" text-anchor="middle">Release</text>
+
+  <rect class="box" x="256" y="248" width="648" height="88" rx="8"/>
+  <text class="label" x="580" y="284" text-anchor="middle">Failure → stop before the next action (default)</text>
+  <text class="small" x="580" y="308" text-anchor="middle">Runtime errors can occur · completed clicks remain</text>
+
+  <rect class="stage" x="24" y="384" width="200" height="76" rx="8"/>
+  <text class="small" x="124" y="405" text-anchor="middle">Observed end-to-end</text>
+  <text class="metric" x="124" y="431" text-anchor="middle">13.64 ms p50</text>
+  <text class="small" x="124" y="453" text-anchor="middle">Four clicks · one request</text>
+</svg>

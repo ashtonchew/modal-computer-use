@@ -77,6 +77,19 @@
       margin: 2rem auto;
     }
 
+    p:has(> img:only-child) {
+      width: min(960px, calc(100vw - 2rem));
+      margin: 2rem 50%;
+      overflow-x: auto;
+      transform: translateX(-50%);
+    }
+
+    p:has(> img:only-child) img {
+      width: 960px;
+      max-width: none;
+      margin: 0;
+    }
+
     code {
       padding: 0.08em 0.28em;
       background: var(--code-bg);
@@ -137,6 +150,8 @@
     @media print {
       main { width: auto; max-width: none; padding: 0; }
       a, a:visited { color: var(--ink); }
+      p:has(> img:only-child) { width: auto; margin: 2rem 0; transform: none; }
+      p:has(> img:only-child) img { width: 100%; max-width: 100%; }
       img { break-inside: avoid; }
     }
   </style>
@@ -168,17 +183,20 @@
 <p>The optimized artifact reports only the complete 1024x768 PNG request. It measured about 29 ms p50 over 30 samples.</p>
 <h2>Input: keep one X11 session open</h2>
 <p>The compatibility path launched <code>xdotool</code> for each action and reopened desktop state. It is a sensible adapter for a broad set of X11 operations, but that lifecycle is expensive inside an agent loop. The native path uses Xlib, the X11 client library, to hold one connection to the server. The XTest extension sends synthetic mouse and keyboard events over it. Each operation precomputes the events, takes one lock, queues them in order, and finishes with one X sync before the call returns.</p>
+<p><img src="../assets/modal-optimized-input-session.svg" alt="Per-action xdotool setup compared with one persistent X11 input connection" /></p>
 <p>A controlled A/B against the retained <code>xdotool</code> path isolated daemon execution cost. This diagnostic used three samples per arm and arithmetic means from one dirty implementation worktree; both arms used the same source state. Move-and-click fell from about 146 ms to 1.2 ms, a 128x reduction. Four move/click pairs fell from about 444 ms to 4.8 ms, or 93x.</p>
 <p>Typing improved less dramatically. One hundred characters fell from about 120 ms to 21 ms, a 5.8x change. One thousand characters fell from about 607 ms to 201 ms, or 3x.</p>
 <p>Reducing execution time exposed the correctness work. I resolve characters against the active keyboard layout and X11 key symbols, then serialize held-key and button state. I permit the compatibility fallback only before native emission could have happened, so an action is never replayed after possible partial input. I also enabled Xlib thread support and installed a nonfatal error handler so an asynchronous window error cannot terminate the daemon; synchronous operations still check their own results.</p>
 <h3>One request put four ordered clicks at 14 ms</h3>
 <p>Once input was cheap, batching removed repeated request admission. The four-click case sends one ordered request. The daemon validates the whole batch before execution, acquires the input lock once, preserves order, and stops at the first error by default. In the final run, one click took about 10 ms p50. Four ordered clicks in one request took about 14 ms.</p>
+<p><img src="../assets/modal-optimized-action-batch.svg" alt="One action request validates and serializes four ordered clicks" /></p>
 <p>I did not measure a four-separate-request optimized counterfactual. Modal default and Tzafon also used one batch for the four-click row, while Daytona used four SDK and transport requests and E2B used four SDK calls over eight transport requests.</p>
 <p>That lock is also a correctness boundary. Without it, two concurrent requests could interleave a move, a button press, and a release into a sequence neither caller asked for. Validation keeps malformed work out of the critical section. Holding the lock across the batch makes the desktop transition match the requested order.</p>
 <p>For typing, Modal optimized forces direct zero-delay keystrokes through the persistent XTest session. It took about 15 ms for 100 characters and 63 ms for 1,000. Modal default kept its public <code>auto</code> behavior, which selected clipboard for both strings. Other providers kept their defaults, and their internal pacing or input method was not observable. The final provider gaps also include caller placement, transport count, configuration, and typing semantics.</p>
 <h2>Commands: isolate subprocess I/O from the request loop</h2>
 <p>Our original benchmark asked for a login shell. That mixed shell initialization with the primitive I wanted to compare. The current harness gives every provider the same logical <code>sh -c</code> command, requires exit zero, and checks exact stdout <code>&quot;42\n&quot;</code>.</p>
 <p>Command pipe setup and cleanup shared Uvicorn's request loop and produced a long tail. The child ran in its own process; its asyncio transport, pipe reads, wait, and cleanup lived on the request loop. A persistent private <code>SelectorEventLoop</code> on a daemon thread owns that lifecycle and bridges the result to Uvicorn. Capacity is bounded, and cancellation kills the process group before cleanup.</p>
+<p><img src="../assets/modal-optimized-command-loop-isolation.svg" alt="Subprocess I/O ownership moves from Uvicorn to a private event loop while the child process remains separate" /></p>
 <p>An earlier controlled 10-sample-per-arm A/B, retained as directional evidence and captured before the process-group safety fix, put the shared loop at about 56 ms p50 and 249 ms p95. The isolated loop measured 10 ms p50 and 11 ms p95. The final command path measured 10 ms p50 and 17 ms p95.</p>
 <p>The subprocess runner exposed a clipboard bug. A live X11 selection owner serves clipboard data. <code>xclip</code> stayed alive after taking ownership and inherited captured stdout and stderr pipes. <code>communicate()</code> waited for EOF even though the clipboard had changed. Output capture made sense as a generic default, but this helper did not use it. Sending those streams to <code>DEVNULL</code> removed the wait. A long-lived helper cannot retain pipes owned by one request. Optimized typing bypasses the clipboard and uses direct keystrokes, so this fix sits outside its path.</p>
 <h2>Warm results across the interface</h2>
@@ -248,6 +266,7 @@
 <p>The tracked <a href="../../benchmark-data/modal-optimized-provider-2026-07-28.json">Modal optimized samples</a> and <a href="../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json">provider-default samples</a> contain the observed ranges. Screenshots retained each provider's native format: Tzafon returned 1280x720 JPEG, while Modal, Daytona, and E2B returned 1024x768 PNG. Typing semantics differed as described above. The four-click row also mixed one-request batching with multi-request defaults.</p>
 <h2>Changed pixels are an early transition signal</h2>
 <p>An agent often needs a frame that reflects the previous action. The Modal-only experimental endpoint captures a baseline. It can use XDamage, an X11 notice that a drawable region may have changed, as a wake hint before checking a full-resolution pixel hash. The response returns the hash-confirmed frame that triggered the result. Click to first changed frame measured about 65 ms p50 and 76 ms p95 over 30 samples. The sanitized artifact does not retain whether XDamage or polling supplied the wake signal.</p>
+<p><img src="../assets/modal-optimized-first-change.svg" alt="XDamage hints or polling trigger a pixel check, while application readiness remains caller-owned" /></p>
 <p>The terminal condition is modest. A blink, cursor, animation, or unrelated repaint can satisfy it, and the first change may capture an intermediate paint. Semantic effects can preserve identical pixels or occur outside the observed region. XDamage supplies a wake hint for the pixel check. A fixed sleep supplies only elapsed time. When the next action depends on application state, the caller still needs a workload-specific readiness condition.</p>
 <h2>Fresh creation is still slow</h2>
 <p>Startup remains the exception to the warm-path results. Fresh product create to validated screenshot measured about 7.8 seconds on Modal optimized, 1.2 seconds for the E2B default desktop template, and 0.22 seconds for a Tzafon nonpersistent desktop. The Modal timer excluded startup of its Modal Function runner. Different templates, images, provisioning substrates, and caller topologies make this a product-level result. An equivalent physical-boot comparison would require matched systems. I omit speed ratios. Startup is the next thing I want to reduce.</p>

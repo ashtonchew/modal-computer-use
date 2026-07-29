@@ -110,6 +110,19 @@ def render() -> None:
       margin: 2rem auto;
     }}
 
+    p:has(> img:only-child) {{
+      width: min(960px, calc(100vw - 2rem));
+      margin: 2rem 50%;
+      overflow-x: auto;
+      transform: translateX(-50%);
+    }}
+
+    p:has(> img:only-child) img {{
+      width: 960px;
+      max-width: none;
+      margin: 0;
+    }}
+
     code {{
       padding: 0.08em 0.28em;
       background: var(--code-bg);
@@ -170,6 +183,8 @@ def render() -> None:
     @media print {{
       main {{ width: auto; max-width: none; padding: 0; }}
       a, a:visited {{ color: var(--ink); }}
+      p:has(> img:only-child) {{ width: auto; margin: 2rem 0; transform: none; }}
+      p:has(> img:only-child) img {{ width: 100%; max-width: 100%; }}
       img {{ break-inside: avoid; }}
     }}
   </style>
