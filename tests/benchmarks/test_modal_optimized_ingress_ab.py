@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -365,6 +366,40 @@ def test_artifact_validator_rejects_unsafe_fields(unsafe) -> None:
     }
     with pytest.raises(ValueError, match="unsafe"):
         validate_modal_optimized_ingress_ab_artifact(payload, require_publishable=False)
+
+
+def test_tracked_ingress_evidence_contains_only_two_aggregate_runs() -> None:
+    payload = json.loads(
+        Path("benchmark-data/modal-optimized-ingress-ab-2026-07-29.json").read_text()
+    )
+
+    assert payload["benchmark"] == "sanitized-modal-optimized-ingress-ab"
+    assert payload["experiment"]["iterations_per_arm"] == 30
+    assert payload["experiment"]["target_sandboxes_per_run"] == 1
+    assert payload["decision"] == {
+        "outcome": "inconclusive",
+        "optimized_modal_default": "connect",
+        "reason": (
+            "Neither run cleared the predeclared winner gate, and the composite "
+            "ordering reversed in the confirmation."
+        ),
+        "zero_byte_floor_used_for_selection": False,
+    }
+    assert [run["run"] for run in payload["runs"]] == ["initial", "confirmation"]
+    assert all(run["failures"] == 0 for run in payload["runs"])
+    assert all("samples_ms" not in run for run in payload["runs"])
+    encoded = json.dumps(payload).lower()
+    for unsafe in (
+        "base_url",
+        "sandbox_id",
+        "resource_id",
+        "screenshot_bytes",
+        "typed_text",
+        "clipboard_text",
+        "http://",
+        "https://",
+    ):
+        assert unsafe not in encoded
 
 
 def _comparison_case(connect: float, tunnel: float) -> dict[str, object]:
