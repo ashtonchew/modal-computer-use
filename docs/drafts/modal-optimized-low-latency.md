@@ -1,6 +1,6 @@
 # How I got computer-use clicks down to 4 ms on Modal
 
-*My tuned warm path beat the E2B, Daytona, Modal, and Tzafon defaults in a dated comparison. Screenshots took 32 ms.*
+*A computer-use agent can wait on screenshots and input hundreds of times. I shortened that path and kept the desktop machinery alive between calls.*
 
 E2B Desktop and Daytona Computer Use put a Linux desktop behind an API in a few lines. Once warm, their default interfaces still made the agent wait. In my dated comparison, one screenshot plus one coordinate click added up to about 413 ms on E2B and 970 ms on Daytona. Each sum comes from separate central measurements and models one turn.
 
