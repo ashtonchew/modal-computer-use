@@ -17,12 +17,33 @@ from modal_computer_use.benchmarks.constants import DEFAULT_PROVIDER_COMPARISON_
 from modal_computer_use.benchmarks.provider_comparison import (
     comparison,
     daytona,
+    e2b,
     live,
     payloads,
     provider_sdk,
     results,
 )
 from modal_computer_use.daemon import budget_policy
+
+
+def test_e2b_benchmark_session_outlives_publishable_warm_matrix() -> None:
+    create_kwargs: dict[str, object] = {}
+
+    class FakeSandbox:
+        @staticmethod
+        def create(**kwargs):
+            create_kwargs.update(kwargs)
+            return object()
+
+    driver = e2b.E2BDriver(SimpleNamespace(Sandbox=FakeSandbox), template=None)
+
+    driver.create_lifecycle_session()
+
+    assert (
+        create_kwargs["timeout"]
+        == e2b.E2B_BENCHMARK_SESSION_TIMEOUT_SECONDS
+        == 3600
+    )
 
 
 def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:

@@ -39,6 +39,8 @@ from .verification import (
     verify_provider_type_readback,
 )
 
+E2B_BENCHMARK_SESSION_TIMEOUT_SECONDS = 3600
+
 
 def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
     provider = "e2b"
@@ -70,6 +72,8 @@ def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, An
         "cpu_count_source": "public_default_desktop_pricing",
         "memory_gib": 1,
         "memory_gib_source": "public_default_desktop_pricing",
+        "session_timeout_seconds": E2B_BENCHMARK_SESSION_TIMEOUT_SECONDS,
+        "session_timeout_source": "benchmark_matrix_lifetime",
     }
     driver = E2BDriver(e2b_module, template=template)
     return run_product_provider_cases(
@@ -206,7 +210,7 @@ class E2BDriver:
             "resolution": (1024, 768),
             "dpi": 96,
             "display": ":0",
-            "timeout": 300,
+            "timeout": E2B_BENCHMARK_SESSION_TIMEOUT_SECONDS,
         }
         if self._template:
             create_kwargs["template"] = self._template
