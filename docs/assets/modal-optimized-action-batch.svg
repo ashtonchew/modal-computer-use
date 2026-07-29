@@ -37,21 +37,21 @@
 
   <rect class="enclosure" x="680" y="72" width="344" height="160" rx="8"/>
   <text class="section" x="852" y="104" text-anchor="middle">Execute in order</text>
-  <rect class="click" x="704" y="128" width="50" height="72" rx="6"/>
-  <text class="small" x="729" y="157" text-anchor="middle">Click</text>
-  <text class="label" x="729" y="181" text-anchor="middle">1</text>
-  <rect class="click" x="778" y="128" width="50" height="72" rx="6"/>
-  <text class="small" x="803" y="157" text-anchor="middle">Click</text>
-  <text class="label" x="803" y="181" text-anchor="middle">2</text>
-  <rect class="click" x="852" y="128" width="50" height="72" rx="6"/>
-  <text class="small" x="877" y="157" text-anchor="middle">Click</text>
-  <text class="label" x="877" y="181" text-anchor="middle">3</text>
-  <rect class="click" x="926" y="128" width="50" height="72" rx="6"/>
-  <text class="small" x="951" y="157" text-anchor="middle">Click</text>
-  <text class="label" x="951" y="181" text-anchor="middle">4</text>
-  <line class="path" x1="754" y1="164" x2="778" y2="164" marker-end="url(#arrow-sage)"/>
-  <line class="path" x1="828" y1="164" x2="852" y2="164" marker-end="url(#arrow-sage)"/>
-  <line class="path" x1="902" y1="164" x2="926" y2="164" marker-end="url(#arrow-sage)"/>
+  <rect class="click" x="716" y="128" width="50" height="72" rx="6"/>
+  <text class="small" x="741" y="157" text-anchor="middle">Click</text>
+  <text class="label" x="741" y="181" text-anchor="middle">1</text>
+  <rect class="click" x="790" y="128" width="50" height="72" rx="6"/>
+  <text class="small" x="815" y="157" text-anchor="middle">Click</text>
+  <text class="label" x="815" y="181" text-anchor="middle">2</text>
+  <rect class="click" x="864" y="128" width="50" height="72" rx="6"/>
+  <text class="small" x="889" y="157" text-anchor="middle">Click</text>
+  <text class="label" x="889" y="181" text-anchor="middle">3</text>
+  <rect class="click" x="938" y="128" width="50" height="72" rx="6"/>
+  <text class="small" x="963" y="157" text-anchor="middle">Click</text>
+  <text class="label" x="963" y="181" text-anchor="middle">4</text>
+  <line class="path" x1="766" y1="164" x2="790" y2="164" marker-end="url(#arrow-sage)"/>
+  <line class="path" x1="840" y1="164" x2="864" y2="164" marker-end="url(#arrow-sage)"/>
+  <line class="path" x1="914" y1="164" x2="938" y2="164" marker-end="url(#arrow-sage)"/>
 
   <rect class="changed" x="1104" y="96" width="144" height="112" rx="8"/>
   <text class="label" x="1176" y="143" text-anchor="middle">Release input</text>
