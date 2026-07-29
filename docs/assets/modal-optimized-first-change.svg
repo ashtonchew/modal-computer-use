@@ -38,20 +38,20 @@
   <line class="path" x1="440" y1="112" x2="528" y2="112" marker-end="url(#arrow-sage)"/>
   <line class="path" x1="688" y1="112" x2="776" y2="112" marker-end="url(#arrow-sage)"/>
 
-  <path class="path" d="M856 160 V184 H600 V208" marker-end="url(#arrow-sage)"/>
-  <path class="decision" d="M600 208 L648 256 L600 304 L552 256 Z"/>
-  <text class="label" x="600" y="250" text-anchor="middle">Pixels</text>
-  <text class="label" x="600" y="271" text-anchor="middle">changed?</text>
-  <rect class="result" x="776" y="208" width="344" height="96" rx="8"/>
+  <path class="path" d="M856 160 V184 H608 V200" marker-end="url(#arrow-sage)"/>
+  <path class="decision" d="M608 200 L664 256 L608 312 L552 256 Z"/>
+  <text class="label" x="608" y="250" text-anchor="middle">Pixels</text>
+  <text class="label" x="608" y="272" text-anchor="middle">changed?</text>
+  <rect class="result" x="776" y="200" width="344" height="112" rx="8"/>
   <text class="label" x="948" y="239" text-anchor="middle">Return the same verified frame</text>
   <text class="metric" x="948" y="267" text-anchor="middle">65 ms p50</text>
   <text class="small" x="948" y="291" text-anchor="middle">76 ms p95</text>
-  <line class="path" x1="648" y1="256" x2="776" y2="256" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label" x="712" y="234" text-anchor="middle">Changed</text>
+  <line class="path" x1="664" y1="256" x2="776" y2="256" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label" x="720" y="234" text-anchor="middle">Changed</text>
 
-  <path class="path-neutral" d="M552 256 H488 V184 H608 V160" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="504" y="234">Keep waiting</text>
-  <path class="path-neutral" d="M948 304 V336 H652 V368" marker-end="url(#arrow-neutral)"/>
+  <path class="path-neutral" d="M552 256 H448 V184 H568 V160" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="500" y="234" text-anchor="middle">Keep waiting</text>
+  <path class="path-neutral" d="M948 312 V336 H652 V368" marker-end="url(#arrow-neutral)"/>
   <rect class="box" x="528" y="368" width="248" height="104" rx="8"/>
   <text class="label" x="652" y="404" text-anchor="middle">Possible early stop</text>
   <text class="small" x="652" y="432" text-anchor="middle">Blink, cursor, animation,</text>
