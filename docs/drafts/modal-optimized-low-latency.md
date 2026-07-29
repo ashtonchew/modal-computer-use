@@ -2,43 +2,41 @@
 
 *A computer-use agent can wait on screenshots and input hundreds of times. I shortened that path and kept the desktop machinery alive between calls.*
 
-E2B Desktop and Daytona Computer Use put a Linux desktop behind an API in a few lines. Once warm, their default interfaces still made the agent wait. In my dated comparison, one screenshot plus one coordinate click added up to about 413 ms on E2B and 970 ms on Daytona. Each sum comes from separate central measurements and models one turn.
+E2B Desktop and Daytona Computer Use put a Linux desktop behind an API in a few lines. Their APIs were quick to build with, but a screenshot followed by a click still kept the agent waiting for hundreds of milliseconds on the default paths.
 
-Across 50 turns, the same calculation produces roughly 21 seconds of interface time on E2B and 49 seconds on Daytona. Optimized Modal comes in under 2 seconds. A delay that feels small once becomes product latency when the agent pays it on every turn.
+A basic computer-use turn wraps model reasoning between two interface calls: fetch the current screen, then click the point the model chose. Those two calls add up to about 413 ms on E2B default and 970 ms on Daytona default. On my tuned Modal path, they add up to 37 ms.
 
-The calculation isolates interface time. Inference, startup, application readiness, failures, and retries sit outside it. The benchmark did not run a complete 50-turn trajectory.
+Repeat that work across 50 turns and the computer-use primitives I built on Modal finish in under 2 seconds. E2B's default adds about 21 seconds; Daytona's adds about 49 seconds. As agents take on longer tasks, they pay that infrastructure cost again on every turn.
 
-I wanted cloud computer use to feel local. After tuning, the warm Modal path ran faster than every provider default I tested. A coordinate click took roughly 4 ms and a full screenshot took 32 ms. The table near the end covers operations with more complicated semantics.
+[OpenAI says its limited Cerebras preview of GPT-5.6 Sol can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, the computer can become slower than the model using it. Longer computer-use tasks also consume more model and tool time. Every repeated interface wait pushes the final result farther out.
 
-I tuned only Modal, with 30 samples. Each provider default had three. The comparison covers public paths I ran on July 26, 2026, so its scope cannot rank every provider configuration.
+I started thinking about this while using RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). A remote desktop feels fast or slow because of the whole route between an input and the next frame: where encoding runs, how long connections stay open, which processes sit in the path, and how many network handoffs each request crosses. As models got faster, I kept wondering why cloud computers for agents still felt so far away.
 
-[OpenAI says its limited Cerebras preview of GPT-5.6 Sol can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that rate, the computer can become slower than the model using it. Longer-horizon computer-use tasks can accomplish more, but they also consume more model and tool time. Every repeated infrastructure wait delays the result.
+I chose Modal because I needed control over both ends of that route. E2B and Daytona expose useful computer-use APIs and customizable environments. Modal let me define the Function caller and Sandbox target in the same Python system, build the desktop Image, request a region for both, wait for readiness, and reach the daemon through authenticated Connect. I could change caller placement and the daemon's hot path together without first building a scheduler or cloud control plane.
 
-Modal bills the Function runner and Sandbox behind an open HTTP session by duration, with no separate charge for the active tunnel. Shorter sessions can use fewer resource-seconds; idle warm targets keep accruing time. The optimized topology also adds a Modal Function runner. This benchmark measures latency and contains no resource-normalized billing or token data.
-
-I chose Modal because I needed control at both ends of the route. E2B and Daytona expose useful computer-use APIs and customizable environments. Modal gave me a Function caller, a Sandbox target, the Image, a shared region selector, readiness checks, and authenticated Connect access in one Python system. I could move the caller and replace the daemon's hot path without first building a scheduler or cloud control plane.
-
-I came to this problem through RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). It trained me to see control latency as architectural: encoding, connection lifetime, process boundaries, placement, and every handoff. The implementation here is independent. Modal Connect uses Modal's authenticated service route; RustDesk's peer-to-peer topology does not apply. I carried over the habit of tracing each request and removing setup that recurred on every call.
+The architecture starts with one split: create and connect once, then repeat the screen, model, and action loop for every turn.
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
-## Why warm latency compounds
+## Create once, then optimize every turn
 
 A computer-use session has two time scales. Creation provisions a sandbox, starts the desktop and daemon, establishes authenticated access, and validates the first frame. The agent then enters an observe, reason, act loop. Creation happens once. Screenshots, clicks, typing, and commands can happen hundreds of times.
 
 That distinction set my priority. Startup matters, especially for short tasks, but repeated latency compounds with every turn. I optimized the warm path first and kept creation as a separate metric.
 
-I kept the measurement boundary outside the primitive. A warm timer begins before the selected public SDK or daemon request and ends after the caller validates the result. It includes routing, authentication, request handling, execution, and response transfer. Internal timings locate work, but the user waits for the whole call. The optimized arm has 30 samples with p50 and p95. Provider defaults have three, so I report their medians and observed ranges without characterizing their tails.
+I kept the measurement boundary outside the primitive. A warm timer begins before the public SDK or daemon request and ends after the caller validates the result. It includes routing, authentication, request handling, execution, and response transfer. Internal timings help locate work, but the user waits for the complete call.
 
 ## Screenshots: shorten the route and keep capture alive
 
-I shortened the request route by running the benchmark client in a Modal Function and requesting the same Modal region for the runner and target Sandbox. Requests still went through Modal Connect. I cannot infer availability zone, host, private networking, or loopback from that placement request. The runner and target reported matching cloud and region in the accepted evidence, so I describe the topology as "same requested Modal region."
+I shortened the request route by running the benchmark client in a Modal Function and requesting the target Sandbox's region for that Function. Requests still went through Modal Connect. The runner and target reported the same cloud and region. The evidence records placement at that granularity; it does not identify availability zone, host, network path, or loopback.
 
-Inside the target, one FastAPI/Uvicorn daemon owns the session's desktop state. It keeps display connections, capture state, input state, and the command runner ready. A hot click should not rediscover the display or launch a helper program.
+Inside the target, one FastAPI/Uvicorn daemon owns the session's desktop state. It keeps display connections, capture state, input state, and the command runner ready. A hot click can reuse the existing display and input state.
 
-The labels in the two rows name different public routes. The default attested tunnel used a Connect token to bootstrap short-lived daemon authorization over an encrypted tunnel. Modal optimized sent the recurring request through Connect itself. The experiment changed caller placement and configuration as well as that route, so the diagram does not attribute the end-to-end gap to transport alone.
+The default row starts with my benchmark client outside Modal and reaches the daemon through an attested tunnel. The optimized row starts with a Modal Function in the target's requested region and reaches the same warm daemon through Connect. Each latency number covers the complete request at the caller.
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)
+
+Keeping the Function and Sandbox warm changes the cost shape. Modal bills both for the time their resources are allocated. The active tunnel has no separate charge. The optimized path adds a Function runner, and an idle warm session continues to accrue duration. Total cost depends on how quickly the task finishes and how long those resources sit idle. Resource-normalized bills and token usage remain unmeasured here.
 
 X11 is the desktop server that owns the pixels and input. MSS is a capture client, and the daemon keeps one MSS session open. On Linux, MSS prefers XShm, which transfers local pixels through shared memory, and can fall back to XGetImage. The daemon encodes the MSS capture in memory, avoiding a helper subprocess and the temporary-file write, read, and delete cycle; conversion paths also avoid file decode and re-encode. If MSS cannot open or grab after one reset and retry, the compatibility path uses `scrot`, then `maim`, and temporary-file work.
 
@@ -76,20 +74,20 @@ An earlier controlled 10-sample-per-arm A/B, retained as directional evidence an
 
 The subprocess runner exposed a clipboard bug. A live X11 selection owner serves clipboard data. `xclip` stayed alive after taking ownership and inherited captured stdout and stderr pipes. `communicate()` waited for EOF even though the clipboard had changed. Output capture made sense as a generic default, but this helper did not use it. Sending those streams to `DEVNULL` removed the wait. A long-lived helper cannot retain pipes owned by one request. Optimized typing bypasses the clipboard and uses direct keystrokes, so this fix sits outside its path.
 
-## What the warm comparison showed
+## Warm results across the interface
 
-Only Modal optimized was tuned. Its cells show p50 / p95 with `n=30`. Provider-default cells show the median with `n=3`, followed by the ratio versus Modal optimized p50. A ratio above 1 means the provider-default request took longer.
+I tuned Modal and left each provider at its public default. The Modal optimized cells show p50 / p95 from 30 samples. The default cells show the median from three samples, followed by the ratio against Modal optimized p50.
 
 | Warm operation | Modal optimized p50 / p95 | Modal default median / ratio | Daytona default median / ratio | E2B default median / ratio | Tzafon default median / ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Full screenshot, native/default | 32.42 / 34.71 ms | 126.86 ms / 3.91x | 588.74 ms / 18.16x | 191.70 ms / 5.91x | 132.38 ms / 4.08x |
-| One coordinate click | 4.43 / 5.06 ms | 209.01 ms / 47.18x | 381.63 ms / 86.15x | 221.15 ms / 49.92x | 154.49 ms / 34.87x |
-| Four coordinate clicks | 7.02 / 8.41 ms | 227.56 ms / 32.44x | 1,548.00 ms / 220.66x | 887.19 ms / 126.47x | 474.00 ms / 67.57x |
+| One click on the screen | 4.43 / 5.06 ms | 209.01 ms / 47.18x | 381.63 ms / 86.15x | 221.15 ms / 49.92x | 154.49 ms / 34.87x |
+| Four clicks in one batch | 7.02 / 8.41 ms | 227.56 ms / 32.44x | 1,548.00 ms / 220.66x | 887.19 ms / 126.47x | 474.00 ms / 67.57x |
 | Type 100 | 9.95 / 10.62 ms | 249.57 ms / 25.09x | 806.05 ms / 81.05x | 4,104.69 ms / 412.71x | 111.80 ms / 11.24x |
 | Type 1000 | 49.58 / 52.35 ms | 248.09 ms / 5.00x | 5,519.92 ms / 111.33x | 41,085.75 ms / 828.61x | 145.78 ms / 2.94x |
 | Non-login shell command | 8.98 / 10.14 ms | 83.89 ms / 9.34x | 287.97 ms / 32.07x | 59.18 ms / 6.59x | 58.03 ms / 6.46x |
 
-The full observed ranges are in the [dated provider report](../benchmark-results-2026-07-26-provider-results.md). Screenshots retained each provider's native format: Tzafon returned 1280x720 JPEG, while Modal, Daytona, and E2B returned 1024x768 PNG. Typing semantics differed as described above. The four-click row also mixed one-request batching with multi-request defaults. The table covers the public systems and configurations I tested on July 26, 2026. Format, semantics, configuration, and request count limit any broader ranking.
+The full observed ranges are in the [provider report](../benchmark-results-2026-07-26-provider-results.md). Screenshots retained each provider's native format: Tzafon returned 1280x720 JPEG, while Modal, Daytona, and E2B returned 1024x768 PNG. Typing semantics differed as described above. The four-click row also mixed one-request batching with multi-request defaults.
 
 ## Changed pixels are an early transition signal
 
