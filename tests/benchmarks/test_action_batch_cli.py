@@ -106,7 +106,7 @@ def test_benchmark_action_batch_redacts_reported_base_url_credentials() -> None:
 
         def post_json(self, path: str, *, json=None, headers=None):
             assert path == "/v1/actions/run"
-            return {"ok": True, "results": [{"ok": True}]}
+            return {"ok": True, "results": [{"ok": True} for _ in json["actions"]]}
 
     payload = run_action_batch_benchmark(
         client=SuccessfulClient(),
@@ -132,7 +132,7 @@ def test_benchmark_action_batch_records_daemon_timing_attribution() -> None:
             self.calls += 1
             return {
                 "ok": True,
-                "results": [{"ok": True}],
+                "results": [{"ok": True} for _ in json["actions"]],
                 "timing": {"daemon_ms": float(self.calls)},
             }
 
@@ -159,7 +159,7 @@ def test_benchmark_action_batch_missing_timing_is_unavailable_not_failure() -> N
 
         def post_json(self, path: str, *, json=None, headers=None):
             assert path == "/v1/actions/run"
-            return {"ok": True, "results": [{"ok": True}]}
+            return {"ok": True, "results": [{"ok": True} for _ in json["actions"]]}
 
     payload = run_action_batch_benchmark(
         client=OldClient(),
@@ -196,3 +196,139 @@ def test_benchmark_action_batch_malformed_timing_is_structured_failure() -> None
     assert payload["failures"][0]["case"] == "batch_5_actions"
     assert payload["failures"][0]["type"] == "RuntimeError"
     assert payload["failures"][0]["message"] == "daemon action timing.daemon_ms was malformed"
+
+
+def test_four_click_ab_uses_one_batch_request_and_four_sequential_requests() -> None:
+    class RecordingClient:
+        base_url = "http://testserver"
+
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            assert path == "/v1/actions/run"
+            assert headers is None
+            self.requests.append(json)
+            return {
+                "ok": True,
+                "results": [
+                    {"ok": True, "output": {"input_backend": "xtest"}}
+                    for _ in json["actions"]
+                ],
+                "timing": {"daemon_ms": 1.0},
+            }
+
+    client = RecordingClient()
+    payload = run_action_batch_benchmark(
+        client=client,
+        mode="mock-local",
+        iterations=2,
+        warmup_iterations=1,
+        include_legacy_cases=False,
+        include_four_click_cases=True,
+    )
+
+    assert payload["ok"] is True
+    assert len(client.requests) == 15
+    assert [len(request["actions"]) for request in client.requests] == [4, 4, 4] + [1] * 12
+    expected = [(16, 16), (128, 16), (128, 128), (16, 128)]
+    assert [
+        (action["x"], action["y"])
+        for request in client.requests[:3]
+        for action in request["actions"]
+    ] == expected * 3
+    assert [
+        (request["actions"][0]["x"], request["actions"][0]["y"])
+        for request in client.requests[3:]
+    ] == expected * 3
+    batch = payload["cases"]["batch_4_clicks"]
+    separate = payload["cases"]["separate_4_clicks"]
+    assert batch["sdk_call_count"] == batch["transport_request_count"] == 1
+    assert separate["sdk_call_count"] == separate["transport_request_count"] == 4
+    assert payload["measurement_policy"]["replacement_samples"] == 0
+    assert payload["four_click_comparison"]["metric"] == "p50"
+
+
+def test_four_click_ab_records_failed_iteration_without_replacement() -> None:
+    class FailsSecondMeasuredBatch:
+        base_url = "http://testserver"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            self.calls += 1
+            if self.calls == 2:
+                return {"ok": False, "results": [{"ok": False}]}
+            return {
+                "ok": True,
+                "results": [
+                    {"ok": True, "output": {"input_backend": "xtest"}}
+                    for _ in json["actions"]
+                ],
+            }
+
+    payload = run_action_batch_benchmark(
+        client=FailsSecondMeasuredBatch(),
+        mode="mock-local",
+        iterations=2,
+        warmup_iterations=0,
+        include_legacy_cases=False,
+        include_four_click_cases=True,
+    )
+
+    assert payload["ok"] is False
+    assert payload["cases"]["batch_4_clicks"]["successful_iterations"] == 1
+    assert len(payload["cases"]["batch_4_clicks"]["samples_ms"]) == 1
+    assert payload["failures"][0]["case"] == "batch_4_clicks"
+    assert payload["failures"][0]["iteration"] == 1
+
+
+def test_four_click_ab_rejects_missing_per_action_backend_evidence() -> None:
+    class MissingBackendClient:
+        base_url = "http://testserver"
+
+        def post_json(self, path: str, *, json=None, headers=None):
+            return {
+                "ok": True,
+                "results": [
+                    {"ok": True, "output": {"input_backend": "xtest"}},
+                    *[{"ok": True} for _ in json["actions"][1:]],
+                ],
+            }
+
+    payload = run_action_batch_benchmark(
+        client=MissingBackendClient(),
+        mode="mock-local",
+        iterations=1,
+        warmup_iterations=0,
+        include_legacy_cases=False,
+        include_four_click_cases=True,
+    )
+
+    assert payload["ok"] is False
+    assert payload["cases"]["batch_4_clicks"]["successful_iterations"] == 0
+    assert payload["failures"][0]["type"] == "RuntimeError"
+
+
+def test_four_click_only_cli_omits_historical_cases(capsys) -> None:
+    exit_code = cli.main(
+        [
+            "benchmark",
+            "action-batch",
+            "--mock-local",
+            "--iterations",
+            "1",
+            "--warmup-iterations",
+            "0",
+            "--four-click-only",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert set(payload["cases"]) == {"batch_4_clicks", "separate_4_clicks"}
+    assert payload["comparison"] == {"status": "not_measured"}
+    serialized = json.dumps(payload).lower()
+    assert "token" not in serialized
+    assert "authorization" not in serialized

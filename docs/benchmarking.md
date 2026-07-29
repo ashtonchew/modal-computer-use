@@ -18,6 +18,18 @@ Use `action-batch` to compare one five-action batch with five separate calls:
 uv run computer-use benchmark action-batch --mock-local --iterations 5
 ```
 
+Add `--four-click-only` to compare the same four coordinate clicks as one ordered request and as
+four sequential requests. Each iteration times the complete arm at the caller, and failed attempts
+are retained without retries or replacement:
+
+```bash
+uv run computer-use benchmark action-batch \
+  --mock-local \
+  --four-click-only \
+  --warmup-iterations 1 \
+  --iterations 5
+```
+
 Use `sdk` for daemon and adapter surfaces. The adapter cases do not call model APIs:
 
 ```bash
@@ -97,6 +109,28 @@ uv run computer-use benchmark modal-colocated-client \
   --subprocess-backend isolated-asyncio \
   --iterations 30 \
   --output benchmark-results/modal-runner.json
+```
+
+Use `modal-action-batching-ab` for the publishable four-click A/B alone. It launches one Modal
+Function, creates one Connect target with the same requested region, checks their observed placement,
+performs one warmup plus 30 measured iterations per arm, and runs terminal cleanup. The command will
+only write beneath ignored `benchmark-results/`. Counts other than 30 plus one require `--pilot` and
+produce an ineligible artifact.
+
+```bash
+evidence_harness_sha="$(git rev-parse HEAD)"
+test -z "$(git status --porcelain)"
+
+uv run python scripts/publish_modal_images.py --revision "$evidence_harness_sha"
+
+uv run computer-use benchmark modal-action-batching-ab \
+  --modal-region us-west-2 \
+  --image-revision "$evidence_harness_sha" \
+  --modal-cpu 4 \
+  --modal-memory-mib 8192 \
+  --warmup-iterations 1 \
+  --iterations 30 \
+  --output benchmark-results/action-batching-ab/final.json
 ```
 
 The combined provider report uses `modal-optimized-provider` for the optimized lifecycle and warm

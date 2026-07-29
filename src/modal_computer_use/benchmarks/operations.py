@@ -59,6 +59,70 @@ class _ActionBatchBenchmark:
             "transport_http_version": _transport_http_version(self._client),
         }
 
+
+class _FourClickBatchBenchmark:
+    def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+    def run_batch(self) -> dict[str, Any]:
+        result = self._client.post_json(
+            "/v1/actions/run",
+            json={"actions": COORDINATE_CLICK_SEQUENCE_ACTIONS, "source": "benchmark"},
+        )
+        _ensure_complete_action_result(result, expected_actions=4)
+        return {
+            "daemon_ms": _extract_daemon_ms(result),
+            "transport_http_version": _transport_http_version(self._client),
+            "input_backend": _require_uniform_input_backend(result, expected_actions=4),
+        }
+
+    def run_separate(self) -> dict[str, Any]:
+        daemon_samples: list[float | None] = []
+        input_backends: set[str] = set()
+        for action in COORDINATE_CLICK_SEQUENCE_ACTIONS:
+            result = self._client.post_json(
+                "/v1/actions/run",
+                json={"actions": [action], "source": "benchmark"},
+            )
+            _ensure_complete_action_result(result, expected_actions=1)
+            daemon_samples.append(_extract_daemon_ms(result))
+            input_backends.add(_require_uniform_input_backend(result, expected_actions=1))
+        if len(input_backends) != 1:
+            raise RuntimeError("four-click requests reported different input backends")
+        observation: dict[str, Any] = {
+            "daemon_ms": (
+                None
+                if any(sample is None for sample in daemon_samples)
+                else sum(sample for sample in daemon_samples if sample is not None)
+            ),
+            "transport_http_version": _transport_http_version(self._client),
+            "input_backend": next(iter(input_backends)),
+        }
+        return observation
+
+
+def _ensure_complete_action_result(result: Any, *, expected_actions: int) -> None:
+    _ensure_ok_result(result)
+    results = result.get("results") if isinstance(result, dict) else None
+    if not isinstance(results, list) or len(results) != expected_actions:
+        raise RuntimeError("daemon action response result count did not match request")
+    if any(not isinstance(item, dict) or item.get("ok") is not True for item in results):
+        raise RuntimeError("daemon action response contained an unsuccessful result")
+
+
+def _require_uniform_input_backend(result: dict[str, Any], *, expected_actions: int) -> str:
+    results = result.get("results")
+    backends: list[str] = []
+    if isinstance(results, list):
+        for item in results:
+            output = item.get("output") if isinstance(item, dict) else None
+            backend = output.get("input_backend") if isinstance(output, dict) else None
+            if isinstance(backend, str) and backend:
+                backends.append(backend)
+    if len(backends) != expected_actions or len(set(backends)) != 1:
+        raise RuntimeError("daemon action response omitted a uniform input backend")
+    return backends[0]
+
 class _MoveClickBenchmark:
     def __init__(self, client: DaemonClient) -> None:
         self._client = client
