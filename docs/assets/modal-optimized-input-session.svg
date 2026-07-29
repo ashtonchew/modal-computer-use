@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="368" viewBox="0 0 960 368" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="432" viewBox="0 0 1152 432" role="img" aria-labelledby="title desc">
   <title id="title">Per-action X11 setup compared with a persistent Xlib session</title>
   <desc id="desc">The default compatibility path starts xdotool and opens an X11 connection for each API action. The optimized path builds input events and reuses one Xlib session, locking once, queueing XTest events, and synchronizing once.</desc>
   <defs>
@@ -22,53 +22,51 @@
     <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
     <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
   </defs>
+  <rect class="bg" width="1152" height="432"/>
 
-  <rect class="bg" width="960" height="368"/>
+  <text class="row" x="32" y="40">Per-action setup</text>
+  <rect class="box" x="32" y="68" width="128" height="120" rx="8"/>
+  <text class="label" x="96" y="133" text-anchor="middle">API action</text>
+  <rect class="box" x="268" y="68" width="128" height="120" rx="8"/>
+  <text class="label" x="332" y="121" text-anchor="middle">Start</text>
+  <text class="label" x="332" y="142" text-anchor="middle">xdotool</text>
+  <rect class="box" x="504" y="68" width="128" height="120" rx="8"/>
+  <text class="label" x="568" y="121" text-anchor="middle">Open X11</text>
+  <text class="label" x="568" y="142" text-anchor="middle">connection</text>
+  <rect class="box" x="740" y="68" width="128" height="120" rx="8"/>
+  <text class="label" x="804" y="133" text-anchor="middle">X11 server</text>
+  <rect class="box" x="976" y="68" width="128" height="120" rx="8"/>
+  <text class="metric" x="1040" y="122" text-anchor="middle">146 ms</text>
+  <text class="small" x="1040" y="152" text-anchor="middle">Move + click</text>
+  <line class="path" x1="160" y1="128" x2="268" y2="128" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="214" y="106" text-anchor="middle">Launch</text>
+  <line class="path" x1="396" y1="128" x2="504" y2="128" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="450" y="106" text-anchor="middle">Open</text>
+  <line class="path" x1="632" y1="128" x2="740" y2="128" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="686" y="106" text-anchor="middle">Send input</text>
+  <line class="path" x1="868" y1="128" x2="976" y2="128" marker-end="url(#arrow-neutral)"/>
 
-  <text class="row" x="32" y="32">Per-action setup</text>
-  <rect class="box" x="32" y="48" width="140" height="112" rx="8"/>
-  <text class="label" x="102" y="110" text-anchor="middle">API action</text>
-  <rect class="box" x="221" y="48" width="140" height="112" rx="8"/>
-  <text class="label" x="291" y="110" text-anchor="middle">Start xdotool</text>
-  <rect class="box" x="410" y="48" width="140" height="112" rx="8"/>
-  <text class="label" x="480" y="98" text-anchor="middle">Open X11</text>
-  <text class="label" x="480" y="119" text-anchor="middle">connection</text>
-  <rect class="box" x="599" y="48" width="140" height="112" rx="8"/>
-  <text class="label" x="669" y="110" text-anchor="middle">X11 server</text>
-  <rect class="box" x="788" y="48" width="140" height="112" rx="8"/>
-  <text class="metric" x="858" y="98" text-anchor="middle">146 ms</text>
-  <text class="small" x="858" y="126" text-anchor="middle">Move + click</text>
-
-  <line class="path" x1="172" y1="104" x2="221" y2="104" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="196.5" y="88" text-anchor="middle">Launch</text>
-  <line class="path" x1="361" y1="104" x2="410" y2="104" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="385.5" y="88" text-anchor="middle">Open</text>
-  <line class="path" x1="550" y1="104" x2="599" y2="104" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="574.5" y="88" text-anchor="middle">Send input</text>
-  <line class="path" x1="739" y1="104" x2="788" y2="104" marker-end="url(#arrow-neutral)"/>
-
-  <text class="row-opt" x="32" y="208">Persistent input session</text>
-  <rect class="box" x="32" y="224" width="140" height="112" rx="8"/>
-  <text class="label" x="102" y="286" text-anchor="middle">API action</text>
-  <rect class="changed" x="221" y="224" width="140" height="112" rx="8"/>
-  <text class="label" x="291" y="274" text-anchor="middle">Build input</text>
-  <text class="label" x="291" y="295" text-anchor="middle">events</text>
-  <rect class="primary" x="410" y="224" width="140" height="112" rx="8"/>
-  <text class="label" x="480" y="250" text-anchor="middle">Reuse Xlib session</text>
-  <text class="small" x="480" y="276" text-anchor="middle">Lock once</text>
-  <text class="small" x="480" y="296" text-anchor="middle">Queue XTest events</text>
-  <text class="small" x="480" y="316" text-anchor="middle">Sync once</text>
-  <rect class="box" x="599" y="224" width="140" height="112" rx="8"/>
-  <text class="label" x="669" y="286" text-anchor="middle">X11 server</text>
-  <rect class="primary" x="788" y="224" width="140" height="112" rx="8"/>
-  <text class="metric" x="858" y="274" text-anchor="middle">1.2 ms</text>
-  <text class="small" x="858" y="302" text-anchor="middle">Move + click</text>
-
-  <line class="path-opt" x1="172" y1="280" x2="221" y2="280" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="196.5" y="264" text-anchor="middle">Prepare</text>
-  <line class="path-opt" x1="361" y1="280" x2="410" y2="280" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="385.5" y="264" text-anchor="middle">Reuse</text>
-  <line class="path-opt" x1="550" y1="280" x2="599" y2="280" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="574.5" y="264" text-anchor="middle">Send XTest</text>
-  <line class="path-opt" x1="739" y1="280" x2="788" y2="280" marker-end="url(#arrow-sage)"/>
+  <text class="row-opt" x="32" y="256">Persistent input session</text>
+  <rect class="box" x="32" y="284" width="128" height="120" rx="8"/>
+  <text class="label" x="96" y="349" text-anchor="middle">API action</text>
+  <rect class="changed" x="268" y="284" width="128" height="120" rx="8"/>
+  <text class="label" x="332" y="337" text-anchor="middle">Build input</text>
+  <text class="label" x="332" y="358" text-anchor="middle">events</text>
+  <rect class="primary" x="504" y="284" width="128" height="120" rx="8"/>
+  <text class="label" x="568" y="318" text-anchor="middle">Reuse Xlib</text>
+  <text class="label" x="568" y="339" text-anchor="middle">session</text>
+  <text class="small" x="568" y="364" text-anchor="middle">Lock once</text>
+  <text class="small" x="568" y="384" text-anchor="middle">Sync once</text>
+  <rect class="box" x="740" y="284" width="128" height="120" rx="8"/>
+  <text class="label" x="804" y="349" text-anchor="middle">X11 server</text>
+  <rect class="primary" x="976" y="284" width="128" height="120" rx="8"/>
+  <text class="metric" x="1040" y="338" text-anchor="middle">1.2 ms</text>
+  <text class="small" x="1040" y="368" text-anchor="middle">Move + click</text>
+  <line class="path-opt" x1="160" y1="344" x2="268" y2="344" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="214" y="322" text-anchor="middle">Prepare</text>
+  <line class="path-opt" x1="396" y1="344" x2="504" y2="344" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="450" y="322" text-anchor="middle">Reuse</text>
+  <line class="path-opt" x1="632" y1="344" x2="740" y2="344" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="686" y="322" text-anchor="middle">Send XTest</text>
+  <line class="path-opt" x1="868" y1="344" x2="976" y2="344" marker-end="url(#arrow-sage)"/>
 </svg>

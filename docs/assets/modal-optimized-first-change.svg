@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="488" viewBox="0 0 960 488" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="504" viewBox="0 0 1152 504" role="img" aria-labelledby="title desc">
   <title id="title">Pixel change is a wake signal, not an application-readiness test</title>
   <desc id="desc">The detector records a baseline hash, runs an action, waits for an XDamage signal or poll, captures a new frame, and returns that same frame when its pixels differ. Blinks, cursors, animation, repaints, or intermediate frames can stop the detector early, so the caller still checks a workload-specific readiness predicate.</desc>
   <defs>
@@ -20,46 +20,44 @@
     <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
     <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
   </defs>
+  <rect class="bg" width="1152" height="504"/>
+  <text class="group" x="32" y="36">Detect the first changed frame</text>
 
-  <rect class="bg" width="960" height="488"/>
-  <text class="group" x="32" y="32">Detect the first changed frame</text>
+  <rect class="box" x="32" y="64" width="160" height="96" rx="8"/>
+  <text class="label" x="112" y="105" text-anchor="middle">Record baseline</text>
+  <text class="small" x="112" y="133" text-anchor="middle">Hash A</text>
+  <rect class="box" x="280" y="64" width="160" height="96" rx="8"/>
+  <text class="label" x="360" y="117" text-anchor="middle">Run action</text>
+  <rect class="box" x="528" y="64" width="160" height="96" rx="8"/>
+  <text class="label" x="608" y="105" text-anchor="middle">Wait for signal</text>
+  <text class="small" x="608" y="133" text-anchor="middle">XDamage or poll</text>
+  <rect class="box" x="776" y="64" width="160" height="96" rx="8"/>
+  <text class="label" x="856" y="105" text-anchor="middle">Capture frame</text>
+  <text class="small" x="856" y="133" text-anchor="middle">Hash B</text>
+  <line class="path" x1="192" y1="112" x2="280" y2="112" marker-end="url(#arrow-sage)"/>
+  <line class="path" x1="440" y1="112" x2="528" y2="112" marker-end="url(#arrow-sage)"/>
+  <line class="path" x1="688" y1="112" x2="776" y2="112" marker-end="url(#arrow-sage)"/>
 
-  <rect class="box" x="32" y="48" width="120" height="112" rx="8"/>
-  <text class="label" x="92" y="91" text-anchor="middle">Record baseline</text>
-  <text class="small" x="92" y="121" text-anchor="middle">Hash A</text>
-  <rect class="box" x="184" y="48" width="112" height="112" rx="8"/>
-  <text class="label" x="240" y="99" text-anchor="middle">Run action</text>
-  <rect class="box" x="328" y="48" width="136" height="112" rx="8"/>
-  <text class="label" x="396" y="91" text-anchor="middle">Wait for signal</text>
-  <text class="small" x="396" y="121" text-anchor="middle">XDamage or poll</text>
-  <rect class="box" x="496" y="48" width="128" height="112" rx="8"/>
-  <text class="label" x="560" y="91" text-anchor="middle">Capture frame</text>
-  <text class="small" x="560" y="121" text-anchor="middle">Hash B</text>
-  <path class="decision" d="M708 48 L760 104 L708 160 L656 104 Z"/>
-  <text class="label" x="708" y="98" text-anchor="middle">Pixels</text>
-  <text class="label" x="708" y="119" text-anchor="middle">changed?</text>
-  <rect class="result" x="792" y="48" width="136" height="112" rx="8"/>
-  <text class="label" x="860" y="80" text-anchor="middle">Return same frame</text>
-  <text class="metric" x="860" y="111" text-anchor="middle">65 ms p50</text>
-  <text class="small" x="860" y="137" text-anchor="middle">76 ms p95</text>
+  <path class="path" d="M856 160 V184 H600 V208" marker-end="url(#arrow-sage)"/>
+  <path class="decision" d="M600 208 L648 256 L600 304 L552 256 Z"/>
+  <text class="label" x="600" y="250" text-anchor="middle">Pixels</text>
+  <text class="label" x="600" y="271" text-anchor="middle">changed?</text>
+  <rect class="result" x="776" y="208" width="344" height="96" rx="8"/>
+  <text class="label" x="948" y="239" text-anchor="middle">Return the same verified frame</text>
+  <text class="metric" x="948" y="267" text-anchor="middle">65 ms p50</text>
+  <text class="small" x="948" y="291" text-anchor="middle">76 ms p95</text>
+  <line class="path" x1="648" y1="256" x2="776" y2="256" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label" x="712" y="234" text-anchor="middle">Changed</text>
 
-  <line class="path" x1="152" y1="104" x2="184" y2="104" marker-end="url(#arrow-sage)"/>
-  <line class="path" x1="296" y1="104" x2="328" y2="104" marker-end="url(#arrow-sage)"/>
-  <line class="path" x1="464" y1="104" x2="496" y2="104" marker-end="url(#arrow-sage)"/>
-  <line class="path" x1="624" y1="104" x2="656" y2="104" marker-end="url(#arrow-sage)"/>
-  <line class="path" x1="760" y1="104" x2="792" y2="104" marker-end="url(#arrow-sage)"/>
-
-  <path class="path-neutral" d="M708 160 V208 H396 V160" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="552" y="196" text-anchor="middle">Keep waiting</text>
-
-  <path class="path-neutral" d="M860 160 V248" marker-end="url(#arrow-neutral)"/>
-  <rect class="box" x="552" y="248" width="376" height="96" rx="8"/>
-  <text class="label" x="740" y="280" text-anchor="middle">Possible early stop</text>
-  <text class="small" x="740" y="308" text-anchor="middle">Blink, cursor, animation, repaint,</text>
-  <text class="small" x="740" y="328" text-anchor="middle">or intermediate paint</text>
-
-  <line class="path-neutral" x1="740" y1="344" x2="740" y2="376" marker-end="url(#arrow-neutral)"/>
-  <rect class="box" x="552" y="376" width="376" height="80" rx="8"/>
-  <text class="label" x="740" y="408" text-anchor="middle">Caller checks readiness</text>
-  <text class="small" x="740" y="434" text-anchor="middle">Workload predicate</text>
+  <path class="path-neutral" d="M552 256 H488 V184 H608 V160" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="504" y="234">Keep waiting</text>
+  <path class="path-neutral" d="M948 304 V336 H652 V368" marker-end="url(#arrow-neutral)"/>
+  <rect class="box" x="528" y="368" width="248" height="104" rx="8"/>
+  <text class="label" x="652" y="404" text-anchor="middle">Possible early stop</text>
+  <text class="small" x="652" y="432" text-anchor="middle">Blink, cursor, animation,</text>
+  <text class="small" x="652" y="452" text-anchor="middle">repaint, or intermediate paint</text>
+  <line class="path-neutral" x1="776" y1="420" x2="872" y2="420" marker-end="url(#arrow-neutral)"/>
+  <rect class="box" x="872" y="368" width="248" height="104" rx="8"/>
+  <text class="label" x="996" y="411" text-anchor="middle">Caller checks readiness</text>
+  <text class="small" x="996" y="441" text-anchor="middle">Workload predicate</text>
 </svg>

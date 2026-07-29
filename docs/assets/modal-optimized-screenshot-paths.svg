@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="384" viewBox="0 0 1152 384" role="img" aria-labelledby="title desc">
   <title id="title">Modal screenshot request path before and after optimization</title>
   <desc id="desc">Two aligned paths compare an external benchmark routed through an attested tunnel with a Modal Function in us-west-2 routed through Modal Connect. Both reach the same warm daemon and capture pipeline.</desc>
   <defs>
@@ -22,55 +22,57 @@
     <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
     <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
   </defs>
+  <rect class="bg" width="1152" height="384"/>
 
-  <rect class="bg" width="960" height="320"/>
+  <text class="row" x="32" y="36">Modal default</text>
+  <rect class="box" x="32" y="64" width="144" height="104" rx="8"/>
+  <text class="label" x="104" y="94" text-anchor="middle">External</text>
+  <text class="label" x="104" y="115" text-anchor="middle">benchmark</text>
+  <text class="small" x="104" y="143" text-anchor="middle">Outside Modal</text>
+  <rect class="box" x="268" y="64" width="144" height="104" rx="8"/>
+  <text class="label" x="340" y="109" text-anchor="middle">Attested</text>
+  <text class="label" x="340" y="130" text-anchor="middle">tunnel</text>
+  <rect class="box" x="504" y="64" width="144" height="104" rx="8"/>
+  <text class="label" x="576" y="121" text-anchor="middle">Warm daemon</text>
+  <rect class="box" x="740" y="64" width="144" height="104" rx="8"/>
+  <text class="label" x="812" y="109" text-anchor="middle">Capture and</text>
+  <text class="label" x="812" y="130" text-anchor="middle">encode</text>
+  <rect class="box" x="976" y="64" width="144" height="104" rx="8"/>
+  <text class="metric" x="1048" y="100" text-anchor="middle">230 ms</text>
+  <text class="small" x="1048" y="126" text-anchor="middle">p50</text>
+  <text class="small" x="1048" y="148" text-anchor="middle">1024×768 PNG</text>
+  <line class="path" x1="176" y1="116" x2="268" y2="116" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="222" y="94" text-anchor="middle">Request</text>
+  <line class="path" x1="412" y1="116" x2="504" y2="116" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="458" y="94" text-anchor="middle">Route</text>
+  <line class="path" x1="648" y1="116" x2="740" y2="116" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="694" y="94" text-anchor="middle">Capture</text>
+  <line class="path" x1="884" y1="116" x2="976" y2="116" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="930" y="94" text-anchor="middle">Return</text>
 
-  <text class="row" x="32" y="32">Modal default</text>
-  <rect class="box" x="32" y="48" width="140" height="88" rx="8"/>
-  <text class="label" x="102" y="77" text-anchor="middle">External</text>
-  <text class="label" x="102" y="98" text-anchor="middle">benchmark</text>
-  <text class="small" x="102" y="122" text-anchor="middle">Outside Modal</text>
-  <rect class="box" x="221" y="48" width="140" height="88" rx="8"/>
-  <text class="label" x="291" y="87" text-anchor="middle">Attested tunnel</text>
-  <rect class="box" x="410" y="48" width="140" height="88" rx="8"/>
-  <text class="label" x="480" y="87" text-anchor="middle">Warm daemon</text>
-  <rect class="box" x="599" y="48" width="140" height="88" rx="8"/>
-  <text class="label" x="669" y="80" text-anchor="middle">Capture and</text>
-  <text class="label" x="669" y="101" text-anchor="middle">encode</text>
-  <rect class="box" x="788" y="48" width="140" height="88" rx="8"/>
-  <text class="metric" x="858" y="84" text-anchor="middle">230 ms p50</text>
-  <text class="small" x="858" y="112" text-anchor="middle">1024×768 PNG</text>
-
-  <line class="path" x1="172" y1="92" x2="221" y2="92" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="196.5" y="76" text-anchor="middle">Request</text>
-  <line class="path" x1="361" y1="92" x2="410" y2="92" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="385.5" y="76" text-anchor="middle">Route</text>
-  <line class="path" x1="550" y1="92" x2="599" y2="92" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="574.5" y="76" text-anchor="middle">Capture</text>
-  <line class="path" x1="739" y1="92" x2="788" y2="92" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="763.5" y="76" text-anchor="middle">Return</text>
-
-  <text class="row-opt" x="32" y="184">Modal optimized</text>
-  <rect class="changed" x="32" y="200" width="140" height="88" rx="8"/>
-  <text class="label" x="102" y="232" text-anchor="middle">Modal Function</text>
-  <text class="small" x="102" y="260" text-anchor="middle">us-west-2</text>
-  <rect class="changed" x="221" y="200" width="140" height="88" rx="8"/>
-  <text class="label" x="291" y="239" text-anchor="middle">Modal Connect</text>
-  <rect class="box" x="410" y="200" width="140" height="88" rx="8"/>
-  <text class="label" x="480" y="239" text-anchor="middle">Warm daemon</text>
-  <rect class="box" x="599" y="200" width="140" height="88" rx="8"/>
-  <text class="label" x="669" y="232" text-anchor="middle">Capture and</text>
-  <text class="label" x="669" y="253" text-anchor="middle">encode</text>
-  <rect class="result" x="788" y="200" width="140" height="88" rx="8"/>
-  <text class="metric" x="858" y="236" text-anchor="middle">29 ms p50</text>
-  <text class="small" x="858" y="264" text-anchor="middle">1024×768 PNG</text>
-
-  <line class="path-opt" x1="172" y1="244" x2="221" y2="244" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="196.5" y="228" text-anchor="middle">Request</text>
-  <line class="path-opt" x1="361" y1="244" x2="410" y2="244" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="385.5" y="228" text-anchor="middle">Route</text>
-  <line class="path-opt" x1="550" y1="244" x2="599" y2="244" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="574.5" y="228" text-anchor="middle">Capture</text>
-  <line class="path-opt" x1="739" y1="244" x2="788" y2="244" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-opt" x="763.5" y="228" text-anchor="middle">Return</text>
+  <text class="row-opt" x="32" y="220">Modal optimized</text>
+  <rect class="changed" x="32" y="248" width="144" height="104" rx="8"/>
+  <text class="label" x="104" y="278" text-anchor="middle">Modal</text>
+  <text class="label" x="104" y="299" text-anchor="middle">Function</text>
+  <text class="small" x="104" y="327" text-anchor="middle">us-west-2</text>
+  <rect class="changed" x="268" y="248" width="144" height="104" rx="8"/>
+  <text class="label" x="340" y="293" text-anchor="middle">Modal</text>
+  <text class="label" x="340" y="314" text-anchor="middle">Connect</text>
+  <rect class="box" x="504" y="248" width="144" height="104" rx="8"/>
+  <text class="label" x="576" y="305" text-anchor="middle">Warm daemon</text>
+  <rect class="box" x="740" y="248" width="144" height="104" rx="8"/>
+  <text class="label" x="812" y="293" text-anchor="middle">Capture and</text>
+  <text class="label" x="812" y="314" text-anchor="middle">encode</text>
+  <rect class="result" x="976" y="248" width="144" height="104" rx="8"/>
+  <text class="metric" x="1048" y="284" text-anchor="middle">29 ms</text>
+  <text class="small" x="1048" y="310" text-anchor="middle">p50</text>
+  <text class="small" x="1048" y="332" text-anchor="middle">1024×768 PNG</text>
+  <line class="path-opt" x1="176" y1="300" x2="268" y2="300" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="222" y="278" text-anchor="middle">Request</text>
+  <line class="path-opt" x1="412" y1="300" x2="504" y2="300" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="458" y="278" text-anchor="middle">Route</text>
+  <line class="path-opt" x1="648" y1="300" x2="740" y2="300" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="694" y="278" text-anchor="middle">Capture</text>
+  <line class="path-opt" x1="884" y1="300" x2="976" y2="300" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="930" y="278" text-anchor="middle">Return</text>
 </svg>
