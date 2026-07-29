@@ -1,103 +1,74 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="376" viewBox="0 0 960 376" role="img" aria-labelledby="title desc">
-  <title id="title">Per-action xdotool setup versus one persistent X11 input connection</title>
-  <desc id="desc">The compatibility path launches an xdotool subprocess and opens a new connection to the X11 server for every action. The native path builds ordered events, enters a client-side session lock, queues XTest events through one persistent Xlib connection shared by mouse and keyboard, and synchronizes once for each nonempty emission to the same X11 server.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="368" viewBox="0 0 960 368" role="img" aria-labelledby="title desc">
+  <title id="title">Per-action X11 setup compared with a persistent Xlib session</title>
+  <desc id="desc">The default compatibility path starts xdotool and opens an X11 connection for each API action. The optimized path builds input events and reuses one Xlib session, locking once, queueing XTest events, and synchronizing once.</desc>
   <defs>
     <style>
       .bg { fill: #101411; }
-      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.25; }
-      .native { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
-      .step { fill: #101411; stroke: #91B89A; stroke-width: 1.15; }
-      .row,
-      .row-native,
-      .row-note,
-      .label,
-      .small,
-      .arrow-label,
-      .arrow-label-native {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-      }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.3; }
+      .changed { fill: #1C231D; stroke: #91B89A; stroke-width: 1.5; }
+      .primary { fill: #233528; stroke: #91B89A; stroke-width: 1.5; }
+      .row, .row-opt, .label, .small, .metric, .arrow-label, .arrow-label-opt { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
       .row { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
-      .row-native { fill: #AACCB0; font-size: 17px; font-weight: 700; }
-      .row-note { fill: #B9C2B8; font-size: 14px; font-weight: 500; }
-      .label { fill: #F1F4EF; font-size: 15px; font-weight: 600; }
+      .row-opt { fill: #AACCB0; font-size: 17px; font-weight: 700; }
+      .label { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
       .small { fill: #B9C2B8; font-size: 12px; }
+      .metric { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
       .arrow-label { fill: #B9C2B8; font-size: 12px; font-weight: 500; }
-      .arrow-label-native { fill: #AACCB0; font-size: 13px; font-weight: 500; }
-      .path { stroke: #8A948B; stroke-width: 1.5; }
-      .path-native { stroke: #91B89A; stroke-width: 1.8; }
-      .arrow { fill: #8A948B; }
-      .arrow-native { fill: #91B89A; }
+      .arrow-label-opt { fill: #AACCB0; font-size: 12px; font-weight: 500; }
+      .path { fill: none; stroke: #8A948B; stroke-width: 1.5; }
+      .path-opt { fill: none; stroke: #91B89A; stroke-width: 1.8; }
     </style>
+    <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
+    <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
   </defs>
 
-  <rect class="bg" width="960" height="376"/>
+  <rect class="bg" width="960" height="368"/>
 
-  <text class="row" x="32" y="32">Compatibility path</text>
-  <text class="row-note" x="188" y="32">(repeats setup)</text>
+  <text class="row" x="32" y="32">Per-action setup</text>
+  <rect class="box" x="32" y="48" width="140" height="112" rx="8"/>
+  <text class="label" x="102" y="110" text-anchor="middle">API action</text>
+  <rect class="box" x="221" y="48" width="140" height="112" rx="8"/>
+  <text class="label" x="291" y="110" text-anchor="middle">Start xdotool</text>
+  <rect class="box" x="410" y="48" width="140" height="112" rx="8"/>
+  <text class="label" x="480" y="98" text-anchor="middle">Open X11</text>
+  <text class="label" x="480" y="119" text-anchor="middle">connection</text>
+  <rect class="box" x="599" y="48" width="140" height="112" rx="8"/>
+  <text class="label" x="669" y="110" text-anchor="middle">X11 server</text>
+  <rect class="box" x="788" y="48" width="140" height="112" rx="8"/>
+  <text class="metric" x="858" y="98" text-anchor="middle">146 ms</text>
+  <text class="small" x="858" y="126" text-anchor="middle">Move + click</text>
 
-  <rect class="box" x="32" y="64" width="132" height="80" rx="8"/>
-  <text class="label" x="98" y="109" text-anchor="middle">API action</text>
+  <line class="path" x1="172" y1="104" x2="221" y2="104" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="196.5" y="88" text-anchor="middle">Launch</text>
+  <line class="path" x1="361" y1="104" x2="410" y2="104" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="385.5" y="88" text-anchor="middle">Open</text>
+  <line class="path" x1="550" y1="104" x2="599" y2="104" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="574.5" y="88" text-anchor="middle">Send input</text>
+  <line class="path" x1="739" y1="104" x2="788" y2="104" marker-end="url(#arrow-neutral)"/>
 
-  <rect class="box" x="212" y="64" width="288" height="80" rx="8"/>
-  <text class="label" x="356" y="96" text-anchor="middle">xdotool subprocess</text>
-  <text class="small" x="356" y="121" text-anchor="middle">start · open X11 · emit · exit</text>
+  <text class="row-opt" x="32" y="208">Persistent input session</text>
+  <rect class="box" x="32" y="224" width="140" height="112" rx="8"/>
+  <text class="label" x="102" y="286" text-anchor="middle">API action</text>
+  <rect class="changed" x="221" y="224" width="140" height="112" rx="8"/>
+  <text class="label" x="291" y="274" text-anchor="middle">Build input</text>
+  <text class="label" x="291" y="295" text-anchor="middle">events</text>
+  <rect class="primary" x="410" y="224" width="140" height="112" rx="8"/>
+  <text class="label" x="480" y="250" text-anchor="middle">Reuse Xlib session</text>
+  <text class="small" x="480" y="276" text-anchor="middle">Lock once</text>
+  <text class="small" x="480" y="296" text-anchor="middle">Queue XTest events</text>
+  <text class="small" x="480" y="316" text-anchor="middle">Sync once</text>
+  <rect class="box" x="599" y="224" width="140" height="112" rx="8"/>
+  <text class="label" x="669" y="286" text-anchor="middle">X11 server</text>
+  <rect class="primary" x="788" y="224" width="140" height="112" rx="8"/>
+  <text class="metric" x="858" y="274" text-anchor="middle">1.2 ms</text>
+  <text class="small" x="858" y="302" text-anchor="middle">Move + click</text>
 
-  <line class="path" x1="164" y1="104" x2="212" y2="104"/>
-  <path class="arrow" d="M 204 99 L 212 104 L 204 109 Z"/>
-  <text class="arrow-label" x="188" y="88" text-anchor="middle">launch</text>
-
-  <line class="path" x1="500" y1="104" x2="800" y2="104"/>
-  <path class="arrow" d="M 792 99 L 800 104 L 792 109 Z"/>
-  <text class="arrow-label" x="650" y="88" text-anchor="middle">new connection every action</text>
-
-  <text class="row-native" x="32" y="190">Native path</text>
-  <text class="row-note" x="132" y="190">(one daemon session)</text>
-
-  <rect class="box" x="32" y="216" width="144" height="128" rx="8"/>
-  <text class="label" x="104" y="263" text-anchor="middle">Repeated API</text>
-  <text class="label" x="104" y="284" text-anchor="middle">actions</text>
-  <text class="small" x="104" y="313" text-anchor="middle">click · type · scroll</text>
-
-  <rect class="box" x="224" y="216" width="144" height="128" rx="8"/>
-  <text class="label" x="296" y="263" text-anchor="middle">Build ordered</text>
-  <text class="label" x="296" y="284" text-anchor="middle">events</text>
-  <text class="small" x="296" y="313" text-anchor="middle">move → press → release</text>
-
-  <rect class="native" x="416" y="216" width="320" height="128" rx="8"/>
-  <text class="label" x="576" y="244" text-anchor="middle">Persistent Xlib connection</text>
-  <text class="small" x="576" y="264" text-anchor="middle">reused by mouse + keyboard</text>
-
-  <rect class="step" x="436" y="280" width="84" height="44" rx="8"/>
-  <text class="small" x="478" y="299" text-anchor="middle">Session</text>
-  <text class="small" x="478" y="315" text-anchor="middle">lock</text>
-
-  <rect class="step" x="548" y="280" width="92" height="44" rx="8"/>
-  <text class="small" x="594" y="299" text-anchor="middle">Queue XTest</text>
-  <text class="small" x="594" y="315" text-anchor="middle">events</text>
-
-  <rect class="step" x="668" y="280" width="56" height="44" rx="8"/>
-  <text class="small" x="696" y="299" text-anchor="middle">XSync</text>
-  <text class="small" x="696" y="315" text-anchor="middle">once</text>
-
-  <line class="path-native" x1="176" y1="280" x2="224" y2="280"/>
-  <path class="arrow-native" d="M 216 275 L 224 280 L 216 285 Z"/>
-
-  <line class="path-native" x1="368" y1="280" x2="416" y2="280"/>
-  <path class="arrow-native" d="M 408 275 L 416 280 L 408 285 Z"/>
-
-  <line class="path-native" x1="520" y1="302" x2="548" y2="302"/>
-  <path class="arrow-native" d="M 540 297 L 548 302 L 540 307 Z"/>
-
-  <line class="path-native" x1="640" y1="302" x2="668" y2="302"/>
-  <path class="arrow-native" d="M 660 297 L 668 302 L 660 307 Z"/>
-
-  <line class="path-native" x1="736" y1="280" x2="800" y2="280"/>
-  <path class="arrow-native" d="M 792 275 L 800 280 L 792 285 Z"/>
-  <text class="arrow-label-native" x="768" y="264" text-anchor="middle">Reuse</text>
-
-  <rect class="box" x="800" y="64" width="128" height="280" rx="8"/>
-  <text class="label" x="864" y="191" text-anchor="middle">X11 server</text>
-  <text class="small" x="864" y="216" text-anchor="middle">owns desktop input</text>
-
+  <line class="path-opt" x1="172" y1="280" x2="221" y2="280" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="196.5" y="264" text-anchor="middle">Prepare</text>
+  <line class="path-opt" x1="361" y1="280" x2="410" y2="280" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="385.5" y="264" text-anchor="middle">Reuse</text>
+  <line class="path-opt" x1="550" y1="280" x2="599" y2="280" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="574.5" y="264" text-anchor="middle">Send XTest</text>
+  <line class="path-opt" x1="739" y1="280" x2="788" y2="280" marker-end="url(#arrow-sage)"/>
 </svg>
