@@ -13,6 +13,7 @@ from modal_computer_use import cli
 from modal_computer_use.benchmark_comparison import run_provider_comparison
 from modal_computer_use.benchmarks import daemon_surface, measurement
 from modal_computer_use.benchmarks import lifecycle as benchmark_lifecycle
+from modal_computer_use.benchmarks.constants import DEFAULT_PROVIDER_COMPARISON_ITERATIONS
 from modal_computer_use.benchmarks.provider_comparison import (
     comparison,
     daytona,
@@ -97,6 +98,19 @@ def test_benchmark_compare_mock_local_outputs_json(capsys) -> None:
     assert "0123456789" not in captured.out
     assert '"text"' not in captured.out
     assert "Bearer" not in captured.out
+
+
+def test_benchmark_compare_defaults_to_publishable_sample_count(monkeypatch) -> None:
+    seen: dict[str, int] = {}
+
+    def fake_benchmark_compare(args) -> int:
+        seen["iterations"] = args.iterations
+        return 0
+
+    monkeypatch.setattr(cli, "_benchmark_compare", fake_benchmark_compare)
+
+    assert cli.main(["benchmark", "compare", "--mock-local"]) == 0
+    assert seen["iterations"] == DEFAULT_PROVIDER_COMPARISON_ITERATIONS == 30
 
 
 def test_adapter_providers_project_sdk_surfaces_to_provider_schema() -> None:

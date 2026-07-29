@@ -14,6 +14,7 @@ from .benchmark_comparison import (
 )
 from .benchmarks import (
     DEFAULT_COMPARE_PROVIDERS,
+    DEFAULT_PROVIDER_COMPARISON_ITERATIONS,
     DEFAULT_SDK_BENCHMARK_SURFACES,
     BenchmarkSurface,
     ComparisonProvider,
@@ -326,7 +327,15 @@ def main(argv: list[str] | None = None) -> int:
     _add_subprocess_backend_argument(compare_parser)
     compare_parser.add_argument("--image-profile", dest="image_profile")
     compare_parser.add_argument("--image-variant", dest="image_profile")
-    compare_parser.add_argument("--iterations", type=_positive_int, default=5)
+    compare_parser.add_argument(
+        "--iterations",
+        type=_positive_int,
+        default=DEFAULT_PROVIDER_COMPARISON_ITERATIONS,
+        help=(
+            "measured iterations per provider and case; "
+            f"defaults to {DEFAULT_PROVIDER_COMPARISON_ITERATIONS}"
+        ),
+    )
     compare_parser.add_argument("--output", type=Path)
     compare_parser.add_argument(
         "--modal-billing-reconcile",

@@ -36,6 +36,7 @@ DEFAULT_COMPARE_PROVIDERS: tuple[ComparisonProvider, ...] = (
     "anthropic",
     "generic",
 )
+DEFAULT_PROVIDER_COMPARISON_ITERATIONS = 30
 ACTION_BATCH_ACTIONS: list[dict[str, Any]] = [
     {"type": "move", "x": 10, "y": 10},
     {"type": "cursor_position"},

@@ -151,7 +151,7 @@ Do not commit the dotenv file. Do not print its contents.
 uv run computer-use benchmark compare \
   --create-modal-sandbox \
   --providers modal-daemon,daytona,e2b,tzafon \
-  --iterations 3 \
+  --iterations 30 \
   --env-file .env \
   --output benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json
 ```
@@ -225,7 +225,7 @@ uv run python scripts/sanitize_provider_benchmark.py \
   --raw-artifact-path benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json \
   --harness-commit "$evidence_harness_sha" \
   --status current_reference \
-  --scope "provider-default SDK paths, one warmup and three measured iterations"
+  --scope "provider-default SDK paths, one warmup and 30 measured iterations"
 ```
 
 Convert the two raw Modal artifacts into strictly allowlisted tracked inputs. This preserves the
