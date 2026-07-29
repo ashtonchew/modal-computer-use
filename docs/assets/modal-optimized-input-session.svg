@@ -4,10 +4,10 @@
   <desc id="desc">The compatibility path launches an xdotool subprocess and opens a new connection to the X11 server for every action. The native path builds ordered events, enters a client-side session lock, queues XTest events through one persistent Xlib connection shared by mouse and keyboard, and synchronizes once for each nonempty emission to the same X11 server.</desc>
   <defs>
     <style>
-      .bg { fill: #FAF8F2; }
-      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.25; }
-      .native { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
-      .step { fill: #FAF8F2; stroke: #66856B; stroke-width: 1.15; }
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.25; }
+      .native { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
+      .step { fill: #101411; stroke: #91B89A; stroke-width: 1.15; }
       .row,
       .row-native,
       .row-note,
@@ -17,17 +17,17 @@
       .arrow-label-native {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
-      .row { fill: #292C2F; font-size: 17px; font-weight: 700; }
-      .row-native { fill: #52705A; font-size: 17px; font-weight: 700; }
-      .row-note { fill: #626865; font-size: 14px; font-weight: 500; }
-      .label { fill: #292C2F; font-size: 15px; font-weight: 600; }
-      .small { fill: #626865; font-size: 12px; }
-      .arrow-label { fill: #626865; font-size: 12px; font-weight: 500; }
-      .arrow-label-native { fill: #52705A; font-size: 13px; font-weight: 500; }
-      .path { stroke: #9A9D99; stroke-width: 1.5; }
-      .path-native { stroke: #66856B; stroke-width: 1.8; }
-      .arrow { fill: #9A9D99; }
-      .arrow-native { fill: #66856B; }
+      .row { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
+      .row-native { fill: #AACCB0; font-size: 17px; font-weight: 700; }
+      .row-note { fill: #B9C2B8; font-size: 14px; font-weight: 500; }
+      .label { fill: #F1F4EF; font-size: 15px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 12px; }
+      .arrow-label { fill: #B9C2B8; font-size: 12px; font-weight: 500; }
+      .arrow-label-native { fill: #AACCB0; font-size: 13px; font-weight: 500; }
+      .path { stroke: #8A948B; stroke-width: 1.5; }
+      .path-native { stroke: #91B89A; stroke-width: 1.8; }
+      .arrow { fill: #8A948B; }
+      .arrow-native { fill: #91B89A; }
     </style>
   </defs>
 

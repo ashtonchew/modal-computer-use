@@ -4,19 +4,19 @@
   <desc id="desc">Create and connect starts a loop from the current screen to the model, an action request, the desktop, and back to an updated screen.</desc>
   <defs>
     <style>
-      .bg { fill: #FAF8F2; }
-      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.4; }
-      .stage { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.4; }
+      .stage { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
       .label,
       .small,
       .arrow-label {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
-      .label { fill: #292C2F; font-size: 16px; font-weight: 600; }
-      .small { fill: #626865; font-size: 13px; }
-      .arrow-label { fill: #626865; font-size: 13px; font-weight: 500; }
-      .path { stroke: #66856B; stroke-width: 1.8; }
-      .arrow { fill: #66856B; }
+      .label { fill: #F1F4EF; font-size: 16px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 13px; }
+      .arrow-label { fill: #B9C2B8; font-size: 13px; font-weight: 500; }
+      .path { stroke: #91B89A; stroke-width: 1.8; }
+      .arrow { fill: #91B89A; }
     </style>
   </defs>
 

@@ -4,10 +4,10 @@
   <desc id="desc">The daemon admits one request containing four ordered clicks, preflight-validates all four actions before input, and acquires the shared input lock once, waiting only if another input request holds it. The clicks execute in list order inside that lock and release it afterward. A runtime failure may still occur after preflight validation; by default execution stops before the next action, without rolling back clicks already completed. The caller observed 13.64 milliseconds p50 for four clicks in one request. No optimized four-separate-request counterfactual was measured.</desc>
   <defs>
     <style>
-      .bg { fill: #FAF8F2; }
-      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.3; }
-      .stage { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
-      .enclosure { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.5; }
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.3; }
+      .stage { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
+      .enclosure { fill: #233528; stroke: #91B89A; stroke-width: 1.5; }
       .label,
       .small,
       .section,
@@ -15,13 +15,13 @@
       .arrow-label {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
-      .label { fill: #292C2F; font-size: 16px; font-weight: 600; }
-      .small { fill: #626865; font-size: 14px; }
-      .section { fill: #292C2F; font-size: 18px; font-weight: 700; }
-      .metric { fill: #292C2F; font-size: 21px; font-weight: 700; }
-      .arrow-label { fill: #626865; font-size: 14px; font-weight: 500; }
-      .path { fill: none; stroke: #66856B; stroke-width: 1.8; stroke-linejoin: round; }
-      .arrow { fill: #66856B; }
+      .label { fill: #F1F4EF; font-size: 16px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 14px; }
+      .section { fill: #F1F4EF; font-size: 18px; font-weight: 700; }
+      .metric { fill: #F1F4EF; font-size: 21px; font-weight: 700; }
+      .arrow-label { fill: #B9C2B8; font-size: 14px; font-weight: 500; }
+      .path { fill: none; stroke: #91B89A; stroke-width: 1.8; stroke-linejoin: round; }
+      .arrow { fill: #91B89A; }
     </style>
   </defs>
 

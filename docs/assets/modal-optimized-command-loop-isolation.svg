@@ -4,11 +4,11 @@
   <desc id="desc">Before isolation, the Uvicorn request event loop owns the subprocess transport, pipe reads, wait, and cleanup. After isolation, Uvicorn performs bounded admission and exchanges work and results across a thread-safe bridge with a persistent SelectorEventLoop on a private daemon thread, which owns that lifecycle. In both designs, the child remains a separate operating system process outside either event loop and thread.</desc>
   <defs>
     <style>
-      .bg { fill: #FAF8F2; }
-      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.25; }
-      .owned { fill: #FAF8F2; stroke: #A9AAA6; stroke-width: 1.15; }
-      .isolated { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.4; }
-      .isolated-inner { fill: #FAF8F2; stroke: #66856B; stroke-width: 1.15; }
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.25; }
+      .owned { fill: #101411; stroke: #657066; stroke-width: 1.15; }
+      .isolated { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
+      .isolated-inner { fill: #101411; stroke: #91B89A; stroke-width: 1.15; }
       .row,
       .row-after,
       .row-note,
@@ -20,19 +20,19 @@
       .arrow-label-after {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
-      .row { fill: #292C2F; font-size: 17px; font-weight: 700; }
-      .row-after { fill: #52705A; font-size: 17px; font-weight: 700; }
-      .row-note { fill: #626865; font-size: 14px; font-weight: 500; }
-      .boundary-label { fill: #292C2F; font-size: 14px; font-weight: 600; }
-      .loop-label { fill: #292C2F; font-size: 14px; font-weight: 600; }
-      .label { fill: #292C2F; font-size: 15px; font-weight: 600; }
-      .small { fill: #626865; font-size: 13px; }
-      .arrow-label { fill: #626865; font-size: 13px; font-weight: 500; }
-      .arrow-label-after { fill: #52705A; font-size: 13px; font-weight: 500; }
-      .path { stroke: #9A9D99; stroke-width: 1.5; }
-      .path-after { stroke: #66856B; stroke-width: 1.8; }
-      .arrow { fill: #9A9D99; }
-      .arrow-after { fill: #66856B; }
+      .row { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
+      .row-after { fill: #AACCB0; font-size: 17px; font-weight: 700; }
+      .row-note { fill: #B9C2B8; font-size: 14px; font-weight: 500; }
+      .boundary-label { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
+      .loop-label { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
+      .label { fill: #F1F4EF; font-size: 15px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 13px; }
+      .arrow-label { fill: #B9C2B8; font-size: 13px; font-weight: 500; }
+      .arrow-label-after { fill: #AACCB0; font-size: 13px; font-weight: 500; }
+      .path { stroke: #8A948B; stroke-width: 1.5; }
+      .path-after { stroke: #91B89A; stroke-width: 1.8; }
+      .arrow { fill: #8A948B; }
+      .arrow-after { fill: #91B89A; }
     </style>
   </defs>
 

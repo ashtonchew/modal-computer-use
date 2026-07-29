@@ -37,14 +37,19 @@ def render() -> None:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark">
   <title>{html.escape(title)}</title>
   <style>
     :root {{
-      --ink: #111;
-      --muted: #555;
-      --rule: #d8d8d8;
-      --code-bg: #f5f5f5;
+      color-scheme: dark;
+      --bg: oklch(16% 0.012 145);
+      --surface: oklch(22% 0.014 145);
+      --ink: oklch(92% 0.012 145);
+      --heading: oklch(96% 0.01 145);
+      --muted: oklch(78% 0.018 145);
+      --rule: oklch(49% 0.018 145);
+      --link: oklch(82% 0.07 145);
+      --link-visited: oklch(72% 0.04 145);
     }}
 
     * {{ box-sizing: border-box; }}
@@ -53,7 +58,7 @@ def render() -> None:
 
     body {{
       margin: 0;
-      background: #fff;
+      background: var(--bg);
       color: var(--ink);
       font-family: Georgia, "Times New Roman", Times, serif;
       line-height: 1.58;
@@ -67,6 +72,7 @@ def render() -> None:
     }}
 
     h1, h2, h3 {{
+      color: var(--heading);
       line-height: 1.18;
       text-wrap: balance;
     }}
@@ -100,8 +106,8 @@ def render() -> None:
       line-height: 1.45;
     }}
 
-    a {{ color: #0000ee; }}
-    a:visited {{ color: #551a8b; }}
+    a {{ color: var(--link); }}
+    a:visited {{ color: var(--link-visited); }}
 
     img {{
       display: block;
@@ -125,14 +131,14 @@ def render() -> None:
 
     code {{
       padding: 0.08em 0.28em;
-      background: var(--code-bg);
+      background: var(--surface);
       font: 0.86em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }}
 
     pre {{
       overflow-x: auto;
       padding: 1rem;
-      background: var(--code-bg);
+      background: var(--surface);
       line-height: 1.45;
     }}
 
@@ -165,7 +171,7 @@ def render() -> None:
     th:first-child, td:first-child {{
       position: sticky;
       left: 0;
-      background: #fff;
+      background: var(--bg);
       text-align: left;
       white-space: normal;
     }}

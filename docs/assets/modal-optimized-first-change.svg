@@ -4,10 +4,10 @@
   <desc id="desc">Before one action, the detector records baseline pixel hash A and arms its watcher. An XDamage hint or poll timer triggers a source-resolution capture and comparison with hash A. An unchanged capture loops back until the deadline. A changed capture returns that same verified first changed frame. The end-to-end result measured 65 milliseconds p50 and 76 milliseconds p95, without retaining which trigger produced the check. Incidental or intermediate paints can stop detection, so the caller still checks a workload predicate for next-step readiness.</desc>
   <defs>
     <style>
-      .bg { fill: #FAF8F2; }
-      .box { fill: #F0EEE8; stroke: #A9AAA6; stroke-width: 1.4; }
-      .result { fill: #E9F0E7; stroke: #66856B; stroke-width: 1.6; }
-      .decision { fill: #F0EEE8; stroke: #66856B; stroke-width: 1.6; }
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.4; }
+      .result { fill: #233528; stroke: #91B89A; stroke-width: 1.6; }
+      .decision { fill: #1C231D; stroke: #91B89A; stroke-width: 1.6; }
       .label,
       .small,
       .metric,
@@ -15,16 +15,16 @@
       .arrow-label {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
-      .label { fill: #292C2F; font-size: 16px; font-weight: 600; }
-      .small { fill: #626865; font-size: 13px; }
-      .metric { fill: #292C2F; font-size: 18px; font-weight: 700; }
-      .annotation-label { fill: #292C2F; font-size: 15px; font-weight: 600; }
-      .arrow-label { fill: #626865; font-size: 13px; font-weight: 500; }
-      .path { fill: none; stroke: #66856B; stroke-width: 2; stroke-linejoin: round; }
-      .path-neutral { fill: none; stroke: #7F8581; stroke-width: 1.8; stroke-linejoin: round; }
-      .path-dashed { fill: none; stroke: #7F8581; stroke-width: 1.8; stroke-dasharray: 6 6; }
-      .arrow { fill: #66856B; }
-      .arrow-neutral { fill: #7F8581; }
+      .label { fill: #F1F4EF; font-size: 16px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 13px; }
+      .metric { fill: #F1F4EF; font-size: 18px; font-weight: 700; }
+      .annotation-label { fill: #F1F4EF; font-size: 15px; font-weight: 600; }
+      .arrow-label { fill: #B9C2B8; font-size: 13px; font-weight: 500; }
+      .path { fill: none; stroke: #91B89A; stroke-width: 2; stroke-linejoin: round; }
+      .path-neutral { fill: none; stroke: #8A948B; stroke-width: 1.8; stroke-linejoin: round; }
+      .path-dashed { fill: none; stroke: #8A948B; stroke-width: 1.8; stroke-dasharray: 6 6; }
+      .arrow { fill: #91B89A; }
+      .arrow-neutral { fill: #8A948B; }
     </style>
   </defs>
 
