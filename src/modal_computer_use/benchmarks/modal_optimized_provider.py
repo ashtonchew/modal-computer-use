@@ -6,7 +6,7 @@ import re
 import statistics
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from ..config import (
     ActionConfig,
@@ -27,6 +27,7 @@ from .provenance import benchmark_provenance
 from .surfaces import run_sdk_surface_benchmark
 
 PRODUCT_CREATE_CASE = "product_create_to_first_screenshot"
+OPTIMIZED_MODAL_INGRESS: Final[Literal["attested-tunnel"]] = "attested-tunnel"
 WARM_CASES = (
     "screenshot_full",
     "coordinate_click",
@@ -185,7 +186,7 @@ def run_modal_optimized_provider_benchmark(
         "runner_invocations": 1,
         "runner_startup_in_product_create_boundary": False,
         "modal_region": config.region,
-        "modal_ingress": "connect",
+        "modal_ingress": OPTIMIZED_MODAL_INGRESS,
         "daemon_http_version": "1.1",
         "browser": config.browser,
         "browser_prewarm": False,
@@ -270,12 +271,12 @@ def run_modal_optimized_provider_in_runner(
             base_url=warm_target.client.base_url,
             environment_metadata={
                 "modal_region": config.region,
-                "modal_ingress": "connect",
+                "modal_ingress": OPTIMIZED_MODAL_INGRESS,
                 "daemon_http_version": "1.1",
                 "browser": config.browser,
                 "input_rate_limit_per_sec": 0,
                 "subprocess_backend": "isolated-asyncio",
-                "modal_runner_path": "connect",
+                "modal_runner_path": OPTIMIZED_MODAL_INGRESS,
             },
             typing_method="keystrokes",
             typing_delay_ms=0,
@@ -439,7 +440,7 @@ def _computer_config(config: ModalOptimizedProviderConfig, *, run_id: str) -> Co
         browser=BrowserConfig(kind=config.browser, prewarm=False),
         actions=ActionConfig(input_rate_limit_per_sec=0),
         run_id=run_id,
-        ingress="connect",
+        ingress=OPTIMIZED_MODAL_INGRESS,
     )
 
 

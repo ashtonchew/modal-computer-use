@@ -154,7 +154,9 @@ uv run computer-use benchmark modal-optimized-provider \
 
 This command runs one warmup and 30 fresh create-to-validated-screenshot samples, then uses a
 separate warm target for the six operation rows. It fails unless every required sample, placement
-check, and cleanup gate passes. The resources are billable.
+check, and cleanup gate passes. Both target phases use the SDK's default attested-tunnel ingress:
+Modal Connect authorizes the daemon before recurring requests move to the encrypted tunnel. The
+resources are billable.
 
 First-visual-change measurements are experimental. They confirm a changed frame by its hash under
 the documented boundary. They do not measure application settle or semantic readiness. Read the
