@@ -1081,7 +1081,7 @@ report `unsupported` or `failed` verification while retaining primitive timing o
 `failed` readback makes both the provider and top-level comparison status fail; `unsupported` remains
 explicit without invalidating timings.
 
-Provider lifecycle comparisons use one warmup plus three independent measured
+Provider lifecycle comparisons use one warmup plus 30 independent measured
 `product_create_to_first_screenshot` resources per provider. Cleanup occurs after each timing sample
 and is excluded from that sample. For Modal, only the final measured sandbox is retained for warm
 cases; all other lifecycle resources are terminated and detached first. The deprecated
@@ -1138,7 +1138,7 @@ uv run python scripts/sanitize_provider_benchmark.py \
   --raw-artifact-path benchmark-results/candidates/provider-compare-live.json \
   --harness-commit "$(git rev-parse HEAD)" \
   --status current_reference \
-  --scope "provider-default SDK paths at 1024x768, three measured iterations"
+  --scope "provider-default SDK paths at 1024x768, 30 measured iterations"
 ```
 
 Add `--check` when the raw artifact is available in review to fail on drift. The generator strips ephemeral ingress and Modal
