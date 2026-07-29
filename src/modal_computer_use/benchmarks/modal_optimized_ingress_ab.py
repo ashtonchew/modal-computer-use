@@ -77,6 +77,7 @@ _UNSAFE_KEYS = {
     "token",
     "typed_text",
 }
+_UNSAFE_KEY_SUFFIXES = tuple(f"_{key}" for key in _UNSAFE_KEYS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -775,10 +776,8 @@ def _safe_failures(value: Any, default_phase: str) -> list[dict[str, Any]]:
 def _validate_safe_value(value: Any, *, path: tuple[str, ...] = ()) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
-            normalized = str(key).lower()
-            if normalized in _UNSAFE_KEYS or any(
-                part in normalized for part in ("credential", "password", "private_key")
-            ):
+            normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", str(key)).lower().replace("-", "_")
+            if normalized in _UNSAFE_KEYS or normalized.endswith(_UNSAFE_KEY_SUFFIXES):
                 field_path = ".".join((*path, str(key)))
                 raise ValueError(f"unsafe field in benchmark artifact: {field_path}")
             _validate_safe_value(item, path=(*path, str(key)))

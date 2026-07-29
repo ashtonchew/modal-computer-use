@@ -958,8 +958,9 @@ Both runs completed without failures. Connect authorization took 236.98 ms in th
 227.71 ms in the confirmation; these one-time setup measurements stayed outside the recurring
 samples. The first recurring geometric p50 score favored the tunnel by 1.24%. The confirmation
 favored Connect by 0.02%. Neither run reached the predeclared 10% improvement threshold, and the
-composite ordering reversed. The result is inconclusive, so the optimized provider benchmark keeps
-Connect. The general SDK default remains attested tunnel.
+composite ordering reversed. The result is inconclusive. The optimized provider benchmark therefore
+uses the general SDK's attested-tunnel default instead of maintaining a separate ingress policy.
+This is a product-consistency decision; the A/B does not establish a performance winner.
 
 The zero-byte floor was descriptive and did not choose the winner. The full-screenshot timer also
 included in-memory frame validation after receiving the PNG, which gives this A/B a stricter boundary

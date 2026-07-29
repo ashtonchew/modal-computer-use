@@ -32,7 +32,7 @@ Those runs changed caller placement and ingress together. A separate Connect-onl
 
 I ran both ingress paths from one Function to one warm target. They used the same image, resources, daemon, payloads, and persistent HTTP/1.1 clients. Both requested `us-west-2` and reported the same cloud and region. I alternated their order across 30 samples per arm. Connect authorization finished before tunnel warmup and took 237 ms, then 228 ms on confirmation, outside the recurring samples.
 
-The first run favored the tunnel by 1.24% across the recurring p50s. Confirmation favored Connect by 0.02%. Screenshots and actions differed by less than 1 ms p50 in both runs, and every request succeeded. Neither run cleared the 10% selection threshold, so I kept Connect.
+The initial run favored the tunnel by 1.24%; confirmation favored Connect by 0.02%. Every request succeeded, and neither cleared the 10% gate. I standardized on attested tunnel, matching the general SDK: Connect mints a short-lived daemon token once, then recurring calls use the encrypted tunnel.
 
 The tunnel led the zero-byte floor by 0.9 ms, then 0.3 ms. That probe did not select the winner. The screenshot A/B continued through in-memory frame validation, so its 84 to 87 ms results have a different boundary from the 29 ms provider row.
 

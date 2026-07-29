@@ -32,12 +32,12 @@ def _config(*, iterations: int = 30, warmup_iterations: int = 1, pilot: bool = F
     )
 
 
-def test_optimized_provider_keeps_connect_after_inconclusive_ingress_ab() -> None:
+def test_optimized_provider_uses_attested_tunnel_after_inconclusive_ingress_ab() -> None:
     config = _config()
     computer_config = _computer_config(config, run_id="safe-test-run")
 
-    assert OPTIMIZED_MODAL_INGRESS == "connect"
-    assert computer_config.ingress == "connect"
+    assert OPTIMIZED_MODAL_INGRESS == "attested-tunnel"
+    assert computer_config.ingress == "attested-tunnel"
 
 
 def _warm_surface(iterations: int) -> dict[str, object]:

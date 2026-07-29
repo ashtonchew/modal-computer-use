@@ -344,6 +344,11 @@ def test_cli_requires_publishable_counts_and_writes_only_under_ignored_results(
     [
         {"base_url": "https://secret.invalid"},
         {"token": "secret"},
+        {"connect_token": "secret"},
+        {"tunnelToken": "secret"},
+        {"daemon-secret": "secret"},
+        {"modalResourceId": "sb-1"},
+        {"initialScreenshotBytes": "bytes"},
         {"sandbox_id": "sb-1"},
         {"screenshot_bytes": "bytes"},
         {"typed_text": "secret"},
@@ -378,10 +383,11 @@ def test_tracked_ingress_evidence_contains_only_two_aggregate_runs() -> None:
     assert payload["experiment"]["target_sandboxes_per_run"] == 1
     assert payload["decision"] == {
         "outcome": "inconclusive",
-        "optimized_modal_default": "connect",
+        "optimized_modal_default": "attested-tunnel",
         "reason": (
-            "Neither run cleared the predeclared winner gate, and the composite "
-            "ordering reversed in the confirmation."
+            "Neither run cleared the predeclared winner gate, so the optimized path "
+            "uses the general SDK default instead of maintaining a separate ingress "
+            "policy."
         ),
         "zero_byte_floor_used_for_selection": False,
     }

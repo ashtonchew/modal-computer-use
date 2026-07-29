@@ -3,8 +3,8 @@
   "date": "2026-07-29",
   "decision": {
     "outcome": "inconclusive",
-    "optimized_modal_default": "connect",
-    "reason": "Neither run cleared the predeclared winner gate, and the composite ordering reversed in the confirmation.",
+    "optimized_modal_default": "attested-tunnel",
+    "reason": "Neither run cleared the predeclared winner gate, so the optimized path uses the general SDK default instead of maintaining a separate ingress policy.",
     "zero_byte_floor_used_for_selection": false
   },
   "experiment": {
