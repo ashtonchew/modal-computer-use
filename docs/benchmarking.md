@@ -170,6 +170,11 @@ separate Modal-optimized arm receives repository optimizations, including explic
 typing with zero delay. Keep provider-default and Modal-optimized columns separate because their
 caller topology, configuration, and sample count differ.
 
+The E2B benchmark target uses a one-hour session lifetime so the 30-sample warm matrix can finish.
+This changes how long the benchmark desktop remains available, not the public screenshot, input,
+or command methods inside the timer. The SDK's five-minute default expires during repeated
+1,000-character typing calls and leaves later command and verification rows on a dead session.
+
 ## Retain and publish artifacts
 
 `benchmark-results/` contains ignored raw output, candidates, preregistrations, rejected runs, and
