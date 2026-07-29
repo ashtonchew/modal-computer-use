@@ -78,6 +78,7 @@ def _warm_surface(iterations: int) -> dict[str, object]:
 def test_runner_uses_fresh_targets_and_times_through_validated_frame() -> None:
     events: list[str] = []
     created: list[object] = []
+    created_ingresses: list[str] = []
     ticks = iter(float(value) for value in range(200))
     warm_surface_kwargs: dict[str, object] = {}
 
@@ -108,6 +109,7 @@ def test_runner_uses_fresh_targets_and_times_through_validated_frame() -> None:
         events.append(f"create:{len(created)}")
         computer = Computer(len(created))
         created.append(computer)
+        created_ingresses.append(kwargs["config"].ingress)
         assert kwargs["wait"] is True
         return computer
 
@@ -136,6 +138,11 @@ def test_runner_uses_fresh_targets_and_times_through_validated_frame() -> None:
     assert events.index("create:0") < events.index("frame:0") < events.index("placement:0")
     assert events.index("placement:0") < events.index("terminate:0") < events.index("detach:0")
     assert lifecycle["samples_ms"] == [1000.0] * 30
+    assert set(created_ingresses) == {"attested-tunnel"}
+    assert warm_surface_kwargs["environment_metadata"]["modal_ingress"] == "attested-tunnel"
+    assert warm_surface_kwargs["environment_metadata"]["modal_runner_path"] == (
+        "attested-tunnel"
+    )
     assert warm_surface_kwargs["typing_method"] == "keystrokes"
     assert warm_surface_kwargs["typing_delay_ms"] == 0
     assert set(result["surfaces"]["daemon-http"]["cases"]) == {
@@ -291,6 +298,7 @@ def test_outer_benchmark_dispatches_once_and_pilot_is_ineligible() -> None:
 
     assert dispatches == 1
     assert result["eligibility"] == "pilot_ineligible"
+    assert result["metadata"]["modal_ingress"] == "attested-tunnel"
     assert result["runner_dispatch"]["included_in_product_create_samples"] is False
     validate_modal_optimized_provider_artifact(result, require_publishable=False)
 
