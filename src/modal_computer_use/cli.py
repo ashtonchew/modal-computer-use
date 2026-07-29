@@ -27,6 +27,12 @@ from .benchmarks.billing import modal_billing_reconciliation_request
 from .benchmarks.costs import estimate_surface_cost
 from .benchmarks.lifecycle import CleanupError, measure_create_to_first_observation
 from .benchmarks.mock_local import _with_mock_local_client
+from .benchmarks.modal_action_batch_ab import (
+    ModalActionBatchABConfig,
+    run_modal_action_batch_ab,
+    validate_modal_action_batch_ab_artifact,
+    validate_modal_action_batch_output_path,
+)
 from .benchmarks.modal_colocated_client import (
     DEFAULT_MODAL_COLOCATED_RUNNER_PATHS,
     DEFAULT_MODAL_COLOCATED_SURFACES,
@@ -116,6 +122,12 @@ def main(argv: list[str] | None = None) -> int:
     action_batch_mode.add_argument("--mock-local", action="store_true")
     action_batch_parser.add_argument("--token")
     action_batch_parser.add_argument("--iterations", type=_positive_int, default=5)
+    action_batch_parser.add_argument("--warmup-iterations", type=_nonnegative_int, default=1)
+    action_batch_parser.add_argument(
+        "--four-click-only",
+        action="store_true",
+        help="run only the four-click batched versus sequential A/B cases",
+    )
     action_batch_parser.add_argument("--json", action="store_true", default=True)
 
     report_parser = benchmark_subparsers.add_parser("report")
@@ -608,6 +620,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     optimized_provider_parser.add_argument("--output", type=Path)
 
+    action_batch_ab_parser = benchmark_subparsers.add_parser("modal-action-batching-ab")
+    action_batch_ab_parser.add_argument("--modal-region", required=True)
+    action_batch_ab_parser.add_argument("--image-revision", required=True)
+    action_batch_ab_parser.add_argument("--modal-cpu", type=float, default=4.0)
+    action_batch_ab_parser.add_argument("--modal-memory-mib", type=int, default=8192)
+    action_batch_ab_parser.add_argument("--iterations", type=_positive_int, default=30)
+    action_batch_ab_parser.add_argument("--warmup-iterations", type=_nonnegative_int, default=1)
+    action_batch_ab_parser.add_argument(
+        "--pilot",
+        action="store_true",
+        help="allow nonpublishable sample counts for a canary run",
+    )
+    action_batch_ab_parser.add_argument("--output", type=Path, required=True)
+
     args = parser.parse_args(argv)
     if args.command == "benchmark" and args.benchmark_command == "report":
         if args.mock_local and args.include_sandbox_exec:
@@ -746,6 +772,8 @@ def main(argv: list[str] | None = None) -> int:
                 "and 1 warmup"
             )
         return _benchmark_modal_optimized_provider(args)
+    if args.benchmark_command == "modal-action-batching-ab":
+        return _benchmark_modal_action_batch_ab(args)
     return _benchmark_report(args)
 
 
@@ -786,6 +814,29 @@ def _benchmark_modal_optimized_provider(args: argparse.Namespace) -> int:
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result.get("ok") else 1
+
+
+def _benchmark_modal_action_batch_ab(args: argparse.Namespace) -> int:
+    try:
+        validate_modal_action_batch_output_path(args.output)
+        config = ModalActionBatchABConfig(
+            region=args.modal_region,
+            image_revision=args.image_revision,
+            cpu=args.modal_cpu,
+            memory_mib=args.modal_memory_mib,
+            iterations=args.iterations,
+            warmup_iterations=args.warmup_iterations,
+            pilot=args.pilot,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    result = run_modal_action_batch_ab(config)
+    validate_modal_action_batch_ab_artifact(result, require_publishable=not args.pilot)
+    output = _json_string(result)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(f"{output}\n", encoding="utf-8")
     print(output)
     return 0 if result.get("ok") else 1
 
@@ -831,7 +882,15 @@ def _trace_replay_target(args: argparse.Namespace) -> ComputerSandbox:
 
 def _benchmark_action_batch(args: argparse.Namespace) -> int:
     if args.mock_local:
-        result = run_action_batch_benchmark_mock_local(iterations=args.iterations)
+        if args.warmup_iterations == 1 and not args.four_click_only:
+            result = run_action_batch_benchmark_mock_local(iterations=args.iterations)
+        else:
+            result = run_action_batch_benchmark_mock_local(
+                iterations=args.iterations,
+                warmup_iterations=args.warmup_iterations,
+                include_legacy_cases=not args.four_click_only,
+                include_four_click_cases=args.four_click_only,
+            )
     else:
         client = DaemonClient(args.base_url, token=args.token)
         try:
@@ -840,6 +899,9 @@ def _benchmark_action_batch(args: argparse.Namespace) -> int:
                 mode="http",
                 iterations=args.iterations,
                 base_url=args.base_url,
+                warmup_iterations=args.warmup_iterations,
+                include_legacy_cases=not args.four_click_only,
+                include_four_click_cases=args.four_click_only,
             )
         finally:
             client.close()
