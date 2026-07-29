@@ -41,6 +41,12 @@ from .benchmarks.modal_colocated_client import (
     ModalColocatedClientBenchmarkConfig,
     run_modal_colocated_client_benchmark,
 )
+from .benchmarks.modal_optimized_ingress_ab import (
+    ModalOptimizedIngressABConfig,
+    run_modal_optimized_ingress_ab,
+    validate_modal_optimized_ingress_ab_artifact,
+    validate_modal_optimized_ingress_ab_output_path,
+)
 from .benchmarks.modal_optimized_provider import (
     ModalOptimizedProviderConfig,
     run_modal_optimized_provider_benchmark,
@@ -620,6 +626,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     optimized_provider_parser.add_argument("--output", type=Path)
 
+    optimized_ingress_ab_parser = benchmark_subparsers.add_parser(
+        "modal-optimized-ingress-ab"
+    )
+    optimized_ingress_ab_parser.add_argument("--modal-region", required=True)
+    optimized_ingress_ab_parser.add_argument("--image-revision", required=True)
+    optimized_ingress_ab_parser.add_argument("--modal-cpu", type=float, default=4.0)
+    optimized_ingress_ab_parser.add_argument("--modal-memory-mib", type=int, default=8192)
+    optimized_ingress_ab_parser.add_argument(
+        "--browser", choices=["chromium"], default="chromium"
+    )
+    optimized_ingress_ab_parser.add_argument("--iterations", type=_positive_int, default=30)
+    optimized_ingress_ab_parser.add_argument(
+        "--warmup-iterations", type=_nonnegative_int, default=2
+    )
+    optimized_ingress_ab_parser.add_argument(
+        "--pilot",
+        action="store_true",
+        help="allow nonpublishable sample counts for a canary run",
+    )
+    optimized_ingress_ab_parser.add_argument("--output", type=Path, required=True)
+
     action_batch_ab_parser = benchmark_subparsers.add_parser("modal-action-batching-ab")
     action_batch_ab_parser.add_argument("--modal-region", required=True)
     action_batch_ab_parser.add_argument("--image-revision", required=True)
@@ -772,6 +799,13 @@ def main(argv: list[str] | None = None) -> int:
                 "and 1 warmup"
             )
         return _benchmark_modal_optimized_provider(args)
+    if args.benchmark_command == "modal-optimized-ingress-ab":
+        if not args.pilot and (args.iterations != 30 or args.warmup_iterations != 2):
+            optimized_ingress_ab_parser.error(
+                "nonpublishable counts require --pilot; publishable runs use 30 measured "
+                "and 2 warmups per arm"
+            )
+        return _benchmark_modal_optimized_ingress_ab(args)
     if args.benchmark_command == "modal-action-batching-ab":
         return _benchmark_modal_action_batch_ab(args)
     return _benchmark_report(args)
@@ -814,6 +848,33 @@ def _benchmark_modal_optimized_provider(args: argparse.Namespace) -> int:
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(f"{output}\n", encoding="utf-8")
+    print(output)
+    return 0 if result.get("ok") else 1
+
+
+def _benchmark_modal_optimized_ingress_ab(args: argparse.Namespace) -> int:
+    try:
+        validate_modal_optimized_ingress_ab_output_path(args.output)
+        config = ModalOptimizedIngressABConfig(
+            region=args.modal_region,
+            image_revision=args.image_revision,
+            cpu=args.modal_cpu,
+            memory_mib=args.modal_memory_mib,
+            browser=args.browser,
+            iterations=args.iterations,
+            warmup_iterations=args.warmup_iterations,
+            pilot=args.pilot,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    result = run_modal_optimized_ingress_ab(config)
+    validate_modal_optimized_ingress_ab_artifact(
+        result,
+        require_publishable=not args.pilot,
+    )
+    output = _json_string(result)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(f"{output}\n", encoding="utf-8")
     print(output)
     return 0 if result.get("ok") else 1
 

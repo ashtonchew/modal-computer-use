@@ -744,8 +744,8 @@ Modal-created sandboxes support three ingress modes:
 - `attested-tunnel` (default): bootstrap through a Modal Connect Token, mint a short-lived daemon
   bearer token with `/v1/session/tunnel-authorize`, then send hot primitive calls through the
   encrypted Modal tunnel on port `8080`.
-- `connect`: keep every daemon request on the Modal Connect-token URL; use this when Modal
-  verified-user metadata on every request matters more than primitive latency.
+- `connect`: keep every daemon request on the Modal Connect-token URL so each request carries
+  Modal verified-user metadata.
 - `tunnel`: expose daemon port `8080` and use a static per-sandbox daemon bearer token. This is the
   lowest-level mode and should be reserved for trusted benchmark harnesses.
 
@@ -933,6 +933,39 @@ reference and its non-contemporaneous caveat, is in
 [the 2026-07-18 provider benchmark results](archive/benchmarks/benchmark-results-2026-07-18-provider-default.md#modal-optimized-configuration).
 The compact machine-readable record is
 [`benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json`](../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json).
+
+### Controlled optimized-ingress A/B, 2026-07-29
+
+The optimized provider run had moved the benchmark caller and changed ingress at the same time. A
+separate A/B held caller placement fixed: one Modal Function and one target Sandbox requested
+`us-west-2`, reported matching cloud and region placement, used the same image and 4 CPU / 8192 MiB
+resource requests, and reused one persistent HTTP/1.1 client per arm. Connect authorization
+completed before attested-tunnel warmup. Each case alternated Connect/tunnel and tunnel/Connect
+order over two warmups plus 30 measured samples per arm.
+
+| Run | Case | Connect p50 / p95 | Attested tunnel p50 / p95 | Tunnel p50 delta |
+| --- | --- | ---: | ---: | ---: |
+| Initial | 0-byte transport floor | 47.30 / 48.24 ms | 46.39 / 47.38 ms | -1.91% |
+| Initial | Full 1024x768 PNG | 86.64 / 91.98 ms | 86.30 / 91.84 ms | -0.39% |
+| Initial | One move-and-click | 48.83 / 49.73 ms | 47.95 / 48.56 ms | -1.81% |
+| Initial | Four ordered clicks | 53.60 / 57.44 ms | 52.79 / 59.27 ms | -1.51% |
+| Confirmation | 0-byte transport floor | 46.82 / 47.26 ms | 46.56 / 47.29 ms | -0.56% |
+| Confirmation | Full 1024x768 PNG | 84.26 / 87.61 ms | 83.79 / 90.92 ms | -0.55% |
+| Confirmation | One move-and-click | 49.30 / 51.32 ms | 49.60 / 53.65 ms | +0.61% |
+| Confirmation | Four ordered clicks | 53.09 / 58.86 ms | 53.09 / 56.12 ms | +0.01% |
+
+Both runs completed without failures. Connect authorization took 236.98 ms in the initial run and
+227.71 ms in the confirmation; these one-time setup measurements stayed outside the recurring
+samples. The first recurring geometric p50 score favored the tunnel by 1.24%. The confirmation
+favored Connect by 0.02%. Neither run reached the predeclared 10% improvement threshold, and the
+composite ordering reversed. The result is inconclusive. The optimized provider benchmark therefore
+uses the general SDK's attested-tunnel default instead of maintaining a separate ingress policy.
+This is a product-consistency decision; the A/B does not establish a performance winner.
+
+The zero-byte floor was descriptive and did not choose the winner. The full-screenshot timer also
+included in-memory frame validation after receiving the PNG, which gives this A/B a stricter boundary
+than the provider-operation screenshot row. The sanitized aggregate record is
+[`benchmark-data/modal-optimized-ingress-ab-2026-07-29.json`](../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json).
 
 The observation-inclusive metric remains a different boundary. A fresh 30/30 valid run whose
 runner and target used the same requested Modal region

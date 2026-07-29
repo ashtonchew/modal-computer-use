@@ -1,0 +1,155 @@
+{
+  "benchmark": "sanitized-modal-optimized-ingress-ab",
+  "date": "2026-07-29",
+  "decision": {
+    "outcome": "inconclusive",
+    "optimized_modal_default": "attested-tunnel",
+    "reason": "Neither run cleared the predeclared winner gate, so the optimized path uses the general SDK default instead of maintaining a separate ingress policy.",
+    "zero_byte_floor_used_for_selection": false
+  },
+  "experiment": {
+    "arms": [
+      "connect",
+      "attested-tunnel"
+    ],
+    "caller": "one Modal Function",
+    "connection_reuse": "one persistent HTTP/1.1 client per arm",
+    "connect_authorization": "completed before attested-tunnel warmup",
+    "image_revision": "1d1b3eed13c8a2cb58b9330f26f726e5dcefe652",
+    "iterations_per_arm": 30,
+    "observed_placement_match": true,
+    "order": "alternating paired rounds: connect/tunnel, tunnel/connect",
+    "region": "us-west-2",
+    "replacement_samples": 0,
+    "runner_invocations_per_run": 1,
+    "target_sandboxes_per_run": 1,
+    "warmup_iterations_per_arm": 2
+  },
+  "gate": {
+    "maximum_losing_case_regression_percent": 5.0,
+    "minimum_recurring_case_wins": 2,
+    "minimum_recurring_score_improvement_percent": 10.0,
+    "recurring_cases": [
+      "screenshot_full_png",
+      "move_and_click",
+      "ordered_four_click_batch"
+    ]
+  },
+  "runs": [
+    {
+      "cases": {
+        "move_and_click": {
+          "attested_tunnel": {
+            "p50_ms": 47.945737,
+            "p95_ms": 48.562377
+          },
+          "attested_vs_connect_percent": -1.806813,
+          "connect": {
+            "p50_ms": 48.827967,
+            "p95_ms": 49.727134
+          }
+        },
+        "ordered_four_click_batch": {
+          "attested_tunnel": {
+            "p50_ms": 52.792901,
+            "p95_ms": 59.272857
+          },
+          "attested_vs_connect_percent": -1.512566,
+          "connect": {
+            "p50_ms": 53.603691,
+            "p95_ms": 57.437237
+          }
+        },
+        "screenshot_full_png": {
+          "attested_tunnel": {
+            "p50_ms": 86.301524,
+            "p95_ms": 91.83535
+          },
+          "attested_vs_connect_percent": -0.391502,
+          "connect": {
+            "p50_ms": 86.640724,
+            "p95_ms": 91.975318
+          }
+        },
+        "transport_floor_0b": {
+          "attested_tunnel": {
+            "p50_ms": 46.391847,
+            "p95_ms": 47.384244
+          },
+          "attested_vs_connect_percent": -1.91325,
+          "connect": {
+            "p50_ms": 47.296752,
+            "p95_ms": 48.243417
+          }
+        }
+      },
+      "connect_setup_ms": 236.979811,
+      "failures": 0,
+      "recurring_score": {
+        "attested_tunnel_ms": 60.225627,
+        "connect_ms": 60.981084,
+        "leading_arm": "attested-tunnel",
+        "leading_arm_improvement_percent": 1.238838
+      },
+      "run": "initial"
+    },
+    {
+      "cases": {
+        "move_and_click": {
+          "attested_tunnel": {
+            "p50_ms": 49.599403,
+            "p95_ms": 53.654879
+          },
+          "attested_vs_connect_percent": 0.605947,
+          "connect": {
+            "p50_ms": 49.300667,
+            "p95_ms": 51.319318
+          }
+        },
+        "ordered_four_click_batch": {
+          "attested_tunnel": {
+            "p50_ms": 53.094605,
+            "p95_ms": 56.124135
+          },
+          "attested_vs_connect_percent": 0.008592,
+          "connect": {
+            "p50_ms": 53.090043,
+            "p95_ms": 58.856917
+          }
+        },
+        "screenshot_full_png": {
+          "attested_tunnel": {
+            "p50_ms": 83.794384,
+            "p95_ms": 90.921652
+          },
+          "attested_vs_connect_percent": -0.554417,
+          "connect": {
+            "p50_ms": 84.261544,
+            "p95_ms": 87.614373
+          }
+        },
+        "transport_floor_0b": {
+          "attested_tunnel": {
+            "p50_ms": 46.562426,
+            "p95_ms": 47.28996
+          },
+          "attested_vs_connect_percent": -0.560073,
+          "connect": {
+            "p50_ms": 46.824678,
+            "p95_ms": 47.25943
+          }
+        }
+      },
+      "connect_setup_ms": 227.70817,
+      "failures": 0,
+      "recurring_score": {
+        "attested_tunnel_ms": 60.429256,
+        "connect_ms": 60.417826,
+        "leading_arm": "connect",
+        "leading_arm_improvement_percent": 0.018915
+      },
+      "run": "confirmation"
+    }
+  ],
+  "schema_version": 1
+}

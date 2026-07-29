@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from modal_computer_use.benchmarks.modal_optimized_provider import (
+    OPTIMIZED_MODAL_INGRESS,
     ModalOptimizedProviderConfig,
+    _computer_config,
     _safe_warm_surfaces,
     run_modal_optimized_provider_benchmark,
     run_modal_optimized_provider_in_runner,
@@ -28,6 +30,14 @@ def _config(*, iterations: int = 30, warmup_iterations: int = 1, pilot: bool = F
         warmup_iterations=warmup_iterations,
         pilot=pilot,
     )
+
+
+def test_optimized_provider_uses_attested_tunnel_after_inconclusive_ingress_ab() -> None:
+    config = _config()
+    computer_config = _computer_config(config, run_id="safe-test-run")
+
+    assert OPTIMIZED_MODAL_INGRESS == "attested-tunnel"
+    assert computer_config.ingress == "attested-tunnel"
 
 
 def _warm_surface(iterations: int) -> dict[str, object]:
