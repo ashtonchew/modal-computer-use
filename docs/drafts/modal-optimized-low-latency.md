@@ -91,7 +91,7 @@ Clipboard writes use `xclip`, a command-line program that must stay alive becaus
 
 The generic subprocess helper gave `xclip` captured stdout and stderr pipes. Its long-lived selection owner inherited those pipes, leaving `communicate()` waiting for EOF after the clipboard had already changed. The helper never used that output, so I redirected both streams to `DEVNULL`. A long-lived helper cannot keep ownership of pipes that belong to one request. Direct XTest typing bypasses this clipboard path.
 
-## The optimized warm path stayed below 64 ms
+## Modal optimized was up to 650x faster than provider defaults
 
 I ran each warm operation 30 times. Only the Modal optimized path was tuned. The remaining columns show the provider defaults exercised by the harness. Each ratio divides the provider p50 by the Modal optimized p50.
 
