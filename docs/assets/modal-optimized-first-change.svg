@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="504" viewBox="0 0 1152 504" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="576" viewBox="0 0 1152 576" role="img" aria-labelledby="title desc">
   <title id="title">Pixel change is a wake signal, not an application-readiness test</title>
   <desc id="desc">The detector records a baseline hash, runs an action, waits for an XDamage signal or poll, captures a new frame, and returns that same frame when its pixels differ. Blinks, cursors, animation, repaints, or intermediate frames can stop the detector early, so the caller still checks a workload-specific readiness predicate.</desc>
   <defs>
@@ -20,7 +20,7 @@
     <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
     <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
   </defs>
-  <rect class="bg" width="1152" height="504"/>
+  <rect class="bg" width="1152" height="576"/>
   <text class="group" x="32" y="36">Detect the first changed frame</text>
 
   <rect class="box" x="32" y="64" width="160" height="96" rx="8"/>
@@ -38,26 +38,26 @@
   <line class="path" x1="440" y1="112" x2="528" y2="112" marker-end="url(#arrow-sage)"/>
   <line class="path" x1="688" y1="112" x2="776" y2="112" marker-end="url(#arrow-sage)"/>
 
-  <path class="path" d="M856 160 V184 H608 V200" marker-end="url(#arrow-sage)"/>
-  <path class="decision" d="M608 200 L664 256 L608 312 L552 256 Z"/>
-  <text class="label" x="608" y="250" text-anchor="middle">Pixels</text>
-  <text class="label" x="608" y="272" text-anchor="middle">changed?</text>
-  <rect class="result" x="776" y="200" width="344" height="112" rx="8"/>
-  <text class="label" x="948" y="239" text-anchor="middle">Return the same verified frame</text>
-  <text class="metric" x="948" y="267" text-anchor="middle">65 ms p50</text>
-  <text class="small" x="948" y="291" text-anchor="middle">76 ms p95</text>
-  <line class="path" x1="664" y1="256" x2="776" y2="256" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label" x="720" y="234" text-anchor="middle">Changed</text>
+  <path class="path" d="M856 160 V200 H608 V240" marker-end="url(#arrow-sage)"/>
+  <path class="decision" d="M608 240 L664 296 L608 352 L552 296 Z"/>
+  <text class="label" x="608" y="290" text-anchor="middle">Pixels</text>
+  <text class="label" x="608" y="312" text-anchor="middle">changed?</text>
+  <rect class="result" x="776" y="240" width="344" height="112" rx="8"/>
+  <text class="label" x="948" y="279" text-anchor="middle">Return the same verified frame</text>
+  <text class="metric" x="948" y="307" text-anchor="middle">65 ms p50</text>
+  <text class="small" x="948" y="331" text-anchor="middle">76 ms p95</text>
+  <line class="path" x1="664" y1="296" x2="776" y2="296" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label" x="720" y="276" text-anchor="middle">Changed</text>
 
-  <path class="path-neutral" d="M552 256 H448 V184 H568 V160" marker-end="url(#arrow-neutral)"/>
-  <text class="arrow-label" x="500" y="234" text-anchor="middle">Keep waiting</text>
-  <path class="path-neutral" d="M948 312 V336 H652 V368" marker-end="url(#arrow-neutral)"/>
-  <rect class="box" x="528" y="368" width="248" height="104" rx="8"/>
-  <text class="label" x="652" y="404" text-anchor="middle">Possible early stop</text>
-  <text class="small" x="652" y="432" text-anchor="middle">Blink, cursor, animation,</text>
-  <text class="small" x="652" y="452" text-anchor="middle">repaint, or intermediate paint</text>
-  <line class="path-neutral" x1="776" y1="420" x2="872" y2="420" marker-end="url(#arrow-neutral)"/>
-  <rect class="box" x="872" y="368" width="248" height="104" rx="8"/>
-  <text class="label" x="996" y="411" text-anchor="middle">Caller checks readiness</text>
-  <text class="small" x="996" y="441" text-anchor="middle">Workload predicate</text>
+  <path class="path-neutral" d="M552 296 H448 V200 H568 V160" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="500" y="276" text-anchor="middle">Keep waiting</text>
+  <path class="path-neutral" d="M948 352 V392 H652 V432" marker-end="url(#arrow-neutral)"/>
+  <rect class="box" x="528" y="432" width="248" height="104" rx="8"/>
+  <text class="label" x="652" y="468" text-anchor="middle">Possible early stop</text>
+  <text class="small" x="652" y="496" text-anchor="middle">Blink, cursor, animation,</text>
+  <text class="small" x="652" y="516" text-anchor="middle">repaint, or intermediate paint</text>
+  <line class="path-neutral" x1="776" y1="484" x2="872" y2="484" marker-end="url(#arrow-neutral)"/>
+  <rect class="box" x="872" y="432" width="248" height="104" rx="8"/>
+  <text class="label" x="996" y="475" text-anchor="middle">Caller checks readiness</text>
+  <text class="small" x="996" y="505" text-anchor="middle">Workload predicate</text>
 </svg>
