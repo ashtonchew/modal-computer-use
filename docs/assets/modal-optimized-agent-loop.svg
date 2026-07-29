@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="340" viewBox="0 0 860 340" role="img" aria-labelledby="title desc">
-  <title id="title">Session setup feeds the repeated computer-use loop</title>
-  <desc id="desc">Create and connect starts a loop from screenshot to model to UI actions to computer and back to an updated screenshot.</desc>
+  <title id="title">Session setup feeds the computer-use loop</title>
+  <desc id="desc">Create and connect starts a loop from the current screen to the model, an action request, the desktop, and back to an updated screen.</desc>
   <defs>
     <style>
       .bg { fill: #FAF8F2; }
@@ -30,31 +30,37 @@
   <text class="arrow-label" x="138" y="137">Start session</text>
 
   <rect class="box" x="65" y="165" width="120" height="80" rx="8"/>
-  <text class="label" x="125" y="211" text-anchor="middle">Screenshot</text>
+  <text class="label" x="125" y="201" text-anchor="middle">
+    <tspan x="125" dy="0">Current</tspan>
+    <tspan x="125" dy="20">screen</tspan>
+  </text>
 
   <rect class="box" x="285" y="165" width="100" height="80" rx="8"/>
   <text class="label" x="335" y="211" text-anchor="middle">Model</text>
 
   <rect class="box" x="485" y="165" width="120" height="80" rx="8"/>
-  <text class="label" x="545" y="211" text-anchor="middle">UI actions</text>
+  <text class="label" x="545" y="201" text-anchor="middle">
+    <tspan x="545" dy="0">Action</tspan>
+    <tspan x="545" dy="20">request</tspan>
+  </text>
 
   <rect class="box" x="705" y="165" width="120" height="80" rx="8"/>
-  <text class="label" x="765" y="211" text-anchor="middle">Computer</text>
+  <text class="label" x="765" y="211" text-anchor="middle">Desktop</text>
 
   <line class="path" x1="185" y1="205" x2="276" y2="205"/>
   <path class="arrow" d="M 276 200 L 285 205 L 276 210 Z"/>
   <text class="arrow-label" x="235" y="179" text-anchor="middle">
     <tspan x="235" dy="0">Send</tspan>
-    <tspan x="235" dy="15">screenshot</tspan>
+    <tspan x="235" dy="15">screen</tspan>
   </text>
 
   <line class="path" x1="385" y1="205" x2="476" y2="205"/>
   <path class="arrow" d="M 476 200 L 485 205 L 476 210 Z"/>
-  <text class="arrow-label" x="435" y="190" text-anchor="middle">Generate</text>
+  <text class="arrow-label" x="435" y="190" text-anchor="middle">Choose</text>
 
   <line class="path" x1="605" y1="205" x2="696" y2="205"/>
   <path class="arrow" d="M 696 200 L 705 205 L 696 210 Z"/>
-  <text class="arrow-label" x="655" y="190" text-anchor="middle">Execute</text>
+  <text class="arrow-label" x="655" y="190" text-anchor="middle">Send</text>
 
   <line class="path" x1="765" y1="245" x2="765" y2="305"/>
   <line class="path" x1="765" y1="305" x2="125" y2="305"/>

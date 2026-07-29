@@ -38,7 +38,7 @@
   <text class="row" x="24" y="32">Modal default</text>
   <text class="row-note" x="140" y="32">(before)</text>
 
-  <rect class="box" x="24" y="48" width="112" height="104" rx="8"/>
+  <rect class="box" x="16" y="48" width="128" height="104" rx="8"/>
   <text class="label" x="80" y="86" text-anchor="middle">External client</text>
   <text class="small" x="80" y="112" text-anchor="middle">Benchmark process</text>
   <text class="small" x="80" y="128" text-anchor="middle">outside Modal</text>
@@ -56,17 +56,17 @@
   <text class="label" x="584" y="116" text-anchor="middle">encode</text>
 
   <rect class="result-before" x="704" y="48" width="132" height="104" rx="8"/>
-  <text class="small" x="770" y="76" text-anchor="middle">1024×768 PNG</text>
-  <text class="metric" x="770" y="108" text-anchor="middle">126.86 ms</text>
-  <text class="small" x="770" y="132" text-anchor="middle">median · n=3</text>
+  <text class="metric" x="770" y="91" text-anchor="middle">229.94 ms</text>
+  <text class="small" x="770" y="116" text-anchor="middle">1024×768 PNG</text>
+  <text class="small" x="770" y="136" text-anchor="middle">p50 · n=30</text>
 
-  <line class="path-before" x1="136" y1="100" x2="200" y2="100"/>
+  <line class="path-before" x1="144" y1="100" x2="200" y2="100"/>
   <path class="arrow-before" d="M 192 95 L 200 100 L 192 105 Z"/>
-  <text class="arrow-label" x="168" y="86" text-anchor="middle">Request</text>
+  <text class="arrow-label" x="172" y="86" text-anchor="middle">Send</text>
 
   <line class="path-before" x1="304" y1="100" x2="368" y2="100"/>
   <path class="arrow-before" d="M 360 95 L 368 100 L 360 105 Z"/>
-  <text class="arrow-label" x="336" y="86" text-anchor="middle">Route</text>
+  <text class="arrow-label" x="336" y="86" text-anchor="middle">Forward</text>
 
   <line class="path-before" x1="464" y1="100" x2="528" y2="100"/>
   <path class="arrow-before" d="M 520 95 L 528 100 L 520 105 Z"/>
@@ -79,11 +79,11 @@
   <text class="row-after" x="24" y="204">Modal optimized</text>
   <text class="row-note" x="164" y="204">(after)</text>
 
-  <rect class="box" x="24" y="220" width="112" height="104" rx="8"/>
+  <rect class="box" x="16" y="220" width="128" height="104" rx="8"/>
   <text class="label" x="80" y="250" text-anchor="middle">Modal Function</text>
   <text class="label" x="80" y="270" text-anchor="middle">client</text>
-  <text class="small" x="80" y="296" text-anchor="middle">Region requested</text>
-  <text class="small" x="80" y="312" text-anchor="middle">to match target</text>
+  <text class="small" x="80" y="296" text-anchor="middle">Target's region</text>
+  <text class="small" x="80" y="312" text-anchor="middle">requested here too</text>
 
   <rect class="box" x="200" y="232" width="104" height="80" rx="8"/>
   <text class="label" x="252" y="278" text-anchor="middle">Connect</text>
@@ -97,17 +97,17 @@
   <text class="label" x="584" y="288" text-anchor="middle">encode</text>
 
   <rect class="result-after" x="704" y="220" width="132" height="104" rx="8"/>
-  <text class="small" x="770" y="248" text-anchor="middle">1024×768 PNG</text>
-  <text class="metric" x="770" y="280" text-anchor="middle">32.42 ms</text>
-  <text class="small" x="770" y="304" text-anchor="middle">median · n=30</text>
+  <text class="metric" x="770" y="263" text-anchor="middle">28.69 ms</text>
+  <text class="small" x="770" y="288" text-anchor="middle">1024×768 PNG</text>
+  <text class="small" x="770" y="308" text-anchor="middle">p50 · n=30</text>
 
-  <line class="path-after" x1="136" y1="272" x2="200" y2="272"/>
+  <line class="path-after" x1="144" y1="272" x2="200" y2="272"/>
   <path class="arrow-after" d="M 192 267 L 200 272 L 192 277 Z"/>
-  <text class="arrow-label-after" x="168" y="258" text-anchor="middle">Request</text>
+  <text class="arrow-label-after" x="172" y="258" text-anchor="middle">Send</text>
 
   <line class="path-after" x1="304" y1="272" x2="368" y2="272"/>
   <path class="arrow-after" d="M 360 267 L 368 272 L 360 277 Z"/>
-  <text class="arrow-label-after" x="336" y="258" text-anchor="middle">Route</text>
+  <text class="arrow-label-after" x="336" y="258" text-anchor="middle">Forward</text>
 
   <line class="path-after" x1="464" y1="272" x2="528" y2="272"/>
   <path class="arrow-after" d="M 520 267 L 528 272 L 520 277 Z"/>
