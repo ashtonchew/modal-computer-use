@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "artifact_status": "current_reference",
+  "benchmark": "modal-action-batching-ab",
+  "date": "2026-07-29",
+  "source_revision": "ab1f403179d92256d417f2d07d73b72004a77fa4",
+  "raw_artifact": {
+    "tracked": false,
+    "sha256": "4d90aee6e271d0ccb3857de736238cd05320f61d10a09cc729d1696f2b4bb497"
+  },
+  "eligibility": "publishable",
+  "iterations": 30,
+  "warmup_iterations": 1,
+  "retries": 0,
+  "replacement_samples": 0,
+  "logical_action_count": 4,
+  "fixed_action_order": true,
+  "timer_boundary": "before first SDK call through validation of final response",
+  "input_backend": "xtest",
+  "transport_http_version": "HTTP/1.1",
+  "placement": {
+    "requested_region": "us-west-2",
+    "runner_target_observed_match": true
+  },
+  "cases": {
+    "one_ordered_request": {
+      "sdk_calls": 1,
+      "transport_requests": 1,
+      "p50_ms": 11.542820500000772,
+      "p95_ms": 15.355705600001006
+    },
+    "four_sequential_requests": {
+      "sdk_calls": 4,
+      "transport_requests": 4,
+      "p50_ms": 26.837644000000438,
+      "p95_ms": 33.646062900000196
+    }
+  },
+  "comparison": {
+    "metric": "p50",
+    "batch_faster": true,
+    "speedup": 2.325050796726731,
+    "delta_ms": 15.294823499999666
+  },
+  "cleanup": {
+    "target_succeeded": true,
+    "terminal_sweep_succeeded": true,
+    "remaining_sandboxes": 0
+  }
+}
