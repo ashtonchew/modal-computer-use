@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>How I got computer-use clicks under 10 ms on Modal</title>
+  <title>How I built 10 ms computer-use clicks on Modal</title>
   <style>
     :root {
       color-scheme: dark;
@@ -84,16 +84,17 @@
     }
 
     p:has(> img:only-child) {
-      width: min(960px, calc(100vw - 2rem));
+      width: min(1280px, calc(100vw - 2rem));
       margin: 2rem 50%;
       overflow-x: auto;
       transform: translateX(-50%);
     }
 
     p:has(> img:only-child) img {
-      width: 960px;
+      width: auto;
+      min-width: 1152px;
       max-width: none;
-      margin: 0;
+      margin: 0 auto;
     }
 
     code {
@@ -157,56 +158,66 @@
       main { width: auto; max-width: none; padding: 0; }
       a, a:visited { color: var(--ink); }
       p:has(> img:only-child) { width: auto; margin: 2rem 0; transform: none; }
-      p:has(> img:only-child) img { width: 100%; max-width: 100%; }
+      p:has(> img:only-child) img { width: 100%; min-width: 0; max-width: 100%; }
       img { break-inside: avoid; }
     }
   </style>
 </head>
 <body>
   <main>
-    <h1>How I got computer-use clicks under 10 ms on Modal</h1>
-<p><em>A computer-use agent can wait on screenshots and input hundreds of times. I shortened that path and kept the desktop machinery alive between calls.</em></p>
-<p>E2B Desktop and Daytona Computer Use put a Linux desktop behind an API in a few lines. Their APIs were quick to build with, but returning a screenshot and sending the next click still kept the agent waiting for hundreds of milliseconds on their default paths.</p>
-<p>The infrastructure around a basic computer-use turn makes two calls: return the current screen, then click the point the model chose. Together, those calls take about 423 ms on E2B default and 481 ms on Daytona default. The computer-use primitives I built on Modal do the same work in about 38 ms.</p>
-<p>Across 50 turns, my Modal primitives finish that interface work in under 2 seconds. E2B's default path takes about 21 seconds and Daytona's takes about 24. As agents take on longer tasks, they pay that infrastructure wait on every turn.</p>
-<p><a href="https://openai.com/index/previewing-gpt-5-6-sol/">OpenAI says its limited Cerebras preview of GPT-5.6 Sol can generate up to 750 tokens per second</a>. At that speed, the computer can become slower than the model using it. Longer computer-use tasks also consume more model and tool time. Every repeated interface wait pushes the final result farther out.</p>
-<p>I started thinking about this while using RustDesk, an <a href="https://rustdesk.com/docs/en/self-host/">open-source remote desktop system</a>. When a remote desktop lagged, the useful question was where the delay entered the path between moving my mouse and seeing the next frame. Capture, encoding, relays, process startup, and connection setup all shaped that response. RustDesk taught me that control latency belongs to the full route between user and desktop. As models got faster, I kept wondering why cloud computers for agents still felt so far away.</p>
-<p>I chose Modal because I needed control over both ends of that route. E2B and Daytona expose useful computer-use APIs and customizable environments. Modal let me define the Function caller and Sandbox target in the same Python system, build the desktop Image, request a region for both, wait for readiness, and reach the daemon through authenticated Connect. I could change caller placement and the daemon's hot path together without first building a scheduler or cloud control plane.</p>
-<p>The architecture starts with one split: create and connect once, then repeat the screen, model, and action loop for every turn.</p>
+    <h1>How I built 10 ms computer-use clicks on Modal</h1>
+<p><em>The tuned warm path returns a full 1024x768 PNG in 29 ms and sends one click in 10 ms.</em></p>
+<p>The first computer-use interface I built on Modal exposed the delay immediately. Looking at the screen and sending one click took about 550 ms on untuned Modal. The E2B and Daytona defaults I tested took about 420 ms and 480 ms.</p>
+<p>A screenshot-and-click pair is one observation and one action: return the current frame, then send one click. A few hundred milliseconds is easy to ignore once. At those warm rates, fifty pairs add roughly 20 to 28 seconds of primitive time. The same arithmetic comes in under 2 seconds for the primitives I built on Modal.</p>
+<p><a href="https://openai.com/index/previewing-gpt-5-6-sol/">OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second</a>. At that speed, the computer can become slower than the model using it. Long computer-use trajectories are useful because they let an agent complete whole workflows. They already consume model and tool time at each step, and every infrastructure wait delays the person waiting for the result.</p>
+<p>That bottleneck reminded me of RustDesk, an <a href="https://rustdesk.com/docs/en/self-host/">open-source remote desktop system</a>. Its rendezvous server handles discovery, then traffic takes a direct path when possible or falls back to a relay. What stuck with me was the separation between connection setup and the path used for every frame and input event. A computer-use agent has the same recurring exchange: pixels go out, an action comes back, and the cycle continues for the life of the session. I started looking for work that Modal repeated inside that loop.</p>
+<p>E2B and Daytona expose ready-made APIs for screenshots, mouse input, typing, and commands. Both also let developers customize the environment through templates or snapshots. In this benchmark, I left their documented screenshot and input paths at provider defaults.</p>
+<p>Modal let me define the desktop, its computer-use server, and the benchmark caller in one Python project. An Image describes the desktop packages and files, and Modal starts it inside an isolated Sandbox. A small FastAPI daemon in that Sandbox owns screenshots, input, and commands.</p>
+<p>For the benchmark client, I used a Modal Function, Python code running in an autoscaled container. The Function sent HTTP requests to the daemon through Modal Connect, its authenticated connection to a Sandbox. I could change the caller, the route, and the code touching the desktop together.</p>
 <p><img src="../assets/modal-optimized-agent-loop.svg" alt="Creation is separate from the repeated computer-use loop" /></p>
-<h2>Create once, then optimize every turn</h2>
-<p>A computer-use session has two time scales. Creation provisions a sandbox, starts the desktop and daemon, establishes authenticated access, and validates the first frame. The agent then enters an observe, reason, act loop. Creation happens once. Screenshots, clicks, typing, and commands can happen hundreds of times.</p>
-<p>That distinction set my priority. Startup matters, especially for short tasks, but repeated latency compounds with every turn. I optimized the warm path first and kept creation as a separate metric.</p>
-<p>I kept the measurement boundary outside the primitive. A warm timer begins before the public SDK or daemon request and ends after the caller validates the result. It includes routing, authentication, request handling, execution, and response transfer. Internal timings help locate work, but the user waits for the complete call.</p>
-<h2>Screenshots: shorten the route and keep capture alive</h2>
-<p>I shortened the request route by running the benchmark client in a Modal Function and requesting the target Sandbox's region for that Function. Requests still went through Modal Connect. The runner and target reported the same cloud and region. The evidence records placement at that granularity; it does not identify availability zone, host, network path, or loopback.</p>
-<p>Inside the target, one FastAPI/Uvicorn daemon owns the session's desktop state. It keeps display connections, capture state, input state, and the command runner ready. A hot click can reuse the existing display and input state.</p>
-<p>The default row starts with my benchmark client outside Modal and reaches the daemon through an attested tunnel. The optimized row starts with a Modal Function in the target's requested region and reaches the same warm daemon through Connect. Each latency number covers the complete request at the caller.</p>
+<p>Creation happens once. I create the Sandbox, start the desktop, and validate its first frame. The agent then repeats screenshots, clicks, typing, and commands. Those warm operations determine how responsive a running agent feels.</p>
+<h2>A 29 ms screenshot starts with a shorter route</h2>
+<p>The default Modal setup ran the benchmark client outside Modal and reached the warm daemon through an attested HTTP tunnel. Returning a full 1024x768 PNG took 230 ms p50.</p>
+<p>An earlier three-sample diagnostic put median daemon capture and PNG encoding at about 23 ms, median end-to-end time at 127 ms, and the separately summarized remainder at 104 ms. Because those summaries came from separate samples, their medians cannot be added or used to isolate network time. Capture still accounted for only part of the delay.</p>
+<p>I moved the benchmark client into a Modal Function and requested <code>us-west-2</code> for both the Function and target Sandbox. Connect still carried the request between them.</p>
 <p><img src="../assets/modal-optimized-screenshot-paths.svg" alt="Default and optimized Modal screenshot request paths" /></p>
-<p>Keeping the Function and Sandbox warm changes the cost shape. Modal bills both for the time their resources are allocated. The active tunnel has no separate charge. The optimized path adds a Function runner, and an idle warm session continues to accrue duration. Total cost depends on how quickly the task finishes and how long those resources sit idle. Resource-normalized bills and token usage remain unmeasured here.</p>
-<p>X11 is the desktop server that owns the pixels and input. MSS is a capture client, and the daemon keeps one MSS session open. On Linux, MSS prefers XShm, which transfers local pixels through shared memory, and can fall back to XGetImage. The daemon encodes the MSS capture in memory, avoiding a helper subprocess and the temporary-file write, read, and delete cycle; conversion paths also avoid file decode and re-encode. If MSS cannot open or grab after one reset and retry, the compatibility path uses <code>scrot</code>, then <code>maim</code>, and temporary-file work.</p>
-<p>A July 26 Modal default run also reported MSS. It spent about 23 ms inside daemon capture and encoding. The report separately summarized about 104 ms outside that component and about 127 ms end to end. Those medians come from different distributions, so adding them would produce a false decomposition. The remainder includes every other part of the request; the evidence cannot isolate network time.</p>
-<p>The optimized artifact reports only the complete 1024x768 PNG request. It measured about 29 ms p50 over 30 samples.</p>
-<h2>Input: keep one X11 session open</h2>
-<p>The compatibility path launched <code>xdotool</code> for each action and reopened desktop state. It is a sensible adapter for a broad set of X11 operations, but that lifecycle is expensive inside an agent loop. The native path uses Xlib, the X11 client library, to hold one connection to the server. The XTest extension sends synthetic mouse and keyboard events over it. Each operation precomputes the events, takes one lock, queues them in order, and finishes with one X sync before the call returns.</p>
+<p>I had already removed target-side setup inside the daemon. The compatibility path launches <code>scrot</code> or <code>maim</code>, moves the screenshot through a temporary file, and then reads it back. The optimized hot path keeps an MSS capture session open, reads the frame through shared memory when available, and encodes it in RAM.</p>
+<p>X11 is the Linux display server that owns the desktop's pixels and input state. MSS is the screenshot library that reads those pixels. Its persistent session prefers XShm, an X11 extension that gives a local client shared-memory access to the frame. If MSS cannot capture after a reset and retry, the daemon falls back to the compatibility path.</p>
+<p>Both final Modal paths were configured for MSS-first capture, so the 230 ms to 29 ms result does not isolate those earlier target-side gains. It measures the complete Function-runner path with the optimized daemon configuration against the default Modal setup.</p>
+<p>The benchmark kept one Function invocation active while it ran the suite and reused one warm target Sandbox for the repeated operations. It did not maintain a warm Function pool. As a continuously allocated hypothetical, the requested 4 physical CPU cores and 8 GiB would cost about $32 for the Sandbox and $11 for a same-sized Function over 24 hours in <code>us-west-2</code> at current list rates. Actual CPU or memory usage above either request can raise the total. This estimate applies Modal's documented 1.75x regional multiplier and excludes GPU, image builds, storage, data transfer, plan fees, and credits.</p>
+<p>Functions scale to zero when they have no inputs, and one concurrent I/O-bound runner could broker requests for several target Sandboxes. I have not built that shared runner. Each desktop would still be its own isolated, billable Sandbox, so long idle lifetimes would continue to cost money.</p>
+<h2>Keep one X11 input session open</h2>
+<p>The original input path shelled out to <code>xdotool</code>, a command-line X11 automation tool. Each click started a process, opened a new X11 connection, moved the pointer, pressed the left mouse button, and released it. The agent paid that setup cost again on every action.</p>
+<p>I replaced that path with one persistent Xlib connection. Xlib is the client library for X11, and its XTest extension sends synthetic mouse and keyboard events. For each request, I precompute the event sequence, acquire one lock so the sequence owns the input state, queue the events in order, and issue one final X sync before returning.</p>
 <p><img src="../assets/modal-optimized-input-session.svg" alt="Per-action xdotool setup compared with one persistent X11 input connection" /></p>
-<p>A controlled A/B against the retained <code>xdotool</code> path isolated daemon execution cost. This diagnostic used three samples per arm and arithmetic means from one dirty implementation worktree; both arms used the same source state. Move-and-click fell from about 146 ms to 1.2 ms, a 128x reduction. Four move/click pairs fell from about 444 ms to 4.8 ms, or 93x.</p>
-<p>Typing improved less dramatically. One hundred characters fell from about 120 ms to 21 ms, a 5.8x change. One thousand characters fell from about 607 ms to 201 ms, or 3x.</p>
-<p>Reducing execution time exposed the correctness work. I resolve characters against the active keyboard layout and X11 key symbols, then serialize held-key and button state. I permit the compatibility fallback only before native emission could have happened, so an action is never replayed after possible partial input. I also enabled Xlib thread support and installed a nonfatal error handler so an asynchronous window error cannot terminate the daemon; synchronous operations still check their own results.</p>
-<h3>One request put four ordered clicks at 14 ms</h3>
-<p>Once input was cheap, batching removed repeated request admission. The four-click case sends one ordered request. The daemon validates the whole batch before execution, acquires the input lock once, preserves order, and stops at the first error by default. In the final run, one click took about 10 ms p50. Four ordered clicks in one request took about 14 ms.</p>
+<p>Clicks showed the largest gain. Daemon-side mean move-and-click time, a pointer move followed by one left click, fell from 146.33 ms to 1.15 ms, a 127.7x speedup. Four move-and-click pairs fell from 443.99 ms to 4.80 ms, a 92.5x speedup.</p>
+<p>Typing still paid for many key-down and key-up events. Daemon-side mean time for a fixed 100-character ASCII workload fell from 119.77 ms to 20.61 ms, while the 1,000-character case fell from 607.35 ms to 201.34 ms. Both arms used the same workload and zero inter-character delay, so the controlled difference was the input backend.</p>
+<p>Direct input also needs to preserve keyboard behavior. I resolve characters through the active X11 layout and key symbols. The lock stops simultaneous requests from corrupting held-key or button state. A request is never retried after XTest may have emitted part of its sequence, because replaying it could duplicate input. One bad X11 request cannot terminate the daemon, while synchronous failures still return an error.</p>
+<p>Typing benefits from the same persistent connection, although each character still needs key-down and key-up events. The controlled backend A/B above reports daemon-side means. In the end-to-end provider run, 30 samples of direct typing with zero delay between characters measured 15.27 ms p50 for 100 characters and 63.34 ms p50 for 1,000 characters.</p>
+<h2>Batch the actions the model already grouped</h2>
+<p>OpenAI's current computer tool can return several ordered actions in one turn through its <code>actions[]</code> array. The documentation tells clients to execute those actions in order. Sending each click as a new API call throws away that structure.</p>
+<p>The project's computer-use SDK sends the model's ordered actions to the daemon in one request:</p>
+<pre><code class="language-python">computer.actions.run([
+    {&quot;type&quot;: &quot;click&quot;, &quot;x&quot;: 100, &quot;y&quot;: 100},
+    {&quot;type&quot;: &quot;click&quot;, &quot;x&quot;: 300, &quot;y&quot;: 100},
+    {&quot;type&quot;: &quot;click&quot;, &quot;x&quot;: 300, &quot;y&quot;: 300},
+    {&quot;type&quot;: &quot;click&quot;, &quot;x&quot;: 100, &quot;y&quot;: 300},
+])
+</code></pre>
+<p>The daemon validates the request once, acquires the input lock once, executes in order, and stops at the first error by default. The lock prevents two concurrent requests from interleaving pointer moves and button transitions into a sequence that neither caller requested.</p>
 <p><img src="../assets/modal-optimized-action-batch.svg" alt="One action request validates and serializes four ordered clicks" /></p>
-<p>I did not measure a four-separate-request optimized counterfactual. Modal default and Tzafon also used one batch for the four-click row, while Daytona used four SDK and transport requests and E2B used four SDK calls over eight transport requests.</p>
-<p>That lock is also a correctness boundary. Without it, two concurrent requests could interleave a move, a button press, and a release into a sequence neither caller asked for. Validation keeps malformed work out of the critical section. Holding the lock across the batch makes the desktop transition match the requested order.</p>
-<p>For typing, Modal optimized forces direct zero-delay keystrokes through the persistent XTest session. It took about 15 ms for 100 characters and 63 ms for 1,000. Modal default kept its public <code>auto</code> behavior, which selected clipboard for both strings. Other providers kept their defaults, and their internal pacing or input method was not observable. The final provider gaps also include caller placement, transport count, configuration, and typing semantics.</p>
-<h2>Commands: isolate subprocess I/O from the request loop</h2>
-<p>Our original benchmark asked for a login shell. That mixed shell initialization with the primitive I wanted to compare. The current harness gives every provider the same logical <code>sh -c</code> command, requires exit zero, and checks exact stdout <code>&quot;42\n&quot;</code>.</p>
-<p>Command pipe setup and cleanup shared Uvicorn's request loop and produced a long tail. The child ran in its own process; its asyncio transport, pipe reads, wait, and cleanup lived on the request loop. A persistent private <code>SelectorEventLoop</code> on a daemon thread owns that lifecycle and bridges the result to Uvicorn. Capacity is bounded, and cancellation kills the process group before cleanup.</p>
+<p>Four ordered clicks took 13.64 ms p50 in the provider run. I followed that with a matched 30-sample A/B: one ordered request took 11.54 ms p50, while four sequential requests took 26.84 ms. Batching the calls was 2.33x faster and preserved the order the model supplied.</p>
+<h2>Move subprocess I/O off the request loop</h2>
+<p>The command endpoint looked simple: start a child process, collect its output, and return the result. The shell already ran in its own process, but asyncio still managed its pipes, wait state, and cleanup on Uvicorn's HTTP event loop. Slow subprocess cleanup could therefore delay unrelated requests handled by the same loop.</p>
+<p>I gave subprocess work a private <code>SelectorEventLoop</code>, Python's event loop for file-descriptor readiness, on a dedicated daemon thread. A bounded queue prevents command requests from creating unlimited subprocess work while Uvicorn remains responsive. A small result bridge carries each completed result back. Cancellation kills the child's process group before cleanup, so capacity does not leak when a request disappears.</p>
 <p><img src="../assets/modal-optimized-command-loop-isolation.svg" alt="Subprocess I/O ownership moves from Uvicorn to a private event loop while the child process remains separate" /></p>
-<p>An earlier controlled 10-sample-per-arm A/B, retained as directional evidence and captured before the process-group safety fix, put the shared loop at about 56 ms p50 and 249 ms p95. The isolated loop measured 10 ms p50 and 11 ms p95. The final command path measured 10 ms p50 and 17 ms p95.</p>
-<p>The subprocess runner exposed a clipboard bug. A live X11 selection owner serves clipboard data. <code>xclip</code> stayed alive after taking ownership and inherited captured stdout and stderr pipes. <code>communicate()</code> waited for EOF even though the clipboard had changed. Output capture made sense as a generic default, but this helper did not use it. Sending those streams to <code>DEVNULL</code> removed the wait. A long-lived helper cannot retain pipes owned by one request. Optimized typing bypasses the clipboard and uses direct keystrokes, so this fix sits outside its path.</p>
-<h2>Warm results across the interface</h2>
-<p>Every warm cell below reports p50 / p95 from 30 samples. I tuned Modal and left each provider at its public default. Ratios compare each default p50 with Modal optimized p50.</p>
+<p>Giving subprocess I/O its own loop collapsed the tail. The shared asyncio path measured 55.92 ms p50, but p95 reached 248.67 ms. With the isolated loop, p50 was 9.86 ms and p95 was 10.63 ms. In the final 30-sample run, the command finished in 9.54 ms p50 and 17.03 ms p95. The test runs <code>sh -c</code>, prints <code>42</code>, and requires exit code zero with exact stdout <code>&quot;42\n&quot;</code>.</p>
+<p>Clipboard writes use <code>xclip</code>, a command-line program that must stay alive because X11 asks the current selection owner for clipboard data.</p>
+<p>The generic subprocess helper gave <code>xclip</code> captured stdout and stderr pipes. Its long-lived selection owner inherited those pipes, leaving <code>communicate()</code> waiting for EOF after the clipboard had already changed. The helper never used that output, so I redirected both streams to <code>DEVNULL</code>. A long-lived helper cannot keep ownership of pipes that belong to one request. Direct XTest typing bypasses this clipboard path.</p>
+<h2>The optimized warm path stayed below 64 ms</h2>
+<p>I ran each warm operation 30 times. Only the Modal optimized path was tuned. The remaining columns show the provider defaults exercised by the harness. Each ratio divides the provider p50 by the Modal optimized p50.</p>
+<p>The screenshot calls kept each provider's native format: Tzafon returned 1280x720 JPEG; Modal, Daytona, and E2B returned 1024x768 PNG. Modal optimized used direct XTest keystrokes with zero delay. Modal default's public <code>auto</code> mode selected clipboard for both strings; the harness could not observe the internal typing method or pacing behind the other provider SDKs.</p>
+<p>For four clicks in this benchmark, Modal optimized, Modal default, and Tzafon each used one SDK call and one transport request. Daytona used four SDK calls and four transport requests; E2B used four SDK calls and eight transport requests. These counts describe the pinned SDK paths measured here.</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -220,7 +231,7 @@
 </thead>
 <tbody>
 <tr>
-<td>Full screenshot, native/default</td>
+<td>Full screenshot, provider-native format</td>
 <td style="text-align:right">28.69 / 43.96 ms</td>
 <td style="text-align:right">229.94 / 235.78 ms / 8.02x</td>
 <td style="text-align:right">264.85 / 297.67 ms / 9.23x</td>
@@ -236,7 +247,7 @@
 <td style="text-align:right">125.75 / 127.92 ms / 12.98x</td>
 </tr>
 <tr>
-<td>Four clicks in one batch</td>
+<td>Four ordered clicks</td>
 <td style="text-align:right">13.64 / 21.98 ms</td>
 <td style="text-align:right">342.68 / 349.16 ms / 25.12x</td>
 <td style="text-align:right">865.55 / 1,061.66 ms / 63.45x</td>
@@ -244,7 +255,7 @@
 <td style="text-align:right">455.96 / 531.37 ms / 33.42x</td>
 </tr>
 <tr>
-<td>Type 100</td>
+<td>Type 100 characters</td>
 <td style="text-align:right">15.27 / 20.69 ms</td>
 <td style="text-align:right">379.28 / 389.18 ms / 24.84x</td>
 <td style="text-align:right">638.50 / 706.86 ms / 41.81x</td>
@@ -252,7 +263,7 @@
 <td style="text-align:right">82.27 / 85.45 ms / 5.39x</td>
 </tr>
 <tr>
-<td>Type 1000</td>
+<td>Type 1,000 characters</td>
 <td style="text-align:right">63.34 / 83.91 ms</td>
 <td style="text-align:right">378.40 / 413.17 ms / 5.97x</td>
 <td style="text-align:right">5,356.25 / 5,425.81 ms / 84.57x</td>
@@ -269,22 +280,21 @@
 </tr>
 </tbody>
 </table></div>
-<p>The tracked <a href="../../benchmark-data/modal-optimized-provider-2026-07-28.json">Modal optimized samples</a> and <a href="../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json">provider-default samples</a> contain the observed ranges. Screenshots retained each provider's native format: Tzafon returned 1280x720 JPEG, while Modal, Daytona, and E2B returned 1024x768 PNG. Typing semantics differed as described above. The four-click row also mixed one-request batching with multi-request defaults.</p>
-<h2>Changed pixels are an early transition signal</h2>
-<p>An agent often needs a frame that reflects the previous action. The Modal-only experimental endpoint captures a baseline. It can use XDamage, an X11 notice that a drawable region may have changed, as a wake hint before checking a full-resolution pixel hash. The response returns the hash-confirmed frame that triggered the result. Click to first changed frame measured about 65 ms p50 and 76 ms p95 over 30 samples. The sanitized artifact does not retain whether XDamage or polling supplied the wake signal.</p>
+<h2>Observe the first changed frame</h2>
+<p>An action acknowledgement tells me that input reached the desktop. The application may not have painted its response yet. I built a Modal-only alpha endpoint that captures a baseline before the action, uses XDamage as a wake hint, and verifies the change with a full-resolution pixel hash. XDamage is an X11 notification that some area may have been repainted. The endpoint returns the same frame that passed the hash check. Click to first changed frame measured 65.39 ms p50 and 76.31 ms p95 across 30 samples.</p>
 <p><img src="../assets/modal-optimized-first-change.svg" alt="XDamage hints or polling trigger a pixel check, while application readiness remains caller-owned" /></p>
-<p>The terminal condition is modest. A blink, cursor, animation, or unrelated repaint can satisfy it, and the first change may capture an intermediate paint. Semantic effects can preserve identical pixels or occur outside the observed region. XDamage supplies a wake hint for the pixel check. A fixed sleep supplies only elapsed time. When the next action depends on application state, the caller still needs a workload-specific readiness condition.</p>
-<h2>Fresh creation is still slow</h2>
-<p>Startup remains the exception to the warm-path results. Fresh product create to validated screenshot measured about 7.8 seconds on Modal optimized, 1.2 seconds for the E2B default desktop template, and 0.22 seconds for a Tzafon nonpersistent desktop. The Modal timer excluded startup of its Modal Function runner. Different templates, images, provisioning substrates, and caller topologies make this a product-level result. An equivalent physical-boot comparison would require matched systems. I omit speed ratios. Startup is the next thing I want to reduce.</p>
-<p>After this work, I trace every cost that repeats inside an agent turn and ask where it belongs. That moved network work closer to the target and let setup survive between calls or amortize across a batch. Observation requires a separate decision about when to stop waiting. Changed pixels show the first visual response, but a dependent action may need stronger evidence that the application is ready.</p>
+<p>The first changed pixel is a narrow terminal condition. A cursor blink, animation, or unrelated repaint can satisfy it, and the first change may be an intermediate frame. A semantic effect may leave identical pixels or happen outside the observed region. This endpoint does not wait for settle or prove application readiness. A dependent next action still needs a workload-specific condition.</p>
+<h2>Startup is the next bottleneck</h2>
+<p>In a fresh product create to validated screenshot test with 30 samples per reported product, Modal optimized measured 7.8 seconds p50. The E2B default desktop template measured 1.2 seconds p50, and a Tzafon nonpersistent desktop measured 0.22 seconds p50. Each product starts a different image on a different provisioning substrate, so these numbers describe the product boundary users encounter, not equivalent physical boots. The Modal measurement also excludes startup of the Function runner. Warm operations are now fast enough that startup is my next target.</p>
+<p>After chasing these numbers, I now treat repeated setup inside an agent turn as a bug. Recurring work should move closer to the desktop, stay alive across calls, or be shared across an ordered batch. Observation needs a different kind of care: returning a new frame quickly helps only when that frame proves what the next action requires.</p>
 <h2>Source notes</h2>
 <ul>
-<li>Current warm measurements: <a href="../../benchmark-data/modal-optimized-provider-2026-07-28.json">Modal optimized samples, 2026-07-28</a>, <a href="../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json">provider-default samples, 2026-07-28</a>, and <a href="../../benchmark-data/modal-observation-2026-07-28.json">changed-frame samples, 2026-07-28</a>. Every warm operation used here completed 30 samples. Daytona's fresh creation case completed 29 of 30, so I excluded that lifecycle result.</li>
-<li>Historical Modal default decomposition: <a href="../benchmark-results-2026-07-26-provider-results.md">provider benchmark results, 2026-07-26</a> and <a href="../../benchmark-data/provider-results-2026-07-26.json">combined sanitized result</a>.</li>
-<li>Controlled input evidence: <a href="../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md">native X11 input benchmark</a>. Earlier directional command-runner evidence is recorded in the tracked <a href="../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json">Tzafon coordinate and command context</a>.</li>
+<li>Current warm measurements: <a href="../../benchmark-data/modal-optimized-provider-2026-07-28.json">Modal optimized samples, 2026-07-28</a>, <a href="../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json">provider-default samples, 2026-07-28</a>, <a href="../../benchmark-data/modal-observation-2026-07-28.json">changed-frame samples, 2026-07-28</a>, and <a href="../../benchmark-data/modal-action-batching-ab-2026-07-29.json">four-click batching A/B, 2026-07-29</a>. The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.</li>
+<li>Historical diagnostics: <a href="../benchmark-results-2026-07-26-provider-results.md">provider benchmark results, 2026-07-26</a>, <a href="../../benchmark-data/provider-results-2026-07-26.json">combined sanitized result</a>, <a href="../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md">native X11 input benchmark</a>, and <a href="../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json">command runner A/B context</a>.</li>
 <li>Implementation and contracts: <a href="../performance.md">performance documentation</a>, <a href="../benchmarking.md">benchmarking methodology</a>, <a href="../experimental-visual-change-observation.md">visual-change observation contract</a>, and <a href="../../research/modal-optimized-create-benchmark-method.md">create-to-validated-screenshot method</a>.</li>
-<li>Product surfaces and billing: <a href="https://e2b.dev/docs/use-cases/computer-use">E2B Computer use</a>, <a href="https://e2b.dev/docs/billing">E2B billing</a>, <a href="https://www.daytona.io/docs/en/computer-use/">Daytona Computer Use</a>, <a href="https://www.daytona.io/docs/billing">Daytona billing</a>, <a href="https://modal.com/docs/guide/sandbox-resources">Modal Sandbox resources</a>, and <a href="https://modal.com/docs/guide/tunnels#pricing">Modal tunnel pricing</a>.</li>
-<li>External architecture and mechanism references: <a href="https://openai.com/index/previewing-gpt-5-6-sol/">OpenAI's GPT-5.6 Sol preview</a>, <a href="https://rustdesk.com/docs/en/self-host/">RustDesk self-hosting documentation</a>, Modal's <a href="https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds">sandbox architecture account</a>, <a href="https://modal.com/docs/guide/region-selection">region selection</a>, <a href="https://modal.com/docs/guide/sandbox-networking#connecting-to-sandboxes-with-http-and-websockets">Sandbox networking</a>, and <a href="https://modal.com/docs/guide/images">Images</a>.</li>
+<li>Product surfaces: <a href="https://e2b.dev/docs/use-cases/computer-use">E2B Computer use</a>, <a href="https://e2b.dev/docs/template/quickstart">E2B templates</a>, <a href="https://www.daytona.io/docs/en/computer-use/">Daytona Computer Use</a>, and <a href="https://www.daytona.io/docs/snapshots/">Daytona snapshots</a>.</li>
+<li>Modal mechanics and cost: <a href="https://modal.com/docs/guide/apps">Functions and Apps</a>, <a href="https://modal.com/docs/guide/region-selection">region selection</a>, <a href="https://modal.com/docs/guide/sandbox-networking#connecting-to-sandboxes-with-http-and-websockets">Sandbox Connect</a>, <a href="https://modal.com/docs/guide/concurrent-inputs">input concurrency</a>, <a href="https://modal.com/docs/guide/scale">Function scaling</a>, <a href="https://modal.com/docs/guide/sandbox-resources">Sandbox resources</a>, <a href="https://modal.com/pricing">current list pricing</a>, and the tracked <a href="../../research/modal-computer-use-provider-cost-comparison-2026-07-29.md">provider and cost research memo</a>.</li>
+<li>External mechanisms: <a href="https://openai.com/index/previewing-gpt-5-6-sol/">OpenAI's GPT-5.6 Sol preview</a>, <a href="https://developers.openai.com/api/docs/guides/tools-computer-use">OpenAI Computer use</a>, <a href="https://rustdesk.com/docs/en/self-host/">RustDesk self-hosting</a>, and Modal's <a href="https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds">sandbox architecture account</a>.</li>
 </ul>
 
   </main>
