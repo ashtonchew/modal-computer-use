@@ -28,15 +28,17 @@ Caller placement explained the large improvement. Requesting the same Modal regi
 
 The Function bills while the trajectory is active, then can scale to zero. The Sandbox remains billable until its owner terminates it, and the application must prevent two trajectories from driving the same desktop at once.
 
-## Keep screenshot capture in memory
+## Why did every screenshot start a process?
 
-Once the request route was short, work inside the daemon was large enough to see. The original default path launched a screenshot program for every frame, wrote a temporary image, then opened that file again to return it. The agent paid for process startup and filesystem work on every observation.
+Once the request route was short, the screenshot handler became easier to see. Every frame launched a command-line program, wrote a temporary PNG, reopened it, and returned its bytes. That is fine for a one-off utility. An agent takes a screenshot after nearly every action.
 
-The same steady-state question applied inside the target. X11 is the display system that owns the Linux desktop's pixels. MSS became a persistent bridge between the daemon and that display. On Linux, its preferred XShm backend lets the X server write pixels into shared memory instead of sending them through the slower `XGetImage` path.
+RustDesk taught me a useful rule for remote software: pay setup costs when a session starts, then reuse the path for the small operations inside it. When I move the mouse in RustDesk, the client does not rediscover the remote computer and open a new connection before sending that movement. It uses the session that is already open. My screenshot code made that mistake one layer lower. The desktop and X11 display remained alive, but each screenshot discarded its capture state and rebuilt the path to the pixels.
 
-The daemon now keeps one MSS session open and encodes the PNG in memory. A normal screenshot no longer needs a child process or a filename before it becomes an HTTP response. If the session fails, the daemon reopens it once. A failed retry returns to the older file-based capture, as does a cursor-visible request that MSS cannot compose. The common path stays in memory without giving up cursor capture or support for less cooperative desktops.
+X11 is the display server that owns the desktop's pixels. MSS became the persistent capture client: the daemon opens it once at startup and reuses it. On Linux, XShm lets the X server write the frame into a shared-memory buffer. Each request can encode that frame as a PNG without starting a child process or touching the filesystem.
 
-By the final provider run, both Modal paths used MSS-first capture. The 230 ms to 29 ms gap in that table comes from caller placement and configuration. The default row was no longer writing screenshots to disk.
+The file-based path remains available when MSS cannot recover or compose a cursor-visible frame. It stays outside the common path.
+
+Once this survived the compatibility cases, I made MSS-first capture the Modal default. Both Modal columns in the final provider run already use it. The 230 ms to 29 ms gap came later, from caller placement and configuration.
 
 ## A process for every click
 
