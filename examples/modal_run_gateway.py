@@ -13,6 +13,9 @@ It deliberately does not proxy screenshot, action, task, or result content.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 import os
 import secrets
 from collections.abc import Callable
@@ -116,6 +119,7 @@ class RunRecord:
     run_id: str
     tenant_id: str
     idempotency_key: str
+    admission_fingerprint: str = field(repr=False)
     state: RunState
     created_at: datetime
     updated_at: datetime
@@ -129,12 +133,14 @@ class RunRecord:
         run_id: str,
         tenant_id: str,
         idempotency_key: str,
+        admission_fingerprint: str,
         now: datetime,
     ) -> RunRecord:
         return cls(
             run_id=run_id,
             tenant_id=tenant_id,
             idempotency_key=idempotency_key,
+            admission_fingerprint=admission_fingerprint,
             state=RunState.RESERVED,
             created_at=now,
             updated_at=now,
@@ -254,6 +260,11 @@ class RunConflict(GatewayError):
         super().__init__(status_code=409, code="run_state_conflict")
 
 
+class IdempotencyConflict(GatewayError):
+    def __init__(self) -> None:
+        super().__init__(status_code=409, code="idempotency_conflict")
+
+
 class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -313,6 +324,10 @@ class RunGatewayService:
             run_id=self.run_id_factory(),
             tenant_id=principal.tenant_id,
             idempotency_key=body.idempotency_key,
+            admission_fingerprint=_admission_fingerprint(
+                desktop_key=body.desktop_key,
+                task_key=body.task_key,
+            ),
             now=now,
         )
         reservation = await self.run_store.reserve_if_absent(
@@ -321,6 +336,11 @@ class RunGatewayService:
             proposed=proposed,
         )
         record = reservation.record
+        if not hmac.compare_digest(
+            record.admission_fingerprint,
+            proposed.admission_fingerprint,
+        ):
+            raise IdempotencyConflict()
         if reservation.created:
             return await self._dispatch(record, desktop=desktop, task=task)
         record, claim_stale_reserved = await self._reconcile_stale_admission(record)
@@ -496,10 +516,10 @@ class ModalTrajectoryDispatcher:
         call = modal.FunctionCall.from_id(call_id.reveal_to_backend())
         try:
             await call.get.aio(timeout=0)
-        except TimeoutError:
-            return PollState.PENDING
         except modal.exception.OutputExpiredError:
             return PollState.INDETERMINATE
+        except modal.exception.TimeoutError:
+            return PollState.PENDING
         except modal.exception.InputCancellation:
             return PollState.CANCELLED
         except Exception:
@@ -527,28 +547,47 @@ def build_run_gateway_app(service: RunGatewayService) -> FastAPI:
         # FastAPI's default validation response can echo rejected secret input.
         return JSONResponse(status_code=422, content={"error": "invalid_request"})
 
-    @app.exception_handler(Exception)
-    async def unexpected_error(_request: Request, _exc: Exception) -> JSONResponse:
-        # Dependency and provider exception text may contain application secrets.
-        return JSONResponse(status_code=500, content={"error": "internal_error"})
-
     @app.post("/v1/runs", response_model=RunResponse, status_code=202)
-    async def create_run(body: CreateRunRequest, request: Request) -> RunResponse:
-        record = await service.create_run(request, body)
-        return _run_response(record)
+    async def create_run(body: CreateRunRequest, request: Request) -> RunResponse | JSONResponse:
+        try:
+            record = await service.create_run(request, body)
+            return _run_response(record)
+        except asyncio.CancelledError:
+            raise
+        except GatewayError:
+            raise
+        except Exception:
+            return _internal_error_response()
 
     @app.get("/v1/runs/{run_id}", response_model=RunResponse)
-    async def get_run(run_id: str, request: Request) -> RunResponse:
-        return _run_response(await service.get_run(request, run_id))
+    async def get_run(run_id: str, request: Request) -> RunResponse | JSONResponse:
+        try:
+            return _run_response(await service.get_run(request, run_id))
+        except asyncio.CancelledError:
+            raise
+        except GatewayError:
+            raise
+        except Exception:
+            return _internal_error_response()
 
     @app.post("/v1/runs/{run_id}/cancel", response_model=CancelRunResponse)
-    async def cancel_run(run_id: str, request: Request) -> CancelRunResponse:
-        record, requested = await service.cancel_run(request, run_id)
-        return CancelRunResponse(
-            run_id=record.run_id,
-            state=record.state,
-            cancellation_requested=requested,
-        )
+    async def cancel_run(
+        run_id: str,
+        request: Request,
+    ) -> CancelRunResponse | JSONResponse:
+        try:
+            record, requested = await service.cancel_run(request, run_id)
+            return CancelRunResponse(
+                run_id=record.run_id,
+                state=record.state,
+                cancellation_requested=requested,
+            )
+        except asyncio.CancelledError:
+            raise
+        except GatewayError:
+            raise
+        except Exception:
+            return _internal_error_response()
 
     return app
 
@@ -562,6 +601,20 @@ def build_default_service() -> RunGatewayService:
 
 def _run_response(record: RunRecord) -> RunResponse:
     return RunResponse(run_id=record.run_id, state=record.state)
+
+
+def _internal_error_response() -> JSONResponse:
+    # Dependency and provider exception text may contain application secrets.
+    return JSONResponse(status_code=500, content={"error": "internal_error"})
+
+
+def _admission_fingerprint(*, desktop_key: str, task_key: str) -> str:
+    canonical = json.dumps(
+        [desktop_key, task_key],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
 
 
 try:

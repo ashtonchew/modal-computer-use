@@ -54,7 +54,11 @@ class FakeSessionCatalog:
 
     async def resolve(self, principal, desktop_key):
         self.calls.append((principal.tenant_id, desktop_key))
-        if desktop_key != f"desktop-for-{principal.tenant_id}":
+        allowed = {
+            f"desktop-for-{principal.tenant_id}",
+            f"alternate-desktop-for-{principal.tenant_id}",
+        }
+        if desktop_key not in allowed:
             raise gateway.ObjectNotFound()
         return gateway.ResolvedDesktop(self.handle)
 
@@ -65,7 +69,11 @@ class FakeTaskCatalog:
 
     async def resolve(self, principal, task_key):
         self.calls.append((principal.tenant_id, task_key))
-        if task_key != f"task-for-{principal.tenant_id}":
+        allowed = {
+            f"task-for-{principal.tenant_id}",
+            f"alternate-task-for-{principal.tenant_id}",
+        }
+        if task_key not in allowed:
             raise gateway.ObjectNotFound()
         return gateway.ResolvedTask("task-text-secret")
 
@@ -168,6 +176,10 @@ def _running_record(clock: Clock, *, tenant: str = "tenant-a", run_id: str = "ru
         run_id=run_id,
         tenant_id=tenant,
         idempotency_key="idempotency-owned",
+        admission_fingerprint=gateway._admission_fingerprint(
+            desktop_key=f"desktop-for-{tenant}",
+            task_key=f"task-for-{tenant}",
+        ),
         now=clock(),
     )
     dispatching = reserved.transition(gateway.RunState.DISPATCHING, now=clock())
@@ -215,9 +227,9 @@ def test_http_authentication_object_authorization_and_input_fail_closed(
     assert dispatcher.spawn_calls == []
 
 
-def test_required_idempotency_and_internal_errors_are_sanitized() -> None:
+def test_required_idempotency_and_internal_errors_are_sanitized(caplog) -> None:
     service, _store, _dispatcher = _service()
-    client = TestClient(gateway.build_run_gateway_app(service), raise_server_exceptions=False)
+    client = TestClient(gateway.build_run_gateway_app(service))
     missing_idempotency = _body()
     del missing_idempotency["idempotency_key"]
 
@@ -236,6 +248,39 @@ def test_required_idempotency_and_internal_errors_are_sanitized() -> None:
     assert error_response.status_code == 500
     assert error_response.json() == {"error": "internal_error"}
     assert "bearer-token-secret" not in error_response.text
+    assert "bearer-token-secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("method_name", "http_method", "path", "json_body"),
+    [
+        ("create_run", "POST", "/v1/runs", _body()),
+        ("get_run", "GET", "/v1/runs/run-owned", None),
+        ("cancel_run", "POST", "/v1/runs/run-owned/cancel", None),
+    ],
+)
+def test_each_route_contains_unexpected_exceptions_before_asgi_logging(
+    method_name: str,
+    http_method: str,
+    path: str,
+    json_body: dict[str, str] | None,
+    caplog,
+) -> None:
+    service, _store, _dispatcher = _service()
+    sentinel = f"private-{method_name}-exception"
+
+    async def fail(*_args, **_kwargs):
+        raise RuntimeError(sentinel)
+
+    setattr(service, method_name, fail)
+    client = TestClient(gateway.build_run_gateway_app(service))
+
+    response = client.request(http_method, path, json=json_body, headers=_headers())
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "internal_error"}
+    assert sentinel not in response.text
+    assert sentinel not in caplog.text
 
 
 def test_idempotent_submissions_return_one_run_and_spawn_once() -> None:
@@ -260,6 +305,38 @@ def test_idempotent_submissions_return_one_run_and_spawn_once() -> None:
         ("tenant-a", "task-for-tenant-a"),
         ("tenant-a", "task-for-tenant-a"),
     ]
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    ["desktop_key", "task_key"],
+)
+def test_idempotency_key_reuse_rejects_different_authorized_admission(
+    changed_field: str,
+    caplog,
+) -> None:
+    service, store, dispatcher = _service()
+    client = TestClient(gateway.build_run_gateway_app(service))
+    first = client.post("/v1/runs", json=_body(), headers=_headers())
+    changed = _body()
+    sentinel = f"alternate-{changed_field.replace('_key', '')}-for-tenant-a"
+    changed[changed_field] = sentinel
+
+    replay = client.post("/v1/runs", json=changed, headers=_headers())
+
+    assert first.status_code == 202
+    assert replay.status_code == 409
+    assert replay.json() == {"error": "idempotency_conflict"}
+    assert sentinel not in replay.text
+    assert sentinel not in caplog.text
+    assert len(dispatcher.spawn_calls) == 1
+    stored = store.by_id["run-application-stable"]
+    assert stored.admission_fingerprint == gateway._admission_fingerprint(
+        desktop_key="desktop-for-tenant-a",
+        task_key="task-for-tenant-a",
+    )
+    assert "desktop-for-tenant-a" not in repr(stored)
+    assert "task-for-tenant-a" not in repr(stored)
 
 
 def test_cross_tenant_get_poll_and_cancel_are_denied_without_provider_calls() -> None:
@@ -291,6 +368,7 @@ def test_closed_state_machine_permits_every_documented_edge_and_rejects_all_othe
             run_id="run-state",
             tenant_id="tenant-a",
             idempotency_key="key",
+            admission_fingerprint="fingerprint",
             state=current,
             created_at=clock(),
             updated_at=clock(),
@@ -321,6 +399,7 @@ def test_closed_state_machine_permits_every_documented_edge_and_rejects_all_othe
                 run_id="run-state",
                 tenant_id="tenant-a",
                 idempotency_key="key",
+                admission_fingerprint="fingerprint",
                 state=current,
                 created_at=clock(),
                 updated_at=clock(),
@@ -329,7 +408,11 @@ def test_closed_state_machine_permits_every_documented_edge_and_rejects_all_othe
                 record.transition(next_state, now=clock())
 
     reserved = gateway.RunRecord.reserve(
-        run_id="run-state", tenant_id="tenant-a", idempotency_key="key", now=clock()
+        run_id="run-state",
+        tenant_id="tenant-a",
+        idempotency_key="key",
+        admission_fingerprint="fingerprint",
+        now=clock(),
     )
     with pytest.raises(gateway.StateTransitionError, match="requires a private call identity"):
         reserved.transition(gateway.RunState.DISPATCHING, now=clock()).transition(
@@ -346,6 +429,10 @@ async def test_stale_reserved_is_claimed_once_under_concurrent_duplicate_request
         run_id="run-stale",
         tenant_id="tenant-a",
         idempotency_key="request-opaque-key",
+        admission_fingerprint=gateway._admission_fingerprint(
+            desktop_key="desktop-for-tenant-a",
+            task_key="task-for-tenant-a",
+        ),
         now=clock() - timedelta(seconds=20),
     )
     store.insert(stale)
@@ -370,6 +457,10 @@ def test_stale_dispatching_becomes_indeterminate_without_respawn() -> None:
         run_id="run-stale-dispatch",
         tenant_id="tenant-a",
         idempotency_key="request-opaque-key",
+        admission_fingerprint=gateway._admission_fingerprint(
+            desktop_key="desktop-for-tenant-a",
+            task_key="task-for-tenant-a",
+        ),
         now=clock() - timedelta(seconds=20),
     ).transition(
         gateway.RunState.DISPATCHING,
@@ -383,6 +474,34 @@ def test_stale_dispatching_becomes_indeterminate_without_respawn() -> None:
 
     assert response.status_code == 202
     assert response.json() == {"run_id": "run-stale-dispatch", "state": "indeterminate"}
+    assert dispatcher.spawn_calls == []
+
+
+def test_mismatched_stale_reservation_is_rejected_before_reclaim() -> None:
+    clock = Clock()
+    store = FakeRunStore()
+    dispatcher = FakeDispatcher()
+    stale = gateway.RunRecord.reserve(
+        run_id="run-stale",
+        tenant_id="tenant-a",
+        idempotency_key="request-opaque-key",
+        admission_fingerprint=gateway._admission_fingerprint(
+            desktop_key="desktop-for-tenant-a",
+            task_key="task-for-tenant-a",
+        ),
+        now=clock() - timedelta(seconds=20),
+    )
+    store.insert(stale)
+    service, _store, _dispatcher = _service(clock=clock, store=store, dispatcher=dispatcher)
+    client = TestClient(gateway.build_run_gateway_app(service))
+    changed = _body()
+    changed["task_key"] = "alternate-task-for-tenant-a"
+
+    response = client.post("/v1/runs", json=changed, headers=_headers())
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "idempotency_conflict"}
+    assert store.by_id["run-stale"].state is gateway.RunState.RESERVED
     assert dispatcher.spawn_calls == []
 
 
@@ -566,6 +685,7 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
     fake_modal = SimpleNamespace(
         FunctionCall=FunctionCall,
         exception=SimpleNamespace(
+            TimeoutError=type("ModalTimeoutError", (Exception,), {}),
             OutputExpiredError=type("OutputExpiredError", (Exception,), {}),
             InputCancellation=type("InputCancellation", (BaseException,), {}),
         ),
@@ -594,6 +714,62 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
         ("from_id", "fc-provider-secret"),
         ("cancel", (), {"terminate_containers": False}),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception_kind", "expected"),
+    [
+        ("modal_timeout", gateway.PollState.PENDING),
+        ("output_expired", gateway.PollState.INDETERMINATE),
+        ("builtin_timeout", gateway.PollState.FAILED),
+    ],
+)
+async def test_modal_poll_distinguishes_sdk_timeout_from_expired_output_and_user_error(
+    monkeypatch,
+    exception_kind: str,
+    expected,
+) -> None:
+    class ModalTimeoutError(Exception):
+        pass
+
+    class OutputExpiredError(ModalTimeoutError):
+        pass
+
+    exception = {
+        "modal_timeout": ModalTimeoutError(),
+        "output_expired": OutputExpiredError(),
+        "builtin_timeout": TimeoutError("remote user timeout"),
+    }[exception_kind]
+
+    class Get:
+        async def aio(self, *, timeout):
+            assert timeout == 0
+            raise exception
+
+    class FunctionCall:
+        @classmethod
+        def from_id(cls, call_id):
+            assert call_id == "fc-provider-secret"
+            return SimpleNamespace(get=Get())
+
+    monkeypatch.setattr(
+        gateway,
+        "modal",
+        SimpleNamespace(
+            FunctionCall=FunctionCall,
+            exception=SimpleNamespace(
+                TimeoutError=ModalTimeoutError,
+                OutputExpiredError=OutputExpiredError,
+                InputCancellation=type("InputCancellation", (BaseException,), {}),
+            ),
+        ),
+    )
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome is expected
 
 
 def test_example_has_no_primitive_proxy_core_export_or_production_memory_store() -> None:

@@ -351,9 +351,12 @@ Function name, FunctionCall ID, owner label, endpoint, or token.
 
 The application must provide an atomic durable `RunStore`. Creation reserves
 `(tenant_id, idempotency_key)` before calling `spawn.aio(handle, task, run_id)`, and duplicates
-return the original application run. A stale `reserved` record can win one CAS claim; a stale
-`dispatching` record becomes terminal `indeterminate` because the first spawn may already have
-crossed Modal's boundary. Once the private FunctionCall identity is stored, GET polls with
+return the original application run only when a durable SHA-256 admission fingerprint matches the
+originally authorized opaque desktop/task key pair. A mismatch returns a sanitized conflict and
+does not reclaim even a stale reservation; the raw keys, handle, and task text are not stored. A
+stale matching `reserved` record can win one CAS claim; a stale `dispatching` record becomes
+terminal `indeterminate` because the first spawn may already have crossed Modal's boundary. Once
+the private FunctionCall identity is stored, GET polls with
 `FunctionCall.from_id(...).get.aio(timeout=0)`. Cancellation durably enters
 `cancellation_requested` before `cancel.aio(terminate_containers=False)` and never claims that the
 desktop was rolled back or terminated.
