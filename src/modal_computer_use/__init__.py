@@ -1,4 +1,5 @@
 from ._version import __version__
+from .borrowed import BorrowedComputer
 from .client import DaemonClient
 from .config import (
     ActionConfig,
@@ -13,11 +14,22 @@ from .config import (
     StorageConfig,
 )
 from .errors import (
+    ActionOutcomeUnknownError,
     BrowserReadinessError,
     ConfigConflictError,
     FrameValidationError,
+    OperationResultUnavailableError,
+    RunSequenceConflictError,
     SandboxAmbiguousError,
     SandboxUnavailableError,
+    SessionBorrowError,
+    SessionBusyError,
+    SessionCompatibilityError,
+    SessionEnvironmentMismatchError,
+    SessionLeaseLostError,
+    SessionPlacementMismatchError,
+    SessionRecoveryRequiredError,
+    SessionTargetMismatchError,
 )
 from .hot_session import HotSessionClient
 from .latency import (
@@ -82,9 +94,11 @@ __all__ = [
     "ActionDecision",
     "ActionItemResult",
     "ActionObservationResult",
+    "ActionOutcomeUnknownError",
     "ActionResult",
     "ArtifactInfo",
     "ArtifactSyncResult",
+    "BorrowedComputer",
     "BrowserConfig",
     "BrowserReadinessError",
     "BudgetConfig",
@@ -111,11 +125,13 @@ __all__ = [
     "ModalVolumeMount",
     "NetworkConfig",
     "ObservationClient",
+    "OperationResultUnavailableError",
     "Point",
     "ProcessStatus",
     "Recording",
     "Region",
     "ResourceConfig",
+    "RunSequenceConflictError",
     "RuntimeConfig",
     "SandboxAmbiguousError",
     "SandboxCleanupItem",
@@ -126,7 +142,15 @@ __all__ = [
     "SandboxUnavailableError",
     "Screenshot",
     "ScreenshotOptions",
+    "SessionBorrowError",
+    "SessionBusyError",
+    "SessionCompatibilityError",
+    "SessionEnvironmentMismatchError",
+    "SessionLeaseLostError",
+    "SessionPlacementMismatchError",
+    "SessionRecoveryRequiredError",
     "SessionStartupTiming",
+    "SessionTargetMismatchError",
     "StorageConfig",
     "WarmPoolClaim",
     "WarmPoolClaimMetrics",

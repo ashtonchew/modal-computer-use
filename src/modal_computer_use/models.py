@@ -3,18 +3,20 @@ from __future__ import annotations
 import base64
 import builtins
 import hashlib
-from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import (  # noqa: UP035 - public API intentionally uses ContextManager
+    Annotated,
+    Any,
+    ContextManager,
+    Literal,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from ._invariants import require_coordinate_pair, require_drag_shape, require_safe_text
+from .borrowed import BorrowedComputer
 from .errors import ActionValidationError
-
-if TYPE_CHECKING:
-    from .sandbox import ComputerSandbox
 
 Button = Literal["left", "middle", "right", "back", "forward"]
 ScrollDirection = Literal["up", "down", "left", "right"]
@@ -268,15 +270,20 @@ class ComputerSessionHandle(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
+    handoff_protocol: Literal["computer-use.session-handoff.v2"] = (
+        "computer-use.session-handoff.v2"
+    )
     sandbox_id: str = Field(repr=False)
+    session_id: str = Field(pattern=r"^[0-9a-f]{32}$", repr=False)
     app_name: str
+    modal_environment: str
     requested_modal_region: str
     ingress: Literal["attested-tunnel", "connect"]
     daemon_http_version: Literal["1.1", "2"]
     config_hash: str = Field(pattern=r"^[0-9a-f]{16}$")
 
-    @field_validator("sandbox_id", "app_name", "requested_modal_region")
+    @field_validator("sandbox_id", "app_name", "modal_environment", "requested_modal_region")
     @classmethod
     def _nonempty_identity(cls, value: str) -> str:
         if not value.strip():
@@ -286,14 +293,16 @@ class ComputerSessionHandle(BaseModel):
     def borrow(
         self,
         *,
+        run_id: str,
         function_region: str,
         readiness_timeout: float = 120.0,
-    ) -> AbstractContextManager[ComputerSandbox]:
+    ) -> ContextManager[BorrowedComputer]:
         """Build a lazy, synchronous Modal Function borrowing context."""
         from .sandbox import _ModalFunctionSessionBorrow
 
         return _ModalFunctionSessionBorrow(
             self,
+            run_id=run_id,
             function_region=function_region,
             readiness_timeout=readiness_timeout,
         )

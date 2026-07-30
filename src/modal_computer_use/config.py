@@ -36,13 +36,15 @@ class RuntimeConfig(StrictBaseModel):
     timeout_seconds: int = Field(default=3600, ge=1, le=86_400)
     idle_timeout_seconds: int | None = Field(default=None, ge=1, le=86_400)
     readiness_timeout_seconds: int = Field(default=120, ge=1, le=900)
+    modal_environment: str | None = None
     modal_region: str | None = None
 
-    @field_validator("modal_region")
+    @field_validator("modal_environment", "modal_region")
     @classmethod
-    def _valid_modal_region(cls, value: str | None) -> str | None:
+    def _valid_modal_placement(cls, value: str | None, info: object) -> str | None:
         if value is not None and not value.strip():
-            raise ValueError("modal_region must be non-empty when set")
+            field_name = getattr(info, "field_name", "runtime placement")
+            raise ValueError(f"{field_name} must be non-empty when set")
         return value
 
 

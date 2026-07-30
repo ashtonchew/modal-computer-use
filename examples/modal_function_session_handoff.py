@@ -11,6 +11,7 @@ Deploy this module once before calling ``run_example``:
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSessionHandle
@@ -29,11 +30,12 @@ def run_trajectory_body(
     handle: ComputerSessionHandle,
     task: str,
     *,
+    run_id: str,
     function_region: str = FUNCTION_REGION,
     max_turns: int = 3,
 ) -> dict[str, object]:
     """Hold one borrowed connection across the repeated observe/decide/act loop."""
-    with handle.borrow(function_region=function_region) as computer:
+    with handle.borrow(run_id=run_id, function_region=function_region) as computer:
         for turn in range(max_turns):
             screenshot = computer.screenshots.full(format="png", processing="daemon")
             action = choose_action_with_model(task=task, screenshot=screenshot, turn=turn)
@@ -62,8 +64,9 @@ else:
     def run_trajectory(
         handle: ComputerSessionHandle,
         task: str,
+        run_id: str,
     ) -> dict[str, object]:
-        return run_trajectory_body(handle, task)
+        return run_trajectory_body(handle, task, run_id=run_id)
 
 
 def run_example(
@@ -80,13 +83,14 @@ def run_example(
     deployed = modal.Function.from_name(APP_NAME, "run_trajectory")
     config = ComputerConfig(
         ingress="attested-tunnel",
-        runtime={"modal_region": FUNCTION_REGION},
+        runtime={"modal_environment": "main", "modal_region": FUNCTION_REGION},
     )
     with ComputerSandbox.create(config=config, app_name=APP_NAME) as owner:
         handle = owner.session_handle()
+        run_id = f"trajectory_{uuid.uuid4().hex}"
         if not spawn:
-            return {"mode": "remote", "result": deployed.remote(handle, task)}
-        call = deployed.spawn(handle, task)
+            return {"mode": "remote", "result": deployed.remote(handle, task, run_id)}
+        call = deployed.spawn(handle, task, run_id)
         if cancel_spawned:
             call.cancel()
             return {"mode": "spawn", "cancel_requested": True}

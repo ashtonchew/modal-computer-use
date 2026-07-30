@@ -9,13 +9,25 @@ import pytest
 from pydantic import ValidationError
 
 from modal_computer_use import (
+    BorrowedComputer,
     ComputerConfig,
     ComputerSandbox,
     ComputerSessionHandle,
     SandboxRef,
 )
-from modal_computer_use.errors import ConfigConflictError, SandboxUnavailableError
+from modal_computer_use.errors import (
+    SandboxUnavailableError,
+    SessionCompatibilityError,
+    SessionEnvironmentMismatchError,
+    SessionPlacementMismatchError,
+    SessionTargetMismatchError,
+)
 from modal_computer_use.state import compute_config_hash
+
+
+@pytest.fixture(autouse=True)
+def _modal_function_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "prod")
 
 
 class _ConnectToken:
@@ -29,6 +41,7 @@ class _OwnedSandbox:
         self._tags = {
             "computer-use": "true",
             "computer-use.config_hash": config_hash or "ignored",
+            "computer-use.session_id": "b" * 32,
         }
         self.detach_calls = 0
         self.terminate_calls = 0
@@ -88,7 +101,9 @@ class _Client:
 def _handle(**updates: object) -> ComputerSessionHandle:
     values: dict[str, object] = {
         "sandbox_id": "sb-owned",
+        "session_id": "b" * 32,
         "app_name": "desktop-app",
+        "modal_environment": "prod",
         "requested_modal_region": "us-west",
         "ingress": "connect",
         "daemon_http_version": "1.1",
@@ -119,7 +134,7 @@ def test_create_produces_safe_versioned_session_handle(monkeypatch) -> None:
     config = ComputerConfig(
         run_id="run-123",
         ingress="connect",
-        runtime={"modal_region": "us-west"},
+        runtime={"modal_environment": "prod", "modal_region": "us-west"},
         network={"daemon_http_version": "2"},
     )
 
@@ -131,13 +146,17 @@ def test_create_produces_safe_versioned_session_handle(monkeypatch) -> None:
     )
     handle = computer.session_handle()
 
-    assert handle.schema_version == 1
+    assert handle.schema_version == 2
+    assert handle.handoff_protocol == "computer-use.session-handoff.v2"
     assert handle.sandbox_id == "sb-owned"
+    assert len(handle.session_id) == 32
     assert handle.app_name == "desktop-app"
+    assert handle.modal_environment == "prod"
     assert handle.requested_modal_region == "us-west"
     assert handle.ingress == "connect"
     assert handle.daemon_http_version == "2"
     assert handle.config_hash == computer.metadata().config_hash  # type: ignore[union-attr]
+    assert computer.metadata().tags["computer-use.session_id"] == handle.session_id  # type: ignore[union-attr]
 
 
 def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monkeypatch) -> None:
@@ -146,37 +165,55 @@ def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monke
 
     runtime = SimpleNamespace(App=_ModalApp, Sandbox=_ModalSandboxType, Probe=None)
     monkeypatch.setitem(sys.modules, "modal", runtime)
-    no_region = ComputerSandbox.create(
-        config=ComputerConfig(run_id="run-no-region", ingress="connect"),
+    no_environment = ComputerSandbox.create(
+        config=ComputerConfig(
+            run_id="run-no-environment",
+            ingress="connect",
+            runtime={"modal_region": "us-west"},
+        ),
         image=object(),
         wait=False,
     )
-    with pytest.raises(SandboxUnavailableError, match="explicit requested Modal region"):
+    assert "computer-use.session_id" not in no_environment.metadata().tags  # type: ignore[union-attr]
+    with pytest.raises(SessionCompatibilityError):
+        no_environment.session_handle()
+
+    no_region = ComputerSandbox.create(
+        config=ComputerConfig(
+            run_id="run-no-region",
+            ingress="connect",
+            runtime={"modal_environment": "prod"},
+        ),
+        image=object(),
+        wait=False,
+    )
+    assert "computer-use.session_id" not in no_region.metadata().tags  # type: ignore[union-attr]
+    with pytest.raises(SessionCompatibilityError):
         no_region.session_handle()
 
     raw_tunnel = ComputerSandbox.create(
         config=ComputerConfig(
             run_id="run-tunnel",
             ingress="tunnel",
-            runtime={"modal_region": "us-west"},
+            runtime={"modal_environment": "prod", "modal_region": "us-west"},
         ),
         image=object(),
         wait=False,
     )
-    with pytest.raises(SandboxUnavailableError, match="credential-refreshable ingress"):
+    with pytest.raises(SessionCompatibilityError):
         raw_tunnel.session_handle()
 
     unverifiable = ComputerSandbox.create(
         config=ComputerConfig(
             run_id="run-warm",
             ingress="connect",
-            runtime={"modal_region": "us-west"},
+            runtime={"modal_environment": "prod", "modal_region": "us-west"},
         ),
         image=object(),
         tag_profile="warm_pool",
         wait=False,
     )
-    with pytest.raises(SandboxUnavailableError, match="verifiable live config identity"):
+    with pytest.raises(SessionTargetMismatchError):
         unverifiable.session_handle()
 
     direct_attach = ComputerSandbox.attach(base_url="https://fixture.invalid")
@@ -186,13 +223,31 @@ def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monke
 
 def test_handle_is_strict_frozen_and_json_pickle_serializable() -> None:
     handle = _handle()
+    assert set(ComputerSessionHandle.model_fields) == {
+        "schema_version",
+        "handoff_protocol",
+        "sandbox_id",
+        "session_id",
+        "app_name",
+        "modal_environment",
+        "requested_modal_region",
+        "ingress",
+        "daemon_http_version",
+        "config_hash",
+    }
     assert ComputerSessionHandle.model_validate_json(handle.model_dump_json()) == handle
     assert pickle.loads(pickle.dumps(handle)) == handle  # noqa: S301 - trusted local object
 
     with pytest.raises(ValidationError):
         ComputerSessionHandle.model_validate({**handle.model_dump(), "unexpected": True})
     with pytest.raises(ValidationError):
-        _handle(schema_version="1")
+        _handle(schema_version=1)
+    with pytest.raises(ValidationError):
+        _handle(handoff_protocol="computer-use.session-handoff.v1")
+    with pytest.raises(ValidationError):
+        _handle(session_id="not-a-session-id")
+    with pytest.raises(ValidationError):
+        _handle(modal_environment=" ")
     with pytest.raises(ValidationError):
         _handle(requested_modal_region=" ")
     with pytest.raises(ValidationError):
@@ -212,6 +267,8 @@ def test_handle_serialization_and_repr_contain_no_credentials_or_endpoints() -> 
 
     assert "sb-owned" in serialized
     assert "sb-owned" not in rendered
+    assert "b" * 32 in serialized
+    assert "b" * 32 not in rendered
     for forbidden in ("credential-value", "connect.invalid", "private.invalid", "novnc"):
         assert forbidden not in serialized
         assert forbidden not in rendered
@@ -219,27 +276,116 @@ def test_handle_serialization_and_repr_contain_no_credentials_or_endpoints() -> 
 
 def test_borrow_is_lazy_and_rejects_region_before_attach(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
+    raw_computer = _borrowed_computer()[0]
 
     def attach(**kwargs: object) -> ComputerSandbox:
         calls.append(kwargs)
-        return _borrowed_computer()[0]
+        return raw_computer
 
     monkeypatch.setattr(ComputerSandbox, "attach", attach)
-    context = _handle().borrow(function_region="us-west")
+    context = _handle().borrow(run_id="run-123", function_region="us-west")
     assert calls == []
 
     with context as computer:
-        assert computer.metadata().sandbox_id == "sb-owned"  # type: ignore[union-attr]
+        assert isinstance(computer, BorrowedComputer)
+        assert computer.actions is raw_computer.actions
         assert len(calls) == 1
         assert calls[0]["wait"] is True
 
     calls.clear()
     with (
-        pytest.raises(ConfigConflictError, match="Function region"),
-        _handle().borrow(function_region="us-east"),
+        pytest.raises(SessionPlacementMismatchError),
+        _handle().borrow(run_id="run-123", function_region="us-east"),
     ):
         raise AssertionError("unreachable")
     assert calls == []
+
+
+def test_borrow_validates_run_id_before_attach(monkeypatch) -> None:
+    calls = 0
+
+    def attach(**_kwargs: object) -> ComputerSandbox:
+        nonlocal calls
+        calls += 1
+        return _borrowed_computer()[0]
+
+    monkeypatch.setattr(ComputerSandbox, "attach", attach)
+    with pytest.raises(ValueError, match="run_id"), _handle().borrow(
+        run_id=" ", function_region="us-west"
+    ):
+        raise AssertionError("unreachable")
+    assert calls == 0
+
+
+@pytest.mark.parametrize("function_environment", [None, "staging"])
+def test_borrow_rejects_missing_or_mismatched_modal_environment_before_attach(
+    monkeypatch,
+    function_environment: str | None,
+) -> None:
+    calls = 0
+
+    def attach(**_kwargs: object) -> ComputerSandbox:
+        nonlocal calls
+        calls += 1
+        return _borrowed_computer()[0]
+
+    monkeypatch.setattr(ComputerSandbox, "attach", attach)
+    if function_environment is None:
+        monkeypatch.delenv("MODAL_ENVIRONMENT")
+    else:
+        monkeypatch.setenv("MODAL_ENVIRONMENT", function_environment)
+
+    with pytest.raises(SessionEnvironmentMismatchError), _handle().borrow(
+        run_id="run-123", function_region="us-west"
+    ):
+        raise AssertionError("unreachable")
+    assert calls == 0
+
+
+def test_borrowed_computer_exposes_only_daemon_capabilities(monkeypatch) -> None:
+    computer, _target, _client = _borrowed_computer()
+    monkeypatch.setattr(ComputerSandbox, "attach", lambda **_kwargs: computer)
+
+    with _handle().borrow(run_id="run-123", function_region="us-west") as borrowed:
+        for capability in (
+            "actions",
+            "apps",
+            "artifacts",
+            "browser",
+            "clipboard",
+            "commands",
+            "display",
+            "input",
+            "keyboard",
+            "mouse",
+            "recordings",
+            "screenshots",
+            "windows",
+            "hot_session",
+            "observation_stream",
+        ):
+            assert hasattr(borrowed, capability)
+        for forbidden in (
+            "client",
+            "lifecycle",
+            "processes",
+            "debug",
+            "session",
+            "start",
+            "stop",
+            "restart",
+            "terminate",
+            "detach",
+            "poll",
+            "runtime_placement",
+            "tags",
+            "snapshot_filesystem",
+            "mount_image",
+            "reload_volumes",
+            "session_handle",
+            "metadata",
+        ):
+            assert not hasattr(borrowed, forbidden)
 
 
 def test_borrow_context_rejects_second_entry_without_replacing_live_client(monkeypatch) -> None:
@@ -252,8 +398,8 @@ def test_borrow_context_rejects_second_entry_without_replacing_live_client(monke
         return computer
 
     monkeypatch.setattr(ComputerSandbox, "attach", attach)
-    context = _handle().borrow(function_region="us-west")
-    assert context.__enter__() is computer
+    context = _handle().borrow(run_id="run-123", function_region="us-west")
+    assert isinstance(context.__enter__(), BorrowedComputer)
     with pytest.raises(RuntimeError, match="only be entered once"):
         context.__enter__()
     context.__exit__(None, None, None)
@@ -268,7 +414,7 @@ def test_attach_or_create_reuse_aligns_ingress_and_http_policy(monkeypatch) -> N
     config = ComputerConfig(
         run_id="run-reuse",
         ingress="connect",
-        runtime={"modal_region": "us-west"},
+        runtime={"modal_environment": "prod", "modal_region": "us-west"},
         network={"daemon_http_version": "2"},
     )
     config_hash = compute_config_hash(config)
@@ -299,8 +445,8 @@ def test_borrow_live_config_mismatch_cleans_up_without_termination(monkeypatch) 
     monkeypatch.setattr(ComputerSandbox, "attach", lambda **_kwargs: computer)
 
     with (
-        pytest.raises(ConfigConflictError, match="live sandbox config_hash"),
-        _handle().borrow(function_region="us-west"),
+        pytest.raises(SessionTargetMismatchError),
+        _handle().borrow(run_id="run-123", function_region="us-west"),
     ):
         raise AssertionError("unreachable")
 
@@ -316,8 +462,25 @@ def test_borrow_rejects_target_that_lost_sdk_ownership_marker(monkeypatch) -> No
     monkeypatch.setattr(ComputerSandbox, "attach", lambda **_kwargs: computer)
 
     with (
-        pytest.raises(ConfigConflictError, match="live sandbox config_hash"),
-        _handle().borrow(function_region="us-west"),
+        pytest.raises(SessionTargetMismatchError),
+        _handle().borrow(run_id="run-123", function_region="us-west"),
+    ):
+        raise AssertionError("unreachable")
+
+    assert target.detach_calls == 1
+    assert client.close_calls == 1
+    assert target.terminate_calls == 0
+
+
+def test_borrow_rejects_target_with_a_different_session_id(monkeypatch) -> None:
+    computer, target, client = _borrowed_computer()
+    target._tags["computer-use.session_id"] = "c" * 32
+    computer._metadata = computer.metadata().model_copy(update={"tags": target.get_tags()})  # type: ignore[union-attr]
+    monkeypatch.setattr(ComputerSandbox, "attach", lambda **_kwargs: computer)
+
+    with (
+        pytest.raises(SessionTargetMismatchError),
+        _handle().borrow(run_id="run-123", function_region="us-west"),
     ):
         raise AssertionError("unreachable")
 
@@ -337,12 +500,12 @@ def test_borrow_deterministically_detaches_without_terminating(
     if raises:
         with (
             pytest.raises(RuntimeError, match="user workload failed"),
-            _handle().borrow(function_region="us-west"),
+            _handle().borrow(run_id="run-123", function_region="us-west"),
         ):
             raise RuntimeError("user workload failed")
     else:
-        with _handle().borrow(function_region="us-west") as borrowed:
-            assert borrowed is computer
+        with _handle().borrow(run_id="run-123", function_region="us-west") as borrowed:
+            assert isinstance(borrowed, BorrowedComputer)
 
     assert target.detach_calls == 1
     assert client.close_calls == 1
@@ -365,7 +528,9 @@ def test_borrow_does_not_retry_or_fallback_on_attach_failures(
         raise failure
 
     monkeypatch.setattr(ComputerSandbox, "attach", fail)
-    with pytest.raises(type(failure)), _handle().borrow(function_region="us-west"):
+    with pytest.raises(type(failure)), _handle().borrow(
+        run_id="run-123", function_region="us-west"
+    ):
         raise AssertionError("unreachable")
     assert calls == 1
 
@@ -388,3 +553,28 @@ def test_computer_session_handle_is_public() -> None:
     import modal_computer_use
 
     assert modal_computer_use.ComputerSessionHandle is ComputerSessionHandle
+    assert modal_computer_use.BorrowedComputer is BorrowedComputer
+
+
+def test_public_session_errors_redact_caller_supplied_identity_and_content() -> None:
+    import modal_computer_use
+
+    error_names = (
+        "SessionBorrowError",
+        "SessionCompatibilityError",
+        "SessionEnvironmentMismatchError",
+        "SessionPlacementMismatchError",
+        "SessionTargetMismatchError",
+        "SessionBusyError",
+        "SessionLeaseLostError",
+        "RunSequenceConflictError",
+        "ActionOutcomeUnknownError",
+        "OperationResultUnavailableError",
+        "SessionRecoveryRequiredError",
+    )
+    for error_name in error_names:
+        error_type = getattr(modal_computer_use, error_name)
+        error = error_type("sb-secret", content="private task")
+        rendered = f"{error!s} {error!r}"
+        assert "sb-secret" not in rendered
+        assert "private task" not in rendered

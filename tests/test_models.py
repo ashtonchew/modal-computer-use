@@ -27,6 +27,22 @@ def test_runtime_modal_region_rejects_empty_string() -> None:
         ComputerConfig(runtime={"modal_region": "   "})
 
 
+def test_runtime_modal_environment_is_distinct_and_rejects_empty_string() -> None:
+    config = ComputerConfig(
+        runtime={"modal_environment": "runtime-prod"},
+        image={
+            "source": "named",
+            "revision": "a" * 40,
+            "environment_name": "image-prod",
+        },
+    )
+    assert config.runtime.modal_environment == "runtime-prod"
+    assert config.image.environment_name == "image-prod"
+
+    with pytest.raises(ValidationError, match="modal_environment must be non-empty"):
+        ComputerConfig(runtime={"modal_environment": "   "})
+
+
 def test_action_subprocess_backend_defaults_and_validates() -> None:
     assert ComputerConfig().actions.subprocess_backend == "isolated-asyncio"
     assert (
