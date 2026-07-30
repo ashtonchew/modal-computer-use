@@ -87,6 +87,8 @@ class ModalOptimizedProviderConfig:
     image_revision: str
     cpu: float = 4.0
     memory_mib: int = 8192
+    runner_cpu: float | None = None
+    runner_memory_mib: int | None = None
     browser: Literal["chromium"] = "chromium"
     iterations: int = 30
     warmup_iterations: int = 1
@@ -104,11 +106,25 @@ class ModalOptimizedProviderConfig:
             raise ValueError("cpu must be positive")
         if self.memory_mib < 128:
             raise ValueError("memory_mib must be at least 128")
+        if self.runner_cpu is not None and self.runner_cpu <= 0:
+            raise ValueError("runner_cpu must be positive")
+        if self.runner_memory_mib is not None and self.runner_memory_mib < 128:
+            raise ValueError("runner_memory_mib must be at least 128")
         if self.iterations < 1 or self.warmup_iterations < 0:
             raise ValueError("iteration counts are invalid")
         publishable_counts = self.iterations == 30 and self.warmup_iterations == 1
         if not self.pilot and not publishable_counts:
             raise ValueError("nonpublishable counts require pilot=True")
+
+    @property
+    def resolved_runner_cpu(self) -> float:
+        """Function runner cores; an unset request inherits the target Sandbox shape."""
+        return self.cpu if self.runner_cpu is None else self.runner_cpu
+
+    @property
+    def resolved_runner_memory_mib(self) -> int:
+        """Function runner memory; an unset request inherits the target Sandbox shape."""
+        return self.memory_mib if self.runner_memory_mib is None else self.runner_memory_mib
 
 
 def run_modal_optimized_provider_benchmark(
@@ -131,8 +147,8 @@ def run_modal_optimized_provider_benchmark(
             app_name=config.app_name,
             region=config.region,
             image_revision=config.image_revision,
-            cpu=config.cpu,
-            memory_mib=config.memory_mib,
+            cpu=config.resolved_runner_cpu,
+            memory_mib=config.resolved_runner_memory_mib,
             timeout_seconds=max(900, (config.iterations + config.warmup_iterations) * 150),
             retries=0,
         )
@@ -191,8 +207,8 @@ def run_modal_optimized_provider_benchmark(
         "browser": config.browser,
         "browser_prewarm": False,
         "image_revision": config.image_revision,
-        "runner_cpu": config.cpu,
-        "runner_memory_mib": config.memory_mib,
+        "runner_cpu": config.resolved_runner_cpu,
+        "runner_memory_mib": config.resolved_runner_memory_mib,
         "target_cpu": config.cpu,
         "target_memory_mib": config.memory_mib,
         "input_rate_limit_per_sec": 0,
@@ -659,6 +675,7 @@ def _validate_complete_run(payload: dict[str, Any]) -> None:
         },
         "metadata",
     )
+    _validate_requested_resources(metadata)
     runs = payload.get("runs")
     if not isinstance(runs, dict) or set(runs) != {"modal_optimized_runner"}:
         raise ValueError("complete artifact requires one optimized runner result")
@@ -814,6 +831,16 @@ def _validate_complete_surfaces(value: Any, iterations: int) -> None:
     for name, item in verification.items():
         if item != {"status": "ok"}:
             raise ValueError(f"{name} verification must succeed")
+
+
+def _validate_requested_resources(metadata: dict[str, Any]) -> None:
+    for name in ("runner_cpu", "target_cpu"):
+        if _finite_nonnegative(metadata.get(name), name) <= 0:
+            raise ValueError(f"{name} must be positive")
+    for name in ("runner_memory_mib", "target_memory_mib"):
+        value = metadata.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 128:
+            raise ValueError(f"{name} must be at least 128")
 
 
 def _validate_failure_records(value: Any, label: str) -> None:

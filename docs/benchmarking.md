@@ -186,6 +186,15 @@ check, and cleanup gate passes. Both target phases use the SDK's default atteste
 Modal Connect authorizes the daemon before recurring requests move to the encrypted tunnel. The
 resources are billable.
 
+The run creates two kinds of machine, and each takes its own resource request. `--modal-cpu` and
+`--modal-memory-mib` size every target Sandbox, which runs a full desktop. `--runner-cpu` and
+`--runner-memory-mib` size the Modal Function that creates those targets and issues their daemon
+requests. An omitted runner flag inherits the matching target value, so a command written before
+these flags existed still requests one shape for both machines and still reports `runner_cpu`,
+`runner_memory_mib`, `target_cpu`, and `target_memory_mib` as equal. The runner holds the HTTP
+client inside the warm-operation timer, so a different runner shape is a different configuration:
+rerun both phases and report the shapes rather than comparing across them.
+
 First-visual-change measurements are experimental. They confirm a changed frame by its hash under
 the documented boundary. They do not measure application settle or semantic readiness. Read the
 [Alpha observation guide](experimental-visual-change-observation.md) before using that surface.
@@ -371,12 +380,19 @@ Live provider and Modal commands can create billable resources. Before a run:
    unit, minimum charge, and the rates that apply to the requested resources.
 2. Count the maximum target and runner instances, including warmups, measured attempts, permitted
    replacements, retries, and concurrent arms. Use configured lifecycle timeouts, not expected
-   latency, as the maximum duration.
+   latency, as the maximum duration. Where a command sizes its runner and its targets separately,
+   price the two shapes separately.
 3. Calculate an explicit ceiling: resource rate multiplied by maximum billable duration and instance
    count, plus fixed operation, storage, snapshot, data-transfer, and minimum charges. State any
    omitted or unknown charge.
 4. Record the ceiling with the run plan. Configure a provider budget or quota when available, and do
    not start when the ceiling exceeds the approved amount.
+
+Modal charges CPU and memory on whichever is higher, the request or the actual usage, and enforces a
+floor of 0.125 physical cores per container, where one physical core is two vCPU
+([Resources](https://modal.com/docs/guide/resources) and [Pricing](https://modal.com/pricing), both
+accessed 2026-07-29). A request above real usage is billed in full, so size each machine from its own
+measured usage rather than copying the other's shape.
 
 The commands on this page do not enforce a maximum-cost gate. They can continue creating billable
 resources until the benchmark finishes or a lifecycle limit stops it. Use an isolated app or project
