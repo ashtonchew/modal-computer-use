@@ -364,9 +364,10 @@ For each approved run, the workflow creates private random App and owner labels,
 test-only App from the checked-out package source, and resolves its Function with
 `modal.Function.from_name(...)`. The owner creates one noVNC-disabled target Sandbox in the same
 non-production Modal Environment and requested region, JSON-round-trips its
-`ComputerSessionHandle`, and invokes the deployed async Function exactly once. The Function enters
-one `borrow_async()` context, waits for daemon readiness as part of borrow entry, captures one full
-inline screenshot, and applies one sequenced wait action that does not type content.
+`ComputerSessionHandle` for the attested-tunnel policy, and invokes the deployed async Function
+exactly once. The Function enters one `borrow_async()` context, authorizes the tunnel, waits for
+daemon readiness as part of borrow entry, captures one full inline screenshot, and applies one
+sequenced wait action that does not type content.
 
 The smoke proves compatibility with the repository-pinned Modal SDK for deployed Function argument
 serialization, the official remote runtime marker, cross-object authorization, Connect-token

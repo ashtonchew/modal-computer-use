@@ -291,6 +291,7 @@ jobs:
               sandbox.terminate(wait=True)
           PY
           uv run modal app stop \
+            --yes \
             --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
             "$MODAL_COMPUTER_USE_HANDOFF_APP_NAME" >/dev/null 2>&1 || app_cleanup_status=$?
 

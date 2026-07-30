@@ -164,7 +164,7 @@ def test_modal_deployed_function_session_handoff_smoke() -> None:
         computer = ComputerSandbox.create(
             config=ComputerConfig(
                 run_id=f"handoff-target-{uuid.uuid4().hex}",
-                ingress="connect",
+                ingress="attested-tunnel",
                 expose_vnc="off",
                 runtime=RuntimeConfig(
                     modal_environment=modal_environment,

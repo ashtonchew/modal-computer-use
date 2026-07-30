@@ -1266,6 +1266,7 @@ def test_deployed_handoff_smoke_owner_round_trips_and_invokes_once() -> None:
     assert "computer.session_handle().model_dump_json()" in test_source
     assert test_source.count("deployed.remote(") == 1
     assert 'expose_vnc="off"' in test_source
+    assert 'ingress="attested-tunnel"' in test_source
     assert "timeout_seconds=600" in test_source
     assert "idle_timeout_seconds=180" in test_source
     assert 'lease_status.get("state") == "released"' in test_source
@@ -1292,6 +1293,7 @@ def test_protected_workflow_scopes_and_cleans_up_handoff_smoke() -> None:
     assert "uv run modal deploy" in protected_job
     assert "if: always()" in protected_job
     assert "uv run modal app stop" in protected_job
+    assert "--yes" in protected_job
     assert '"computer-use.owner": owner' in protected_job
     assert "sandbox.terminate(wait=True)" in protected_job
     assert ">/dev/null 2>&1" in protected_job
