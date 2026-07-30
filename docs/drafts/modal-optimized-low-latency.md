@@ -42,21 +42,23 @@ The usual cursor-hidden request now reads the current frame from the long-lived 
 
 ## A process for every click
 
-On a local computer, a click feels atomic. X11 sees a short sequence: move the pointer, press a button, release it. My first implementation asked `xdotool`, a command-line X11 automation program, to produce that sequence. Every API action started a process, opened a display connection, sent the events, and exited.
+On a local computer, a click feels atomic. Underneath, the desktop receives separate input events. [macOS sends mouse events through Quartz](https://developer.apple.com/documentation/coregraphics/cgevent); the Linux desktop in my Sandbox uses X11. An agent's `click(x, y)` therefore has to become pointer motion, button press, and button release in X11's event stream.
 
-The event mechanism was already fast. `xdotool` itself uses XTest, the X11 extension for synthetic keyboard and mouse events, together with Xlib. The process around it was slow. I removed the command-line boundary and opened one Xlib connection when the daemon started. Each request now builds its XTest events in memory, takes one input lock, queues the sequence, and synchronizes with the X server once at the end.
+My first implementation handed that translation to [`xdotool`](https://github.com/jordansissel/xdotool), a command-line X11 automation program. `xdotool` already knew how to speak to the display and synthesize input, and each invocation lived in its own process. If one invocation failed, it did not take the daemon with it.
+
+A pointer move followed by one click took about 146 ms inside the daemon. I checked what `xdotool` was doing beneath the CLI before replacing X11. It already used [XTest](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html), the X11 extension for synthetic input, through Xlib. Every invocation still started a new executable, loaded its libraries, parsed the command, and opened a fresh display connection around a three-event click. The process boundary bought useful isolation for a local automation script, where a person pauses between commands. An agent paid for it after every screenshot.
+
+I kept XTest and removed the per-action process. The daemon loads the X11 client libraries once, keeps one display connection open, and builds the motion, press, and release events in memory. Each request takes the input lock, queues the complete sequence, and synchronizes with the X server once at the end.
 
 ![Per-action xdotool setup compared with one persistent X11 input connection](../assets/modal-optimized-input-session.svg)
 
 Inside the daemon, the mean for a pointer move followed by one left click fell from about 146 ms to 1.2 ms, a 128x speedup. Four move-and-click pairs took 4.8 ms instead of 444 ms.
 
-Typing improved less because every character still expands into key-down and key-up events. The daemon-side mean for one hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms.
+Typing sends at least a key-down and key-up for every character, plus modifiers when needed. The daemon-side mean for one hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms. These were adapter timings inside the daemon. The final table times the complete request.
 
-Those daemon-side means isolate XTest from `xdotool`. The provider table later reports p50 for a separate end-to-end run on the final zero-delay typing configuration.
+Keeping the connection open traded process isolation for state I now had to manage. Consider typing `A`: press Shift, press `a`, release `a`, release Shift. If another request typed `2` halfway through, X11 could receive `@` instead. The daemon reads the active XKB layout before building the sequence and holds the input lock until every key and button has been released. That same lock protects mouse drags and modified clicks.
 
-The persistent session also owns keyboard state. On a US layout, `A` requires Shift plus `a`, while `@` requires Shift plus `2`; another layout may choose different keys. The daemon reads the active XKB map and builds the right key sequence. It holds the input lock throughout, so a second request cannot type while the first has Shift held or a mouse button down.
-
-The first emitted event creates the retry boundary. Before it, the daemon can safely use the default `xdotool` path if XTest is unavailable. After it, replaying the request could type a character twice or click twice, so the daemon returns the failure without fallback. It also contains Xlib errors instead of letting one bad request terminate the process.
+The failure boundary moved into the daemon with the connection. If XTest is unavailable before the first event, the daemon can still use `xdotool`. Once a button press or key-down may have reached the X server, replaying the request could double-click or type a character twice. The daemon attempts to release anything it pressed and returns the error without fallback. It also contains Xlib errors so a bad display operation does not terminate the long-lived process.
 
 ## Four clicks, one request
 
