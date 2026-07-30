@@ -351,6 +351,45 @@ The protected tests verify that Volume v2 sync commits with `sync <artifacts_dir
 visible through `Volume.read_file`. They restore snapshots with `snapshot_directory` plus
 `mount_image`, rather than treating a directory snapshot as the whole desktop image.
 
+### Protected deployed-Function handoff smoke
+
+The `Release Validation` workflow includes one opt-in handoff smoke in its protected
+`modal-smoke` job. It remains `workflow_dispatch`-only and runs only when
+`run_modal_smoke=true` is approved for the GitHub `modal-smoke` environment. The Modal workspace
+must have a dedicated non-production Environment named `modal-computer-use-smoke`; the protected
+service user must be able to deploy Functions and create Sandboxes there. Do not point the job at a
+production Environment.
+
+For each approved run, the workflow creates private random App and owner labels, deploys the
+test-only App from the checked-out package source, and resolves its Function with
+`modal.Function.from_name(...)`. The owner creates one noVNC-disabled target Sandbox in the same
+non-production Modal Environment and requested region, JSON-round-trips its
+`ComputerSessionHandle`, and invokes the deployed async Function exactly once. The Function enters
+one `borrow_async()` context, waits for daemon readiness as part of borrow entry, captures one full
+inline screenshot, and applies one sequenced wait action that does not type content.
+
+The smoke proves compatibility with the repository-pinned Modal SDK for deployed Function argument
+serialization, the official remote runtime marker, cross-object authorization, Connect-token
+issuance, attested handle policy, lease acquisition and release, async daemon access, and borrower
+cleanup. It also verifies that the borrower leaves the target running and that the owner explicitly
+terminates it.
+
+The result is deliberately limited to success booleans, screenshot width and height, and the
+documented `MODAL_CLOUD_PROVIDER` and `MODAL_REGION` observations for the Function. The owner
+records the same two placement labels from `runtime_placement()`. Both observations must be
+present, but the test does not require them to match and does not infer availability zone, host,
+loopback, private-network, or co-location properties. It does not return or log screenshot bytes
+or digests, provider identifiers, endpoints, credentials, call identifiers, prompts, or typed
+content.
+
+Function retries are disabled, warm and maximum Function capacity are bounded, and both the
+Function and target have finite timeouts. An `if: always()` step terminates only targets with the
+exact private owner tag and then stops the run-scoped App, while job concurrency prevents duplicate
+paid runs. GitHub force-cancellation can prevent cleanup steps from executing, so target timeout and
+idle timeout remain the final cost backstop. Run this smoke intentionally for Modal SDK upgrades or
+handoff protocol changes; it is compatibility validation, not a recurring benchmark or an
+exactly-once guarantee.
+
 ## Performance and benchmark evidence
 
 Use [Performance](performance.md) for placement, ingress, image, browser, and warm-capacity decision
