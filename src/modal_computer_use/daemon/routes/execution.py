@@ -11,7 +11,9 @@ from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
     mark_desktop_ready,
+    mutation_lock,
     ready_input_lock,
+    ready_mutation_lock,
 )
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload
@@ -41,7 +43,7 @@ async def run_input_action[T](
     error = policy.action_reservation_error()
     if error is not None:
         raise error
-    async with ready_input_lock(request):
+    async with ready_mutation_lock(request):
         policy.reserve_action()
         result = await operation()
     return raise_for_failed_action_result(
@@ -103,15 +105,16 @@ async def run_recording_start[T](
     error = policy.recording_start_error()
     if error is not None:
         raise error
-    result = await operation()
-    try:
-        policy.enforce("recordings")
-    except DaemonError:
-        if rollback is not None:
-            rollback(result)
-        raise
-    policy.touch_activity()
-    return result
+    async with mutation_lock(request):
+        result = await operation()
+        try:
+            policy.enforce("recordings")
+        except DaemonError:
+            if rollback is not None:
+                rollback(result)
+            raise
+        policy.touch_activity()
+        return result
 
 
 async def run_idle_only_mutation[T](
@@ -120,19 +123,23 @@ async def run_idle_only_mutation[T](
     *,
     enforce_after: tuple[BudgetKind, ...] = (),
     rollback: Callable[[T], None] | None = None,
+    after_success: Callable[[T], None] | None = None,
 ) -> T:
     policy = budget_policy(request)
-    policy.enforce_idle()
-    result = await operation()
-    try:
-        if enforce_after:
-            policy.enforce(*enforce_after)
-    except DaemonError:
-        if rollback is not None:
-            rollback(result)
-        raise
-    policy.touch_activity()
-    return result
+    async with mutation_lock(request):
+        policy.enforce_idle()
+        result = await operation()
+        try:
+            if enforce_after:
+                policy.enforce(*enforce_after)
+        except DaemonError:
+            if rollback is not None:
+                rollback(result)
+            raise
+        if after_success is not None:
+            after_success(result)
+        policy.touch_activity()
+        return result
 
 
 def raise_for_failed_action_result[T](

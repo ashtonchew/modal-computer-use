@@ -8,6 +8,7 @@ from fastapi import Request
 
 from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.leases import validate_mutation_headers
 from modal_computer_use.models import Point, Region
 
 
@@ -60,6 +61,23 @@ async def ensure_desktop_ready(request: Request, *, force: bool = False) -> None
 async def ready_input_lock(request: Request) -> AsyncIterator[None]:
     lock_was_contended = request.app.state.input_lock.locked()
     async with request.app.state.input_lock:
+        if lock_was_contended:
+            await ensure_desktop_ready(request, force=True)
+        yield
+
+
+@asynccontextmanager
+async def mutation_lock(request: Request) -> AsyncIterator[None]:
+    async with request.app.state.input_lock:
+        validate_mutation_headers(request.app.state, request.headers)
+        yield
+
+
+@asynccontextmanager
+async def ready_mutation_lock(request: Request) -> AsyncIterator[None]:
+    lock_was_contended = request.app.state.input_lock.locked()
+    async with request.app.state.input_lock:
+        validate_mutation_headers(request.app.state, request.headers)
         if lock_was_contended:
             await ensure_desktop_ready(request, force=True)
         yield

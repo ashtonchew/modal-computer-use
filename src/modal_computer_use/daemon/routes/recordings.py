@@ -38,8 +38,8 @@ async def stop(recording_id: str, request: Request) -> Recording:
         operation,
         enforce_after=("recordings", "artifacts"),
         rollback=lambda _rec: request.app.state.recordings.delete(recording_id),
+        after_success=lambda _rec: request.app.state.recordings.append_manifest(recording_id),
     )
-    request.app.state.recordings.append_manifest(recording_id)
     return rec
 
 

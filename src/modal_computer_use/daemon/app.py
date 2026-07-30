@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import OrderedDict, deque
@@ -23,6 +24,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputUnavailableError,
 )
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
+from modal_computer_use.daemon.leases import LeaseCoordinator
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.readiness import ReadinessCache
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
@@ -45,6 +47,7 @@ from .routes import (
     hot_session,
     input,
     keyboard,
+    leases,
     lifecycle,
     mouse,
     observations,
@@ -91,6 +94,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         try:
+            lease_expiry_task = app.state.lease_expiry_task
+            if lease_expiry_task is not None:
+                lease_expiry_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await lease_expiry_task
             await supervisor.stop()
         finally:
             app.state.backend.close()
@@ -119,6 +127,8 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         subprocess_backend=settings.subprocess_backend,
     )
     app.state.input_lock = asyncio.Lock()
+    app.state.lease_coordinator = LeaseCoordinator()
+    app.state.lease_expiry_task = None
     app.state.readiness_cache = ReadinessCache(settings.readiness_cache_ttl_ms)
     app.state.artifacts = ArtifactStore(
         settings.artifacts_dir,
@@ -278,6 +288,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     for router in (
         health.router,
+        leases.router,
         lifecycle.router,
         processes.router,
         mouse.router,

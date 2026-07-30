@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from modal_computer_use.daemon.desktop.browser import DEFAULT_BROWSER_PROFILE_DIR
 from modal_computer_use.daemon.routes.execution import run_input_action
-from modal_computer_use.daemon.routes.validation import ensure_desktop_ready
+from modal_computer_use.daemon.routes.validation import ensure_desktop_ready, mutation_lock
 from modal_computer_use.daemon.schemas import BrowserOpenUrlRequest, BrowserRenderMetricsRequest
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload
@@ -33,10 +33,12 @@ async def render_metrics(
     payload: BrowserRenderMetricsRequest,
     request: Request,
 ) -> dict[str, object]:
-    return await request.app.state.backend.browser_render_metrics(
-        payload.url,
-        timeout_seconds=payload.timeout_seconds,
-    )
+    await ensure_desktop_ready(request)
+    async with mutation_lock(request):
+        return await request.app.state.backend.browser_render_metrics(
+            payload.url,
+            timeout_seconds=payload.timeout_seconds,
+        )
 
 
 @router.get("/status")

@@ -13,6 +13,7 @@ from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacted_action
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
+from modal_computer_use.daemon.leases import LeaseCredentials, lease_credentials_from_headers
 from modal_computer_use.daemon.routes.validation import backend_readiness, mark_desktop_ready
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
@@ -58,10 +59,13 @@ class _FailedActionResultError(DaemonError):
 
 
 class ActionBatchContext:
-    def __init__(self, state: Any) -> None:
+    def __init__(self, state: Any, headers: Any | None = None) -> None:
         self.state = state
         self.budget_policy: BudgetPolicy = state.budget_policy
         self.traces = ActionTraceWriter(self)
+        self.lease_credentials: LeaseCredentials | None = (
+            lease_credentials_from_headers(headers) if headers is not None else None
+        )
 
 
 async def _ensure_desktop_ready(context: ActionBatchContext, *, force: bool = False) -> None:
@@ -133,7 +137,17 @@ async def _run(
         else _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
     )
     if cached is not None:
-        return cached, None
+        async with context.state.input_lock:
+            coordinator = getattr(context.state, "lease_coordinator", None)
+            if coordinator is not None:
+                coordinator.validate_mutation(context.lease_credentials)
+            cached = _cached_idempotency_result(
+                context,
+                effective_idempotency_key,
+                request_fingerprint,
+            )
+            if cached is not None:
+                return cached, None
     action_count = _count_action_tree(payload.actions)
     if action_count > context.state.settings.max_batch_actions:
         raise DaemonError(
@@ -164,6 +178,9 @@ async def _run(
     action_phase_failed = False
     lock_was_contended = context.state.input_lock.locked()
     async with context.state.input_lock:
+        coordinator = getattr(context.state, "lease_coordinator", None)
+        if coordinator is not None:
+            coordinator.validate_mutation(context.lease_credentials)
         cache = context.state.idempotency_cache
         cached = (
             None

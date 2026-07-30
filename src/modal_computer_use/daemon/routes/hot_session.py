@@ -96,7 +96,10 @@ async def _send_hot_action_result(
     payload: dict[str, Any],
 ) -> None:
     request = ActionBatchRequest.model_validate(payload)
-    result = await run_batch(request, ActionBatchContext(websocket.app.state))
+    result = await run_batch(
+        request,
+        ActionBatchContext(websocket.app.state, websocket.headers),
+    )
     await websocket.send_json(
         {
             "type": "result",
@@ -113,7 +116,10 @@ async def _send_hot_action_screenshot_result(
     payload: dict[str, Any],
 ) -> None:
     request = ActionBatchRequest.model_validate(payload)
-    result, shot = await run_with_screenshot_bytes(request, ActionBatchContext(websocket.app.state))
+    result, shot = await run_with_screenshot_bytes(
+        request,
+        ActionBatchContext(websocket.app.state, websocket.headers),
+    )
     if shot is None:
         await _send_hot_error(
             websocket,

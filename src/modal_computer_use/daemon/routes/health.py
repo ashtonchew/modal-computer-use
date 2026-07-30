@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response
 
 from modal_computer_use._version import __version__
+from modal_computer_use.daemon.leases import LEASE_PROTOCOL_VERSION
 from modal_computer_use.daemon.routes.validation import daemon_readiness
 from modal_computer_use.models import Capabilities, ReadyStatus, VersionInfo
 
@@ -31,7 +32,8 @@ async def readyz(request: Request, response: Response) -> ReadyStatus:
 
 
 @router.get("/v1/version")
-async def version(request: Request) -> VersionInfo:
+async def version(request: Request, response: Response) -> VersionInfo:
+    response.headers["x-computer-use-lease-protocol"] = LEASE_PROTOCOL_VERSION
     return VersionInfo(
         daemon_version=__version__,
         sdk_min_version="1.0.0",
@@ -42,8 +44,9 @@ async def version(request: Request) -> VersionInfo:
 
 
 @router.get("/v1/capabilities")
-async def capabilities(request: Request) -> Capabilities:
+async def capabilities(request: Request, response: Response) -> Capabilities:
     backend = request.app.state.backend
+    response.headers["x-computer-use-lease-protocol"] = LEASE_PROTOCOL_VERSION
     return Capabilities(
         primitives=[
             "mouse",
@@ -63,6 +66,7 @@ async def capabilities(request: Request) -> Capabilities:
             "processes",
             "session",
             "debug",
+            "trajectory-leases-v1",
         ],
         screenshot_formats=["png", "jpeg", "webp"],
         action_types=[
