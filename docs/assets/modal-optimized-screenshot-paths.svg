@@ -39,7 +39,7 @@
 
   <rect class="box" x="960" y="88" width="160" height="104" rx="8"/>
   <text class="label" x="1040" y="130" text-anchor="middle">1024×768 PNG</text>
-  <text class="small" x="1040" y="157" text-anchor="middle">Full screenshot returned</text>
+  <text class="small" x="1040" y="157" text-anchor="middle">Screenshot returned</text>
 
   <line class="path" x1="208" y1="140" x2="480" y2="140" marker-end="url(#arrow-grey)"/>
   <text class="setup" x="344" y="104" text-anchor="middle">One-time authorization</text>
@@ -64,7 +64,7 @@
 
   <rect class="box-opt" x="960" y="296" width="160" height="104" rx="8"/>
   <text class="label" x="1040" y="338" text-anchor="middle">1024×768 PNG</text>
-  <text class="small" x="1040" y="365" text-anchor="middle">Full screenshot returned</text>
+  <text class="small" x="1040" y="365" text-anchor="middle">Screenshot returned</text>
 
   <line class="path-opt" x1="208" y1="348" x2="480" y2="348" marker-end="url(#arrow-sage)"/>
   <text class="setup-opt" x="344" y="312" text-anchor="middle">One-time authorization</text>
