@@ -4,7 +4,7 @@
 
 The first computer-use loop I built on Modal took about 550 ms to look at the screen and click once. The E2B and Daytona defaults took about 420 ms and 480 ms. I built the Modal path myself from lower-level primitives, which let me move the caller and rewrite the daemon as I traced it. Where did the half-second go?
 
-A fifty-turn loop that takes one screenshot and sends one click per turn pays that interface cost fifty times. At the measured p50s, those three paths add roughly 20 to 28 seconds of waiting around the model. The primitives I built on Modal bring that interface budget under 2 seconds.
+A fifty-turn loop with one screenshot and one click per turn pays that delay fifty times. Across the three baseline paths, the interface adds about 24 seconds of waiting around the model. After the improvements, my optimized Modal path brings the same fifty-turn loop under 2 seconds.
 
 [OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, hundreds of milliseconds in the computer interface no longer hide behind slow generation. Longer trajectories make the gap worse because the user pays it on every turn before getting the result.
 
