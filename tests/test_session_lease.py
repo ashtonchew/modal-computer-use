@@ -76,6 +76,23 @@ class _AsyncTransport(_SyncTransport):
         return super().request(method, path, **kwargs)
 
 
+def _exception_graph(error: BaseException) -> list[BaseException]:
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    graph: list[BaseException] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        graph.append(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return graph
+
+
 def test_sync_sequence_is_gap_free_and_shared_by_all_executors() -> None:
     transport = _SyncTransport()
     coordinator = SessionLeaseCoordinator(transport, run_id="run-a")
@@ -217,6 +234,44 @@ def test_unallowlisted_daemon_operation_kind_is_redacted_to_none() -> None:
     assert "daemon.invalid" not in rendered
     assert "protected" not in rendered
     coordinator.close()
+
+
+def test_sync_result_unavailable_drops_raw_daemon_and_transport_exception_chains() -> None:
+    sentinel = "sentinel-endpoint-token-sync"
+    cases = (
+        (
+            "received",
+            DaemonHTTPError(sentinel, code="operation_result_unavailable"),
+        ),
+        ("transport", httpx.ReadTimeout(sentinel)),
+    )
+    for mode, raw_error in cases:
+        transport = _SyncTransport()
+        receipt = {
+            "state": "COMPLETED",
+            "sequence": 0,
+            "operation_kind": "actions.run",
+        }
+        if mode == "received":
+            transport.status[0] = receipt
+        else:
+            transport.resolved[0] = receipt
+        coordinator = SessionLeaseCoordinator(transport, run_id=f"run-{mode}")
+        coordinator.acquire()
+
+        with pytest.raises(OperationResultUnavailableError) as raised:
+            coordinator.execute(
+                lambda _headers, error=raw_error: (_ for _ in ()).throw(error)
+            )
+
+        graph = _exception_graph(raised.value)
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+        assert graph == [raised.value]
+        assert sentinel not in " ".join(
+            f"{error!s} {error!r}" for error in graph
+        )
+        coordinator.close()
 
 
 def test_sync_reobservation_requires_result_loss_and_never_reenables_mutation() -> None:
@@ -447,6 +502,51 @@ async def test_async_reobservation_is_repeatable_cancellable_and_keeps_mutations
     with pytest.raises(ActionOutcomeUnknownError):
         await coordinator.execute(lost)
     await coordinator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_result_unavailable_drops_raw_daemon_and_transport_exception_chains() -> None:
+    sentinel = "sentinel-endpoint-token-async"
+    cases = (
+        (
+            "received",
+            DaemonHTTPError(sentinel, code="operation_result_unavailable"),
+        ),
+        ("transport", httpx.ReadTimeout(sentinel)),
+    )
+    for mode, raw_error in cases:
+        transport = _AsyncTransport()
+        heartbeat_transport = _SyncTransport()
+        receipt = {
+            "state": "COMPLETED",
+            "sequence": 0,
+            "operation_kind": "actions.run",
+        }
+        if mode == "received":
+            transport.status[0] = receipt
+        else:
+            transport.resolved[0] = receipt
+        coordinator = AsyncSessionLeaseCoordinator(
+            transport,
+            run_id=f"run-{mode}",
+            heartbeat_transport=heartbeat_transport,
+            heartbeat_join_timeout_seconds=0.1,
+        )
+        await coordinator.acquire()
+
+        with pytest.raises(OperationResultUnavailableError) as raised:
+            await coordinator.execute(
+                lambda _headers, error=raw_error: _raise_async(error)
+            )
+
+        graph = _exception_graph(raised.value)
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+        assert graph == [raised.value]
+        assert sentinel not in " ".join(
+            f"{error!s} {error!r}" for error in graph
+        )
+        await coordinator.aclose()
 
 
 @pytest.mark.asyncio

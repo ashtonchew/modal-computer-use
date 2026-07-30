@@ -127,6 +127,16 @@ def _receipt_state(payload: Any, sequence: int) -> str:
     return str(state)
 
 
+def _result_unavailable_error(
+    payload: Mapping[str, Any],
+    sequence: int,
+) -> OperationResultUnavailableError:
+    return OperationResultUnavailableError(
+        sequence=sequence,
+        operation_kind=stable_operation_kind(payload.get("operation_kind")),
+    )
+
+
 class SessionLeaseCoordinator:
     """Deep sync module for one borrowed trajectory lease.
 
@@ -144,8 +154,6 @@ class SessionLeaseCoordinator:
         self._heartbeat: threading.Thread | None = None
         self._heartbeat_error: BaseException | None = None
         self._state: _CoordinatorState = "active"
-        self._result_unavailable_sequence: int | None = None
-        self._result_unavailable_operation_kind: str | None = None
         self._released = False
         self._resources: list[Any] = []
         self._close_wait_seconds = _transport_timeout_seconds(transport)
@@ -182,16 +190,16 @@ class SessionLeaseCoordinator:
             try:
                 result = request(headers)
             except DaemonHTTPError as exc:
-                self._handle_received_error(exc, sequence)
-                raise AssertionError("unreachable") from None
+                result_unavailable = self._handle_received_error(exc, sequence)
             except AuthenticationError as exc:
                 self._state = "unsafe"
                 raise SessionLeaseLostError() from exc
             except BaseException as exc:
-                self._resolve_transport_loss(sequence, exc)
-                raise AssertionError("unreachable") from None
-            self._sequence += 1
-            return result
+                result_unavailable = self._resolve_transport_loss(sequence, exc)
+            else:
+                self._sequence += 1
+                return result
+            raise result_unavailable
 
     def track(self, resource: T) -> T:
         self.ensure_open()
@@ -269,20 +277,6 @@ class SessionLeaseCoordinator:
         if self._state != "result_unavailable":
             raise ActionOutcomeUnknownError()
 
-    def _result_unavailable_error(
-        self,
-        payload: Mapping[str, Any],
-        sequence: int,
-    ) -> OperationResultUnavailableError:
-        operation_kind = stable_operation_kind(payload.get("operation_kind"))
-        self._state = "result_unavailable"
-        self._result_unavailable_sequence = sequence
-        self._result_unavailable_operation_kind = operation_kind
-        return OperationResultUnavailableError(
-            sequence=sequence,
-            operation_kind=operation_kind,
-        )
-
     def _receipt(self, path: str, sequence: int) -> dict[str, Any]:
         response = self._transport.request(
             "POST",
@@ -295,7 +289,11 @@ class SessionLeaseCoordinator:
             raise ActionOutcomeUnknownError()
         return payload
 
-    def _handle_received_error(self, exc: DaemonHTTPError, sequence: int) -> None:
+    def _handle_received_error(
+        self,
+        exc: DaemonHTTPError,
+        sequence: int,
+    ) -> OperationResultUnavailableError:
         if exc.code in {
             "lease_required",
             "lease_stale",
@@ -317,7 +315,8 @@ class SessionLeaseCoordinator:
         if state == "COMPLETED":
             self._sequence += 1
             if exc.code == "operation_result_unavailable":
-                raise self._result_unavailable_error(payload, sequence) from None
+                self._state = "result_unavailable"
+                return _result_unavailable_error(payload, sequence)
             mapped = _mapped_error(exc)
             if mapped is exc:
                 raise exc
@@ -325,7 +324,11 @@ class SessionLeaseCoordinator:
         self._state = "unsafe"
         raise SessionRecoveryRequiredError() from exc
 
-    def _resolve_transport_loss(self, sequence: int, cause: BaseException) -> None:
+    def _resolve_transport_loss(
+        self,
+        sequence: int,
+        cause: BaseException,
+    ) -> OperationResultUnavailableError:
         self._state = "unsafe"
         try:
             payload = self._receipt("/v1/receipts/resolve", sequence)
@@ -337,7 +340,8 @@ class SessionLeaseCoordinator:
             raise OperationNotAppliedError() from cause
         if state == "COMPLETED":
             self._sequence += 1
-            raise self._result_unavailable_error(payload, sequence) from None
+            self._state = "result_unavailable"
+            return _result_unavailable_error(payload, sequence)
         if state == "INDETERMINATE":
             raise SessionRecoveryRequiredError() from cause
         raise ActionOutcomeUnknownError() from cause
@@ -444,8 +448,6 @@ class AsyncSessionLeaseCoordinator:
         self._operation_lock = asyncio.Lock()
         self._heartbeat_worker: _LeaseHeartbeatWorker | None = None
         self._state: _CoordinatorState = "active"
-        self._result_unavailable_sequence: int | None = None
-        self._result_unavailable_operation_kind: str | None = None
         self._released = False
         self._resources: list[Any] = []
 
@@ -497,16 +499,16 @@ class AsyncSessionLeaseCoordinator:
                 await self._resolve_after_cancellation(sequence, exc)
                 raise
             except DaemonHTTPError as exc:
-                await self._handle_received_error(exc, sequence)
-                raise AssertionError("unreachable") from None
+                result_unavailable = await self._handle_received_error(exc, sequence)
             except AuthenticationError as exc:
                 self._state = "unsafe"
                 raise SessionLeaseLostError() from exc
             except BaseException as exc:
-                await self._resolve_transport_loss(sequence, exc)
-                raise AssertionError("unreachable") from None
-            self._sequence += 1
-            return result
+                result_unavailable = await self._resolve_transport_loss(sequence, exc)
+            else:
+                self._sequence += 1
+                return result
+            raise result_unavailable
 
     def track(self, resource: T) -> T:
         self.ensure_open()
@@ -600,20 +602,6 @@ class AsyncSessionLeaseCoordinator:
         if self._state != "result_unavailable":
             raise ActionOutcomeUnknownError()
 
-    def _result_unavailable_error(
-        self,
-        payload: Mapping[str, Any],
-        sequence: int,
-    ) -> OperationResultUnavailableError:
-        operation_kind = stable_operation_kind(payload.get("operation_kind"))
-        self._state = "result_unavailable"
-        self._result_unavailable_sequence = sequence
-        self._result_unavailable_operation_kind = operation_kind
-        return OperationResultUnavailableError(
-            sequence=sequence,
-            operation_kind=operation_kind,
-        )
-
     async def _receipt(self, path: str, sequence: int) -> dict[str, Any]:
         response = await self._transport.request(
             "POST",
@@ -626,7 +614,11 @@ class AsyncSessionLeaseCoordinator:
             raise ActionOutcomeUnknownError()
         return payload
 
-    async def _handle_received_error(self, exc: DaemonHTTPError, sequence: int) -> None:
+    async def _handle_received_error(
+        self,
+        exc: DaemonHTTPError,
+        sequence: int,
+    ) -> OperationResultUnavailableError:
         if exc.code in {
             "lease_required",
             "lease_stale",
@@ -648,7 +640,8 @@ class AsyncSessionLeaseCoordinator:
         if state == "COMPLETED":
             self._sequence += 1
             if exc.code == "operation_result_unavailable":
-                raise self._result_unavailable_error(payload, sequence) from None
+                self._state = "result_unavailable"
+                return _result_unavailable_error(payload, sequence)
             mapped = _mapped_error(exc)
             if mapped is exc:
                 raise exc
@@ -656,7 +649,11 @@ class AsyncSessionLeaseCoordinator:
         self._state = "unsafe"
         raise SessionRecoveryRequiredError() from exc
 
-    async def _resolve_transport_loss(self, sequence: int, cause: BaseException) -> None:
+    async def _resolve_transport_loss(
+        self,
+        sequence: int,
+        cause: BaseException,
+    ) -> OperationResultUnavailableError:
         self._state = "unsafe"
         try:
             payload = await self._receipt("/v1/receipts/resolve", sequence)
@@ -668,7 +665,8 @@ class AsyncSessionLeaseCoordinator:
             raise OperationNotAppliedError() from cause
         if state == "COMPLETED":
             self._sequence += 1
-            raise self._result_unavailable_error(payload, sequence) from None
+            self._state = "result_unavailable"
+            return _result_unavailable_error(payload, sequence)
         if state == "INDETERMINATE":
             raise SessionRecoveryRequiredError() from cause
         raise ActionOutcomeUnknownError() from cause
