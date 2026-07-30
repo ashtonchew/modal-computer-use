@@ -12,7 +12,7 @@ RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/se
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
-Modal gave me control over the system I was measuring. I could move the caller into a Function and rewrite the desktop daemon. I left E2B and Daytona at their documented defaults. On Modal I could replace stateless helpers with long-lived ones, then measure each change.
+E2B and Daytona expose ready-made computer-use primitives, and I benchmarked their documented defaults. Modal starts lower in the stack. Its Function and Sandbox primitives let me change the route to the desktop and rewrite the code touching X11 in the same Python-defined system. I wanted to see whether that control could beat the purpose-built defaults.
 
 ## Was the tunnel slow, or was the caller far away?
 
