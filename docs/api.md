@@ -61,7 +61,8 @@ application run ID and sanitized state; provider call identities, handles, task 
 endpoints, and tokens stay private.
 
 The gateway's closed lifecycle is `reserved -> dispatching -> running`, followed by a terminal
-state or `cancellation_requested`. One application-store admission transaction authoritatively
+state or `cancellation_requested`. Every admitted record has an absolute `deadline_at`; extending
+a reconciliation interval never extends that deadline. One application-store admission transaction authoritatively
 handles replay, quota, exclusive ownership of a stable application desktop identity, run creation,
 and creation of a payload-free pending dispatch intent. Versioned HMAC-SHA256 bindings keep raw
 idempotency keys and internal desktop/task identities out of the run record. A matching replay is
@@ -69,10 +70,27 @@ returned before capacity checks; mismatched replay, desktop contention, and tena
 return sanitized errors without writes. A second atomic claim moves both the run and intent before
 the sole winner may spawn, including on replay after admission commit. The intent is not an
 automatic delivery queue and has no worker or delivered state.
+A safe cancellation or expiry before dispatch atomically revokes the still-pending intent while it
+releases capacity.
 A stale dispatch claim becomes `indeterminate` and is never automatically spawned again. Modal
 Function dispatch and durable persistence are not one transaction: the stable application run ID
 fences a repeated `borrow_async(run_id=run_id, ...)`, but it cannot reconstruct a missing
 FunctionCall identity after a dispatch/persistence gap.
+
+`GET /v1/runs/{run_id}` is a durable read and never polls Modal or advances state. The cancel route
+only records `cancellation_requested`, its request time, and a bounded cancellation deadline. A
+scheduled application reconciler owns polling and provider cancellation. It keyset-scans a bounded
+number of bounded pages and atomically leases each due record; every write requires both the opaque
+lease token and expected record version. Overlapping reconciler containers are therefore safe.
+Single-container Modal settings are cost controls, not correctness primitives.
+
+Pending polls reset the consecutive provider-error counter. Transiently unavailable polls use
+capped exponential backoff and become `indeterminate` at the configured error cap. At the absolute
+run deadline, recovery first persists cancellation intent, then polls before requesting
+`cancel(terminate_containers=False)`. Cancellation recovery polls before each request and remains
+`cancellation_requested` after an accepted or transiently failed request. Missing call identity,
+irrecoverable provider ambiguity, an error cap, or the cancellation deadline seals the record as
+`indeterminate`; it continues to hold quota and its desktop claim.
 
 The `RunStore` contract is intentionally incompatible with the former `reserve_if_absent` example.
 Adapters need an explicit migration, drain, or backfill. Existing SHA-only rows cannot safely infer
@@ -83,6 +101,20 @@ verification. Migrate, drain, or expire all rows and tombstones using a retiring
 references remain, and only then remove that key. A missing retained key version is an internal
 configuration/migration failure: admission fails closed with no writes rather than treating an old
 identity as new. The example intentionally provides no migration worker or database adapter.
+
+The store contract also owns operator recovery and retention. `SAFE_RELEASE` and `SAFE_REPLACE`
+require a sealed `indeterminate` record, expected version, and non-empty actor, reason, and audit
+identity. Replacement atomically seals the old record and creates a successor with a fresh run and
+idempotency identity; it never reopens the ambiguous run. There is deliberately no production admin
+HTTP route. Retention may compact only released `succeeded`, `failed`, or `cancelled` records after
+the configured interval. Active, leased, cancellation, unresolved-audit, and all `indeterminate`
+records are protected. Replay tombstones must remain authoritative through their fencing window,
+and admission must consult them before quota or desktop acquisition.
+
+The gateway dispatcher calls the user-owned trajectory Function with
+`(handle, task, run_id, deadline_at)`. The deadline is the original timezone-aware absolute value
+from admission, so Function retries or container replacement cannot silently restart the wall-clock
+budget.
 
 Use the native-async borrow context inside an async user-owned Modal Function:
 

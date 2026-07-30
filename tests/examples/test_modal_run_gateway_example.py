@@ -206,6 +206,13 @@ class FakeRunStore:
             self.by_id[current.run_id] = next_record
             self.transitions.append((current.state, next_record.state))
             if (
+                current.state is self.types.RunState.RESERVED
+                and next_record.state is self.types.RunState.CANCELLED
+            ):
+                self.intents[current.run_id] = self.types.DispatchIntent.revoked(
+                    current.run_id
+                )
+            if (
                 next_record.state in self.types.CAPACITY_RELEASING_STATES
                 and current.run_id in self.capacity
             ):
@@ -225,13 +232,13 @@ class FakeRunStore:
 
 class FakeDispatcher:
     def __init__(self) -> None:
-        self.spawn_calls: list[tuple[object, object, str]] = []
+        self.spawn_calls: list[tuple[object, object, str, datetime]] = []
         self.poll_calls: list[object] = []
         self.cancel_calls: list[object] = []
         self.poll_state = gateway.PollState.PENDING
 
-    async def spawn(self, *, desktop, task, run_id):
-        self.spawn_calls.append((desktop, task, run_id))
+    async def spawn(self, *, desktop, task, run_id, deadline_at):
+        self.spawn_calls.append((desktop, task, run_id, deadline_at))
         await asyncio.sleep(0)
         return gateway.FunctionCallIdentity("fc-provider-secret")
 
@@ -241,6 +248,7 @@ class FakeDispatcher:
 
     async def cancel(self, call_id):
         self.cancel_calls.append(call_id)
+        return gateway.CancelOutcome(gateway.CancelState.ACCEPTED)
 
 
 def _service(
@@ -261,7 +269,6 @@ def _service(
         dispatcher=dispatcher,
         identity_keyring=identity_keyring
         or gateway.IdentityKeyring(gateway.IdentityKey("active", b"a" * 32)),
-        stale_after=timedelta(seconds=10),
         clock=clock,
         run_id_factory=lambda: "run-application-stable",
     )
@@ -315,6 +322,7 @@ def _command(
         desktop_binding=desktop_proof.mint,
         task_binding=task_proof.mint,
         now=now,
+        deadline_at=now + timedelta(hours=1),
     )
     return gateway.AdmissionCommand(
         proposed=record,
@@ -356,6 +364,7 @@ def _reserved_record(
             value=f"task-internal-{task_key}",
         ).mint,
         now=clock(),
+        deadline_at=clock() + timedelta(hours=1),
     )
 
 
@@ -476,6 +485,7 @@ def test_idempotent_submissions_return_one_run_and_spawn_once() -> None:
     }
     assert len(dispatcher.spawn_calls) == 1
     assert dispatcher.spawn_calls[0][2] == "run-application-stable"
+    assert dispatcher.spawn_calls[0][3] == service.clock() + service.run_timeout
     assert service.session_catalog.calls == [
         ("tenant-a", "desktop-for-tenant-a"),
         ("tenant-a", "desktop-for-tenant-a"),
@@ -868,22 +878,43 @@ def test_closed_state_machine_permits_every_documented_edge_and_rejects_all_othe
     call_id = gateway.FunctionCallIdentity("fc-private")
     binding = gateway.KeyedDigest("active", b"d" * 32)
     all_states = set(gateway.RunState)
-    for current, next_state in gateway.LEGAL_TRANSITIONS:
-        record = gateway.RunRecord(
+
+    def record_for(state):
+        return gateway.RunRecord(
             run_id="run-state",
             tenant_id="tenant-a",
             idempotency_binding=binding,
             desktop_binding=binding,
             task_binding=binding,
-            state=current,
+            state=state,
             created_at=clock(),
             updated_at=clock(),
+            deadline_at=clock() + timedelta(hours=1),
+            state_changed_at=clock(),
+            reconcile_at=None if state in gateway.TERMINAL_STATES else clock(),
             function_call_id=(
                 call_id
-                if current in {gateway.RunState.RUNNING, gateway.RunState.CANCELLATION_REQUESTED}
+                if state in {gateway.RunState.RUNNING, gateway.RunState.CANCELLATION_REQUESTED}
+                else None
+            ),
+            terminal_reason=(
+                gateway.TerminalReason.OBSERVED_TERMINAL
+                if state in gateway.TERMINAL_STATES
+                else None
+            ),
+            terminal_at=clock() if state in gateway.TERMINAL_STATES else None,
+            cancellation_requested_at=(
+                clock() if state is gateway.RunState.CANCELLATION_REQUESTED else None
+            ),
+            cancellation_deadline_at=(
+                clock() + timedelta(minutes=5)
+                if state is gateway.RunState.CANCELLATION_REQUESTED
                 else None
             ),
         )
+
+    for current, next_state in gateway.LEGAL_TRANSITIONS:
+        record = record_for(current)
         transitioned = record.transition(
             next_state,
             now=clock(),
@@ -891,6 +922,21 @@ def test_closed_state_machine_permits_every_documented_edge_and_rejects_all_othe
                 call_id
                 if (current, next_state)
                 == (gateway.RunState.DISPATCHING, gateway.RunState.RUNNING)
+                else None
+            ),
+            reconcile_at=(
+                clock()
+                if next_state not in gateway.TERMINAL_STATES
+                else None
+            ),
+            cancellation_requested_at=(
+                clock()
+                if next_state is gateway.RunState.CANCELLATION_REQUESTED
+                else None
+            ),
+            cancellation_deadline_at=(
+                clock() + timedelta(minutes=5)
+                if next_state is gateway.RunState.CANCELLATION_REQUESTED
                 else None
             ),
         )
@@ -901,16 +947,7 @@ def test_closed_state_machine_permits_every_documented_edge_and_rejects_all_othe
         for next_state in all_states:
             if (current, next_state) in gateway.LEGAL_TRANSITIONS:
                 continue
-            record = gateway.RunRecord(
-                run_id="run-state",
-                tenant_id="tenant-a",
-                idempotency_binding=binding,
-                desktop_binding=binding,
-                task_binding=binding,
-                state=current,
-                created_at=clock(),
-                updated_at=clock(),
-            )
+            record = record_for(current)
             with pytest.raises(gateway.StateTransitionError):
                 record.transition(next_state, now=clock())
 
@@ -941,7 +978,7 @@ async def test_pending_reserved_is_claimed_once_under_concurrent_duplicate_reque
     assert store.by_id["run-stale"].state is gateway.RunState.RUNNING
 
 
-def test_stale_dispatching_becomes_indeterminate_without_respawn() -> None:
+def test_replayed_dispatching_is_observed_without_mutation_or_respawn() -> None:
     clock = Clock()
     store = FakeRunStore()
     dispatcher = FakeDispatcher()
@@ -956,7 +993,7 @@ def test_stale_dispatching_becomes_indeterminate_without_respawn() -> None:
     response = client.post("/v1/runs", json=_body(), headers=_headers())
 
     assert response.status_code == 202
-    assert response.json() == {"run_id": "run-stale-dispatch", "state": "indeterminate"}
+    assert response.json() == {"run_id": "run-stale-dispatch", "state": "dispatching"}
     assert dispatcher.spawn_calls == []
 
 
@@ -984,39 +1021,45 @@ def test_mismatched_stale_reservation_is_rejected_before_reclaim() -> None:
     [
         (gateway.RunState.RUNNING, gateway.PollState.PENDING, gateway.RunState.RUNNING),
         (gateway.RunState.RUNNING, gateway.PollState.UNAVAILABLE, gateway.RunState.RUNNING),
-        (gateway.RunState.RUNNING, gateway.PollState.SUCCEEDED, gateway.RunState.SUCCEEDED),
-        (gateway.RunState.RUNNING, gateway.PollState.FAILED, gateway.RunState.FAILED),
-        (gateway.RunState.RUNNING, gateway.PollState.CANCELLED, gateway.RunState.FAILED),
+        (gateway.RunState.RUNNING, gateway.PollState.SUCCEEDED, gateway.RunState.RUNNING),
+        (gateway.RunState.RUNNING, gateway.PollState.FAILED, gateway.RunState.RUNNING),
+        (gateway.RunState.RUNNING, gateway.PollState.CANCELLED, gateway.RunState.RUNNING),
         (
             gateway.RunState.RUNNING,
             gateway.PollState.INDETERMINATE,
-            gateway.RunState.INDETERMINATE,
+            gateway.RunState.RUNNING,
         ),
         (
             gateway.RunState.CANCELLATION_REQUESTED,
             gateway.PollState.CANCELLED,
-            gateway.RunState.CANCELLED,
+            gateway.RunState.CANCELLATION_REQUESTED,
         ),
         (
             gateway.RunState.CANCELLATION_REQUESTED,
             gateway.PollState.SUCCEEDED,
-            gateway.RunState.SUCCEEDED,
+            gateway.RunState.CANCELLATION_REQUESTED,
         ),
         (
             gateway.RunState.CANCELLATION_REQUESTED,
             gateway.PollState.FAILED,
-            gateway.RunState.FAILED,
+            gateway.RunState.CANCELLATION_REQUESTED,
         ),
     ],
 )
-def test_poll_maps_only_sanitized_terminal_state(initial, outcome, expected) -> None:
+def test_get_is_read_only_for_every_provider_outcome(initial, outcome, expected) -> None:
     clock = Clock()
     store = FakeRunStore()
     dispatcher = FakeDispatcher()
     dispatcher.poll_state = outcome
     record = _running_record(clock)
     if initial is gateway.RunState.CANCELLATION_REQUESTED:
-        record = record.transition(initial, now=clock())
+        record = record.transition(
+            initial,
+            now=clock(),
+            reconcile_at=clock(),
+            cancellation_requested_at=clock(),
+            cancellation_deadline_at=clock() + timedelta(minutes=5),
+        )
     store.insert(record)
     service, _store, _dispatcher = _service(clock=clock, store=store, dispatcher=dispatcher)
     client = TestClient(gateway.build_run_gateway_app(service))
@@ -1026,22 +1069,16 @@ def test_poll_maps_only_sanitized_terminal_state(initial, outcome, expected) -> 
     assert response.status_code == 200
     assert response.json() == {"run_id": "run-owned", "state": expected.value}
     assert "fc-provider-secret" not in response.text
+    assert dispatcher.poll_calls == []
 
 
-def test_cancellation_records_intent_before_remote_call_and_never_terminates_containers() -> None:
+def test_cancellation_endpoint_only_records_durable_intent() -> None:
     clock = Clock()
     store = FakeRunStore()
     dispatcher = FakeDispatcher()
     record = _running_record(clock)
     store.insert(record)
     service, _store, _dispatcher = _service(clock=clock, store=store, dispatcher=dispatcher)
-    observed_states: list[object] = []
-
-    async def cancel(call_id):
-        observed_states.append(store.by_id[record.run_id].state)
-        dispatcher.cancel_calls.append(call_id)
-
-    dispatcher.cancel = cancel
     client = TestClient(gateway.build_run_gateway_app(service))
 
     first = client.post(f"/v1/runs/{record.run_id}/cancel", headers=_headers())
@@ -1052,61 +1089,70 @@ def test_cancellation_records_intent_before_remote_call_and_never_terminates_con
         "state": "cancellation_requested",
         "cancellation_requested": True,
     }
-    assert observed_states == [gateway.RunState.CANCELLATION_REQUESTED]
-    assert len(dispatcher.cancel_calls) == 1
+    assert dispatcher.cancel_calls == []
+    assert store.by_id[record.run_id].cancellation_requested_at == clock()
 
 
-@pytest.mark.asyncio
-async def test_cancelling_poll_task_leaves_running_state_reconcilable() -> None:
+def test_reserved_cancellation_is_safe_and_releases_once_without_provider_work() -> None:
     clock = Clock()
     store = FakeRunStore()
     dispatcher = FakeDispatcher()
-    record = _running_record(clock)
-    store.insert(record)
-    service, _store, _dispatcher = _service(clock=clock, store=store, dispatcher=dispatcher)
-    entered = asyncio.Event()
+    record = _reserved_record(clock)
+    store.insert(record, intent=gateway.DispatchIntent.pending(record.run_id))
+    service, _store, _dispatcher = _service(
+        clock=clock,
+        store=store,
+        dispatcher=dispatcher,
+    )
+    client = TestClient(gateway.build_run_gateway_app(service))
 
-    async def blocked_poll(_call_id):
-        entered.set()
-        await asyncio.Future()
+    first = client.post(f"/v1/runs/{record.run_id}/cancel", headers=_headers())
+    second = client.post(f"/v1/runs/{record.run_id}/cancel", headers=_headers())
 
-    dispatcher.poll = blocked_poll
-    request = SimpleNamespace(headers={"authorization": "Bearer tenant-a"})
-    task = asyncio.create_task(service.get_run(request, record.run_id))
-    await entered.wait()
-    task.cancel()
-
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert store.by_id[record.run_id].state is gateway.RunState.RUNNING
+    assert first.json() == {
+        "run_id": record.run_id,
+        "state": "cancelled",
+        "cancellation_requested": True,
+    }
+    assert second.json()["cancellation_requested"] is False
+    assert store.capacity == set()
+    assert store.desktop_claims == {}
+    assert store.intents[record.run_id].state is gateway.DispatchIntentState.REVOKED
     assert dispatcher.cancel_calls == []
 
 
 @pytest.mark.asyncio
-async def test_cancelling_remote_cancel_task_retains_requested_state_without_retry() -> None:
+async def test_get_does_not_start_provider_work() -> None:
     clock = Clock()
     store = FakeRunStore()
     dispatcher = FakeDispatcher()
     record = _running_record(clock)
     store.insert(record)
     service, _store, _dispatcher = _service(clock=clock, store=store, dispatcher=dispatcher)
-    entered = asyncio.Event()
-
-    async def blocked_cancel(call_id):
-        dispatcher.cancel_calls.append(call_id)
-        entered.set()
-        await asyncio.Future()
-
-    dispatcher.cancel = blocked_cancel
     request = SimpleNamespace(headers={"authorization": "Bearer tenant-a"})
-    task = asyncio.create_task(service.cancel_run(request, record.run_id))
-    await entered.wait()
-    task.cancel()
+    observed = await service.get_run(request, record.run_id)
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    assert observed == record
+    assert store.by_id[record.run_id].state is gateway.RunState.RUNNING
+    assert dispatcher.poll_calls == []
+    assert dispatcher.cancel_calls == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_request_returns_without_provider_work() -> None:
+    clock = Clock()
+    store = FakeRunStore()
+    dispatcher = FakeDispatcher()
+    record = _running_record(clock)
+    store.insert(record)
+    service, _store, _dispatcher = _service(clock=clock, store=store, dispatcher=dispatcher)
+    request = SimpleNamespace(headers={"authorization": "Bearer tenant-a"})
+    requested, accepted = await service.cancel_run(request, record.run_id)
+
+    assert accepted
+    assert requested.state is gateway.RunState.CANCELLATION_REQUESTED
     assert store.by_id[record.run_id].state is gateway.RunState.CANCELLATION_REQUESTED
-    assert len(dispatcher.cancel_calls) == 1
+    assert dispatcher.cancel_calls == []
 
 
 def test_private_values_are_absent_from_models_errors_and_representations() -> None:
@@ -1199,15 +1245,22 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
     )
     task = gateway.ResolvedTask("task-text-secret", "task-id-secret")
 
-    call_id = await dispatcher.spawn(desktop=desktop, task=task, run_id="run-stable")
+    deadline_at = datetime(2026, 7, 30, 1, tzinfo=UTC)
+    call_id = await dispatcher.spawn(
+        desktop=desktop,
+        task=task,
+        run_id="run-stable",
+        deadline_at=deadline_at,
+    )
     outcome = await dispatcher.poll(call_id)
-    await dispatcher.cancel(call_id)
+    cancellation = await dispatcher.cancel(call_id)
 
     assert outcome == gateway.PollOutcome(gateway.PollState.SUCCEEDED)
+    assert cancellation == gateway.CancelOutcome(gateway.CancelState.ACCEPTED)
     assert events == [
         (
             "spawn",
-            (desktop.handle, task.text, "run-stable"),
+            (desktop.handle, task.text, "run-stable", deadline_at),
             {},
         ),
         ("from_id", "fc-provider-secret"),
@@ -1219,7 +1272,13 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
 
 
 def _fake_modal(
-    *, roots=None, graph_exception=None, result=None, get_exception=None, get_calls=None
+    *,
+    roots=None,
+    graph_exception=None,
+    result=None,
+    get_exception=None,
+    get_calls=None,
+    cancel_exception=None,
 ):
     class ModalError(Exception):
         pass
@@ -1256,13 +1315,61 @@ def _fake_modal(
                 raise get_exception(exception_types)
             return result
 
+    class Cancel:
+        async def aio(self, *, terminate_containers):
+            assert terminate_containers is False
+            if cancel_exception is not None:
+                raise cancel_exception(exception_types)
+
     class FunctionCall:
         @classmethod
         def from_id(cls, call_id):
             assert call_id == "fc-provider-secret"
-            return SimpleNamespace(get_call_graph=Graph(), get=Get())
+            return SimpleNamespace(get_call_graph=Graph(), get=Get(), cancel=Cancel())
 
     return SimpleNamespace(FunctionCall=FunctionCall, exception=exception_types)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception_factory", "expected"),
+    [
+        (
+            lambda exc: exc.ConnectionError(),
+            gateway.CancelOutcome(
+                gateway.CancelState.UNAVAILABLE,
+                gateway.CancelReason.TRANSIENT_PROVIDER_ERROR,
+            ),
+        ),
+        (
+            lambda exc: exc.NotFoundError(),
+            gateway.CancelOutcome(
+                gateway.CancelState.INDETERMINATE,
+                gateway.CancelReason.MISSING_CALL,
+            ),
+        ),
+        (
+            lambda exc: exc.Error(),
+            gateway.CancelOutcome(
+                gateway.CancelState.INDETERMINATE,
+                gateway.CancelReason.UNKNOWN_PROVIDER_ERROR,
+            ),
+        ),
+    ],
+)
+async def test_modal_cancel_classifies_provider_failures(
+    monkeypatch, exception_factory, expected
+) -> None:
+    monkeypatch.setattr(
+        gateway,
+        "modal",
+        _fake_modal(cancel_exception=exception_factory),
+    )
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.cancel(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == expected
 
 
 @pytest.mark.asyncio
@@ -1544,7 +1651,7 @@ def test_example_has_no_primitive_proxy_core_export_or_production_memory_store()
     assert "openai" not in source.lower()
     assert "anthropic" not in source.lower()
     assert "RunGatewayService" not in core_exports
-    assert len(entry_source.splitlines()) < 80
+    assert len(entry_source.splitlines()) < 90
     assert "async with handle.borrow_async" in handoff
     assert "run_id=run_id" in handoff
 

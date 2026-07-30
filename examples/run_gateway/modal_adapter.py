@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from typing import Any
 
 from .domain import (
+    CancelOutcome,
+    CancelReason,
+    CancelState,
     FunctionCallIdentity,
     PollOutcome,
     PollReason,
@@ -16,6 +20,7 @@ from .domain import (
     TrajectoryStatus,
 )
 from .http import build_run_gateway_app
+from .recovery import RunReconciler
 from .service import RunGatewayService
 
 try:
@@ -57,8 +62,14 @@ class ModalTrajectoryDispatcher:
         desktop: ResolvedDesktop,
         task: ResolvedTask,
         run_id: str,
+        deadline_at: datetime,
     ) -> FunctionCallIdentity:
-        call = await self._function.spawn.aio(desktop.handle, task.text, run_id)
+        call = await self._function.spawn.aio(
+            desktop.handle,
+            task.text,
+            run_id,
+            deadline_at,
+        )
         return FunctionCallIdentity(call.object_id)
 
     async def poll(self, call_id: FunctionCallIdentity) -> PollOutcome:
@@ -128,12 +139,39 @@ class ModalTrajectoryDispatcher:
         except exceptions.Error:
             return PollOutcome(PollState.INDETERMINATE)
 
-    async def cancel(self, call_id: FunctionCallIdentity) -> None:
+    async def cancel(self, call_id: FunctionCallIdentity) -> CancelOutcome:
         runtime = self._modal
         if runtime is None:
             raise ImportError("Modal is required for hosted trajectory cancellation")
-        call = runtime.FunctionCall.from_id(call_id.reveal_to_backend())
-        await call.cancel.aio(terminate_containers=False)
+        exceptions = runtime.exception
+        try:
+            call = runtime.FunctionCall.from_id(call_id.reveal_to_backend())
+            await call.cancel.aio(terminate_containers=False)
+        except exceptions.NotFoundError:
+            return CancelOutcome(CancelState.INDETERMINATE, CancelReason.MISSING_CALL)
+        except TimeoutError:
+            return CancelOutcome(
+                CancelState.UNAVAILABLE,
+                CancelReason.TRANSIENT_PROVIDER_ERROR,
+            )
+        except (
+            exceptions.ConnectionError,
+            exceptions.ServiceError,
+            exceptions.AuthError,
+            exceptions.ResourceExhaustedError,
+            exceptions.InternalError,
+            exceptions.InternalFailure,
+        ):
+            return CancelOutcome(
+                CancelState.UNAVAILABLE,
+                CancelReason.TRANSIENT_PROVIDER_ERROR,
+            )
+        except exceptions.Error:
+            return CancelOutcome(
+                CancelState.INDETERMINATE,
+                CancelReason.UNKNOWN_PROVIDER_ERROR,
+            )
+        return CancelOutcome(CancelState.ACCEPTED)
 
 
 async def _poll_result(call: Any, exceptions: Any) -> PollOutcome:
@@ -161,6 +199,14 @@ def build_default_service() -> RunGatewayService:
     )
 
 
+def build_reconciler_from_environment() -> RunReconciler:
+    """Integration seam for an application-owned DSN-backed RunStore adapter."""
+    raise RuntimeError(
+        "inject a durable RUN_GATEWAY_STORE_DSN adapter and trajectory dispatcher "
+        "before deploying reconciliation"
+    )
+
+
 if modal is None:
     app = None
 else:
@@ -182,6 +228,26 @@ else:
         def web(self):
             return build_run_gateway_app(self.service)
 
+    @app.function(
+        image=_image,
+        schedule=modal.Period(seconds=60),
+        secrets=[
+            modal.Secret.from_name(
+                "run-gateway-store",
+                required_keys=["RUN_GATEWAY_STORE_DSN"],
+            )
+        ],
+        min_containers=0,
+        max_containers=1,
+        timeout=45,
+        retries=0,
+    )
+    @modal.concurrent(max_inputs=1)
+    async def reconcile_runs() -> None:
+        # Container/input caps bound spend only. Store leases and CAS provide correctness.
+        reconciler = build_reconciler_from_environment()
+        await reconciler.reconcile(now=datetime.now(UTC))
+
 
 def build_modal_app() -> object:
     if app is None:
@@ -196,5 +262,6 @@ __all__ = [
     "app",
     "build_default_service",
     "build_modal_app",
+    "build_reconciler_from_environment",
     "modal",
 ]

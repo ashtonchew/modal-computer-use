@@ -373,19 +373,33 @@ when a request is replayed, but is deliberately not an automatic-delivery outbox
 worker, delivery state, or persistence primitive in this example. A stale `dispatching` record
 becomes terminal `indeterminate` because the first spawn may already have crossed Modal's boundary;
 it retains its quota and desktop claim. Only `succeeded`, `failed`, and `cancelled` release them,
-exactly once. Once
-the private FunctionCall identity is stored, GET first reads the Function call graph. A successful
+exactly once. Cancelling or expiring a still-reserved run revokes its pending intent in the same
+release transaction. `GET` only reads durable state. Once the private FunctionCall identity is stored, the
+scheduled reconciler reads the Function call graph. A successful
 root is fetched once with `get.aio(timeout=0)` and must contain exactly the strict trajectory
 envelope `{"status": "succeeded" | "failed" | "indeterminate"}`. No task or result content is
 part of that contract. Pending and transiently unavailable polls preserve durable state. Empty,
 multiple, malformed, incomplete, or lossy call-graph data is unavailable and is not used to infer
 a terminal state. Expired, missing, or lossy results become `indeterminate`. A terminated Function
 becomes `cancelled` only when cancellation intent was already durable, and otherwise becomes `failed`.
-Cancellation durably enters
-`cancellation_requested` before `cancel.aio(terminate_containers=False)` and never claims that the
-desktop was rolled back or terminated.
+The HTTP cancellation route only durably enters `cancellation_requested`; scheduled reconciliation
+owns `cancel.aio(terminate_containers=False)` and never claims that the desktop was rolled back or
+terminated. Reconciliation polls cancellation records first. Accepted or transient cancellation
+requests remain requested and are revisited with capped backoff until a provider terminal outcome,
+an error cap, irrecoverable ambiguity, or the absolute cancellation deadline.
 
-The deployed application trajectory receives the same stable application `run_id` that it passes
+Recovery uses strict application policy bounds for page size, pages per tick, polling, backoff,
+provider and cancellation error caps, cancellation grace, stale dispatch age, and lease duration.
+The authoritative store keyset-scans due work and issues opaque leases. Every recovery update uses
+the lease and expected version together, so overlapping scheduled ticks cannot both advance a row.
+The example wires a 60-second Modal Period with a named Secret requiring
+`RUN_GATEWAY_STORE_DSN`, scale-to-zero, a sub-period timeout, no retries, one container, and one
+concurrent input. The container cap bounds cost only. `build_reconciler_from_environment()` is an
+explicit integration seam because this repository intentionally does not invent a production DSN
+adapter.
+
+The deployed application trajectory accepts `(handle, task, run_id, deadline_at)`. It receives the
+same stable application `run_id` that it passes
 to `handle.borrow_async(run_id=run_id, ...)`. The daemon lease and durable operation receipts are
 the final mutation fence if infrastructure ambiguity dispatches duplicate Functions; private
 FunctionCall, input, and task identifiers are only orchestration metadata. The first attempt to
@@ -396,6 +410,14 @@ cross-system persistence gap or recover a lost provider call handle. The deploye
 identity, authorization, quotas, billing, retention, auditing, durable task/result storage, and
 reconciliation. Keep screenshot/action bytes on the direct daemon/runner path rather than turning
 the gateway into a latency-sensitive primitive proxy.
+
+Resolving that ambiguity is an operator action. The store-level `SAFE_RELEASE`/`SAFE_REPLACE`
+contract requires a sealed `indeterminate` row, expected version, and actor/reason/audit identity.
+`SAFE_REPLACE` creates a new successor run and idempotency identity and never reopens or respawns the
+old run. No administrative HTTP endpoint is included. Retention protects active, cancellation,
+leased, unresolved-audit, and every `indeterminate` row. Only safely released terminal rows may be
+compacted after retention, with a tombstone consulted before capacity or desktop acquisition for
+the full replay-fencing window.
 
 This `RunStore` protocol replaces the earlier `reserve_if_absent` sample and is intentionally
 breaking. Application adapters must migrate, drain, or backfill their durable rows before switching

@@ -23,6 +23,24 @@ class RunState(StrEnum):
     INDETERMINATE = "indeterminate"
 
 
+class TerminalReason(StrEnum):
+    OBSERVED_TERMINAL = "observed_terminal"
+    TRAJECTORY_SUCCEEDED = "trajectory_succeeded"
+    TRAJECTORY_FAILED = "trajectory_failed"
+    FUNCTION_TIMEOUT = "function_timeout"
+    TERMINATED = "terminated"
+    EXPIRED_BEFORE_DISPATCH = "expired_before_dispatch"
+    CANCELLED_BEFORE_DISPATCH = "cancelled_before_dispatch"
+    DISPATCH_AMBIGUOUS = "dispatch_ambiguous"
+    PROVIDER_AMBIGUOUS = "provider_ambiguous"
+    PROVIDER_ERROR_CAP = "provider_error_cap"
+    CANCELLATION_ERROR_CAP = "cancellation_error_cap"
+    CANCELLATION_AMBIGUOUS = "cancellation_ambiguous"
+    CANCELLATION_DEADLINE = "cancellation_deadline"
+    OPERATOR_SAFE_RELEASE = "operator_safe_release"
+    OPERATOR_SAFE_REPLACE = "operator_safe_replace"
+
+
 TERMINAL_STATES = frozenset(
     {RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED, RunState.INDETERMINATE}
 )
@@ -32,6 +50,7 @@ CAPACITY_RELEASING_STATES = frozenset(
 
 LEGAL_TRANSITIONS = frozenset(
     {
+        (RunState.RESERVED, RunState.CANCELLED),
         (RunState.RESERVED, RunState.DISPATCHING),
         (RunState.DISPATCHING, RunState.RUNNING),
         (RunState.DISPATCHING, RunState.INDETERMINATE),
@@ -49,6 +68,11 @@ LEGAL_TRANSITIONS = frozenset(
 
 class StateTransitionError(RuntimeError):
     """Raised before storage for an edge outside the closed transition graph."""
+
+
+def _require_aware(value: datetime, name: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{name} must be timezone-aware")
 
 
 class IdentityKeyUnavailable(RuntimeError):
@@ -246,8 +270,59 @@ class RunRecord:
     state: RunState
     created_at: datetime
     updated_at: datetime
+    deadline_at: datetime
+    state_changed_at: datetime
     version: int = 0
     function_call_id: FunctionCallIdentity | None = field(default=None, repr=False)
+    reconcile_at: datetime | None = None
+    provider_error_count: int = 0
+    cancel_error_count: int = 0
+    cancellation_requested_at: datetime | None = None
+    cancellation_deadline_at: datetime | None = None
+    cancel_last_attempt_at: datetime | None = None
+    terminal_reason: TerminalReason | None = None
+    terminal_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("created_at", "updated_at", "deadline_at", "state_changed_at"):
+            _require_aware(getattr(self, name), name)
+        for name in (
+            "reconcile_at",
+            "cancellation_requested_at",
+            "cancellation_deadline_at",
+            "cancel_last_attempt_at",
+            "terminal_at",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _require_aware(value, name)
+        if self.deadline_at < self.created_at:
+            raise ValueError("deadline_at must not precede created_at")
+        if self.version < 0 or self.provider_error_count < 0 or self.cancel_error_count < 0:
+            raise ValueError("versions and error counters must be non-negative")
+        if self.state in TERMINAL_STATES:
+            if self.terminal_at is None or self.terminal_reason is None:
+                raise ValueError("terminal records require a terminal time and reason")
+            if self.reconcile_at is not None:
+                raise ValueError("terminal records cannot remain scheduled")
+        elif self.terminal_at is not None or self.terminal_reason is not None:
+            raise ValueError("non-terminal records cannot have terminal metadata")
+        elif self.reconcile_at is None:
+            raise ValueError("non-terminal records require a reconciliation time")
+        if self.cancellation_deadline_at is not None:
+            if self.cancellation_requested_at is None:
+                raise ValueError("cancellation deadline requires its request time")
+            if self.cancellation_deadline_at < self.cancellation_requested_at:
+                raise ValueError("cancellation deadline must not precede its request")
+        if self.state is RunState.CANCELLATION_REQUESTED and (
+            self.cancellation_requested_at is None or self.cancellation_deadline_at is None
+        ):
+            raise ValueError("cancellation-requested records require bounded cancellation metadata")
+        if self.state in {RunState.RESERVED, RunState.DISPATCHING, RunState.RUNNING} and (
+            self.cancellation_requested_at is not None
+            or self.cancellation_deadline_at is not None
+        ):
+            raise ValueError("pre-cancellation records cannot carry cancellation metadata")
 
     @classmethod
     def reserve(
@@ -259,6 +334,7 @@ class RunRecord:
         desktop_binding: KeyedDigest,
         task_binding: KeyedDigest,
         now: datetime,
+        deadline_at: datetime,
     ) -> RunRecord:
         return cls(
             run_id=run_id,
@@ -269,6 +345,9 @@ class RunRecord:
             state=RunState.RESERVED,
             created_at=now,
             updated_at=now,
+            deadline_at=deadline_at,
+            state_changed_at=now,
+            reconcile_at=now,
         )
 
     def transition(
@@ -277,6 +356,13 @@ class RunRecord:
         *,
         now: datetime,
         function_call_id: FunctionCallIdentity | None = None,
+        reconcile_at: datetime | None = None,
+        provider_error_count: int | None = None,
+        cancel_error_count: int | None = None,
+        cancellation_requested_at: datetime | None = None,
+        cancellation_deadline_at: datetime | None = None,
+        cancel_last_attempt_at: datetime | None = None,
+        terminal_reason: TerminalReason | None = None,
     ) -> RunRecord:
         if (self.state, next_state) not in LEGAL_TRANSITIONS:
             raise StateTransitionError(
@@ -293,18 +379,75 @@ class RunRecord:
             raise StateTransitionError(
                 "a private call identity may only be set when entering running"
             )
+        entering_terminal = next_state in TERMINAL_STATES
+        if entering_terminal and terminal_reason is None:
+            terminal_reason = TerminalReason.OBSERVED_TERMINAL
+        if not entering_terminal and terminal_reason is not None:
+            raise StateTransitionError("terminal reason is only valid for a terminal transition")
+        next_reconcile_at = None
+        if not entering_terminal:
+            next_reconcile_at = self.reconcile_at if reconcile_at is None else reconcile_at
         return replace(
             self,
             state=next_state,
             updated_at=now,
+            state_changed_at=now,
             version=self.version + 1,
             function_call_id=next_call_id,
+            reconcile_at=next_reconcile_at,
+            provider_error_count=(
+                self.provider_error_count
+                if provider_error_count is None
+                else provider_error_count
+            ),
+            cancel_error_count=(
+                self.cancel_error_count if cancel_error_count is None else cancel_error_count
+            ),
+            cancellation_requested_at=(
+                cancellation_requested_at or self.cancellation_requested_at
+            ),
+            cancellation_deadline_at=(
+                cancellation_deadline_at or self.cancellation_deadline_at
+            ),
+            cancel_last_attempt_at=cancel_last_attempt_at or self.cancel_last_attempt_at,
+            terminal_reason=terminal_reason,
+            terminal_at=now if entering_terminal else None,
+        )
+
+    def reschedule(
+        self,
+        *,
+        now: datetime,
+        reconcile_at: datetime,
+        provider_error_count: int | None = None,
+        cancel_error_count: int | None = None,
+        cancel_last_attempt_at: datetime | None = None,
+    ) -> RunRecord:
+        if self.state in TERMINAL_STATES:
+            raise StateTransitionError("terminal records cannot be rescheduled")
+        if reconcile_at < now:
+            raise ValueError("reconcile_at must not precede now")
+        return replace(
+            self,
+            updated_at=now,
+            version=self.version + 1,
+            reconcile_at=reconcile_at,
+            provider_error_count=(
+                self.provider_error_count
+                if provider_error_count is None
+                else provider_error_count
+            ),
+            cancel_error_count=(
+                self.cancel_error_count if cancel_error_count is None else cancel_error_count
+            ),
+            cancel_last_attempt_at=cancel_last_attempt_at or self.cancel_last_attempt_at,
         )
 
 
 class DispatchIntentState(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
+    REVOKED = "revoked"
 
 
 @dataclass(frozen=True)
@@ -317,6 +460,42 @@ class DispatchIntent:
     @classmethod
     def pending(cls, run_id: str) -> DispatchIntent:
         return cls(run_id=run_id, state=DispatchIntentState.PENDING)
+
+    @classmethod
+    def revoked(cls, run_id: str) -> DispatchIntent:
+        return cls(run_id=run_id, state=DispatchIntentState.REVOKED)
+
+
+@dataclass(frozen=True)
+class ReplayTombstone:
+    """Minimal replay fence retained after a safe terminal record is compacted."""
+
+    run_id: str
+    tenant_id: str
+    idempotency_binding: KeyedDigest = field(repr=False)
+    desktop_binding: KeyedDigest = field(repr=False)
+    task_binding: KeyedDigest = field(repr=False)
+    state: RunState
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.run_id or not self.tenant_id:
+            raise ValueError("replay tombstone requires stable run and tenant identities")
+        if self.state not in CAPACITY_RELEASING_STATES:
+            raise ValueError("replay tombstones require a safely released terminal state")
+        _require_aware(self.expires_at, "expires_at")
+
+    @classmethod
+    def from_record(cls, record: RunRecord, *, expires_at: datetime) -> ReplayTombstone:
+        return cls(
+            run_id=record.run_id,
+            tenant_id=record.tenant_id,
+            idempotency_binding=record.idempotency_binding,
+            desktop_binding=record.desktop_binding,
+            task_binding=record.task_binding,
+            state=record.state,
+            expires_at=expires_at,
+        )
 
 
 @dataclass(frozen=True)
@@ -369,7 +548,7 @@ class AdmissionCommand:
 @dataclass(frozen=True)
 class AdmissionAccepted:
     disposition: AdmissionDisposition
-    record: RunRecord
+    record: RunRecord | ReplayTombstone
     intent: DispatchIntent
 
 
@@ -433,3 +612,21 @@ class PollReason(StrEnum):
 class PollOutcome:
     state: PollState
     reason: PollReason | None = None
+
+
+class CancelState(StrEnum):
+    ACCEPTED = "accepted"
+    UNAVAILABLE = "unavailable"
+    INDETERMINATE = "indeterminate"
+
+
+class CancelReason(StrEnum):
+    TRANSIENT_PROVIDER_ERROR = "transient_provider_error"
+    MISSING_CALL = "missing_call"
+    UNKNOWN_PROVIDER_ERROR = "unknown_provider_error"
+
+
+@dataclass(frozen=True)
+class CancelOutcome:
+    state: CancelState
+    reason: CancelReason | None = None

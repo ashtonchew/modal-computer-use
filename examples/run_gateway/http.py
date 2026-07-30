@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .domain import RunRecord, RunState
+from .domain import ReplayTombstone, RunRecord, RunState
 from .service import (
     AuthenticationRequired,
     DesktopBusy,
@@ -98,7 +98,7 @@ def build_run_gateway_app(service: RunGatewayService) -> FastAPI:
     return app
 
 
-def _run_response(record: RunRecord) -> RunResponse:
+def _run_response(record: RunRecord | ReplayTombstone) -> RunResponse:
     return RunResponse(run_id=record.run_id, state=record.state)
 
 
