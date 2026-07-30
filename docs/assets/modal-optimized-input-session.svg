@@ -8,6 +8,7 @@
       .box { fill: #1C231D; stroke: #657066; stroke-width: 1.3; }
       .changed { fill: #1C231D; stroke: #91B89A; stroke-width: 1.5; }
       .primary { fill: #233528; stroke: #91B89A; stroke-width: 1.5; }
+      .step-box { fill: #1C231D; stroke: #91B89A; stroke-width: 1.1; }
       .row, .row-opt, .label, .small, .step, .metric, .arrow-label, .arrow-label-opt { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
       .row { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
       .row-opt { fill: #AACCB0; font-size: 17px; font-weight: 700; }
@@ -55,10 +56,12 @@
   <text class="label" x="332" y="337" text-anchor="middle">Build input</text>
   <text class="label" x="332" y="358" text-anchor="middle">events</text>
   <rect class="primary" x="484" y="284" width="168" height="120" rx="8"/>
-  <text class="label" x="568" y="313" text-anchor="middle">One input lock</text>
-  <text class="step" x="568" y="343" text-anchor="middle">Queue XTest events</text>
-  <line class="path-step" x1="568" y1="351" x2="568" y2="369" marker-end="url(#arrow-sage)"/>
-  <text class="step" x="568" y="391" text-anchor="middle">XSync once</text>
+  <text class="label" x="568" y="310" text-anchor="middle">One input lock</text>
+  <rect class="step-box" x="500" y="322" width="136" height="26" rx="5"/>
+  <text class="step" x="568" y="339" text-anchor="middle">Queue XTest events</text>
+  <line class="path-step" x1="568" y1="348" x2="568" y2="364" marker-end="url(#arrow-sage)"/>
+  <rect class="step-box" x="500" y="364" width="136" height="26" rx="5"/>
+  <text class="step" x="568" y="381" text-anchor="middle">XSync once</text>
   <rect class="box" x="740" y="284" width="128" height="120" rx="8"/>
   <text class="label" x="804" y="349" text-anchor="middle">X11 server</text>
   <rect class="primary" x="976" y="284" width="128" height="120" rx="8"/>
