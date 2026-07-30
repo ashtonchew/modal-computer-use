@@ -852,6 +852,34 @@ async def test_modal_poll_incomplete_graph_fallback_can_remain_pending(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_modal_poll_lossy_graph_with_unfinished_result_remains_pending(monkeypatch) -> None:
+    runtime = _fake_modal(
+        graph_exception=lambda exc: exc.DataLossError(),
+        get_exception=lambda _exc: TimeoutError(),
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(gateway.PollState.PENDING)
+
+
+@pytest.mark.asyncio
+async def test_modal_poll_lossy_graph_can_recover_valid_strict_result(monkeypatch) -> None:
+    runtime = _fake_modal(
+        graph_exception=lambda exc: exc.DeserializationError(),
+        result={"status": "succeeded"},
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(gateway.PollState.SUCCEEDED)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["succeeded", "failed", "indeterminate"])
 async def test_modal_poll_validates_and_maps_strict_success_envelope(monkeypatch, status) -> None:
     runtime = _fake_modal(

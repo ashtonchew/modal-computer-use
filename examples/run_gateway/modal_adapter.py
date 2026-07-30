@@ -68,7 +68,16 @@ class ModalTrajectoryDispatcher:
         exceptions = runtime.exception
         try:
             call = runtime.FunctionCall.from_id(call_id.reveal_to_backend())
-            roots = await call.get_call_graph.aio()
+            try:
+                roots = await call.get_call_graph.aio()
+            except (
+                exceptions.DeserializationError,
+                exceptions.ExecutionError,
+                exceptions.DataLossError,
+            ):
+                # The graph is best-effort metadata. Loss while decoding it says
+                # nothing authoritative about the Function's durable result.
+                roots = None
             status = (
                 getattr(roots[0], "status", None)
                 if isinstance(roots, list) and len(roots) == 1
