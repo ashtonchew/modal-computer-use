@@ -701,6 +701,7 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
             DeserializationError=type("DeserializationError", (ModalError,), {}),
             ExecutionError=type("ExecutionError", (ModalError,), {}),
             FunctionTimeoutError=type("FunctionTimeoutError", (ModalError,), {}),
+            InternalError=type("InternalError", (ModalError,), {}),
             InternalFailure=type("InternalFailure", (ModalError,), {}),
             InputCancellation=type("InputCancellation", (BaseException,), {}),
             NotFoundError=type("NotFoundError", (ModalError,), {}),
@@ -750,6 +751,7 @@ def _fake_modal(
         DeserializationError=type("DeserializationError", (ModalError,), {}),
         ExecutionError=type("ExecutionError", (ModalError,), {}),
         FunctionTimeoutError=type("FunctionTimeoutError", (ModalError,), {}),
+        InternalError=type("InternalError", (ModalError,), {}),
         InternalFailure=type("InternalFailure", (ModalError,), {}),
         InputCancellation=type("InputCancellation", (BaseException,), {}),
         NotFoundError=type("NotFoundError", (ModalError,), {}),
@@ -968,6 +970,7 @@ async def test_modal_success_get_classifies_specific_result_errors(
         "ServiceError",
         "AuthError",
         "ResourceExhaustedError",
+        "InternalError",
         "InternalFailure",
     ],
 )

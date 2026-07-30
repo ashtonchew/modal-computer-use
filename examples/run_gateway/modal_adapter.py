@@ -121,6 +121,7 @@ class ModalTrajectoryDispatcher:
             exceptions.ServiceError,
             exceptions.AuthError,
             exceptions.ResourceExhaustedError,
+            exceptions.InternalError,
             exceptions.InternalFailure,
         ):
             return PollOutcome(PollState.UNAVAILABLE, PollReason.TRANSIENT_PROVIDER_ERROR)
