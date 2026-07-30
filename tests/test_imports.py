@@ -36,6 +36,37 @@ import modal_computer_use.cli
     assert result.returncode == 0, result.stderr
 
 
+def test_session_handle_import_and_validation_do_not_require_modal() -> None:
+    code = """
+import importlib.abc
+import sys
+
+class Blocker(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname.split('.', 1)[0] == "modal":
+            raise ImportError(f"blocked optional dependency: {fullname}")
+        return None
+
+sys.meta_path.insert(0, Blocker())
+from modal_computer_use import ComputerSessionHandle
+
+handle = ComputerSessionHandle(
+    sandbox_id="sb-placeholder",
+    app_name="desktop-app",
+    requested_modal_region="us-west",
+    ingress="attested-tunnel",
+    daemon_http_version="1.1",
+    config_hash="a" * 16,
+)
+assert handle.schema_version == 1
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_no_network_filesystem_usage() -> None:
     from pathlib import Path
 

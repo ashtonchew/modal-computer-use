@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import secrets as _secrets
 import time
 from collections.abc import Callable, Sequence
@@ -25,7 +26,7 @@ from .errors import (
 from .hot_session import HotSessionClient
 from .image import default_image, named_image, selected_image_identity
 from .latency import SessionStartupTiming, validate_first_frame
-from .models import ComputerStatus, DebugUrls, SandboxRef
+from .models import ComputerSessionHandle, ComputerStatus, DebugUrls, SandboxRef
 from .namespaces import (
     ActionsNamespace,
     AppsNamespace,
@@ -87,6 +88,15 @@ class ModalDaemonCommandResult:
     fallback_used: bool
     fallback_reason: str | None = None
     fallback_error_type: str | None = None
+
+
+@dataclass(frozen=True)
+class _SessionHandoffPolicy:
+    app_name: str
+    modal_region: str | None
+    ingress: ModalIngress
+    daemon_http_version: Literal["1.1", "2"]
+    config_hash: str
 
 
 @dataclass
@@ -900,6 +910,62 @@ def _daemon_bearer_from_auth(auth: dict[str, str]) -> str:
     return auth["COMPUTER_USE_TUNNEL_TOKEN"]
 
 
+class _ModalFunctionSessionBorrow:
+    """Lazy owner of one borrowed daemon connection for a Function invocation."""
+
+    def __init__(
+        self,
+        handle: ComputerSessionHandle,
+        *,
+        function_region: str,
+        readiness_timeout: float,
+    ) -> None:
+        self._handle = handle
+        self._function_region = function_region
+        self._readiness_timeout = readiness_timeout
+        self._computer: ComputerSandbox | None = None
+        self._entered = False
+
+    def __enter__(self) -> ComputerSandbox:
+        if self._entered:
+            raise RuntimeError("a session borrow context can only be entered once")
+        self._entered = True
+        if not isinstance(self._function_region, str) or not self._function_region.strip():
+            raise ValueError("function_region must be a non-empty string")
+        if self._function_region != self._handle.requested_modal_region:
+            raise ConfigConflictError(
+                "Function region does not match the session handle's requested Modal region"
+            )
+        if (
+            isinstance(self._readiness_timeout, bool)
+            or not isinstance(self._readiness_timeout, (int, float))
+            or not math.isfinite(self._readiness_timeout)
+            or self._readiness_timeout <= 0
+        ):
+            raise ValueError("readiness_timeout must be a positive finite number")
+        computer = _borrow_modal_function_session(
+            self._handle,
+            readiness_timeout=float(self._readiness_timeout),
+        )
+        self._computer = computer
+        return computer
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        computer, self._computer = self._computer, None
+        if computer is None:
+            return
+        try:
+            computer.detach()
+        except Exception as cleanup_exc:
+            if isinstance(exc, BaseException):
+                exc.add_note(
+                    "borrowed session cleanup also failed: "
+                    f"detach ({type(cleanup_exc).__name__})"
+                )
+                return
+            raise
+
+
 class ComputerSandbox:
     def __init__(
         self,
@@ -913,6 +979,7 @@ class ComputerSandbox:
         self._sandbox = sandbox
         self._metadata = metadata
         self._requested_modal_region: str | None = None
+        self._session_handoff_policy: _SessionHandoffPolicy | None = None
         self._daemon_bearer: str | None = None
         self.startup_timing = startup_timing
         self._readiness_failure_cleanup: Literal["none", "client", "sandbox"] = "none"
@@ -1126,6 +1193,11 @@ class ComputerSandbox:
             timing.mark("attestation_ready")
             computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         computer._requested_modal_region = config.runtime.modal_region
+        computer._session_handoff_policy = _session_handoff_policy(
+            config,
+            app_name=app_name,
+            config_hash=metadata.config_hash or compute_config_hash(config),
+        )
         computer._readiness_failure_cleanup = "none"
         return computer
 
@@ -1226,6 +1298,8 @@ class ComputerSandbox:
                 computer = cls.attach(
                     run_id=config.run_id,
                     app_name=app_name,
+                    ingress=config.ingress,
+                    http2=config.network.daemon_http_version == "2",
                     wait=wait,
                     readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
                 )
@@ -1238,6 +1312,11 @@ class ComputerSandbox:
                     computer.metadata().config_hash == requested_hash
                 ):
                     computer._requested_modal_region = config.runtime.modal_region
+                    computer._session_handoff_policy = _session_handoff_policy(
+                        config,
+                        app_name=app_name,
+                        config_hash=requested_hash,
+                    )
                 return computer
             except SandboxAmbiguousError:
                 raise
@@ -1250,6 +1329,8 @@ class ComputerSandbox:
                 computer = cls.attach(
                     name=name,
                     app_name=app_name,
+                    ingress=config.ingress,
+                    http2=config.network.daemon_http_version == "2",
                     wait=wait,
                     readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
                 )
@@ -1262,6 +1343,11 @@ class ComputerSandbox:
                     computer.metadata().config_hash == requested_hash
                 ):
                     computer._requested_modal_region = config.runtime.modal_region
+                    computer._session_handoff_policy = _session_handoff_policy(
+                        config,
+                        app_name=app_name,
+                        config_hash=requested_hash,
+                    )
                 return computer
             except SandboxAmbiguousError:
                 raise
@@ -1271,6 +1357,46 @@ class ComputerSandbox:
             raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
 
         return cls.create(config=config, app_name=app_name, name=name, wait=wait, **kwargs)
+
+    def session_handle(self) -> ComputerSessionHandle:
+        """Return the safe reconnect policy for an SDK-owned Modal desktop."""
+        policy = self._session_handoff_policy
+        metadata = self._metadata
+        if self._sandbox is None or metadata is None or policy is None:
+            raise SandboxUnavailableError(
+                "session handles require an SDK-owned Modal desktop created by create() "
+                "or compatibly reused by attach_or_create()"
+            )
+        if metadata.sandbox_id == "unknown" or not metadata.sandbox_id.strip():
+            raise SandboxUnavailableError("session handle sandbox identity is unavailable")
+        if not policy.app_name.strip():
+            raise SandboxUnavailableError("session handle app identity is unavailable")
+        if metadata.app_name != policy.app_name or metadata.config_hash != policy.config_hash:
+            raise ConfigConflictError(
+                "session handle identity no longer matches its creation policy"
+            )
+        if metadata.tags.get("computer-use") != "true":
+            raise SandboxUnavailableError("session handle target is not identified as SDK-owned")
+        if metadata.tags.get("computer-use.config_hash") != policy.config_hash:
+            raise SandboxUnavailableError(
+                "session handle target lacks a verifiable live config identity"
+            )
+        if policy.modal_region is None or not policy.modal_region.strip():
+            raise SandboxUnavailableError(
+                "session handles require an explicit requested Modal region"
+            )
+        if policy.ingress not in {"attested-tunnel", "connect"}:
+            raise SandboxUnavailableError(
+                "session handles require credential-refreshable ingress"
+            )
+        return ComputerSessionHandle(
+            sandbox_id=metadata.sandbox_id,
+            app_name=policy.app_name,
+            requested_modal_region=policy.modal_region,
+            ingress=policy.ingress,
+            daemon_http_version=policy.daemon_http_version,
+            config_hash=policy.config_hash,
+        )
 
     def start(self) -> object:
         return self.lifecycle.start()
@@ -1334,9 +1460,11 @@ class ComputerSandbox:
             self.stop()
 
     def detach(self) -> None:
-        if self._sandbox is not None and hasattr(self._sandbox, "detach"):
-            self._sandbox.detach()
-        self.client.close()
+        try:
+            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
+                self._sandbox.detach()
+        finally:
+            self.client.close()
 
     def metadata(self) -> SandboxRef | None:
         return self._metadata
@@ -2441,6 +2569,60 @@ def _normalize_reuse_policy(reuse: bool | ReusePolicy) -> ReusePolicy:
     if reuse in ("by_run_id", "by_name", "never"):
         return reuse
     raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
+
+
+def _session_handoff_policy(
+    config: ComputerConfig,
+    *,
+    app_name: str,
+    config_hash: str,
+) -> _SessionHandoffPolicy:
+    return _SessionHandoffPolicy(
+        app_name=app_name,
+        modal_region=config.runtime.modal_region,
+        ingress=config.ingress,
+        daemon_http_version=config.network.daemon_http_version,
+        config_hash=config_hash,
+    )
+
+
+def _borrow_modal_function_session(
+    handle: ComputerSessionHandle,
+    *,
+    readiness_timeout: float,
+) -> ComputerSandbox:
+    computer = ComputerSandbox.attach(
+        sandbox_id=handle.sandbox_id,
+        app_name=handle.app_name,
+        ingress=handle.ingress,
+        http2=handle.daemon_http_version == "2",
+        wait=True,
+        readiness_timeout=readiness_timeout,
+    )
+    metadata = computer.metadata()
+    if (
+        metadata is not None
+        and metadata.sandbox_id == handle.sandbox_id
+        and metadata.app_name == handle.app_name
+        and metadata.config_hash == handle.config_hash
+        and metadata.tags.get("computer-use") == "true"
+        and metadata.tags.get("computer-use.config_hash") == handle.config_hash
+    ):
+        return computer
+    mismatch = ConfigConflictError(
+        "live sandbox config_hash or identity does not match the session handle",
+        requested_hash=handle.config_hash,
+        existing_hash=None if metadata is None else metadata.config_hash,
+        sandbox_id=handle.sandbox_id,
+    )
+    try:
+        computer.detach()
+    except Exception as cleanup_exc:
+        mismatch.add_note(
+            "borrowed session cleanup also failed: "
+            f"detach ({type(cleanup_exc).__name__})"
+        )
+    raise mismatch
 
 
 def _metadata_from_sandbox(sandbox: object, *, app_name: str) -> SandboxRef:

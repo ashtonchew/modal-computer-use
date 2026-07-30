@@ -2,6 +2,34 @@
 
 Most latency in a computer-use loop comes from network round trips and screenshot encoding. This page lists the knobs that matter.
 
+## Modal Function handoff capacity
+
+A `ComputerSessionHandle` lets a Modal Function mint a fresh connection to an existing desktop and
+keep it for the whole repeated screenshot/model/action trajectory. Context construction is local;
+credential creation, readiness, and live config verification happen once on entry. This removes
+per-turn attach overhead, but does not remove action or batch round trips and does not retry failed
+or possibly partial work.
+
+Set the Function's `region` placement request to the handle's exact `requested_modal_region`.
+`routing_region` affects Function input/output routing and is not a substitute. A shared requested
+selector is a scheduling policy, not evidence of a common host or availability zone, and the
+handoff does not depend on loopback or private networking.
+
+Choose Function capacity as an explicit latency/cost tradeoff:
+
+- `min_containers=0` scales the Function to zero and can add cold-start latency.
+- Positive warm capacity spends more to reduce idle-to-first-invocation delay.
+- `max_containers` and application admission control must prevent concurrent trajectories for one
+  desktop. Daemon input locking is only per action or batch, not per trajectory.
+- Use `retries=0` to avoid configured retries; Modal may still reschedule a crashed Function
+  container, so the complete trajectory is not exactly-once.
+
+Cancellation stops the Function invocation, not the target desktop and not prior GUI effects. The
+borrower detaches on normal return or Python exception and the creator terminates only after remote
+and spawned work has reached a terminal outcome. Capacity planning must include the separately
+running Sandbox cost. This is a single-trajectory ownership contract, not a multi-tenant safety
+claim. The public surface is synchronous; native async borrowing may be added later.
+
 ## Batch actions
 
 The daemon's `/v1/actions/run` route accepts an ordered list of actions and executes them under one input lock. Each action is one HTTP round trip when sent individually; a 10-action batch is one. For multi-step interactions the model returns in a single turn, batch them.

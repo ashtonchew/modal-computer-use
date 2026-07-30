@@ -119,6 +119,56 @@ profile requires a specific region, create a new sandbox with
 `ComputerConfig(runtime={"modal_region": "us-west"})` or use the default config mismatch behavior to
 reject an incompatible reused sandbox.
 
+### Hand a desktop to a Modal Function
+
+For a stateful model loop, create the desktop in an owner process, call `session_handle()`, and pass
+that value through normal Modal Function arguments. The complete executable pattern is
+[`examples/modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py). It
+keeps the native user-owned `@app.function` surface. Deploy that App once, then look up the deployed
+Function with `modal.Function.from_name(...)` and choose either `.remote(handle, task)` or
+`.spawn(handle, task)`, including `.cancel()` for a spawned call. The SDK never calls `app.run()` or
+creates an App for the handoff. One Function invocation enters one borrow context and holds that
+same daemon connection across its repeated screenshot, application-owned model, and action steps.
+
+Modal Function `region=...` is a container placement request. It must exactly match the handle's
+`requested_modal_region`. Modal's `routing_region=...` controls routing of Function inputs and
+outputs; it is a different option and does not satisfy the placement check. The handoff makes no
+claim about host identity, availability zone identity, loopback reachability, or private
+networking.
+
+Pass one region constant to both the Function decorator and `handle.borrow(function_region=...)`.
+The borrow context checks that declaration against the handle; it cannot introspect the deployed
+Function decorator or turn observed placement into a scheduling selector.
+
+The deployed Function image must include `modal-computer-use[modal]`, and its Modal identity must
+be allowed to access the target Sandbox's environment. Do not set `restrict_modal_access=True` on
+this Function: borrowing resolves the Sandbox and mints fresh access from inside the invocation.
+
+The creator owns the desktop lifetime. It must keep the target running until every `.remote()` call
+has returned and every spawned call has completed or reached its cancellation outcome, then
+terminate it. A borrower only detaches and closes its daemon client. Function cancellation requests
+cancellation of that invocation; it is not a rollback of possibly partial input and never means
+that the target desktop was terminated. On ordinary return or Python exception, the borrow context
+detaches deterministically. The owner remains responsible for eventual target cleanup even when an
+invocation is cancelled or lost.
+
+Use `retries=0` to avoid configured Function retries for a stateful trajectory. Modal can still
+reschedule an input after a container crash, so this does not create exactly-once execution. The
+SDK does not retry, switch ingress, replay the callback, or replay the action. Existing action
+idempotency fields protect the requests that use them, not a complete model trajectory. The handoff
+also does not acquire a trajectory-wide lease: daemon locks cover one action or batch. The
+application must serialize trajectories per desktop and must not treat one handle as a
+multi-tenant isolation boundary.
+
+Function capacity is independent from desktop capacity. `min_containers=0` allows the Function to
+scale to zero, adding a cold start after idle periods. A positive warm minimum reduces that startup
+cost but accrues warm-container cost. Bound `max_containers` and application concurrency so one
+desktop cannot receive overlapping trajectories. The target Sandbox continues to follow its own
+timeout, idle-timeout, and billing lifecycle while Function capacity scales separately.
+
+The borrow API is intentionally synchronous. A future async context can be additive; current async
+applications should not assume a thread wrapper changes Modal cancellation or cleanup semantics.
+
 ## Co-located runners and brokers
 
 When caller-to-Sandbox latency is material, one deployment option is a short-lived co-located

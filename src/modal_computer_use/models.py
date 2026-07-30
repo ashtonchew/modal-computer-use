@@ -3,14 +3,18 @@ from __future__ import annotations
 import base64
 import builtins
 import hashlib
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from ._invariants import require_coordinate_pair, require_drag_shape, require_safe_text
 from .errors import ActionValidationError
+
+if TYPE_CHECKING:
+    from .sandbox import ComputerSandbox
 
 Button = Literal["left", "middle", "right", "back", "forward"]
 ScrollDirection = Literal["up", "down", "left", "right"]
@@ -257,6 +261,42 @@ class ArtifactSyncResult(StrictBaseModel):
     persistent: bool
     synced_paths: list[str] = Field(default_factory=list)
     message: str | None = None
+
+
+class ComputerSessionHandle(BaseModel):
+    """Serializable reconnect policy for one SDK-owned Modal desktop."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal[1] = 1
+    sandbox_id: str = Field(repr=False)
+    app_name: str
+    requested_modal_region: str
+    ingress: Literal["attested-tunnel", "connect"]
+    daemon_http_version: Literal["1.1", "2"]
+    config_hash: str = Field(pattern=r"^[0-9a-f]{16}$")
+
+    @field_validator("sandbox_id", "app_name", "requested_modal_region")
+    @classmethod
+    def _nonempty_identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("session handle identity fields must be non-empty")
+        return value
+
+    def borrow(
+        self,
+        *,
+        function_region: str,
+        readiness_timeout: float = 120.0,
+    ) -> AbstractContextManager[ComputerSandbox]:
+        """Build a lazy, synchronous Modal Function borrowing context."""
+        from .sandbox import _ModalFunctionSessionBorrow
+
+        return _ModalFunctionSessionBorrow(
+            self,
+            function_region=function_region,
+            readiness_timeout=readiness_timeout,
+        )
 
 
 class SandboxRef(StrictBaseModel):
