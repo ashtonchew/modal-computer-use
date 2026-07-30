@@ -42,9 +42,9 @@ The usual cursor-hidden request now reads the current frame from the long-lived 
 
 ## A process for every click
 
-On a local computer, a click feels atomic. Underneath, the desktop receives separate input events. [macOS sends mouse events through Quartz](https://developer.apple.com/documentation/coregraphics/cgevent); the Linux desktop in my Sandbox uses X11. An agent's `click(x, y)` therefore has to become pointer motion, button press, and button release in X11's event stream.
+On a local computer, a click feels instant. The desktop still receives separate input events. [macOS sends mouse events through Quartz](https://developer.apple.com/documentation/coregraphics/cgevent). My Sandbox runs a Linux desktop with X11, the window system that routes those events to applications. An agent's `click(x, y)` therefore has to become pointer motion, button press, and button release in X11's event stream.
 
-My first implementation handed that translation to [`xdotool`](https://github.com/jordansissel/xdotool), a command-line X11 automation program. `xdotool` already knew how to speak to the display and synthesize input, and each invocation lived in its own process. If one invocation failed, it did not take the daemon with it.
+My first implementation handed that translation to [`xdotool`](https://github.com/jordansissel/xdotool), the usual command-line tool for X11 automation. `xdotool` already knew how to speak to the display and synthesize input, and each invocation lived in its own process. If one invocation failed, it did not take the daemon with it.
 
 A pointer move followed by one click took about 146 ms inside the daemon. I checked what `xdotool` was doing beneath the CLI before replacing X11. It already used [XTest](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html), the X11 extension for synthetic input, through Xlib. Every invocation still started a new executable, loaded its libraries, parsed the command, and opened a fresh display connection around a three-event click. The process boundary bought useful isolation for a local automation script, where a person pauses between commands. An agent paid for it after every screenshot.
 
