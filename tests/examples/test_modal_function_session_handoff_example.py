@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,13 +39,15 @@ class FakeComputer:
 class FakeHandle:
     def __init__(self, computer: FakeComputer) -> None:
         self.computer = computer
-        self.borrow_calls: list[str] = []
+        self.borrow_calls: list[tuple[str, str]] = []
+        self.borrow_environments: list[str | None] = []
         self.active = False
         self.active_during_operations: list[bool] = []
 
     @contextmanager
-    def borrow(self, *, function_region: str) -> Iterator[FakeComputer]:
-        self.borrow_calls.append(function_region)
+    def borrow(self, *, run_id: str, function_region: str) -> Iterator[FakeComputer]:
+        self.borrow_calls.append((run_id, function_region))
+        self.borrow_environments.append(os.environ.get("MODAL_ENVIRONMENT"))
         self.active = True
         original_full = self.computer.full
         original_run = self.computer.run
@@ -65,19 +68,22 @@ class FakeHandle:
             self.active = False
 
 
-def test_one_function_body_borrows_once_across_the_complete_repeated_loop() -> None:
+def test_one_function_body_borrows_once_across_the_complete_repeated_loop(monkeypatch) -> None:
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "main")
     computer = FakeComputer()
     handle = FakeHandle(computer)
 
     result = example.run_trajectory_body(
         handle,
         "private task placeholder",
+        run_id="run-123",
         function_region="us-west",
         max_turns=3,
     )
 
     assert result == {"completed": True, "turns": 3}
-    assert handle.borrow_calls == ["us-west"]
+    assert handle.borrow_calls == [("run-123", "us-west")]
+    assert handle.borrow_environments == ["main"]
     assert computer.screenshot_calls == 3
     assert len(computer.action_calls) == 3
     assert handle.active_during_operations == [True] * 6
@@ -91,8 +97,8 @@ def test_example_preserves_native_modal_invocation_and_cancellation_calls() -> N
 
     assert "@app.function(" in source
     assert 'modal.Function.from_name(APP_NAME, "run_trajectory")' in source
-    assert "deployed.remote(handle, task)" in source
-    assert "deployed.spawn(handle, task)" in source
+    assert "deployed.remote(handle, task, run_id)" in source
+    assert "deployed.spawn(handle, task, run_id)" in source
     assert "call.cancel()" in source
     assert "app.run()" not in source
     assert "retries=0" in source

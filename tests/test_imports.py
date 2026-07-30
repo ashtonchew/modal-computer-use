@@ -52,13 +52,16 @@ from modal_computer_use import ComputerSessionHandle
 
 handle = ComputerSessionHandle(
     sandbox_id="sb-placeholder",
+    session_id="b" * 32,
     app_name="desktop-app",
+    modal_environment="prod",
     requested_modal_region="us-west",
     ingress="attested-tunnel",
     daemon_http_version="1.1",
     config_hash="a" * 16,
 )
-assert handle.schema_version == 1
+assert handle.schema_version == 2
+assert handle.handoff_protocol == "computer-use.session-handoff.v2"
 """
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-c", code], capture_output=True, text=True

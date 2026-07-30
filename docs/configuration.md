@@ -41,6 +41,7 @@ that `budgets.max_idle_seconds` is a separate daemon-side budget described below
 | `runtime.timeout_seconds` | `3600` | Integer `1..86400`; passed to Modal as the Sandbox lifetime timeout. |
 | `runtime.idle_timeout_seconds` | unset | Integer `1..86400` or `None`; passed to Modal as its Sandbox idle timeout. Warm capacity does not support an explicit value. |
 | `runtime.readiness_timeout_seconds` | `120` | Integer `1..900`; SDK wait deadline for Modal and daemon readiness. It does not map to `COMPUTER_USE_READINESS_CACHE_TTL_MS`. |
+| `runtime.modal_environment` | unset | Non-empty Modal environment name or `None`; selects the environment for `App.lookup`. It is independent of `image.environment_name`, which selects a published named image. |
 | `runtime.modal_region` | unset | Non-empty Modal region string or `None`; passed to Modal as requested placement. |
 
 ### Resources and image

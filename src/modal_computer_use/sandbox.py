@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import secrets as _secrets
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from typing import Any, Literal
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from ._version import __version__
+from .borrowed import BorrowedComputer
 from .client import DaemonClient
 from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
 from .errors import (
@@ -22,6 +24,10 @@ from .errors import (
     ModalNotInstalledError,
     SandboxAmbiguousError,
     SandboxUnavailableError,
+    SessionCompatibilityError,
+    SessionEnvironmentMismatchError,
+    SessionPlacementMismatchError,
+    SessionTargetMismatchError,
 )
 from .hot_session import HotSessionClient
 from .image import default_image, named_image, selected_image_identity
@@ -92,7 +98,9 @@ class ModalDaemonCommandResult:
 
 @dataclass(frozen=True)
 class _SessionHandoffPolicy:
+    session_id: str | None
     app_name: str
+    modal_environment: str | None
     modal_region: str | None
     ingress: ModalIngress
     daemon_http_version: Literal["1.1", "2"]
@@ -910,6 +918,11 @@ def _daemon_bearer_from_auth(auth: dict[str, str]) -> str:
     return auth["COMPUTER_USE_TUNNEL_TOKEN"]
 
 
+def _modal_function_environment(environ: Mapping[str, str] | None = None) -> str | None:
+    source = os.environ if environ is None else environ
+    return source.get("MODAL_ENVIRONMENT")
+
+
 class _ModalFunctionSessionBorrow:
     """Lazy owner of one borrowed daemon connection for a Function invocation."""
 
@@ -917,25 +930,34 @@ class _ModalFunctionSessionBorrow:
         self,
         handle: ComputerSessionHandle,
         *,
+        run_id: str,
         function_region: str,
         readiness_timeout: float,
     ) -> None:
         self._handle = handle
+        self._run_id = run_id
         self._function_region = function_region
         self._readiness_timeout = readiness_timeout
         self._computer: ComputerSandbox | None = None
         self._entered = False
 
-    def __enter__(self) -> ComputerSandbox:
+    def __enter__(self) -> BorrowedComputer:
         if self._entered:
             raise RuntimeError("a session borrow context can only be entered once")
         self._entered = True
+        if not isinstance(self._run_id, str) or not self._run_id.strip():
+            raise ValueError("run_id must be a non-empty string")
+        function_environment = _modal_function_environment()
+        if (
+            function_environment is None
+            or not function_environment.strip()
+            or function_environment != self._handle.modal_environment
+        ):
+            raise SessionEnvironmentMismatchError
         if not isinstance(self._function_region, str) or not self._function_region.strip():
             raise ValueError("function_region must be a non-empty string")
         if self._function_region != self._handle.requested_modal_region:
-            raise ConfigConflictError(
-                "Function region does not match the session handle's requested Modal region"
-            )
+            raise SessionPlacementMismatchError
         if (
             isinstance(self._readiness_timeout, bool)
             or not isinstance(self._readiness_timeout, (int, float))
@@ -948,7 +970,7 @@ class _ModalFunctionSessionBorrow:
             readiness_timeout=float(self._readiness_timeout),
         )
         self._computer = computer
-        return computer
+        return BorrowedComputer(computer)
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         computer, self._computer = self._computer, None
@@ -1079,8 +1101,8 @@ class ComputerSandbox:
                 browser_prewarm=config.browser.prewarm if config.browser else False,
             )
         app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
-        if config.image.source == "named" and config.image.environment_name is not None:
-            app_lookup_kwargs["environment_name"] = config.image.environment_name
+        if config.runtime.modal_environment is not None:
+            app_lookup_kwargs["environment_name"] = config.runtime.modal_environment
         app = modal.App.lookup(app_name, **app_lookup_kwargs)
         if app_tags:
             _set_modal_object_tags(app, app_tags)
@@ -1093,6 +1115,13 @@ class ComputerSandbox:
             warm_pool_tags() if tag_profile == "warm_pool" else default_tags(config, owner=owner)
         )
         sandbox_tags = {**(tags or {}), **base_tags}
+        session_id: str | None = None
+        if (
+            config.runtime.modal_environment is not None
+            and config.runtime.modal_region is not None
+        ):
+            session_id = _secrets.token_hex(16)
+            sandbox_tags["computer-use.session_id"] = session_id
         sandbox_tags["computer-use.image_identity"] = (
             "custom"
             if custom_image_supplied
@@ -1195,6 +1224,7 @@ class ComputerSandbox:
         computer._requested_modal_region = config.runtime.modal_region
         computer._session_handoff_policy = _session_handoff_policy(
             config,
+            session_id=session_id,
             app_name=app_name,
             config_hash=metadata.config_hash or compute_config_hash(config),
         )
@@ -1314,6 +1344,7 @@ class ComputerSandbox:
                     computer._requested_modal_region = config.runtime.modal_region
                     computer._session_handoff_policy = _session_handoff_policy(
                         config,
+                        session_id=computer.metadata().tags.get("computer-use.session_id"),
                         app_name=app_name,
                         config_hash=requested_hash,
                     )
@@ -1345,6 +1376,7 @@ class ComputerSandbox:
                     computer._requested_modal_region = config.runtime.modal_region
                     computer._session_handoff_policy = _session_handoff_policy(
                         config,
+                        session_id=computer.metadata().tags.get("computer-use.session_id"),
                         app_name=app_name,
                         config_hash=requested_hash,
                     )
@@ -1372,26 +1404,27 @@ class ComputerSandbox:
         if not policy.app_name.strip():
             raise SandboxUnavailableError("session handle app identity is unavailable")
         if metadata.app_name != policy.app_name or metadata.config_hash != policy.config_hash:
-            raise ConfigConflictError(
-                "session handle identity no longer matches its creation policy"
-            )
+            raise SessionTargetMismatchError
         if metadata.tags.get("computer-use") != "true":
             raise SandboxUnavailableError("session handle target is not identified as SDK-owned")
         if metadata.tags.get("computer-use.config_hash") != policy.config_hash:
-            raise SandboxUnavailableError(
-                "session handle target lacks a verifiable live config identity"
-            )
+            raise SessionTargetMismatchError
+        if policy.modal_environment is None or not policy.modal_environment.strip():
+            raise SessionCompatibilityError
         if policy.modal_region is None or not policy.modal_region.strip():
-            raise SandboxUnavailableError(
-                "session handles require an explicit requested Modal region"
-            )
+            raise SessionCompatibilityError
+        if (
+            policy.session_id is None
+            or metadata.tags.get("computer-use.session_id") != policy.session_id
+        ):
+            raise SessionTargetMismatchError
         if policy.ingress not in {"attested-tunnel", "connect"}:
-            raise SandboxUnavailableError(
-                "session handles require credential-refreshable ingress"
-            )
+            raise SessionCompatibilityError
         return ComputerSessionHandle(
             sandbox_id=metadata.sandbox_id,
+            session_id=policy.session_id,
             app_name=policy.app_name,
+            modal_environment=policy.modal_environment,
             requested_modal_region=policy.modal_region,
             ingress=policy.ingress,
             daemon_http_version=policy.daemon_http_version,
@@ -1793,8 +1826,8 @@ def create_modal_benchmark_computer(
             environment_name=config.image.environment_name,
         )
     app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
-    if config.image.environment_name is not None:
-        app_lookup_kwargs["environment_name"] = config.image.environment_name
+    if config.runtime.modal_environment is not None:
+        app_lookup_kwargs["environment_name"] = config.runtime.modal_environment
     app = runtime.App.lookup(app_name, **app_lookup_kwargs)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
@@ -1962,8 +1995,8 @@ def create_modal_v2_tunnel_computer(
             environment_name=config.image.environment_name,
         )
     app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
-    if config.image.environment_name is not None:
-        app_lookup_kwargs["environment_name"] = config.image.environment_name
+    if config.runtime.modal_environment is not None:
+        app_lookup_kwargs["environment_name"] = config.runtime.modal_environment
     app = runtime.App.lookup(app_name, **app_lookup_kwargs)
     if app_tags:
         _set_modal_object_tags(app, app_tags)
@@ -2574,11 +2607,14 @@ def _normalize_reuse_policy(reuse: bool | ReusePolicy) -> ReusePolicy:
 def _session_handoff_policy(
     config: ComputerConfig,
     *,
+    session_id: str | None,
     app_name: str,
     config_hash: str,
 ) -> _SessionHandoffPolicy:
     return _SessionHandoffPolicy(
+        session_id=session_id,
         app_name=app_name,
+        modal_environment=config.runtime.modal_environment,
         modal_region=config.runtime.modal_region,
         ingress=config.ingress,
         daemon_http_version=config.network.daemon_http_version,
@@ -2607,14 +2643,10 @@ def _borrow_modal_function_session(
         and metadata.config_hash == handle.config_hash
         and metadata.tags.get("computer-use") == "true"
         and metadata.tags.get("computer-use.config_hash") == handle.config_hash
+        and metadata.tags.get("computer-use.session_id") == handle.session_id
     ):
         return computer
-    mismatch = ConfigConflictError(
-        "live sandbox config_hash or identity does not match the session handle",
-        requested_hash=handle.config_hash,
-        existing_hash=None if metadata is None else metadata.config_hash,
-        sandbox_id=handle.sandbox_id,
-    )
+    mismatch = SessionTargetMismatchError()
     try:
         computer.detach()
     except Exception as cleanup_exc:
