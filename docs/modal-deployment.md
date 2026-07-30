@@ -131,9 +131,12 @@ creates an App for the handoff. One Function invocation enters one borrow contex
 same lease and daemon connection across its repeated screenshot, application-owned model, and
 action steps. Native `borrow_async()` is canonical for async Modal Functions; `borrow()` remains
 available for synchronous Functions. The borrow `run_id` is an application-generated unique ID for
-one trajectory and cannot be reused after that durable run is sealed. Async model and application
-work must yield rather than block the event loop, because lease heartbeats and distinct-desktop
-concurrency run there too.
+one trajectory and cannot be reused after that durable run is sealed. Each async borrow renews its
+lease from one private worker thread and a dedicated blocking HTTP transport, so ordinary blocking
+Python I/O on the Function event loop does not starve heartbeats. Screenshots, actions, model calls,
+other async inputs, and cancellation remain native async work on that event loop. Prefer native
+async model and application clients; use `asyncio.to_thread()` only as compatibility guidance for
+blocking I/O that cannot yet be made async.
 
 Modal Function `region=...` is a container placement request. It must exactly match the handle's
 `requested_modal_region`. Modal's `routing_region=...` controls routing of Function inputs and
@@ -180,8 +183,16 @@ desktop cannot receive overlapping trajectories. The target Sandbox continues to
 timeout, idle-timeout, and billing lifecycle while Function capacity scales separately.
 
 Async cancellation is reconciled and cleaned up under shielding before `CancelledError` propagates.
-Borrowed cleanup closes tracked WebSockets, releases the lease when valid, closes HTTP, and calls
-Modal detach; it never terminates the owner target. Sync cleanup provides the same ownership rule.
+Borrowed cleanup stops its heartbeat worker, closes tracked WebSockets, joins the worker, releases
+the lease when valid, closes both HTTP transports, and calls Modal detach; it never terminates the
+owner target. If the bounded worker join deadline is missed, cleanup clears the worker's credentials,
+attempts release to fence stale heartbeat headers, detaches, and reports a redacted lease-loss
+failure. An existing user exception remains primary. Sync cleanup provides the same ownership rule.
+
+The heartbeat worker does not make a blocked event loop responsive: screenshots, actions, other
+async inputs, and cancellation delivery still wait for the loop. Process death stops the worker,
+the daemon lease TTL remains the final ownership release, and CPU-bound or GIL-holding work can
+still delay all Python threads.
 
 The receipt journal is target-local SQLite using WAL with `synchronous=NORMAL`. It survives daemon
 process restart on the same target filesystem, but this is not a claim of host-loss durability.

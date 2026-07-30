@@ -888,6 +888,19 @@ async def test_async_borrow_uses_only_modal_aio_and_cleans_up(monkeypatch) -> No
         return target
 
     transport = _AsyncBorrowTransport()
+    heartbeat_transport = _SyncBorrowTransport()
+    transport_configuration: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def async_transport(*args: object, **kwargs: object) -> _AsyncBorrowTransport:
+        transport_configuration.append(("async", args, kwargs))
+        return transport
+
+    def heartbeat(
+        *args: object, **kwargs: object
+    ) -> _SyncBorrowTransport:
+        transport_configuration.append(("heartbeat", args, kwargs))
+        return heartbeat_transport
+
     monkeypatch.setitem(
         sys.modules,
         "modal",
@@ -895,8 +908,9 @@ async def test_async_borrow_uses_only_modal_aio_and_cleans_up(monkeypatch) -> No
     )
     monkeypatch.setattr(
         "modal_computer_use.sandbox.AsyncHTTPTransport",
-        lambda *_args, **_kwargs: transport,
+        async_transport,
     )
+    monkeypatch.setattr("modal_computer_use.sandbox.HTTPTransport", heartbeat)
 
     async with _handle().borrow_async(
         run_id="async-run", function_region="us-west"
@@ -912,7 +926,81 @@ async def test_async_borrow_uses_only_modal_aio_and_cleans_up(monkeypatch) -> No
     assert transport.calls.count("/v1/leases/acquire") == 1
     assert transport.calls.count("/v1/leases/release") == 1
     assert transport.closed
+    assert heartbeat_transport.calls == []
+    assert heartbeat_transport.closed
+    assert transport_configuration == [
+        (
+            "async",
+            ("https://connect.invalid",),
+            {
+                "token": "credential-value",
+                "timeout": 30.0,
+                "http2": False,
+            },
+        ),
+        (
+            "heartbeat",
+            ("https://connect.invalid",),
+            {
+                "token": "credential-value",
+                "timeout": 30.0,
+                "http2": False,
+            },
+        ),
+    ]
     assert "terminate" not in target.calls
+
+
+@pytest.mark.asyncio
+async def test_async_user_exception_remains_primary_when_cleanup_fails(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class Borrowed:
+        def _invalidate(self) -> None:
+            calls.append("invalidate")
+
+    class Coordinator:
+        async def aclose(self) -> None:
+            calls.append("coordinator.aclose")
+            raise SessionLeaseLostError("private endpoint and credential")
+
+    class Client:
+        async def aclose(self) -> None:
+            calls.append("client.aclose")
+
+    class Target:
+        def __init__(self) -> None:
+            self.detach = _AioCall(self._detach)
+
+        async def _detach(self) -> None:
+            calls.append("detach.aio")
+
+    async def borrow(*_args: object, **_kwargs: object):
+        return Borrowed(), Target(), Client(), Coordinator()
+
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._borrow_modal_function_session_async",
+        borrow,
+    )
+
+    with pytest.raises(RuntimeError, match="user workload failed") as raised:
+        async with _handle().borrow_async(
+            run_id="async-run", function_region="us-west"
+        ):
+            raise RuntimeError("user workload failed")
+
+    assert raised.value.__notes__ == [
+        "borrowed session cleanup also failed: cleanup (SessionLeaseLostError)"
+    ]
+    assert "private" not in " ".join(raised.value.__notes__)
+    assert calls == [
+        "invalidate",
+        "coordinator.aclose",
+        "client.aclose",
+        "detach.aio",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1081,6 +1169,51 @@ async def test_async_partial_entry_releases_closes_and_detaches(monkeypatch) -> 
     assert transport.closed
     assert target.calls[-1] == "detach.aio"
     assert "terminate" not in target.calls
+
+
+@pytest.mark.asyncio
+async def test_async_acquire_failure_closes_both_transports_and_detaches(
+    monkeypatch,
+) -> None:
+    target = _AsyncTarget()
+
+    async def from_id(_sandbox_id: str) -> _AsyncTarget:
+        return target
+
+    class AcquireFailureTransport(_AsyncBorrowTransport):
+        async def request(
+            self, method: str, path: str, **kwargs: object
+        ) -> httpx.Response:
+            if path == "/v1/leases/acquire":
+                self.calls.append(path)
+                raise ConnectionError("acquire failed")
+            return await super().request(method, path, **kwargs)
+
+    transport = AcquireFailureTransport()
+    heartbeat_transport = _SyncBorrowTransport()
+    monkeypatch.setitem(
+        sys.modules,
+        "modal",
+        SimpleNamespace(Sandbox=SimpleNamespace(from_id=_AioCall(from_id))),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.AsyncHTTPTransport",
+        lambda *_args, **_kwargs: transport,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        lambda *_args, **_kwargs: heartbeat_transport,
+    )
+
+    with pytest.raises(ConnectionError, match="acquire failed"):
+        async with _handle().borrow_async(
+            run_id="async-run", function_region="us-west"
+        ):
+            raise AssertionError("unreachable")
+
+    assert transport.closed
+    assert heartbeat_transport.closed
+    assert target.calls[-1] == "detach.aio"
 
 
 @pytest.mark.asyncio

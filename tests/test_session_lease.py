@@ -34,14 +34,14 @@ def _response(
     )
 
 
-def _grant() -> httpx.Response:
+def _grant(*, heartbeat_interval_seconds: float = 60.0) -> httpx.Response:
     return _response(
         {
             "lease_id": "lease-test",
             "daemon_epoch": "epoch-test",
             "fence": 4,
             "ttl_seconds": 30.0,
-            "heartbeat_interval_seconds": 60.0,
+            "heartbeat_interval_seconds": heartbeat_interval_seconds,
         },
         headers={"x-computer-use-lease-token": "protected-token"},
     )
@@ -53,6 +53,7 @@ class _SyncTransport:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.status: dict[int, dict[str, Any]] = {}
         self.resolved: dict[int, dict[str, Any]] = {}
+        self.closed = False
 
     def request(self, _method: str, path: str, **kwargs: Any) -> httpx.Response:
         self.calls.append((path, kwargs))
@@ -65,6 +66,9 @@ class _SyncTransport:
             sequence = kwargs["json"]["sequence"]
             return _response(self.resolved[sequence])
         return _response({"ok": True})
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _AsyncTransport(_SyncTransport):
@@ -194,13 +198,19 @@ def test_transport_loss_missing_is_not_replayed_and_seals_current_borrow() -> No
 @pytest.mark.asyncio
 async def test_async_cancellation_resolves_before_propagation_without_replay() -> None:
     transport = _AsyncTransport()
+    heartbeat_transport = _SyncTransport()
     transport.resolved[0] = {
         "state": "MISSING",
         "sequence": 0,
         "proven_not_applied": True,
         "run_sealed": True,
     }
-    coordinator = AsyncSessionLeaseCoordinator(transport, run_id="run-a")
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.1,
+    )
     await coordinator.acquire()
     dispatched = asyncio.Event()
 
@@ -220,7 +230,13 @@ async def test_async_cancellation_resolves_before_propagation_without_replay() -
 @pytest.mark.asyncio
 async def test_async_closed_coordinator_rejects_retained_mutation_without_dispatch() -> None:
     transport = _AsyncTransport()
-    coordinator = AsyncSessionLeaseCoordinator(transport, run_id="run-a")
+    heartbeat_transport = _SyncTransport()
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.1,
+    )
     await coordinator.acquire()
     await coordinator.aclose()
     calls_after_close = list(transport.calls)
@@ -232,6 +248,293 @@ async def test_async_closed_coordinator_rejects_retained_mutation_without_dispat
         await coordinator.execute(operation)
 
     assert transport.calls == calls_after_close
+
+
+class _ShortGrantAsyncTransport(_AsyncTransport):
+    def __init__(self, *, heartbeat_interval_seconds: float = 0.005) -> None:
+        super().__init__()
+        self.heartbeat_interval_seconds = heartbeat_interval_seconds
+        self.release_observation: tuple[bool, object, bool | None] | None = None
+        self.worker: object | None = None
+        self.resource: object | None = None
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        if path == "/v1/leases/acquire":
+            self.calls.append((path, kwargs))
+            return _grant(
+                heartbeat_interval_seconds=self.heartbeat_interval_seconds
+            )
+        if path == "/v1/leases/release" and self.worker is not None:
+            thread = self.worker._thread
+            credentials = self.worker._credentials_value
+            resource_closed = (
+                self.resource.closed if self.resource is not None else None
+            )
+            self.release_observation = (
+                thread.is_alive(),
+                credentials,
+                resource_closed,
+            )
+        return await super().request(method, path, **kwargs)
+
+
+class _HeartbeatTransport:
+    def __init__(
+        self,
+        *,
+        timeout: float = 0.01,
+        fail: bool = False,
+        block: bool = False,
+    ) -> None:
+        self.timeout = timeout
+        self.fail = fail
+        self.block = block
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.started = threading.Event()
+        self.unblock = threading.Event()
+        self.closed = False
+
+    def request(self, _method: str, path: str, **kwargs: Any) -> httpx.Response:
+        self.calls.append((path, kwargs))
+        self.started.set()
+        if self.block:
+            self.unblock.wait()
+        if self.fail:
+            raise httpx.ConnectError("secret https://daemon.invalid?token=protected")
+        return _response({"ok": True})
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_async_heartbeat_renews_while_event_loop_is_blocked() -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport()
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.05,
+    )
+    await coordinator.acquire()
+
+    time.sleep(0.04)
+
+    assert len(heartbeat_transport.calls) >= 2
+    assert {path for path, _ in heartbeat_transport.calls} == {
+        "/v1/leases/heartbeat"
+    }
+    assert "/v1/leases/heartbeat" not in [path for path, _ in transport.calls]
+    await coordinator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_heartbeat_failure_blocks_next_mutation_and_redacts_error() -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport(fail=True)
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.05,
+    )
+    await coordinator.acquire()
+    assert await asyncio.to_thread(heartbeat_transport.started.wait, 1.0)
+    dispatched = False
+
+    async def operation(_headers: Any) -> None:
+        nonlocal dispatched
+        dispatched = True
+
+    with pytest.raises(SessionLeaseLostError) as raised:
+        await coordinator.execute(operation)
+
+    rendered = f"{raised.value!s} {raised.value!r} {raised.value.__cause__!r}"
+    assert not dispatched
+    assert "daemon.invalid" not in rendered
+    assert "protected" not in rendered
+    await coordinator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_heartbeat_request_timeout_must_be_below_join_budget() -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport(timeout=0.05)
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(ValueError, match="request timeout"):
+        await coordinator.acquire()
+    await coordinator.aclose()
+
+    assert heartbeat_transport.closed
+
+
+@pytest.mark.asyncio
+async def test_async_heartbeat_start_failure_keeps_cleanup_ownership(
+    monkeypatch,
+) -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport()
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.05,
+    )
+
+    def fail_start(_worker: object) -> None:
+        raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(
+        "modal_computer_use.session_lease._LeaseHeartbeatWorker.start",
+        fail_start,
+    )
+
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        await coordinator.acquire()
+    await coordinator.aclose()
+
+    assert coordinator._heartbeat_worker is None
+    assert coordinator._grant is None
+    assert heartbeat_transport.closed
+    assert [path for path, _ in transport.calls].count("/v1/leases/release") == 1
+
+
+@pytest.mark.asyncio
+async def test_async_normal_cleanup_joins_worker_before_release_and_clears_secrets() -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport()
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.05,
+    )
+    await coordinator.acquire()
+    assert await asyncio.to_thread(heartbeat_transport.started.wait, 1.0)
+    worker = coordinator._heartbeat_worker
+    assert worker is not None
+    transport.worker = worker
+
+    class Resource:
+        closed = False
+
+        async def aclose(self) -> None:
+            assert worker._stop.is_set()
+            self.closed = True
+
+    resource = coordinator.track(Resource())
+    transport.resource = resource
+    calls_before_close = len(heartbeat_transport.calls)
+
+    await coordinator.aclose()
+    time.sleep(0.02)
+
+    assert transport.release_observation == (False, None, True)
+    assert len(heartbeat_transport.calls) == calls_before_close
+    assert heartbeat_transport.closed
+    assert coordinator._heartbeat_worker is None
+    assert coordinator._grant is None
+    assert "protected-token" not in repr(worker)
+
+
+@pytest.mark.asyncio
+async def test_async_join_deadline_fences_releases_clears_and_reports_redacted_error() -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport(timeout=0.005, block=True)
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.02,
+    )
+    await coordinator.acquire()
+    assert await asyncio.to_thread(heartbeat_transport.started.wait, 1.0)
+    worker = coordinator._heartbeat_worker
+    assert worker is not None
+    transport.worker = worker
+
+    started = time.monotonic()
+    with pytest.raises(SessionLeaseLostError) as raised:
+        await coordinator.aclose()
+    elapsed = time.monotonic() - started
+
+    rendered = f"{raised.value!s} {raised.value!r} {raised.value.__cause__!r}"
+    assert elapsed < 0.2
+    assert transport.release_observation == (True, None, None)
+    assert [path for path, _ in transport.calls].count("/v1/leases/release") == 1
+    assert heartbeat_transport.closed
+    assert coordinator._heartbeat_worker is None
+    assert coordinator._grant is None
+    assert "daemon.invalid" not in rendered
+    assert "protected" not in rendered
+    heartbeat_transport.unblock.set()
+    worker._thread.join(timeout=1.0)
+    assert not worker._thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_async_sequential_borrows_do_not_retain_workers_or_credentials() -> None:
+    workers: list[object] = []
+    for _ in range(2):
+        transport = _ShortGrantAsyncTransport()
+        heartbeat_transport = _HeartbeatTransport()
+        coordinator = AsyncSessionLeaseCoordinator(
+            transport,
+            run_id="run-a",
+            heartbeat_transport=heartbeat_transport,
+            heartbeat_join_timeout_seconds=0.05,
+        )
+        await coordinator.acquire()
+        worker = coordinator._heartbeat_worker
+        assert worker is not None
+        workers.append(worker)
+        await coordinator.aclose()
+
+    assert workers[0] is not workers[1]
+    assert all(worker._credentials_value is None for worker in workers)
+    assert all(not worker._thread.is_alive() for worker in workers)
+
+
+@pytest.mark.asyncio
+async def test_async_concurrent_borrows_use_isolated_workers_and_transports() -> None:
+    coordinators: list[AsyncSessionLeaseCoordinator] = []
+    heartbeat_transports: list[_HeartbeatTransport] = []
+    for run_id in ("run-a", "run-b"):
+        heartbeat_transport = _HeartbeatTransport()
+        coordinator = AsyncSessionLeaseCoordinator(
+            _ShortGrantAsyncTransport(),
+            run_id=run_id,
+            heartbeat_transport=heartbeat_transport,
+            heartbeat_join_timeout_seconds=0.05,
+        )
+        coordinators.append(coordinator)
+        heartbeat_transports.append(heartbeat_transport)
+
+    await asyncio.gather(*(coordinator.acquire() for coordinator in coordinators))
+    assert all(
+        await asyncio.gather(
+            *(
+                asyncio.to_thread(transport.started.wait, 1.0)
+                for transport in heartbeat_transports
+            )
+        )
+    )
+
+    workers = [coordinator._heartbeat_worker for coordinator in coordinators]
+    assert workers[0] is not workers[1]
+    assert heartbeat_transports[0] is not heartbeat_transports[1]
+    assert all(
+        {path for path, _ in transport.calls} == {"/v1/leases/heartbeat"}
+        for transport in heartbeat_transports
+    )
+    await asyncio.gather(*(coordinator.aclose() for coordinator in coordinators))
 
 
 def test_sync_close_is_bounded_when_heartbeat_transport_is_stuck() -> None:

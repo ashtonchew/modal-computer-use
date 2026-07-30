@@ -81,6 +81,8 @@ ModalBenchmarkTransport = Literal[
 ]
 MODAL_OPERATION_TIMEOUT_SECONDS = 55
 MODAL_SNAPSHOT_RETENTION_SECONDS = 30 * 24 * 3600
+_ASYNC_BORROW_REQUEST_TIMEOUT_SECONDS = 30.0
+_ASYNC_HEARTBEAT_JOIN_TIMEOUT_SECONDS = 31.0
 
 
 @dataclass(frozen=True)
@@ -2918,6 +2920,7 @@ async def _borrow_modal_function_session_async(
         ) from exc
     sandbox = await modal.Sandbox.from_id.aio(handle.sandbox_id)
     transport: AsyncHTTPTransport | None = None
+    heartbeat_transport: HTTPTransport | None = None
     coordinator: object | None = None
     try:
         tags = await _read_modal_object_tags_async(sandbox)
@@ -2936,11 +2939,24 @@ async def _borrow_modal_function_session_async(
         transport = AsyncHTTPTransport(
             base_url,
             token=token,
+            timeout=_ASYNC_BORROW_REQUEST_TIMEOUT_SECONDS,
+            http2=handle.daemon_http_version == "2",
+        )
+        heartbeat_transport = HTTPTransport(
+            base_url,
+            token=token,
+            timeout=_ASYNC_BORROW_REQUEST_TIMEOUT_SECONDS,
             http2=handle.daemon_http_version == "2",
         )
         from .session_lease import AsyncSessionLeaseCoordinator
 
-        coordinator = AsyncSessionLeaseCoordinator(transport, run_id=run_id)
+        coordinator = AsyncSessionLeaseCoordinator(
+            transport,
+            run_id=run_id,
+            heartbeat_transport=heartbeat_transport,
+            heartbeat_join_timeout_seconds=_ASYNC_HEARTBEAT_JOIN_TIMEOUT_SECONDS,
+        )
+        heartbeat_transport = None
         await coordinator.acquire()
         client = AsyncDaemonClient(
             base_url,
@@ -2965,6 +2981,7 @@ async def _borrow_modal_function_session_async(
             sandbox,
             coordinator=coordinator,
             transport=transport,
+            heartbeat_transport=heartbeat_transport,
         )
         raise
 
@@ -3090,6 +3107,7 @@ async def _cleanup_failed_borrow_async(
     *,
     coordinator: Any | None,
     transport: AsyncHTTPTransport | None,
+    heartbeat_transport: HTTPTransport | None,
 ) -> None:
     async def cleanup() -> None:
         if coordinator is not None:
@@ -3098,6 +3116,9 @@ async def _cleanup_failed_borrow_async(
         if transport is not None:
             with suppress(BaseException):
                 await transport.aclose()
+        if heartbeat_transport is not None:
+            with suppress(BaseException):
+                heartbeat_transport.close()
         await _detach_after_failed_borrow_async(sandbox)
 
     task = asyncio.create_task(cleanup())

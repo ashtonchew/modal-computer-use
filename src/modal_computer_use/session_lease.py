@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -28,6 +29,8 @@ LEASE_TOKEN_HEADER = "x-computer-use-lease-token"  # noqa: S105
 OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
 
 T = TypeVar("T")
+
+_ASYNC_HEARTBEAT_JOIN_TIMEOUT_SECONDS = 31.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,18 +314,106 @@ class SessionLeaseCoordinator:
         raise ActionOutcomeUnknownError() from cause
 
 
+class _LeaseHeartbeatWorker:
+    """Private blocking heartbeat owner for one async session borrow."""
+
+    def __init__(
+        self,
+        transport: Any,
+        *,
+        credentials: LeaseCredentials,
+        heartbeat_interval_seconds: float,
+        join_timeout_seconds: float,
+    ) -> None:
+        request_timeout_seconds = _transport_timeout_seconds(transport)
+        if (
+            not math.isfinite(join_timeout_seconds)
+            or join_timeout_seconds <= 0
+            or request_timeout_seconds >= join_timeout_seconds
+        ):
+            raise ValueError("heartbeat request timeout must be below its join timeout")
+        self._transport: Any | None = transport
+        self._credentials_value: LeaseCredentials | None = credentials
+        self._heartbeat_interval_seconds = heartbeat_interval_seconds
+        self._join_timeout_seconds = join_timeout_seconds
+        self._stop = threading.Event()
+        self._state_lock = threading.Lock()
+        self._error: SessionLeaseLostError | None = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name="computer-use-async-lease-heartbeat",
+            daemon=True,
+        )
+
+    def __repr__(self) -> str:
+        return "_LeaseHeartbeatWorker()"
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        with self._state_lock:
+            self._stop.set()
+
+    def join(self) -> bool:
+        self._thread.join(timeout=self._join_timeout_seconds)
+        return not self._thread.is_alive()
+
+    def clear_credentials(self) -> None:
+        with self._state_lock:
+            self._credentials_value = None
+
+    def error(self) -> SessionLeaseLostError | None:
+        with self._state_lock:
+            return self._error
+
+    def close_transport(self) -> None:
+        with self._state_lock:
+            transport, self._transport = self._transport, None
+        if transport is not None:
+            transport.close()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._heartbeat_interval_seconds):
+            with self._state_lock:
+                if self._stop.is_set():
+                    return
+                credentials = self._credentials_value
+                transport = self._transport
+            if credentials is None or transport is None:
+                return
+            try:
+                transport.request(
+                    "POST",
+                    "/v1/leases/heartbeat",
+                    headers=credentials.headers(),
+                )
+            except BaseException:
+                with self._state_lock:
+                    self._error = SessionLeaseLostError()
+                    self._stop.set()
+                return
+
+
 class AsyncSessionLeaseCoordinator:
     """Native-async counterpart to :class:`SessionLeaseCoordinator`."""
 
-    def __init__(self, transport: Any, *, run_id: str) -> None:
+    def __init__(
+        self,
+        transport: Any,
+        *,
+        run_id: str,
+        heartbeat_transport: Any,
+        heartbeat_join_timeout_seconds: float = _ASYNC_HEARTBEAT_JOIN_TIMEOUT_SECONDS,
+    ) -> None:
         self._transport = transport
+        self._heartbeat_transport: Any | None = heartbeat_transport
+        self._heartbeat_join_timeout_seconds = heartbeat_join_timeout_seconds
         self._run_id = run_id
         self._grant: LeaseGrant | None = None
         self._sequence = 0
         self._operation_lock = asyncio.Lock()
-        self._stop = asyncio.Event()
-        self._heartbeat: asyncio.Task[None] | None = None
-        self._heartbeat_error: BaseException | None = None
+        self._heartbeat_worker: _LeaseHeartbeatWorker | None = None
         self._poisoned = False
         self._released = False
         self._closed = False
@@ -339,7 +430,22 @@ class AsyncSessionLeaseCoordinator:
             if mapped is exc:
                 raise
             raise mapped from exc
-        self._heartbeat = asyncio.create_task(self._heartbeat_loop())
+        heartbeat_transport = self._heartbeat_transport
+        if heartbeat_transport is None:
+            raise SessionLeaseLostError()
+        heartbeat_worker = _LeaseHeartbeatWorker(
+            heartbeat_transport,
+            credentials=self._grant.credentials,
+            heartbeat_interval_seconds=self._grant.heartbeat_interval_seconds,
+            join_timeout_seconds=self._heartbeat_join_timeout_seconds,
+        )
+        try:
+            heartbeat_worker.start()
+        except BaseException:
+            heartbeat_worker.clear_credentials()
+            raise
+        self._heartbeat_worker = heartbeat_worker
+        self._heartbeat_transport = None
 
     def metadata_headers(self) -> dict[str, str]:
         return self._credentials().headers()
@@ -385,57 +491,45 @@ class AsyncSessionLeaseCoordinator:
             return
         self._closed = True
         errors: list[BaseException] = []
-        self._stop.set()
-        heartbeat, self._heartbeat = self._heartbeat, None
+        heartbeat, self._heartbeat_worker = self._heartbeat_worker, None
+        heartbeat_transport, self._heartbeat_transport = self._heartbeat_transport, None
         if heartbeat is not None:
-            heartbeat.cancel()
-            try:
-                await heartbeat
-            except asyncio.CancelledError:
-                pass
-            except BaseException as exc:
-                errors.append(exc)
+            heartbeat.stop()
         for resource in reversed(self._resources):
             try:
                 await resource.aclose()
             except BaseException as exc:
                 errors.append(exc)
         self._resources.clear()
+        heartbeat_terminated = True
+        if heartbeat is not None:
+            heartbeat_terminated = await asyncio.to_thread(heartbeat.join)
+            heartbeat.clear_credentials()
+        release_headers = (
+            self._grant.credentials.headers() if self._grant is not None else None
+        )
         if self._grant is not None and not self._released:
             try:
                 await self._transport.request(
                     "POST",
                     "/v1/leases/release",
-                    headers=self.metadata_headers(),
+                    headers=release_headers,
                 )
                 self._released = True
             except BaseException as exc:
                 errors.append(_mapped_error(exc))
+        self._grant = None
+        try:
+            if heartbeat is not None:
+                heartbeat.close_transport()
+            elif heartbeat_transport is not None:
+                heartbeat_transport.close()
+        except BaseException:
+            errors.append(SessionLeaseLostError())
+        if not heartbeat_terminated:
+            errors.insert(0, SessionLeaseLostError())
         if errors:
             raise SessionLeaseLostError() from errors[0]
-
-    async def _heartbeat_loop(self) -> None:
-        assert self._grant is not None
-        try:
-            while True:
-                try:
-                    await asyncio.wait_for(
-                        self._stop.wait(),
-                        timeout=self._grant.heartbeat_interval_seconds,
-                    )
-                    return
-                except TimeoutError:
-                    pass
-                await self._transport.request(
-                    "POST",
-                    "/v1/leases/heartbeat",
-                    headers=self.metadata_headers(),
-                )
-        except asyncio.CancelledError:
-            raise
-        except BaseException as exc:
-            self._heartbeat_error = _mapped_error(exc)
-            self._stop.set()
 
     def _credentials(self) -> LeaseCredentials:
         if self._grant is None:
@@ -444,8 +538,13 @@ class AsyncSessionLeaseCoordinator:
 
     def _ensure_mutable(self) -> None:
         self.ensure_open()
-        if self._heartbeat_error is not None:
-            raise SessionLeaseLostError() from self._heartbeat_error
+        heartbeat_error = (
+            self._heartbeat_worker.error()
+            if self._heartbeat_worker is not None
+            else None
+        )
+        if heartbeat_error is not None:
+            raise SessionLeaseLostError() from heartbeat_error
         if self._poisoned:
             raise ActionOutcomeUnknownError()
 
