@@ -20,6 +20,15 @@ from modal_computer_use import (
     ComputerSessionHandle,
     SandboxRef,
 )
+from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.leases import (
+    LEASE_EPOCH_HEADER,
+    LEASE_FENCE_HEADER,
+    LEASE_ID_HEADER,
+    LEASE_TOKEN_HEADER,
+)
+from modal_computer_use.daemon.receipts import OPERATION_SEQUENCE_HEADER
+from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.errors import (
     SandboxUnavailableError,
     SessionCompatibilityError,
@@ -1477,6 +1486,142 @@ async def test_async_post_acquire_cancellation_cannot_interrupt_failed_entry_cle
 
 
 @pytest.mark.asyncio
+async def test_async_cancellation_after_acquisition_safely_closes_run_and_target(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+        )
+    )
+    target = _AsyncTarget()
+    acquired_headers: dict[str, str] = {}
+
+    async def from_id(_sandbox_id: str) -> _AsyncTarget:
+        return target
+
+    async def ready_immediately(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    async with app.router.lifespan_context(app):
+        asgi = httpx.ASGITransport(app=app)
+        borrowed_http = httpx.AsyncClient(
+            transport=asgi,
+            base_url="http://target",
+            headers={"Authorization": "Bearer dev"},
+        )
+        verifier = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://target",
+            headers={"Authorization": "Bearer dev"},
+        )
+
+        class DaemonTransport:
+            timeout = 1.0
+
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                self.closed = False
+
+            async def request(
+                self, method: str, path: str, **kwargs: object
+            ) -> httpx.Response:
+                response = await borrowed_http.request(method, path, **kwargs)
+                if path == "/v1/leases/acquire" and response.status_code == 200:
+                    body = response.json()
+                    acquired_headers.update(
+                        {
+                            LEASE_ID_HEADER: body["lease_id"],
+                            LEASE_EPOCH_HEADER: body["daemon_epoch"],
+                            LEASE_FENCE_HEADER: str(body["fence"]),
+                            LEASE_TOKEN_HEADER: response.headers[LEASE_TOKEN_HEADER],
+                        }
+                    )
+                return response
+
+            async def aclose(self) -> None:
+                self.closed = True
+                await borrowed_http.aclose()
+
+        daemon_transport = DaemonTransport()
+        heartbeat_transport = _SyncBorrowTransport()
+        monkeypatch.setitem(
+            sys.modules,
+            "modal",
+            SimpleNamespace(Sandbox=SimpleNamespace(from_id=_AioCall(from_id))),
+        )
+        monkeypatch.setattr(
+            "modal_computer_use.sandbox.AsyncHTTPTransport",
+            lambda *_args, **_kwargs: daemon_transport,
+        )
+        monkeypatch.setattr(
+            "modal_computer_use.sandbox.HTTPTransport",
+            lambda *_args, **_kwargs: heartbeat_transport,
+        )
+        monkeypatch.setattr(
+            "modal_computer_use.sandbox._wait_borrowed_ready_async",
+            ready_immediately,
+        )
+
+        entered = asyncio.Event()
+
+        async def borrow_until_cancelled() -> None:
+            async with _handle().borrow_async(
+                run_id="cancelled-run",
+                function_region="us-west",
+            ):
+                entered.set()
+                await asyncio.Event().wait()
+
+        task = asyncio.create_task(borrow_until_cancelled())
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        stale = await verifier.post(
+            "/v1/mouse/move",
+            json={"x": 1, "y": 2},
+            headers={**acquired_headers, OPERATION_SEQUENCE_HEADER: "0"},
+        )
+        sealed = await verifier.post(
+            "/v1/leases/acquire",
+            json={"run_id": "cancelled-run"},
+        )
+        fresh = await verifier.post(
+            "/v1/leases/acquire",
+            json={"run_id": "fresh-run"},
+        )
+        fresh_body = fresh.json()
+        fresh_headers = {
+            LEASE_ID_HEADER: fresh_body["lease_id"],
+            LEASE_EPOCH_HEADER: fresh_body["daemon_epoch"],
+            LEASE_FENCE_HEADER: str(fresh_body["fence"]),
+            LEASE_TOKEN_HEADER: fresh.headers[LEASE_TOKEN_HEADER],
+            OPERATION_SEQUENCE_HEADER: "0",
+        }
+        fresh_mutation = await verifier.post(
+            "/v1/mouse/move",
+            json={"x": 3, "y": 4},
+            headers=fresh_headers,
+        )
+        await verifier.aclose()
+
+    assert daemon_transport.closed
+    assert heartbeat_transport.closed
+    assert target.calls[-1] == "detach.aio"
+    assert "terminate" not in target.calls
+    assert stale.json()["code"] == "lease_released"
+    assert sealed.json()["code"] == "run_sealed"
+    assert fresh.status_code == 200
+    assert fresh_mutation.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_async_borrowed_facade_cannot_resurrect_connections_after_exit(monkeypatch) -> None:
     target = _AsyncTarget()
 
@@ -1613,22 +1758,23 @@ def test_deployed_handoff_smoke_owner_round_trips_and_invokes_once() -> None:
 
 
 def test_protected_workflow_scopes_and_cleans_up_handoff_smoke() -> None:
-    source = (
+    source = (ROOT / ".github" / "workflows" / "modal-handoff-smoke.yml").read_text(
+        encoding="utf-8"
+    )
+    release = (
         ROOT / ".github" / "workflows" / "release-validation.yml"
     ).read_text(encoding="utf-8")
-    protected_job = source.split("  modal-smoke:", maxsplit=1)[1]
-    unprotected_jobs = source.split("  modal-smoke:", maxsplit=1)[0]
 
-    assert "MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE" not in unprotected_jobs
-    assert protected_job.count("MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE") == 1
-    assert "github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke" in protected_job
-    assert "environment: modal-smoke" in protected_job
-    assert "timeout-minutes:" in protected_job
-    assert "concurrency:" in protected_job
-    assert "uv run modal deploy" in protected_job
-    assert "if: always()" in protected_job
-    assert "uv run modal app stop" in protected_job
-    assert "--yes" in protected_job
-    assert '"computer-use.owner": owner' in protected_job
-    assert "sandbox.terminate(wait=True)" in protected_job
-    assert ">/dev/null 2>&1" in protected_job
+    assert source.count("MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE") == 1
+    assert "workflow_dispatch:" in source
+    assert "environment: modal-smoke" in source
+    assert "timeout-minutes:" in source
+    assert "concurrency:" in source
+    assert "uv run modal deploy" in source
+    assert "if: always()" in source
+    assert "uv run modal app stop" in source
+    assert "--yes" in source
+    assert '"computer-use.owner": owner' in source
+    assert "sandbox.terminate(wait=True)" in source
+    assert ">/dev/null 2>&1" in source
+    assert "MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE" not in release
