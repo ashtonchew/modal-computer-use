@@ -880,6 +880,20 @@ async def test_modal_poll_lossy_graph_can_recover_valid_strict_result(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_modal_poll_unavailable_graph_with_remote_user_error_fails(monkeypatch) -> None:
+    runtime = _fake_modal(
+        graph_exception=lambda exc: exc.ExecutionError(),
+        get_exception=lambda _exc: ValueError("private remote failure"),
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(gateway.PollState.FAILED)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["succeeded", "failed", "indeterminate"])
 async def test_modal_poll_validates_and_maps_strict_success_envelope(monkeypatch, status) -> None:
     runtime = _fake_modal(

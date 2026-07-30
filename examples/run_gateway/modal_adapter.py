@@ -94,7 +94,7 @@ class ModalTrajectoryDispatcher:
                 return PollOutcome(PollState.TERMINATED)
             # Call-graph metadata is best-effort. SUCCESS and incomplete or
             # malformed graph data converge on one authoritative result poll.
-            return await _poll_result(call)
+            return await _poll_result(call, exceptions)
         except exceptions.InputCancellation:
             return PollOutcome(PollState.TERMINATED)
         except exceptions.OutputExpiredError:
@@ -130,8 +130,17 @@ class ModalTrajectoryDispatcher:
         await call.cancel.aio(terminate_containers=False)
 
 
-async def _poll_result(call: Any) -> PollOutcome:
-    raw_outcome = await call.get.aio(timeout=0)
+async def _poll_result(call: Any, exceptions: Any) -> PollOutcome:
+    try:
+        raw_outcome = await call.get.aio(timeout=0)
+    except TimeoutError:
+        raise
+    except exceptions.Error:
+        raise
+    except Exception:
+        # A completed Function may re-raise an arbitrary application exception.
+        # Classify it without exposing its type, message, or attached payload.
+        return PollOutcome(PollState.FAILED)
     try:
         outcome = TrajectoryOutcome.validate(raw_outcome)
     except ValueError:
