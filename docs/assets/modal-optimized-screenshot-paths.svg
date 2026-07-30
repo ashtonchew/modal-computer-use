@@ -5,69 +5,72 @@
   <defs>
     <style>
       .bg { fill: #101411; }
-      .box-neutral { fill: #1C231D; stroke: #657066; stroke-width: 1.5; }
-      .box-modal { fill: #1C231D; stroke: #91B89A; stroke-width: 1.8; }
-      .row-modal, .label-neutral, .label-modal, .small-neutral, .small-modal, .arrow-label-modal, .setup-modal { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
-      .row-modal { fill: #AACCB0; font-size: 18px; font-weight: 700; }
-      .label-neutral { fill: #B9C2B8; font-size: 15px; font-weight: 600; }
-      .label-modal { fill: #AACCB0; font-size: 15px; font-weight: 600; }
-      .small-neutral { fill: #8A948B; font-size: 13px; }
-      .small-modal { fill: #91B89A; font-size: 13px; }
-      .arrow-label-modal { fill: #AACCB0; font-size: 13px; font-weight: 600; }
-      .setup-modal { fill: #AACCB0; font-size: 13px; font-weight: 600; }
-      .path-modal { fill: none; stroke: #91B89A; stroke-width: 1.8; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.5; }
+      .box-opt { fill: #1C231D; stroke: #91B89A; stroke-width: 1.8; }
+      .row, .row-opt, .label, .small, .arrow-label, .arrow-label-opt, .setup, .setup-opt { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .row { fill: #F1F4EF; font-size: 18px; font-weight: 700; }
+      .row-opt { fill: #AACCB0; font-size: 18px; font-weight: 700; }
+      .label { fill: #F1F4EF; font-size: 15px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 13px; }
+      .arrow-label { fill: #B9C2B8; font-size: 13px; font-weight: 600; }
+      .arrow-label-opt { fill: #AACCB0; font-size: 13px; font-weight: 600; }
+      .setup { fill: #B9C2B8; font-size: 13px; font-weight: 600; }
+      .setup-opt { fill: #AACCB0; font-size: 13px; font-weight: 600; }
+      .path { fill: none; stroke: #8A948B; stroke-width: 1.5; }
+      .path-opt { fill: none; stroke: #91B89A; stroke-width: 1.8; }
     </style>
+    <marker id="arrow-grey" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
     <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
   </defs>
   <rect class="bg" width="1152" height="432"/>
 
-  <text class="row-modal" x="32" y="32">Modal default</text>
+  <text class="row" x="32" y="32">Modal default</text>
 
-  <rect class="box-neutral" x="32" y="88" width="176" height="104" rx="8" fill="#1C231D" stroke="#657066" stroke-width="1.5"/>
-  <text class="label-neutral" x="120" y="128" text-anchor="middle">External caller</text>
-  <text class="small-neutral" x="120" y="155" text-anchor="middle">Outside Modal</text>
+  <rect class="box" x="32" y="88" width="176" height="104" rx="8"/>
+  <text class="label" x="120" y="128" text-anchor="middle">External caller</text>
+  <text class="small" x="120" y="155" text-anchor="middle">Outside Modal</text>
 
-  <rect class="box-modal" x="480" y="88" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="560" y="146" text-anchor="middle">Warm daemon</text>
+  <rect class="box" x="480" y="88" width="160" height="104" rx="8"/>
+  <text class="label" x="560" y="146" text-anchor="middle">Warm daemon</text>
 
-  <rect class="box-modal" x="720" y="88" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="800" y="135" text-anchor="middle">Capture and</text>
-  <text class="label-modal" x="800" y="157" text-anchor="middle">encode</text>
+  <rect class="box" x="720" y="88" width="160" height="104" rx="8"/>
+  <text class="label" x="800" y="135" text-anchor="middle">Capture and</text>
+  <text class="label" x="800" y="157" text-anchor="middle">encode</text>
 
-  <rect class="box-modal" x="960" y="88" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="1040" y="130" text-anchor="middle">1024×768 PNG</text>
-  <text class="small-modal" x="1040" y="157" text-anchor="middle">Full screenshot returned</text>
+  <rect class="box" x="960" y="88" width="160" height="104" rx="8"/>
+  <text class="label" x="1040" y="130" text-anchor="middle">1024×768 PNG</text>
+  <text class="small" x="1040" y="157" text-anchor="middle">Full screenshot returned</text>
 
-  <line class="path-modal" x1="208" y1="140" x2="480" y2="140" fill="none" stroke="#91B89A" stroke-width="1.8" marker-end="url(#arrow-sage)"/>
-  <text class="setup-modal" x="344" y="104" text-anchor="middle">One-time authorization</text>
-  <text class="arrow-label-modal" x="344" y="124" text-anchor="middle">Encrypted requests</text>
-  <line class="path-modal" x1="640" y1="140" x2="720" y2="140" fill="none" stroke="#91B89A" stroke-width="1.8" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-modal" x="680" y="124" text-anchor="middle">Capture</text>
-  <line class="path-modal" x1="880" y1="140" x2="960" y2="140" fill="none" stroke="#91B89A" stroke-width="1.8" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-modal" x="920" y="124" text-anchor="middle">Return</text>
+  <line class="path" x1="208" y1="140" x2="480" y2="140" marker-end="url(#arrow-grey)"/>
+  <text class="setup" x="344" y="104" text-anchor="middle">One-time authorization</text>
+  <text class="arrow-label" x="344" y="124" text-anchor="middle">Encrypted requests</text>
+  <line class="path" x1="640" y1="140" x2="720" y2="140" marker-end="url(#arrow-grey)"/>
+  <text class="arrow-label" x="680" y="124" text-anchor="middle">Capture</text>
+  <line class="path" x1="880" y1="140" x2="960" y2="140" marker-end="url(#arrow-grey)"/>
+  <text class="arrow-label" x="920" y="124" text-anchor="middle">Return</text>
 
-  <text class="row-modal" x="32" y="240">Modal optimized</text>
+  <text class="row-opt" x="32" y="240">Modal optimized</text>
 
-  <rect class="box-modal" x="32" y="296" width="176" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="120" y="336" text-anchor="middle">Modal Function</text>
-  <text class="small-modal" x="120" y="363" text-anchor="middle">us-west-2</text>
+  <rect class="box-opt" x="32" y="296" width="176" height="104" rx="8"/>
+  <text class="label" x="120" y="336" text-anchor="middle">Modal Function</text>
+  <text class="small" x="120" y="363" text-anchor="middle">us-west-2</text>
 
-  <rect class="box-modal" x="480" y="296" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="560" y="354" text-anchor="middle">Warm daemon</text>
+  <rect class="box-opt" x="480" y="296" width="160" height="104" rx="8"/>
+  <text class="label" x="560" y="354" text-anchor="middle">Warm daemon</text>
 
-  <rect class="box-modal" x="720" y="296" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="800" y="343" text-anchor="middle">Capture and</text>
-  <text class="label-modal" x="800" y="365" text-anchor="middle">encode</text>
+  <rect class="box-opt" x="720" y="296" width="160" height="104" rx="8"/>
+  <text class="label" x="800" y="343" text-anchor="middle">Capture and</text>
+  <text class="label" x="800" y="365" text-anchor="middle">encode</text>
 
-  <rect class="box-modal" x="960" y="296" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="1040" y="338" text-anchor="middle">1024×768 PNG</text>
-  <text class="small-modal" x="1040" y="365" text-anchor="middle">Full screenshot returned</text>
+  <rect class="box-opt" x="960" y="296" width="160" height="104" rx="8"/>
+  <text class="label" x="1040" y="338" text-anchor="middle">1024×768 PNG</text>
+  <text class="small" x="1040" y="365" text-anchor="middle">Full screenshot returned</text>
 
-  <line class="path-modal" x1="208" y1="348" x2="480" y2="348" fill="none" stroke="#91B89A" stroke-width="1.8" marker-end="url(#arrow-sage)"/>
-  <text class="setup-modal" x="344" y="312" text-anchor="middle">One-time authorization</text>
-  <text class="arrow-label-modal" x="344" y="332" text-anchor="middle">Encrypted requests</text>
-  <line class="path-modal" x1="640" y1="348" x2="720" y2="348" fill="none" stroke="#91B89A" stroke-width="1.8" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-modal" x="680" y="332" text-anchor="middle">Capture</text>
-  <line class="path-modal" x1="880" y1="348" x2="960" y2="348" fill="none" stroke="#91B89A" stroke-width="1.8" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label-modal" x="920" y="332" text-anchor="middle">Return</text>
+  <line class="path-opt" x1="208" y1="348" x2="480" y2="348" marker-end="url(#arrow-sage)"/>
+  <text class="setup-opt" x="344" y="312" text-anchor="middle">One-time authorization</text>
+  <text class="arrow-label-opt" x="344" y="332" text-anchor="middle">Encrypted requests</text>
+  <line class="path-opt" x1="640" y1="348" x2="720" y2="348" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="680" y="332" text-anchor="middle">Capture</text>
+  <line class="path-opt" x1="880" y1="348" x2="960" y2="348" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="920" y="332" text-anchor="middle">Return</text>
 </svg>
