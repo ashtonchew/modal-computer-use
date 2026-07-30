@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from .domain import (
@@ -20,6 +21,10 @@ from .domain import (
     TerminalReason,
 )
 from .ports import RunStore, TrajectoryDispatcher
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _positive(value: int | timedelta, name: str) -> None:
@@ -176,20 +181,22 @@ class RunReconciler:
     store: RunStore
     dispatcher: TrajectoryDispatcher
     policy: RecoveryPolicy = field(default_factory=RecoveryPolicy)
+    clock: Callable[[], datetime] = _utc_now
 
-    async def reconcile(self, *, now: datetime) -> int:
+    async def reconcile(self) -> int:
         cursor: ReconcileCursor | None = None
         processed = 0
+        scan_now = self.clock()
         for _ in range(self.policy.max_pages_per_tick):
             page = await self.store.claim_reconcile_page(
                 cursor=cursor,
-                now=now,
+                now=scan_now,
                 limit=self.policy.page_size,
                 lease_duration=self.policy.lease_duration,
             )
             for claim in page.claims:
                 try:
-                    await self._reconcile_claim(claim, now=now)
+                    await self._reconcile_claim(claim)
                 finally:
                     await self.store.release_reconcile_lease(claim=claim)
                 processed += 1
@@ -198,8 +205,9 @@ class RunReconciler:
                 break
         return processed
 
-    async def _reconcile_claim(self, claim: ReconcileClaim, *, now: datetime) -> None:
+    async def _reconcile_claim(self, claim: ReconcileClaim) -> None:
         record = claim.record
+        now = self.clock()
         if record.state is RunState.RESERVED:
             if now >= record.deadline_at:
                 await self._commit(
@@ -230,11 +238,9 @@ class RunReconciler:
                     ),
                 )
             else:
-                due = min(
-                    record.deadline_at,
-                    record.state_changed_at + self.policy.dispatch_stale_after,
-                )
-                await self._commit(claim, record.reschedule(now=now, reconcile_at=due))
+                # The atomic dispatch claim schedules the stale boundary. A fresh
+                # in-flight spawn must retain its version so its call ID can commit.
+                return
             return
         if record.state is RunState.RUNNING:
             if now >= record.deadline_at:
@@ -247,20 +253,40 @@ class RunReconciler:
                 )
                 committed = await self._commit(claim, requested)
                 if committed is not None:
-                    await self._poll_cancellation(claim.advanced(committed), now=now)
+                    await self._poll_cancellation(claim.advanced(committed))
                 return
-            await self._poll(claim, now=now)
+            await self._poll(claim)
             return
         if record.state is RunState.CANCELLATION_REQUESTED:
-            await self._poll_cancellation(claim, now=now)
+            await self._poll_cancellation(claim)
 
-    async def _poll(self, claim: ReconcileClaim, *, now: datetime) -> None:
+    async def _poll(self, claim: ReconcileClaim) -> None:
         record = claim.record
         call_id = record.function_call_id
         if call_id is None:
-            await self._indeterminate(claim, now, TerminalReason.PROVIDER_AMBIGUOUS)
+            await self._indeterminate(
+                claim,
+                self.clock(),
+                TerminalReason.PROVIDER_AMBIGUOUS,
+            )
             return
         outcome = await self._safe_poll(call_id)
+        now = self.clock()
+        if (
+            outcome.state in {PollState.PENDING, PollState.UNAVAILABLE}
+            and now >= record.deadline_at
+        ):
+            requested = record.transition(
+                RunState.CANCELLATION_REQUESTED,
+                now=now,
+                reconcile_at=now,
+                cancellation_requested_at=now,
+                cancellation_deadline_at=now + self.policy.cancellation_grace,
+            )
+            committed = await self._commit(claim, requested)
+            if committed is not None:
+                await self._cancel(claim.advanced(committed))
+            return
         if outcome.state is PollState.PENDING:
             await self._commit(
                 claim,
@@ -275,13 +301,18 @@ class RunReconciler:
         else:
             await self._finish_from_poll(claim, outcome, now=now)
 
-    async def _poll_cancellation(self, claim: ReconcileClaim, *, now: datetime) -> None:
+    async def _poll_cancellation(self, claim: ReconcileClaim) -> None:
         record = claim.record
         call_id = record.function_call_id
         if call_id is None:
-            await self._indeterminate(claim, now, TerminalReason.PROVIDER_AMBIGUOUS)
+            await self._indeterminate(
+                claim,
+                self.clock(),
+                TerminalReason.PROVIDER_AMBIGUOUS,
+            )
             return
         outcome = await self._safe_poll(call_id)
+        now = self.clock()
         if outcome.state not in {PollState.PENDING, PollState.UNAVAILABLE}:
             await self._finish_from_poll(claim, outcome, now=now)
             return
@@ -300,10 +331,14 @@ class RunReconciler:
             if advanced is None:
                 return
             claim = claim.advanced(advanced)
-        await self._cancel(claim, now=now)
+        await self._cancel(claim)
 
-    async def _cancel(self, claim: ReconcileClaim, *, now: datetime) -> None:
+    async def _cancel(self, claim: ReconcileClaim) -> None:
         record = claim.record
+        now = self.clock()
+        if record.cancellation_deadline_at is None or now >= record.cancellation_deadline_at:
+            await self._indeterminate(claim, now, TerminalReason.CANCELLATION_DEADLINE)
+            return
         call_id = record.function_call_id
         if call_id is None:
             await self._indeterminate(claim, now, TerminalReason.PROVIDER_AMBIGUOUS)
@@ -314,6 +349,10 @@ class RunReconciler:
             raise
         except Exception:
             outcome = CancelOutcome(CancelState.UNAVAILABLE)
+        now = self.clock()
+        if now >= record.cancellation_deadline_at:
+            await self._indeterminate(claim, now, TerminalReason.CANCELLATION_DEADLINE)
+            return
         if not isinstance(outcome, CancelOutcome):
             outcome = CancelOutcome(CancelState.INDETERMINATE)
         if outcome.state is CancelState.INDETERMINATE:

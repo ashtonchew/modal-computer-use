@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from .domain import (
@@ -117,7 +117,7 @@ class ModalTrajectoryDispatcher:
             return PollOutcome(PollState.INDETERMINATE, PollReason.OUTPUT_EXPIRED)
         except exceptions.FunctionTimeoutError:
             return PollOutcome(PollState.FAILED, PollReason.FUNCTION_TIMEOUT)
-        except TimeoutError:
+        except (TimeoutError, exceptions.TimeoutError):
             return PollOutcome(PollState.PENDING)
         except exceptions.NotFoundError:
             return PollOutcome(PollState.INDETERMINATE, PollReason.MISSING_CALL)
@@ -149,7 +149,7 @@ class ModalTrajectoryDispatcher:
             await call.cancel.aio(terminate_containers=False)
         except exceptions.NotFoundError:
             return CancelOutcome(CancelState.INDETERMINATE, CancelReason.MISSING_CALL)
-        except TimeoutError:
+        except (TimeoutError, exceptions.TimeoutError):
             return CancelOutcome(
                 CancelState.UNAVAILABLE,
                 CancelReason.TRANSIENT_PROVIDER_ERROR,
@@ -246,7 +246,7 @@ else:
     async def reconcile_runs() -> None:
         # Container/input caps bound spend only. Store leases and CAS provide correctness.
         reconciler = build_reconciler_from_environment()
-        await reconciler.reconcile(now=datetime.now(UTC))
+        await reconciler.reconcile()
 
 
 def build_modal_app() -> object:

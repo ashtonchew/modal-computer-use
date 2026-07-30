@@ -171,7 +171,7 @@ class FakeRunStore:
         if self.fail_after == phase:
             raise RuntimeError("admission-fault-secret")
 
-    async def claim_dispatch(self, *, current, pending_intent, now):
+    async def claim_dispatch(self, *, current, pending_intent, now, reconcile_at):
         async with self._lock:
             stored = self.by_id.get(current.run_id)
             intent = self.intents.get(current.run_id)
@@ -182,7 +182,11 @@ class FakeRunStore:
                 or intent.state is not self.types.DispatchIntentState.PENDING
             ):
                 return None
-            next_record = current.transition(self.types.RunState.DISPATCHING, now=now)
+            next_record = current.transition(
+                self.types.RunState.DISPATCHING,
+                now=now,
+                reconcile_at=reconcile_at,
+            )
             next_intent = self.types.DispatchIntent(
                 run_id=current.run_id,
                 state=self.types.DispatchIntentState.CLAIMED,
@@ -613,6 +617,7 @@ async def test_concurrent_dispatch_claims_have_exactly_one_winner() -> None:
                 current=admitted.record,
                 pending_intent=admitted.intent,
                 now=admitted.record.created_at,
+                reconcile_at=admitted.record.created_at + timedelta(seconds=30),
             )
             for _ in range(30)
         )
@@ -633,6 +638,7 @@ async def test_terminal_release_is_once_and_indeterminate_retains_ownership() ->
         current=admitted.record,
         pending_intent=admitted.intent,
         now=admitted.record.created_at,
+        reconcile_at=admitted.record.created_at + timedelta(seconds=30),
     )
     assert claim is not None
     running = claim.record.transition(
@@ -656,6 +662,7 @@ async def test_terminal_release_is_once_and_indeterminate_retains_ownership() ->
         current=uncertain.record,
         pending_intent=uncertain.intent,
         now=uncertain.record.created_at,
+        reconcile_at=uncertain.record.created_at + timedelta(seconds=30),
     )
     assert uncertain_claim is not None
     indeterminate = uncertain_claim.record.transition(
@@ -1233,6 +1240,7 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
             OutputExpiredError=type("OutputExpiredError", (ModalError,), {}),
             ResourceExhaustedError=type("ResourceExhaustedError", (ModalError,), {}),
             ServiceError=type("ServiceError", (ModalError,), {}),
+            TimeoutError=type("TimeoutError", (ModalError,), {}),
         ),
     )
     monkeypatch.setattr(gateway, "modal", fake_modal)
@@ -1298,6 +1306,7 @@ def _fake_modal(
         OutputExpiredError=type("OutputExpiredError", (ModalError,), {}),
         ResourceExhaustedError=type("ResourceExhaustedError", (ModalError,), {}),
         ServiceError=type("ServiceError", (ModalError,), {}),
+        TimeoutError=type("TimeoutError", (ModalError,), {}),
     )
 
     class Graph:
@@ -1336,6 +1345,13 @@ def _fake_modal(
     [
         (
             lambda exc: exc.ConnectionError(),
+            gateway.CancelOutcome(
+                gateway.CancelState.UNAVAILABLE,
+                gateway.CancelReason.TRANSIENT_PROVIDER_ERROR,
+            ),
+        ),
+        (
+            lambda exc: exc.TimeoutError(),
             gateway.CancelOutcome(
                 gateway.CancelState.UNAVAILABLE,
                 gateway.CancelReason.TRANSIENT_PROVIDER_ERROR,

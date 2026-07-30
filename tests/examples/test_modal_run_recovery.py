@@ -323,6 +323,14 @@ class Dispatcher:
         return self.cancel_outcome
 
 
+class MutableClock:
+    def __init__(self, now: datetime = NOW) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
 def _policy(**changes) -> gateway.RecoveryPolicy:
     defaults = {
         "page_size": 2,
@@ -340,6 +348,10 @@ def _policy(**changes) -> gateway.RecoveryPolicy:
     }
     defaults.update(changes)
     return gateway.RecoveryPolicy(**defaults)
+
+
+def _reconciler(store, dispatcher, policy=None, *, clock=lambda: NOW):
+    return gateway.RunReconciler(store, dispatcher, policy or _policy(), clock)
 
 
 @pytest.mark.parametrize(
@@ -361,9 +373,9 @@ def test_recovery_policy_is_strictly_bounded(field, value) -> None:
 async def test_keyset_tick_is_bounded_by_page_size_and_page_count() -> None:
     records = tuple(_reserved(f"run-{index:02}") for index in range(7))
     store = LockedRecoveryStore(records)
-    reconciler = gateway.RunReconciler(store, Dispatcher(), _policy())
+    reconciler = _reconciler(store, Dispatcher())
 
-    processed = await reconciler.reconcile(now=NOW)
+    processed = await reconciler.reconcile()
 
     assert processed == 4
     assert sum(record.version > records[0].version for record in store.records.values()) == 4
@@ -401,7 +413,7 @@ async def test_reserved_expiry_releases_once_and_stale_dispatch_is_never_respawn
     store = LockedRecoveryStore((reserved, dispatching))
     dispatcher = Dispatcher()
 
-    assert await gateway.RunReconciler(store, dispatcher, _policy()).reconcile(now=NOW) == 2
+    assert await _reconciler(store, dispatcher).reconcile() == 2
 
     assert store.records[reserved.run_id].state is gateway.RunState.CANCELLED
     assert (
@@ -415,6 +427,20 @@ async def test_reserved_expiry_releases_once_and_stale_dispatch_is_never_respawn
 
 
 @pytest.mark.asyncio
+async def test_fresh_dispatch_reconciliation_does_not_change_its_cas_version() -> None:
+    dispatching = _reserved("run-in-flight").transition(
+        gateway.RunState.DISPATCHING,
+        now=NOW,
+        reconcile_at=NOW,
+    )
+    store = LockedRecoveryStore((dispatching,))
+
+    await _reconciler(store, Dispatcher()).reconcile()
+
+    assert store.records[dispatching.run_id] == dispatching
+
+
+@pytest.mark.asyncio
 async def test_running_deadline_durably_requests_cancellation_before_provider_call() -> None:
     record = _running("run-deadline", deadline_at=NOW)
     store = LockedRecoveryStore((record,))
@@ -422,7 +448,7 @@ async def test_running_deadline_durably_requests_cancellation_before_provider_ca
     dispatcher.store = store
     dispatcher.run_id = record.run_id
 
-    await gateway.RunReconciler(store, dispatcher, _policy()).reconcile(now=NOW)
+    await _reconciler(store, dispatcher).reconcile()
 
     recovered = store.records[record.run_id]
     assert recovered.state is gateway.RunState.CANCELLATION_REQUESTED
@@ -432,27 +458,64 @@ async def test_running_deadline_durably_requests_cancellation_before_provider_ca
 
 
 @pytest.mark.asyncio
+async def test_deadlines_are_rechecked_after_provider_awaits() -> None:
+    clock = MutableClock()
+    running = _running("run-crossed", deadline_at=NOW + timedelta(seconds=5))
+
+    class CrossingDispatcher(Dispatcher):
+        async def poll(self, call_id):
+            outcome = await super().poll(call_id)
+            clock.now = NOW + timedelta(seconds=6)
+            return outcome
+
+    running_store = LockedRecoveryStore((running,))
+    running_dispatcher = CrossingDispatcher()
+    await _reconciler(running_store, running_dispatcher, clock=clock).reconcile()
+    assert (
+        running_store.records[running.run_id].state
+        is gateway.RunState.CANCELLATION_REQUESTED
+    )
+    assert running_dispatcher.events == ["poll", "cancel"]
+
+    clock.now = NOW
+    requested = _running("run-cancel-crossed").transition(
+        gateway.RunState.CANCELLATION_REQUESTED,
+        now=NOW,
+        reconcile_at=NOW,
+        cancellation_requested_at=NOW,
+        cancellation_deadline_at=NOW + timedelta(seconds=5),
+    )
+    requested_store = LockedRecoveryStore((requested,))
+    requested_dispatcher = CrossingDispatcher()
+    await _reconciler(requested_store, requested_dispatcher, clock=clock).reconcile()
+    recovered = requested_store.records[requested.run_id]
+    assert recovered.state is gateway.RunState.INDETERMINATE
+    assert recovered.terminal_reason is gateway.TerminalReason.CANCELLATION_DEADLINE
+    assert requested_dispatcher.events == ["poll"]
+
+
+@pytest.mark.asyncio
 async def test_pending_resets_provider_errors_and_transient_errors_hit_cap() -> None:
     pending = _running("run-pending", provider_errors=2)
     pending_store = LockedRecoveryStore((pending,))
-    await gateway.RunReconciler(
-        pending_store, Dispatcher(gateway.PollState.PENDING), _policy()
-    ).reconcile(now=NOW)
+    await _reconciler(
+        pending_store, Dispatcher(gateway.PollState.PENDING)
+    ).reconcile()
     assert pending_store.records[pending.run_id].provider_error_count == 0
 
     unavailable = _running("run-unavailable", provider_errors=2)
     unavailable_store = LockedRecoveryStore((unavailable,))
-    await gateway.RunReconciler(
-        unavailable_store, Dispatcher(gateway.PollState.UNAVAILABLE), _policy()
-    ).reconcile(now=NOW)
+    await _reconciler(
+        unavailable_store, Dispatcher(gateway.PollState.UNAVAILABLE)
+    ).reconcile()
     assert unavailable_store.records[unavailable.run_id].state is gateway.RunState.INDETERMINATE
     assert unavailable.run_id in unavailable_store.capacity
 
     first_error = _running("run-backoff")
     backoff_store = LockedRecoveryStore((first_error,))
-    await gateway.RunReconciler(
-        backoff_store, Dispatcher(gateway.PollState.UNAVAILABLE), _policy()
-    ).reconcile(now=NOW)
+    await _reconciler(
+        backoff_store, Dispatcher(gateway.PollState.UNAVAILABLE)
+    ).reconcile()
     assert backoff_store.records[first_error.run_id].reconcile_at == NOW + timedelta(
         seconds=2
     )
@@ -489,7 +552,7 @@ async def test_reconciler_maps_provider_terminal_states(initial, outcome, expect
         )
     store = LockedRecoveryStore((record,))
 
-    await gateway.RunReconciler(store, Dispatcher(outcome), _policy()).reconcile(now=NOW)
+    await _reconciler(store, Dispatcher(outcome)).reconcile()
 
     assert store.records[record.run_id].state is expected
     if expected in gateway.CAPACITY_RELEASING_STATES:
@@ -510,7 +573,7 @@ async def test_cancellation_polls_first_and_accepted_or_transient_cancel_stays_r
     )
     store = LockedRecoveryStore((requested,))
     dispatcher = Dispatcher()
-    await gateway.RunReconciler(store, dispatcher, _policy()).reconcile(now=NOW)
+    await _reconciler(store, dispatcher).reconcile()
     assert dispatcher.events == ["poll", "cancel"]
     assert store.records[requested.run_id].state is gateway.RunState.CANCELLATION_REQUESTED
 
@@ -518,9 +581,7 @@ async def test_cancellation_polls_first_and_accepted_or_transient_cancel_stays_r
     transient_store = LockedRecoveryStore((transient,))
     transient_dispatcher = Dispatcher()
     transient_dispatcher.cancel_error = RuntimeError("credential-sentinel")
-    await gateway.RunReconciler(
-        transient_store, transient_dispatcher, _policy()
-    ).reconcile(now=NOW)
+    await _reconciler(transient_store, transient_dispatcher).reconcile()
     recovered = transient_store.records[transient.run_id]
     assert recovered.state is gateway.RunState.CANCELLATION_REQUESTED
     assert recovered.cancel_error_count == 1
@@ -532,9 +593,7 @@ async def test_cancellation_polls_first_and_accepted_or_transient_cancel_stays_r
         gateway.CancelState.UNAVAILABLE,
         gateway.CancelReason.TRANSIENT_PROVIDER_ERROR,
     )
-    await gateway.RunReconciler(
-        unavailable_store, unavailable_dispatcher, _policy()
-    ).reconcile(now=NOW)
+    await _reconciler(unavailable_store, unavailable_dispatcher).reconcile()
     assert unavailable_store.records[unavailable.run_id].cancel_error_count == 1
 
     ambiguous = replace(requested, run_id="run-cancel-ambiguous")
@@ -544,9 +603,7 @@ async def test_cancellation_polls_first_and_accepted_or_transient_cancel_stays_r
         gateway.CancelState.INDETERMINATE,
         gateway.CancelReason.MISSING_CALL,
     )
-    await gateway.RunReconciler(
-        ambiguous_store, ambiguous_dispatcher, _policy()
-    ).reconcile(now=NOW)
+    await _reconciler(ambiguous_store, ambiguous_dispatcher).reconcile()
     resolved = ambiguous_store.records[ambiguous.run_id]
     assert resolved.state is gateway.RunState.INDETERMINATE
     assert resolved.terminal_reason is gateway.TerminalReason.CANCELLATION_AMBIGUOUS
@@ -566,7 +623,7 @@ async def test_cancellation_error_cap_and_grace_expiry_become_indeterminate() ->
     store = LockedRecoveryStore((capped,))
     dispatcher = Dispatcher()
     dispatcher.cancel_error = RuntimeError("transient")
-    await gateway.RunReconciler(store, dispatcher, _policy()).reconcile(now=NOW)
+    await _reconciler(store, dispatcher).reconcile()
     assert (
         store.records[capped.run_id].terminal_reason
         is gateway.TerminalReason.CANCELLATION_ERROR_CAP
@@ -579,7 +636,7 @@ async def test_cancellation_error_cap_and_grace_expiry_become_indeterminate() ->
     )
     expired_store = LockedRecoveryStore((expired,))
     expired_dispatcher = Dispatcher()
-    await gateway.RunReconciler(expired_store, expired_dispatcher, _policy()).reconcile(now=NOW)
+    await _reconciler(expired_store, expired_dispatcher).reconcile()
     assert (
         expired_store.records[expired.run_id].terminal_reason
         is gateway.TerminalReason.CANCELLATION_DEADLINE

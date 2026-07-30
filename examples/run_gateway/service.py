@@ -157,6 +157,12 @@ class RunGatewayService:
                 raise DesktopBusy()
             raise TenantQuotaExceeded()
         if isinstance(admission.record, RunRecord) and admission.record.state is RunState.RESERVED:
+            if self.clock() >= admission.record.deadline_at:
+                return await self._transition_or_reload(
+                    admission.record,
+                    RunState.CANCELLED,
+                    terminal_reason=TerminalReason.EXPIRED_BEFORE_DISPATCH,
+                )
             return await self._claim_and_dispatch(
                 admission.record,
                 pending_intent=admission.intent,
@@ -218,10 +224,15 @@ class RunGatewayService:
         desktop: ResolvedDesktop,
         task: ResolvedTask,
     ) -> RunRecord:
+        now = self.clock()
         claim = await self.run_store.claim_dispatch(
             current=record,
             pending_intent=pending_intent,
-            now=self.clock(),
+            now=now,
+            reconcile_at=min(
+                record.deadline_at,
+                now + self.recovery_policy.dispatch_stale_after,
+            ),
         )
         if claim is None:
             latest = await self.run_store.get_authorized(

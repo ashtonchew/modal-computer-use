@@ -72,6 +72,7 @@ class RunStore(Protocol):
         current: RunRecord,
         pending_intent: DispatchIntent,
         now: datetime,
+        reconcile_at: datetime,
     ) -> DispatchClaim | None: ...
 
     async def get_authorized(self, *, tenant_id: str, run_id: str) -> RunRecord | None: ...
