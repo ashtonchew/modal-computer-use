@@ -8,7 +8,7 @@ The result worked. Looking at the screen and clicking once took about 550 ms.
 
 E2B and Daytona ship computer-use primitives as a product, and I measured their documented defaults for the same two operations: about 420 ms and 480 ms. My hand-rolled version landed in the same band, which was reassuring for about a minute. Then I wanted to know where the half second went.
 
-A fifty-turn loop with one screenshot and one click pays that delay fifty times. Averaged across the three paths, that comes to roughly 24 seconds of a trajectory spent waiting on the interface instead of the model. It is arithmetic over repeated warm costs, not a measured trajectory. After the work below, the optimized Modal path runs the same fifty turns in under 2 seconds.
+A fifty-turn loop with one screenshot and one click pays that delay fifty times, which comes to about 27 seconds spent on nothing but screenshots and clicks. That is arithmetic over repeated warm costs, not a measured trajectory. After the work below, the optimized Modal path runs the same fifty turns in under 2 seconds.
 
 [OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, hundreds of milliseconds in the computer interface stop hiding behind slow generation. Longer trajectories make it worse, because the delay is paid on every turn before the user sees anything.
 
