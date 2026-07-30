@@ -475,7 +475,7 @@ async def test_deadlines_are_rechecked_after_provider_awaits() -> None:
         running_store.records[running.run_id].state
         is gateway.RunState.CANCELLATION_REQUESTED
     )
-    assert running_dispatcher.events == ["poll", "cancel"]
+    assert running_dispatcher.events == ["poll", "poll", "cancel"]
 
     clock.now = NOW
     requested = _running("run-cancel-crossed").transition(

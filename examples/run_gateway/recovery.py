@@ -285,7 +285,7 @@ class RunReconciler:
             )
             committed = await self._commit(claim, requested)
             if committed is not None:
-                await self._cancel(claim.advanced(committed))
+                await self._poll_cancellation(claim.advanced(committed))
             return
         if outcome.state is PollState.PENDING:
             await self._commit(
