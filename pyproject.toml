@@ -12,6 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "modal-computer-use contributors" }]
 dependencies = [
+  "anyio>=4",
   "fastapi>=0.115",
   "h2>=4.1",
   "httpx[http2]>=0.27",

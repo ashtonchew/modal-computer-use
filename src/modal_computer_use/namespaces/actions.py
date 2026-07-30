@@ -15,7 +15,7 @@ from modal_computer_use.models import (
     parse_action,
 )
 
-from .base import Namespace
+from .base import AsyncNamespace, Namespace
 
 
 @dataclass(frozen=True)
@@ -246,6 +246,193 @@ class ActionsNamespace(Namespace):
             "sequence": sequence,
             "source": source,
         }
+
+
+class AsyncActionsNamespace(AsyncNamespace):
+    async def apply(
+        self,
+        action: ComputerAction | dict[str, Any],
+        *,
+        source: str = "sdk",
+    ) -> ActionResult:
+        result = await self.run([action], source=source)
+        first = result.results[0]
+        return ActionResult(
+            ok=first.ok,
+            message=first.error,
+            elapsed_ms=first.elapsed_ms,
+            output=first.output,
+        )
+
+    async def run(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_after: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        idempotency_key: str | None = None,
+        call_id: str | None = None,
+        run_id: str | None = None,
+        sequence: int | None = None,
+        source: str = "sdk",
+    ) -> ActionBatchResult:
+        payload = ActionsNamespace._run_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_after=screenshot_after,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+            run_id=run_id,
+            sequence=sequence,
+            source=source,
+        )
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        return ActionBatchResult.model_validate(
+            await self._client.post_json("/v1/actions/run", json=payload, headers=headers)
+        )
+
+    async def run_and_screenshot_bytes(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        idempotency_key: str | None = None,
+        call_id: str | None = None,
+        run_id: str | None = None,
+        sequence: int | None = None,
+        source: str = "sdk",
+    ) -> ActionScreenshotBytesResult:
+        payload = ActionsNamespace._run_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_after=True,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+            run_id=run_id,
+            sequence=sequence,
+            source=source,
+        )
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        data, response_headers = await self._client.post_bytes_with_headers(
+            "/v1/actions/run/raw-screenshot",
+            json=payload,
+            headers=headers,
+        )
+        result_header = response_headers.get("x-computer-use-action-result")
+        result = ActionBatchResult.model_validate(
+            json.loads(base64.b64decode(result_header or "e30=").decode("utf-8"))
+        )
+        return ActionScreenshotBytesResult(
+            result=result,
+            data=data,
+            format=str(response_headers.get("content-type", "image/png")).removeprefix("image/"),
+            width=_int_header(response_headers, "x-computer-use-width"),
+            height=_int_header(response_headers, "x-computer-use-height"),
+            size_bytes=len(data),
+        )
+
+    async def run_and_observe_change_screenshot_bytes(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        previous_source_sha256: str | None = None,
+        capture_delay_ms: int = 0,
+        change_timeout_ms: int = 100,
+        poll_interval_ms: int = 8,
+        poll_strategy: str = "fixed",
+        change_detection: str = "full",
+        change_detection_region: Region | dict[str, Any] | None = None,
+        change_region_radius: int = 192,
+        change_signal: str = "auto",
+        continue_on_error: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        idempotency_key: str | None = None,
+        call_id: str | None = None,
+        run_id: str | None = None,
+        sequence: int | None = None,
+        source: str = "sdk",
+    ) -> ActionScreenshotBytesResult:
+        payload = ActionsNamespace._run_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_after=False,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+            run_id=run_id,
+            sequence=sequence,
+            source=source,
+        )
+        payload.update(
+            {
+                "previous_source_sha256": previous_source_sha256,
+                "capture_delay_ms": capture_delay_ms,
+                "change_timeout_ms": change_timeout_ms,
+                "poll_interval_ms": poll_interval_ms,
+                "poll_strategy": poll_strategy,
+                "change_detection": change_detection,
+                "change_detection_region": change_detection_region.model_dump(mode="json")
+                if isinstance(change_detection_region, Region)
+                else change_detection_region,
+                "change_region_radius": change_region_radius,
+                "change_signal": change_signal,
+            }
+        )
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        data, response_headers = await self._client.post_bytes_with_headers(
+            "/v1/actions/run/observe-change/raw-screenshot",
+            json=payload,
+            headers=headers,
+        )
+        result = _action_result_header(response_headers)
+        return ActionScreenshotBytesResult(
+            result=result,
+            data=data,
+            format=str(response_headers.get("content-type", "image/png")).removeprefix("image/"),
+            width=_int_header(response_headers, "x-computer-use-width"),
+            height=_int_header(response_headers, "x-computer-use-height"),
+            size_bytes=len(data),
+            change_result=_json_response_header(response_headers, "x-computer-use-change-result"),
+            change_timing_ms=_float_json_response_header(
+                response_headers,
+                "x-computer-use-change-timing-ms",
+            ),
+        )
+
+    async def validate(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_after: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        call_id: str | None = None,
+        run_id: str | None = None,
+        sequence: int | None = None,
+        source: str = "sdk",
+    ) -> ValidationResult:
+        payload = ActionsNamespace._run_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_after=screenshot_after,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+            run_id=run_id,
+            sequence=sequence,
+            source=source,
+        )
+        return ValidationResult.model_validate(
+            await self._client.post_json("/v1/actions/validate", json=payload)
+        )
 
 
 def _int_header(headers: Any, name: str) -> int | None:

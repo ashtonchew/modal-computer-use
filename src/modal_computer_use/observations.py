@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Literal
 
 from .latency import SessionStartupTiming, validate_first_frame
 from .models import ScreenshotOptions
+from .transports.async_observation import AsyncObservationStreamTransport
 from .transports.observation import ObservationFrame, ObservationStreamTransport
 
 SDK_AUTO_REGION_RADIUS = 64
@@ -310,6 +311,213 @@ class ObservationClient:
 
     def configure(self, **payload: Any) -> None:
         self.transport.configure(payload)
+
+
+class AsyncObservationClient:
+    """Asynchronous SDK facade over the daemon observation stream protocol."""
+
+    def __init__(
+        self,
+        transport: AsyncObservationStreamTransport,
+        *,
+        options: ScreenshotOptions | Mapping[str, Any] | None = None,
+        fps: float = 5.0,
+        max_frames: int | None = None,
+        idle_timeout_ms: int | None = None,
+        send_unchanged: bool = False,
+        delivery: Literal["latest", "reliable"] | None = None,
+        delta_mode: Literal["auto", "off"] | None = None,
+        delta_max_ratio: float | None = None,
+        keyframe_interval: int | None = None,
+        tile_size: int | None = None,
+        max_patch_rects: int | None = None,
+        multi_rect_min_savings: float | None = None,
+        transport_timing: bool = False,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = "binary-envelope",
+        startup_timing: SessionStartupTiming | None = None,
+    ) -> None:
+        self.transport = transport
+        self.payload = _observation_payload(
+            options,
+            fps=fps,
+            max_frames=max_frames,
+            idle_timeout_ms=idle_timeout_ms,
+            send_unchanged=send_unchanged,
+            delivery=delivery,
+            delta_mode=delta_mode,
+            delta_max_ratio=delta_max_ratio,
+            keyframe_interval=keyframe_interval,
+            tile_size=tile_size,
+            max_patch_rects=max_patch_rects,
+            multi_rect_min_savings=multi_rect_min_savings,
+            transport_timing=transport_timing,
+            frame_encoding=frame_encoding,
+        )
+        self._started = False
+        self._startup_timing = startup_timing
+
+    async def aclose(self) -> None:
+        await self.transport.aclose()
+
+    async def __aenter__(self) -> AsyncObservationClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        await self.aclose()
+
+    async def frames(self) -> AsyncIterator[ObservationFrame]:
+        if self._started:
+            while True:
+                try:
+                    yield await self.transport.receive_frame(
+                        transport_timing=bool(self.payload.get("transport_timing"))
+                    )
+                except StopAsyncIteration:
+                    self._started = False
+                    return
+        else:
+            self._started = True
+            async for frame in self.transport.frames(self.payload):
+                yield frame
+
+    async def start(self, *, drain_initial_frame: bool = False) -> ObservationFrame | None:
+        if self._started:
+            return None
+        await self.transport.start(self.payload)
+        self._started = True
+        if drain_initial_frame:
+            frame = await self.transport.receive_frame(
+                transport_timing=bool(self.payload.get("transport_timing"))
+            )
+            if self._startup_timing is not None:
+                self._startup_timing.mark("observation_stream_ready")
+            return frame
+        if self._startup_timing is not None:
+            self._startup_timing.mark("observation_stream_connected")
+        return None
+
+    async def pause(self) -> None:
+        await self.transport.pause()
+
+    async def resume(self) -> None:
+        await self.transport.resume()
+
+    async def request_frame(self) -> None:
+        await self.transport.request_frame()
+
+    async def run_actions_capture(self, **payload: Any) -> None:
+        await self.transport.run_actions_capture(payload)
+
+    async def run_actions_observe_change(self, **payload: Any) -> None:
+        await self.transport.run_actions_observe_change(payload)
+
+    async def _experimental_act_until_visual_change(
+        self,
+        *,
+        actions: list[Mapping[str, Any]],
+        source: str = "sdk",
+        capture_delay_ms: int = 0,
+        change_timeout_ms: int = 100,
+        poll_interval_ms: int = 8,
+        poll_strategy: Literal["fixed", "adaptive"] = "adaptive",
+        change_detection: Literal["auto", "full", "auto_region"] = "auto",
+        change_signal: Literal["poll", "xdamage", "auto"] = "auto",
+        dirty_frame_producer: Literal["auto", "off"] = "auto",
+        dirty_frame_producer_wait_ms: int | None = None,
+        dirty_region_confirmation: Literal["auto", "off"] = "auto",
+        full_frame_fallback: bool | None = None,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+        change_detection_region: Mapping[str, Any] | None = None,
+        change_region_radius: int | None = None,
+        continue_on_error: bool = False,
+    ) -> ActionObservationResult:
+        """Issue an action batch and await its first detected visual change."""
+        await self.start(drain_initial_frame=True)
+        action_payloads = [dict(action) for action in actions]
+        resolved_change_detection = _resolve_action_change_detection(
+            action_payloads,
+            requested=change_detection,
+            change_detection_region=change_detection_region,
+        )
+        payload: dict[str, Any] = {
+            "actions": action_payloads,
+            "source": source,
+            "capture_delay_ms": capture_delay_ms,
+            "change_timeout_ms": change_timeout_ms,
+            "poll_interval_ms": poll_interval_ms,
+            "poll_strategy": poll_strategy,
+            "change_detection": resolved_change_detection,
+            "change_signal": change_signal,
+            "dirty_frame_producer": dirty_frame_producer,
+            "full_frame_fallback": _resolve_full_frame_fallback(requested=full_frame_fallback),
+        }
+        if dirty_frame_producer_wait_ms is not None:
+            payload["dirty_frame_producer_wait_ms"] = dirty_frame_producer_wait_ms
+        if dirty_region_confirmation != "auto":
+            payload["dirty_region_confirmation"] = dirty_region_confirmation
+        if frame_encoding is not None:
+            payload["frame_encoding"] = frame_encoding
+        if continue_on_error:
+            payload["continue_on_error"] = True
+        if change_detection_region is not None:
+            payload["change_detection_region"] = dict(change_detection_region)
+        resolved_change_region_radius = _resolve_change_region_radius(
+            resolved_change_detection,
+            requested=change_region_radius,
+        )
+        if resolved_change_region_radius is not None:
+            payload["change_region_radius"] = resolved_change_region_radius
+        action_sent = perf_counter()
+        frame = await self.transport.run_actions_observe_change_and_recv(
+            payload,
+            transport_timing=bool(self.payload.get("transport_timing")),
+        )
+        return ActionObservationResult(
+            frame=frame,
+            elapsed_ms=(perf_counter() - action_sent) * 1000.0,
+        )
+
+    async def act_and_observe(
+        self,
+        *,
+        actions: list[Mapping[str, Any]],
+        source: str = "sdk",
+        capture_delay_ms: int = 0,
+        change_timeout_ms: int = 100,
+        poll_interval_ms: int = 8,
+        poll_strategy: Literal["fixed", "adaptive"] = "adaptive",
+        change_detection: Literal["auto", "full", "auto_region"] = "auto",
+        change_signal: Literal["poll", "xdamage", "auto"] = "auto",
+        dirty_frame_producer: Literal["auto", "off"] = "auto",
+        dirty_frame_producer_wait_ms: int | None = None,
+        dirty_region_confirmation: Literal["auto", "off"] = "auto",
+        full_frame_fallback: bool | None = None,
+        frame_encoding: Literal["json-binary", "binary-envelope"] | None = None,
+        change_detection_region: Mapping[str, Any] | None = None,
+        change_region_radius: int | None = None,
+        continue_on_error: bool = False,
+    ) -> ActionObservationResult:
+        return await self._experimental_act_until_visual_change(
+            actions=actions,
+            source=source,
+            capture_delay_ms=capture_delay_ms,
+            change_timeout_ms=change_timeout_ms,
+            poll_interval_ms=poll_interval_ms,
+            poll_strategy=poll_strategy,
+            change_detection=change_detection,
+            change_signal=change_signal,
+            dirty_frame_producer=dirty_frame_producer,
+            dirty_frame_producer_wait_ms=dirty_frame_producer_wait_ms,
+            dirty_region_confirmation=dirty_region_confirmation,
+            full_frame_fallback=full_frame_fallback,
+            frame_encoding=frame_encoding,
+            change_detection_region=change_detection_region,
+            change_region_radius=change_region_radius,
+            continue_on_error=continue_on_error,
+        )
+
+    async def configure(self, **payload: Any) -> None:
+        await self.transport.configure(payload)
 
 
 def _observation_payload(
