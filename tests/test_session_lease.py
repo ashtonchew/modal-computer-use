@@ -376,6 +376,37 @@ async def test_async_heartbeat_request_timeout_must_be_below_join_budget() -> No
 
 
 @pytest.mark.asyncio
+async def test_async_heartbeat_start_failure_keeps_cleanup_ownership(
+    monkeypatch,
+) -> None:
+    transport = _ShortGrantAsyncTransport()
+    heartbeat_transport = _HeartbeatTransport()
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.05,
+    )
+
+    def fail_start(_worker: object) -> None:
+        raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(
+        "modal_computer_use.session_lease._LeaseHeartbeatWorker.start",
+        fail_start,
+    )
+
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        await coordinator.acquire()
+    await coordinator.aclose()
+
+    assert coordinator._heartbeat_worker is None
+    assert coordinator._grant is None
+    assert heartbeat_transport.closed
+    assert [path for path, _ in transport.calls].count("/v1/leases/release") == 1
+
+
+@pytest.mark.asyncio
 async def test_async_normal_cleanup_joins_worker_before_release_and_clears_secrets() -> None:
     transport = _ShortGrantAsyncTransport()
     heartbeat_transport = _HeartbeatTransport()

@@ -439,9 +439,13 @@ class AsyncSessionLeaseCoordinator:
             heartbeat_interval_seconds=self._grant.heartbeat_interval_seconds,
             join_timeout_seconds=self._heartbeat_join_timeout_seconds,
         )
+        try:
+            heartbeat_worker.start()
+        except BaseException:
+            heartbeat_worker.clear_credentials()
+            raise
         self._heartbeat_worker = heartbeat_worker
         self._heartbeat_transport = None
-        heartbeat_worker.start()
 
     def metadata_headers(self) -> dict[str, str]:
         return self._credentials().headers()
