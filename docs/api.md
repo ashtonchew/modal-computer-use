@@ -39,8 +39,10 @@ The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verif
 
 `ComputerSandbox.session_handle()` returns a frozen, versioned `ComputerSessionHandle` for an
 SDK-owned Modal desktop created with an explicit requested region and either `attested-tunnel` or
-`connect` ingress. The handle serializes only `schema_version`, sandbox ID, app name,
-`requested_modal_region`, ingress, daemon HTTP version, and config hash. The sandbox ID is hidden
+`connect` ingress and `vnc_mode="off" | "view_only"`. Control-mode noVNC targets cannot produce or
+enter a handoff. The v2 handle serializes only its protocol version, sandbox/session identity, app
+and Modal environment, `requested_modal_region`, ingress, daemon HTTP version, vnc policy, and
+config hash. Sandbox/session identity is hidden
 from `repr()` but necessarily remains in JSON or cloudpickle/pickle data so Modal can reconnect.
 Endpoint URLs, bearer or Connect credentials, noVNC URLs, tags, prompts, typed text, screenshots,
 and artifacts are never fields on the handle.
@@ -49,34 +51,58 @@ The handle is routing identity, not a bearer credential or an authorization boun
 or publish it. A public HTTP wrapper must authenticate callers and authorize the target before it
 invokes the deployed Function; the Function's Modal identity is what resolves fresh access.
 
-Use the synchronous borrow context inside a user-owned Modal Function:
+Use the native-async borrow context inside an async user-owned Modal Function:
 
 ```python
 FUNCTION_REGION = "us-west"
 
 
-def trajectory(handle: ComputerSessionHandle, task: str) -> None:
-    with handle.borrow(function_region=FUNCTION_REGION) as computer:
+async def trajectory(handle: ComputerSessionHandle, task: str, run_id: str) -> None:
+    async with handle.borrow_async(
+        run_id=run_id, function_region=FUNCTION_REGION
+    ) as computer:
         for _ in range(3):
-            screenshot = computer.screenshots.full()
-            action = application_model_call(task, screenshot)
-            computer.actions.run([action])
+            screenshot = await computer.screenshots.full()
+            action = await application_model_call(task, screenshot)
+            await computer.actions.run([action])
 ```
 
-Constructing the context does not contact Modal or create credentials. Entering it requires exact
-equality between `function_region` and `requested_modal_region`, attaches once by sandbox ID and
-app name, requests fresh access, requires daemon readiness, and compares the live config hash. It
+Constructing the context does not contact Modal or create credentials. Entering it requires an
+application-generated `run_id` unique to that one trajectory/borrow; a durably sealed run ID cannot
+be reused. It also requires a positive finite readiness timeout, Modal's official deployed-Function
+runtime marker `MODAL_IS_REMOTE=1`, `MODAL_ENVIRONMENT`, exact equality between
+`function_region` and `requested_modal_region`, and handle/vnc policy before credential issuance.
+It then validates the live object, SDK marker, config tag, and policy-bound session tag before
+requesting fresh access, and requires daemon readiness. It
 does not retry, fall back to another transport, replay a callback, or replay an action. A failed
 endpoint, authorization, readiness, or config check propagates and closes any created client.
 Leaving the context detaches the borrower and never terminates the desktop; the creator retains
 lifecycle ownership. Borrow contexts are one-shot.
 
-This surface is synchronous only. A native async context may be added later without changing this
-contract; wrapping the synchronous API in a fake async facade is not supported. Daemon locking is
-per primitive action or action batch, not an exclusive lease for an entire trajectory. The
-application must prevent two Function invocations from running trajectories against the same
-desktop concurrently. This contract does not claim multi-tenant safety. If an action reports that
-input may be partial, the Function must not automatically replay it.
+The compact session tag combines randomness with a digest over the handle's app name, Modal
+environment, requested region, ingress, daemon HTTP version, VNC policy, and config hash. Borrow
+recomputes that digest from the handle and requires an exact live session-tag match, so changing any
+of those routing or policy fields is rejected before credentials are issued without consuming more
+of Modal's 10-tag Sandbox budget.
+
+`borrow_async()` is canonical for async Modal Functions and uses Modal's native `.aio` calls.
+Borrowed async application code, including model calls, must not block the event loop so the
+independent heartbeat and other desktop trajectories can progress. `borrow()` remains supported
+for synchronous callers. Entry acquires one exclusive daemon trajectory
+lease and starts an independent heartbeat. Every borrower-reachable mutation receives one gap-free
+sequence shared across HTTP, hot-session, and observation transports; an ordered action batch uses
+one sequence, while read-only calls consume none. Artifact/auto screenshot storage is a mutation;
+inline/raw capture is read-only.
+
+There is no automatic retry, fallback, callback replay, or action replay after possible dispatch.
+On a lost response the borrower resolves that exact sequence from the daemon's durable receipt:
+proven missing raises `OperationNotAppliedError`, completed-without-result raises
+`OperationResultUnavailableError`, and indeterminate work raises `ActionOutcomeUnknownError` or
+`SessionRecoveryRequiredError`. All seal the current borrow; only an indeterminate target requires
+owner recovery. The original `ComputerSandbox` owner can inspect `recovery_status()` and call
+`acknowledge_recovery(incident_id=...)`; attached objects without its private owner proof fail
+closed. Exclusive lease ownership prevents overlapping trajectories for one desktop but is not a
+claim that one desktop is safe for multiple tenants.
 
 Keyboard typing accepts `method="auto" | "keystrokes" | "clipboard" | "xdotool"`.
 `keystrokes` is the canonical direct-input behavior and uses the configured native or compatibility

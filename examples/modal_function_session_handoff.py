@@ -11,7 +11,9 @@ Deploy this module once before calling ``run_example``:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from contextlib import suppress
 from typing import Any
 
 from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSessionHandle
@@ -20,13 +22,15 @@ FUNCTION_REGION = "us-west"  # Replace with one measured Modal region selector.
 APP_NAME = "computer-use-function-handoff"
 
 
-def choose_action_with_model(*, task: str, screenshot: object, turn: int) -> dict[str, object]:
+async def choose_action_with_model(
+    *, task: str, screenshot: object, turn: int
+) -> dict[str, object]:
     """Placeholder for the application's provider-specific model call."""
     _ = (task, screenshot, turn)
     return {"type": "wait", "duration_ms": 50}
 
 
-def run_trajectory_body(
+async def run_trajectory_body(
     handle: ComputerSessionHandle,
     task: str,
     *,
@@ -35,12 +39,45 @@ def run_trajectory_body(
     max_turns: int = 3,
 ) -> dict[str, object]:
     """Hold one borrowed connection across the repeated observe/decide/act loop."""
-    with handle.borrow(run_id=run_id, function_region=function_region) as computer:
+    async with handle.borrow_async(
+        run_id=run_id, function_region=function_region
+    ) as computer:
         for turn in range(max_turns):
-            screenshot = computer.screenshots.full(format="png", processing="daemon")
-            action = choose_action_with_model(task=task, screenshot=screenshot, turn=turn)
-            computer.actions.run([action])
+            screenshot = await computer.screenshots.full(
+                format="png", processing="daemon"
+            )
+            action = await choose_action_with_model(
+                task=task, screenshot=screenshot, turn=turn
+            )
+            await computer.actions.run([action])
     return {"completed": True, "turns": max_turns}
+
+
+async def run_distinct_trajectories_body(
+    handles: list[ComputerSessionHandle],
+    tasks: list[str],
+    run_ids: list[str],
+    *,
+    function_region: str = FUNCTION_REGION,
+) -> list[dict[str, object]]:
+    """Run independent trajectories concurrently, one lease per desktop."""
+    if not (len(handles) == len(tasks) == len(run_ids)):
+        raise ValueError("handles, tasks, and run_ids must have equal lengths")
+    if len({handle.sandbox_id for handle in handles}) != len(handles):
+        raise ValueError("each concurrent trajectory requires a distinct desktop handle")
+    return list(
+        await asyncio.gather(
+            *(
+                run_trajectory_body(
+                    handle,
+                    task,
+                    run_id=run_id,
+                    function_region=function_region,
+                )
+                for handle, task, run_id in zip(handles, tasks, run_ids, strict=True)
+            )
+        )
+    )
 
 
 try:
@@ -49,6 +86,7 @@ except ImportError:
     modal = None
     app = None
     run_trajectory = None
+    run_distinct_trajectories = None
 else:
     app = modal.App(APP_NAME)
     function_image = modal.Image.debian_slim().pip_install("modal-computer-use[modal]")
@@ -61,12 +99,27 @@ else:
         max_containers=4,
         timeout=900,
     )
-    def run_trajectory(
+    async def run_trajectory(
         handle: ComputerSessionHandle,
         task: str,
         run_id: str,
     ) -> dict[str, object]:
-        return run_trajectory_body(handle, task, run_id=run_id)
+        return await run_trajectory_body(handle, task, run_id=run_id)
+
+    @app.function(
+        image=function_image,
+        region=FUNCTION_REGION,
+        retries=0,
+        min_containers=0,
+        max_containers=4,
+        timeout=900,
+    )
+    async def run_distinct_trajectories(
+        handles: list[ComputerSessionHandle],
+        tasks: list[str],
+        run_ids: list[str],
+    ) -> list[dict[str, object]]:
+        return await run_distinct_trajectories_body(handles, tasks, run_ids)
 
 
 def run_example(
@@ -93,6 +146,8 @@ def run_example(
         call = deployed.spawn(handle, task, run_id)
         if cancel_spawned:
             call.cancel()
+            with suppress(Exception):
+                call.get()
             return {"mode": "spawn", "cancel_requested": True}
         return {"mode": "spawn", "result": call.get()}
 

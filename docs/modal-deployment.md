@@ -125,10 +125,15 @@ For a stateful model loop, create the desktop in an owner process, call `session
 that value through normal Modal Function arguments. The complete executable pattern is
 [`examples/modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py). It
 keeps the native user-owned `@app.function` surface. Deploy that App once, then look up the deployed
-Function with `modal.Function.from_name(...)` and choose either `.remote(handle, task)` or
-`.spawn(handle, task)`, including `.cancel()` for a spawned call. The SDK never calls `app.run()` or
+Function with `modal.Function.from_name(...)` and choose either `.remote(handle, task, run_id)` or
+`.spawn(handle, task, run_id)`, including `.cancel()` for a spawned call. The SDK never calls `app.run()` or
 creates an App for the handoff. One Function invocation enters one borrow context and holds that
-same daemon connection across its repeated screenshot, application-owned model, and action steps.
+same lease and daemon connection across its repeated screenshot, application-owned model, and
+action steps. Native `borrow_async()` is canonical for async Modal Functions; `borrow()` remains
+available for synchronous Functions. The borrow `run_id` is an application-generated unique ID for
+one trajectory and cannot be reused after that durable run is sealed. Async model and application
+work must yield rather than block the event loop, because lease heartbeats and distinct-desktop
+concurrency run there too.
 
 Modal Function `region=...` is a container placement request. It must exactly match the handle's
 `requested_modal_region`. Modal's `routing_region=...` controls routing of Function inputs and
@@ -143,6 +148,12 @@ Function decorator or turn observed placement into a scheduling selector.
 The deployed Function image must include `modal-computer-use[modal]`, and its Modal identity must
 be allowed to access the target Sandbox's environment. Do not set `restrict_modal_access=True` on
 this Function: borrowing resolves the Sandbox and mints fresh access from inside the invocation.
+Borrow entry also requires Modal's official deployed-Function runtime marker
+`MODAL_IS_REMOTE=1`; setting environment and region strings in a local process is not sufficient.
+The compact live session tag contains a random suffix and a digest binding app name, Modal
+environment, requested region, ingress, daemon HTTP version, VNC policy, and config hash. This
+rejects any policy-field tampering before credentials are minted without reducing caller tag
+capacity.
 
 The creator owns the desktop lifetime. It must keep the target running until every `.remote()` call
 has returned and every spawned call has completed or reached its cancellation outcome, then
@@ -154,11 +165,13 @@ invocation is cancelled or lost.
 
 Use `retries=0` to avoid configured Function retries for a stateful trajectory. Modal can still
 reschedule an input after a container crash, so this does not create exactly-once execution. The
-SDK does not retry, switch ingress, replay the callback, or replay the action. Existing action
-idempotency fields protect the requests that use them, not a complete model trajectory. The handoff
-also does not acquire a trajectory-wide lease: daemon locks cover one action or batch. The
-application must serialize trajectories per desktop and must not treat one handle as a
-multi-tenant isolation boundary.
+SDK does not retry, switch ingress, replay the callback, or replay the action. One borrow acquires
+an exclusive trajectory lease, heartbeats it independently from long target operations, and
+injects one gap-free sequence per mutation across HTTP and WebSocket primitives. A batch is one
+sequenced operation. Lost responses are resolved against the exact durable receipt and never
+replayed. A completed response-loss poisons only that borrow. Indeterminate state quarantines the
+target until the original owner inspects `recovery_status()` and acknowledges the exact incident.
+The lease serializes trajectories for one desktop; it is not a multi-tenant isolation boundary.
 
 Function capacity is independent from desktop capacity. `min_containers=0` allows the Function to
 scale to zero, adding a cold start after idle periods. A positive warm minimum reduces that startup
@@ -166,8 +179,13 @@ cost but accrues warm-container cost. Bound `max_containers` and application con
 desktop cannot receive overlapping trajectories. The target Sandbox continues to follow its own
 timeout, idle-timeout, and billing lifecycle while Function capacity scales separately.
 
-The borrow API is intentionally synchronous. A future async context can be additive; current async
-applications should not assume a thread wrapper changes Modal cancellation or cleanup semantics.
+Async cancellation is reconciled and cleaned up under shielding before `CancelledError` propagates.
+Borrowed cleanup closes tracked WebSockets, releases the lease when valid, closes HTTP, and calls
+Modal detach; it never terminates the owner target. Sync cleanup provides the same ownership rule.
+
+The receipt journal is target-local SQLite using WAL with `synchronous=NORMAL`. It survives daemon
+process restart on the same target filesystem, but this is not a claim of host-loss durability.
+After an interrupted in-progress receipt, owner acknowledgment is required before a new lease.
 
 ## Co-located runners and brokers
 
