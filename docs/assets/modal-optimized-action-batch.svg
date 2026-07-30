@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="504" viewBox="0 0 1280 504" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1312" height="504" viewBox="0 0 1312 504" role="img" aria-labelledby="title desc">
   <title id="title">One request executes four ordered clicks under one input lock</title>
-  <desc id="desc">The daemon validates a four-click request, acquires the input lock once, executes clicks one through four in order, and releases the lock. A runtime error stops execution before the next click while preserving completed clicks.</desc>
+  <desc id="desc">The daemon validates a four-click request, acquires the input lock once, executes clicks one through four in order, and releases the lock on success. A runtime error stops execution before the next click while preserving completed clicks.</desc>
   <defs>
     <style>
       .bg { fill: #101411; }
@@ -24,7 +24,7 @@
     <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
     <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
   </defs>
-  <rect class="bg" width="1280" height="504"/>
+  <rect class="bg" width="1312" height="504"/>
 
   <rect class="box" x="32" y="96" width="136" height="112" rx="8"/>
   <text class="label" x="100" y="143" text-anchor="middle">One request</text>
@@ -55,17 +55,17 @@
   <line class="path" x1="840" y1="164" x2="864" y2="164" marker-end="url(#arrow-sage)"/>
   <line class="path" x1="914" y1="164" x2="938" y2="164" marker-end="url(#arrow-sage)"/>
 
-  <rect class="changed" x="1104" y="96" width="144" height="112" rx="8"/>
-  <text class="label" x="1176" y="143" text-anchor="middle">Release input</text>
-  <text class="label" x="1176" y="164" text-anchor="middle">lock</text>
+  <rect class="changed" x="1136" y="96" width="144" height="112" rx="8"/>
+  <text class="label" x="1208" y="143" text-anchor="middle">Release input</text>
+  <text class="label" x="1208" y="164" text-anchor="middle">lock</text>
   <line class="path" x1="168" y1="152" x2="248" y2="152" marker-end="url(#arrow-sage)"/>
   <text class="arrow-label" x="208" y="130" text-anchor="middle">Validate</text>
   <line class="path" x1="384" y1="152" x2="464" y2="152" marker-end="url(#arrow-sage)"/>
   <text class="arrow-label" x="424" y="130" text-anchor="middle">Acquire</text>
   <line class="path" x1="600" y1="152" x2="680" y2="152" marker-end="url(#arrow-sage)"/>
   <text class="arrow-label" x="640" y="130" text-anchor="middle">Execute</text>
-  <line class="path" x1="1024" y1="152" x2="1104" y2="152" marker-end="url(#arrow-sage)"/>
-  <text class="arrow-label" x="1064" y="130" text-anchor="middle">Release</text>
+  <line class="path" x1="1024" y1="152" x2="1136" y2="152" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label" x="1080" y="130" text-anchor="middle">On success</text>
 
   <path class="path-neutral" d="M852 232 V296 H552 V328" marker-end="url(#arrow-neutral)"/>
   <text class="arrow-label-neutral" x="702" y="274" text-anchor="middle">On error</text>
@@ -75,8 +75,8 @@
   <rect class="box" x="720" y="328" width="304" height="96" rx="8"/>
   <text class="label" x="872" y="366" text-anchor="middle">Stop before next click</text>
   <text class="small" x="872" y="396" text-anchor="middle">Completed clicks remain</text>
-  <path class="path" d="M1176 208 V304" marker-end="url(#arrow-sage)"/>
-  <rect class="result" x="1104" y="304" width="144" height="104" rx="8"/>
-  <text class="metric" x="1176" y="351" text-anchor="middle">14 ms p50</text>
-  <text class="small" x="1176" y="381" text-anchor="middle">Four clicks</text>
+  <path class="path" d="M1208 208 V304" marker-end="url(#arrow-sage)"/>
+  <rect class="result" x="1136" y="304" width="144" height="104" rx="8"/>
+  <text class="metric" x="1208" y="351" text-anchor="middle">14 ms</text>
+  <text class="small" x="1208" y="381" text-anchor="middle">Four clicks</text>
 </svg>

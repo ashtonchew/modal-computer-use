@@ -35,7 +35,7 @@
   <text class="label" x="968" y="115" text-anchor="middle">OS child</text>
   <text class="label" x="968" y="136" text-anchor="middle">process</text>
   <rect class="box" x="1104" y="64" width="144" height="112" rx="8"/>
-  <text class="metric" x="1176" y="112" text-anchor="middle">56 ms p50</text>
+  <text class="metric" x="1176" y="112" text-anchor="middle">56 ms</text>
   <text class="small" x="1176" y="142" text-anchor="middle">249 ms p95</text>
   <line class="path" x1="176" y1="120" x2="240" y2="120" marker-end="url(#arrow-neutral)"/>
   <text class="arrow-label" x="208" y="98" text-anchor="middle">Run</text>
@@ -63,7 +63,7 @@
   <text class="label" x="968" y="335" text-anchor="middle">OS child</text>
   <text class="label" x="968" y="356" text-anchor="middle">process</text>
   <rect class="primary" x="1104" y="280" width="144" height="120" rx="8"/>
-  <text class="metric" x="1176" y="332" text-anchor="middle">10 ms p50</text>
+  <text class="metric" x="1176" y="332" text-anchor="middle">10 ms</text>
   <text class="small" x="1176" y="362" text-anchor="middle">11 ms p95</text>
   <line class="path-opt" x1="176" y1="340" x2="240" y2="340" marker-end="url(#arrow-sage)"/>
   <text class="arrow-label-opt" x="208" y="318" text-anchor="middle">Submit</text>
