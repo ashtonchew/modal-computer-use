@@ -14,7 +14,7 @@ E2B and Daytona expose ready-made APIs for screenshots, mouse input, typing, and
 
 Modal let me define the desktop, its computer-use server, and the benchmark caller in one Python project. An Image describes the desktop packages and files, and Modal starts it inside an isolated Sandbox. A small FastAPI daemon in that Sandbox owns screenshots, input, and commands.
 
-For the benchmark client, I used a Modal Function, Python code running in an autoscaled container. The Function sent HTTP requests to the daemon through Modal Connect, its authenticated connection to a Sandbox. I could change the caller, the route, and the code touching the desktop together.
+For the benchmark client, I used a Modal Function, Python code in an autoscaled container. The SDK gives me a credential-free `ComputerSessionHandle` to pass into my deployed Function. Inside, it borrows an authenticated connection for the loop. My application owns the model loop and desktop lifetime.
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
@@ -44,7 +44,7 @@ X11 is the Linux display server that owns the desktop's pixels and input state. 
 
 Both Modal paths used MSS-first capture. The 230 ms to 29 ms result therefore covers the Function-runner configuration against the default Modal setup.
 
-The A/B requested 4 CPU cores and 8 GiB to control resources. The Function bills only while active. A smaller I/O-bound runner could broker targets. I have not built it. Each desktop remains a billable Sandbox, so idle sessions cost money.
+The A/B requested 4 CPU cores and 8 GiB to control resources. Functions bill only while active. There is no shared Function pool, and my application must keep overlapping trajectories off a desktop. Each desktop stays billable, so idle sessions cost money.
 
 ## Keep one X11 input session open
 
