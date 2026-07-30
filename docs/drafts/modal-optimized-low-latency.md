@@ -62,7 +62,7 @@ I kept XTest and deleted the process. The daemon loads the X11 client libraries 
 
 ![Per-action xdotool setup compared with one persistent X11 input connection](../assets/modal-optimized-input-session.svg)
 
-Inside the daemon, a move plus one click went from about 146 ms to 1.2 ms.
+Inside the daemon, the mean for a move plus one click went from about 146 ms to 1.2 ms.
 
 Four move-and-click pairs went from 444 ms to 4.8 ms. Typing gained less, for a more interesting reason. Every character costs at least a key-down and a key-up, plus modifiers when the layout needs them (on a US keyboard, `!` is Shift held over `1`), so the events start to matter on their own. A hundred characters fell from about 120 ms to 21 ms, and a thousand from 607 ms to 201 ms. Deleting one process per action does nothing about the two thousand events a thousand characters still have to emit.
 
