@@ -61,6 +61,11 @@ class FakeManager:
         self.terminated.append(sandbox_id)
 
 
+def test_session_broker_is_explicitly_privileged_single_trust_domain() -> None:
+    assert "Privileged single-trust-domain" in broker.__doc__
+    assert "does not perform application authentication" in broker.__doc__
+
+
 class FakeComputer:
     def __init__(
         self,

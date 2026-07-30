@@ -533,9 +533,10 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
                     headers=lease_headers,
                 )
             )
+            stop_renewal = asyncio.Event()
 
             async def renew_while_running() -> None:
-                while not mutation.done():
+                while not stop_renewal.is_set():
                     heartbeat = await client.post(
                         "/v1/leases/heartbeat", headers=lease_headers
                     )
@@ -556,14 +557,17 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
                     f"status={early.status_code} code={early.json().get('code')}"
                 )
             assert admission in done, "mutation did not reach backend admission within 1s"
-            result = await mutation
-            await renewal
-            status = await client.get("/v1/leases/status")
-            receipt = await client.post(
-                "/v1/receipts/status",
-                json={"run_id": "long-operation", "sequence": 0},
-                headers=lease_headers,
-            )
+            try:
+                result = await mutation
+                status = await client.get("/v1/leases/status")
+                receipt = await client.post(
+                    "/v1/receipts/status",
+                    json={"run_id": "long-operation", "sequence": 0},
+                    headers=lease_headers,
+                )
+            finally:
+                stop_renewal.set()
+                await renewal
 
         assert result.status_code == 200
         assert status.json()["state"] == "active"

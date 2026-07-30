@@ -330,12 +330,44 @@ or application layer; core SDK modules should only provide generic Sandbox orche
 Use Connect Tokens or the attested tunnel default for daemon access, and treat returned daemon
 tokens as secrets.
 
-A Modal ASGI broker is a separate control-plane pattern. The broker may create, list, inspect, and
-terminate sessions. It should return direct daemon or runner connection metadata and leave
+A Modal ASGI broker is a separate privileged, single-trust-domain administrative control-plane
+pattern. The broker may create, list, inspect, and terminate sessions, but its caller-selected
+owner labels and raw Sandbox IDs are not tenant authorization evidence. Do not expose that example
+as a multi-tenant service. It should return direct daemon or runner connection metadata and leave
 screenshots and input actions on the direct path. Proxying the hot path through the broker adds
 another network hop and hides the latency source. See the
 [session broker example](../examples/modal_session_broker.py) for a testable
 control-plane example based on Modal's ASGI, lifecycle, concurrency, and proxy-auth primitives.
+
+### Application-owned hosted runs
+
+For a non-Python product surface, adapt the
+[application-owned run gateway example](../examples/modal_run_gateway.py). Modal proxy
+authentication remains an outer Workspace or Environment guard. Every request also goes through
+the application's injected principal resolver, and every desktop, task, run read, poll, and
+cancellation is authorized against that stable tenant identity. The client supplies only opaque
+desktop/task keys plus a required idempotency key; it cannot supply a Sandbox ID, session handle,
+Function name, FunctionCall ID, owner label, endpoint, or token.
+
+The application must provide an atomic durable `RunStore`. Creation reserves
+`(tenant_id, idempotency_key)` before calling `spawn.aio(handle, task, run_id)`, and duplicates
+return the original application run only when a durable SHA-256 admission fingerprint matches the
+originally authorized opaque desktop/task key pair. A mismatch returns a sanitized conflict and
+does not reclaim even a stale reservation; the raw keys, handle, and task text are not stored. A
+stale matching `reserved` record can win one CAS claim; a stale `dispatching` record becomes
+terminal `indeterminate` because the first spawn may already have crossed Modal's boundary. Once
+the private FunctionCall identity is stored, GET polls with
+`FunctionCall.from_id(...).get.aio(timeout=0)`. Cancellation durably enters
+`cancellation_requested` before `cancel.aio(terminate_containers=False)` and never claims that the
+desktop was rolled back or terminated.
+
+The deployed application trajectory receives the same stable application `run_id` that it passes
+to `handle.borrow_async(run_id=run_id, ...)`. The daemon lease and durable operation receipts are
+the final mutation fence if infrastructure ambiguity dispatches duplicate Functions. They do not
+close the cross-system persistence gap or recover a lost provider call handle. The deployer still
+owns identity, authorization, quotas, billing, retention, auditing, durable task/result storage,
+and reconciliation. Keep screenshot/action bytes on the direct daemon/runner path rather than
+turning the gateway into a latency-sensitive primitive proxy.
 
 ## Cleanup
 

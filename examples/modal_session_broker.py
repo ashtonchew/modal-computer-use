@@ -1,8 +1,13 @@
-"""Modal ASGI session broker example.
+"""Privileged single-trust-domain Modal ASGI session broker example.
 
 The broker is a control plane: it creates, lists, inspects, and terminates
 desktop sandboxes. It deliberately does not proxy screenshots or input actions;
 callers use the returned daemon endpoint directly for the hot path.
+
+This admin example accepts caller-selected owner labels and raw Sandbox IDs. It
+does not perform application authentication or object-level tenant authorization
+and must not be exposed as a multi-tenant service. Use ``modal_run_gateway.py``
+as the reference boundary for application-owned hosted trajectory admission.
 """
 
 from __future__ import annotations
@@ -108,7 +113,11 @@ class SessionBrokerService:
 
 
 def build_session_broker_app(service: SessionBrokerService) -> FastAPI:
-    app = FastAPI(title="modal-computer-use session broker", version="1.0.0")
+    app = FastAPI(
+        title="privileged single-trust-domain modal-computer-use session broker",
+        version="1.0.0",
+        description="Administrative example; not a tenant authorization boundary.",
+    )
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

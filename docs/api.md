@@ -51,6 +51,26 @@ The handle is routing identity, not a bearer credential or an authorization boun
 or publish it. A public HTTP wrapper must authenticate callers and authorize the target before it
 invokes the deployed Function; the Function's Modal identity is what resolves fresh access.
 
+For non-Python clients, the
+[application-owned run gateway example](../examples/modal_run_gateway.py) provides a bounded
+spawn-and-poll HTTP control plane. It accepts only opaque application `desktop_key`, `task_key`,
+and required `idempotency_key` values. The host application must inject its principal resolver,
+ownership catalogs, atomic durable run store, and one deployed trajectory Function dispatcher.
+There is no permissive resolver or in-memory production store. Responses contain only the stable
+application run ID and sanitized state; provider call identities, handles, task text, results,
+endpoints, and tokens stay private.
+
+The gateway's closed lifecycle is `reserved -> dispatching -> running`, followed by a terminal
+state or `cancellation_requested`. A stale reservation may be claimed once with compare-and-set.
+A private SHA-256 fingerprint binds that durable reservation to the originally authorized opaque
+desktop/task key pair. Reusing its tenant/idempotency key for different authorized objects returns
+a sanitized conflict before any stale reservation can be reclaimed; raw keys are not stored in
+the run record.
+A stale dispatch claim becomes `indeterminate` and is never automatically spawned again. Modal
+Function dispatch and durable persistence are not one transaction: the stable application run ID
+fences a repeated `borrow_async(run_id=run_id, ...)`, but it cannot reconstruct a missing
+FunctionCall identity after a dispatch/persistence gap.
+
 Use the native-async borrow context inside an async user-owned Modal Function:
 
 ```python
