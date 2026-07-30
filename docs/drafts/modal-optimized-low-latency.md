@@ -2,19 +2,23 @@
 
 *The same warm path returns a full 1024x768 PNG in 29 ms.*
 
-Modal does not ship a computer-use API. It ships Sandboxes, Functions, and a Python interface for wiring them together, so I built the simplest computer-use implementation I could out of those pieces: a Linux desktop inside a Sandbox, a small HTTP daemon beside it, and an SDK that asks for screenshots and sends clicks. It was partly a challenge and partly a question about how far the primitives go on their own.
+I built the fastest cloud computer-use API on Modal. A lot faster than E2B or Daytona.
 
-The result worked. Looking at the screen and clicking once took about 550 ms.
+Sandboxes and Functions, wiring them together, I first built the simplest computer-use implementation I could: a Linux desktop inside a Sandbox, a HTTP daemon beside it, and an SDK that asks for screenshots and sends clicks.
 
-E2B and Daytona ship computer-use primitives as a product, and I measured their documented defaults for the same two operations: about 420 ms and 480 ms. My hand-rolled version landed in the same band, which was reassuring for about a minute. Then I wanted to know where the half second went.
+With a simple Modal computer-use API, returning a screenshot of the screen and clicking once took about or half a second (550ms).
 
-A fifty-turn loop with one screenshot and one click pays that delay fifty times, which comes to about 27 seconds spent on nothing but screenshots and clicks. That is arithmetic over repeated warm costs, not a measured trajectory. After the work below, the optimized Modal path runs the same fifty turns in under 2 seconds.
+E2B and Daytona ship computer-use APIs as a product primitive. To compare, I ran the same task of a screenshot and clicking a spot. E2B took ~420 ms and Daytona took about ~480 ms. Not bad.
 
-[OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, hundreds of milliseconds in the computer interface stop hiding behind slow generation. Longer trajectories make it worse, because the delay is paid on every turn before the user sees anything.
+But, in a fifty-turn loop with one screenshot and one click pays that half-a-second lag 50 times. In that scenario, it comes to about 27 seconds spent on nothing but a simple screenshot and click. After all the work below, the Optimized Modal computer-use API runs all fifty turns in less than 2 seconds.
 
-Building on primitives instead of a product meant I could change things a computer-use API keeps on its own side of the boundary: where the caller runs, how long the desktop daemon's processes live, how it talks to X11, what a single request is allowed to contain, and how a Function hands work to a Sandbox. All of it in one Python-defined system. I wanted to find out whether that control could beat purpose-built defaults.
+[OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, hundreds of milliseconds in the computer interface stop hiding behind slow generation. Longer trajectories make it worse, because the delay is paid on every turn before the user sees anything. Infra will be the next issue in frontier computer-use agents.
 
-RustDesk gave me the shape of the answer before I had any of it. [It is an open-source remote desktop system](https://rustdesk.com/docs/en/self-host/) that pays for discovery and connection setup once, when a session begins, then reuses the live path for screen updates and input. Moving the mouse does not rediscover the remote computer. So I traced one warm agent turn, looking for setup work that was still happening every time the agent looked at the screen or touched it.
+Building on primitives instead of a product meant I could change things a computer-use API keeps on its own side of the boundary: where the caller runs, how it processes clicks, what a single request is allowed to contain, and how a Function hands work to a Sandbox. A custom framework built on Modal primitives.
+
+I took the idea from RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). It connects to the remote machine once, when the session starts, and reuses that connection for everything after. Moving your mouse sends an event over a connection that is already open. Contrast this with existing computer-use APIs that reconnect for each event, suitable only for short agentic tasks.
+
+Branching off the idea of decoupling connection and usage. I mapped out the latency
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
@@ -36,15 +40,15 @@ Running the caller on Modal costs Function compute for as long as the trajectory
 
 ## Why did every screenshot start a process?
 
-With the route shortened, I went looking inside the screenshot handler. Every frame launched a command-line capture program, wrote a temporary PNG to disk, reopened the file, and returned its bytes. That is a fine design for a utility a person runs a few times a day. An agent asks for a screenshot after nearly every action.
+With the route shortened, I went looking inside the screenshot handler. Every frame launched a command-line capture program, wrote a temporary PNG to disk, reopened the file, and returned its bytes of an image. A computer-use agent needs a screenshot (almost) every single request, so the fifty-turn loop from the opening spawns fifty of those processes and writes fifty temporary files. The screenshot handler of the past was certainly built without that fact in mind.
 
-The RustDesk lesson applied one layer down. The desktop and its X11 display stayed alive between requests, but each screenshot threw away its capture state and rebuilt the path to the pixels from scratch.
+Every window on the desktop draws through X11, the display server that owns the pixels, and X11 was running the whole time. What restarted on every frame was everything on my side of it: a new process, a new connection to the display, a new buffer, a file on disk.
 
-X11 is the display server that owns the desktop's pixels; every window draws through it. MSS is a small Python screen-capture library, and it became the persistent capture client. The daemon opens it once at startup and keeps it open. On Linux it prefers XShm, the shared-memory extension that lets the X server hand over a frame without pushing it through the display socket. A request now reads the current frame from that live session and encodes the PNG in memory.
+So I kept the capture client open instead. The daemon opens MSS, a small Python screen-capture library, on the first screenshot that can use it and holds that session open for as long as the daemon runs. On Linux MSS uses XShm, which lets the X server hand back a frame through shared memory rather than pushing it down the display socket. A screenshot became a read out of a buffer that already existed, encoded to PNG in memory.
 
 Two cases still take the old path. MSS cannot compose the X11 cursor, so a cursor-visible screenshot uses file capture. If the display connection breaks, the daemon reopens it once and falls back to file capture if that fails too.
 
-The comparison table further down cannot isolate this change, because by the time I ran it both Modal paths already used MSS. What it removed is easy to name anyway: a fork, an exec, a temporary file, and a read, on every frame the agent asks for.
+The comparison table further down cannot isolate this change, because by the time I ran it both Modal paths already used MSS. I never ran the capture path as its own A/B either, so I do not know what it saved. The process launch is a cost I did measure, one section down: deleting a per-action `xdotool` process took a move plus one click from about 146 ms to 1.2 ms inside the daemon. Screenshots were paying that same kind of setup, and a temporary file on top of it.
 
 ## A process for every click
 
