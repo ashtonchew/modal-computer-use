@@ -277,6 +277,31 @@ def test_connection_rejects_unexpected_synchronous_pragma(tmp_path, monkeypatch)
         journal._connect(synchronous="FULL")
 
 
+def test_connection_rejects_unavailable_wal_mode(tmp_path, monkeypatch) -> None:
+    original_connect = sqlite3.connect
+
+    class FallbackJournalModeResult:
+        @staticmethod
+        def fetchone() -> tuple[str]:
+            return ("delete",)
+
+    class FallbackJournalModeConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "PRAGMA journal_mode=WAL":
+                return FallbackJournalModeResult()
+            return super().execute(sql, parameters)
+
+    def fallback_connect(*args, **kwargs):
+        return original_connect(*args, factory=FallbackJournalModeConnection, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", fallback_connect)
+    journal = ReceiptJournal(tmp_path / "runtime")
+    journal._runtime_dir.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="receipt journal WAL mode was not applied"):
+        journal._connect(synchronous="FULL")
+
+
 def test_gap_free_sequence_replay_conflict_and_no_silent_eviction(tmp_path) -> None:
     app = _app(tmp_path)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:

@@ -395,7 +395,14 @@ class ReceiptJournal:
         connection = sqlite3.connect(self._db_path, timeout=10)
         try:
             connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA journal_mode=WAL")
+            journal_mode_row = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+            effective_journal_mode = (
+                str(journal_mode_row[0]).casefold()
+                if journal_mode_row is not None
+                else None
+            )
+            if effective_journal_mode != "wal":
+                raise RuntimeError("receipt journal WAL mode was not applied")
             connection.execute(f"PRAGMA synchronous={synchronous}")
             effective_row = connection.execute("PRAGMA synchronous").fetchone()
             effective_synchronous = (
