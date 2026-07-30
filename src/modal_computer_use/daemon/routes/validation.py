@@ -15,6 +15,7 @@ from modal_computer_use.daemon.receipts import (
     operation_sequence_from_headers,
 )
 from modal_computer_use.models import Point, Region
+from modal_computer_use.operation_kinds import stable_operation_kind
 
 
 async def backend_readiness(state: Any, *, force: bool = False) -> tuple[bool, list[str]]:
@@ -127,7 +128,7 @@ async def ready_mutation_lock(
 def _operation_kind(request: Request) -> str:
     route = request.scope.get("route")
     template = getattr(route, "path", None)
-    return template if isinstance(template, str) else "daemon.mutation"
+    return stable_operation_kind(template) or "daemon.mutation"
 
 
 def validate_point(request: Request, point: Point, *, field: str = "coordinate") -> None:

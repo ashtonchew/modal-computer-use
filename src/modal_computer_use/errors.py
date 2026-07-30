@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from modal_computer_use.operation_kinds import STABLE_OPERATION_KINDS
+
 
 class ComputerUseError(Exception):
     """Base exception for modal-computer-use."""
@@ -147,6 +149,23 @@ class OperationResultUnavailableError(SessionBorrowError):
     """Raised when a retained operation result is no longer available."""
 
     message = "the operation result is unavailable"
+
+    def __init__(
+        self,
+        *,
+        sequence: int,
+        operation_kind: str | None,
+    ) -> None:
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+            raise ValueError("sequence must be a nonnegative integer")
+        if operation_kind is not None and (
+            not isinstance(operation_kind, str)
+            or operation_kind not in STABLE_OPERATION_KINDS
+        ):
+            raise ValueError("operation_kind must be a stable daemon operation kind or None")
+        super().__init__()
+        self.sequence = sequence
+        self.operation_kind = operation_kind
 
 
 class OperationNotAppliedError(SessionBorrowError):

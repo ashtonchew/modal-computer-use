@@ -6,7 +6,7 @@ import threading
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 import httpx
 
@@ -21,6 +21,7 @@ from .errors import (
     SessionLeaseLostError,
     SessionRecoveryRequiredError,
 )
+from .operation_kinds import stable_operation_kind
 
 LEASE_ID_HEADER = "x-computer-use-lease-id"
 LEASE_EPOCH_HEADER = "x-computer-use-lease-epoch"
@@ -29,6 +30,7 @@ LEASE_TOKEN_HEADER = "x-computer-use-lease-token"  # noqa: S105
 OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
 
 T = TypeVar("T")
+_CoordinatorState = Literal["active", "result_unavailable", "unsafe", "closed"]
 
 _ASYNC_HEARTBEAT_JOIN_TIMEOUT_SECONDS = 31.0
 
@@ -113,8 +115,6 @@ def _mapped_error(exc: BaseException) -> BaseException:
         return RunSequenceConflictError()
     if code in {"recovery_required", "recovery_incident_mismatch"}:
         return SessionRecoveryRequiredError()
-    if code == "operation_result_unavailable":
-        return OperationResultUnavailableError()
     return exc
 
 
@@ -143,9 +143,10 @@ class SessionLeaseCoordinator:
         self._stop = threading.Event()
         self._heartbeat: threading.Thread | None = None
         self._heartbeat_error: BaseException | None = None
-        self._poisoned = False
+        self._state: _CoordinatorState = "active"
+        self._result_unavailable_sequence: int | None = None
+        self._result_unavailable_operation_kind: str | None = None
         self._released = False
-        self._closed = False
         self._resources: list[Any] = []
         self._close_wait_seconds = _transport_timeout_seconds(transport)
 
@@ -184,6 +185,7 @@ class SessionLeaseCoordinator:
                 self._handle_received_error(exc, sequence)
                 raise AssertionError("unreachable") from None
             except AuthenticationError as exc:
+                self._state = "unsafe"
                 raise SessionLeaseLostError() from exc
             except BaseException as exc:
                 self._resolve_transport_loss(sequence, exc)
@@ -197,36 +199,42 @@ class SessionLeaseCoordinator:
         return resource
 
     def ensure_open(self) -> None:
-        if self._closed:
+        if self._state == "closed":
             raise SessionLeaseLostError()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        errors: list[BaseException] = []
-        self._stop.set()
-        heartbeat, self._heartbeat = self._heartbeat, None
-        if heartbeat is not None:
-            heartbeat.join(timeout=self._close_wait_seconds)
-        for resource in reversed(self._resources):
-            try:
-                resource.close()
-            except BaseException as exc:
-                errors.append(exc)
-        self._resources.clear()
-        if self._grant is not None and not self._released:
-            try:
-                self._transport.request(
-                    "POST",
-                    "/v1/leases/release",
-                    headers=self.metadata_headers(),
-                )
-                self._released = True
-            except BaseException as exc:
-                errors.append(_mapped_error(exc))
-        if errors:
-            raise SessionLeaseLostError() from errors[0]
+        with self._operation_lock:
+            if self._state == "closed":
+                return
+            self._state = "closed"
+            errors: list[BaseException] = []
+            self._stop.set()
+            heartbeat, self._heartbeat = self._heartbeat, None
+            if heartbeat is not None:
+                heartbeat.join(timeout=self._close_wait_seconds)
+            for resource in reversed(self._resources):
+                try:
+                    resource.close()
+                except BaseException as exc:
+                    errors.append(exc)
+            self._resources.clear()
+            if self._grant is not None and not self._released:
+                try:
+                    self._transport.request(
+                        "POST",
+                        "/v1/leases/release",
+                        headers=self.metadata_headers(),
+                    )
+                    self._released = True
+                except BaseException as exc:
+                    errors.append(_mapped_error(exc))
+            if errors:
+                raise SessionLeaseLostError() from errors[0]
+
+    def observe_after_result_loss(self, request: Callable[[], T]) -> T:
+        with self._operation_lock:
+            self._ensure_reobservable()
+            return request()
 
     def _heartbeat_loop(self) -> None:
         assert self._grant is not None
@@ -251,8 +259,29 @@ class SessionLeaseCoordinator:
         self.ensure_open()
         if self._heartbeat_error is not None:
             raise SessionLeaseLostError() from self._heartbeat_error
-        if self._poisoned:
+        if self._state != "active":
             raise ActionOutcomeUnknownError()
+
+    def _ensure_reobservable(self) -> None:
+        self.ensure_open()
+        if self._heartbeat_error is not None:
+            raise SessionLeaseLostError() from self._heartbeat_error
+        if self._state != "result_unavailable":
+            raise ActionOutcomeUnknownError()
+
+    def _result_unavailable_error(
+        self,
+        payload: Mapping[str, Any],
+        sequence: int,
+    ) -> OperationResultUnavailableError:
+        operation_kind = stable_operation_kind(payload.get("operation_kind"))
+        self._state = "result_unavailable"
+        self._result_unavailable_sequence = sequence
+        self._result_unavailable_operation_kind = operation_kind
+        return OperationResultUnavailableError(
+            sequence=sequence,
+            operation_kind=operation_kind,
+        )
 
     def _receipt(self, path: str, sequence: int) -> dict[str, Any]:
         response = self._transport.request(
@@ -275,9 +304,10 @@ class SessionLeaseCoordinator:
         }:
             raise SessionLeaseLostError() from exc
         try:
-            state = _receipt_state(self._receipt("/v1/receipts/status", sequence), sequence)
+            payload = self._receipt("/v1/receipts/status", sequence)
+            state = _receipt_state(payload, sequence)
         except BaseException as status_exc:
-            self._poisoned = True
+            self._state = "unsafe"
             raise ActionOutcomeUnknownError() from status_exc
         if state == "MISSING":
             mapped = _mapped_error(exc)
@@ -287,17 +317,16 @@ class SessionLeaseCoordinator:
         if state == "COMPLETED":
             self._sequence += 1
             if exc.code == "operation_result_unavailable":
-                self._poisoned = True
-                raise OperationResultUnavailableError() from exc
+                raise self._result_unavailable_error(payload, sequence) from None
             mapped = _mapped_error(exc)
             if mapped is exc:
                 raise exc
             raise mapped from exc
-        self._poisoned = True
+        self._state = "unsafe"
         raise SessionRecoveryRequiredError() from exc
 
     def _resolve_transport_loss(self, sequence: int, cause: BaseException) -> None:
-        self._poisoned = True
+        self._state = "unsafe"
         try:
             payload = self._receipt("/v1/receipts/resolve", sequence)
             state = _receipt_state(payload, sequence)
@@ -308,7 +337,7 @@ class SessionLeaseCoordinator:
             raise OperationNotAppliedError() from cause
         if state == "COMPLETED":
             self._sequence += 1
-            raise OperationResultUnavailableError() from cause
+            raise self._result_unavailable_error(payload, sequence) from None
         if state == "INDETERMINATE":
             raise SessionRecoveryRequiredError() from cause
         raise ActionOutcomeUnknownError() from cause
@@ -414,9 +443,10 @@ class AsyncSessionLeaseCoordinator:
         self._sequence = 0
         self._operation_lock = asyncio.Lock()
         self._heartbeat_worker: _LeaseHeartbeatWorker | None = None
-        self._poisoned = False
+        self._state: _CoordinatorState = "active"
+        self._result_unavailable_sequence: int | None = None
+        self._result_unavailable_operation_kind: str | None = None
         self._released = False
-        self._closed = False
         self._resources: list[Any] = []
 
     async def acquire(self) -> None:
@@ -470,6 +500,7 @@ class AsyncSessionLeaseCoordinator:
                 await self._handle_received_error(exc, sequence)
                 raise AssertionError("unreachable") from None
             except AuthenticationError as exc:
+                self._state = "unsafe"
                 raise SessionLeaseLostError() from exc
             except BaseException as exc:
                 await self._resolve_transport_loss(sequence, exc)
@@ -483,53 +514,62 @@ class AsyncSessionLeaseCoordinator:
         return resource
 
     def ensure_open(self) -> None:
-        if self._closed:
+        if self._state == "closed":
             raise SessionLeaseLostError()
 
     async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        errors: list[BaseException] = []
-        heartbeat, self._heartbeat_worker = self._heartbeat_worker, None
-        heartbeat_transport, self._heartbeat_transport = self._heartbeat_transport, None
-        if heartbeat is not None:
-            heartbeat.stop()
-        for resource in reversed(self._resources):
-            try:
-                await resource.aclose()
-            except BaseException as exc:
-                errors.append(exc)
-        self._resources.clear()
-        heartbeat_terminated = True
-        if heartbeat is not None:
-            heartbeat_terminated = await asyncio.to_thread(heartbeat.join)
-            heartbeat.clear_credentials()
-        release_headers = (
-            self._grant.credentials.headers() if self._grant is not None else None
-        )
-        if self._grant is not None and not self._released:
-            try:
-                await self._transport.request(
-                    "POST",
-                    "/v1/leases/release",
-                    headers=release_headers,
-                )
-                self._released = True
-            except BaseException as exc:
-                errors.append(_mapped_error(exc))
-        self._grant = None
-        try:
+        async with self._operation_lock:
+            if self._state == "closed":
+                return
+            self._state = "closed"
+            errors: list[BaseException] = []
+            heartbeat, self._heartbeat_worker = self._heartbeat_worker, None
+            heartbeat_transport, self._heartbeat_transport = self._heartbeat_transport, None
             if heartbeat is not None:
-                heartbeat.close_transport()
-            elif heartbeat_transport is not None:
-                heartbeat_transport.close()
-        except BaseException:
-            errors.append(SessionLeaseLostError())
-        if not heartbeat_terminated:
-            errors.insert(0, SessionLeaseLostError())
-        if errors:
-            raise SessionLeaseLostError() from errors[0]
+                heartbeat.stop()
+            for resource in reversed(self._resources):
+                try:
+                    await resource.aclose()
+                except BaseException as exc:
+                    errors.append(exc)
+            self._resources.clear()
+            heartbeat_terminated = True
+            if heartbeat is not None:
+                heartbeat_terminated = await asyncio.to_thread(heartbeat.join)
+                heartbeat.clear_credentials()
+            release_headers = (
+                self._grant.credentials.headers() if self._grant is not None else None
+            )
+            if self._grant is not None and not self._released:
+                try:
+                    await self._transport.request(
+                        "POST",
+                        "/v1/leases/release",
+                        headers=release_headers,
+                    )
+                    self._released = True
+                except BaseException as exc:
+                    errors.append(_mapped_error(exc))
+            self._grant = None
+            try:
+                if heartbeat is not None:
+                    heartbeat.close_transport()
+                elif heartbeat_transport is not None:
+                    heartbeat_transport.close()
+            except BaseException:
+                errors.append(SessionLeaseLostError())
+            if not heartbeat_terminated:
+                errors.insert(0, SessionLeaseLostError())
+            if errors:
+                raise SessionLeaseLostError() from errors[0]
+
+    async def observe_after_result_loss(
+        self,
+        request: Callable[[], Awaitable[T]],
+    ) -> T:
+        async with self._operation_lock:
+            self._ensure_reobservable()
+            return await request()
 
     def _credentials(self) -> LeaseCredentials:
         if self._grant is None:
@@ -545,8 +585,34 @@ class AsyncSessionLeaseCoordinator:
         )
         if heartbeat_error is not None:
             raise SessionLeaseLostError() from heartbeat_error
-        if self._poisoned:
+        if self._state != "active":
             raise ActionOutcomeUnknownError()
+
+    def _ensure_reobservable(self) -> None:
+        self.ensure_open()
+        heartbeat_error = (
+            self._heartbeat_worker.error()
+            if self._heartbeat_worker is not None
+            else None
+        )
+        if heartbeat_error is not None:
+            raise SessionLeaseLostError() from heartbeat_error
+        if self._state != "result_unavailable":
+            raise ActionOutcomeUnknownError()
+
+    def _result_unavailable_error(
+        self,
+        payload: Mapping[str, Any],
+        sequence: int,
+    ) -> OperationResultUnavailableError:
+        operation_kind = stable_operation_kind(payload.get("operation_kind"))
+        self._state = "result_unavailable"
+        self._result_unavailable_sequence = sequence
+        self._result_unavailable_operation_kind = operation_kind
+        return OperationResultUnavailableError(
+            sequence=sequence,
+            operation_kind=operation_kind,
+        )
 
     async def _receipt(self, path: str, sequence: int) -> dict[str, Any]:
         response = await self._transport.request(
@@ -569,11 +635,10 @@ class AsyncSessionLeaseCoordinator:
         }:
             raise SessionLeaseLostError() from exc
         try:
-            state = _receipt_state(
-                await self._receipt("/v1/receipts/status", sequence), sequence
-            )
+            payload = await self._receipt("/v1/receipts/status", sequence)
+            state = _receipt_state(payload, sequence)
         except BaseException as status_exc:
-            self._poisoned = True
+            self._state = "unsafe"
             raise ActionOutcomeUnknownError() from status_exc
         if state == "MISSING":
             mapped = _mapped_error(exc)
@@ -583,17 +648,16 @@ class AsyncSessionLeaseCoordinator:
         if state == "COMPLETED":
             self._sequence += 1
             if exc.code == "operation_result_unavailable":
-                self._poisoned = True
-                raise OperationResultUnavailableError() from exc
+                raise self._result_unavailable_error(payload, sequence) from None
             mapped = _mapped_error(exc)
             if mapped is exc:
                 raise exc
             raise mapped from exc
-        self._poisoned = True
+        self._state = "unsafe"
         raise SessionRecoveryRequiredError() from exc
 
     async def _resolve_transport_loss(self, sequence: int, cause: BaseException) -> None:
-        self._poisoned = True
+        self._state = "unsafe"
         try:
             payload = await self._receipt("/v1/receipts/resolve", sequence)
             state = _receipt_state(payload, sequence)
@@ -604,7 +668,7 @@ class AsyncSessionLeaseCoordinator:
             raise OperationNotAppliedError() from cause
         if state == "COMPLETED":
             self._sequence += 1
-            raise OperationResultUnavailableError() from cause
+            raise self._result_unavailable_error(payload, sequence) from None
         if state == "INDETERMINATE":
             raise SessionRecoveryRequiredError() from cause
         raise ActionOutcomeUnknownError() from cause

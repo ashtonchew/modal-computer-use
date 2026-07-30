@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from .client import AsyncDaemonClient, DaemonClient
     from .hot_session import AsyncHotSessionClient, HotSessionClient
     from .latency import SessionStartupTiming
+    from .models import Screenshot
     from .namespaces import (
         ActionsNamespace,
         AppsNamespace,
@@ -172,6 +173,19 @@ class BorrowedComputer:
             _mutation_executor=self.__coordinator.execute,
         )
         return self.__coordinator.track(HotSessionClient(transport))
+
+    def observe_after_result_loss(self) -> Screenshot:
+        """Capture one fixed full inline PNG after a proven completed operation."""
+        from .namespaces import ScreenshotsNamespace
+
+        self.__ensure_active()
+        return self.__coordinator.observe_after_result_loss(
+            lambda: ScreenshotsNamespace(self.__client).full(
+                format="png",
+                processing="daemon",
+                storage="inline",
+            )
+        )
 
     def observation_stream(
         self,
@@ -358,6 +372,21 @@ class AsyncBorrowedComputer:
             _mutation_executor=self.__coordinator.execute,
         )
         return self.__coordinator.track(AsyncHotSessionClient(transport))
+
+    async def observe_after_result_loss(self) -> Screenshot:
+        """Capture one fixed full inline PNG after a proven completed operation."""
+        from .namespaces import AsyncScreenshotsNamespace
+
+        self.__ensure_active()
+
+        async def observe() -> Screenshot:
+            return await AsyncScreenshotsNamespace(self.__client).full(
+                format="png",
+                processing="daemon",
+                storage="inline",
+            )
+
+        return await self.__coordinator.observe_after_result_loss(observe)
 
     def observation_stream(
         self,
