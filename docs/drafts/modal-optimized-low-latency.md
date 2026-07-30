@@ -89,9 +89,9 @@ I sent the same four clicks both ways, 30 times each. One batch took 11.5 ms p50
 
 ## Why did command p95 jump to 249 ms?
 
-Once screenshots and clicks were taking tens of milliseconds, the command distribution looked wrong. The median was 56 ms, but p95 jumped to 249 ms even though the command already ran in a child process. Process separation had not moved the whole lifecycle away from the HTTP server. Uvicorn's event loop still managed the child's pipes, wait state, and cleanup, so a slow subprocess could hold up unrelated requests.
+Once screenshots and clicks were taking tens of milliseconds, the command distribution looked wrong. The median was 56 ms, but p95 jumped to 249 ms even though the command already ran in a child process. The child was separate, but Uvicorn's event loop still owned its stdin and output pipes, wait state, and cleanup. That lifecycle work shared the same scheduler as unrelated HTTP requests.
 
-I moved the subprocess lifecycle onto a private `SelectorEventLoop` running on a daemon thread. A bounded queue caps outstanding work, and cancellation terminates the child's process group before releasing capacity. The HTTP loop only receives the result. Command latency fell to 9.9 ms p50 and 10.6 ms p95.
+I moved the subprocess lifecycle onto a private `SelectorEventLoop` running on a daemon thread. Bounded admission caps outstanding work before a thread-safe handoff schedules the command on that loop. Uvicorn awaits a future while the private loop owns the child's pipes, wait state, and cleanup. Cancellation terminates the process group and acknowledges cleanup before releasing capacity. Command latency fell to 9.9 ms p50 and 10.6 ms p95.
 
 ![Subprocess I/O ownership moves from Uvicorn to a private event loop while the child process remains separate](../assets/modal-optimized-command-loop-isolation.svg)
 
