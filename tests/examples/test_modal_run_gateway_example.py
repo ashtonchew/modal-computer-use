@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import sys
 from datetime import UTC, datetime, timedelta
@@ -509,6 +510,7 @@ def test_mismatched_stale_reservation_is_rejected_before_reclaim() -> None:
     ("initial", "outcome", "expected"),
     [
         (gateway.RunState.RUNNING, gateway.PollState.PENDING, gateway.RunState.RUNNING),
+        (gateway.RunState.RUNNING, gateway.PollState.UNAVAILABLE, gateway.RunState.RUNNING),
         (gateway.RunState.RUNNING, gateway.PollState.SUCCEEDED, gateway.RunState.SUCCEEDED),
         (gateway.RunState.RUNNING, gateway.PollState.FAILED, gateway.RunState.FAILED),
         (gateway.RunState.RUNNING, gateway.PollState.CANCELLED, gateway.RunState.FAILED),
@@ -678,16 +680,34 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
         def from_id(cls, call_id):
             events.append(("from_id", call_id))
             return SimpleNamespace(
-                get=AioMethod("get", {"result-content-secret": True}),
+                get_call_graph=AioMethod(
+                    "get_call_graph",
+                    [SimpleNamespace(status=SimpleNamespace(name="SUCCESS"))],
+                ),
+                get=AioMethod("get", {"status": "succeeded"}),
                 cancel=AioMethod("cancel"),
             )
+
+    class ModalError(Exception):
+        pass
 
     fake_modal = SimpleNamespace(
         FunctionCall=FunctionCall,
         exception=SimpleNamespace(
-            TimeoutError=type("ModalTimeoutError", (Exception,), {}),
-            OutputExpiredError=type("OutputExpiredError", (Exception,), {}),
+            Error=ModalError,
+            AuthError=type("AuthError", (ModalError,), {}),
+            ConnectionError=type("ConnectionError", (ModalError,), {}),
+            DataLossError=type("DataLossError", (ModalError,), {}),
+            DeserializationError=type("DeserializationError", (ModalError,), {}),
+            ExecutionError=type("ExecutionError", (ModalError,), {}),
+            FunctionTimeoutError=type("FunctionTimeoutError", (ModalError,), {}),
+            InternalError=type("InternalError", (ModalError,), {}),
+            InternalFailure=type("InternalFailure", (ModalError,), {}),
             InputCancellation=type("InputCancellation", (BaseException,), {}),
+            NotFoundError=type("NotFoundError", (ModalError,), {}),
+            OutputExpiredError=type("OutputExpiredError", (ModalError,), {}),
+            ResourceExhaustedError=type("ResourceExhaustedError", (ModalError,), {}),
+            ServiceError=type("ServiceError", (ModalError,), {}),
         ),
     )
     monkeypatch.setattr(gateway, "modal", fake_modal)
@@ -702,7 +722,7 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
     outcome = await dispatcher.poll(call_id)
     await dispatcher.cancel(call_id)
 
-    assert outcome is gateway.PollState.SUCCEEDED
+    assert outcome == gateway.PollOutcome(gateway.PollState.SUCCEEDED)
     assert events == [
         (
             "spawn",
@@ -710,71 +730,322 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
             {},
         ),
         ("from_id", "fc-provider-secret"),
+        ("get_call_graph", (), {}),
         ("get", (), {"timeout": 0}),
         ("from_id", "fc-provider-secret"),
         ("cancel", (), {"terminate_containers": False}),
     ]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("exception_kind", "expected"),
-    [
-        ("modal_timeout", gateway.PollState.PENDING),
-        ("output_expired", gateway.PollState.INDETERMINATE),
-        ("builtin_timeout", gateway.PollState.FAILED),
-    ],
-)
-async def test_modal_poll_distinguishes_sdk_timeout_from_expired_output_and_user_error(
-    monkeypatch,
-    exception_kind: str,
-    expected,
-) -> None:
-    class ModalTimeoutError(Exception):
+def _fake_modal(
+    *, roots=None, graph_exception=None, result=None, get_exception=None, get_calls=None
+):
+    class ModalError(Exception):
         pass
 
-    class OutputExpiredError(ModalTimeoutError):
-        pass
+    exception_types = SimpleNamespace(
+        Error=ModalError,
+        AuthError=type("AuthError", (ModalError,), {}),
+        ConnectionError=type("ConnectionError", (ModalError,), {}),
+        DataLossError=type("DataLossError", (ModalError,), {}),
+        DeserializationError=type("DeserializationError", (ModalError,), {}),
+        ExecutionError=type("ExecutionError", (ModalError,), {}),
+        FunctionTimeoutError=type("FunctionTimeoutError", (ModalError,), {}),
+        InternalError=type("InternalError", (ModalError,), {}),
+        InternalFailure=type("InternalFailure", (ModalError,), {}),
+        InputCancellation=type("InputCancellation", (BaseException,), {}),
+        NotFoundError=type("NotFoundError", (ModalError,), {}),
+        OutputExpiredError=type("OutputExpiredError", (ModalError,), {}),
+        ResourceExhaustedError=type("ResourceExhaustedError", (ModalError,), {}),
+        ServiceError=type("ServiceError", (ModalError,), {}),
+    )
 
-    exception = {
-        "modal_timeout": ModalTimeoutError(),
-        "output_expired": OutputExpiredError(),
-        "builtin_timeout": TimeoutError("remote user timeout"),
-    }[exception_kind]
+    class Graph:
+        async def aio(self):
+            if graph_exception is not None:
+                raise graph_exception(exception_types)
+            return roots
 
     class Get:
         async def aio(self, *, timeout):
             assert timeout == 0
-            raise exception
+            if get_calls is not None:
+                get_calls.append(timeout)
+            if get_exception is not None:
+                raise get_exception(exception_types)
+            return result
 
     class FunctionCall:
         @classmethod
         def from_id(cls, call_id):
             assert call_id == "fc-provider-secret"
-            return SimpleNamespace(get=Get())
+            return SimpleNamespace(get_call_graph=Graph(), get=Get())
 
+    return SimpleNamespace(FunctionCall=FunctionCall, exception=exception_types)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("PENDING", gateway.PollOutcome(gateway.PollState.PENDING)),
+        ("FAILURE", gateway.PollOutcome(gateway.PollState.FAILED)),
+        ("INIT_FAILURE", gateway.PollOutcome(gateway.PollState.FAILED)),
+        (
+            "TIMEOUT",
+            gateway.PollOutcome(
+                gateway.PollState.FAILED,
+                gateway.PollReason.FUNCTION_TIMEOUT,
+            ),
+        ),
+        ("TERMINATED", gateway.PollOutcome(gateway.PollState.TERMINATED)),
+    ],
+)
+async def test_modal_poll_maps_each_non_success_call_graph_status(
+    monkeypatch, status, expected
+) -> None:
     monkeypatch.setattr(
         gateway,
         "modal",
-        SimpleNamespace(
-            FunctionCall=FunctionCall,
-            exception=SimpleNamespace(
-                TimeoutError=ModalTimeoutError,
-                OutputExpiredError=OutputExpiredError,
-                InputCancellation=type("InputCancellation", (BaseException,), {}),
-            ),
+        _fake_modal(roots=[SimpleNamespace(status=SimpleNamespace(name=status))]),
+    )
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    assert await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret")) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "roots",
+    [
+        [],
+        [object(), object()],
+        [SimpleNamespace(status=object())],
+        [SimpleNamespace(status=SimpleNamespace(name="UNKNOWN"))],
+    ],
+)
+async def test_modal_poll_incomplete_call_graph_is_unavailable_without_result_poll(
+    monkeypatch, roots
+) -> None:
+    get_calls = []
+    monkeypatch.setattr(
+        gateway,
+        "modal",
+        _fake_modal(roots=roots, result={"status": "succeeded"}, get_calls=get_calls),
+    )
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.UNAVAILABLE,
+        gateway.PollReason.CALL_GRAPH_UNAVAILABLE,
+    )
+    assert get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_modal_poll_lossy_graph_is_unavailable_without_result_poll(monkeypatch) -> None:
+    get_calls = []
+    runtime = _fake_modal(
+        graph_exception=lambda exc: exc.DataLossError(),
+        result={"status": "succeeded"},
+        get_calls=get_calls,
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.UNAVAILABLE,
+        gateway.PollReason.CALL_GRAPH_UNAVAILABLE,
+    )
+    assert get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_modal_poll_success_graph_with_remote_user_error_fails(monkeypatch) -> None:
+    runtime = _fake_modal(
+        roots=[SimpleNamespace(status=SimpleNamespace(name="SUCCESS"))],
+        get_exception=lambda _exc: ValueError("private remote failure"),
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(gateway.PollState.FAILED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["succeeded", "failed", "indeterminate"])
+async def test_modal_poll_validates_and_maps_strict_success_envelope(monkeypatch, status) -> None:
+    runtime = _fake_modal(
+        roots=[SimpleNamespace(status=SimpleNamespace(name="SUCCESS"))],
+        result={"status": status},
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome.state.value == status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    [None, "succeeded", {}, {"status": "unknown"}, {"status": "succeeded", "result": "x"}],
+)
+async def test_modal_poll_rejects_invalid_success_envelopes(monkeypatch, result) -> None:
+    monkeypatch.setattr(
+        gateway,
+        "modal",
+        _fake_modal(
+            roots=[SimpleNamespace(status=SimpleNamespace(name="SUCCESS"))],
+            result=result,
         ),
     )
     dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
 
     outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
 
-    assert outcome is expected
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.INDETERMINATE,
+        gateway.PollReason.INVALID_OUTCOME,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception_factory", "expected_state", "expected_reason"),
+    [
+        (lambda _exc: TimeoutError(), gateway.PollState.PENDING, None),
+        (
+            lambda exc: exc.OutputExpiredError(),
+            gateway.PollState.INDETERMINATE,
+            gateway.PollReason.OUTPUT_EXPIRED,
+        ),
+        (
+            lambda exc: exc.FunctionTimeoutError(),
+            gateway.PollState.FAILED,
+            gateway.PollReason.FUNCTION_TIMEOUT,
+        ),
+        (
+            lambda exc: exc.DeserializationError(),
+            gateway.PollState.INDETERMINATE,
+            gateway.PollReason.RESULT_DATA_LOSS,
+        ),
+        (
+            lambda exc: exc.DataLossError(),
+            gateway.PollState.INDETERMINATE,
+            gateway.PollReason.RESULT_DATA_LOSS,
+        ),
+    ],
+)
+async def test_modal_success_get_classifies_specific_result_errors(
+    monkeypatch, exception_factory, expected_state, expected_reason
+) -> None:
+    monkeypatch.setattr(
+        gateway,
+        "modal",
+        _fake_modal(
+            roots=[SimpleNamespace(status=SimpleNamespace(name="SUCCESS"))],
+            get_exception=exception_factory,
+        ),
+    )
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(expected_state, expected_reason)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exception_name",
+    [
+        "ConnectionError",
+        "ServiceError",
+        "AuthError",
+        "ResourceExhaustedError",
+        "InternalError",
+        "InternalFailure",
+    ],
+)
+async def test_modal_poll_transient_errors_are_unavailable(monkeypatch, exception_name) -> None:
+    runtime = _fake_modal(
+        graph_exception=lambda exc: getattr(exc, exception_name)(),
+    )
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.UNAVAILABLE,
+        gateway.PollReason.TRANSIENT_PROVIDER_ERROR,
+    )
+
+
+@pytest.mark.asyncio
+async def test_modal_poll_missing_call_is_indeterminate(monkeypatch) -> None:
+    runtime = _fake_modal(graph_exception=lambda exc: exc.NotFoundError())
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.INDETERMINATE,
+        gateway.PollReason.MISSING_CALL,
+    )
+
+
+@pytest.mark.asyncio
+async def test_modal_poll_propagates_async_request_cancellation(monkeypatch) -> None:
+    entered = asyncio.Event()
+
+    class Graph:
+        async def aio(self):
+            entered.set()
+            await asyncio.Future()
+
+    class FunctionCall:
+        @classmethod
+        def from_id(cls, _call_id):
+            return SimpleNamespace(get_call_graph=Graph())
+
+    runtime = _fake_modal(roots=[])
+    runtime.FunctionCall = FunctionCall
+    monkeypatch.setattr(gateway, "modal", runtime)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+    task = asyncio.create_task(
+        dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+    )
+    await entered.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_modal_adapter_fails_closed_when_modal_is_absent(monkeypatch) -> None:
+    monkeypatch.setattr(gateway, "modal", None)
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    with pytest.raises(ImportError, match="Modal is required"):
+        await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
 
 
 def test_example_has_no_primitive_proxy_core_export_or_production_memory_store() -> None:
     root = Path(__file__).resolve().parents[2]
-    source = (root / "examples" / "modal_run_gateway.py").read_text()
+    entry_source = (root / "examples" / "modal_run_gateway.py").read_text()
+    source = "\n".join(
+        path.read_text() for path in (root / "examples" / "run_gateway").glob("*.py")
+    )
     core_exports = (root / "src" / "modal_computer_use" / "__init__.py").read_text()
     handoff = (root / "examples" / "modal_function_session_handoff.py").read_text()
 
@@ -787,6 +1058,7 @@ def test_example_has_no_primitive_proxy_core_export_or_production_memory_store()
     assert "openai" not in source.lower()
     assert "anthropic" not in source.lower()
     assert "RunGatewayService" not in core_exports
+    assert len(entry_source.splitlines()) < 80
     assert "async with handle.borrow_async" in handoff
     assert "run_id=run_id" in handoff
 
@@ -804,3 +1076,43 @@ def test_missing_dependencies_and_default_service_fail_closed() -> None:
         gateway.build_run_gateway_app(None)
     with pytest.raises(RuntimeError, match="inject the application's PrincipalResolver"):
         gateway.build_default_service()
+
+
+def test_compatibility_entry_reexports_modal_run_gateway_class_when_installed() -> None:
+    from run_gateway import modal_adapter
+
+    assert gateway.modal is not None
+    assert gateway.RunGateway is modal_adapter.RunGateway
+    assert "RunGateway" in gateway.__all__
+
+
+def test_qualified_entry_shares_package_class_identity_and_accepts_package_service(
+    monkeypatch,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.delitem(sys.modules, "examples", raising=False)
+    importlib.invalidate_caches()
+    qualified = importlib.import_module("examples.modal_run_gateway")
+    package = importlib.import_module("examples.run_gateway")
+
+    assert qualified.RunGatewayService is package.RunGatewayService
+    assert qualified.RunRecord is package.RunRecord
+    assert qualified.ModalTrajectoryDispatcher is package.ModalTrajectoryDispatcher
+    if qualified.modal is not None:
+        assert qualified.RunGateway is package.modal_adapter.RunGateway
+
+    service = qualified.RunGatewayService(
+        principal_resolver=FakePrincipalResolver(),
+        session_catalog=FakeSessionCatalog(),
+        task_catalog=FakeTaskCatalog(),
+        run_store=FakeRunStore(),
+        dispatcher=FakeDispatcher(),
+        run_id_factory=lambda: "run-qualified",
+    )
+    client = TestClient(qualified.build_run_gateway_app(service))
+
+    response = client.post("/v1/runs", json=_body(), headers=_headers())
+
+    assert response.status_code == 202
+    assert response.json() == {"run_id": "run-qualified", "state": "running"}
