@@ -172,9 +172,20 @@ SDK does not retry, switch ingress, replay the callback, or replay the action. O
 an exclusive trajectory lease, heartbeats it independently from long target operations, and
 injects one gap-free sequence per mutation across HTTP and WebSocket primitives. A batch is one
 sequenced operation. Lost responses are resolved against the exact durable receipt and never
-replayed. A completed response-loss poisons only that borrow. Indeterminate state quarantines the
-target until the original owner inspects `recovery_status()` and acknowledges the exact incident.
-The lease serializes trajectories for one desktop; it is not a multi-tenant isolation boundary.
+replayed. A completed response-loss raises `OperationResultUnavailableError` with only the safe
+sequence and an allowlisted stable operation-kind label. That state permits repeated
+`observe_after_result_loss()` calls, each fixed to one daemon-processed full inline PNG with no
+artifact write or operation sequence. It does not retain or reconstruct the original result, and a
+successful observation never permits another mutation in the same borrow. The Function example
+reobserves once, returns only safe status metadata, and exits the borrow; an application that elects
+to continue must start a new borrow with a fresh run ID.
+
+Reobservation is evidence of one later visible frame, not proof of semantic success. It misses
+intermediate frames and animation and cannot prove readiness or expose invisible command,
+clipboard, download, filesystem, network, or other effects outside the screen. Indeterminate state
+still quarantines the target until the original owner inspects `recovery_status()` and acknowledges
+the exact incident. The lease serializes trajectories for one desktop; it is not a multi-tenant
+isolation boundary.
 
 Function capacity is independent from desktop capacity. `min_containers=0` allows the Function to
 scale to zero, adding a cold start after idle periods. A positive warm minimum reduces that startup
