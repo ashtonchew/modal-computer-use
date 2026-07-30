@@ -12,21 +12,21 @@ RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/se
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
-I used Modal because it let me rearrange the system I was measuring. The desktop ran in a Sandbox, the caller could run in a Function, and I owned the daemon inside the desktop. I left the documented E2B and Daytona paths at their provider defaults and changed Modal at each layer the trace implicated.
+I used Modal because it let me rearrange the system I was measuring. The desktop ran in a Sandbox, the caller could run in a Function, and I owned the daemon inside the desktop. I left the documented E2B and Daytona paths at their provider defaults. On Modal I could move the caller and replace stateless desktop helpers with long-lived ones, then measure each change.
 
 ## Was the tunnel slow, or was the caller far away?
 
-My first trace began outside Modal. The client sent each request through an attested HTTP tunnel to a warm daemon inside the desktop Sandbox. A full 1024x768 PNG took 230 ms p50.
+My first trace began outside Modal. The client sent each request through an attested HTTP tunnel to a warm daemon inside the desktop Sandbox. A full 1024x768 PNG took 230 ms p50. I needed to separate time spent reaching the desktop from time spent capturing it.
 
-I moved the same client into a Modal Function and requested `us-west-2` for both the Function and Sandbox. The request still crossed authenticated ingress, but it no longer started from my laptop. The screenshot fell to 29 ms p50. In a smaller test that held Connect fixed, one move-and-click fell from 32.4 ms outside Modal to 4.6 ms from the Function.
+To isolate caller placement, I reran both arms through Connect and moved only the caller. In the same run, one move-and-click fell from 32.4 ms outside Modal to 4.6 ms from a Modal Function. Moving the caller removed about 28 ms from the same request.
+
+The end-to-end optimized path changed caller placement and ingress together. I isolated ingress with a second A/B from one Function to one warm target, alternating Connect and the attested tunnel across 30 requests per arm. The winner flipped between runs, the largest gap was 1.24%, and every request succeeded.
+
+Caller placement was the useful lever. I moved the screenshot client into a Modal Function and requested `us-west-2` for both the Function and Sandbox. The request still crossed authenticated ingress, but it no longer started from my laptop. In the final provider run, the full PNG returned in 29 ms p50. Connect and the attested tunnel were effectively tied, so I kept the attested tunnel already used by the general client. A shared requested region does not imply the same availability zone, host, or private network.
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)
 
-That result was large, but the experiment had changed two variables: caller placement and ingress. I ran a second A/B from one Function to one warm target, alternating Connect and the attested tunnel across 30 requests per arm. The winner flipped between runs, the largest gap was 1.24%, and every request succeeded.
-
-The second A/B narrowed the large improvement to caller placement. Connect and the attested tunnel were effectively tied, so I kept the attested tunnel already used by the general client. Requesting the same Modal region shortens the recurring route without implying the same availability zone, host, or private network.
-
-In production, I pass a credential-free `ComputerSessionHandle` into a deployed Function, open one authenticated client, and reuse it for the trajectory. My application still owns the model loop and desktop lifetime, including preventing two trajectories from driving the same desktop at once.
+In production, a deployed Function receives a credential-free `ComputerSessionHandle`, opens one authenticated client, and reuses it for the trajectory. The application still owns the desktop and keeps competing trajectories off it.
 
 ## Why did every screenshot start a process?
 
@@ -38,7 +38,7 @@ X11 is the display server that owns the desktop's pixels. MSS became the persist
 
 MSS still has two escape hatches. It cannot compose the X11 cursor, so cursor-visible screenshots use the file path. If its display connection fails, the daemon reopens it once, then falls back to file capture. The usual cursor-hidden frame stays in memory.
 
-That removed process startup and disk I/O from the repeated path. Both Modal paths used MSS in the final run, yet the external caller took 230 ms and the region-matched Function 29 ms. With capture held constant, caller placement and configuration explained the gap.
+The usual cursor-hidden request now reads the current frame from the long-lived session and encodes it in memory. Process startup and temporary files stay out of the recurring path.
 
 ## A process for every click
 
@@ -48,9 +48,11 @@ The event mechanism was already fast. `xdotool` itself uses XTest, the X11 exten
 
 ![Per-action xdotool setup compared with one persistent X11 input connection](../assets/modal-optimized-input-session.svg)
 
-A pointer move followed by one left click fell from about 146 ms to 1.2 ms inside the daemon, a 128x speedup. Four move-and-click pairs took 4.8 ms instead of 444 ms.
+Inside the daemon, the mean for a pointer move followed by one left click fell from about 146 ms to 1.2 ms, a 128x speedup. Four move-and-click pairs took 4.8 ms instead of 444 ms.
 
-Typing improved less because every character still expands into key-down and key-up events. One hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms.
+Typing improved less because every character still expands into key-down and key-up events. The daemon-side mean for one hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms.
+
+Those daemon-side means isolate XTest from `xdotool`. The provider table later reports p50 for a separate end-to-end run on the final zero-delay typing configuration.
 
 The persistent session also owns keyboard state. On a US layout, `A` requires Shift plus `a`, while `@` requires Shift plus `2`; another layout may choose different keys. The daemon reads the active XKB map and builds the right key sequence. It holds the input lock throughout, so a second request cannot type while the first has Shift held or a mouse button down.
 
@@ -79,7 +81,7 @@ In a matched 30-sample A/B, one four-click request took 11.5 ms p50. Sending the
 
 ## Why did command p95 jump to 249 ms?
 
-Commands had a different failure shape. The median was 56 ms, but p95 jumped to 249 ms even though the command already ran in a child process. Process separation had not moved the whole lifecycle away from the HTTP server. Uvicorn's event loop still managed the child's pipes, wait state, and cleanup, so a slow subprocess could hold up unrelated requests.
+Once screenshots and clicks were taking tens of milliseconds, the command distribution looked wrong. The median was 56 ms, but p95 jumped to 249 ms even though the command already ran in a child process. Process separation had not moved the whole lifecycle away from the HTTP server. Uvicorn's event loop still managed the child's pipes, wait state, and cleanup, so a slow subprocess could hold up unrelated requests.
 
 I moved the subprocess lifecycle onto a private `SelectorEventLoop` running on a daemon thread. A bounded queue caps outstanding work, and cancellation terminates the child's process group before releasing capacity. The HTTP loop only receives the result. Command latency fell to 9.9 ms p50 and 10.6 ms p95.
 
@@ -91,7 +93,9 @@ My generic subprocess helper captured stdout and stderr. The long-lived selectio
 
 ## Modal optimized was up to 650x faster than provider defaults
 
-A full screenshot returned in 29 ms. One click took 10 ms. Every tuned warm primitive finished below 64 ms p50, and the largest measured gap was 648x on a 1,000-character typing request.
+A full screenshot returned in 29 ms, and one click took 10 ms. All six warm operations finished below 64 ms p50.
+
+The 650x ceiling came from typing 1,000 characters: 63 ms with zero-delay XTest versus 41,049 ms through E2B's public default. E2B's SDK does not expose its internal pacing, so 648x describes those two public behaviors.
 
 | Warm operation | Modal optimized p50 / p95 | Modal default p50 / p95 / ratio | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -103,8 +107,6 @@ A full screenshot returned in 29 ms. One click took 10 ms. Every tuned warm prim
 | Non-login shell command | 9.54 / 17.03 ms | 182.43 / 346.47 ms / 19.12x | 116.92 / 120.86 ms / 12.26x | 52.18 / 54.35 ms / 5.47x | 29.60 / 30.84 ms / 3.10x |
 
 I tuned only the Modal optimized path. The other columns are provider defaults from the pinned harness. The screenshot row uses each provider's native format: Tzafon returned a 1280x720 JPEG, while Modal, Daytona, and E2B returned a 1024x768 PNG.
-
-Typing followed each provider's public behavior. Modal optimized used zero-delay XTest events, Modal default selected clipboard, and the other SDKs did not expose their internal pacing. The 648x result describes those defaults.
 
 Request shape explains much of the four-click row. Modal optimized, Modal default, and Tzafon used one batch. Daytona used four requests. E2B used four SDK calls that produced eight transport requests.
 
@@ -124,9 +126,7 @@ With warm actions below 64 ms, the 7.8-second product create path is impossible 
 
 The benchmark begins at product creation and ends at a validated screenshot. Each provider packages different work, so the result does not represent an equivalent physical boot. The Modal timer begins before Sandbox creation and ends after the daemon is ready and the first PNG has been transferred and validated. The E2B harness uses its default desktop template, and E2B documents that a template can snapshot a running process so it is already alive at creation. Tzafon's public call does not expose enough stage timing to explain its 220 ms result.
 
-I need a startup trace before choosing a fix. If scheduling owns most of the delay, a pool of ready desktops could trade idle cost for immediate assignment. If desktop and daemon startup own it, a better prepared image could reduce the work without keeping capacity warm. Credential issuance, the first capture, and validation may point somewhere else.
-
-The warm loop got faster whenever I found setup work inside a repeated turn and paid it once instead. That leaves two measurements I still want: where the 7.8 seconds go, and which visible state proves that an action has finished. The computer is now fast enough for both waits to stand out.
+I need a startup trace before choosing a fix. The first boundary is Sandbox allocation. If it owns most of the 7.8 seconds, a pool of ready desktops could buy that time back at the cost of idle capacity. If it does not, I will keep following the delay through desktop startup, daemon readiness, and the first frame. The trace should decide whether to keep desktops ready or remove more startup work from the image.
 
 ## Source notes
 
