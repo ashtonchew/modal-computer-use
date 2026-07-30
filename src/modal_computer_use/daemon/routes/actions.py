@@ -83,7 +83,7 @@ async def run(
 ) -> ActionBatchResult:
     return await run_batch(
         payload,
-        ActionBatchContext(request.app.state),
+        ActionBatchContext(request.app.state, request.headers),
         idempotency_key=idempotency_key,
     )
 
@@ -99,7 +99,7 @@ async def run_raw_screenshot(
 ) -> Response:
     result, shot = await run_with_screenshot_bytes(
         payload,
-        ActionBatchContext(request.app.state),
+        ActionBatchContext(request.app.state, request.headers),
         idempotency_key=idempotency_key,
     )
     if shot is None:
@@ -178,7 +178,7 @@ async def run_observe_change_raw_screenshot(
         action_started = perf_counter()
         action_result = await run_batch(
             action_request,
-            ActionBatchContext(request.app.state),
+            ActionBatchContext(request.app.state, request.headers),
             idempotency_key=idempotency_key,
         )
         action_wall_ms = _elapsed_ms(action_started)
