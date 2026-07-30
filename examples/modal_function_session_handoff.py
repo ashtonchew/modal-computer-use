@@ -12,8 +12,10 @@ Deploy this module once before calling ``run_example``:
 from __future__ import annotations
 
 import asyncio
+import sys
 import uuid
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from modal_computer_use import (
@@ -22,6 +24,12 @@ from modal_computer_use import (
     ComputerSessionHandle,
     OperationResultUnavailableError,
 )
+
+_examples_dir = str(Path(__file__).resolve().parent)
+if _examples_dir not in sys.path:
+    sys.path.insert(0, _examples_dir)
+
+from run_gateway.domain import TrajectoryOutcome, TrajectoryStatus  # noqa: E402
 
 FUNCTION_REGION = "us-west"  # Replace with one measured Modal region selector.
 APP_NAME = "computer-use-function-handoff"
@@ -42,7 +50,7 @@ async def run_trajectory_body(
     run_id: str,
     function_region: str = FUNCTION_REGION,
     max_turns: int = 3,
-) -> dict[str, object]:
+) -> dict[str, str]:
     """Hold one borrowed connection across the repeated observe/decide/act loop."""
     async with handle.borrow_async(
         run_id=run_id, function_region=function_region
@@ -56,16 +64,10 @@ async def run_trajectory_body(
                     task=task, screenshot=screenshot, turn=turn
                 )
                 await computer.actions.run([action])
-        except OperationResultUnavailableError as exc:
-            frame = await computer.observe_after_result_loss()
-            return {
-                "completed": False,
-                "status": "result_unavailable",
-                "sequence": exc.sequence,
-                "operation_kind": exc.operation_kind,
-                "reobserved": frame.width > 0 and frame.height > 0,
-            }
-    return {"completed": True, "turns": max_turns}
+        except OperationResultUnavailableError:
+            await computer.observe_after_result_loss()
+            return TrajectoryOutcome(TrajectoryStatus.INDETERMINATE).as_dict()
+    return TrajectoryOutcome(TrajectoryStatus.SUCCEEDED).as_dict()
 
 
 async def run_distinct_trajectories_body(
@@ -74,7 +76,7 @@ async def run_distinct_trajectories_body(
     run_ids: list[str],
     *,
     function_region: str = FUNCTION_REGION,
-) -> list[dict[str, object]]:
+) -> list[dict[str, str]]:
     """Run independent trajectories concurrently, one lease per desktop."""
     if not (len(handles) == len(tasks) == len(run_ids)):
         raise ValueError("handles, tasks, and run_ids must have equal lengths")
@@ -118,7 +120,7 @@ else:
         handle: ComputerSessionHandle,
         task: str,
         run_id: str,
-    ) -> dict[str, object]:
+    ) -> dict[str, str]:
         return await run_trajectory_body(handle, task, run_id=run_id)
 
     @app.function(
@@ -133,7 +135,7 @@ else:
         handles: list[ComputerSessionHandle],
         tasks: list[str],
         run_ids: list[str],
-    ) -> list[dict[str, object]]:
+    ) -> list[dict[str, str]]:
         return await run_distinct_trajectories_body(handles, tasks, run_ids)
 
 

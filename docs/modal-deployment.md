@@ -356,6 +356,10 @@ cancellation is authorized against that stable tenant identity. The client suppl
 desktop/task keys plus a required idempotency key; it cannot supply a Sandbox ID, session handle,
 Function name, FunctionCall ID, owner label, endpoint, or token.
 
+The executable is a compatibility entry point over the behavior-local
+[`examples/run_gateway`](../examples/run_gateway) package: domain invariants, application ports,
+service orchestration, HTTP boundaries, and the Modal adapter remain independently testable.
+
 The application must provide an atomic durable `RunStore`. Creation reserves
 `(tenant_id, idempotency_key)` before calling `spawn.aio(handle, task, run_id)`, and duplicates
 return the original application run only when a durable SHA-256 admission fingerprint matches the
@@ -363,8 +367,13 @@ originally authorized opaque desktop/task key pair. A mismatch returns a sanitiz
 does not reclaim even a stale reservation; the raw keys, handle, and task text are not stored. A
 stale matching `reserved` record can win one CAS claim; a stale `dispatching` record becomes
 terminal `indeterminate` because the first spawn may already have crossed Modal's boundary. Once
-the private FunctionCall identity is stored, GET polls with
-`FunctionCall.from_id(...).get.aio(timeout=0)`. Cancellation durably enters
+the private FunctionCall identity is stored, GET first reads the Function call graph. A successful
+root is fetched once with `get.aio(timeout=0)` and must contain exactly the strict trajectory
+envelope `{"status": "succeeded" | "failed" | "indeterminate"}`. No task or result content is
+part of that contract. Pending and transiently unavailable polls preserve durable state; expired,
+missing, malformed, or lossy results become `indeterminate`. A terminated Function becomes
+`cancelled` only when cancellation intent was already durable, and otherwise becomes `failed`.
+Cancellation durably enters
 `cancellation_requested` before `cancel.aio(terminate_containers=False)` and never claims that the
 desktop was rolled back or terminated.
 

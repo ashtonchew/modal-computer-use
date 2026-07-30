@@ -99,7 +99,7 @@ async def test_one_function_body_borrows_once_across_the_complete_repeated_loop(
         max_turns=3,
     )
 
-    assert result == {"completed": True, "turns": 3}
+    assert result == {"status": "succeeded"}
     assert handle.borrow_calls == [("run-123", "us-west")]
     assert handle.borrow_environments == ["main"]
     assert computer.screenshot_calls == 3
@@ -128,13 +128,7 @@ async def test_function_body_reobserves_once_and_returns_only_safe_status_on_res
         max_turns=3,
     )
 
-    assert result == {
-        "completed": False,
-        "status": "result_unavailable",
-        "sequence": 4,
-        "operation_kind": "actions.run",
-        "reobserved": True,
-    }
+    assert result == {"status": "indeterminate"}
     assert "private-frame" not in repr(result)
     assert computer.reobservation_calls == 1
     assert len(computer.action_calls) == 1
@@ -155,8 +149,8 @@ async def test_concurrent_variant_requires_distinct_desktops(monkeypatch) -> Non
     )
 
     assert results == [
-        {"completed": True, "turns": 3},
-        {"completed": True, "turns": 3},
+        {"status": "succeeded"},
+        {"status": "succeeded"},
     ]
     duplicate = FakeHandle(FakeComputer(), sandbox_id="sandbox-a")
     with pytest.raises(ValueError, match="distinct desktop"):
