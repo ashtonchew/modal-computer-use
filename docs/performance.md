@@ -2,6 +2,19 @@
 
 Most latency in a computer-use loop comes from network round trips and screenshot encoding. This page lists the knobs that matter.
 
+## Receipt durability cost
+
+Each leased mutation crosses one target-local SQLite WAL commit with `synchronous=FULL` before the
+daemon dispatches the mutation. Terminal receipt bookkeeping remains `synchronous=NORMAL`, so the
+stronger synchronization cost is paid only at the safety boundary that prevents dispatch without a
+surviving `IN_PROGRESS` receipt. This is a surviving-target-filesystem guarantee, not remote
+persistence or desktop reconstruction after Sandbox loss.
+
+Measure the incremental cost on the intended runtime filesystem with alternating `FULL` and
+`NORMAL` pre-dispatch transactions, after warmup and with the same schema and terminal bookkeeping.
+Treat that local microbenchmark as deployment evidence rather than a production latency claim. Do
+not replace the safety boundary with a network filesystem or move the SQLite WAL to a Modal Volume.
+
 ## Modal Function handoff capacity
 
 A `ComputerSessionHandle` lets a Modal Function mint a fresh connection to an existing desktop and
