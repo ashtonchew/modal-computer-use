@@ -265,7 +265,12 @@ EDITOR_CSS = """
       font: 0.62rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
+    /* The bar is glass over the article: a thin veil of --surface plus a blur, so the
+       page reads through it. Both the veil and the edge are variables because every
+       state below moves them together, and the text on top never dims with them. */
     .be-bar {
+      --be-veil: color-mix(in oklch, var(--surface) 55%, transparent);
+      --be-edge: color-mix(in oklch, var(--rule) 34%, transparent);
       position: fixed;
       right: 1rem;
       bottom: 1rem;
@@ -274,36 +279,67 @@ EDITOR_CSS = """
       gap: 0.9rem;
       align-items: center;
       padding: 0.5rem 0.5rem 0.5rem 1rem;
-      border: 1px solid var(--rule);
+      border: 1px solid var(--be-edge);
       border-radius: 999px;
       background: var(--surface);
       color: var(--muted);
       font: 0.62rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      box-shadow: 0 0.4rem 1.5rem oklch(0% 0 0 / 0.5);
+      box-shadow: 0 0.3rem 1rem oklch(0% 0 0 / 0.28);
+      transition:
+        background-color 150ms ease,
+        border-color 150ms ease,
+        box-shadow 150ms ease;
     }
 
-    .be-bar .be-lead { color: var(--muted); opacity: 0.7; }
+    /* Without a backdrop filter the veil would sit on unblurred content, so the opaque
+       surface above stands as the fallback and only supporting browsers go translucent. */
+    @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+      .be-bar {
+        background: var(--be-veil);
+        -webkit-backdrop-filter: blur(14px) saturate(130%);
+        backdrop-filter: blur(14px) saturate(130%);
+      }
+    }
+
+    /* Quiet while it has nothing to report; solid once it does, or once you reach for it. */
+    .be-bar:hover,
+    .be-bar:focus-within,
+    .be-bar:not([data-tone=""]) {
+      --be-veil: color-mix(in oklch, var(--surface) 88%, transparent);
+      --be-edge: color-mix(in oklch, var(--rule) 72%, transparent);
+      box-shadow: 0 0.4rem 1.4rem oklch(0% 0 0 / 0.42);
+    }
+
     .be-bar .be-status { color: var(--ink); }
     .be-bar[data-tone="dirty"] .be-status { color: var(--link); }
-    .be-bar[data-tone="error"] { border-color: var(--link); }
+    .be-bar[data-tone="error"] { --be-edge: var(--link); }
     .be-bar[data-tone="error"] .be-status { color: var(--link); }
 
     .be-bar button {
       padding: 0.45rem 0.95rem;
-      border: 1px solid var(--rule);
+      border: 1px solid color-mix(in oklch, var(--rule) 70%, transparent);
       border-radius: 999px;
-      background: var(--bg);
+      background: color-mix(in oklch, var(--bg) 80%, transparent);
       color: var(--ink);
       font: inherit;
       cursor: pointer;
+      transition:
+        background-color 150ms ease,
+        border-color 150ms ease,
+        color 150ms ease;
     }
 
-    .be-bar button:hover:not(:disabled) { border-color: var(--link); color: var(--link); }
-    .be-bar button:disabled { opacity: 0.4; cursor: default; }
+    /* Enabled only ever means there is something to save, so the rim says so. */
+    .be-bar button:enabled { border-color: color-mix(in oklch, var(--link) 60%, transparent); }
 
-    @media (max-width: 600px) {
-      .be-bar .be-lead { display: none; }
+    .be-bar button:hover:enabled,
+    .be-bar button:focus-visible {
+      border-color: var(--link);
+      background: var(--bg);
+      color: var(--link);
     }
+
+    .be-bar button:disabled { opacity: 0.5; cursor: default; }
 """
 
 EDITOR_JS = r"""
@@ -526,9 +562,8 @@ EDITOR_JS = r"""
 """
 
 EDITOR_BAR = """
-  <div class="be-bar" data-tone="" role="status">
-    <span class="be-lead">Double-click a block to edit its Markdown</span>
-    <span class="be-status">No unsaved edits</span>
+  <div class="be-bar" data-tone="">
+    <span class="be-status" role="status">No unsaved edits</span>
     <button type="button" class="be-save" disabled>Save</button>
   </div>"""
 
