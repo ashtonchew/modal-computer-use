@@ -533,6 +533,16 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
                     headers=lease_headers,
                 )
             )
+
+            async def renew_while_running() -> None:
+                while not mutation.done():
+                    heartbeat = await client.post(
+                        "/v1/leases/heartbeat", headers=lease_headers
+                    )
+                    assert heartbeat.status_code == 200
+                    await asyncio.sleep(0.008)
+
+            renewal = asyncio.create_task(renew_while_running())
             admission = asyncio.create_task(admitted.wait())
             done, _pending = await asyncio.wait(
                 {admission, mutation},
@@ -546,13 +556,8 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
                     f"status={early.status_code} code={early.json().get('code')}"
                 )
             assert admission in done, "mutation did not reach backend admission within 1s"
-            while not mutation.done():
-                heartbeat = await client.post(
-                    "/v1/leases/heartbeat", headers=lease_headers
-                )
-                assert heartbeat.status_code == 200
-                await asyncio.sleep(0.008)
             result = await mutation
+            await renewal
             status = await client.get("/v1/leases/status")
             receipt = await client.post(
                 "/v1/receipts/status",
