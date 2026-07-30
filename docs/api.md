@@ -98,8 +98,35 @@ There is no automatic retry, fallback, callback replay, or action replay after p
 On a lost response the borrower resolves that exact sequence from the daemon's durable receipt:
 proven missing raises `OperationNotAppliedError`, completed-without-result raises
 `OperationResultUnavailableError`, and indeterminate work raises `ActionOutcomeUnknownError` or
-`SessionRecoveryRequiredError`. All seal the current borrow; only an indeterminate target requires
-owner recovery. The original `ComputerSandbox` owner can inspect `recovery_status()` and call
+`SessionRecoveryRequiredError`. `OperationResultUnavailableError` exposes only the completed
+operation's nonnegative `sequence` and an allowlisted `operation_kind` when the daemon supplied a
+known stable route label; its message and representation remain generic.
+
+After that specific completed-without-result error, the borrowed facade provides one explicit
+read-only recovery convenience:
+
+```python
+try:
+    await computer.actions.run(actions)
+except OperationResultUnavailableError as exc:
+    frame = await computer.observe_after_result_loss()
+    # Decide from visible state, then leave this borrow. Use exc.sequence and
+    # exc.operation_kind only as safe diagnostic metadata.
+```
+
+`observe_after_result_loss()` accepts no options. It always captures the full screen as an inline
+PNG with daemon processing, creates no artifact, consumes no operation sequence, and may be called
+repeatedly while the borrow remains open. The original result is neither retained nor replayed.
+Observation success never clears the mutation block: every later mutation in that borrow still
+fails, so any application-elected continuation must leave the context and use a fresh run ID.
+Other read-only namespaces remain available; this helper does not create generic result recovery
+for commands or artifacts.
+
+A reobserved frame shows only one later visible state. It cannot reconstruct intermediate frames
+or animation, prove readiness, or establish semantic success. It also cannot reveal invisible
+command, clipboard, download, filesystem, network, or other effects outside the captured screen.
+All receipt outcomes seal the current borrow; only an indeterminate target requires owner recovery.
+The original `ComputerSandbox` owner can inspect `recovery_status()` and call
 `acknowledge_recovery(incident_id=...)`; attached objects without its private owner proof fail
 closed. Exclusive lease ownership prevents overlapping trajectories for one desktop but is not a
 claim that one desktop is safe for multiple tenants.

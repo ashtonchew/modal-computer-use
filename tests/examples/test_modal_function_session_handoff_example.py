@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from modal_computer_use import OperationResultUnavailableError
+
 
 def _load_example():
     path = Path(__file__).resolve().parents[2] / "examples" / "modal_function_session_handoff.py"
@@ -27,6 +29,8 @@ class FakeComputer:
     def __init__(self) -> None:
         self.screenshot_calls = 0
         self.action_calls: list[list[dict[str, object]]] = []
+        self.reobservation_calls = 0
+        self.result_loss: OperationResultUnavailableError | None = None
         self.screenshots = SimpleNamespace(full=self.full)
         self.actions = SimpleNamespace(run=self.run)
 
@@ -36,6 +40,12 @@ class FakeComputer:
 
     async def run(self, actions: list[dict[str, object]]) -> None:
         self.action_calls.append(actions)
+        if self.result_loss is not None:
+            raise self.result_loss
+
+    async def observe_after_result_loss(self) -> object:
+        self.reobservation_calls += 1
+        return SimpleNamespace(width=1024, height=768, data_base64="private-frame")
 
 
 class FakeHandle:
@@ -95,6 +105,39 @@ async def test_one_function_body_borrows_once_across_the_complete_repeated_loop(
     assert computer.screenshot_calls == 3
     assert len(computer.action_calls) == 3
     assert handle.active_during_operations == [True] * 6
+    assert handle.active is False
+
+
+@pytest.mark.asyncio
+async def test_function_body_reobserves_once_and_returns_only_safe_status_on_result_loss(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "main")
+    computer = FakeComputer()
+    computer.result_loss = OperationResultUnavailableError(
+        sequence=4,
+        operation_kind="actions.run",
+    )
+    handle = FakeHandle(computer)
+
+    result = await example.run_trajectory_body(
+        handle,
+        "private task placeholder",
+        run_id="run-123",
+        function_region="us-west",
+        max_turns=3,
+    )
+
+    assert result == {
+        "completed": False,
+        "status": "result_unavailable",
+        "sequence": 4,
+        "operation_kind": "actions.run",
+        "reobserved": True,
+    }
+    assert "private-frame" not in repr(result)
+    assert computer.reobservation_calls == 1
+    assert len(computer.action_calls) == 1
     assert handle.active is False
 
 

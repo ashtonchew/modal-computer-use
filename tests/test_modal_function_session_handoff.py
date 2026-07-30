@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from modal_computer_use import (
+    AsyncBorrowedComputer,
     BorrowedComputer,
     ComputerConfig,
     ComputerSandbox,
@@ -147,6 +148,9 @@ class _Coordinator:
 
     def execute(self, request):
         return request({})
+
+    def observe_after_result_loss(self, request):
+        return request()
 
     def metadata_headers(self) -> dict[str, str]:
         return {}
@@ -497,6 +501,7 @@ def test_borrowed_computer_exposes_only_daemon_capabilities(monkeypatch) -> None
             "windows",
             "hot_session",
             "observation_stream",
+            "observe_after_result_loss",
         ):
             assert hasattr(borrowed, capability)
         for forbidden in (
@@ -520,6 +525,196 @@ def test_borrowed_computer_exposes_only_daemon_capabilities(monkeypatch) -> None
             "metadata",
         ):
             assert not hasattr(borrowed, forbidden)
+
+
+def _inline_png_payload() -> dict[str, object]:
+    return {
+        "format": "png",
+        "width": 1,
+        "height": 1,
+        "size_bytes": 1,
+        "data_base64": "AA==",
+        "artifact_uri": None,
+        "coordinate_space": {
+            "desktop_width": 1,
+            "desktop_height": 1,
+            "image_width": 1,
+            "image_height": 1,
+        },
+    }
+
+
+def test_sync_lost_result_observation_has_fixed_inline_full_png_semantics() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        def post_json(self, path: str, **kwargs: object) -> dict[str, object]:
+            self.calls.append((path, kwargs))
+            return _inline_png_payload()
+
+    client = Client()
+    coordinator = _Coordinator()
+    borrowed = BorrowedComputer(
+        client,  # type: ignore[arg-type]
+        coordinator,  # type: ignore[arg-type]
+        base_url="https://private.invalid",
+        token="credential-value",
+        http2=False,
+    )
+
+    frame = borrowed.observe_after_result_loss()
+
+    assert frame.format == "png"
+    assert frame.artifact_uri is None
+    assert client.calls == [
+        (
+            "/v1/screenshots/full",
+            {
+                "json": {
+                    "format": "png",
+                    "quality": 90,
+                    "scale": 1.0,
+                    "show_cursor": False,
+                    "processing": "daemon",
+                    "storage": "inline",
+                },
+                "_mutation": False,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_async_lost_result_observation_has_fixed_inline_full_png_semantics() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def post_json(self, path: str, **kwargs: object) -> dict[str, object]:
+            self.calls.append((path, kwargs))
+            return _inline_png_payload()
+
+    class Coordinator:
+        async def observe_after_result_loss(self, request):
+            return await request()
+
+    client = Client()
+    borrowed = AsyncBorrowedComputer(
+        client,  # type: ignore[arg-type]
+        Coordinator(),  # type: ignore[arg-type]
+        base_url="https://private.invalid",
+        token="credential-value",
+        http2=False,
+    )
+
+    frame = await borrowed.observe_after_result_loss()
+
+    assert frame.format == "png"
+    assert frame.artifact_uri is None
+    assert client.calls == [
+        (
+            "/v1/screenshots/full",
+            {
+                "json": {
+                    "format": "png",
+                    "quality": 90,
+                    "scale": 1.0,
+                    "show_cursor": False,
+                    "processing": "daemon",
+                    "storage": "inline",
+                },
+                "_mutation": False,
+            },
+        )
+    ]
+
+
+def test_failed_sync_lost_result_observation_still_releases_and_detaches(
+    monkeypatch,
+) -> None:
+    _computer, target, client = _borrowed_computer()
+
+    class Coordinator(_Coordinator):
+        def observe_after_result_loss(self, _request):
+            raise ConnectionError("private endpoint and token")
+
+    coordinator = Coordinator()
+    borrowed = BorrowedComputer(
+        client,  # type: ignore[arg-type]
+        coordinator,  # type: ignore[arg-type]
+        base_url=client.base_url,
+        token=client.transport.token,
+        http2=False,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._borrow_modal_function_session",
+        lambda _handle, **_kwargs: (borrowed, target, client, coordinator),
+    )
+
+    with (
+        pytest.raises(ConnectionError, match="private endpoint"),
+        _handle().borrow(run_id="run-123", function_region="us-west") as retained,
+    ):
+        retained.observe_after_result_loss()
+
+    assert coordinator.close_calls == 1
+    assert client.close_calls == 1
+    assert target.detach_calls == 1
+    assert target.terminate_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_async_lost_result_observation_still_releases_and_detaches(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class Client:
+        async def aclose(self) -> None:
+            calls.append("client.aclose")
+
+    class Coordinator:
+        async def observe_after_result_loss(self, _request):
+            raise ConnectionError("private endpoint and token")
+
+        async def aclose(self) -> None:
+            calls.append("coordinator.aclose")
+
+    class Target:
+        def __init__(self) -> None:
+            self.detach = _AioCall(self._detach)
+
+        async def _detach(self) -> None:
+            calls.append("detach.aio")
+
+    client = Client()
+    coordinator = Coordinator()
+    target = Target()
+    borrowed = AsyncBorrowedComputer(
+        client,  # type: ignore[arg-type]
+        coordinator,  # type: ignore[arg-type]
+        base_url="https://private.invalid",
+        token="credential-value",
+        http2=False,
+    )
+
+    async def attach(*_args: object, **_kwargs: object):
+        return borrowed, target, client, coordinator
+
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._borrow_modal_function_session_async",
+        attach,
+    )
+
+    with pytest.raises(ConnectionError, match="private endpoint"):
+        async with _handle().borrow_async(
+            run_id="async-run",
+            function_region="us-west",
+        ) as retained:
+            await retained.observe_after_result_loss()
+
+    assert calls == ["coordinator.aclose", "client.aclose", "detach.aio"]
 
 
 def test_borrow_context_rejects_second_entry_without_replacing_live_client(monkeypatch) -> None:
@@ -1327,7 +1522,6 @@ def test_public_session_errors_redact_caller_supplied_identity_and_content() -> 
         "SessionLeaseLostError",
         "RunSequenceConflictError",
         "ActionOutcomeUnknownError",
-        "OperationResultUnavailableError",
         "OperationNotAppliedError",
         "SessionRecoveryRequiredError",
     )
@@ -1337,6 +1531,14 @@ def test_public_session_errors_redact_caller_supplied_identity_and_content() -> 
         rendered = f"{error!s} {error!r}"
         assert "sb-secret" not in rendered
         assert "private task" not in rendered
+
+    unavailable = modal_computer_use.OperationResultUnavailableError(
+        sequence=3,
+        operation_kind="actions.run",
+    )
+    rendered = f"{unavailable!s} {unavailable!r}"
+    assert "sb-secret" not in rendered
+    assert "private task" not in rendered
 
 
 def test_deployed_handoff_smoke_source_is_bounded_and_returns_only_safe_aggregates() -> None:

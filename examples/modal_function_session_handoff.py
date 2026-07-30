@@ -16,7 +16,12 @@ import uuid
 from contextlib import suppress
 from typing import Any
 
-from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSessionHandle
+from modal_computer_use import (
+    ComputerConfig,
+    ComputerSandbox,
+    ComputerSessionHandle,
+    OperationResultUnavailableError,
+)
 
 FUNCTION_REGION = "us-west"  # Replace with one measured Modal region selector.
 APP_NAME = "computer-use-function-handoff"
@@ -42,14 +47,24 @@ async def run_trajectory_body(
     async with handle.borrow_async(
         run_id=run_id, function_region=function_region
     ) as computer:
-        for turn in range(max_turns):
-            screenshot = await computer.screenshots.full(
-                format="png", processing="daemon"
-            )
-            action = await choose_action_with_model(
-                task=task, screenshot=screenshot, turn=turn
-            )
-            await computer.actions.run([action])
+        try:
+            for turn in range(max_turns):
+                screenshot = await computer.screenshots.full(
+                    format="png", processing="daemon"
+                )
+                action = await choose_action_with_model(
+                    task=task, screenshot=screenshot, turn=turn
+                )
+                await computer.actions.run([action])
+        except OperationResultUnavailableError as exc:
+            frame = await computer.observe_after_result_loss()
+            return {
+                "completed": False,
+                "status": "result_unavailable",
+                "sequence": exc.sequence,
+                "operation_kind": exc.operation_kind,
+                "reobserved": frame.width > 0 and frame.height > 0,
+            }
     return {"completed": True, "turns": max_turns}
 
 

@@ -76,6 +76,23 @@ class _AsyncTransport(_SyncTransport):
         return super().request(method, path, **kwargs)
 
 
+def _exception_graph(error: BaseException) -> list[BaseException]:
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    graph: list[BaseException] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        graph.append(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return graph
+
+
 def test_sync_sequence_is_gap_free_and_shared_by_all_executors() -> None:
     transport = _SyncTransport()
     coordinator = SessionLeaseCoordinator(transport, run_id="run-a")
@@ -127,8 +144,16 @@ def test_received_missing_error_does_not_consume_sequence() -> None:
 
 def test_completed_delivered_error_advances_but_only_result_unavailable_poisons() -> None:
     transport = _SyncTransport()
-    transport.status[0] = {"state": "COMPLETED", "sequence": 0}
-    transport.status[2] = {"state": "COMPLETED", "sequence": 2}
+    transport.status[0] = {
+        "state": "COMPLETED",
+        "sequence": 0,
+        "operation_kind": "actions.run",
+    }
+    transport.status[2] = {
+        "state": "COMPLETED",
+        "sequence": 2,
+        "operation_kind": "/v1/mouse/click",
+    }
     coordinator = SessionLeaseCoordinator(transport, run_id="run-a")
     coordinator.acquire()
 
@@ -142,7 +167,7 @@ def test_completed_delivered_error_advances_but_only_result_unavailable_poisons(
         lambda headers: int(headers["x-computer-use-operation-sequence"])
     ) == 1
 
-    with pytest.raises(OperationResultUnavailableError):
+    with pytest.raises(OperationResultUnavailableError) as raised:
         coordinator.execute(
             lambda _headers: (_ for _ in ()).throw(
                 DaemonHTTPError(
@@ -150,9 +175,214 @@ def test_completed_delivered_error_advances_but_only_result_unavailable_poisons(
                 )
             )
         )
+    assert raised.value.sequence == 2
+    assert raised.value.operation_kind == "/v1/mouse/click"
     with pytest.raises(ActionOutcomeUnknownError):
         coordinator.execute(lambda _headers: None)
     coordinator.close()
+
+
+def test_result_unavailable_error_exposes_only_safe_validated_metadata() -> None:
+    error = OperationResultUnavailableError(
+        sequence=7,
+        operation_kind="actions.run",
+    )
+
+    assert vars(error) == {"sequence": 7, "operation_kind": "actions.run"}
+    rendered = f"{error!s} {error!r}"
+    assert rendered == (
+        "the operation result is unavailable "
+        "OperationResultUnavailableError('the operation result is unavailable')"
+    )
+    assert "daemon.invalid" not in rendered
+    assert "protected" not in rendered
+
+    for sequence in (-1, True, 1.5):
+        with pytest.raises(ValueError, match="sequence"):
+            OperationResultUnavailableError(
+                sequence=sequence,  # type: ignore[arg-type]
+                operation_kind="actions.run",
+            )
+    with pytest.raises(ValueError, match="operation_kind") as raised:
+        OperationResultUnavailableError(
+            sequence=0,
+            operation_kind="https://daemon.invalid/private-operation",
+        )
+    assert "daemon.invalid" not in str(raised.value)
+
+
+def test_unallowlisted_daemon_operation_kind_is_redacted_to_none() -> None:
+    transport = _SyncTransport()
+    transport.resolved[0] = {
+        "state": "COMPLETED",
+        "sequence": 0,
+        "operation_kind": "https://daemon.invalid?token=protected",
+    }
+    coordinator = SessionLeaseCoordinator(transport, run_id="run-a")
+    coordinator.acquire()
+
+    with pytest.raises(OperationResultUnavailableError) as raised:
+        coordinator.execute(
+            lambda _headers: (_ for _ in ()).throw(
+                httpx.ReadTimeout("private endpoint and token")
+            )
+        )
+
+    assert raised.value.sequence == 0
+    assert raised.value.operation_kind is None
+    rendered = f"{raised.value!s} {raised.value!r}"
+    assert "daemon.invalid" not in rendered
+    assert "protected" not in rendered
+    coordinator.close()
+
+
+def test_sync_result_unavailable_drops_raw_daemon_and_transport_exception_chains() -> None:
+    sentinel = "sentinel-endpoint-token-sync"
+    cases = (
+        (
+            "received",
+            DaemonHTTPError(sentinel, code="operation_result_unavailable"),
+        ),
+        ("transport", httpx.ReadTimeout(sentinel)),
+    )
+    for mode, raw_error in cases:
+        transport = _SyncTransport()
+        receipt = {
+            "state": "COMPLETED",
+            "sequence": 0,
+            "operation_kind": "actions.run",
+        }
+        if mode == "received":
+            transport.status[0] = receipt
+        else:
+            transport.resolved[0] = receipt
+        coordinator = SessionLeaseCoordinator(transport, run_id=f"run-{mode}")
+        coordinator.acquire()
+
+        with pytest.raises(OperationResultUnavailableError) as raised:
+            coordinator.execute(
+                lambda _headers, error=raw_error: (_ for _ in ()).throw(error)
+            )
+
+        graph = _exception_graph(raised.value)
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+        assert graph == [raised.value]
+        assert sentinel not in " ".join(
+            f"{error!s} {error!r}" for error in graph
+        )
+        coordinator.close()
+
+
+def test_sync_reobservation_requires_result_loss_and_never_reenables_mutation() -> None:
+    transport = _SyncTransport()
+    transport.resolved[0] = {
+        "state": "COMPLETED",
+        "sequence": 0,
+        "operation_kind": "actions.run",
+    }
+    coordinator = SessionLeaseCoordinator(transport, run_id="run-a")
+    coordinator.acquire()
+
+    with pytest.raises(ActionOutcomeUnknownError):
+        coordinator.observe_after_result_loss(lambda: "must not run")
+
+    dispatches = 0
+
+    def lost(_headers: Any) -> None:
+        nonlocal dispatches
+        dispatches += 1
+        raise httpx.ReadTimeout("private endpoint and token")
+
+    with pytest.raises(OperationResultUnavailableError) as raised:
+        coordinator.execute(lost)
+    assert raised.value.sequence == 0
+    assert raised.value.operation_kind == "actions.run"
+    assert raised.value.__cause__ is None
+    assert "private" not in f"{raised.value!s} {raised.value!r}"
+    assert "token" not in f"{raised.value!s} {raised.value!r}"
+
+    observations = 0
+
+    def observe() -> str:
+        nonlocal observations
+        observations += 1
+        return "frame"
+
+    assert coordinator.observe_after_result_loss(observe) == "frame"
+    assert coordinator.observe_after_result_loss(observe) == "frame"
+    with pytest.raises(ActionOutcomeUnknownError):
+        coordinator.execute(lost)
+    assert dispatches == 1
+    assert observations == 2
+
+    coordinator.close()
+    with pytest.raises(SessionLeaseLostError):
+        coordinator.observe_after_result_loss(observe)
+
+
+def test_sync_failed_resolution_is_unsafe_but_new_run_can_mutate() -> None:
+    first_transport = _SyncTransport()
+    first = SessionLeaseCoordinator(first_transport, run_id="run-a")
+    first.acquire()
+
+    with pytest.raises(ActionOutcomeUnknownError):
+        first.execute(
+            lambda _headers: (_ for _ in ()).throw(
+                httpx.ReadTimeout("private endpoint and token")
+            )
+        )
+    with pytest.raises(ActionOutcomeUnknownError):
+        first.observe_after_result_loss(lambda: "must not run")
+    first.close()
+
+    second_transport = _SyncTransport()
+    second = SessionLeaseCoordinator(second_transport, run_id="run-b")
+    second.acquire()
+    assert second.execute(lambda headers: headers["x-computer-use-operation-sequence"]) == "0"
+    second.close()
+
+
+def test_sync_cleanup_waits_for_result_loss_observation_lock() -> None:
+    transport = _SyncTransport()
+    transport.resolved[0] = {
+        "state": "COMPLETED",
+        "sequence": 0,
+        "operation_kind": "actions.run",
+    }
+    coordinator = SessionLeaseCoordinator(transport, run_id="run-a")
+    coordinator.acquire()
+    with pytest.raises(OperationResultUnavailableError):
+        coordinator.execute(
+            lambda _headers: (_ for _ in ()).throw(httpx.ReadTimeout("lost"))
+        )
+
+    observation_started = threading.Event()
+    finish_observation = threading.Event()
+
+    def observe() -> str:
+        observation_started.set()
+        finish_observation.wait(timeout=1.0)
+        return "frame"
+
+    observation = threading.Thread(
+        target=lambda: coordinator.observe_after_result_loss(observe)
+    )
+    observation.start()
+    assert observation_started.wait(timeout=1.0)
+    cleanup = threading.Thread(target=coordinator.close)
+    cleanup.start()
+    time.sleep(0.01)
+
+    assert cleanup.is_alive()
+    assert "/v1/leases/release" not in [path for path, _ in transport.calls]
+
+    finish_observation.set()
+    observation.join(timeout=1.0)
+    cleanup.join(timeout=1.0)
+    assert not observation.is_alive()
+    assert not cleanup.is_alive()
+    assert [path for path, _ in transport.calls].count("/v1/leases/release") == 1
 
 
 def test_received_stale_lease_maps_without_receipt_query() -> None:
@@ -225,6 +455,176 @@ async def test_async_cancellation_resolves_before_propagation_without_replay() -
         await task
     assert "/v1/receipts/resolve" in [path for path, _ in transport.calls]
     await coordinator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_reobservation_is_repeatable_cancellable_and_keeps_mutations_blocked() -> None:
+    transport = _AsyncTransport()
+    heartbeat_transport = _SyncTransport()
+    transport.resolved[0] = {
+        "state": "COMPLETED",
+        "sequence": 0,
+        "operation_kind": "actions.run",
+    }
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.1,
+    )
+    await coordinator.acquire()
+
+    async def lost(_headers: Any) -> None:
+        raise httpx.ReadTimeout("private endpoint and token")
+
+    with pytest.raises(OperationResultUnavailableError) as raised:
+        await coordinator.execute(lost)
+    assert raised.value.sequence == 0
+    assert raised.value.operation_kind == "actions.run"
+
+    observation_started = asyncio.Event()
+
+    async def blocked_observation() -> str:
+        observation_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    task = asyncio.create_task(
+        coordinator.observe_after_result_loss(blocked_observation)
+    )
+    await observation_started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert await coordinator.observe_after_result_loss(lambda: _async_value("frame")) == "frame"
+    assert await coordinator.observe_after_result_loss(lambda: _async_value("frame")) == "frame"
+    with pytest.raises(ActionOutcomeUnknownError):
+        await coordinator.execute(lost)
+    await coordinator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_result_unavailable_drops_raw_daemon_and_transport_exception_chains() -> None:
+    sentinel = "sentinel-endpoint-token-async"
+    cases = (
+        (
+            "received",
+            DaemonHTTPError(sentinel, code="operation_result_unavailable"),
+        ),
+        ("transport", httpx.ReadTimeout(sentinel)),
+    )
+    for mode, raw_error in cases:
+        transport = _AsyncTransport()
+        heartbeat_transport = _SyncTransport()
+        receipt = {
+            "state": "COMPLETED",
+            "sequence": 0,
+            "operation_kind": "actions.run",
+        }
+        if mode == "received":
+            transport.status[0] = receipt
+        else:
+            transport.resolved[0] = receipt
+        coordinator = AsyncSessionLeaseCoordinator(
+            transport,
+            run_id=f"run-{mode}",
+            heartbeat_transport=heartbeat_transport,
+            heartbeat_join_timeout_seconds=0.1,
+        )
+        await coordinator.acquire()
+
+        with pytest.raises(OperationResultUnavailableError) as raised:
+            await coordinator.execute(
+                lambda _headers, error=raw_error: _raise_async(error)
+            )
+
+        graph = _exception_graph(raised.value)
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+        assert graph == [raised.value]
+        assert sentinel not in " ".join(
+            f"{error!s} {error!r}" for error in graph
+        )
+        await coordinator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_cleanup_waits_for_result_loss_observation_lock() -> None:
+    transport = _AsyncTransport()
+    heartbeat_transport = _SyncTransport()
+    transport.resolved[0] = {
+        "state": "COMPLETED",
+        "sequence": 0,
+        "operation_kind": "actions.run",
+    }
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.1,
+    )
+    await coordinator.acquire()
+
+    with pytest.raises(OperationResultUnavailableError):
+        await coordinator.execute(
+            lambda _headers: _raise_async(httpx.ReadTimeout("lost"))
+        )
+
+    observation_started = asyncio.Event()
+    finish_observation = asyncio.Event()
+
+    async def observe() -> str:
+        observation_started.set()
+        await finish_observation.wait()
+        return "frame"
+
+    observation = asyncio.create_task(coordinator.observe_after_result_loss(observe))
+    await observation_started.wait()
+    cleanup = asyncio.create_task(coordinator.aclose())
+    await asyncio.sleep(0)
+
+    assert not cleanup.done()
+    assert "/v1/leases/release" not in [path for path, _ in transport.calls]
+
+    finish_observation.set()
+    assert await observation == "frame"
+    await cleanup
+    assert [path for path, _ in transport.calls].count("/v1/leases/release") == 1
+
+
+async def _async_value(value: str) -> str:
+    return value
+
+
+@pytest.mark.asyncio
+async def test_async_reobservation_rejects_active_unsafe_and_closed_states() -> None:
+    transport = _AsyncTransport()
+    heartbeat_transport = _SyncTransport()
+    coordinator = AsyncSessionLeaseCoordinator(
+        transport,
+        run_id="run-a",
+        heartbeat_transport=heartbeat_transport,
+        heartbeat_join_timeout_seconds=0.1,
+    )
+    await coordinator.acquire()
+
+    with pytest.raises(ActionOutcomeUnknownError):
+        await coordinator.observe_after_result_loss(lambda: _async_value("must not run"))
+    with pytest.raises(ActionOutcomeUnknownError):
+        await coordinator.execute(
+            lambda _headers: _raise_async(httpx.ReadTimeout("private endpoint and token"))
+        )
+    with pytest.raises(ActionOutcomeUnknownError):
+        await coordinator.observe_after_result_loss(lambda: _async_value("must not run"))
+
+    await coordinator.aclose()
+    with pytest.raises(SessionLeaseLostError):
+        await coordinator.observe_after_result_loss(lambda: _async_value("must not run"))
+
+
+async def _raise_async(exc: BaseException) -> None:
+    raise exc
 
 
 @pytest.mark.asyncio
