@@ -32,13 +32,13 @@ The Function bills while the trajectory is active, then can scale to zero. The S
 
 Once the request route was short, the screenshot handler became easier to see. Every frame launched a command-line program, wrote a temporary PNG, reopened it, and returned its bytes. That is fine for a one-off utility. An agent takes a screenshot after nearly every action.
 
-RustDesk taught me a useful rule for remote software: pay setup costs when a session starts, then reuse the path for the small operations inside it. When I move the mouse in RustDesk, the client does not rediscover the remote computer and open a new connection before sending that movement. It uses the session that is already open. My screenshot code made that mistake one layer lower. The desktop and X11 display remained alive, but each screenshot discarded its capture state and rebuilt the path to the pixels.
+RustDesk taught me to pay setup costs when a session starts. Moving the mouse does not rediscover the remote computer or open a new connection; it uses the session already open. My screenshot code made that mistake one layer lower. The desktop and X11 display stayed alive, but every screenshot discarded its capture state and rebuilt the path to the pixels.
 
 X11 is the display server that owns the desktop's pixels. MSS became the persistent capture client: the daemon opens it once at startup and reuses it. On Linux, XShm lets the X server write the frame into a shared-memory buffer. Each request can encode that frame as a PNG without starting a child process or touching the filesystem.
 
-The file-based path remains available when MSS cannot recover or compose a cursor-visible frame. It stays outside the common path.
+MSS still has two escape hatches. It cannot compose the X11 cursor, so cursor-visible screenshots use the file path. If its display connection fails, the daemon reopens it once, then falls back to file capture. The usual cursor-hidden frame stays in memory.
 
-Once this survived the compatibility cases, I made MSS-first capture the Modal default. Both Modal columns in the final provider run already use it. The 230 ms to 29 ms gap came later, from caller placement and configuration.
+That removed process startup and disk I/O from the repeated path. Both Modal paths used MSS in the final run, yet the external caller took 230 ms and the region-matched Function 29 ms. With capture held constant, caller placement and configuration explained the gap.
 
 ## A process for every click
 
