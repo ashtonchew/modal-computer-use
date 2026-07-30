@@ -12,11 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from .domain import RunRecord, RunState
 from .service import (
     AuthenticationRequired,
+    DesktopBusy,
     GatewayError,
     IdempotencyConflict,
     ObjectNotFound,
     RunConflict,
     RunGatewayService,
+    TenantQuotaExceeded,
 )
 
 
@@ -108,10 +110,12 @@ __all__ = [
     "AuthenticationRequired",
     "CancelRunResponse",
     "CreateRunRequest",
+    "DesktopBusy",
     "GatewayError",
     "IdempotencyConflict",
     "ObjectNotFound",
     "RunConflict",
     "RunResponse",
+    "TenantQuotaExceeded",
     "build_run_gateway_app",
 ]

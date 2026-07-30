@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from fastapi import Request
 
 from .domain import (
+    AdmissionCommand,
+    AdmissionResult,
+    DispatchClaim,
+    DispatchIntent,
     FunctionCallIdentity,
     PollOutcome,
     PollState,
     Principal,
-    Reservation,
     ResolvedDesktop,
     ResolvedTask,
     RunRecord,
@@ -31,15 +35,27 @@ class TaskCatalog(Protocol):
 
 
 class RunStore(Protocol):
-    """Application-supplied durable store with atomic reservation and CAS."""
+    """Application durable store owning admission, capacity, and state CAS.
 
-    async def reserve_if_absent(
+    ``admit`` is one transaction in this fixed conceptual order: replay lookup,
+    tenant quota check, exclusive desktop claim, run insert, pending intent insert.
+    A rejection rolls back every phase. ``claim_dispatch`` atomically changes both
+    RESERVED -> DISPATCHING and PENDING -> CLAIMED; only its winner may spawn.
+
+    ``compare_and_set`` releases a run's desktop claim and quota exactly once when
+    entering SUCCEEDED, FAILED, or CANCELLED. INDETERMINATE deliberately retains
+    both because application ownership is not known to be safe to reuse.
+    """
+
+    async def admit(self, command: AdmissionCommand) -> AdmissionResult: ...
+
+    async def claim_dispatch(
         self,
         *,
-        tenant_id: str,
-        idempotency_key: str,
-        proposed: RunRecord,
-    ) -> Reservation: ...
+        current: RunRecord,
+        pending_intent: DispatchIntent,
+        now: datetime,
+    ) -> DispatchClaim | None: ...
 
     async def get_authorized(self, *, tenant_id: str, run_id: str) -> RunRecord | None: ...
 

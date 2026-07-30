@@ -61,15 +61,23 @@ application run ID and sanitized state; provider call identities, handles, task 
 endpoints, and tokens stay private.
 
 The gateway's closed lifecycle is `reserved -> dispatching -> running`, followed by a terminal
-state or `cancellation_requested`. A stale reservation may be claimed once with compare-and-set.
-A private SHA-256 fingerprint binds that durable reservation to the originally authorized opaque
-desktop/task key pair. Reusing its tenant/idempotency key for different authorized objects returns
-a sanitized conflict before any stale reservation can be reclaimed; raw keys are not stored in
-the run record.
+state or `cancellation_requested`. One application-store admission transaction authoritatively
+handles replay, quota, exclusive ownership of a stable application desktop identity, run creation,
+and creation of a payload-free pending dispatch intent. Versioned HMAC-SHA256 bindings keep raw
+idempotency keys and internal desktop/task identities out of the run record. A matching replay is
+returned before capacity checks; mismatched replay, desktop contention, and tenant quota exhaustion
+return sanitized errors without writes. A second atomic claim moves both the run and intent before
+the sole winner may spawn, including on replay after admission commit. The intent is not an
+automatic delivery queue and has no worker or delivered state.
 A stale dispatch claim becomes `indeterminate` and is never automatically spawned again. Modal
 Function dispatch and durable persistence are not one transaction: the stable application run ID
 fences a repeated `borrow_async(run_id=run_id, ...)`, but it cannot reconstruct a missing
 FunctionCall identity after a dispatch/persistence gap.
+
+The `RunStore` contract is intentionally incompatible with the former `reserve_if_absent` example.
+Adapters need an explicit migration, drain, or backfill. Existing SHA-only rows cannot safely infer
+desktop claims and must not be upgraded implicitly. Terminal `succeeded`, `failed`, and `cancelled`
+transitions release quota and the desktop claim exactly once; `indeterminate` retains both.
 
 Use the native-async borrow context inside an async user-owned Modal Function:
 
