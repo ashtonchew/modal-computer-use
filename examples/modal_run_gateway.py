@@ -15,7 +15,12 @@ if __package__:
     from .run_gateway.modal_adapter import (
         ModalTrajectoryDispatcher as _ModalTrajectoryDispatcher,
     )
-    from .run_gateway.modal_adapter import app, build_default_service, modal
+    from .run_gateway.modal_adapter import (
+        app,
+        build_default_service,
+        build_reconciler_from_environment,
+        modal,
+    )
 else:
     _examples_dir = str(Path(__file__).resolve().parent)
     if _examples_dir not in sys.path:
@@ -26,7 +31,12 @@ else:
     from run_gateway.modal_adapter import (
         ModalTrajectoryDispatcher as _ModalTrajectoryDispatcher,
     )
-    from run_gateway.modal_adapter import app, build_default_service, modal
+    from run_gateway.modal_adapter import (
+        app,
+        build_default_service,
+        build_reconciler_from_environment,
+        modal,
+    )
 
 if modal is not None:
     if __package__:
@@ -57,6 +67,7 @@ __all__ = [
     *_package_exports,
     "app",
     "build_default_service",
+    "build_reconciler_from_environment",
 ]
 if modal is not None:
     __all__.append("RunGateway")

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -20,15 +19,16 @@ from .domain import (
     FunctionCallIdentity,
     IdentityKeyring,
     IdentityKind,
-    PollOutcome,
-    PollState,
     Principal,
+    ReplayTombstone,
     ResolvedDesktop,
     ResolvedTask,
     RunRecord,
     RunState,
+    TerminalReason,
 )
 from .ports import PrincipalResolver, RunStore, SessionCatalog, TaskCatalog, TrajectoryDispatcher
+from .recovery import RecoveryPolicy
 
 
 class CreateRunBody(Protocol):
@@ -86,7 +86,8 @@ class RunGatewayService:
     run_store: RunStore
     dispatcher: TrajectoryDispatcher
     identity_keyring: IdentityKeyring
-    stale_after: timedelta = timedelta(seconds=30)
+    run_timeout: timedelta = timedelta(hours=1)
+    recovery_policy: RecoveryPolicy = field(default_factory=RecoveryPolicy)
     clock: Callable[[], datetime] = utc_now
     run_id_factory: Callable[[], str] = lambda: f"run_{secrets.token_urlsafe(24)}"
 
@@ -104,10 +105,12 @@ class RunGatewayService:
                 "all authentication, authorization, storage, and dispatch dependencies "
                 "are required"
             )
-        if self.stale_after <= timedelta(0):
-            raise ValueError("stale_after must be positive")
+        if self.run_timeout <= timedelta(0):
+            raise ValueError("run_timeout must be positive")
 
-    async def create_run(self, request: Request, body: CreateRunBody) -> RunRecord:
+    async def create_run(
+        self, request: Request, body: CreateRunBody
+    ) -> RunRecord | ReplayTombstone:
         principal = await self.principal_resolver.resolve(request)
         desktop_key = body.desktop_key
         task_key = body.task_key
@@ -136,6 +139,7 @@ class RunGatewayService:
             desktop_binding=desktop_identity.mint,
             task_binding=task_identity.mint,
             now=now,
+            deadline_at=now + self.run_timeout,
         )
         admission = await self.run_store.admit(
             AdmissionCommand(
@@ -152,65 +156,55 @@ class RunGatewayService:
             if admission.rejection is AdmissionRejection.DESKTOP_BUSY:
                 raise DesktopBusy()
             raise TenantQuotaExceeded()
-        if admission.record.state is RunState.RESERVED:
+        if isinstance(admission.record, RunRecord) and admission.record.state is RunState.RESERVED:
+            if self.clock() >= admission.record.deadline_at:
+                return await self._transition_or_reload(
+                    admission.record,
+                    RunState.CANCELLED,
+                    terminal_reason=TerminalReason.EXPIRED_BEFORE_DISPATCH,
+                )
             return await self._claim_and_dispatch(
                 admission.record,
                 pending_intent=admission.intent,
                 desktop=desktop,
                 task=task,
             )
-        return await self._reconcile_stale_dispatch(admission.record)
+        return admission.record
 
     async def get_run(self, request: Request, run_id: str) -> RunRecord:
         principal = await self.principal_resolver.resolve(request)
-        record = await self._authorized_run(principal, run_id)
-        record = await self._reconcile_stale_dispatch(record)
-        if record.state not in {RunState.RUNNING, RunState.CANCELLATION_REQUESTED}:
-            return record
-        call_id = record.function_call_id
-        if call_id is None:
-            return await self._transition_or_reload(record, RunState.INDETERMINATE)
-        observed = await self.dispatcher.poll(call_id)
-        outcome = observed if isinstance(observed, PollOutcome) else PollOutcome(observed)
-        if outcome.state in {PollState.PENDING, PollState.UNAVAILABLE}:
-            return record
-        if outcome.state is PollState.SUCCEEDED:
-            next_state = RunState.SUCCEEDED
-        elif outcome.state is PollState.FAILED:
-            next_state = RunState.FAILED
-        elif outcome.state is PollState.TERMINATED:
-            next_state = (
-                RunState.CANCELLED
-                if record.state is RunState.CANCELLATION_REQUESTED
-                else RunState.FAILED
-            )
-        else:
-            next_state = RunState.INDETERMINATE
-        return await self._transition_or_reload(record, next_state)
+        return await self._authorized_run(principal, run_id)
 
     async def cancel_run(self, request: Request, run_id: str) -> tuple[RunRecord, bool]:
         principal = await self.principal_resolver.resolve(request)
         record = await self._authorized_run(principal, run_id)
-        record = await self._reconcile_stale_dispatch(record)
         if record.state is RunState.CANCELLATION_REQUESTED:
             return record, True
         if record.state in TERMINAL_STATES:
             return record, False
+        if record.state is RunState.RESERVED:
+            cancelled = await self._transition(
+                record,
+                RunState.CANCELLED,
+                terminal_reason=TerminalReason.CANCELLED_BEFORE_DISPATCH,
+            )
+            if cancelled is not None:
+                return cancelled, True
+            latest = await self._authorized_run(principal, run_id)
+            return latest, latest.state is RunState.CANCELLED
         if record.state is not RunState.RUNNING:
             raise RunConflict()
-        claimed = await self._transition(record, RunState.CANCELLATION_REQUESTED)
+        now = self.clock()
+        claimed = await self._transition(
+            record,
+            RunState.CANCELLATION_REQUESTED,
+            reconcile_at=now,
+            cancellation_requested_at=now,
+            cancellation_deadline_at=now + self.recovery_policy.cancellation_grace,
+        )
         if claimed is None:
             latest = await self._authorized_run(principal, run_id)
             return latest, latest.state is RunState.CANCELLATION_REQUESTED
-        call_id = claimed.function_call_id
-        if call_id is None:
-            return await self._transition_or_reload(claimed, RunState.INDETERMINATE), False
-        try:
-            await self.dispatcher.cancel(call_id)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return await self._transition_or_reload(claimed, RunState.INDETERMINATE), False
         return claimed, True
 
     async def _authorized_run(self, principal: Principal, run_id: str) -> RunRecord:
@@ -230,10 +224,15 @@ class RunGatewayService:
         desktop: ResolvedDesktop,
         task: ResolvedTask,
     ) -> RunRecord:
+        now = self.clock()
         claim = await self.run_store.claim_dispatch(
             current=record,
             pending_intent=pending_intent,
-            now=self.clock(),
+            now=now,
+            reconcile_at=min(
+                record.deadline_at,
+                now + self.recovery_policy.dispatch_stale_after,
+            ),
         )
         if claim is None:
             latest = await self.run_store.get_authorized(
@@ -249,30 +248,27 @@ class RunGatewayService:
                 desktop=desktop,
                 task=task,
                 run_id=dispatching.run_id,
+                deadline_at=dispatching.deadline_at,
             )
             running = await self._transition(
                 dispatching,
                 RunState.RUNNING,
                 function_call_id=call_id,
+                reconcile_at=self.clock(),
             )
-        except asyncio.CancelledError:
-            await asyncio.shield(
-                self._transition_or_reload(dispatching, RunState.INDETERMINATE)
-            )
-            raise
         except Exception:
-            return await self._transition_or_reload(dispatching, RunState.INDETERMINATE)
+            return await self._transition_or_reload(
+                dispatching,
+                RunState.INDETERMINATE,
+                terminal_reason=TerminalReason.DISPATCH_AMBIGUOUS,
+            )
         if running is not None:
             return running
-        return await self._transition_or_reload(dispatching, RunState.INDETERMINATE)
-
-    async def _reconcile_stale_dispatch(self, record: RunRecord) -> RunRecord:
-        if (
-            record.state is RunState.DISPATCHING
-            and self.clock() - record.updated_at >= self.stale_after
-        ):
-            return await self._transition_or_reload(record, RunState.INDETERMINATE)
-        return record
+        return await self._transition_or_reload(
+            dispatching,
+            RunState.INDETERMINATE,
+            terminal_reason=TerminalReason.DISPATCH_AMBIGUOUS,
+        )
 
     async def _transition(
         self,
@@ -280,11 +276,19 @@ class RunGatewayService:
         next_state: RunState,
         *,
         function_call_id: FunctionCallIdentity | None = None,
+        reconcile_at: datetime | None = None,
+        cancellation_requested_at: datetime | None = None,
+        cancellation_deadline_at: datetime | None = None,
+        terminal_reason: TerminalReason | None = None,
     ) -> RunRecord | None:
         next_record = record.transition(
             next_state,
             now=self.clock(),
             function_call_id=function_call_id,
+            reconcile_at=reconcile_at,
+            cancellation_requested_at=cancellation_requested_at,
+            cancellation_deadline_at=cancellation_deadline_at,
+            terminal_reason=terminal_reason,
         )
         return await self.run_store.compare_and_set(current=record, next_record=next_record)
 
@@ -292,8 +296,14 @@ class RunGatewayService:
         self,
         record: RunRecord,
         next_state: RunState,
+        *,
+        terminal_reason: TerminalReason | None = None,
     ) -> RunRecord:
-        transitioned = await self._transition(record, next_state)
+        transitioned = await self._transition(
+            record,
+            next_state,
+            terminal_reason=terminal_reason,
+        )
         if transitioned is not None:
             return transitioned
         latest = await self.run_store.get_authorized(

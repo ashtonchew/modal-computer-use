@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Protocol
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Protocol
 
 from fastapi import Request
 
 from .domain import (
     AdmissionCommand,
     AdmissionResult,
+    CancelOutcome,
     DispatchClaim,
     DispatchIntent,
     FunctionCallIdentity,
@@ -20,6 +21,17 @@ from .domain import (
     ResolvedTask,
     RunRecord,
 )
+
+if TYPE_CHECKING:
+    from .recovery import (
+        OperatorResolution,
+        OperatorResolutionResult,
+        PruneResult,
+        ReconcileClaim,
+        ReconcileCursor,
+        ReconcilePage,
+        RetentionPolicy,
+    )
 
 
 class PrincipalResolver(Protocol):
@@ -47,8 +59,9 @@ class RunStore(Protocol):
     RESERVED -> DISPATCHING and PENDING -> CLAIMED; only its winner may spawn.
 
     ``compare_and_set`` releases a run's desktop claim and quota exactly once when
-    entering SUCCEEDED, FAILED, or CANCELLED. INDETERMINATE deliberately retains
-    both because application ownership is not known to be safe to reuse.
+    entering SUCCEEDED, FAILED, or CANCELLED. A RESERVED -> CANCELLED write also
+    revokes its pending dispatch intent in that same transaction. INDETERMINATE
+    deliberately retains both claims because ownership is not known to be safe.
     """
 
     async def admit(self, command: AdmissionCommand) -> AdmissionResult: ...
@@ -59,6 +72,7 @@ class RunStore(Protocol):
         current: RunRecord,
         pending_intent: DispatchIntent,
         now: datetime,
+        reconcile_at: datetime,
     ) -> DispatchClaim | None: ...
 
     async def get_authorized(self, *, tenant_id: str, run_id: str) -> RunRecord | None: ...
@@ -70,6 +84,48 @@ class RunStore(Protocol):
         next_record: RunRecord,
     ) -> RunRecord | None: ...
 
+    async def claim_reconcile_page(
+        self,
+        *,
+        cursor: ReconcileCursor | None,
+        now: datetime,
+        limit: int,
+        lease_duration: timedelta,
+    ) -> ReconcilePage:
+        """Atomically keyset-scan due runs and lease each returned record."""
+        ...
+
+    async def reconcile_compare_and_set(
+        self,
+        *,
+        claim: ReconcileClaim,
+        next_record: RunRecord,
+    ) -> RunRecord | None:
+        """Write only while both the opaque lease and expected version remain current.
+
+        Expiring RESERVED -> CANCELLED also revokes its pending dispatch intent in
+        this transaction.
+        """
+        ...
+
+    async def release_reconcile_lease(self, *, claim: ReconcileClaim) -> bool: ...
+
+    async def resolve_indeterminate(
+        self, *, resolution: OperatorResolution, now: datetime
+    ) -> OperatorResolutionResult | None:
+        """Atomically seal an operator SAFE_RELEASE or SAFE_REPLACE decision."""
+        ...
+
+    async def prune_safe_terminal_page(
+        self,
+        *,
+        cursor: ReconcileCursor | None,
+        now: datetime,
+        policy: RetentionPolicy,
+    ) -> PruneResult:
+        """Prune only released terminal rows while retaining replay tombstones."""
+        ...
+
 
 class TrajectoryDispatcher(Protocol):
     async def spawn(
@@ -78,8 +134,9 @@ class TrajectoryDispatcher(Protocol):
         desktop: ResolvedDesktop,
         task: ResolvedTask,
         run_id: str,
+        deadline_at: datetime,
     ) -> FunctionCallIdentity: ...
 
     async def poll(self, call_id: FunctionCallIdentity) -> PollOutcome | PollState: ...
 
-    async def cancel(self, call_id: FunctionCallIdentity) -> None: ...
+    async def cancel(self, call_id: FunctionCallIdentity) -> CancelOutcome: ...
