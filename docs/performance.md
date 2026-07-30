@@ -36,8 +36,12 @@ claim. `borrow_async()` is canonical for async Modal Functions and avoids blocki
 `borrow()` is the supported synchronous variant. Modal async concurrent inputs run as asyncio tasks
 and cancellation arrives as `asyncio.CancelledError`; sync cancellation can terminate the Function
 container, which is another reason to prefer the native async surface for concurrent capacity.
-Application model calls inside `borrow_async()` must also be async (or explicitly moved to a worker
-thread) so they cannot starve lease heartbeat and distinct-desktop tasks.
+Lease heartbeat renewal for each async borrow runs on one private thread with a dedicated blocking
+transport, so ordinary blocking Python I/O does not starve the lease. Application model calls and
+other work should still use native async clients so screenshots, actions, cancellation delivery,
+and distinct-desktop tasks remain responsive. Use `asyncio.to_thread()` only as a compatibility
+bridge for blocking I/O. It does not make CPU-bound or GIL-holding work safe, and the heartbeat
+worker does not make a blocked event loop responsive.
 
 One Function invocation should hold the complete repeated loop. Function concurrency is useful for
 distinct desktop handles, not overlapping work on one handle. The executable example includes a
