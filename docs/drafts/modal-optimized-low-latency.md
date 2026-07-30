@@ -30,11 +30,11 @@ The Function bills while the trajectory is active, then can scale to zero. The S
 
 ## Keep screenshot capture in memory
 
-Once the request route was short, work inside the daemon was large enough to see. The original default path launched `scrot` or `maim` for every screenshot, wrote a temporary image, then opened that file again to return it. The agent paid for process startup and filesystem work on every observation.
+Once the request route was short, work inside the daemon was large enough to see. The original default path launched a screenshot program for every frame, wrote a temporary image, then opened that file again to return it. The agent paid for process startup and filesystem work on every observation.
 
 The same steady-state question applied inside the target. X11 is the display system that owns the Linux desktop's pixels. MSS became a persistent bridge between the daemon and that display. On Linux, its preferred XShm backend lets the X server write pixels into shared memory instead of sending them through the slower `XGetImage` path.
 
-The daemon now keeps one MSS session open and encodes the PNG in memory. A normal screenshot no longer needs a child process or a filename before it becomes an HTTP response. If the session fails, the daemon reopens it once. A second failure, or a capture mode that needs the file adapter, falls back to `scrot` and then `maim`.
+The daemon now keeps one MSS session open and encodes the PNG in memory. A normal screenshot no longer needs a child process or a filename before it becomes an HTTP response. If the session fails, the daemon reopens it once. A failed retry returns to the older file-based capture, as does a cursor-visible request that MSS cannot compose. The common path stays in memory without giving up cursor capture or support for less cooperative desktops.
 
 By the final provider run, both Modal paths used MSS-first capture. The 230 ms to 29 ms gap in that table comes from caller placement and configuration. The default row was no longer writing screenshots to disk.
 
@@ -112,7 +112,7 @@ I built a Modal-only experimental endpoint around that gap. It captures a baseli
 
 ![XDamage hints or polling trigger a pixel check, while application readiness remains caller-owned](../assets/modal-optimized-first-change.svg)
 
-This experiment stops at a visual change. A blinking cursor, spinner, animation, unrelated repaint, or intermediate frame can win the race. Some meaningful effects leave the watched pixels unchanged. A caller that needs “save completed” still has to check for that state. Returning pixels quickly solves capture latency; deciding when the application is ready remains part of the task.
+This experiment stops at a visual change. A blinking cursor, spinner, animation, unrelated repaint, or intermediate frame can win the race. Some meaningful effects leave the watched pixels unchanged. A caller that needs "save completed" still has to check for that state. Returning pixels quickly solves capture latency; deciding when the application is ready remains part of the task.
 
 ## Startup is now the slow path
 
