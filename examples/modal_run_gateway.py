@@ -21,6 +21,11 @@ from run_gateway.modal_adapter import (  # noqa: E402
 from run_gateway.modal_adapter import app, build_default_service, modal  # noqa: E402
 from run_gateway.service import admission_fingerprint as _admission_fingerprint  # noqa: E402
 
+if modal is not None:
+    from run_gateway.modal_adapter import RunGateway as _RunGateway
+
+    RunGateway = _RunGateway
+
 
 class ModalTrajectoryDispatcher(_ModalTrajectoryDispatcher):
     """Compatibility shim that keeps this module's injectable Modal runtime."""
@@ -40,6 +45,8 @@ __all__ = [
     "app",
     "build_default_service",
 ]
+if modal is not None:
+    __all__.append("RunGateway")
 
 
 if __name__ == "__main__":

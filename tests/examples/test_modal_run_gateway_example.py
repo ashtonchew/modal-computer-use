@@ -1011,3 +1011,11 @@ def test_missing_dependencies_and_default_service_fail_closed() -> None:
         gateway.build_run_gateway_app(None)
     with pytest.raises(RuntimeError, match="inject the application's PrincipalResolver"):
         gateway.build_default_service()
+
+
+def test_compatibility_entry_reexports_modal_run_gateway_class_when_installed() -> None:
+    from run_gateway import modal_adapter
+
+    assert gateway.modal is not None
+    assert gateway.RunGateway is modal_adapter.RunGateway
+    assert "RunGateway" in gateway.__all__
