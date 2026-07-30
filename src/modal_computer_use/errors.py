@@ -149,6 +149,12 @@ class OperationResultUnavailableError(SessionBorrowError):
     message = "the operation result is unavailable"
 
 
+class OperationNotAppliedError(SessionBorrowError):
+    """Raised when durable receipt resolution proves an operation did not run."""
+
+    message = "the operation was not applied"
+
+
 class SessionRecoveryRequiredError(SessionBorrowError):
     """Raised when explicit recovery is required before further operations."""
 

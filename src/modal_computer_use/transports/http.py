@@ -23,6 +23,7 @@ class HTTPTransport:
         timeout: float = 30.0,
         http2: bool = False,
         client: httpx.Client | None = None,
+        _metadata_headers: MetadataHeaders | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
@@ -32,6 +33,7 @@ class HTTPTransport:
             timeout=timeout,
             http2=http2,
         )
+        self._metadata_headers = _metadata_headers
         self._tracer = get_tracer(name="modal_computer_use.sdk")
 
     def close(self) -> None:
@@ -104,6 +106,7 @@ class HTTPTransport:
         request_headers = dict(headers or {})
         if self.token:
             request_headers.setdefault("Authorization", f"Bearer {self.token}")
+        request_headers.update(resolve_metadata_headers(self._metadata_headers))
         return request_headers
 
     @staticmethod

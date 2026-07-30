@@ -70,7 +70,9 @@ class ActionsNamespace(Namespace):
         )
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         return ActionBatchResult.model_validate(
-            self._client.post_json("/v1/actions/run", json=payload, headers=headers)
+            self._client.post_json(
+                "/v1/actions/run", json=payload, headers=headers, _mutation=True
+            )
         )
 
     def run_and_screenshot_bytes(
@@ -102,6 +104,7 @@ class ActionsNamespace(Namespace):
             "/v1/actions/run/raw-screenshot",
             json=payload,
             headers=headers,
+            _mutation=True,
         )
         result_header = response_headers.get("x-computer-use-action-result")
         result = ActionBatchResult.model_validate(
@@ -169,6 +172,7 @@ class ActionsNamespace(Namespace):
             "/v1/actions/run/observe-change/raw-screenshot",
             json=payload,
             headers=headers,
+            _mutation=True,
         )
         result = _action_result_header(response_headers)
         return ActionScreenshotBytesResult(
@@ -291,7 +295,9 @@ class AsyncActionsNamespace(AsyncNamespace):
         )
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         return ActionBatchResult.model_validate(
-            await self._client.post_json("/v1/actions/run", json=payload, headers=headers)
+            await self._client.post_json(
+                "/v1/actions/run", json=payload, headers=headers, _mutation=True
+            )
         )
 
     async def run_and_screenshot_bytes(
@@ -323,6 +329,7 @@ class AsyncActionsNamespace(AsyncNamespace):
             "/v1/actions/run/raw-screenshot",
             json=payload,
             headers=headers,
+            _mutation=True,
         )
         result_header = response_headers.get("x-computer-use-action-result")
         result = ActionBatchResult.model_validate(
@@ -390,6 +397,7 @@ class AsyncActionsNamespace(AsyncNamespace):
             "/v1/actions/run/observe-change/raw-screenshot",
             json=payload,
             headers=headers,
+            _mutation=True,
         )
         result = _action_result_header(response_headers)
         return ActionScreenshotBytesResult(

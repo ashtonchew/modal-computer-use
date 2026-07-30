@@ -58,6 +58,7 @@ handle = ComputerSessionHandle(
     requested_modal_region="us-west",
     ingress="attested-tunnel",
     daemon_http_version="1.1",
+    vnc_mode="off",
     config_hash="a" * 16,
 )
 assert handle.schema_version == 2

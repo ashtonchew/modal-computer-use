@@ -52,7 +52,7 @@ class _ReceiptResolveRequest(_ReceiptStatusRequest):
 @router.get("/v1/recovery/status")
 async def recovery_status(request: Request, response: Response) -> dict[str, object]:
     async with request.app.state.input_lock:
-        _require_owner_or_current_lease(request)
+        await _require_owner_or_current_lease(request)
         result = await request.app.state.receipt_journal.recovery_status()
     response.headers["Cache-Control"] = "no-store"
     return result
@@ -82,9 +82,10 @@ async def receipt_status(
 ) -> dict[str, object]:
     async with request.app.state.input_lock:
         if not _has_owner_proof(request):
-            lease = request.app.state.lease_coordinator.validate_mutation(
-                lease_credentials_from_headers(request.headers)
-            )
+            async with request.app.state.lease_lock:
+                lease = request.app.state.lease_coordinator.validate_mutation(
+                    lease_credentials_from_headers(request.headers)
+                )
             if lease is None or not secrets.compare_digest(lease.run_id, payload.run_id):
                 raise DaemonError(
                     "receipt access is denied",
@@ -117,9 +118,12 @@ async def resolve_receipt(
                 raise _receipt_access_denied_error("receipt resolve access is denied")
             result = proof
         else:
-            released_lease = request.app.state.lease_coordinator.authenticate_last_released(
-                credentials
-            )
+            async with request.app.state.lease_lock:
+                released_lease = (
+                    request.app.state.lease_coordinator.authenticate_last_released(
+                        credentials
+                    )
+                )
             if released_lease is not None:
                 if not secrets.compare_digest(released_lease.run_id, payload.run_id):
                     raise _receipt_access_denied_error("receipt resolve access is denied")
@@ -131,7 +135,10 @@ async def resolve_receipt(
                     raise _receipt_access_denied_error("receipt resolve access is denied")
                 result = proof
             else:
-                lease = request.app.state.lease_coordinator.validate_mutation(credentials)
+                async with request.app.state.lease_lock:
+                    lease = request.app.state.lease_coordinator.validate_mutation(
+                        credentials
+                    )
                 if lease is None or not secrets.compare_digest(lease.run_id, payload.run_id):
                     raise _receipt_access_denied_error("receipt resolve access is denied")
                 result = await _resolve_and_release_cancellation_safe(
@@ -154,12 +161,13 @@ def _require_owner(request: Request) -> None:
         )
 
 
-def _require_owner_or_current_lease(request: Request) -> None:
+async def _require_owner_or_current_lease(request: Request) -> None:
     if _has_owner_proof(request):
         return
-    lease = request.app.state.lease_coordinator.validate_mutation(
-        lease_credentials_from_headers(request.headers)
-    )
+    async with request.app.state.lease_lock:
+        lease = request.app.state.lease_coordinator.validate_mutation(
+            lease_credentials_from_headers(request.headers)
+        )
     if lease is None:
         raise DaemonError(
             "recovery status access is denied",
@@ -195,7 +203,8 @@ async def _acknowledge_and_reset_cancellation_safe(
 ) -> dict[str, object]:
     async def acknowledge_and_reset() -> dict[str, object]:
         result = await state.receipt_journal.acknowledge(incident_id)
-        state.lease_coordinator.reset_after_owner_recovery()
+        async with state.lease_lock:
+            state.lease_coordinator.reset_after_owner_recovery()
         return result
 
     task = asyncio.create_task(acknowledge_and_reset())
@@ -223,7 +232,8 @@ async def _resolve_and_release_cancellation_safe(
     async def resolve_and_release() -> dict[str, object]:
         result = await state.receipt_journal.resolve(run_id, sequence)
         if result["state"] == "MISSING":
-            state.lease_coordinator.release_validated(admitted_lease)
+            async with state.lease_lock:
+                state.lease_coordinator.release_validated(admitted_lease)
         return result
 
     task = asyncio.create_task(resolve_and_release())

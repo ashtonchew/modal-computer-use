@@ -237,7 +237,6 @@ async def _run_impl(
     lock_was_contended = context.state.input_lock.locked()
     async with context.state.input_lock:
         await context.state.receipt_journal.ensure_mutation_allowed()
-        context.state.lease_coordinator.validate_mutation(context.lease_credentials)
         if lock_was_contended:
             await _ensure_desktop_ready(context, force=True)
         if context.lease_credentials is not None:

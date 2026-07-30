@@ -780,7 +780,8 @@ async def prepare_mutation_receipt(
     semantic_data: Any,
 ) -> ReceiptHandle | None:
     await state.receipt_journal.ensure_mutation_allowed()
-    lease: MutationLease | None = state.lease_coordinator.validate_mutation(credentials)
+    async with state.lease_lock:
+        lease: MutationLease | None = state.lease_coordinator.validate_mutation(credentials)
     if lease is None:
         return None
     resolved_sequence = require_operation_sequence(sequence)

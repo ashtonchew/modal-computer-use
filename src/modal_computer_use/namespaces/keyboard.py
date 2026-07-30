@@ -19,6 +19,7 @@ class KeyboardNamespace(Namespace):
             self._client.post_json(
                 "/v1/keyboard/type",
                 json={"text": text, "delay_ms": delay_ms, "method": method},
+                _mutation=True,
             )
         )
 
@@ -32,6 +33,7 @@ class KeyboardNamespace(Namespace):
             self._client.post_json(
                 "/v1/keyboard/press",
                 json={"key": key, "modifiers": modifiers or [], "duration_ms": duration_ms},
+                _mutation=True,
             )
         )
 
@@ -40,6 +42,7 @@ class KeyboardNamespace(Namespace):
             self._client.post_json(
                 "/v1/keyboard/hotkey",
                 json={"keys": normalize_key_combo(keys), "duration_ms": duration_ms},
+                _mutation=True,
             )
         )
 
@@ -52,6 +55,7 @@ class KeyboardNamespace(Namespace):
             self._client.post_json(
                 "/v1/keyboard/hold",
                 json={"key": key, "duration_ms": duration_ms},
+                _mutation=True,
             )
         )
 
@@ -70,6 +74,7 @@ class AsyncKeyboardNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/keyboard/type",
                 json={"text": text, "delay_ms": delay_ms, "method": method},
+                _mutation=True,
             )
         )
 
@@ -83,6 +88,7 @@ class AsyncKeyboardNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/keyboard/press",
                 json={"key": key, "modifiers": modifiers or [], "duration_ms": duration_ms},
+                _mutation=True,
             )
         )
 
@@ -91,6 +97,7 @@ class AsyncKeyboardNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/keyboard/hotkey",
                 json={"keys": normalize_key_combo(keys), "duration_ms": duration_ms},
+                _mutation=True,
             )
         )
 
@@ -99,6 +106,7 @@ class AsyncKeyboardNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/keyboard/hold",
                 json={"key": key, "duration_ms": duration_ms},
+                _mutation=True,
             )
         )
 

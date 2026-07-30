@@ -16,6 +16,8 @@ from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
 from .metadata import MetadataHeaders, resolve_metadata_headers
 from .websocket_url import daemon_websocket_url
 
+_OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
+
 
 @dataclass(frozen=True)
 class AsyncHotSessionBinaryResult:
@@ -38,11 +40,13 @@ class AsyncHotSessionTransport:
         timeout: float = 30.0,
         websocket: ClientConnection | None = None,
         _metadata_headers: MetadataHeaders | None = None,
+        _mutation_executor: Any | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
         self._metadata_headers = _metadata_headers
+        self._mutation_executor = _mutation_executor
         self._ids = itertools.count(1)
         self._connect_lock = asyncio.Lock()
         self._exchange_lock = asyncio.Lock()
@@ -70,8 +74,21 @@ class AsyncHotSessionTransport:
         return await self.request("ping", {})
 
     async def request(self, op: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if op in self._MUTATING_OPS and self._mutation_executor is not None:
+            return await self._mutation_executor(
+                lambda metadata: self._request(op, payload, metadata=metadata)
+            )
+        return await self._request(op, payload)
+
+    async def _request(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         async with self._exchange_lock:
-            message = await self._exchange(op, payload)
+            message = await self._exchange(op, payload, metadata=metadata)
         if message.get("type") == "error":
             self._raise_hot_error(message)
         if message.get("type") != "result":
@@ -83,8 +100,23 @@ class AsyncHotSessionTransport:
         return result if isinstance(result, dict) else {}
 
     async def request_binary(self, op: str, payload: dict[str, Any]) -> AsyncHotSessionBinaryResult:
+        if op in self._MUTATING_OPS and self._mutation_executor is not None:
+            return await self._mutation_executor(
+                lambda metadata: self._request_binary(op, payload, metadata=metadata)
+            )
+        return await self._request_binary(op, payload)
+
+    async def _request_binary(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> AsyncHotSessionBinaryResult:
         async with self._exchange_lock:
-            message = await self._exchange(op, payload, receive_binary=True)
+            message = await self._exchange(
+                op, payload, receive_binary=True, metadata=metadata
+            )
             if message.get("type") == "error":
                 self._raise_hot_error(message)
             if message.get("type") != "binary":
@@ -164,6 +196,7 @@ class AsyncHotSessionTransport:
         payload: dict[str, Any],
         *,
         receive_binary: bool = False,
+        metadata: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         websocket = await self._ensure_connected()
         request_id = str(next(self._ids))
@@ -171,7 +204,10 @@ class AsyncHotSessionTransport:
         possibly_sent = False
         try:
             possibly_sent = mutating
-            await websocket.send(json.dumps({"id": request_id, "op": op, "payload": payload}))
+            message = {"id": request_id, "op": op, "payload": payload}
+            if metadata is not None and _OPERATION_SEQUENCE_HEADER in metadata:
+                message["sequence"] = metadata[_OPERATION_SEQUENCE_HEADER]
+            await websocket.send(json.dumps(message))
             raw = await asyncio.wait_for(websocket.recv(), timeout=self.timeout)
             if not isinstance(raw, str):
                 raise DaemonHTTPError(

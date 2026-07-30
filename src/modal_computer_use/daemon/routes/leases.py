@@ -35,9 +35,8 @@ async def acquire(
     response: Response,
 ) -> dict[str, object]:
     async with request.app.state.input_lock:
-        previous = request.app.state.lease_coordinator.status()
-        if previous["state"] == "active":
-            request.app.state.lease_coordinator.acquire(payload.run_id)
+        async with request.app.state.lease_lock:
+            previous = request.app.state.lease_coordinator.prepare_acquire()
         if previous["state"] == "expired" and isinstance(previous["run_id"], str):
             await request.app.state.receipt_journal.seal_run(
                 previous["run_id"],
@@ -45,7 +44,8 @@ async def acquire(
             )
         await request.app.state.receipt_journal.validate_acquire(payload.run_id)
         await request.app.state.receipt_journal.activate_run(payload.run_id)
-        grant = request.app.state.lease_coordinator.acquire(payload.run_id)
+        async with request.app.state.lease_lock:
+            grant = request.app.state.lease_coordinator.acquire(payload.run_id)
         _schedule_expiry(request)
     response.headers[LEASE_TOKEN_HEADER] = grant.token
     response.headers["x-computer-use-lease-protocol"] = LEASE_PROTOCOL_VERSION
@@ -55,7 +55,7 @@ async def acquire(
 
 @router.post("/heartbeat")
 async def heartbeat(request: Request, response: Response) -> dict[str, object]:
-    async with request.app.state.input_lock:
+    async with request.app.state.lease_lock:
         result = request.app.state.lease_coordinator.heartbeat(
             lease_credentials_from_headers(request.headers)
         )
@@ -68,7 +68,8 @@ async def heartbeat(request: Request, response: Response) -> dict[str, object]:
 async def release(request: Request, response: Response) -> dict[str, object]:
     async with request.app.state.input_lock:
         credentials = lease_credentials_from_headers(request.headers)
-        lease = request.app.state.lease_coordinator.validate_mutation(credentials)
+        async with request.app.state.lease_lock:
+            lease = request.app.state.lease_coordinator.validate_mutation(credentials)
         assert lease is not None
         result = await _seal_and_release_cancellation_safe(
             request.app.state,
@@ -81,7 +82,8 @@ async def release(request: Request, response: Response) -> dict[str, object]:
 @router.get("/status")
 async def status(request: Request, response: Response) -> dict[str, object]:
     async with request.app.state.input_lock:
-        result = request.app.state.lease_coordinator.status()
+        async with request.app.state.lease_lock:
+            result = request.app.state.lease_coordinator.status()
         if result["state"] == "expired" and isinstance(result["run_id"], str):
             await request.app.state.receipt_journal.seal_run(
                 result["run_id"],
@@ -108,7 +110,8 @@ async def _expire_after_ttl(state: Any) -> None:
     try:
         await asyncio.sleep(state.lease_coordinator.ttl_seconds)
         async with state.input_lock:
-            status = state.lease_coordinator.status()
+            async with state.lease_lock:
+                status = state.lease_coordinator.status()
             if status["state"] == "expired" and isinstance(status["run_id"], str):
                 await state.receipt_journal.seal_run(status["run_id"], "lease_expired")
     except asyncio.CancelledError:
@@ -125,7 +128,8 @@ async def _seal_and_release_cancellation_safe(
 ) -> dict[str, object]:
     async def seal_and_release() -> dict[str, object]:
         await state.receipt_journal.seal_run(admitted_lease.run_id, "lease_released")
-        result = state.lease_coordinator.release_validated(admitted_lease)
+        async with state.lease_lock:
+            result = state.lease_coordinator.release_validated(admitted_lease)
         _cancel_expiry(state)
         return result
 

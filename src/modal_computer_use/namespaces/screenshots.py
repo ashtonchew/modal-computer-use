@@ -66,6 +66,7 @@ class ScreenshotsNamespace(Namespace):
                     processing=processing,
                     storage=storage,
                 ),
+                _mutation=storage in {"artifact", "auto"},
             )
         )
 
@@ -115,6 +116,7 @@ class ScreenshotsNamespace(Namespace):
                 | {
                     "region": {"x": x, "y": y, "width": width, "height": height},
                 },
+                _mutation=storage in {"artifact", "auto"},
             )
         )
 
@@ -162,6 +164,7 @@ class ScreenshotsNamespace(Namespace):
                     "show_cursor": show_cursor,
                     "storage": storage,
                 },
+                _mutation=storage in {"artifact", "auto"},
             )
         )
 
@@ -226,6 +229,7 @@ class AsyncScreenshotsNamespace(AsyncNamespace):
                     processing=processing,
                     storage=storage,
                 ),
+                _mutation=storage in {"artifact", "auto"},
             )
         )
 
@@ -273,6 +277,7 @@ class AsyncScreenshotsNamespace(AsyncNamespace):
                     storage=storage,
                 )
                 | {"region": {"x": x, "y": y, "width": width, "height": height}},
+                _mutation=storage in {"artifact", "auto"},
             )
         )
 
@@ -320,6 +325,7 @@ class AsyncScreenshotsNamespace(AsyncNamespace):
                     "show_cursor": show_cursor,
                     "storage": storage,
                 },
+                _mutation=storage in {"artifact", "auto"},
             )
         )
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import (  # noqa: UP035 - public API intentionally uses ContextManager
     Annotated,
     Any,
+    AsyncContextManager,
     ContextManager,
     Literal,
 )
@@ -15,7 +16,7 @@ from typing import (  # noqa: UP035 - public API intentionally uses ContextManag
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from ._invariants import require_coordinate_pair, require_drag_shape, require_safe_text
-from .borrowed import BorrowedComputer
+from .borrowed import AsyncBorrowedComputer, BorrowedComputer
 from .errors import ActionValidationError
 
 Button = Literal["left", "middle", "right", "back", "forward"]
@@ -265,10 +266,26 @@ class ArtifactSyncResult(StrictBaseModel):
     message: str | None = None
 
 
+class SessionRecoveryStatus(StrictBaseModel):
+    recovery_required: bool
+    incident_id: str | None = Field(default=None, repr=False)
+    classification: str | None = None
+
+
+class SessionRecoveryAcknowledgement(StrictBaseModel):
+    recovery_required: Literal[False]
+    acknowledged: Literal[True]
+
+
 class ComputerSessionHandle(BaseModel):
     """Serializable reconnect policy for one SDK-owned Modal desktop."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+        hide_input_in_errors=True,
+    )
 
     schema_version: Literal[2] = 2
     handoff_protocol: Literal["computer-use.session-handoff.v2"] = (
@@ -281,6 +298,7 @@ class ComputerSessionHandle(BaseModel):
     requested_modal_region: str
     ingress: Literal["attested-tunnel", "connect"]
     daemon_http_version: Literal["1.1", "2"]
+    vnc_mode: Literal["off", "view_only"]
     config_hash: str = Field(pattern=r"^[0-9a-f]{16}$")
 
     @field_validator("sandbox_id", "app_name", "modal_environment", "requested_modal_region")
@@ -301,6 +319,23 @@ class ComputerSessionHandle(BaseModel):
         from .sandbox import _ModalFunctionSessionBorrow
 
         return _ModalFunctionSessionBorrow(
+            self,
+            run_id=run_id,
+            function_region=function_region,
+            readiness_timeout=readiness_timeout,
+        )
+
+    def borrow_async(
+        self,
+        *,
+        run_id: str,
+        function_region: str,
+        readiness_timeout: float = 120.0,
+    ) -> AsyncContextManager[AsyncBorrowedComputer]:
+        """Build a lazy, native-async Modal Function borrowing context."""
+        from .sandbox import _AsyncModalFunctionSessionBorrow
+
+        return _AsyncModalFunctionSessionBorrow(
             self,
             run_id=run_id,
             function_region=function_region,

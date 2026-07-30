@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -15,8 +16,8 @@ from typing import Any, Literal
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from ._version import __version__
-from .borrowed import BorrowedComputer
-from .client import DaemonClient
+from .borrowed import AsyncBorrowedComputer, BorrowedComputer
+from .client import AsyncDaemonClient, DaemonClient
 from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
 from .errors import (
     BrowserReadinessError,
@@ -26,13 +27,21 @@ from .errors import (
     SandboxUnavailableError,
     SessionCompatibilityError,
     SessionEnvironmentMismatchError,
+    SessionLeaseLostError,
     SessionPlacementMismatchError,
     SessionTargetMismatchError,
 )
 from .hot_session import HotSessionClient
 from .image import default_image, named_image, selected_image_identity
 from .latency import SessionStartupTiming, validate_first_frame
-from .models import ComputerSessionHandle, ComputerStatus, DebugUrls, SandboxRef
+from .models import (
+    ComputerSessionHandle,
+    ComputerStatus,
+    DebugUrls,
+    SandboxRef,
+    SessionRecoveryAcknowledgement,
+    SessionRecoveryStatus,
+)
 from .namespaces import (
     ActionsNamespace,
     AppsNamespace,
@@ -54,7 +63,12 @@ from .namespaces import (
 )
 from .observations import ObservationClient
 from .state import compute_config_hash, default_tags, new_run_id, warm_pool_tags
-from .transports import HotSessionTransport, ObservationStreamTransport
+from .transports import (
+    AsyncHTTPTransport,
+    HotSessionTransport,
+    HTTPTransport,
+    ObservationStreamTransport,
+)
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
@@ -104,6 +118,7 @@ class _SessionHandoffPolicy:
     modal_region: str | None
     ingress: ModalIngress
     daemon_http_version: Literal["1.1", "2"]
+    vnc_mode: Literal["off", "view_only", "control"]
     config_hash: str
 
 
@@ -938,54 +953,179 @@ class _ModalFunctionSessionBorrow:
         self._run_id = run_id
         self._function_region = function_region
         self._readiness_timeout = readiness_timeout
-        self._computer: ComputerSandbox | None = None
+        self._sandbox: object | None = None
+        self._client: DaemonClient | None = None
+        self._coordinator: object | None = None
+        self._borrowed: BorrowedComputer | None = None
         self._entered = False
 
     def __enter__(self) -> BorrowedComputer:
         if self._entered:
             raise RuntimeError("a session borrow context can only be entered once")
         self._entered = True
-        if not isinstance(self._run_id, str) or not self._run_id.strip():
-            raise ValueError("run_id must be a non-empty string")
-        function_environment = _modal_function_environment()
-        if (
-            function_environment is None
-            or not function_environment.strip()
-            or function_environment != self._handle.modal_environment
-        ):
-            raise SessionEnvironmentMismatchError
-        if not isinstance(self._function_region, str) or not self._function_region.strip():
-            raise ValueError("function_region must be a non-empty string")
-        if self._function_region != self._handle.requested_modal_region:
-            raise SessionPlacementMismatchError
-        if (
-            isinstance(self._readiness_timeout, bool)
-            or not isinstance(self._readiness_timeout, (int, float))
-            or not math.isfinite(self._readiness_timeout)
-            or self._readiness_timeout <= 0
-        ):
-            raise ValueError("readiness_timeout must be a positive finite number")
-        computer = _borrow_modal_function_session(
+        _validate_borrow_request(
             self._handle,
+            run_id=self._run_id,
+            function_region=self._function_region,
+            readiness_timeout=self._readiness_timeout,
+        )
+        borrowed, sandbox, client, coordinator = _borrow_modal_function_session(
+            self._handle,
+            run_id=self._run_id,
             readiness_timeout=float(self._readiness_timeout),
         )
-        self._computer = computer
-        return BorrowedComputer(computer)
+        self._sandbox = sandbox
+        self._client = client
+        self._coordinator = coordinator
+        self._borrowed = borrowed
+        return borrowed
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        computer, self._computer = self._computer, None
-        if computer is None:
+        sandbox, self._sandbox = self._sandbox, None
+        client, self._client = self._client, None
+        coordinator, self._coordinator = self._coordinator, None
+        borrowed, self._borrowed = self._borrowed, None
+        if borrowed is not None:
+            borrowed._invalidate()
+        if sandbox is None or client is None or coordinator is None:
             return
-        try:
-            computer.detach()
-        except Exception as cleanup_exc:
+        cleanup_errors: list[BaseException] = []
+        for cleanup in (coordinator.close, client.close, sandbox.detach):
+            try:
+                cleanup()
+            except BaseException as cleanup_exc:
+                cleanup_errors.append(cleanup_exc)
+        if cleanup_errors:
+            first_cleanup_error = cleanup_errors[0]
             if isinstance(exc, BaseException):
                 exc.add_note(
                     "borrowed session cleanup also failed: "
-                    f"detach ({type(cleanup_exc).__name__})"
+                    f"cleanup ({type(first_cleanup_error).__name__})"
                 )
                 return
-            raise
+            raise SessionLeaseLostError() from first_cleanup_error
+
+
+class _AsyncModalFunctionSessionBorrow:
+    """Native-async owner of one borrowed daemon connection."""
+
+    def __init__(
+        self,
+        handle: ComputerSessionHandle,
+        *,
+        run_id: str,
+        function_region: str,
+        readiness_timeout: float,
+    ) -> None:
+        self._handle = handle
+        self._run_id = run_id
+        self._function_region = function_region
+        self._readiness_timeout = readiness_timeout
+        self._sandbox: object | None = None
+        self._client: AsyncDaemonClient | None = None
+        self._coordinator: object | None = None
+        self._borrowed: AsyncBorrowedComputer | None = None
+        self._entered = False
+
+    async def __aenter__(self) -> AsyncBorrowedComputer:
+        if self._entered:
+            raise RuntimeError("a session borrow context can only be entered once")
+        self._entered = True
+        _validate_borrow_request(
+            self._handle,
+            run_id=self._run_id,
+            function_region=self._function_region,
+            readiness_timeout=self._readiness_timeout,
+        )
+        borrowed, sandbox, client, coordinator = await _borrow_modal_function_session_async(
+            self._handle,
+            run_id=self._run_id,
+            readiness_timeout=float(self._readiness_timeout),
+        )
+        self._sandbox = sandbox
+        self._client = client
+        self._coordinator = coordinator
+        self._borrowed = borrowed
+        return borrowed
+
+    async def __aexit__(self, _exc_type: object, exc: object, _traceback: object) -> None:
+        sandbox, self._sandbox = self._sandbox, None
+        client, self._client = self._client, None
+        coordinator, self._coordinator = self._coordinator, None
+        borrowed, self._borrowed = self._borrowed, None
+        if borrowed is not None:
+            borrowed._invalidate()
+        if sandbox is None or client is None or coordinator is None:
+            return
+
+        async def cleanup() -> None:
+            cleanup_errors: list[BaseException] = []
+            for operation in (
+                coordinator.aclose,
+                client.aclose,
+                sandbox.detach.aio,
+            ):
+                try:
+                    await operation()
+                except BaseException as cleanup_exc:
+                    cleanup_errors.append(cleanup_exc)
+            if cleanup_errors:
+                raise SessionLeaseLostError() from cleanup_errors[0]
+
+        task = asyncio.create_task(cleanup())
+        cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as cleanup_cancelled:
+                if task.cancelled():
+                    raise
+                cancellation = cancellation or cleanup_cancelled
+                continue
+            except Exception as cleanup_exc:
+                if isinstance(exc, BaseException):
+                    exc.add_note(
+                        "borrowed session cleanup also failed: "
+                        f"cleanup ({type(cleanup_exc).__name__})"
+                    )
+                    return
+                raise
+            if cancellation is not None:
+                raise cancellation
+            return
+
+
+def _validate_borrow_request(
+    handle: ComputerSessionHandle,
+    *,
+    run_id: str,
+    function_region: str,
+    readiness_timeout: float,
+) -> None:
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    if (
+        isinstance(readiness_timeout, bool)
+        or not isinstance(readiness_timeout, (int, float))
+        or not math.isfinite(readiness_timeout)
+        or readiness_timeout <= 0
+    ):
+        raise ValueError("readiness_timeout must be a positive finite number")
+    if os.environ.get("MODAL_IS_REMOTE") != "1":
+        raise SessionEnvironmentMismatchError
+    function_environment = _modal_function_environment()
+    if (
+        function_environment is None
+        or not function_environment.strip()
+        or function_environment != handle.modal_environment
+    ):
+        raise SessionEnvironmentMismatchError
+    if not isinstance(function_region, str) or not function_region.strip():
+        raise ValueError("function_region must be a non-empty string")
+    if function_region != handle.requested_modal_region:
+        raise SessionPlacementMismatchError
+    if handle.vnc_mode not in {"off", "view_only"}:
+        raise SessionCompatibilityError
 
 
 class ComputerSandbox:
@@ -1115,12 +1255,21 @@ class ComputerSandbox:
             warm_pool_tags() if tag_profile == "warm_pool" else default_tags(config, owner=owner)
         )
         sandbox_tags = {**(tags or {}), **base_tags}
+        config_hash = compute_config_hash(config)
         session_id: str | None = None
         if (
             config.runtime.modal_environment is not None
             and config.runtime.modal_region is not None
         ):
-            session_id = _secrets.token_hex(16)
+            session_id = _session_policy_id_prefix(
+                app_name=app_name,
+                modal_environment=config.runtime.modal_environment,
+                requested_modal_region=config.runtime.modal_region,
+                ingress=config.ingress,
+                daemon_http_version=config.network.daemon_http_version,
+                vnc_mode=vnc_mode,
+                config_hash=config_hash,
+            ) + _secrets.token_hex(8)
             sandbox_tags["computer-use.session_id"] = session_id
         sandbox_tags["computer-use.image_identity"] = (
             "custom"
@@ -1187,7 +1336,7 @@ class ComputerSandbox:
             run_id=config.run_id,
             owner=sandbox_tags.get("computer-use.owner"),
             created_at=_created_at_from_tags(sandbox_tags),
-            config_hash=compute_config_hash(config),
+            config_hash=config_hash,
             status="started",
             tags=sandbox_tags,
             vnc_url=None,
@@ -1226,6 +1375,7 @@ class ComputerSandbox:
             config,
             session_id=session_id,
             app_name=app_name,
+            vnc_mode=vnc_mode,
             config_hash=metadata.config_hash or compute_config_hash(config),
         )
         computer._readiness_failure_cleanup = "none"
@@ -1420,6 +1570,8 @@ class ComputerSandbox:
             raise SessionTargetMismatchError
         if policy.ingress not in {"attested-tunnel", "connect"}:
             raise SessionCompatibilityError
+        if policy.vnc_mode == "control":
+            raise SessionCompatibilityError
         return ComputerSessionHandle(
             sandbox_id=metadata.sandbox_id,
             session_id=policy.session_id,
@@ -1428,6 +1580,7 @@ class ComputerSandbox:
             requested_modal_region=policy.modal_region,
             ingress=policy.ingress,
             daemon_http_version=policy.daemon_http_version,
+            vnc_mode=policy.vnc_mode,
             config_hash=policy.config_hash,
         )
 
@@ -1442,6 +1595,41 @@ class ComputerSandbox:
 
     def status(self) -> ComputerStatus:
         return self.lifecycle.status()
+
+    def recovery_status(self) -> SessionRecoveryStatus:
+        """Return durable target recovery state using owner-only authorization."""
+        bearer = self._daemon_bearer
+        if not bearer:
+            raise SandboxUnavailableError(
+                "owner recovery requires the original SDK-owned daemon authorization"
+            )
+        payload = self.client.transport.request(
+            "GET",
+            "/v1/recovery/status",
+            headers={"x-computer-use-owner-proof": bearer},
+        ).json()
+        return SessionRecoveryStatus.model_validate(payload)
+
+    def acknowledge_recovery(
+        self,
+        *,
+        incident_id: str,
+    ) -> SessionRecoveryAcknowledgement:
+        """Acknowledge one exact recovery incident as the original owner."""
+        if not isinstance(incident_id, str) or not incident_id.strip():
+            raise ValueError("incident_id must be a non-empty string")
+        bearer = self._daemon_bearer
+        if not bearer:
+            raise SandboxUnavailableError(
+                "owner recovery requires the original SDK-owned daemon authorization"
+            )
+        payload = self.client.transport.request(
+            "POST",
+            "/v1/recovery/acknowledge",
+            json={"incident_id": incident_id},
+            headers={"x-computer-use-owner-proof": bearer},
+        ).json()
+        return SessionRecoveryAcknowledgement.model_validate(payload)
 
     def wait_until_ready(self, timeout: float = 120.0, interval: float = 1.0) -> None:
         deadline = time.monotonic() + timeout
@@ -2609,6 +2797,7 @@ def _session_handoff_policy(
     *,
     session_id: str | None,
     app_name: str,
+    vnc_mode: Literal["off", "view_only", "control"] | None = None,
     config_hash: str,
 ) -> _SessionHandoffPolicy:
     return _SessionHandoffPolicy(
@@ -2618,43 +2807,324 @@ def _session_handoff_policy(
         modal_region=config.runtime.modal_region,
         ingress=config.ingress,
         daemon_http_version=config.network.daemon_http_version,
+        vnc_mode=vnc_mode or normalize_vnc_mode(config.expose_vnc),
         config_hash=config_hash,
     )
+
+
+def _session_policy_id_prefix(
+    *,
+    app_name: str,
+    modal_environment: str,
+    requested_modal_region: str,
+    ingress: str,
+    daemon_http_version: str,
+    vnc_mode: str,
+    config_hash: str,
+) -> str:
+    """Bind handoff policy into the existing session tag without consuming tag budget."""
+    policy = "\0".join(
+        (
+            app_name,
+            modal_environment,
+            requested_modal_region,
+            ingress,
+            daemon_http_version,
+            vnc_mode,
+            config_hash,
+        )
+    ).encode()
+    return hashlib.sha256(policy).hexdigest()[:16]
 
 
 def _borrow_modal_function_session(
     handle: ComputerSessionHandle,
     *,
+    run_id: str,
     readiness_timeout: float,
-) -> ComputerSandbox:
-    computer = ComputerSandbox.attach(
-        sandbox_id=handle.sandbox_id,
-        app_name=handle.app_name,
-        ingress=handle.ingress,
-        http2=handle.daemon_http_version == "2",
-        wait=True,
-        readiness_timeout=readiness_timeout,
-    )
-    metadata = computer.metadata()
-    if (
-        metadata is not None
-        and metadata.sandbox_id == handle.sandbox_id
-        and metadata.app_name == handle.app_name
-        and metadata.config_hash == handle.config_hash
-        and metadata.tags.get("computer-use") == "true"
-        and metadata.tags.get("computer-use.config_hash") == handle.config_hash
-        and metadata.tags.get("computer-use.session_id") == handle.session_id
-    ):
-        return computer
-    mismatch = SessionTargetMismatchError()
+) -> tuple[BorrowedComputer, object, DaemonClient, object]:
     try:
-        computer.detach()
-    except Exception as cleanup_exc:
-        mismatch.add_note(
-            "borrowed session cleanup also failed: "
-            f"detach ({type(cleanup_exc).__name__})"
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "session borrowing requires the modal extra"
+        ) from exc
+    sandbox = modal.Sandbox.from_id(handle.sandbox_id)
+    transport: HTTPTransport | None = None
+    coordinator: object | None = None
+    try:
+        tags = _read_modal_object_tags(sandbox)
+        if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
+            raise SessionTargetMismatchError()
+        token_info = sandbox.create_connect_token(
+            user_metadata={"sdk": "modal-computer-use", "version": __version__}
         )
-    raise mismatch
+        connect_base_url, connect_token = _connect_token_parts(token_info)
+        base_url, token = _borrow_ingress_parts_sync(
+            sandbox,
+            handle=handle,
+            connect_base_url=connect_base_url,
+            connect_token=connect_token,
+        )
+        transport = HTTPTransport(
+            base_url,
+            token=token,
+            http2=handle.daemon_http_version == "2",
+        )
+        from .session_lease import SessionLeaseCoordinator
+
+        coordinator = SessionLeaseCoordinator(transport, run_id=run_id)
+        coordinator.acquire()
+        client = DaemonClient(
+            base_url,
+            transport=transport,
+            _mutation_executor=coordinator.execute,
+        )
+        _wait_borrowed_ready_sync(client, readiness_timeout)
+        return (
+            BorrowedComputer(
+                client,
+                coordinator,
+                base_url=base_url,
+                token=token,
+                http2=handle.daemon_http_version == "2",
+            ),
+            sandbox,
+            client,
+            coordinator,
+        )
+    except BaseException:
+        if coordinator is not None:
+            with suppress(Exception):
+                coordinator.close()
+        if transport is not None:
+            with suppress(Exception):
+                transport.close()
+        _detach_after_failed_borrow(sandbox)
+        raise
+
+
+async def _borrow_modal_function_session_async(
+    handle: ComputerSessionHandle,
+    *,
+    run_id: str,
+    readiness_timeout: float,
+) -> tuple[AsyncBorrowedComputer, object, AsyncDaemonClient, object]:
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "session borrowing requires the modal extra"
+        ) from exc
+    sandbox = await modal.Sandbox.from_id.aio(handle.sandbox_id)
+    transport: AsyncHTTPTransport | None = None
+    coordinator: object | None = None
+    try:
+        tags = await _read_modal_object_tags_async(sandbox)
+        if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
+            raise SessionTargetMismatchError()
+        token_info = await sandbox.create_connect_token.aio(
+            user_metadata={"sdk": "modal-computer-use", "version": __version__}
+        )
+        connect_base_url, connect_token = _connect_token_parts(token_info)
+        base_url, token = await _borrow_ingress_parts_async(
+            sandbox,
+            handle=handle,
+            connect_base_url=connect_base_url,
+            connect_token=connect_token,
+        )
+        transport = AsyncHTTPTransport(
+            base_url,
+            token=token,
+            http2=handle.daemon_http_version == "2",
+        )
+        from .session_lease import AsyncSessionLeaseCoordinator
+
+        coordinator = AsyncSessionLeaseCoordinator(transport, run_id=run_id)
+        await coordinator.acquire()
+        client = AsyncDaemonClient(
+            base_url,
+            transport=transport,
+            _mutation_executor=coordinator.execute,
+        )
+        await _wait_borrowed_ready_async(client, readiness_timeout)
+        return (
+            AsyncBorrowedComputer(
+                client,
+                coordinator,
+                base_url=base_url,
+                token=token,
+                http2=handle.daemon_http_version == "2",
+            ),
+            sandbox,
+            client,
+            coordinator,
+        )
+    except BaseException:
+        await _cleanup_failed_borrow_async(
+            sandbox,
+            coordinator=coordinator,
+            transport=transport,
+        )
+        raise
+
+
+def _live_borrow_target_matches(
+    handle: ComputerSessionHandle,
+    *,
+    sandbox: object,
+    tags: dict[str, str] | None,
+) -> bool:
+    return bool(
+        getattr(sandbox, "object_id", None) == handle.sandbox_id
+        and isinstance(tags, dict)
+        and tags.get("computer-use") == "true"
+        and tags.get("computer-use.config_hash") == handle.config_hash
+        and tags.get("computer-use.session_id") == handle.session_id
+        and handle.session_id.startswith(
+            _session_policy_id_prefix(
+                app_name=handle.app_name,
+                modal_environment=handle.modal_environment,
+                requested_modal_region=handle.requested_modal_region,
+                ingress=handle.ingress,
+                daemon_http_version=handle.daemon_http_version,
+                vnc_mode=handle.vnc_mode,
+                config_hash=handle.config_hash,
+            )
+        )
+    )
+
+
+def _borrow_ingress_parts_sync(
+    sandbox: object,
+    *,
+    handle: ComputerSessionHandle,
+    connect_base_url: str,
+    connect_token: str | None,
+) -> tuple[str, str | None]:
+    if handle.ingress == "connect":
+        return connect_base_url, connect_token
+    return _attested_tunnel_parts(
+        sandbox,
+        connect_base_url=connect_base_url,
+        connect_token=connect_token,
+    )
+
+
+async def _borrow_ingress_parts_async(
+    sandbox: object,
+    *,
+    handle: ComputerSessionHandle,
+    connect_base_url: str,
+    connect_token: str | None,
+) -> tuple[str, str | None]:
+    if handle.ingress == "connect":
+        return connect_base_url, connect_token
+    connect_client = AsyncDaemonClient(connect_base_url, token=connect_token)
+    try:
+        payload = await connect_client.post_json("/v1/session/tunnel-authorize")
+    finally:
+        await connect_client.aclose()
+    token = payload.get("token") if isinstance(payload, dict) else None
+    if not isinstance(token, str) or not token:
+        raise SandboxUnavailableError("daemon did not authorize the selected ingress")
+    tunnels = await sandbox.tunnels.aio()
+    tunnel = tunnels.get(8080) if isinstance(tunnels, dict) else None
+    value = None if tunnel is None else getattr(tunnel, "url", None)
+    if not value:
+        raise SandboxUnavailableError("the selected daemon ingress is unavailable")
+    return str(value).rstrip("/"), token
+
+
+def _wait_borrowed_ready_sync(client: DaemonClient, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        with suppress(Exception):
+            if client.get_json("/readyz").get("ready") is True:
+                return
+        if time.monotonic() >= deadline:
+            raise TimeoutError("borrowed daemon readiness timed out")
+        time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+
+
+async def _wait_borrowed_ready_async(client: AsyncDaemonClient, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        with suppress(Exception):
+            if (await client.get_json("/readyz")).get("ready") is True:
+                return
+        if time.monotonic() >= deadline:
+            raise TimeoutError("borrowed daemon readiness timed out")
+        await asyncio.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+
+
+def _detach_after_failed_borrow(sandbox: object) -> None:
+    detach = getattr(sandbox, "detach", None)
+    if callable(detach):
+        with suppress(Exception):
+            detach()
+
+
+async def _detach_after_failed_borrow_async(sandbox: object) -> None:
+    detach = getattr(sandbox, "detach", None)
+    aio = getattr(detach, "aio", None)
+    if callable(aio):
+        task = asyncio.create_task(aio())
+        while True:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if task.done():
+                    with suppress(BaseException):
+                        await task
+                    return
+                continue
+            except Exception:
+                return
+            else:
+                return
+
+
+async def _cleanup_failed_borrow_async(
+    sandbox: object,
+    *,
+    coordinator: Any | None,
+    transport: AsyncHTTPTransport | None,
+) -> None:
+    async def cleanup() -> None:
+        if coordinator is not None:
+            with suppress(BaseException):
+                await coordinator.aclose()
+        if transport is not None:
+            with suppress(BaseException):
+                await transport.aclose()
+        await _detach_after_failed_borrow_async(sandbox)
+
+    task = asyncio.create_task(cleanup())
+    while True:
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.done():
+                with suppress(BaseException):
+                    await task
+                return
+            continue
+        except BaseException:
+            return
+        else:
+            return
+
+
+async def _read_modal_object_tags_async(target: object) -> dict[str, str] | None:
+    get_tags = getattr(target, "get_tags", None)
+    aio = getattr(get_tags, "aio", None)
+    if not callable(aio):
+        return None
+    raw_tags = await aio()
+    if isinstance(raw_tags, dict):
+        return {str(key): str(value) for key, value in raw_tags.items()}
+    return None
 
 
 def _metadata_from_sandbox(sandbox: object, *, app_name: str) -> SandboxRef:

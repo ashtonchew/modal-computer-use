@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import struct
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter, sleep
@@ -13,9 +13,11 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
+from modal_computer_use.transports.metadata import MetadataHeaders, resolve_metadata_headers
 from modal_computer_use.transports.websocket_url import daemon_websocket_url
 
 FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
+_OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
 FrameEncoding = Literal["json-binary", "binary-envelope"]
 
 
@@ -82,6 +84,8 @@ class ObservationStreamTransport:
         websocket: ClientConnection | None = None,
         connect_attempts: int = 1,
         connect_backoff_seconds: float = 0.25,
+        _metadata_headers: MetadataHeaders | None = None,
+        _mutation_executor: Any | None = None,
     ) -> None:
         if connect_attempts < 1:
             raise ValueError("connect_attempts must be at least 1")
@@ -92,6 +96,8 @@ class ObservationStreamTransport:
         self.timeout = timeout
         self.connect_attempts = connect_attempts
         self.connect_backoff_seconds = connect_backoff_seconds
+        self._metadata_headers = _metadata_headers
+        self._mutation_executor = _mutation_executor
         self.setup_attempts = 1
         self.setup_elapsed_ms = 0.0
         self.setup_retry_errors: list[dict[str, str]] = []
@@ -181,10 +187,24 @@ class ObservationStreamTransport:
         self._send("capture_now", {})
 
     def run_actions_capture(self, payload: dict[str, Any]) -> None:
-        self._send("run_actions_capture", payload)
+        if self._mutation_executor is None:
+            self._send("run_actions_capture", payload)
+            return
+        self._mutation_executor(
+            lambda metadata: self._send_mutation_and_buffer_matching(
+                "run_actions_capture", payload, metadata=metadata
+            )
+        )
 
     def run_actions_observe_change(self, payload: dict[str, Any]) -> None:
-        self._send("run_actions_observe_change", payload)
+        if self._mutation_executor is None:
+            self._send("run_actions_observe_change", payload)
+            return
+        self._mutation_executor(
+            lambda metadata: self._send_mutation_and_buffer_matching(
+                "run_actions_observe_change", payload, metadata=metadata
+            )
+        )
 
     def run_actions_observe_change_and_recv(
         self,
@@ -192,7 +212,28 @@ class ObservationStreamTransport:
         *,
         transport_timing: bool = False,
     ) -> ObservationFrame:
-        request_id = self._send("run_actions_observe_change", payload)
+        if self._mutation_executor is not None:
+            return self._mutation_executor(
+                lambda metadata: self._run_actions_observe_change_and_recv(
+                    payload,
+                    transport_timing=transport_timing,
+                    metadata=metadata,
+                )
+            )
+        return self._run_actions_observe_change_and_recv(
+            payload, transport_timing=transport_timing
+        )
+
+    def _run_actions_observe_change_and_recv(
+        self,
+        payload: dict[str, Any],
+        *,
+        transport_timing: bool = False,
+        metadata: Mapping[str, str] | None = None,
+    ) -> ObservationFrame:
+        request_id = self._send(
+            "run_actions_observe_change", payload, metadata=metadata
+        )
         while True:
             frame = (
                 self._recv_frame_with_timing()
@@ -280,11 +321,13 @@ class ObservationStreamTransport:
         }
 
     def _connect(self, *, timeout: float) -> ClientConnection:
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
+        headers = resolve_metadata_headers(self._metadata_headers)
+        if self.token:
+            headers.setdefault("Authorization", f"Bearer {self.token}")
         try:
             return connect(
                 _websocket_url(self.base_url, "/v1/observations/stream"),
-                additional_headers=headers,
+                additional_headers=headers or None,
                 open_timeout=timeout,
                 max_size=8 * 1024 * 1024,
                 compression=None,
@@ -294,11 +337,34 @@ class ObservationStreamTransport:
                 raise AuthenticationError("observation stream authentication failed") from exc
             raise
 
-    def _send(self, op: str, payload: dict[str, Any]) -> str:
+    def _send(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> str:
         request_id = str(self._next_id)
         self._next_id += 1
-        self._websocket.send(json.dumps({"id": request_id, "op": op, "payload": payload}))
+        message = {"id": request_id, "op": op, "payload": payload}
+        if metadata is not None and _OPERATION_SEQUENCE_HEADER in metadata:
+            message["sequence"] = metadata[_OPERATION_SEQUENCE_HEADER]
+        self._websocket.send(json.dumps(message))
         return request_id
+
+    def _send_mutation_and_buffer_matching(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str],
+    ) -> None:
+        request_id = self._send(op, payload, metadata=metadata)
+        while True:
+            frame = self._receive_frame(transport_timing=False)
+            self._buffer_frame(frame)
+            if frame.metadata.get("id") == request_id:
+                return
 
     def recv_frame_with_timing(self) -> ObservationFrame:
         """Receive one frame and split client-side transport timing.

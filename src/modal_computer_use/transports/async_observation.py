@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
 from time import perf_counter
 from typing import Any
@@ -23,6 +23,7 @@ from .observation import (
 from .websocket_url import daemon_websocket_url
 
 _STOP = object()
+_OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
 
 
 class AsyncObservationStreamTransport:
@@ -40,6 +41,7 @@ class AsyncObservationStreamTransport:
         connect_attempts: int = 1,
         connect_backoff_seconds: float = 0.25,
         _metadata_headers: MetadataHeaders | None = None,
+        _mutation_executor: Any | None = None,
     ) -> None:
         if connect_attempts < 1:
             raise ValueError("connect_attempts must be at least 1")
@@ -54,6 +56,7 @@ class AsyncObservationStreamTransport:
         self.setup_elapsed_ms = 0.0
         self.setup_retry_errors: list[dict[str, str]] = []
         self._metadata_headers = _metadata_headers
+        self._mutation_executor = _mutation_executor
         self._websocket = websocket
         self._ready = False
         self._closed = False
@@ -194,6 +197,19 @@ class AsyncObservationStreamTransport:
         return item
 
     async def _request(self, op: str, payload: dict[str, Any]) -> Any:
+        if op in self._MUTATING_OPS and self._mutation_executor is not None:
+            return await self._mutation_executor(
+                lambda metadata: self._request_impl(op, payload, metadata=metadata)
+            )
+        return await self._request_impl(op, payload)
+
+    async def _request_impl(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: dict[str, str] | Mapping[str, str] | None = None,
+    ) -> Any:
         websocket = await self._ensure_connected()
         loop = asyncio.get_running_loop()
         request_id = str(self._next_id)
@@ -205,7 +221,10 @@ class AsyncObservationStreamTransport:
         try:
             async with self._send_lock:
                 possibly_sent = mutating
-                await websocket.send(json.dumps({"id": request_id, "op": op, "payload": payload}))
+                message = {"id": request_id, "op": op, "payload": payload}
+                if metadata is not None and _OPERATION_SEQUENCE_HEADER in metadata:
+                    message["sequence"] = metadata[_OPERATION_SEQUENCE_HEADER]
+                await websocket.send(json.dumps(message))
             return await asyncio.wait_for(future, timeout=self.timeout)
         except asyncio.CancelledError:
             self._pending.pop(request_id, None)
