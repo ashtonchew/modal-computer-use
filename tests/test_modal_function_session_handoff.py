@@ -1583,11 +1583,6 @@ async def test_async_cancellation_after_acquisition_safely_closes_run_and_target
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        stale = await verifier.post(
-            "/v1/mouse/move",
-            json={"x": 1, "y": 2},
-            headers={**acquired_headers, OPERATION_SEQUENCE_HEADER: "0"},
-        )
         sealed = await verifier.post(
             "/v1/leases/acquire",
             json={"run_id": "cancelled-run"},
@@ -1597,6 +1592,11 @@ async def test_async_cancellation_after_acquisition_safely_closes_run_and_target
             json={"run_id": "fresh-run"},
         )
         fresh_body = fresh.json()
+        stale = await verifier.post(
+            "/v1/mouse/move",
+            json={"x": 1, "y": 2},
+            headers={**acquired_headers, OPERATION_SEQUENCE_HEADER: "0"},
+        )
         fresh_headers = {
             LEASE_ID_HEADER: fresh_body["lease_id"],
             LEASE_EPOCH_HEADER: fresh_body["daemon_epoch"],
@@ -1615,9 +1615,9 @@ async def test_async_cancellation_after_acquisition_safely_closes_run_and_target
     assert heartbeat_transport.closed
     assert target.calls[-1] == "detach.aio"
     assert "terminate" not in target.calls
-    assert stale.json()["code"] == "lease_released"
     assert sealed.json()["code"] == "run_sealed"
     assert fresh.status_code == 200
+    assert stale.json()["code"] == "lease_stale"
     assert fresh_mutation.status_code == 200
 
 
