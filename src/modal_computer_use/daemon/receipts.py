@@ -24,6 +24,11 @@ RECEIPT_PROTOCOL_VERSION = "1"
 MAX_OPERATION_SEQUENCE = (1 << 63) - 1
 
 ReceiptState = Literal["IN_PROGRESS", "COMPLETED", "INDETERMINATE"]
+_SynchronousMode = Literal["NORMAL", "FULL"]
+_SYNCHRONOUS_PRAGMA_VALUES: dict[_SynchronousMode, int] = {
+    "NORMAL": 1,
+    "FULL": 2,
+}
 
 
 class _Headers(Protocol):
@@ -378,11 +383,31 @@ class ReceiptJournal:
             os.close(descriptor)
         return key
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(
+        self,
+        *,
+        synchronous: _SynchronousMode = "NORMAL",
+    ) -> sqlite3.Connection:
+        try:
+            expected_synchronous = _SYNCHRONOUS_PRAGMA_VALUES[synchronous]
+        except KeyError:
+            raise ValueError("unsupported receipt journal synchronous mode") from None
         connection = sqlite3.connect(self._db_path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=NORMAL")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(f"PRAGMA synchronous={synchronous}")
+            effective_row = connection.execute("PRAGMA synchronous").fetchone()
+            effective_synchronous = (
+                int(effective_row[0]) if effective_row is not None else None
+            )
+            if effective_synchronous != expected_synchronous:
+                raise RuntimeError(
+                    "receipt journal synchronous mode was not applied"
+                )
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     def _fingerprint(self, operation_kind: str, semantic_data: Any) -> str:
@@ -439,7 +464,7 @@ class ReceiptJournal:
         fingerprint: str,
     ) -> ReceiptHandle:
         now = time.time()
-        with self._connect() as connection:
+        with self._connect(synchronous="FULL") as connection:
             connection.execute("BEGIN IMMEDIATE")
             recovery = connection.execute(
                 "SELECT recovery_required, incident_id FROM recovery WHERE singleton = 1"
