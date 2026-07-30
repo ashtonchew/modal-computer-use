@@ -35,6 +35,16 @@ async def acquire(
     response: Response,
 ) -> dict[str, object]:
     async with request.app.state.input_lock:
+        previous = request.app.state.lease_coordinator.status()
+        if previous["state"] == "active":
+            request.app.state.lease_coordinator.acquire(payload.run_id)
+        if previous["state"] == "expired" and isinstance(previous["run_id"], str):
+            await request.app.state.receipt_journal.seal_run(
+                previous["run_id"],
+                "lease_expired",
+            )
+        await request.app.state.receipt_journal.validate_acquire(payload.run_id)
+        await request.app.state.receipt_journal.activate_run(payload.run_id)
         grant = request.app.state.lease_coordinator.acquire(payload.run_id)
         _schedule_expiry(request)
     response.headers[LEASE_TOKEN_HEADER] = grant.token
@@ -57,10 +67,13 @@ async def heartbeat(request: Request, response: Response) -> dict[str, object]:
 @router.post("/release")
 async def release(request: Request, response: Response) -> dict[str, object]:
     async with request.app.state.input_lock:
-        result = request.app.state.lease_coordinator.release(
-            lease_credentials_from_headers(request.headers)
+        credentials = lease_credentials_from_headers(request.headers)
+        lease = request.app.state.lease_coordinator.validate_mutation(credentials)
+        assert lease is not None
+        result = await _seal_and_release_cancellation_safe(
+            request.app.state,
+            lease,
         )
-        _cancel_expiry(request.app.state)
     response.headers["Cache-Control"] = "no-store"
     return result
 
@@ -69,6 +82,11 @@ async def release(request: Request, response: Response) -> dict[str, object]:
 async def status(request: Request, response: Response) -> dict[str, object]:
     async with request.app.state.input_lock:
         result = request.app.state.lease_coordinator.status()
+        if result["state"] == "expired" and isinstance(result["run_id"], str):
+            await request.app.state.receipt_journal.seal_run(
+                result["run_id"],
+                "lease_expired",
+            )
     response.headers["Cache-Control"] = "no-store"
     return result
 
@@ -90,10 +108,38 @@ async def _expire_after_ttl(state: Any) -> None:
     try:
         await asyncio.sleep(state.lease_coordinator.ttl_seconds)
         async with state.input_lock:
-            state.lease_coordinator.status()
+            status = state.lease_coordinator.status()
+            if status["state"] == "expired" and isinstance(status["run_id"], str):
+                await state.receipt_journal.seal_run(status["run_id"], "lease_expired")
     except asyncio.CancelledError:
         raise
     finally:
         current = getattr(state, "lease_expiry_task", None)
         if current is asyncio.current_task():
             state.lease_expiry_task = None
+
+
+async def _seal_and_release_cancellation_safe(
+    state: Any,
+    admitted_lease: Any,
+) -> dict[str, object]:
+    async def seal_and_release() -> dict[str, object]:
+        await state.receipt_journal.seal_run(admitted_lease.run_id, "lease_released")
+        result = state.lease_coordinator.release_validated(admitted_lease)
+        _cancel_expiry(state)
+        return result
+
+    task = asyncio.create_task(seal_and_release())
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            result = await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if task.cancelled():
+                raise
+            if cancellation is None:
+                cancellation = exc
+            continue
+        if cancellation is not None:
+            raise cancellation
+        return result

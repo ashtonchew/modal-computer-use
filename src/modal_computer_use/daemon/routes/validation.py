@@ -8,7 +8,12 @@ from fastapi import Request
 
 from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.leases import validate_mutation_headers
+from modal_computer_use.daemon.leases import lease_credentials_from_headers
+from modal_computer_use.daemon.receipts import (
+    begin_mutation_receipt,
+    finish_mutation_receipt,
+    operation_sequence_from_headers,
+)
 from modal_computer_use.models import Point, Region
 
 
@@ -67,20 +72,63 @@ async def ready_input_lock(request: Request) -> AsyncIterator[None]:
 
 
 @asynccontextmanager
-async def mutation_lock(request: Request) -> AsyncIterator[None]:
+async def mutation_lock(
+    request: Request,
+    *,
+    semantic_data: Any,
+    operation_kind: str | None = None,
+) -> AsyncIterator[None]:
     async with request.app.state.input_lock:
-        validate_mutation_headers(request.app.state, request.headers)
-        yield
+        handle = await begin_mutation_receipt(
+            request.app.state,
+            credentials=lease_credentials_from_headers(request.headers),
+            sequence=operation_sequence_from_headers(request.headers),
+            operation_kind=operation_kind or _operation_kind(request),
+            semantic_data=semantic_data,
+        )
+        try:
+            yield
+        except BaseException as exc:
+            await finish_mutation_receipt(request.app.state, handle, exc)
+            raise
+        else:
+            await finish_mutation_receipt(request.app.state, handle, None)
 
 
 @asynccontextmanager
-async def ready_mutation_lock(request: Request) -> AsyncIterator[None]:
+async def ready_mutation_lock(
+    request: Request,
+    *,
+    semantic_data: Any,
+    operation_kind: str | None = None,
+) -> AsyncIterator[None]:
     lock_was_contended = request.app.state.input_lock.locked()
     async with request.app.state.input_lock:
-        validate_mutation_headers(request.app.state, request.headers)
+        await request.app.state.receipt_journal.ensure_mutation_allowed()
+        credentials = lease_credentials_from_headers(request.headers)
+        request.app.state.lease_coordinator.validate_mutation(credentials)
         if lock_was_contended:
             await ensure_desktop_ready(request, force=True)
-        yield
+        handle = await begin_mutation_receipt(
+            request.app.state,
+            credentials=credentials,
+            sequence=operation_sequence_from_headers(request.headers),
+            operation_kind=operation_kind or _operation_kind(request),
+            semantic_data=semantic_data,
+        )
+        try:
+            yield
+        except BaseException as exc:
+            await finish_mutation_receipt(request.app.state, handle, exc)
+            raise
+        else:
+            await finish_mutation_receipt(request.app.state, handle, None)
+
+
+def _operation_kind(request: Request) -> str:
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    return template if isinstance(template, str) else "daemon.mutation"
 
 
 def validate_point(request: Request, point: Point, *, field: str = "coordinate") -> None:

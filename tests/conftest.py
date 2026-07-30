@@ -17,6 +17,7 @@ def app(tmp_path):
             backend="mock",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
         )
     )

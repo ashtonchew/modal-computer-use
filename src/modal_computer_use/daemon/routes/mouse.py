@@ -32,7 +32,7 @@ async def move(payload: MouseMoveRequest, request: Request, response: Response) 
         _report_input_backend(response, backend.input_backend)
         return point
 
-    return await run_input_action(request, operation)
+    return await run_input_action(request, operation, semantic_data=payload)
 
 
 def _report_input_backend(response: Response, backend_name: object) -> None:
@@ -57,7 +57,7 @@ async def click(payload: MouseClickRequest, request: Request, response: Response
         _report_input_backend(response, backend.input_backend)
         return point
 
-    return await run_input_action(request, operation)
+    return await run_input_action(request, operation, semantic_data=payload)
 
 
 @router.post("/drag")
@@ -87,7 +87,7 @@ async def drag(payload: MouseDragRequest, request: Request, response: Response) 
         _report_input_backend(response, backend.input_backend)
         return point
 
-    return await run_input_action(request, operation)
+    return await run_input_action(request, operation, semantic_data=payload)
 
 
 @router.post("/scroll")
@@ -110,6 +110,7 @@ async def scroll(
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="mouse_scroll_failed",
         fallback_message="mouse scroll failed",
     )
@@ -128,6 +129,7 @@ async def down(payload: MouseButtonRequest, request: Request, response: Response
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="mouse_down_failed",
         fallback_message="mouse down failed",
     )
@@ -146,6 +148,7 @@ async def up(payload: MouseButtonRequest, request: Request, response: Response) 
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="mouse_up_failed",
         fallback_message="mouse up failed",
     )

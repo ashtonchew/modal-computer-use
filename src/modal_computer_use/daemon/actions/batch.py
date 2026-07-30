@@ -14,6 +14,13 @@ from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacte
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
 from modal_computer_use.daemon.leases import LeaseCredentials, lease_credentials_from_headers
+from modal_computer_use.daemon.receipts import (
+    ReceiptHandle,
+    finish_mutation_receipt,
+    operation_sequence_from_headers,
+    prepare_mutation_receipt,
+    require_new_receipt,
+)
 from modal_computer_use.daemon.routes.validation import backend_readiness, mark_desktop_ready
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
@@ -59,13 +66,26 @@ class _FailedActionResultError(DaemonError):
 
 
 class ActionBatchContext:
-    def __init__(self, state: Any, headers: Any | None = None) -> None:
+    def __init__(
+        self,
+        state: Any,
+        headers: Any | None = None,
+        *,
+        operation_sequence: Any = None,
+    ) -> None:
         self.state = state
         self.budget_policy: BudgetPolicy = state.budget_policy
         self.traces = ActionTraceWriter(self)
         self.lease_credentials: LeaseCredentials | None = (
             lease_credentials_from_headers(headers) if headers is not None else None
         )
+        self.operation_sequence = (
+            operation_sequence_from_headers(headers)
+            if headers is not None and operation_sequence is None
+            else operation_sequence
+        )
+        self.receipt_handle: ReceiptHandle | None = None
+        self.receipt_finalized = False
 
 
 async def _ensure_desktop_ready(context: ActionBatchContext, *, force: bool = False) -> None:
@@ -129,6 +149,27 @@ async def _run(
     idempotency_key: str | None,
     raw_screenshot_after: bool,
 ):
+    try:
+        return await _run_impl(
+            payload,
+            context,
+            idempotency_key=idempotency_key,
+            raw_screenshot_after=raw_screenshot_after,
+        )
+    except BaseException as exc:
+        if context.receipt_handle is not None and not context.receipt_finalized:
+            await finish_mutation_receipt(context.state, context.receipt_handle, exc)
+            context.receipt_finalized = True
+        raise
+
+
+async def _run_impl(
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+    *,
+    idempotency_key: str | None,
+    raw_screenshot_after: bool,
+):
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
     cached = (
@@ -138,15 +179,32 @@ async def _run(
     )
     if cached is not None:
         async with context.state.input_lock:
-            coordinator = getattr(context.state, "lease_coordinator", None)
-            if coordinator is not None:
-                coordinator.validate_mutation(context.lease_credentials)
             cached = _cached_idempotency_result(
                 context,
                 effective_idempotency_key,
                 request_fingerprint,
             )
             if cached is not None:
+                handle = await prepare_mutation_receipt(
+                    context.state,
+                    credentials=context.lease_credentials,
+                    sequence=context.operation_sequence,
+                    operation_kind="actions.run",
+                    semantic_data={
+                        "request": payload.model_dump(
+                            mode="json", exclude={"idempotency_key"}
+                        ),
+                        "raw_screenshot_after": raw_screenshot_after,
+                    },
+                )
+                if handle is not None and handle.existing_state is not None:
+                    require_new_receipt(handle)
+                if handle is not None and handle.existing_state is None:
+                    context.receipt_finalized = True
+                    await context.state.receipt_journal.complete(
+                        handle,
+                        classification="known_cached_result",
+                    )
                 return cached, None
     action_count = _count_action_tree(payload.actions)
     if action_count > context.state.settings.max_batch_actions:
@@ -178,9 +236,24 @@ async def _run(
     action_phase_failed = False
     lock_was_contended = context.state.input_lock.locked()
     async with context.state.input_lock:
-        coordinator = getattr(context.state, "lease_coordinator", None)
-        if coordinator is not None:
-            coordinator.validate_mutation(context.lease_credentials)
+        await context.state.receipt_journal.ensure_mutation_allowed()
+        context.state.lease_coordinator.validate_mutation(context.lease_credentials)
+        if lock_was_contended:
+            await _ensure_desktop_ready(context, force=True)
+        if context.lease_credentials is not None:
+            _preflight_action_budget(context, payload.actions)
+        handle = await prepare_mutation_receipt(
+            context.state,
+            credentials=context.lease_credentials,
+            sequence=context.operation_sequence,
+            operation_kind="actions.run",
+            semantic_data={
+                "request": payload.model_dump(mode="json", exclude={"idempotency_key"}),
+                "raw_screenshot_after": raw_screenshot_after,
+            },
+        )
+        require_new_receipt(handle)
+        context.receipt_handle = handle
         cache = context.state.idempotency_cache
         cached = (
             None
@@ -188,9 +261,13 @@ async def _run(
             else _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
         )
         if cached is not None:
+            if handle is not None:
+                context.receipt_finalized = True
+                await context.state.receipt_journal.complete(
+                    handle,
+                    classification="known_cached_result",
+                )
             return cached, None
-        if lock_was_contended:
-            await _ensure_desktop_ready(context, force=True)
 
         batch_timeout_ms = context.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
@@ -337,7 +414,7 @@ async def _run(
                         }
                     },
                 )
-                if batch_timed_out or not payload.continue_on_error:
+                if handle is not None or batch_timed_out or not payload.continue_on_error:
                     action_phase_failed = True
                     break
             except Exception as exc:
@@ -378,6 +455,9 @@ async def _run(
                         }
                     },
                 )
+                if handle is not None and _action_item_is_uncertain(item):
+                    action_phase_failed = True
+                    break
                 if (
                     payload.continue_on_error
                     and _uses_post_action_delay(action)
@@ -387,7 +467,9 @@ async def _run(
                 if not payload.continue_on_error:
                     action_phase_failed = True
                     break
-        action_phase_allows_screenshot = payload.continue_on_error or not action_phase_failed
+        action_phase_allows_screenshot = (
+            payload.continue_on_error and handle is None
+        ) or not action_phase_failed
         if (
             payload.screenshot_after
             and action_phase_allows_screenshot
@@ -502,7 +584,54 @@ async def _run(
                 "result": result.model_dump(mode="json"),
             }
             _prune_idempotency_cache(context)
+        if handle is not None:
+            uncertain_item = next(
+                (
+                    item
+                    for item in results
+                    if _action_item_is_uncertain(item)
+                ),
+                None,
+            )
+            if uncertain_item is not None:
+                uncertain_code = uncertain_item.error_code or "action_failed"
+                if uncertain_code == "timeout":
+                    receipt_error: BaseException = TimeoutError("action batch timed out")
+                else:
+                    receipt_error = DaemonError(
+                        "action dispatch outcome is uncertain",
+                        code=uncertain_code,
+                        details=uncertain_item.output,
+                    )
+                context.receipt_finalized = True
+                await finish_mutation_receipt(context.state, handle, receipt_error)
+            else:
+                retry_safe = bool(results) and all(
+                    not item.ok
+                    and item.output.get("retry_safe") is True
+                    and item.output.get("emission_state") == "not_started"
+                    for item in results
+                )
+                context.receipt_finalized = True
+                if retry_safe:
+                    await context.state.receipt_journal.abandon(
+                        handle,
+                        classification="not_started",
+                    )
+                else:
+                    await context.state.receipt_journal.complete(handle)
         return result, screenshot_bytes
+
+
+def _action_item_is_uncertain(item: ActionItemResult) -> bool:
+    if item.type == "screenshot_after":
+        return False
+    code = item.error_code
+    return bool(
+        code in {"timeout", "input_may_be_partial", "action_failed"}
+        or item.output.get("indeterminate") is True
+        or (isinstance(code, str) and code.endswith("_indeterminate"))
+    )
 
 
 def _effective_idempotency_key(payload: ActionBatchRequest, header_key: str | None) -> str | None:

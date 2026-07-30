@@ -32,6 +32,7 @@ async def run(payload: CommandRunRequest, request: Request) -> ActionResult:
     result = await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="command_failed",
         fallback_message="command failed",
     )

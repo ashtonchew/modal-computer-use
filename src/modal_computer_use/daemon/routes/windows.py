@@ -50,6 +50,7 @@ async def activate(window_id: str, request: Request, response: Response) -> Acti
     return await run_input_action(
         request,
         operation,
+        semantic_data={"window_id": window_id},
         fallback_code="window_activate_failed",
         fallback_message="window activate failed",
     )
@@ -66,6 +67,7 @@ async def close(window_id: str, request: Request, response: Response) -> ActionR
     return await run_input_action(
         request,
         operation,
+        semantic_data={"window_id": window_id},
         fallback_code="window_close_failed",
         fallback_message="window close failed",
     )

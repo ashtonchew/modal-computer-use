@@ -17,7 +17,9 @@ from modal_computer_use.daemon.leases import (
     LEASE_TOKEN_HEADER,
     LeaseCoordinator,
     LeaseCredentials,
+    MutationLease,
 )
+from modal_computer_use.daemon.receipts import OPERATION_SEQUENCE_HEADER
 from modal_computer_use.daemon.settings import DaemonSettings
 
 
@@ -114,6 +116,30 @@ def test_coordinator_rejects_blank_application_run_id() -> None:
     assert coordinator.status()["run_id"] is None
 
 
+def test_release_validated_ignores_ttl_only_for_exact_admitted_identity() -> None:
+    clock = _Clock()
+    coordinator = LeaseCoordinator(clock=clock, ttl_seconds=1)
+    grant = coordinator.acquire("validated-run")
+    admitted = coordinator.validate_mutation(_credentials(grant))
+    assert admitted is not None
+
+    for mismatched in (
+        MutationLease(run_id="other-run", epoch=admitted.epoch, fence=admitted.fence),
+        MutationLease(run_id=admitted.run_id, epoch="other-epoch", fence=admitted.fence),
+        MutationLease(run_id=admitted.run_id, epoch=admitted.epoch, fence=admitted.fence + 1),
+    ):
+        with pytest.raises(DaemonError) as stale:
+            coordinator.release_validated(mismatched)
+        assert stale.value.code == "lease_stale"
+
+    clock.advance(2)
+    released = coordinator.release_validated(admitted)
+    assert released["state"] == "released"
+    with pytest.raises(DaemonError) as repeated:
+        coordinator.release_validated(admitted)
+    assert repeated.value.code == "lease_stale"
+
+
 def test_coordinator_epoch_changes_on_daemon_restart_and_tokens_are_repr_safe() -> None:
     first = LeaseCoordinator()
     second = LeaseCoordinator()
@@ -169,7 +195,10 @@ def test_lease_heartbeat_release_and_stale_delayed_fence(test_client) -> None:
     assert test_client.get("/v1/leases/status").json()["run_id"] == "first-run"
 
     second = _acquire(test_client, "second-run")
-    second_headers = _lease_headers(second)
+    second_headers = {
+        **_lease_headers(second),
+        OPERATION_SEQUENCE_HEADER: "0",
+    }
     assert second.json()["fence"] == first.json()["fence"] + 1
     assert first.json()["run_id"] == "first-run"
     assert second.json()["run_id"] == "second-run"
@@ -196,6 +225,7 @@ def test_acquire_run_id_is_not_taken_from_daemon_settings(tmp_path) -> None:
             backend="mock",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
             run_id="computer-use-environment-run",
         )
@@ -379,6 +409,7 @@ def test_acquire_waits_for_existing_input_lock_to_drain(tmp_path) -> None:
             backend="mock",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
         )
     )
@@ -420,6 +451,7 @@ def test_idle_expiration_seals_run_interrupted_and_releases_ownership(tmp_path) 
             backend="mock",
             artifacts_dir=tmp_path / "artifacts",
             recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
             local_token="dev",
         )
     )
