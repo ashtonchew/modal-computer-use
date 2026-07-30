@@ -56,9 +56,9 @@ I kept XTest and removed the per-action process. The daemon loads the X11 client
 
 ![Per-action xdotool setup compared with one persistent X11 input connection](../assets/modal-optimized-input-session.svg)
 
-Inside the daemon, the mean for a pointer move followed by one left click fell from about 146 ms to 1.2 ms, a 128x speedup. Four move-and-click pairs took 4.8 ms instead of 444 ms.
+Inside the daemon, the mean for a pointer move followed by one left click fell from about 146 ms to 1.2 ms, a 128x speedup. Four move-and-click pairs took 4.8 ms instead of 444 ms, a near 100x speedup.
 
-Typing sends at least a key-down and key-up for every character, plus modifiers when needed. The daemon-side mean for one hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms. These were adapter timings inside the daemon. The final table times the complete request.
+Typing sends at least a key-down and key-up for every character, plus modifiers when needed (on a US keyboard layout, `!` requires holding Shift while pressing `1`). The daemon-side mean for one hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms.
 
 Keeping the connection open traded process isolation for state I now had to manage. Consider typing `A`: press Shift, press `a`, release `a`, release Shift. If another request typed `2` halfway through, X11 could receive `@` instead. The daemon reads the active XKB layout before building the sequence and holds the input lock until every key and button has been released. That same lock protects mouse drags and modified clicks.
 
