@@ -36,7 +36,7 @@ class LeaseCredentials:
 @dataclass(frozen=True, slots=True)
 class LeaseGrant:
     lease_id: str
-    run_id: str
+    run_id: str = field(repr=False)
     epoch: str
     fence: int
     token: str = field(repr=False)
@@ -55,10 +55,17 @@ class LeaseGrant:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class MutationLease:
+    run_id: str = field(repr=False)
+    epoch: str
+    fence: int
+
+
 @dataclass(slots=True)
 class _Lease:
     lease_id: str
-    run_id: str
+    run_id: str = field(repr=False)
     fence: int
     token: str = field(repr=False)
     expires_at: float
@@ -143,14 +150,64 @@ class LeaseCoordinator:
         self._run_state = "released"
         return self.status()
 
-    def validate_mutation(self, credentials: LeaseCredentials | None) -> None:
+    def release_validated(self, admitted: MutationLease) -> dict[str, Any]:
+        """Release an already-admitted lease without reevaluating its TTL."""
+        lease = self._lease
+        matches = bool(
+            self._state == "active"
+            and lease is not None
+            and admitted.epoch == self.epoch
+            and admitted.fence == lease.fence
+            and secrets.compare_digest(admitted.run_id, lease.run_id)
+        )
+        if not matches:
+            raise DaemonError(
+                "admitted trajectory lease is no longer current",
+                status_code=409,
+                code="lease_stale",
+            )
+        self._state = "released"
+        self._run_state = "released"
+        return self.status()
+
+    def reset_after_owner_recovery(self) -> None:
+        self._expire_if_needed()
+        if self._state == "active":
+            self._state = "released"
+            self._run_state = "interrupted"
+
+    def validate_mutation(self, credentials: LeaseCredentials | None) -> MutationLease | None:
         self._expire_if_needed()
         if self._state == "active":
             self._require_owner(credentials)
-            return
+            assert self._lease is not None
+            return MutationLease(
+                run_id=self._lease.run_id,
+                epoch=self.epoch,
+                fence=self._lease.fence,
+            )
         if credentials is None:
-            return
+            return None
         self._raise_inactive_or_stale()
+        return None
+
+    def authenticate_last_released(
+        self, credentials: LeaseCredentials | None
+    ) -> MutationLease | None:
+        """Authenticate the immediately released lease without changing time-based state."""
+        lease = self._lease
+        if (
+            self._state != "released"
+            or self._run_state != "released"
+            or lease is None
+            or not self._credentials_match(lease, credentials)
+        ):
+            return None
+        return MutationLease(
+            run_id=lease.run_id,
+            epoch=self.epoch,
+            fence=lease.fence,
+        )
 
     def status(self) -> dict[str, Any]:
         self._expire_if_needed()
@@ -180,18 +237,25 @@ class LeaseCoordinator:
             )
         lease = self._lease
         assert lease is not None
-        matches = (
-            credentials.lease_id == lease.lease_id
-            and credentials.epoch == self.epoch
-            and credentials.fence == lease.fence
-            and secrets.compare_digest(credentials.token, lease.token)
-        )
-        if not matches:
+        if not self._credentials_match(lease, credentials):
             raise DaemonError(
                 "trajectory lease credentials are stale",
                 status_code=409,
                 code="lease_stale",
             )
+
+    def _credentials_match(
+        self,
+        lease: _Lease,
+        credentials: LeaseCredentials | None,
+    ) -> bool:
+        return bool(
+            credentials is not None
+            and credentials.lease_id == lease.lease_id
+            and credentials.epoch == self.epoch
+            and credentials.fence == lease.fence
+            and secrets.compare_digest(credentials.token, lease.token)
+        )
 
     def _raise_inactive_or_stale(self) -> None:
         if self._state == "expired":

@@ -57,9 +57,19 @@ async def _handle_hot_session_message(websocket: WebSocket, message: Any) -> Non
                 {"type": "result", "id": request_id, "ok": True, "result": {}}
             )
         elif op == "run_actions":
-            await _send_hot_action_result(websocket, request_id, payload)
+            await _send_hot_action_result(
+                websocket,
+                request_id,
+                payload,
+                operation_sequence=message.get("sequence"),
+            )
         elif op == "run_raw_screenshot":
-            await _send_hot_action_screenshot_result(websocket, request_id, payload)
+            await _send_hot_action_screenshot_result(
+                websocket,
+                request_id,
+                payload,
+                operation_sequence=message.get("sequence"),
+            )
         elif op == "screenshot_raw":
             await _send_hot_screenshot_result(websocket, request_id, payload)
         else:
@@ -94,11 +104,17 @@ async def _send_hot_action_result(
     websocket: WebSocket,
     request_id: str,
     payload: dict[str, Any],
+    *,
+    operation_sequence: Any,
 ) -> None:
     request = ActionBatchRequest.model_validate(payload)
     result = await run_batch(
         request,
-        ActionBatchContext(websocket.app.state, websocket.headers),
+        ActionBatchContext(
+            websocket.app.state,
+            websocket.headers,
+            operation_sequence=operation_sequence,
+        ),
     )
     await websocket.send_json(
         {
@@ -114,11 +130,17 @@ async def _send_hot_action_screenshot_result(
     websocket: WebSocket,
     request_id: str,
     payload: dict[str, Any],
+    *,
+    operation_sequence: Any,
 ) -> None:
     request = ActionBatchRequest.model_validate(payload)
     result, shot = await run_with_screenshot_bytes(
         request,
-        ActionBatchContext(websocket.app.state, websocket.headers),
+        ActionBatchContext(
+            websocket.app.state,
+            websocket.headers,
+            operation_sequence=operation_sequence,
+        ),
     )
     if shot is None:
         await _send_hot_error(

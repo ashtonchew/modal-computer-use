@@ -408,7 +408,11 @@ async def _handle_observation_message(
             )
             action_result = await run_batch(
                 action_request,
-                ActionBatchContext(websocket.app.state, websocket.headers),
+                ActionBatchContext(
+                    websocket.app.state,
+                    websocket.headers,
+                    operation_sequence=message.get("sequence"),
+                ),
             )
             if stream_request.capture_delay_ms > 0:
                 await asyncio.sleep(stream_request.capture_delay_ms / 1000)
@@ -501,7 +505,11 @@ async def _handle_observation_message(
             action_started = perf_counter()
             action_result = await run_batch(
                 action_request,
-                ActionBatchContext(websocket.app.state, websocket.headers),
+                ActionBatchContext(
+                    websocket.app.state,
+                    websocket.headers,
+                    operation_sequence=message.get("sequence"),
+                ),
             )
             action_ended = perf_counter()
             action_wall_ms = (action_ended - action_started) * 1000

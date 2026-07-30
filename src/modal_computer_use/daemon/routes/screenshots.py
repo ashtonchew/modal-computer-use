@@ -82,7 +82,11 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
             artifact_store=request.app.state.artifacts,
         )
 
-    return await run_screenshot_capture(request, operation)
+    return await run_screenshot_capture(
+        request,
+        operation,
+        mutation_semantic_data=payload if options.storage in {"artifact", "auto"} else None,
+    )
 
 
 @router.post(
@@ -128,7 +132,11 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
             artifact_store=request.app.state.artifacts,
         )
 
-    return await run_screenshot_capture(request, operation)
+    return await run_screenshot_capture(
+        request,
+        operation,
+        mutation_semantic_data=payload if options.storage in {"artifact", "auto"} else None,
+    )
 
 
 @router.post(
@@ -185,7 +193,11 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
             artifact_store=request.app.state.artifacts,
         )
 
-    return await run_screenshot_capture(request, operation)
+    return await run_screenshot_capture(
+        request,
+        operation,
+        mutation_semantic_data=payload if options.storage in {"artifact", "auto"} else None,
+    )
 
 
 @router.post(

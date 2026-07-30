@@ -31,6 +31,7 @@ async def set_text(payload: TextRequest, request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="clipboard_set_failed",
         fallback_message="clipboard set failed",
     )
@@ -44,6 +45,7 @@ async def clear_text(request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data={},
         fallback_code="clipboard_clear_failed",
         fallback_message="clipboard clear failed",
     )

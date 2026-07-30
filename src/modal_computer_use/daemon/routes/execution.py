@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import perf_counter
+from typing import Any
 
 from fastapi import Request
 
@@ -35,6 +36,7 @@ async def run_input_action[T](
     request: Request,
     operation: Callable[[], Awaitable[T]],
     *,
+    semantic_data: Any,
     fallback_code: str = "action_failed",
     fallback_message: str = "input action failed",
 ) -> T:
@@ -43,9 +45,15 @@ async def run_input_action[T](
     error = policy.action_reservation_error()
     if error is not None:
         raise error
-    async with ready_mutation_lock(request):
+    async with ready_mutation_lock(request, semantic_data=semantic_data):
         policy.reserve_action()
         result = await operation()
+        if _is_indeterminate_action_result(result):
+            raise_for_failed_action_result(
+                result,
+                fallback_code=fallback_code,
+                fallback_message=fallback_message,
+            )
     return raise_for_failed_action_result(
         result,
         fallback_code=fallback_code,
@@ -53,17 +61,36 @@ async def run_input_action[T](
     )
 
 
+def _is_indeterminate_action_result(result: Any) -> bool:
+    if not isinstance(result, ActionResult) or result.ok or not isinstance(result.output, dict):
+        return False
+    code = result.output.get("code")
+    return bool(
+        result.output.get("indeterminate") is True
+        or code == "input_may_be_partial"
+        or (isinstance(code, str) and code.endswith("_indeterminate"))
+    )
+
+
 async def run_screenshot_capture[T](
     request: Request,
     operation: Callable[[], Awaitable[T]],
+    *,
+    mutation_semantic_data: Any = None,
 ) -> T:
-    result, _timing = await run_screenshot_capture_with_timing(request, operation)
+    result, _timing = await run_screenshot_capture_with_timing(
+        request,
+        operation,
+        mutation_semantic_data=mutation_semantic_data,
+    )
     return result
 
 
 async def run_screenshot_capture_with_timing[T](
     request: Request,
     operation: Callable[[], Awaitable[T]],
+    *,
+    mutation_semantic_data: Any = None,
 ) -> tuple[T, ScreenshotCaptureTiming]:
     total_started = perf_counter()
     ready_started = total_started
@@ -74,7 +101,12 @@ async def run_screenshot_capture_with_timing[T](
     if error is not None:
         raise error
     lock_wait_started = perf_counter()
-    async with ready_input_lock(request):
+    lock = (
+        ready_mutation_lock(request, semantic_data=mutation_semantic_data)
+        if mutation_semantic_data is not None
+        else ready_input_lock(request)
+    )
+    async with lock:
         lock_wait_ms = (perf_counter() - lock_wait_started) * 1000
         error = policy.screenshot_reservation_error()
         if error is not None:
@@ -98,6 +130,7 @@ async def run_recording_start[T](
     request: Request,
     operation: Callable[[], Awaitable[T]],
     *,
+    semantic_data: Any,
     rollback: Callable[[T], None] | None = None,
 ) -> T:
     await ensure_desktop_ready(request)
@@ -105,7 +138,7 @@ async def run_recording_start[T](
     error = policy.recording_start_error()
     if error is not None:
         raise error
-    async with mutation_lock(request):
+    async with mutation_lock(request, semantic_data=semantic_data):
         result = await operation()
         try:
             policy.enforce("recordings")
@@ -121,12 +154,13 @@ async def run_idle_only_mutation[T](
     request: Request,
     operation: Callable[[], Awaitable[T]],
     *,
+    semantic_data: Any,
     enforce_after: tuple[BudgetKind, ...] = (),
     rollback: Callable[[T], None] | None = None,
     after_success: Callable[[T], None] | None = None,
 ) -> T:
     policy = budget_policy(request)
-    async with mutation_lock(request):
+    async with mutation_lock(request, semantic_data=semantic_data):
         policy.enforce_idle()
         result = await operation()
         try:
