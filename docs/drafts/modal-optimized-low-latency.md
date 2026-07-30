@@ -158,9 +158,9 @@ A first changed frame answers one narrow question: have new pixels appeared yet?
 
 ## Three cents a minute
 
-The Function that runs the benchmark exists for one invocation. It takes the job, runs the suite, and exits, and Modal keeps nothing warm behind it waiting for the next one. Each target desktop lives only as long as the samples that use it. The 2026-07-28 run made 31 of them, reused none, and left nothing running when it finished.
+Modal bills a Function and a Sandbox for the seconds each one is alive. A run costs about 3 cents a minute for the two together, and I pay nothing between runs.
 
-Modal bills a Function and a Sandbox for the seconds each one is alive, not for the requests each one serves. So I pay nothing between runs, and a run in progress costs about 3 cents a minute. Startup is 7.8 seconds of that. Fifty warm turns add under two seconds more.
+I run the benchmark from a Function that serves one invocation and then exits. Each target desktop lives only as long as the samples that use it. The 2026-07-28 run made 31 of them, and the cleanup sweep at the end found nothing still running.
 
 ## Startup still takes 7.8 seconds
 
