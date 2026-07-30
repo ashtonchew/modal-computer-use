@@ -44,9 +44,13 @@ The usual cursor-hidden request now reads the current frame from the long-lived 
 
 On a local computer, a click feels instant. The desktop still receives separate input events. [macOS sends mouse events through Quartz](https://developer.apple.com/documentation/coregraphics/cgevent). My Sandbox runs a Linux desktop with X11, the window system that routes those events to applications. An agent's `click(x, y)` therefore has to become pointer motion, button press, and button release in X11's event stream.
 
-My first implementation handed that translation to [`xdotool`](https://github.com/jordansissel/xdotool), the usual command-line tool for X11 automation. `xdotool` already knew how to speak to the display and synthesize input, and each invocation lived in its own process. If one invocation failed, it did not take the daemon with it.
+My first implementation handed that translation to [`xdotool`](https://github.com/jordansissel/xdotool), the usual command-line tool for X11 automation. `xdotool` already knew how to speak to the display and synthesize input. Every API action launched a new invocation.
 
-A pointer move followed by one click took about 146 ms inside the daemon. I checked what `xdotool` was doing beneath the CLI before replacing X11. It already used [XTest](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html), the X11 extension for synthetic input, through Xlib. Every invocation still started a new executable, loaded its libraries, parsed the command, and opened a fresh display connection around a three-event click. The process boundary bought useful isolation for a local automation script, where a person pauses between commands. An agent paid for it after every screenshot.
+A pointer move followed by one click took about 146 ms inside the daemon. I checked what `xdotool` was doing beneath the CLI before replacing X11. It already used [XTest](https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html), the X11 extension for synthetic input, through Xlib.
+
+A click at `(x, y)` needs three XTest events: move the pointer there, send button-down, then send button-up. `xdotool` wrapped those events in a complete program run. Before X11 saw the pointer move, Linux created a child process, loaded `xdotool` and its shared libraries, parsed the coordinates and button, and opened a display connection. After button-up, the process closed the connection and exited.
+
+That boundary is convenient in a shell script. The script has no display connection to manage after the command returns, and a broken `xdotool` process does not crash its caller. When a person runs commands by hand, 146 ms is buried under the time spent typing and deciding what to do next. An agent issues the click as soon as the model chooses it, so the same setup adds directly to action latency and repeats on the next click.
 
 I kept XTest and removed the per-action process. The daemon loads the X11 client libraries once, keeps one display connection open, and builds the motion, press, and release events in memory. Each request takes the input lock, queues the complete sequence, and synchronizes with the X server once at the end.
 
