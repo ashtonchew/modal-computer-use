@@ -60,9 +60,11 @@ Inside the daemon, the mean for a pointer move followed by one left click fell f
 
 Typing sends at least a key-down and key-up for every character, plus modifiers when needed (on a US keyboard layout, `!` requires holding Shift while pressing `1`). The daemon-side mean for one hundred characters dropped from about 120 ms to 21 ms. One thousand dropped from 607 ms to 201 ms.
 
-Keeping the connection open traded process isolation for state I now had to manage. Consider typing `A`: press Shift, press `a`, release `a`, release Shift. If another request typed `2` halfway through, X11 could receive `@` instead. The daemon reads the active XKB layout before building the sequence and holds the input lock until every key and button has been released. That same lock protects mouse drags and modified clicks.
+Keeping the connection open meant every request shared X11's keyboard and pointer state. Suppose two requests reach the daemon together. One sends `Ctrl+L` to focus the browser's address bar while the other starts typing a URL. If a `w` from the URL arrives before the first request releases Ctrl, the browser receives `Ctrl+W` and closes the tab. The daemon resolves each sequence against the active XKB layout and holds the input lock from the first press through the final release. A drag gets the same protection, so another request cannot move the pointer between mouse-down and mouse-up.
 
-The failure boundary moved into the daemon with the connection. If XTest is unavailable before the first event, the daemon can still use `xdotool`. Once a button press or key-down may have reached the X server, replaying the request could double-click or type a character twice. The daemon attempts to release anything it pressed and returns the error without fallback. It also contains Xlib errors so a bad display operation does not terminate the long-lived process.
+The failure boundary moved into the daemon with the connection. If XTest is unavailable before the first event, the daemon falls back to `xdotool`. Once a button press or key-down may have reached the X server, replaying the request could double-click or type a character twice. The daemon attempts to release anything it pressed and returns the error without fallback.
+
+Xlib introduced another process-level risk. The daemon also uses it for window operations, and an application window can close between listing it and reading its attributes. Xlib's default asynchronous error handler treats that ordinary race as fatal and exits the process. I install a nonfatal handler before opening the display and check each operation's result, so a disappearing window fails one request instead of taking down the desktop API.
 
 ## Four clicks, one request
 
