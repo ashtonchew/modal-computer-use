@@ -111,6 +111,39 @@ uv run computer-use benchmark modal-colocated-client \
   --output benchmark-results/modal-runner.json
 ```
 
+The tracked subprocess-runner A/B in
+[`benchmark-data/modal-subprocess-runner-ab-2026-07-30.json`](../benchmark-data/modal-subprocess-runner-ab-2026-07-30.json)
+came from three runs of that command into an isolated app, one per daemon subprocess backend, on the
+shipping attested-tunnel path:
+
+```bash
+for backend in asyncio threaded isolated-asyncio; do
+  uv run computer-use benchmark modal-colocated-client \
+    --app-name modal-computer-use-subproc-ab \
+    --runner-only \
+    --modal-region us-west-2 \
+    --modal-ingress attested-tunnel \
+    --daemon-http-version 1.1 \
+    --runner-path inherited \
+    --surface daemon-http \
+    --browser chromium \
+    --resource-profile browser \
+    --modal-cpu 4 \
+    --modal-memory-mib 8192 \
+    --runner-cpu 4 \
+    --runner-memory-mib 8192 \
+    --input-rate-limit-per-sec 0 \
+    --input-backend xtest \
+    --subprocess-backend "$backend" \
+    --iterations 30 \
+    --output "benchmark-results/subprocess-runner-ab-2026-07-30/$backend.json"
+done
+```
+
+Each arm runs one warmup and 30 measured samples. The arms compare to each other only. The tracked
+artifact records the configuration differences that stop them from replacing the 2026-07-24
+subprocess A/B values.
+
 Use `modal-action-batching-ab` for the publishable four-click A/B alone. It launches one Modal
 Function, creates one Connect target with the same requested region, checks their observed placement,
 performs one warmup plus 30 measured iterations per arm, and runs terminal cleanup. The command will

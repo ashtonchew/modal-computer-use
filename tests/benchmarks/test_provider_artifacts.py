@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import statistics
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from modal_computer_use.benchmarks.artifacts import (
     serialize_provider_benchmark,
     validate_sanitized_provider_benchmark,
 )
+from modal_computer_use.benchmarks.measurement import _percentile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -372,5 +374,159 @@ def test_tzafon_coordinate_command_context_matches_allowlisted_sources() -> None
         "access_token",
         "base_url",
         "bearer",
+    ):
+        assert forbidden not in serialized
+
+
+def test_modal_subprocess_runner_ab_2026_07_30_is_pinned_and_secret_safe() -> None:
+    artifact_path = (
+        REPO_ROOT / "benchmark-data/modal-subprocess-runner-ab-2026-07-30.json"
+    )
+    artifact = json.loads(artifact_path.read_text())
+
+    assert artifact["status"] == "candidate"
+    assert artifact["provenance"]["source_sha"] == (
+        "7c8e6810ee7fc1da4046590525b0e8d48e1fd919"
+    )
+    assert artifact["provenance"]["harness_state"] == "clean"
+    assert artifact["provenance"]["git_worktree_clean"] is True
+    assert artifact["provenance"]["raw_artifacts_tracked"] is False
+    assert artifact["semantics"]["command_nonlogin_shell_echo"] == {
+        "benchmark_semantics": "shell-command-echo-v2",
+        "shell_mode": "non_login",
+        "argv": ["sh", "-c", "printf '42\\n'"],
+        "timeout_seconds": 30,
+        "transport_shape": "argv",
+    }
+
+    configuration = dict(artifact["configuration"])
+    expected_configuration_sha256 = configuration.pop("safe_configuration_sha256")
+    serialized_configuration = json.dumps(
+        configuration, sort_keys=True, separators=(",", ":")
+    ).encode()
+    assert (
+        hashlib.sha256(serialized_configuration).hexdigest()
+        == expected_configuration_sha256
+    )
+    assert configuration["requested"]["modal_ingress"] == "attested-tunnel"
+    assert configuration["requested"]["runner_path"] == "inherited"
+    assert configuration["requested"]["runner_only"] is True
+    assert configuration["requested"]["modal_cpu"] == 4.0
+    assert configuration["requested"]["modal_memory_mib"] == 8192
+    assert configuration["requested"]["runner_cpu"] == 4.0
+    assert configuration["requested"]["runner_memory_mib"] == 8192
+    assert configuration["observed"]["canonical_surface_name"] == (
+        "modal-daemon-attested-tunnel"
+    )
+    assert configuration["observed"]["external_caller_included"] is False
+    assert configuration["observed"]["input_backend"] == "xtest"
+
+    block = artifact["subprocess_runner_ab"]
+    assert block["metric"] == "modal-colocated shell-command-echo-v2 milliseconds"
+    assert block["case"] == "command_nonlogin_shell_echo"
+    assert block["iterations_per_arm"] == 30
+    assert block["warmup_iterations"] == 1
+    assert block["p50_method"] == "statistics.median"
+    assert block["p95_method"] == (
+        "linear interpolation on sorted values at rank 0.95*(n-1)"
+    )
+    assert artifact["verification"]["subprocess_runner_ab_failures"] == 0
+    assert (
+        artifact["verification"]["subprocess_runner_ab_successful_iterations_per_arm"]
+        == 30
+    )
+
+    expected_arms = {
+        "asyncio": {
+            "raw_artifact_sha256": (
+                "e7c13b02d8d80691e367899890506364ceab0278f294c65b05c9f5cc5db3d3a6"
+            ),
+            "total": {"p50": 54.90595200000037, "p95": 219.92788569999882},
+            "daemon": {"p50": 49.534644500001335, "p95": 214.753257949997},
+            "caller_transport_overhead": {
+                "p50": 5.222455500000223,
+                "p95": 5.809947500000322,
+            },
+        },
+        "threaded": {
+            "raw_artifact_sha256": (
+                "ecf808416f5e2a148ad2fc5fa3344a2c8a0e418d8837613d88a2242bc716529c"
+            ),
+            "total": {"p50": 10.617587999999678, "p95": 13.161663449999136},
+            "daemon": {"p50": 6.7867264999996735, "p95": 8.99796054999857},
+            "caller_transport_overhead": {
+                "p50": 3.809115500000182,
+                "p95": 4.339098949999708,
+            },
+        },
+        "isolated-asyncio": {
+            "raw_artifact_sha256": (
+                "c87c1f19527ee264726c1c41ac8bc9300fb8e6adef5f88ed8b4c9590d19dfd56"
+            ),
+            "total": {"p50": 7.584464999999874, "p95": 8.67549800000038},
+            "daemon": {"p50": 5.331084500001637, "p95": 5.843138550000759},
+            "caller_transport_overhead": {
+                "p50": 2.286975499999677,
+                "p95": 2.8009997999999916,
+            },
+        },
+    }
+    for backend, expected in expected_arms.items():
+        arm = block[backend]
+        assert arm["raw_artifact"] == (
+            f"benchmark-results/subprocess-runner-ab-2026-07-30/{backend}.json"
+        )
+        assert arm["raw_artifact_sha256"] == expected["raw_artifact_sha256"]
+        assert arm["successful_iterations"] == 30
+        assert arm["failures"] == 0
+        for label in ("total", "daemon", "caller_transport_overhead"):
+            assert arm[label] == expected[label]
+
+    # The ordering claim the artifact exists to support.
+    assert (
+        block["isolated-asyncio"]["total"]["p50"]
+        < block["threaded"]["total"]["p50"]
+        < block["asyncio"]["total"]["p50"]
+    )
+
+    # Recompute from the raw arms when they are present in an ignored working tree.
+    for backend, arm in expected_arms.items():
+        raw_path = REPO_ROOT / block[backend]["raw_artifact"]
+        if not raw_path.exists():
+            continue
+        raw_bytes = raw_path.read_bytes()
+        assert hashlib.sha256(raw_bytes).hexdigest() == arm["raw_artifact_sha256"]
+        run = json.loads(raw_bytes)["runs"]["modal_colocated_runner"]
+        assert run["warmup_iterations"] == block["warmup_iterations"]
+        case = run["surfaces"]["daemon-http"]["cases"][block["case"]]
+        assert case["iterations"] == block["iterations_per_arm"]
+        assert case["failures"] == []
+        for label, samples_key in (
+            ("total", "samples_ms"),
+            ("daemon", "daemon_samples_ms"),
+            ("caller_transport_overhead", "overhead_samples_ms"),
+        ):
+            samples = sorted(case[samples_key])
+            assert len(samples) == block["iterations_per_arm"]
+            assert block[backend][label] == {
+                "p50": float(statistics.median(samples)),
+                "p95": _percentile(samples, 95),
+            }
+
+    limitations = " ".join(artifact["limitations"])
+    assert "connect runner path" in limitations
+    assert "did not request resources explicitly" in limitations
+    assert "not drop-in replacements" in limitations
+
+    serialized = artifact_path.read_text().lower()
+    for forbidden in (
+        "modal.host",
+        "sb-",
+        "run_",
+        "api_key",
+        "access_token",
+        "base_url",
+        "bearer",
+        "://",
     ):
         assert forbidden not in serialized
