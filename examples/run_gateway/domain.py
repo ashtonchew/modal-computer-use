@@ -199,7 +199,7 @@ class PollReason(StrEnum):
     FUNCTION_TIMEOUT = "function_timeout"
     OUTPUT_EXPIRED = "output_expired"
     MISSING_CALL = "missing_call"
-    MALFORMED_CALL_GRAPH = "malformed_call_graph"
+    CALL_GRAPH_UNAVAILABLE = "call_graph_unavailable"
     INVALID_OUTCOME = "invalid_outcome"
     RESULT_DATA_LOSS = "result_data_loss"
     TRANSIENT_PROVIDER_ERROR = "transient_provider_error"

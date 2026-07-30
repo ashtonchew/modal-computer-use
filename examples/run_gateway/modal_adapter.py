@@ -75,14 +75,16 @@ class ModalTrajectoryDispatcher:
                 exceptions.ExecutionError,
                 exceptions.DataLossError,
             ):
-                # The graph is best-effort metadata. Loss while decoding it says
-                # nothing authoritative about the Function's durable result.
-                roots = None
-            status = (
-                getattr(roots[0], "status", None)
-                if isinstance(roots, list) and len(roots) == 1
-                else None
-            )
+                return PollOutcome(
+                    PollState.UNAVAILABLE,
+                    PollReason.CALL_GRAPH_UNAVAILABLE,
+                )
+            if not isinstance(roots, list) or len(roots) != 1:
+                return PollOutcome(
+                    PollState.UNAVAILABLE,
+                    PollReason.CALL_GRAPH_UNAVAILABLE,
+                )
+            status = getattr(roots[0], "status", None)
             status_name = getattr(status, "name", None)
             if status_name == "PENDING":
                 return PollOutcome(PollState.PENDING)
@@ -92,9 +94,12 @@ class ModalTrajectoryDispatcher:
                 return PollOutcome(PollState.FAILED, PollReason.FUNCTION_TIMEOUT)
             if status_name == "TERMINATED":
                 return PollOutcome(PollState.TERMINATED)
-            # Call-graph metadata is best-effort. SUCCESS and incomplete or
-            # malformed graph data converge on one authoritative result poll.
-            return await _poll_result(call, exceptions)
+            if status_name == "SUCCESS":
+                return await _poll_result(call, exceptions)
+            return PollOutcome(
+                PollState.UNAVAILABLE,
+                PollReason.CALL_GRAPH_UNAVAILABLE,
+            )
         except exceptions.InputCancellation:
             return PollOutcome(PollState.TERMINATED)
         except exceptions.OutputExpiredError:

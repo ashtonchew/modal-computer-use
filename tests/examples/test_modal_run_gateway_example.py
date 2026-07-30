@@ -736,7 +736,9 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
     ]
 
 
-def _fake_modal(*, roots=None, graph_exception=None, result=None, get_exception=None):
+def _fake_modal(
+    *, roots=None, graph_exception=None, result=None, get_exception=None, get_calls=None
+):
     class ModalError(Exception):
         pass
 
@@ -765,6 +767,8 @@ def _fake_modal(*, roots=None, graph_exception=None, result=None, get_exception=
     class Get:
         async def aio(self, *, timeout):
             assert timeout == 0
+            if get_calls is not None:
+                get_calls.append(timeout)
             if get_exception is not None:
                 raise get_exception(exception_types)
             return result
@@ -810,79 +814,58 @@ async def test_modal_poll_maps_each_non_success_call_graph_status(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("roots", "result", "expected"),
+    "roots",
     [
-        ([], {"status": "succeeded"}, gateway.PollState.SUCCEEDED),
-        ([object(), object()], {"status": "failed"}, gateway.PollState.FAILED),
-        (
-            [SimpleNamespace(status=object())],
-            {"status": "indeterminate"},
-            gateway.PollState.INDETERMINATE,
-        ),
-        (
-            [SimpleNamespace(status=SimpleNamespace(name="UNKNOWN"))],
-            {"status": "succeeded"},
-            gateway.PollState.SUCCEEDED,
-        ),
+        [],
+        [object(), object()],
+        [SimpleNamespace(status=object())],
+        [SimpleNamespace(status=SimpleNamespace(name="UNKNOWN"))],
     ],
 )
-async def test_modal_poll_falls_back_to_result_for_incomplete_call_graph(
-    monkeypatch, roots, result, expected
+async def test_modal_poll_incomplete_call_graph_is_unavailable_without_result_poll(
+    monkeypatch, roots
 ) -> None:
-    monkeypatch.setattr(gateway, "modal", _fake_modal(roots=roots, result=result))
-    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
-
-    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
-
-    assert outcome.state is expected
-
-
-@pytest.mark.asyncio
-async def test_modal_poll_incomplete_graph_fallback_can_remain_pending(monkeypatch) -> None:
+    get_calls = []
     monkeypatch.setattr(
         gateway,
         "modal",
-        _fake_modal(roots=[], get_exception=lambda _exc: TimeoutError()),
+        _fake_modal(roots=roots, result={"status": "succeeded"}, get_calls=get_calls),
     )
     dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
 
     outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
 
-    assert outcome == gateway.PollOutcome(gateway.PollState.PENDING)
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.UNAVAILABLE,
+        gateway.PollReason.CALL_GRAPH_UNAVAILABLE,
+    )
+    assert get_calls == []
 
 
 @pytest.mark.asyncio
-async def test_modal_poll_lossy_graph_with_unfinished_result_remains_pending(monkeypatch) -> None:
+async def test_modal_poll_lossy_graph_is_unavailable_without_result_poll(monkeypatch) -> None:
+    get_calls = []
     runtime = _fake_modal(
         graph_exception=lambda exc: exc.DataLossError(),
-        get_exception=lambda _exc: TimeoutError(),
-    )
-    monkeypatch.setattr(gateway, "modal", runtime)
-    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
-
-    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
-
-    assert outcome == gateway.PollOutcome(gateway.PollState.PENDING)
-
-
-@pytest.mark.asyncio
-async def test_modal_poll_lossy_graph_can_recover_valid_strict_result(monkeypatch) -> None:
-    runtime = _fake_modal(
-        graph_exception=lambda exc: exc.DeserializationError(),
         result={"status": "succeeded"},
+        get_calls=get_calls,
     )
     monkeypatch.setattr(gateway, "modal", runtime)
     dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
 
     outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
 
-    assert outcome == gateway.PollOutcome(gateway.PollState.SUCCEEDED)
+    assert outcome == gateway.PollOutcome(
+        gateway.PollState.UNAVAILABLE,
+        gateway.PollReason.CALL_GRAPH_UNAVAILABLE,
+    )
+    assert get_calls == []
 
 
 @pytest.mark.asyncio
-async def test_modal_poll_unavailable_graph_with_remote_user_error_fails(monkeypatch) -> None:
+async def test_modal_poll_success_graph_with_remote_user_error_fails(monkeypatch) -> None:
     runtime = _fake_modal(
-        graph_exception=lambda exc: exc.ExecutionError(),
+        roots=[SimpleNamespace(status=SimpleNamespace(name="SUCCESS"))],
         get_exception=lambda _exc: ValueError("private remote failure"),
     )
     monkeypatch.setattr(gateway, "modal", runtime)
