@@ -1010,6 +1010,7 @@ name = "modal-computer-use"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "fastapi" },
     { name = "h2" },
     { name = "httpx", extra = ["http2"] },
@@ -1058,6 +1059,7 @@ openai = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.101" },
+    { name = "anyio", specifier = ">=4" },
     { name = "daytona", marker = "extra == 'bench-daytona'", specifier = "==0.175.0" },
     { name = "daytona", marker = "extra == 'bench-providers'", specifier = "==0.175.0" },
     { name = "e2b-desktop", marker = "extra == 'bench-e2b'", specifier = "==2.3.1" },

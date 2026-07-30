@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from modal_computer_use.client import DaemonClient
+from modal_computer_use.client import AsyncDaemonClient, DaemonClient
 
 
 class Namespace:
     def __init__(self, client: DaemonClient) -> None:
+        self._client = client
+
+
+class AsyncNamespace:
+    def __init__(self, client: AsyncDaemonClient) -> None:
         self._client = client

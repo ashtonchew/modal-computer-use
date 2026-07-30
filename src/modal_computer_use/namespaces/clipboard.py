@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from modal_computer_use.models import ActionResult
 
-from .base import Namespace
+from .base import AsyncNamespace, Namespace
 
 
 class ClipboardNamespace(Namespace):
@@ -17,3 +17,17 @@ class ClipboardNamespace(Namespace):
 
     def clear(self) -> ActionResult:
         return ActionResult.model_validate(self._client.delete_json("/v1/clipboard/text"))
+
+
+class AsyncClipboardNamespace(AsyncNamespace):
+    async def get_text(self) -> str:
+        payload = await self._client.get_json("/v1/clipboard/text")
+        return str(payload.get("text", ""))
+
+    async def set_text(self, text: str) -> ActionResult:
+        return ActionResult.model_validate(
+            await self._client.put_json("/v1/clipboard/text", json={"text": text})
+        )
+
+    async def clear(self) -> ActionResult:
+        return ActionResult.model_validate(await self._client.delete_json("/v1/clipboard/text"))

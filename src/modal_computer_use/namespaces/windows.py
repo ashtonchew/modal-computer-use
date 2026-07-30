@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from modal_computer_use.models import ActionResult, X11Window
 
-from .base import Namespace
+from .base import AsyncNamespace, Namespace
 
 
 class WindowsNamespace(Namespace):
@@ -30,6 +30,46 @@ class WindowsNamespace(Namespace):
     ) -> X11Window:
         return X11Window.model_validate(
             self._client.post_json(
+                "/v1/windows/wait-for",
+                json={
+                    "title_regex": title_regex,
+                    "class_name": class_name,
+                    "pid": pid,
+                    "timeout": timeout,
+                },
+            )
+        )
+
+
+class AsyncWindowsNamespace(AsyncNamespace):
+    async def list(self) -> list[X11Window]:
+        return [
+            X11Window.model_validate(item) for item in await self._client.get_json("/v1/windows")
+        ]
+
+    async def active(self) -> X11Window | None:
+        payload = await self._client.get_json("/v1/windows/active")
+        return X11Window.model_validate(payload) if payload else None
+
+    async def activate(self, window_id: str) -> ActionResult:
+        return ActionResult.model_validate(
+            await self._client.post_json(f"/v1/windows/{window_id}/activate")
+        )
+
+    async def close(self, window_id: str) -> ActionResult:
+        return ActionResult.model_validate(
+            await self._client.post_json(f"/v1/windows/{window_id}/close")
+        )
+
+    async def wait_for(
+        self,
+        title_regex: str | None = None,
+        class_name: str | None = None,
+        pid: int | None = None,
+        timeout: float = 10.0,
+    ) -> X11Window:
+        return X11Window.model_validate(
+            await self._client.post_json(
                 "/v1/windows/wait-for",
                 json={
                     "title_regex": title_regex,

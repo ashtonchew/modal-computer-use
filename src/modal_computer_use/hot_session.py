@@ -5,7 +5,12 @@ from typing import Any
 
 from .actions import normalize_actions
 from .models import ActionBatchResult, ComputerAction, ScreenshotOptions
-from .transports import HotSessionBinaryResult, HotSessionTransport
+from .transports import (
+    AsyncHotSessionBinaryResult,
+    AsyncHotSessionTransport,
+    HotSessionBinaryResult,
+    HotSessionTransport,
+)
 
 
 class HotSessionClient:
@@ -63,6 +68,66 @@ class HotSessionClient:
         options: ScreenshotOptions | Mapping[str, Any] | None = None,
     ) -> HotSessionBinaryResult:
         return self.transport.request_binary("screenshot_raw", _screenshot_options_payload(options))
+
+
+class AsyncHotSessionClient:
+    """Native async SDK facade over the daemon hot-session protocol."""
+
+    def __init__(self, transport: AsyncHotSessionTransport) -> None:
+        self.transport = transport
+
+    async def aclose(self) -> None:
+        await self.transport.aclose()
+
+    async def __aenter__(self) -> AsyncHotSessionClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        await self.aclose()
+
+    async def ping(self) -> dict[str, Any]:
+        return await self.transport.ping()
+
+    async def run_actions(
+        self,
+        actions: Iterable[ComputerAction | dict[str, Any]],
+        *,
+        source: str = "sdk-hot-session",
+        continue_on_error: bool = False,
+    ) -> ActionBatchResult:
+        payload = {
+            "actions": [action.model_dump(mode="json") for action in normalize_actions(actions)],
+            "source": source,
+            "continue_on_error": continue_on_error,
+        }
+        return ActionBatchResult.model_validate(
+            await self.transport.request("run_actions", payload)
+        )
+
+    async def run_actions_with_raw_screenshot(
+        self,
+        actions: Iterable[ComputerAction | dict[str, Any]],
+        *,
+        screenshot_options: ScreenshotOptions | Mapping[str, Any] | None = None,
+        source: str = "sdk-hot-session",
+        continue_on_error: bool = False,
+    ) -> AsyncHotSessionBinaryResult:
+        payload = {
+            "actions": [action.model_dump(mode="json") for action in normalize_actions(actions)],
+            "screenshot_after": True,
+            "screenshot_options": _screenshot_options_payload(screenshot_options),
+            "source": source,
+            "continue_on_error": continue_on_error,
+        }
+        return await self.transport.request_binary("run_raw_screenshot", payload)
+
+    async def screenshot_raw(
+        self,
+        options: ScreenshotOptions | Mapping[str, Any] | None = None,
+    ) -> AsyncHotSessionBinaryResult:
+        return await self.transport.request_binary(
+            "screenshot_raw", _screenshot_options_payload(options)
+        )
 
 
 def _screenshot_options_payload(
