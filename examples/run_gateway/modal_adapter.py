@@ -69,12 +69,12 @@ class ModalTrajectoryDispatcher:
         try:
             call = runtime.FunctionCall.from_id(call_id.reveal_to_backend())
             roots = await call.get_call_graph.aio()
-            if not isinstance(roots, list) or len(roots) != 1:
-                return PollOutcome(
-                    PollState.INDETERMINATE,
-                    PollReason.MALFORMED_CALL_GRAPH,
-                )
-            status_name = getattr(roots[0].status, "name", None)
+            status = (
+                getattr(roots[0], "status", None)
+                if isinstance(roots, list) and len(roots) == 1
+                else None
+            )
+            status_name = getattr(status, "name", None)
             if status_name == "PENDING":
                 return PollOutcome(PollState.PENDING)
             if status_name in {"FAILURE", "INIT_FAILURE"}:
@@ -83,17 +83,9 @@ class ModalTrajectoryDispatcher:
                 return PollOutcome(PollState.FAILED, PollReason.FUNCTION_TIMEOUT)
             if status_name == "TERMINATED":
                 return PollOutcome(PollState.TERMINATED)
-            if status_name != "SUCCESS":
-                return PollOutcome(
-                    PollState.INDETERMINATE,
-                    PollReason.MALFORMED_CALL_GRAPH,
-                )
-            raw_outcome = await call.get.aio(timeout=0)
-            try:
-                outcome = TrajectoryOutcome.validate(raw_outcome)
-            except ValueError:
-                return PollOutcome(PollState.INDETERMINATE, PollReason.INVALID_OUTCOME)
-            return PollOutcome(PollState(outcome.status.value))
+            # Call-graph metadata is best-effort. SUCCESS and incomplete or
+            # malformed graph data converge on one authoritative result poll.
+            return await _poll_result(call)
         except exceptions.InputCancellation:
             return PollOutcome(PollState.TERMINATED)
         except exceptions.OutputExpiredError:
@@ -115,6 +107,7 @@ class ModalTrajectoryDispatcher:
             exceptions.ServiceError,
             exceptions.AuthError,
             exceptions.ResourceExhaustedError,
+            exceptions.InternalFailure,
         ):
             return PollOutcome(PollState.UNAVAILABLE, PollReason.TRANSIENT_PROVIDER_ERROR)
         except exceptions.Error:
@@ -126,6 +119,15 @@ class ModalTrajectoryDispatcher:
             raise ImportError("Modal is required for hosted trajectory cancellation")
         call = runtime.FunctionCall.from_id(call_id.reveal_to_backend())
         await call.cancel.aio(terminate_containers=False)
+
+
+async def _poll_result(call: Any) -> PollOutcome:
+    raw_outcome = await call.get.aio(timeout=0)
+    try:
+        outcome = TrajectoryOutcome.validate(raw_outcome)
+    except ValueError:
+        return PollOutcome(PollState.INDETERMINATE, PollReason.INVALID_OUTCOME)
+    return PollOutcome(PollState(outcome.status.value))
 
 
 def build_default_service() -> RunGatewayService:

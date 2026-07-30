@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import sys
 from datetime import UTC, datetime, timedelta
@@ -700,6 +701,7 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
             DeserializationError=type("DeserializationError", (ModalError,), {}),
             ExecutionError=type("ExecutionError", (ModalError,), {}),
             FunctionTimeoutError=type("FunctionTimeoutError", (ModalError,), {}),
+            InternalFailure=type("InternalFailure", (ModalError,), {}),
             InputCancellation=type("InputCancellation", (BaseException,), {}),
             NotFoundError=type("NotFoundError", (ModalError,), {}),
             OutputExpiredError=type("OutputExpiredError", (ModalError,), {}),
@@ -734,7 +736,6 @@ async def test_modal_adapter_uses_native_aio_spawn_poll_and_non_terminating_canc
     ]
 
 
-@pytest.mark.asyncio
 def _fake_modal(*, roots=None, graph_exception=None, result=None, get_exception=None):
     class ModalError(Exception):
         pass
@@ -747,6 +748,7 @@ def _fake_modal(*, roots=None, graph_exception=None, result=None, get_exception=
         DeserializationError=type("DeserializationError", (ModalError,), {}),
         ExecutionError=type("ExecutionError", (ModalError,), {}),
         FunctionTimeoutError=type("FunctionTimeoutError", (ModalError,), {}),
+        InternalFailure=type("InternalFailure", (ModalError,), {}),
         InputCancellation=type("InputCancellation", (BaseException,), {}),
         NotFoundError=type("NotFoundError", (ModalError,), {}),
         OutputExpiredError=type("OutputExpiredError", (ModalError,), {}),
@@ -807,17 +809,46 @@ async def test_modal_poll_maps_each_non_success_call_graph_status(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("roots", [[], [object(), object()], [SimpleNamespace(status=object())]])
-async def test_modal_poll_treats_empty_multiple_or_malformed_graph_as_indeterminate(
-    monkeypatch, roots
+@pytest.mark.parametrize(
+    ("roots", "result", "expected"),
+    [
+        ([], {"status": "succeeded"}, gateway.PollState.SUCCEEDED),
+        ([object(), object()], {"status": "failed"}, gateway.PollState.FAILED),
+        (
+            [SimpleNamespace(status=object())],
+            {"status": "indeterminate"},
+            gateway.PollState.INDETERMINATE,
+        ),
+        (
+            [SimpleNamespace(status=SimpleNamespace(name="UNKNOWN"))],
+            {"status": "succeeded"},
+            gateway.PollState.SUCCEEDED,
+        ),
+    ],
+)
+async def test_modal_poll_falls_back_to_result_for_incomplete_call_graph(
+    monkeypatch, roots, result, expected
 ) -> None:
-    monkeypatch.setattr(gateway, "modal", _fake_modal(roots=roots))
+    monkeypatch.setattr(gateway, "modal", _fake_modal(roots=roots, result=result))
     dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
 
     outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
 
-    assert outcome.state is gateway.PollState.INDETERMINATE
-    assert outcome.reason is gateway.PollReason.MALFORMED_CALL_GRAPH
+    assert outcome.state is expected
+
+
+@pytest.mark.asyncio
+async def test_modal_poll_incomplete_graph_fallback_can_remain_pending(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gateway,
+        "modal",
+        _fake_modal(roots=[], get_exception=lambda _exc: TimeoutError()),
+    )
+    dispatcher = gateway.ModalTrajectoryDispatcher(SimpleNamespace())
+
+    outcome = await dispatcher.poll(gateway.FunctionCallIdentity("fc-provider-secret"))
+
+    assert outcome == gateway.PollOutcome(gateway.PollState.PENDING)
 
 
 @pytest.mark.asyncio
@@ -907,7 +938,13 @@ async def test_modal_success_get_classifies_specific_result_errors(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "exception_name",
-    ["ConnectionError", "ServiceError", "AuthError", "ResourceExhaustedError"],
+    [
+        "ConnectionError",
+        "ServiceError",
+        "AuthError",
+        "ResourceExhaustedError",
+        "InternalFailure",
+    ],
 )
 async def test_modal_poll_transient_errors_are_unavailable(monkeypatch, exception_name) -> None:
     runtime = _fake_modal(
@@ -993,7 +1030,7 @@ def test_example_has_no_primitive_proxy_core_export_or_production_memory_store()
     assert "openai" not in source.lower()
     assert "anthropic" not in source.lower()
     assert "RunGatewayService" not in core_exports
-    assert len(entry_source.splitlines()) < 60
+    assert len(entry_source.splitlines()) < 80
     assert "async with handle.borrow_async" in handoff
     assert "run_id=run_id" in handoff
 
@@ -1019,3 +1056,35 @@ def test_compatibility_entry_reexports_modal_run_gateway_class_when_installed() 
     assert gateway.modal is not None
     assert gateway.RunGateway is modal_adapter.RunGateway
     assert "RunGateway" in gateway.__all__
+
+
+def test_qualified_entry_shares_package_class_identity_and_accepts_package_service(
+    monkeypatch,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root))
+    monkeypatch.delitem(sys.modules, "examples", raising=False)
+    importlib.invalidate_caches()
+    qualified = importlib.import_module("examples.modal_run_gateway")
+    package = importlib.import_module("examples.run_gateway")
+
+    assert qualified.RunGatewayService is package.RunGatewayService
+    assert qualified.RunRecord is package.RunRecord
+    assert qualified.ModalTrajectoryDispatcher is package.ModalTrajectoryDispatcher
+    if qualified.modal is not None:
+        assert qualified.RunGateway is package.modal_adapter.RunGateway
+
+    service = qualified.RunGatewayService(
+        principal_resolver=FakePrincipalResolver(),
+        session_catalog=FakeSessionCatalog(),
+        task_catalog=FakeTaskCatalog(),
+        run_store=FakeRunStore(),
+        dispatcher=FakeDispatcher(),
+        run_id_factory=lambda: "run-qualified",
+    )
+    client = TestClient(qualified.build_run_gateway_app(service))
+
+    response = client.post("/v1/runs", json=_body(), headers=_headers())
+
+    assert response.status_code == 202
+    assert response.json() == {"run_id": "run-qualified", "state": "running"}

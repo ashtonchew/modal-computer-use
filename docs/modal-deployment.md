@@ -370,8 +370,9 @@ terminal `indeterminate` because the first spawn may already have crossed Modal'
 the private FunctionCall identity is stored, GET first reads the Function call graph. A successful
 root is fetched once with `get.aio(timeout=0)` and must contain exactly the strict trajectory
 envelope `{"status": "succeeded" | "failed" | "indeterminate"}`. No task or result content is
-part of that contract. Pending and transiently unavailable polls preserve durable state; expired,
-missing, malformed, or lossy results become `indeterminate`. A terminated Function becomes
+part of that contract. Pending and transiently unavailable polls preserve durable state. Empty,
+multiple, malformed, or incomplete call-graph data falls back to the same nonblocking result poll;
+expired, missing, or lossy results become `indeterminate`. A terminated Function becomes
 `cancelled` only when cancellation intent was already durable, and otherwise becomes `failed`.
 Cancellation durably enters
 `cancellation_requested` before `cancel.aio(terminate_containers=False)` and never claims that the
