@@ -360,13 +360,20 @@ The executable is a compatibility entry point over the behavior-local
 [`examples/run_gateway`](../examples/run_gateway) package: domain invariants, application ports,
 service orchestration, HTTP boundaries, and the Modal adapter remain independently testable.
 
-The application must provide an atomic durable `RunStore`. Creation reserves
-`(tenant_id, idempotency_key)` before calling `spawn.aio(handle, task, run_id)`, and duplicates
-return the original application run only when a durable SHA-256 admission fingerprint matches the
-originally authorized opaque desktop/task key pair. A mismatch returns a sanitized conflict and
-does not reclaim even a stale reservation; the raw keys, handle, and task text are not stored. A
-stale matching `reserved` record can win one CAS claim; a stale `dispatching` record becomes
-terminal `indeterminate` because the first spawn may already have crossed Modal's boundary. Once
+The application must provide an atomic durable `RunStore`. Its `admit` transaction performs replay
+lookup, tenant quota enforcement, exclusive application-desktop ownership, run insertion, and a
+payload-free pending dispatch-intent insertion in that fixed order, all-or-nothing. HMAC-SHA256
+bindings made with the application's versioned keyring identify the idempotency request, stable
+internal desktop, and stable internal task without storing their raw keys, IDs, handle, or text.
+A matching replay returns the original run before capacity checks; a mismatch, busy desktop, or
+exhausted tenant quota returns a sanitized error without writes. The separate `claim_dispatch`
+transaction atomically moves the run from `reserved` to `dispatching` and its intent from `pending`
+to `claimed`; only the winner may call `spawn`. This closes the admission-commit-before-claim gap
+when a request is replayed, but is deliberately not an automatic-delivery outbox: there is no
+worker, delivery state, or persistence primitive in this example. A stale `dispatching` record
+becomes terminal `indeterminate` because the first spawn may already have crossed Modal's boundary;
+it retains its quota and desktop claim. Only `succeeded`, `failed`, and `cancelled` release them,
+exactly once. Once
 the private FunctionCall identity is stored, GET first reads the Function call graph. A successful
 root is fetched once with `get.aio(timeout=0)` and must contain exactly the strict trajectory
 envelope `{"status": "succeeded" | "failed" | "indeterminate"}`. No task or result content is
@@ -389,6 +396,16 @@ cross-system persistence gap or recover a lost provider call handle. The deploye
 identity, authorization, quotas, billing, retention, auditing, durable task/result storage, and
 reconciliation. Keep screenshot/action bytes on the direct daemon/runner path rather than turning
 the gateway into a latency-sensitive primitive proxy.
+
+This `RunStore` protocol replaces the earlier `reserve_if_absent` sample and is intentionally
+breaking. Application adapters must migrate, drain, or backfill their durable rows before switching
+traffic. Old SHA-only fingerprint rows cannot safely infer the application-owned desktop identity
+needed to reconstruct exclusive claims, so they must not be silently treated as admitted rows.
+HMAC key rotation is also a storage migration: introduce the new active key while keeping the old
+key as retiring, migrate, drain, or expire every retained row and tombstone that references the old
+version, verify that no reference remains, and only then remove it. Admission must fail internally
+and without writes whenever a retained binding's key version is absent from the current keyring;
+silently removing a retiring key could otherwise make a replay or desktop claim look new.
 
 ## Cleanup
 
