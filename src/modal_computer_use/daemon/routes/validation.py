@@ -106,7 +106,6 @@ async def ready_mutation_lock(
     async with request.app.state.input_lock:
         await request.app.state.receipt_journal.ensure_mutation_allowed()
         credentials = lease_credentials_from_headers(request.headers)
-        request.app.state.lease_coordinator.validate_mutation(credentials)
         if lock_was_contended:
             await ensure_desktop_ready(request, force=True)
         handle = await begin_mutation_receipt(

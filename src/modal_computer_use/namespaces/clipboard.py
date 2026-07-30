@@ -12,11 +12,15 @@ class ClipboardNamespace(Namespace):
 
     def set_text(self, text: str) -> ActionResult:
         return ActionResult.model_validate(
-            self._client.put_json("/v1/clipboard/text", json={"text": text})
+            self._client.put_json(
+                "/v1/clipboard/text", json={"text": text}, _mutation=True
+            )
         )
 
     def clear(self) -> ActionResult:
-        return ActionResult.model_validate(self._client.delete_json("/v1/clipboard/text"))
+        return ActionResult.model_validate(
+            self._client.delete_json("/v1/clipboard/text", _mutation=True)
+        )
 
 
 class AsyncClipboardNamespace(AsyncNamespace):
@@ -26,8 +30,12 @@ class AsyncClipboardNamespace(AsyncNamespace):
 
     async def set_text(self, text: str) -> ActionResult:
         return ActionResult.model_validate(
-            await self._client.put_json("/v1/clipboard/text", json={"text": text})
+            await self._client.put_json(
+                "/v1/clipboard/text", json={"text": text}, _mutation=True
+            )
         )
 
     async def clear(self) -> ActionResult:
-        return ActionResult.model_validate(await self._client.delete_json("/v1/clipboard/text"))
+        return ActionResult.model_validate(
+            await self._client.delete_json("/v1/clipboard/text", _mutation=True)
+        )

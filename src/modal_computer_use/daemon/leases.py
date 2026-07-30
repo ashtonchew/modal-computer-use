@@ -74,9 +74,9 @@ class _Lease:
 class LeaseCoordinator:
     """Daemon-private trajectory ownership state.
 
-    Callers serialize all methods with the daemon input lock. Keeping lease
-    transitions on that lock makes activation and release fencing boundaries
-    for already-admitted mutations.
+    Callers serialize lease transitions with the daemon lease lock. Operations
+    that also need the input lock acquire input first, then lease; heartbeat
+    needs only the lease lock so admitted backend work cannot starve renewal.
     """
 
     def __init__(
@@ -104,18 +104,7 @@ class LeaseCoordinator:
             )
         self._expire_if_needed()
         if self._state == "active":
-            remaining = self._remaining_seconds()
-            raise DaemonError(
-                "trajectory session is busy",
-                status_code=409,
-                code="session_busy",
-                details={
-                    "retry_after_seconds": min(
-                        max(1, math.ceil(remaining)),
-                        math.ceil(self.ttl_seconds),
-                    )
-                },
-            )
+            self._raise_busy()
         self._fence += 1
         token = secrets.token_urlsafe(32)
         lease = _Lease(
@@ -136,6 +125,31 @@ class LeaseCoordinator:
             token=token,
             ttl_seconds=self.ttl_seconds,
             heartbeat_interval_seconds=self.heartbeat_interval_seconds,
+        )
+
+    def prepare_acquire(self) -> dict[str, Any]:
+        """Return the prior non-active lease state or reject without installing a lease."""
+        self._expire_if_needed()
+        if self._state == "active":
+            self._raise_busy()
+        lease = self._lease
+        return {
+            "state": self._state,
+            "run_id": None if lease is None else lease.run_id,
+        }
+
+    def _raise_busy(self) -> None:
+        remaining = self._remaining_seconds()
+        raise DaemonError(
+            "trajectory session is busy",
+            status_code=409,
+            code="session_busy",
+            details={
+                "retry_after_seconds": min(
+                    max(1, math.ceil(remaining)),
+                    math.ceil(self.ttl_seconds),
+                )
+            },
         )
 
     def heartbeat(self, credentials: LeaseCredentials | None) -> dict[str, Any]:

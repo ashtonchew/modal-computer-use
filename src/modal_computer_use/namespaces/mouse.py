@@ -17,10 +17,16 @@ class MouseNamespace(Namespace):
         modifiers: list[str] | None = None,
     ) -> Point:
         payload = {"x": x, "y": y, "button": button, "double": double, "modifiers": modifiers or []}
-        return Point.model_validate(self._client.post_json("/v1/mouse/click", json=payload))
+        return Point.model_validate(
+            self._client.post_json("/v1/mouse/click", json=payload, _mutation=True)
+        )
 
     def move(self, x: int, y: int) -> Point:
-        return Point.model_validate(self._client.post_json("/v1/mouse/move", json={"x": x, "y": y}))
+        return Point.model_validate(
+            self._client.post_json(
+                "/v1/mouse/move", json={"x": x, "y": y}, _mutation=True
+            )
+        )
 
     def drag(
         self,
@@ -44,7 +50,9 @@ class MouseNamespace(Namespace):
             "duration_ms": duration_ms,
             "modifiers": modifiers or [],
         }
-        return Point.model_validate(self._client.post_json("/v1/mouse/drag", json=payload))
+        return Point.model_validate(
+            self._client.post_json("/v1/mouse/drag", json=payload, _mutation=True)
+        )
 
     def scroll(
         self,
@@ -57,6 +65,7 @@ class MouseNamespace(Namespace):
             self._client.post_json(
                 "/v1/mouse/scroll",
                 json={"direction": direction, "amount": amount, "x": x, "y": y},
+                _mutation=True,
             )
         )
 
@@ -67,7 +76,11 @@ class MouseNamespace(Namespace):
         y: int | None = None,
     ) -> ActionResult:
         return ActionResult.model_validate(
-            self._client.post_json("/v1/mouse/down", json={"button": button, "x": x, "y": y})
+            self._client.post_json(
+                "/v1/mouse/down",
+                json={"button": button, "x": x, "y": y},
+                _mutation=True,
+            )
         )
 
     def up(
@@ -77,7 +90,11 @@ class MouseNamespace(Namespace):
         y: int | None = None,
     ) -> ActionResult:
         return ActionResult.model_validate(
-            self._client.post_json("/v1/mouse/up", json={"button": button, "x": x, "y": y})
+            self._client.post_json(
+                "/v1/mouse/up",
+                json={"button": button, "x": x, "y": y},
+                _mutation=True,
+            )
         )
 
     def position(self) -> Point:
@@ -100,11 +117,17 @@ class AsyncMouseNamespace(AsyncNamespace):
             "double": double,
             "modifiers": modifiers or [],
         }
-        return Point.model_validate(await self._client.post_json("/v1/mouse/click", json=payload))
+        return Point.model_validate(
+            await self._client.post_json(
+                "/v1/mouse/click", json=payload, _mutation=True
+            )
+        )
 
     async def move(self, x: int, y: int) -> Point:
         return Point.model_validate(
-            await self._client.post_json("/v1/mouse/move", json={"x": x, "y": y})
+            await self._client.post_json(
+                "/v1/mouse/move", json={"x": x, "y": y}, _mutation=True
+            )
         )
 
     async def drag(
@@ -129,7 +152,11 @@ class AsyncMouseNamespace(AsyncNamespace):
             "duration_ms": duration_ms,
             "modifiers": modifiers or [],
         }
-        return Point.model_validate(await self._client.post_json("/v1/mouse/drag", json=payload))
+        return Point.model_validate(
+            await self._client.post_json(
+                "/v1/mouse/drag", json=payload, _mutation=True
+            )
+        )
 
     async def scroll(
         self,
@@ -142,6 +169,7 @@ class AsyncMouseNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/mouse/scroll",
                 json={"direction": direction, "amount": amount, "x": x, "y": y},
+                _mutation=True,
             )
         )
 
@@ -152,7 +180,11 @@ class AsyncMouseNamespace(AsyncNamespace):
         y: int | None = None,
     ) -> ActionResult:
         return ActionResult.model_validate(
-            await self._client.post_json("/v1/mouse/down", json={"button": button, "x": x, "y": y})
+            await self._client.post_json(
+                "/v1/mouse/down",
+                json={"button": button, "x": x, "y": y},
+                _mutation=True,
+            )
         )
 
     async def up(
@@ -162,7 +194,11 @@ class AsyncMouseNamespace(AsyncNamespace):
         y: int | None = None,
     ) -> ActionResult:
         return ActionResult.model_validate(
-            await self._client.post_json("/v1/mouse/up", json={"button": button, "x": x, "y": y})
+            await self._client.post_json(
+                "/v1/mouse/up",
+                json={"button": button, "x": x, "y": y},
+                _mutation=True,
+            )
         )
 
     async def position(self) -> Point:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -23,6 +23,7 @@ class DaemonClient:
         timeout: float = 30.0,
         http2: bool = False,
         transport: HTTPTransport | None = None,
+        _mutation_executor: Callable[[Callable[[Mapping[str, str]], Any]], Any] | None = None,
     ) -> None:
         self.transport = transport or HTTPTransport(
             base_url,
@@ -30,6 +31,7 @@ class DaemonClient:
             timeout=timeout,
             http2=http2,
         )
+        self._mutation_executor = _mutation_executor
 
     @property
     def base_url(self) -> str:
@@ -47,8 +49,11 @@ class DaemonClient:
         *,
         json: Any | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> Any:
-        response = self.transport.request("POST", path, json=json, headers=headers)
+        response = self._request(
+            "POST", path, json=json, headers=headers, mutation=_mutation
+        )
         if not response.content:
             return None
         return response.json()
@@ -60,14 +65,22 @@ class DaemonClient:
         json: Any | None = None,
         content: bytes | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> Any:
-        response = self.transport.request("PUT", path, json=json, content=content, headers=headers)
+        response = self._request(
+            "PUT",
+            path,
+            json=json,
+            content=content,
+            headers=headers,
+            mutation=_mutation,
+        )
         if not response.content:
             return None
         return response.json()
 
-    def delete_json(self, path: str) -> Any:
-        response = self.transport.request("DELETE", path)
+    def delete_json(self, path: str, *, _mutation: bool = False) -> Any:
+        response = self._request("DELETE", path, mutation=_mutation)
         if not response.content:
             return None
         return response.json()
@@ -81,8 +94,11 @@ class DaemonClient:
         *,
         json: Any | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> bytes:
-        return self.transport.request("POST", path, json=json, headers=headers).content
+        return self._request(
+            "POST", path, json=json, headers=headers, mutation=_mutation
+        ).content
 
     def post_bytes_with_headers(
         self,
@@ -90,8 +106,11 @@ class DaemonClient:
         *,
         json: Any | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> tuple[bytes, Mapping[str, str]]:
-        response = self.transport.request("POST", path, json=json, headers=headers)
+        response = self._request(
+            "POST", path, json=json, headers=headers, mutation=_mutation
+        )
         return response.content, response.headers
 
     def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:
@@ -104,6 +123,28 @@ class DaemonClient:
 
     def download(self, path: str, local_path: str | Path) -> Path:
         return self.transport.stream_download(path, local_path)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        mutation: bool = False,
+        headers: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if not mutation or self._mutation_executor is None:
+            return self.transport.request(method, path, headers=headers, **kwargs)
+
+        def dispatch(metadata: Mapping[str, str]) -> Any:
+            return self.transport.request(
+                method,
+                path,
+                headers={**dict(headers or {}), **metadata},
+                **kwargs,
+            )
+
+        return self._mutation_executor(dispatch)
 
 
 class AsyncDaemonClient:
@@ -118,6 +159,10 @@ class AsyncDaemonClient:
         http2: bool = False,
         transport: AsyncHTTPTransport | None = None,
         _metadata_headers: MetadataHeaders | None = None,
+        _mutation_executor: Callable[
+            [Callable[[Mapping[str, str]], Awaitable[Any]]], Awaitable[Any]
+        ]
+        | None = None,
     ) -> None:
         self.transport = transport or AsyncHTTPTransport(
             base_url,
@@ -126,6 +171,7 @@ class AsyncDaemonClient:
             http2=http2,
             _metadata_headers=_metadata_headers,
         )
+        self._mutation_executor = _mutation_executor
 
     @property
     def base_url(self) -> str:
@@ -149,8 +195,11 @@ class AsyncDaemonClient:
         *,
         json: Any | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> Any:
-        response = await self.transport.request("POST", path, json=json, headers=headers)
+        response = await self._request(
+            "POST", path, json=json, headers=headers, mutation=_mutation
+        )
         return response.json() if response.content else None
 
     async def put_json(
@@ -160,14 +209,20 @@ class AsyncDaemonClient:
         json: Any | None = None,
         content: bytes | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> Any:
-        response = await self.transport.request(
-            "PUT", path, json=json, content=content, headers=headers
+        response = await self._request(
+            "PUT",
+            path,
+            json=json,
+            content=content,
+            headers=headers,
+            mutation=_mutation,
         )
         return response.json() if response.content else None
 
-    async def delete_json(self, path: str) -> Any:
-        response = await self.transport.request("DELETE", path)
+    async def delete_json(self, path: str, *, _mutation: bool = False) -> Any:
+        response = await self._request("DELETE", path, mutation=_mutation)
         return response.json() if response.content else None
 
     async def get_bytes(self, path: str, *, params: dict[str, Any] | None = None) -> bytes:
@@ -179,8 +234,13 @@ class AsyncDaemonClient:
         *,
         json: Any | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> bytes:
-        return (await self.transport.request("POST", path, json=json, headers=headers)).content
+        return (
+            await self._request(
+                "POST", path, json=json, headers=headers, mutation=_mutation
+            )
+        ).content
 
     async def post_bytes_with_headers(
         self,
@@ -188,8 +248,11 @@ class AsyncDaemonClient:
         *,
         json: Any | None = None,
         headers: dict[str, str] | None = None,
+        _mutation: bool = False,
     ) -> tuple[bytes, Mapping[str, str]]:
-        response = await self.transport.request("POST", path, json=json, headers=headers)
+        response = await self._request(
+            "POST", path, json=json, headers=headers, mutation=_mutation
+        )
         return response.content, response.headers
 
     async def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:
@@ -202,3 +265,25 @@ class AsyncDaemonClient:
 
     async def download(self, path: str, local_path: str | Path) -> Path:
         return await self.transport.stream_download(path, local_path)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        mutation: bool = False,
+        headers: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if not mutation or self._mutation_executor is None:
+            return await self.transport.request(method, path, headers=headers, **kwargs)
+
+        async def dispatch(metadata: Mapping[str, str]) -> Any:
+            return await self.transport.request(
+                method,
+                path,
+                headers={**dict(headers or {}), **metadata},
+                **kwargs,
+            )
+
+        return await self._mutation_executor(dispatch)

@@ -116,6 +116,21 @@ def test_coordinator_rejects_blank_application_run_id() -> None:
     assert coordinator.status()["run_id"] is None
 
 
+def test_prepare_acquire_cannot_install_an_unreturned_lease_when_clock_crosses_ttl() -> None:
+    moments = iter((0.0, 0.0, 0.5, 2.0))
+    coordinator = LeaseCoordinator(clock=lambda: next(moments), ttl_seconds=1)
+    first = coordinator.acquire("first-run")
+
+    with pytest.raises(DaemonError) as busy:
+        coordinator.prepare_acquire()
+
+    assert busy.value.code == "session_busy"
+    assert coordinator._fence == 1
+    assert coordinator._lease is not None
+    assert coordinator._lease.lease_id == first.lease_id
+    assert coordinator._lease.run_id == "first-run"
+
+
 def test_release_validated_ignores_ttl_only_for_exact_admitted_identity() -> None:
     clock = _Clock()
     coordinator = LeaseCoordinator(clock=clock, ttl_seconds=1)
@@ -470,3 +485,84 @@ def test_idle_expiration_seals_run_interrupted_and_releases_ownership(tmp_path) 
     assert status.json()["state"] == "expired"
     assert status.json()["run_state"] == "interrupted"
     assert legacy.status_code == 200
+
+
+def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+        )
+    )
+    app.state.lease_coordinator = LeaseCoordinator(
+        ttl_seconds=0.03,
+        heartbeat_interval_seconds=0.01,
+    )
+    app.state.supervisor.running = True
+    original_move = app.state.backend.mouse_move
+    admitted = asyncio.Event()
+
+    async def slow_move(x: int, y: int):
+        admitted.set()
+        await asyncio.sleep(0.09)
+        return await original_move(x, y)
+
+    app.state.backend.mouse_move = slow_move
+
+    async def exercise() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": "Bearer dev"},
+        ) as client:
+            acquired = await client.post(
+                "/v1/leases/acquire", json={"run_id": "long-operation"}
+            )
+            lease_headers = {
+                **_lease_headers(acquired),
+                OPERATION_SEQUENCE_HEADER: "0",
+            }
+            mutation = asyncio.create_task(
+                client.post(
+                    "/v1/mouse/move",
+                    json={"x": 7, "y": 8},
+                    headers=lease_headers,
+                )
+            )
+            admission = asyncio.create_task(admitted.wait())
+            done, _pending = await asyncio.wait(
+                {admission, mutation},
+                timeout=1.0,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if mutation in done and not admitted.is_set():
+                early = await mutation
+                pytest.fail(
+                    "mutation failed before backend admission: "
+                    f"status={early.status_code} code={early.json().get('code')}"
+                )
+            assert admission in done, "mutation did not reach backend admission within 1s"
+            while not mutation.done():
+                heartbeat = await client.post(
+                    "/v1/leases/heartbeat", headers=lease_headers
+                )
+                assert heartbeat.status_code == 200
+                await asyncio.sleep(0.008)
+            result = await mutation
+            status = await client.get("/v1/leases/status")
+            receipt = await client.post(
+                "/v1/receipts/status",
+                json={"run_id": "long-operation", "sequence": 0},
+                headers=lease_headers,
+            )
+
+        assert result.status_code == 200
+        assert status.json()["state"] == "active"
+        assert status.json()["run_state"] == "active"
+        assert receipt.json()["state"] == "COMPLETED"
+
+    asyncio.run(exercise())

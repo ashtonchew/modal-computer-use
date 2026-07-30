@@ -11,6 +11,7 @@ class BrowserNamespace(Namespace):
             self._client.post_json(
                 "/v1/browser/open-url",
                 json={"url": url, "wait_for_window": wait_for_window},
+                _mutation=True,
             )
         )
 
@@ -22,6 +23,7 @@ class BrowserNamespace(Namespace):
             self._client.post_json(
                 "/v1/browser/render-metrics",
                 json={"url": url, "timeout_seconds": timeout_seconds},
+                _mutation=True,
             )
         )
 
@@ -32,6 +34,7 @@ class AsyncBrowserNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/browser/open-url",
                 json={"url": url, "wait_for_window": wait_for_window},
+                _mutation=True,
             )
         )
 
@@ -43,5 +46,6 @@ class AsyncBrowserNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/browser/render-metrics",
                 json={"url": url, "timeout_seconds": timeout_seconds},
+                _mutation=True,
             )
         )

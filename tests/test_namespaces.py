@@ -15,7 +15,14 @@ class _FakeClient:
         self.posts: list[dict[str, Any]] = []
         self.downloads: list[tuple[str, Path]] = []
 
-    def post_json(self, path: str, *, json: Any | None = None, headers=None):
+    def post_json(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        headers=None,
+        _mutation: bool = False,
+    ):
         self.posts.append({"path": path, "json": json, "headers": headers})
         if path == "/v1/actions/validate":
             return {"ok": True, "errors": []}
@@ -33,11 +40,25 @@ class _FakeClient:
     def get_bytes(self, *_args, **_kwargs):
         raise AssertionError("recording downloads must stream instead of buffering")
 
-    def post_bytes(self, path: str, *, json: Any | None = None, headers=None):
+    def post_bytes(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        headers=None,
+        _mutation: bool = False,
+    ):
         self.posts.append({"path": path, "json": json, "headers": headers})
         return b"image-bytes"
 
-    def post_bytes_with_headers(self, path: str, *, json: Any | None = None, headers=None):
+    def post_bytes_with_headers(
+        self,
+        path: str,
+        *,
+        json: Any | None = None,
+        headers=None,
+        _mutation: bool = False,
+    ):
         self.posts.append({"path": path, "json": json, "headers": headers})
         action_result = {
             "ok": True,

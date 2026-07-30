@@ -1,6 +1,6 @@
 from ._version import __version__
-from .borrowed import BorrowedComputer
-from .client import DaemonClient
+from .borrowed import AsyncBorrowedComputer, BorrowedComputer
+from .client import AsyncDaemonClient, DaemonClient
 from .config import (
     ActionConfig,
     BrowserConfig,
@@ -18,6 +18,7 @@ from .errors import (
     BrowserReadinessError,
     ConfigConflictError,
     FrameValidationError,
+    OperationNotAppliedError,
     OperationResultUnavailableError,
     RunSequenceConflictError,
     SandboxAmbiguousError,
@@ -31,7 +32,7 @@ from .errors import (
     SessionRecoveryRequiredError,
     SessionTargetMismatchError,
 )
-from .hot_session import HotSessionClient
+from .hot_session import AsyncHotSessionClient, HotSessionClient
 from .latency import (
     SessionStartupTiming,
     WarmPoolClaim,
@@ -70,9 +71,11 @@ from .models import (
     SandboxRef,
     Screenshot,
     ScreenshotOptions,
+    SessionRecoveryAcknowledgement,
+    SessionRecoveryStatus,
     X11Window,
 )
-from .observations import ActionObservationResult, ObservationClient
+from .observations import ActionObservationResult, AsyncObservationClient, ObservationClient
 from .registry import SandboxRegistry
 from .sandbox import (
     ComputerSandbox,
@@ -98,6 +101,10 @@ __all__ = [
     "ActionResult",
     "ArtifactInfo",
     "ArtifactSyncResult",
+    "AsyncBorrowedComputer",
+    "AsyncDaemonClient",
+    "AsyncHotSessionClient",
+    "AsyncObservationClient",
     "BorrowedComputer",
     "BrowserConfig",
     "BrowserReadinessError",
@@ -125,6 +132,7 @@ __all__ = [
     "ModalVolumeMount",
     "NetworkConfig",
     "ObservationClient",
+    "OperationNotAppliedError",
     "OperationResultUnavailableError",
     "Point",
     "ProcessStatus",
@@ -148,7 +156,9 @@ __all__ = [
     "SessionEnvironmentMismatchError",
     "SessionLeaseLostError",
     "SessionPlacementMismatchError",
+    "SessionRecoveryAcknowledgement",
     "SessionRecoveryRequiredError",
+    "SessionRecoveryStatus",
     "SessionStartupTiming",
     "SessionTargetMismatchError",
     "StorageConfig",

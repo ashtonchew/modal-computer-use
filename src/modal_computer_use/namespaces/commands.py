@@ -13,6 +13,7 @@ class CommandsNamespace(Namespace):
             self._client.post_json(
                 "/v1/commands/run",
                 json={"command": list(command), "timeout": timeout},
+                _mutation=True,
             )
         )
 
@@ -25,5 +26,6 @@ class AsyncCommandsNamespace(AsyncNamespace):
             await self._client.post_json(
                 "/v1/commands/run",
                 json={"command": list(command), "timeout": timeout},
+                _mutation=True,
             )
         )

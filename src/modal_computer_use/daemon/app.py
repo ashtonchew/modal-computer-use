@@ -140,6 +140,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         subprocess_backend=settings.subprocess_backend,
     )
     app.state.input_lock = asyncio.Lock()
+    app.state.lease_lock = asyncio.Lock()
     app.state.lease_coordinator = LeaseCoordinator()
     app.state.lease_expiry_task = None
     app.state.receipt_journal = ReceiptJournal(settings.runtime_dir)

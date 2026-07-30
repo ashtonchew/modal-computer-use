@@ -15,11 +15,17 @@ class WindowsNamespace(Namespace):
 
     def activate(self, window_id: str) -> ActionResult:
         return ActionResult.model_validate(
-            self._client.post_json(f"/v1/windows/{window_id}/activate")
+            self._client.post_json(
+                f"/v1/windows/{window_id}/activate", _mutation=True
+            )
         )
 
     def close(self, window_id: str) -> ActionResult:
-        return ActionResult.model_validate(self._client.post_json(f"/v1/windows/{window_id}/close"))
+        return ActionResult.model_validate(
+            self._client.post_json(
+                f"/v1/windows/{window_id}/close", _mutation=True
+            )
+        )
 
     def wait_for(
         self,
@@ -53,12 +59,16 @@ class AsyncWindowsNamespace(AsyncNamespace):
 
     async def activate(self, window_id: str) -> ActionResult:
         return ActionResult.model_validate(
-            await self._client.post_json(f"/v1/windows/{window_id}/activate")
+            await self._client.post_json(
+                f"/v1/windows/{window_id}/activate", _mutation=True
+            )
         )
 
     async def close(self, window_id: str) -> ActionResult:
         return ActionResult.model_validate(
-            await self._client.post_json(f"/v1/windows/{window_id}/close")
+            await self._client.post_json(
+                f"/v1/windows/{window_id}/close", _mutation=True
+            )
         )
 
     async def wait_for(

@@ -8,7 +8,10 @@ A `ComputerSessionHandle` lets a Modal Function mint a fresh connection to an ex
 keep it for the whole repeated screenshot/model/action trajectory. Context construction is local;
 credential creation, readiness, and live config verification happen once on entry. This removes
 per-turn attach overhead, but does not remove action or batch round trips and does not retry failed
-or possibly partial work.
+or possibly partial work. Entry is restricted to a deployed Function runtime
+(`MODAL_IS_REMOTE=1`). A compact existing session tag binds app, environment, requested region,
+ingress, HTTP version, VNC policy, and config hash, so the safety check consumes no additional tag
+capacity.
 
 Set the Function's `region` placement request to the handle's exact `requested_modal_region`.
 `routing_region` affects Function input/output routing and is not a substitute. A shared requested
@@ -20,7 +23,8 @@ Choose Function capacity as an explicit latency/cost tradeoff:
 - `min_containers=0` scales the Function to zero and can add cold-start latency.
 - Positive warm capacity spends more to reduce idle-to-first-invocation delay.
 - `max_containers` and application admission control must prevent concurrent trajectories for one
-  desktop. Daemon input locking is only per action or batch, not per trajectory.
+  desktop. The daemon lease excludes overlapping trajectories per target; mutations still serialize
+  through one per-borrow sequence coordinator.
 - Use `retries=0` to avoid configured retries; Modal may still reschedule a crashed Function
   container, so the complete trajectory is not exactly-once.
 
@@ -28,7 +32,18 @@ Cancellation stops the Function invocation, not the target desktop and not prior
 borrower detaches on normal return or Python exception and the creator terminates only after remote
 and spawned work has reached a terminal outcome. Capacity planning must include the separately
 running Sandbox cost. This is a single-trajectory ownership contract, not a multi-tenant safety
-claim. The public surface is synchronous; native async borrowing may be added later.
+claim. `borrow_async()` is canonical for async Modal Functions and avoids blocking the event loop;
+`borrow()` is the supported synchronous variant. Modal async concurrent inputs run as asyncio tasks
+and cancellation arrives as `asyncio.CancelledError`; sync cancellation can terminate the Function
+container, which is another reason to prefer the native async surface for concurrent capacity.
+Application model calls inside `borrow_async()` must also be async (or explicitly moved to a worker
+thread) so they cannot starve lease heartbeat and distinct-desktop tasks.
+
+One Function invocation should hold the complete repeated loop. Function concurrency is useful for
+distinct desktop handles, not overlapping work on one handle. The executable example includes a
+concurrent distinct-target variant and rejects duplicate target handles. Lease heartbeat uses a
+separate daemon coordination lock, so a target operation longer than the lease TTL can remain owned
+while backend work holds the input lock.
 
 ## Batch actions
 

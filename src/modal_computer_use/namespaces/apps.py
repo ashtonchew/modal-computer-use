@@ -8,12 +8,18 @@ from .base import AsyncNamespace, Namespace
 class AppsNamespace(Namespace):
     def launch(self, command: str, args: list[str] | None = None) -> ActionResult:
         return ActionResult.model_validate(
-            self._client.post_json("/v1/apps/launch", json={"command": command, "args": args or []})
+            self._client.post_json(
+                "/v1/apps/launch",
+                json={"command": command, "args": args or []},
+                _mutation=True,
+            )
         )
 
     def open_artifact(self, path: str) -> ActionResult:
         return ActionResult.model_validate(
-            self._client.post_json("/v1/apps/open-artifact", json={"path": path})
+            self._client.post_json(
+                "/v1/apps/open-artifact", json={"path": path}, _mutation=True
+            )
         )
 
 
@@ -21,11 +27,15 @@ class AsyncAppsNamespace(AsyncNamespace):
     async def launch(self, command: str, args: list[str] | None = None) -> ActionResult:
         return ActionResult.model_validate(
             await self._client.post_json(
-                "/v1/apps/launch", json={"command": command, "args": args or []}
+                "/v1/apps/launch",
+                json={"command": command, "args": args or []},
+                _mutation=True,
             )
         )
 
     async def open_artifact(self, path: str) -> ActionResult:
         return ActionResult.model_validate(
-            await self._client.post_json("/v1/apps/open-artifact", json={"path": path})
+            await self._client.post_json(
+                "/v1/apps/open-artifact", json={"path": path}, _mutation=True
+            )
         )
