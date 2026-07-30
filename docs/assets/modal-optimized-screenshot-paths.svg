@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1152" height="432" viewBox="0 0 1152 432" role="img" aria-labelledby="title desc">
   <title id="title">Moving the benchmark caller shortened the repeated screenshot path</title>
-  <desc id="desc">Both paths complete one-time authorization and use encrypted requests. The external caller has a longer route to the warm daemon. The Function and target Sandbox request us-west-2, shortening that route while preserving the same daemon, capture, and response stages.</desc>
+  <desc id="desc">Both paths complete one-time authorization and use encrypted requests. The external caller has a longer route to the warm daemon. The optimized caller is a Modal Function in the requested us-west-2 region, shortening that route while preserving the same daemon, capture, and response stages.</desc>
   <defs>
     <style>
       .bg { fill: #101411; }
@@ -47,11 +47,10 @@
   <text class="arrow-label-modal" x="920" y="124" text-anchor="middle">Return</text>
 
   <text class="row-modal" x="32" y="240">Modal optimized</text>
-  <text class="small-modal" x="202" y="240">Function and target request us-west-2</text>
 
   <rect class="box-modal" x="32" y="296" width="176" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
-  <text class="label-modal" x="120" y="338" text-anchor="middle">Modal Function</text>
-  <text class="label-modal" x="120" y="360" text-anchor="middle">runner</text>
+  <text class="label-modal" x="120" y="336" text-anchor="middle">Modal Function</text>
+  <text class="small-modal" x="120" y="363" text-anchor="middle">us-west-2</text>
 
   <rect class="box-modal" x="480" y="296" width="160" height="104" rx="8" fill="#1C231D" stroke="#91B89A" stroke-width="1.8"/>
   <text class="label-modal" x="560" y="354" text-anchor="middle">Warm daemon</text>
