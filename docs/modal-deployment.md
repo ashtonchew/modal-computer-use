@@ -194,9 +194,17 @@ async inputs, and cancellation delivery still wait for the loop. Process death s
 the daemon lease TTL remains the final ownership release, and CPU-bound or GIL-holding work can
 still delay all Python threads.
 
-The receipt journal is target-local SQLite using WAL with `synchronous=NORMAL`. It survives daemon
-process restart on the same target filesystem, but this is not a claim of host-loss durability.
-After an interrupted in-progress receipt, owner acknowledgment is required before a new lease.
+The receipt journal is target-local SQLite using WAL. The pre-dispatch `IN_PROGRESS` transaction
+uses an effective `synchronous=FULL` boundary; mutation dispatch does not begin until that commit
+returns. Terminal completion, abandonment, status, and recovery bookkeeping use
+`synchronous=NORMAL`. If a terminal commit is lost, the durable `IN_PROGRESS` receipt keeps the
+target quarantined and fails closed.
+
+This guarantee is **surviving target filesystem** durability: it covers daemon restart and an
+operating-system or power loss when the target's local filesystem survives. It does not recover a
+destroyed Sandbox, host filesystem, or GUI state. Target or Sandbox loss requires a new target and
+a new run; the receipt alone cannot reconstruct the desktop. After an interrupted in-progress
+receipt, owner acknowledgment is required before a new lease.
 
 ## Co-located runners and brokers
 

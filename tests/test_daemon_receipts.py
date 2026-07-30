@@ -119,6 +119,189 @@ def _block_after_sync_commit(original, committed: threading.Event, release: thre
     return blocking
 
 
+def test_only_predispatch_receipt_connection_requests_full(tmp_path, monkeypatch) -> None:
+    journal = ReceiptJournal(tmp_path / "runtime")
+    synchronous_modes: list[str] = []
+    original_connect = journal._connect
+
+    def recording_connect(*, synchronous="NORMAL"):
+        connection = original_connect(synchronous=synchronous)
+        synchronous_modes.append(synchronous)
+        expected = 2 if synchronous == "FULL" else 1
+        assert connection.execute("PRAGMA synchronous").fetchone()[0] == expected
+        return connection
+
+    monkeypatch.setattr(journal, "_connect", recording_connect)
+
+    async def exercise() -> None:
+        await journal.start()
+        synchronous_modes.clear()
+        await journal.activate_run("run-synchronous-mode")
+        handle = await journal.begin(
+            lease=MutationLease(
+                run_id="run-synchronous-mode",
+                epoch="epoch",
+                fence=1,
+            ),
+            sequence=0,
+            operation_kind="test.synchronous.mode",
+            semantic_data={},
+        )
+        await journal.complete(handle)
+        await journal.receipt_status("run-synchronous-mode", 0)
+        await journal.recovery_status()
+        await journal.close()
+
+    asyncio.run(exercise())
+
+    assert synchronous_modes == ["NORMAL", "FULL", "NORMAL", "NORMAL", "NORMAL"]
+
+
+def test_full_receipt_commit_returns_before_mutation_dispatch(
+    tmp_path, monkeypatch
+) -> None:
+    events: list[str] = []
+    original_connect = sqlite3.connect
+
+    class RecordingConnection(sqlite3.Connection):
+        def commit(self) -> None:
+            in_progress = self.execute(
+                "SELECT 1 FROM operations WHERE state = 'IN_PROGRESS' LIMIT 1"
+            ).fetchone()
+            if in_progress is not None:
+                assert self.execute("PRAGMA synchronous").fetchone()[0] == 2
+                events.append("full_commit_started")
+                super().commit()
+                events.append("full_commit_returned")
+                return
+            super().commit()
+
+    def recording_connect(*args, **kwargs):
+        return original_connect(*args, factory=RecordingConnection, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+    app = _app(tmp_path)
+    original_move = app.state.backend.mouse_move
+
+    async def tracked_move(x: int, y: int):
+        events.append("mutation_dispatched")
+        return await original_move(x, y)
+
+    app.state.backend.mouse_move = tracked_move
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        _, lease = _acquire(client, "run-commit-order")
+        response = client.post(
+            "/v1/mouse/move",
+            json={"x": 1, "y": 2},
+            headers=_operation_headers(lease, 0),
+        )
+
+    assert response.status_code == 200
+    assert events == [
+        "full_commit_started",
+        "full_commit_returned",
+        "mutation_dispatched",
+    ]
+
+
+def test_predispatch_commit_failure_prevents_mutation(tmp_path, monkeypatch) -> None:
+    original_connect = sqlite3.connect
+    move_calls = 0
+
+    class FailingConnection(sqlite3.Connection):
+        def commit(self) -> None:
+            in_progress = self.execute(
+                "SELECT 1 FROM operations WHERE state = 'IN_PROGRESS' LIMIT 1"
+            ).fetchone()
+            if (
+                in_progress is not None
+                and self.execute("PRAGMA synchronous").fetchone()[0] == 2
+            ):
+                raise sqlite3.OperationalError("injected pre-dispatch commit failure")
+            super().commit()
+
+    def failing_connect(*args, **kwargs):
+        return original_connect(*args, factory=FailingConnection, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", failing_connect)
+    app = _app(tmp_path)
+    original_move = app.state.backend.mouse_move
+
+    async def tracked_move(x: int, y: int):
+        nonlocal move_calls
+        move_calls += 1
+        return await original_move(x, y)
+
+    app.state.backend.mouse_move = tracked_move
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        _, lease = _acquire(client, "run-commit-failure")
+        response = client.post(
+            "/v1/mouse/move",
+            json={"x": 1, "y": 2},
+            headers=_operation_headers(lease, 0),
+        )
+
+    assert response.status_code == 500
+    assert move_calls == 0
+
+
+def test_connection_rejects_unexpected_synchronous_pragma(tmp_path, monkeypatch) -> None:
+    original_connect = sqlite3.connect
+
+    class UnexpectedPragmaResult:
+        @staticmethod
+        def fetchone() -> tuple[int]:
+            return (1,)
+
+    class MisreportingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "PRAGMA synchronous":
+                return UnexpectedPragmaResult()
+            return super().execute(sql, parameters)
+
+    def misreporting_connect(*args, **kwargs):
+        return original_connect(*args, factory=MisreportingConnection, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", misreporting_connect)
+    journal = ReceiptJournal(tmp_path / "runtime")
+    journal._runtime_dir.mkdir(parents=True)
+
+    with pytest.raises(
+        RuntimeError,
+        match="receipt journal synchronous mode was not applied",
+    ):
+        journal._connect(synchronous="FULL")
+
+
+def test_connection_rejects_unavailable_wal_mode(tmp_path, monkeypatch) -> None:
+    original_connect = sqlite3.connect
+
+    class FallbackJournalModeResult:
+        @staticmethod
+        def fetchone() -> tuple[str]:
+            return ("delete",)
+
+    class FallbackJournalModeConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "PRAGMA journal_mode=WAL":
+                return FallbackJournalModeResult()
+            return super().execute(sql, parameters)
+
+    def fallback_connect(*args, **kwargs):
+        return original_connect(*args, factory=FallbackJournalModeConnection, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", fallback_connect)
+    journal = ReceiptJournal(tmp_path / "runtime")
+    journal._runtime_dir.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="receipt journal WAL mode was not applied"):
+        journal._connect(synchronous="FULL")
+
+
 def test_gap_free_sequence_replay_conflict_and_no_silent_eviction(tmp_path) -> None:
     app = _app(tmp_path)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
