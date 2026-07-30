@@ -512,6 +512,27 @@ idle timeout remain the final cost backstop. Run this smoke intentionally for Mo
 handoff protocol changes; it is compatibility validation, not a recurring benchmark or an
 exactly-once guarantee.
 
+#### Local validation record: 2026-07-30
+
+The deployed-Function handoff smoke passed when invoked locally from commit `620a724` with Modal
+SDK 1.5.2. The local client used Python 3.14.2 and deployed the test Function's configured Python
+3.12 image. The run used one temporary non-production Modal Environment because the documented
+long-lived smoke Environment was not configured in the local workspace. App, owner, target, and
+trajectory names were generated for this run and were not recorded.
+
+The validation deployed `tests/modal_function_session_handoff_smoke_app.py`, then selected exactly
+`test_modal_deployed_function_session_handoff_smoke` from `tests/test_modal_integration.py`. It
+created one target Sandbox, JSON-round-tripped its session handle, invoked the deployed Function
+once, entered one async borrowed session, captured one inline full screenshot, submitted one
+sequenced wait action, released the trajectory lease, verified that borrower cleanup left the
+target running, and terminated the target through its external owner. The test passed. The scoped
+cleanup stopped the test App and deleted the temporary Environment; a redacted follow-up query
+found zero temporary handoff Environments remaining.
+
+Only the aggregate pass and cleanup results were retained. Credentials, endpoint URLs, Modal object
+identifiers, Function call identifiers, screenshot bytes, prompts, and typed content were neither
+printed nor recorded.
+
 ## Performance and benchmark evidence
 
 Use [Performance](performance.md) for placement, ingress, image, browser, and warm-capacity decision
