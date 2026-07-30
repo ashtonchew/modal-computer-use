@@ -111,6 +111,116 @@ def _skip_without_v1_smoke() -> None:
         pytest.skip("Set MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 to run protected v1 Modal smoke")
 
 
+def _skip_without_handoff_smoke() -> None:
+    if os.getenv("MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE") != "1":
+        pytest.skip(
+            "Set MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE=1 to run protected handoff smoke"
+        )
+
+
+def _required_handoff_setting(name: str) -> str:
+    value = os.getenv(name)
+    if not value or not value.strip():
+        raise RuntimeError(f"protected handoff smoke requires {name}")
+    return value
+
+
+@pytest.mark.modal
+def test_modal_deployed_function_session_handoff_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_handoff_smoke()
+
+    import modal
+
+    from modal_computer_use import (
+        ComputerConfig,
+        ComputerSandbox,
+        ComputerSessionHandle,
+    )
+    from modal_computer_use.config import RuntimeConfig
+
+    app_name = _required_handoff_setting("MODAL_COMPUTER_USE_HANDOFF_APP_NAME")
+    modal_environment = _required_handoff_setting(
+        "MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT"
+    )
+    function_region = _required_handoff_setting(
+        "MODAL_COMPUTER_USE_HANDOFF_REGION"
+    )
+    owner = _required_handoff_setting("MODAL_COMPUTER_USE_HANDOFF_OWNER")
+    trajectory_run_id = f"handoff-trajectory-{uuid.uuid4().hex}"
+    safe_result_fields = {
+        "borrow_succeeded",
+        "screenshot_succeeded",
+        "action_succeeded",
+        "width",
+        "height",
+        "function_cloud",
+        "function_region",
+    }
+    computer = None
+    owner_terminated = False
+
+    try:
+        computer = ComputerSandbox.create(
+            config=ComputerConfig(
+                run_id=f"handoff-target-{uuid.uuid4().hex}",
+                ingress="attested-tunnel",
+                expose_vnc="off",
+                runtime=RuntimeConfig(
+                    modal_environment=modal_environment,
+                    modal_region=function_region,
+                    timeout_seconds=600,
+                    idle_timeout_seconds=180,
+                    readiness_timeout_seconds=180,
+                ),
+            ),
+            app_name=app_name,
+            owner=owner,
+            tags={"computer-use.smoke": "function-session-handoff"},
+        )
+        target_placement = computer.runtime_placement()
+        assert isinstance(target_placement["cloud"], str)
+        assert target_placement["cloud"]
+        assert isinstance(target_placement["region"], str)
+        assert target_placement["region"]
+
+        handle = ComputerSessionHandle.model_validate_json(
+            computer.session_handle().model_dump_json()
+        )
+        deployed = modal.Function.from_name(
+            app_name,
+            "run_handoff_smoke",
+            environment_name=modal_environment,
+        )
+        result = deployed.remote(handle, trajectory_run_id)
+
+        assert isinstance(result, dict)
+        assert set(result) == safe_result_fields
+        assert result["borrow_succeeded"] is True
+        assert result["screenshot_succeeded"] is True
+        assert result["action_succeeded"] is True
+        assert isinstance(result["width"], int) and result["width"] > 0
+        assert isinstance(result["height"], int) and result["height"] > 0
+        assert isinstance(result["function_cloud"], str)
+        assert result["function_cloud"]
+        assert isinstance(result["function_region"], str)
+        assert result["function_region"]
+
+        lease_status = computer.client.get_json("/v1/leases/status")
+        assert lease_status.get("state") == "released"
+        assert computer.poll() is None
+        assert computer.status().ready is True
+
+        computer.terminate(wait=True)
+        owner_terminated = True
+        assert computer.poll() is not None
+    finally:
+        if computer is not None:
+            if not owner_terminated:
+                computer.terminate(wait=True)
+            computer.detach()
+
+
 @pytest.mark.modal
 def test_modal_manager_attach_reuse_cleanup_smoke() -> None:
     _skip_without_modal_auth()

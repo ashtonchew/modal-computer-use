@@ -186,6 +186,13 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke
     environment: modal-smoke
+    timeout-minutes: 30
+    concurrency:
+      group: protected-modal-smoke
+      cancel-in-progress: false
+    env:
+      MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT: modal-computer-use-smoke
+      MODAL_COMPUTER_USE_HANDOFF_REGION: us-west
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -211,6 +218,16 @@ jobs:
             exit 1
           fi
 
+      - name: Create private handoff run scope
+        run: |
+          scope="$(uv run python -c 'import secrets; print(secrets.token_hex(12))')"
+          app_name="mcu-handoff-$scope"
+          owner="mcu-handoff-owner-$scope"
+          echo "::add-mask::$app_name"
+          echo "::add-mask::$owner"
+          echo "MODAL_COMPUTER_USE_HANDOFF_APP_NAME=$app_name" >> "$GITHUB_ENV"
+          echo "MODAL_COMPUTER_USE_HANDOFF_OWNER=$owner" >> "$GITHUB_ENV"
+
       - name: Run protected live Modal smoke
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
@@ -218,3 +235,69 @@ jobs:
           MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE: "1"
           MODAL_COMPUTER_USE_RUN_V1_SMOKE: "1"
         run: uv run pytest -m modal tests/test_modal_integration.py -q
+
+      - name: Deploy protected Function handoff smoke
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_ENVIRONMENT: ${{ env.MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT }}
+        run: |
+          if ! uv run modal deploy \
+            --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
+            tests/modal_function_session_handoff_smoke_app.py >/dev/null 2>&1
+          then
+            echo "::error::protected Function handoff deployment failed"
+            exit 1
+          fi
+
+      - name: Run protected Function handoff smoke
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_ENVIRONMENT: ${{ env.MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT }}
+          MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE: "1"
+        run: |
+          if ! uv run pytest -m modal tests/test_modal_integration.py \
+            -k test_modal_deployed_function_session_handoff_smoke -q >/dev/null 2>&1
+          then
+            echo "::error::protected Function handoff smoke failed"
+            exit 1
+          fi
+          echo "Protected Function handoff smoke passed"
+
+      - name: Clean up protected Function handoff smoke
+        if: always()
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_ENVIRONMENT: ${{ env.MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT }}
+        run: |
+          if [ -z "${MODAL_COMPUTER_USE_HANDOFF_APP_NAME:-}" ] || \
+            [ -z "${MODAL_COMPUTER_USE_HANDOFF_OWNER:-}" ]
+          then
+            echo "Protected Function handoff cleanup was not required"
+            exit 0
+          fi
+
+          target_cleanup_status=0
+          app_cleanup_status=0
+          uv run python - <<'PY' >/dev/null 2>&1 || target_cleanup_status=$?
+          import os
+
+          import modal
+
+          owner = os.environ["MODAL_COMPUTER_USE_HANDOFF_OWNER"]
+          for sandbox in modal.Sandbox.list(tags={"computer-use.owner": owner}):
+              sandbox.terminate(wait=True)
+          PY
+          uv run modal app stop \
+            --yes \
+            --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
+            "$MODAL_COMPUTER_USE_HANDOFF_APP_NAME" >/dev/null 2>&1 || app_cleanup_status=$?
+
+          if [ "$target_cleanup_status" -ne 0 ] || [ "$app_cleanup_status" -ne 0 ]
+          then
+            echo "::error::protected Function handoff cleanup failed"
+            exit 1
+          fi
+          echo "Protected Function handoff cleanup completed"

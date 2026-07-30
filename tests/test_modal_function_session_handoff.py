@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import pickle
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -27,6 +29,8 @@ from modal_computer_use.errors import (
 )
 from modal_computer_use.sandbox import _session_policy_id_prefix
 from modal_computer_use.state import compute_config_hash
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -1200,3 +1204,96 @@ def test_public_session_errors_redact_caller_supplied_identity_and_content() -> 
         rendered = f"{error!s} {error!r}"
         assert "sb-secret" not in rendered
         assert "private task" not in rendered
+
+
+def test_deployed_handoff_smoke_source_is_bounded_and_returns_only_safe_aggregates() -> None:
+    path = ROOT / "tests" / "modal_function_session_handoff_smoke_app.py"
+    source = path.read_text(encoding="utf-8")
+    module = ast.parse(source)
+    body = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "run_handoff_smoke_body"
+    )
+    returned = next(
+        node.value
+        for node in ast.walk(body)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
+    )
+    return_keys = {
+        key.value
+        for key in returned.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+
+    assert return_keys == {
+        "borrow_succeeded",
+        "screenshot_succeeded",
+        "action_succeeded",
+        "width",
+        "height",
+        "function_cloud",
+        "function_region",
+    }
+    assert '.pip_install_from_pyproject(' in source
+    assert 'optional_dependencies=["modal"]' in source
+    assert '.add_local_python_source("modal_computer_use", copy=True)' in source
+    assert "retries=0" in source
+    assert "min_containers=0" in source
+    assert "max_containers=1" in source
+    assert "FUNCTION_TIMEOUT_SECONDS = 300" in source
+    assert "timeout=FUNCTION_TIMEOUT_SECONDS" in source
+    assert "restrict_modal_access=False" in source
+    assert source.count("handle.borrow_async(") == 1
+    assert source.count("computer.screenshots.full(") == 1
+    assert 'storage="inline"' in source
+    assert source.count("computer.actions.run(") == 1
+    assert '{"type": "wait", "duration_ms": 50}' in source
+
+
+def test_deployed_handoff_smoke_owner_round_trips_and_invokes_once() -> None:
+    source = (ROOT / "tests" / "test_modal_integration.py").read_text(
+        encoding="utf-8"
+    )
+    test_source = source.split(
+        "def test_modal_deployed_function_session_handoff_smoke() -> None:",
+        maxsplit=1,
+    )[1].split("\n\n@pytest.mark.modal", maxsplit=1)[0]
+
+    assert 'os.getenv("MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE")' in source
+    assert "ComputerSessionHandle.model_validate_json(" in test_source
+    assert "computer.session_handle().model_dump_json()" in test_source
+    assert test_source.count("deployed.remote(") == 1
+    assert 'expose_vnc="off"' in test_source
+    assert 'ingress="attested-tunnel"' in test_source
+    assert "timeout_seconds=600" in test_source
+    assert "idle_timeout_seconds=180" in test_source
+    assert 'lease_status.get("state") == "released"' in test_source
+    assert "assert computer.poll() is None" in test_source
+    assert "computer.terminate(wait=True)" in test_source
+    assert "target_placement[\"cloud\"]" in test_source
+    assert "target_placement[\"region\"]" in test_source
+    assert "target_placement == result" not in test_source
+
+
+def test_protected_workflow_scopes_and_cleans_up_handoff_smoke() -> None:
+    source = (
+        ROOT / ".github" / "workflows" / "release-validation.yml"
+    ).read_text(encoding="utf-8")
+    protected_job = source.split("  modal-smoke:", maxsplit=1)[1]
+    unprotected_jobs = source.split("  modal-smoke:", maxsplit=1)[0]
+
+    assert "MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE" not in unprotected_jobs
+    assert protected_job.count("MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE") == 1
+    assert "github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke" in protected_job
+    assert "environment: modal-smoke" in protected_job
+    assert "timeout-minutes:" in protected_job
+    assert "concurrency:" in protected_job
+    assert "uv run modal deploy" in protected_job
+    assert "if: always()" in protected_job
+    assert "uv run modal app stop" in protected_job
+    assert "--yes" in protected_job
+    assert '"computer-use.owner": owner' in protected_job
+    assert "sandbox.terminate(wait=True)" in protected_job
+    assert ">/dev/null 2>&1" in protected_job
