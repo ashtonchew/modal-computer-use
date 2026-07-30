@@ -160,7 +160,7 @@ A first changed frame answers one narrow question: have new pixels appeared yet?
 
 Modal bills a Function and a Sandbox for the seconds each one is alive. A run costs about 3 cents a minute for the two together, and I pay nothing between runs.
 
-I run the benchmark from a Function that serves one invocation and then exits. Each target desktop lives only as long as the samples that use it. The 2026-07-28 run made 31 of them, and the cleanup sweep at the end found nothing still running.
+I run the benchmark from a Function that serves one invocation and then exits. Each target desktop lives only as long as the samples that use it. The 2026-07-28 run made 31 of them, and I can put a floor of about 12 cents on what it cost. The artifact records 241 seconds of sample latency and no wall clock, so everything between the samples went unpriced: the create and terminate calls around each desktop, the Function's own startup, and the gaps while the harness moved between cases. The next run should stamp a clock at both ends.
 
 ## Startup still takes 7.8 seconds
 
