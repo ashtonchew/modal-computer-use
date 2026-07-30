@@ -8,7 +8,7 @@ A screenshot followed by a click completes one useful exchange with the desktop.
 
 [OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). As inference gets faster, the computer starts holding up the model. Longer trajectories make computer-use agents more valuable, but they also make every repeated infrastructure wait visible to the person waiting for the final result.
 
-The shape of the problem reminded me of RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). RustDesk separates the work of finding and connecting peers from the path that carries every frame and input event. That trained me to look at control latency as an architectural property. The important question was no longer how quickly I could create a desktop. It was what happened every time the agent looked at it or touched it.
+RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/), gave me a useful way to think about the delay. Its rendezvous server helps peers find each other; after that, frame and input traffic takes a direct route when possible or uses a relay. The desktop's responsiveness comes from the path used after connection setup. I started tracing what Modal did every time the agent looked at the screen or touched it.
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
@@ -22,9 +22,9 @@ I moved the same client into a Modal Function and requested `us-west-2` for both
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)
 
-That first experiment changed two variables: caller placement and ingress. I ran a second A/B from one Function to one warm target, alternating Connect and the attested tunnel across 30 requests per arm. The winner flipped between runs, and the largest gap was 1.24%. Every request succeeded. I standardized the optimized SDK path on the attested tunnel used by the general client.
+That first experiment changed two variables: caller placement and ingress. I ran a second A/B from one Function to one warm target, alternating Connect and the attested tunnel across 30 requests per arm. The winner flipped between runs, and the largest gap was 1.24%. Every request succeeded. I kept the attested tunnel already used by the general client.
 
-The useful result came from moving the caller. Requesting the same Modal region shortened the recurring route without implying the same availability zone, host, or private network. The application now passes a credential-free `ComputerSessionHandle` into a deployed Function and borrows one authenticated client for the trajectory. My application still owns the model loop and desktop lifetime.
+Caller placement explained the large improvement. Requesting the same Modal region shortened the recurring route without implying the same availability zone, host, or private network. The application now passes a credential-free `ComputerSessionHandle` into a deployed Function and borrows one authenticated client for the trajectory. My application still owns the model loop and desktop lifetime.
 
 The Function bills while the trajectory is active, then can scale to zero. The Sandbox remains billable until its owner terminates it, and the application must prevent two trajectories from driving the same desktop at once.
 
@@ -32,11 +32,11 @@ The Function bills while the trajectory is active, then can scale to zero. The S
 
 Once the request route was short, work inside the daemon was large enough to see. The original default path launched `scrot` or `maim` for every screenshot, wrote a temporary image, then opened that file again to return it. The agent paid for process startup and filesystem work on every observation.
 
-I applied the RustDesk lesson again. X11 is the display system that owns the Linux desktop's pixels. MSS became a persistent bridge between the daemon and that display. On Linux, its preferred XShm backend lets the X server write pixels into shared memory instead of sending them through the slower `XGetImage` path.
+The same steady-state question applied inside the target. X11 is the display system that owns the Linux desktop's pixels. MSS became a persistent bridge between the daemon and that display. On Linux, its preferred XShm backend lets the X server write pixels into shared memory instead of sending them through the slower `XGetImage` path.
 
 The daemon now keeps one MSS session open and encodes the PNG in memory. A normal screenshot no longer needs a child process or a filename before it becomes an HTTP response. If the session fails, the daemon reopens it once. A second failure, or a capture mode that needs the file adapter, falls back to `scrot` and then `maim`.
 
-By the final provider run, both the Modal default and optimized paths used MSS-first capture. The 230 ms to 29 ms gap in that table therefore reflects the Function-runner configuration, not a claim that the default row still wrote screenshots to disk.
+By the final provider run, both Modal paths used MSS-first capture. The 230 ms to 29 ms gap in that table comes from caller placement and configuration. The default row was no longer writing screenshots to disk.
 
 ## A process for every click
 
@@ -46,7 +46,9 @@ The event mechanism was already fast. `xdotool` itself uses XTest, the X11 exten
 
 ![Per-action xdotool setup compared with one persistent X11 input connection](../assets/modal-optimized-input-session.svg)
 
-Daemon-side mean move-and-click time, a pointer move followed by one left click, fell from 146.33 ms to 1.15 ms, a 127.7x speedup. Four move-and-click pairs fell from 443.99 ms to 4.80 ms. Typing 100 characters dropped from 119.77 ms to 20.61 ms; 1,000 characters dropped from 607.35 ms to 201.34 ms. Typing improves less because every character still expands into key-down and key-up events.
+Daemon-side mean move-and-click time, a pointer move followed by one left click, fell from 146.33 ms to 1.15 ms, a 127.7x speedup. Four move-and-click pairs fell from 443.99 ms to 4.80 ms.
+
+Typing 100 characters dropped from 119.77 ms to 20.61 ms; 1,000 characters dropped from 607.35 ms to 201.34 ms. The gain is smaller because every character still expands into key-down and key-up events.
 
 The persistent session also owns keyboard state. On a US layout, `A` requires Shift plus `a`, while `@` requires Shift plus `2`; another layout may choose different keys. The daemon reads the active XKB map and builds the right key sequence. It holds the input lock throughout, so a second request cannot type while the first has Shift held or a mouse button down.
 
@@ -87,7 +89,7 @@ My generic subprocess helper captured stdout and stderr. The long-lived selectio
 
 ## Modal optimized was up to 650x faster than provider defaults
 
-After these changes, every tuned warm primitive in the final run finished below 64 ms p50. The largest observed gap was 648x on a 1,000-character typing request. A full screenshot returned in 29 ms, and one click took 10 ms. At this point, the computer interface stopped dominating short agent steps.
+After these changes, every tuned warm primitive in the July 28 Connect-backed run finished below 64 ms p50. The largest observed gap was 648x on a 1,000-character typing request. A full screenshot returned in 29 ms, and one click took 10 ms. Hundreds of milliseconds of interface latency were no longer the floor for each step.
 
 | Warm operation | Modal optimized p50 / p95 | Modal default p50 / p95 / ratio | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -110,7 +112,7 @@ I built a Modal-only experimental endpoint around that gap. It captures a baseli
 
 ![XDamage hints or polling trigger a pixel check, while application readiness remains caller-owned](../assets/modal-optimized-first-change.svg)
 
-This experiment stops at a visual change. A blinking cursor, spinner, animation, unrelated repaint, or intermediate frame can win the race. Some meaningful effects leave the watched pixels unchanged. A caller that needs “save completed” still has to check for that state. The result was useful because it separated fast observation from the harder question of what evidence lets the agent proceed.
+This experiment stops at a visual change. A blinking cursor, spinner, animation, unrelated repaint, or intermediate frame can win the race. Some meaningful effects leave the watched pixels unchanged. A caller that needs “save completed” still has to check for that state. Returning pixels quickly solves capture latency; deciding when the application is ready remains part of the task.
 
 ## Startup is now the slow path
 
@@ -120,11 +122,11 @@ Those calls package different work. The Modal timer begins before Sandbox creati
 
 The next experiment is a startup trace. I want to separate scheduling, desktop and daemon readiness, credential issuance, first capture, and validation, then attack the stage that owns the 7.8 seconds. A pool of ready desktops could trade idle cost for immediate assignment. A better prepared image could reduce work without keeping capacity warm. The trace should decide which approach is worth paying for.
 
-The bottleneck moved. A 10 ms click makes a 7.8-second create path look enormous, and a 29 ms screenshot makes application readiness visible. I removed the repeated setup I could find. The next gains will come from preparing the desktop earlier and defining exactly what the agent must observe before it acts again.
+After this work, the 7.8-second create path is the obvious target. A 10 ms click makes startup look enormous, and a 29 ms screenshot exposes the time an application needs to react. I removed the repeated setup I could find. The next gains will come from preparing the desktop earlier and defining exactly what the agent must observe before it acts again.
 
 ## Source notes
 
-- Current warm measurements: [Modal optimized samples, 2026-07-28](../../benchmark-data/modal-optimized-provider-2026-07-28.json), [provider-default samples, 2026-07-28](../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json), [changed-frame samples, 2026-07-28](../../benchmark-data/modal-observation-2026-07-28.json), [four-click batching A/B, 2026-07-29](../../benchmark-data/modal-action-batching-ab-2026-07-29.json), and [Connect versus attested-tunnel A/B, 2026-07-29](../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json). The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.
+- Current warm measurements: [Modal optimized samples, 2026-07-28](../../benchmark-data/modal-optimized-provider-2026-07-28.json), [provider-default samples, 2026-07-28](../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json), [changed-frame samples, 2026-07-28](../../benchmark-data/modal-observation-2026-07-28.json), [four-click batching A/B, 2026-07-29](../../benchmark-data/modal-action-batching-ab-2026-07-29.json), and [Connect versus attested-tunnel A/B, 2026-07-29](../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json). The warm table predates ingress standardization and uses Connect; the subsequent controlled A/B found no clear ingress winner. The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.
 - Historical diagnostics: [provider benchmark results, 2026-07-26](../benchmark-results-2026-07-26-provider-results.md), [combined sanitized result](../../benchmark-data/provider-results-2026-07-26.json), [Connect caller-placement evidence](../../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json), [native X11 input benchmark](../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md), and [command runner A/B context](../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json). The Modal-default screenshot diagnostic separately summarized 22.83 ms p50 for daemon capture and encoding, 126.86 ms end to end, and a 103.91 ms remainder. Those summaries used different samples, so I do not add the component medians or label the remainder as network time. The historical command benchmark asked for `sh -lc`; the current comparison gives every provider the same logical `sh -c` command and requires exit zero with exact stdout `"42\n"`.
 - Implementation and contracts: [performance documentation](../performance.md), [benchmarking methodology](../benchmarking.md), [visual-change observation contract](../experimental-visual-change-observation.md), and [create-to-validated-screenshot method](../../research/modal-optimized-create-benchmark-method.md).
 - Product surfaces: [E2B Computer use](https://e2b.dev/docs/use-cases/computer-use), [E2B running-process snapshots](https://e2b.dev/docs/template/start-ready-command), [Daytona Computer Use](https://www.daytona.io/docs/en/computer-use/), and [Daytona snapshots](https://www.daytona.io/docs/snapshots/).
