@@ -37,8 +37,12 @@ class TaskCatalog(Protocol):
 class RunStore(Protocol):
     """Application durable store owning admission, capacity, and state CAS.
 
-    ``admit`` is one transaction in this fixed conceptual order: replay lookup,
-    tenant quota check, exclusive desktop claim, run insert, pending intent insert.
+    ``admit`` is one transaction in this fixed conceptual order: retained-key
+    availability guard, replay lookup, tenant quota check, exclusive desktop claim,
+    run insert, pending intent insert. Before any decision, every retained binding
+    relevant to the tenant must use a key version present in the matching command
+    proof. An unknown retained version raises ``IdentityKeyUnavailable`` and changes
+    nothing; it is an internal configuration/migration failure, not a user conflict.
     A rejection rolls back every phase. ``claim_dispatch`` atomically changes both
     RESERVED -> DISPATCHING and PENDING -> CLAIMED; only its winner may spawn.
 

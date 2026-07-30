@@ -104,6 +104,20 @@ class FakeRunStore:
                 dict(self.desktop_claims),
             )
             try:
+                retained = (
+                    (command.idempotency, "idempotency_binding"),
+                    (command.desktop, "desktop_binding"),
+                    (command.task, "task_binding"),
+                )
+                for record in self.by_id.values():
+                    if record.tenant_id != command.proposed.tenant_id:
+                        continue
+                    if any(
+                        not proof.recognizes_key(getattr(record, field_name))
+                        for proof, field_name in retained
+                    ):
+                        raise self.types.IdentityKeyUnavailable()
+                self._fault("key_guard")
                 for record in self.by_id.values():
                     if record.tenant_id != command.proposed.tenant_id:
                         continue
@@ -234,6 +248,7 @@ def _service(
     clock: Clock | None = None,
     store: FakeRunStore | None = None,
     dispatcher: FakeDispatcher | None = None,
+    identity_keyring=None,
 ):
     clock = clock or Clock()
     store = store or FakeRunStore()
@@ -244,9 +259,8 @@ def _service(
         task_catalog=FakeTaskCatalog(),
         run_store=store,
         dispatcher=dispatcher,
-        identity_keyring=gateway.IdentityKeyring(
-            gateway.IdentityKey("active", b"a" * 32)
-        ),
+        identity_keyring=identity_keyring
+        or gateway.IdentityKeyring(gateway.IdentityKey("active", b"a" * 32)),
         stale_after=timedelta(seconds=10),
         clock=clock,
         run_id_factory=lambda: "run-application-stable",
@@ -539,7 +553,9 @@ async def test_mismatched_replay_precedes_capacity_checks_without_writes() -> No
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("phase", ["replay", "quota", "desktop", "run", "intent"])
+@pytest.mark.parametrize(
+    "phase", ["key_guard", "replay", "quota", "desktop", "run", "intent"]
+)
 async def test_admission_fault_after_each_phase_rolls_back(phase: str) -> None:
     store = FakeRunStore(fail_after=phase)
 
@@ -683,6 +699,93 @@ def test_identity_hmac_is_domain_separated_rotatable_and_strict() -> None:
         gateway.IdentityKey("x" * 65, b"a" * 32)
     with pytest.raises(ValueError, match="unique and active-first"):
         gateway.IdentityProof(proof.mint, (proof.mint, proof.mint))
+
+
+@pytest.mark.asyncio
+async def test_rotated_keyring_replays_binding_minted_by_retiring_key() -> None:
+    old = gateway.IdentityKey("old", b"o" * 32)
+    active = gateway.IdentityKey("new", b"n" * 32)
+    store = FakeRunStore()
+    old_command = _command(
+        run_id="run-old-key",
+        idempotency="request-opaque-key",
+        desktop="desktop-internal-desktop-for-tenant-a",
+        task="task-internal-task-for-tenant-a",
+        keyring=gateway.IdentityKeyring(old),
+    )
+    assert isinstance(await store.admit(old_command), gateway.AdmissionAccepted)
+    service, _store, dispatcher = _service(
+        store=store,
+        identity_keyring=gateway.IdentityKeyring(active, (old,)),
+    )
+    request = SimpleNamespace(headers={"authorization": "Bearer tenant-a"})
+
+    replay = await service.create_run(request, gateway.CreateRunRequest(**_body()))
+
+    assert replay.run_id == "run-old-key"
+    assert replay.state is gateway.RunState.RUNNING
+    assert len(store.by_id) == len(store.intents) == 1
+    assert len(dispatcher.spawn_calls) == 1
+
+
+def test_removing_referenced_retiring_key_fails_closed_without_side_effects(caplog) -> None:
+    old = gateway.IdentityKey("old", b"o" * 32)
+    active = gateway.IdentityKey("new", b"n" * 32)
+    store = FakeRunStore()
+    service, _store, dispatcher = _service(
+        store=store,
+        identity_keyring=gateway.IdentityKeyring(old),
+    )
+    client = TestClient(gateway.build_run_gateway_app(service))
+    first = client.post("/v1/runs", json=_body(), headers=_headers())
+    assert first.status_code == 202
+    before = (
+        dict(store.by_id),
+        dict(store.intents),
+        set(store.capacity),
+        dict(store.desktop_claims),
+        list(store.transitions),
+    )
+    service.identity_keyring = gateway.IdentityKeyring(active)
+
+    same = client.post("/v1/runs", json=_body(), headers=_headers())
+    different_body = {
+        **_body(),
+        "desktop_key": "alternate-desktop-for-tenant-a",
+        "task_key": "alternate-task-for-tenant-a",
+        "idempotency_key": "different-source-identity-sentinel",
+    }
+    different = client.post("/v1/runs", json=different_body, headers=_headers())
+
+    assert same.status_code == different.status_code == 500
+    assert same.json() == different.json() == {"error": "internal_error"}
+    assert (
+        store.by_id,
+        store.intents,
+        store.capacity,
+        store.desktop_claims,
+        store.transitions,
+    ) == before
+    assert len(dispatcher.spawn_calls) == 1
+    assert "different-source-identity-sentinel" not in different.text
+    assert "different-source-identity-sentinel" not in caplog.text
+
+
+def test_unavailable_key_error_and_identity_representations_are_redacted() -> None:
+    source_identity = "source-identity-sentinel"
+    key = gateway.IdentityKey("key", b"secret-key-material-sentinel-0000")
+    proof = gateway.IdentityKeyring(key).prove(
+        tenant_id="tenant-a",
+        kind=gateway.IdentityKind.IDEMPOTENCY,
+        value=source_identity,
+    )
+    digest = proof.mint.digest.hex()
+    error = gateway.IdentityKeyUnavailable()
+
+    for representation in (repr(key), repr(proof), repr(proof.mint), repr(error), str(error)):
+        assert source_identity not in representation
+        assert digest not in representation
+        assert "secret-key-material-sentinel" not in representation
 
 
 @pytest.mark.parametrize(

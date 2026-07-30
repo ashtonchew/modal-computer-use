@@ -78,6 +78,11 @@ The `RunStore` contract is intentionally incompatible with the former `reserve_i
 Adapters need an explicit migration, drain, or backfill. Existing SHA-only rows cannot safely infer
 desktop claims and must not be upgraded implicitly. Terminal `succeeded`, `failed`, and `cancelled`
 transitions release quota and the desktop claim exactly once; `indeterminate` retains both.
+For HMAC rotation, add the replacement as active and retain every referenced prior key for
+verification. Migrate, drain, or expire all rows and tombstones using a retiring version, verify no
+references remain, and only then remove that key. A missing retained key version is an internal
+configuration/migration failure: admission fails closed with no writes rather than treating an old
+identity as new. The example intentionally provides no migration worker or database adapter.
 
 Use the native-async borrow context inside an async user-owned Modal Function:
 

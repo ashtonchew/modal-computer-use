@@ -51,6 +51,13 @@ class StateTransitionError(RuntimeError):
     """Raised before storage for an edge outside the closed transition graph."""
 
 
+class IdentityKeyUnavailable(RuntimeError):
+    """A retained binding cannot be verified by the configured keyring."""
+
+    def __init__(self) -> None:
+        super().__init__("retained identity key version is unavailable")
+
+
 class IdentityKind(StrEnum):
     IDEMPOTENCY = "idempotency"
     DESKTOP = "desktop"
@@ -120,6 +127,14 @@ class IdentityProof:
             same_digest = hmac.compare_digest(candidate.digest, stored.digest)
             matched = matched or (same_key and same_digest)
         return matched
+
+    def recognizes_key(self, stored: KeyedDigest) -> bool:
+        """Whether this proof can verify a retained binding's key version."""
+
+        return any(
+            hmac.compare_digest(candidate.key_id, stored.key_id)
+            for candidate in self.verification_candidates
+        )
 
 
 @dataclass(frozen=True)

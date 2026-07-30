@@ -401,6 +401,11 @@ This `RunStore` protocol replaces the earlier `reserve_if_absent` sample and is 
 breaking. Application adapters must migrate, drain, or backfill their durable rows before switching
 traffic. Old SHA-only fingerprint rows cannot safely infer the application-owned desktop identity
 needed to reconstruct exclusive claims, so they must not be silently treated as admitted rows.
+HMAC key rotation is also a storage migration: introduce the new active key while keeping the old
+key as retiring, migrate, drain, or expire every retained row and tombstone that references the old
+version, verify that no reference remains, and only then remove it. Admission must fail internally
+and without writes whenever a retained binding's key version is absent from the current keyring;
+silently removing a retiring key could otherwise make a replay or desktop claim look new.
 
 ## Cleanup
 
