@@ -2,7 +2,7 @@
 
 *The same warm path returns a full 1024x768 PNG in 29 ms.*
 
-The first computer-use loop I built on Modal felt slow while doing almost nothing. Looking at the screen and sending one click took about 550 ms on untuned Modal. The E2B and Daytona defaults I tested took about 420 ms and 480 ms.
+Modal did not have a computer-use API. I wanted to see how far I could stretch its primitives, so I built the simplest version I could: a desktop in a Sandbox, an HTTP daemon, and a client on my laptop. It worked, but looking at the screen and sending one click took about 550 ms. The E2B and Daytona defaults I tested took about 420 ms and 480 ms.
 
 A fifty-turn loop that takes one screenshot and sends one click per turn pays that interface cost fifty times. At the measured p50s, those three paths add roughly 20 to 28 seconds of waiting around the model. The primitives I built on Modal bring that interface budget under 2 seconds.
 
@@ -12,7 +12,7 @@ RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/se
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
-I used Modal because it let me rearrange the system I was measuring. The desktop ran in a Sandbox, the caller could run in a Function, and I owned the daemon inside the desktop. I left the documented E2B and Daytona paths at their provider defaults. On Modal I could move the caller and replace stateless desktop helpers with long-lived ones, then measure each change.
+Modal gave me control over the system I was measuring. I could move the caller into a Function and rewrite the desktop daemon. I left E2B and Daytona at their documented defaults. On Modal I could replace stateless helpers with long-lived ones, then measure each change.
 
 ## Was the tunnel slow, or was the caller far away?
 
@@ -91,13 +91,13 @@ The clipboard exposed a stranger version of the same ownership bug. Agents use i
 
 My generic subprocess helper captured stdout and stderr. The long-lived selection owner inherited both pipes, so `communicate()` waited for EOF after the clipboard had changed. Clipboard writes never used those streams. Sending them to `DEVNULL` let the request return while `xclip` stayed alive for the eventual paste. This fixed clipboard writes as a separate primitive; the typing numbers below come from direct XTest keystrokes.
 
-## Modal optimized was up to 650x faster than provider defaults
+## Modal optimized was up to 650x faster than the tested default paths
 
 A full screenshot returned in 29 ms, and one click took 10 ms. All six warm operations finished below 64 ms p50.
 
 The 650x ceiling came from typing 1,000 characters: 63 ms with zero-delay XTest versus 41,049 ms through E2B's public default. E2B's SDK does not expose its internal pacing, so 648x describes those two public behaviors.
 
-| Warm operation | Modal optimized p50 / p95 | Modal default p50 / p95 / ratio | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
+| Warm operation | Modal optimized p50 / p95 | Modal default in this library p50 / p95 / ratio | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Full screenshot, provider-native format | 28.69 / 43.96 ms | 229.94 / 235.78 ms / 8.02x | 264.85 / 297.67 ms / 9.23x | 212.75 / 225.28 ms / 7.42x | 146.14 / 168.34 ms / 5.09x |
 | One click on the screen | 9.69 / 15.55 ms | 323.81 / 331.35 ms / 33.43x | 216.04 / 221.02 ms / 22.31x | 210.56 / 214.88 ms / 21.74x | 125.75 / 127.92 ms / 12.98x |
@@ -106,7 +106,7 @@ The 650x ceiling came from typing 1,000 characters: 63 ms with zero-delay XTest 
 | Type 1,000 characters | 63.34 / 83.91 ms | 378.40 / 413.17 ms / 5.97x | 5,356.25 / 5,425.81 ms / 84.57x | 41,048.75 / 41,619.86 ms / 648.12x | 181.03 / 212.66 ms / 2.86x |
 | Non-login shell command | 9.54 / 17.03 ms | 182.43 / 346.47 ms / 19.12x | 116.92 / 120.86 ms / 12.26x | 52.18 / 54.35 ms / 5.47x | 29.60 / 30.84 ms / 3.10x |
 
-I tuned only the Modal optimized path. The other columns are provider defaults from the pinned harness. The screenshot row uses each provider's native format: Tzafon returned a 1280x720 JPEG, while Modal, Daytona, and E2B returned a 1024x768 PNG.
+Modal supplies the infrastructure. The Modal default column uses the simplest public computer-use configuration in this library. I tuned only the Modal optimized path. Daytona, E2B, and Tzafon use their defaults from the pinned harness. The screenshot row uses each path's native format: Tzafon returned a 1280x720 JPEG, while Modal, Daytona, and E2B returned a 1024x768 PNG.
 
 Request shape explains much of the four-click row. Modal optimized, Modal default, and Tzafon used one batch. Daytona used four requests. E2B used four SDK calls that produced eight transport requests.
 

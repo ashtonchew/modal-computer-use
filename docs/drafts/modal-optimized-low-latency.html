@@ -167,12 +167,12 @@
   <main>
     <h1>How I got computer-use clicks to 10 ms on Modal</h1>
 <p><em>The same warm path returns a full 1024x768 PNG in 29 ms.</em></p>
-<p>The first computer-use loop I built on Modal felt slow while doing almost nothing. Looking at the screen and sending one click took about 550 ms on untuned Modal. The E2B and Daytona defaults I tested took about 420 ms and 480 ms.</p>
+<p>Modal did not have a computer-use API. I wanted to see how far I could stretch its primitives, so I built the simplest version I could: a desktop in a Sandbox, an HTTP daemon, and a client on my laptop. It worked, but looking at the screen and sending one click took about 550 ms. The E2B and Daytona defaults I tested took about 420 ms and 480 ms.</p>
 <p>A fifty-turn loop that takes one screenshot and sends one click per turn pays that interface cost fifty times. At the measured p50s, those three paths add roughly 20 to 28 seconds of waiting around the model. The primitives I built on Modal bring that interface budget under 2 seconds.</p>
 <p><a href="https://openai.com/index/previewing-gpt-5-6-sol/">OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second</a>. At that speed, hundreds of milliseconds in the computer interface no longer hide behind slow generation. Longer trajectories make the gap worse because the user pays it on every turn before getting the result.</p>
 <p>RustDesk, an <a href="https://rustdesk.com/docs/en/self-host/">open-source remote desktop system</a>, taught me to separate connection setup from repeated traffic. It pays discovery and connection setup when a session begins, then reuses the live path for screen updates and input. Moving the mouse does not rediscover the remote computer. I started tracing one warm agent turn to find setup work that was still happening every time the agent looked at the screen or touched it.</p>
 <p><img src="../assets/modal-optimized-agent-loop.svg" alt="Creation is separate from the repeated computer-use loop" /></p>
-<p>I used Modal because it let me rearrange the system I was measuring. The desktop ran in a Sandbox, the caller could run in a Function, and I owned the daemon inside the desktop. I left the documented E2B and Daytona paths at their provider defaults. On Modal I could move the caller and replace stateless desktop helpers with long-lived ones, then measure each change.</p>
+<p>Modal gave me control over the system I was measuring. I could move the caller into a Function and rewrite the desktop daemon. I left E2B and Daytona at their documented defaults. On Modal I could replace stateless helpers with long-lived ones, then measure each change.</p>
 <h2>Was the tunnel slow, or was the caller far away?</h2>
 <p>My first trace began outside Modal. The client sent each request through an attested HTTP tunnel to a warm daemon inside the desktop Sandbox. A full 1024x768 PNG took 230 ms p50. I needed to separate time spent reaching the desktop from time spent capturing it.</p>
 <p>To isolate caller placement, I reran both arms through Connect and moved only the caller. In the same run, one move-and-click fell from 32.4 ms outside Modal to 4.6 ms from a Modal Function. Moving the caller removed about 28 ms from the same request.</p>
@@ -214,7 +214,7 @@
 <p><img src="../assets/modal-optimized-command-loop-isolation.svg" alt="Subprocess I/O ownership moves from Uvicorn to a private event loop while the child process remains separate" /></p>
 <p>The clipboard exposed a stranger version of the same ownership bug. Agents use it to paste a command into a GUI terminal, put a long block into an editor, or fill a field without synthesizing hundreds of key events. Under X11, the clipboard is a selection owned by a client process. When another application pastes, X11 asks that owner to provide the data. This is why <code>xclip</code> leaves a small process alive after a write.</p>
 <p>My generic subprocess helper captured stdout and stderr. The long-lived selection owner inherited both pipes, so <code>communicate()</code> waited for EOF after the clipboard had changed. Clipboard writes never used those streams. Sending them to <code>DEVNULL</code> let the request return while <code>xclip</code> stayed alive for the eventual paste. This fixed clipboard writes as a separate primitive; the typing numbers below come from direct XTest keystrokes.</p>
-<h2>Modal optimized was up to 650x faster than provider defaults</h2>
+<h2>Modal optimized was up to 650x faster than the tested default paths</h2>
 <p>A full screenshot returned in 29 ms, and one click took 10 ms. All six warm operations finished below 64 ms p50.</p>
 <p>The 650x ceiling came from typing 1,000 characters: 63 ms with zero-delay XTest versus 41,049 ms through E2B's public default. E2B's SDK does not expose its internal pacing, so 648x describes those two public behaviors.</p>
 <div class="table-scroll"><table>
@@ -222,7 +222,7 @@
 <tr>
 <th>Warm operation</th>
 <th style="text-align:right">Modal optimized p50 / p95</th>
-<th style="text-align:right">Modal default p50 / p95 / ratio</th>
+<th style="text-align:right">Modal default in this library p50 / p95 / ratio</th>
 <th style="text-align:right">Daytona default p50 / p95 / ratio</th>
 <th style="text-align:right">E2B default p50 / p95 / ratio</th>
 <th style="text-align:right">Tzafon default p50 / p95 / ratio</th>
@@ -279,7 +279,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>I tuned only the Modal optimized path. The other columns are provider defaults from the pinned harness. The screenshot row uses each provider's native format: Tzafon returned a 1280x720 JPEG, while Modal, Daytona, and E2B returned a 1024x768 PNG.</p>
+<p>Modal supplies the infrastructure. The Modal default column uses the simplest public computer-use configuration in this library. I tuned only the Modal optimized path. Daytona, E2B, and Tzafon use their defaults from the pinned harness. The screenshot row uses each path's native format: Tzafon returned a 1280x720 JPEG, while Modal, Daytona, and E2B returned a 1024x768 PNG.</p>
 <p>Request shape explains much of the four-click row. Modal optimized, Modal default, and Tzafon used one batch. Daytona used four requests. E2B used four SDK calls that produced eight transport requests.</p>
 <h2>What counts as the next frame?</h2>
 <p>A 10 ms click does not mean the application has painted its result. Suppose an agent clicks <strong>Save</strong> and immediately asks for another screenshot. The input endpoint can return successfully before the application paints its confirmation. The next frame may still show the old form, inviting the model to click again.</p>
