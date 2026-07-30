@@ -1809,19 +1809,45 @@ def test_release_and_expiry_seal_zero_operation_runs_and_require_new_run(tmp_pat
     app.state.lease_coordinator.ttl_seconds = 0.02
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         _, lease = _acquire(client, "run-zero")
+        busy = client.post("/v1/leases/acquire", json={"run_id": "run-zero"})
         released = client.post("/v1/leases/release", headers=lease)
         same = client.post("/v1/leases/acquire", json={"run_id": "run-zero"})
-        new, _ = _acquire(client, "run-new")
+        new, new_lease = _acquire(client, "run-new")
+        stale_after_release = client.post(
+            "/v1/mouse/move",
+            json={"x": 1, "y": 2},
+            headers=_operation_headers(lease, 0),
+        )
+        new_mutation = client.post(
+            "/v1/mouse/move",
+            json={"x": 3, "y": 4},
+            headers=_operation_headers(new_lease, 0),
+        )
         time.sleep(0.04)
         assert client.get("/v1/leases/status").json()["state"] == "expired"
         expired_same = client.post("/v1/leases/acquire", json={"run_id": "run-new"})
-        after_expiry, _ = _acquire(client, "run-after-expiry")
+        after_expiry, after_expiry_lease = _acquire(client, "run-after-expiry")
+        stale_after_expiry = client.post(
+            "/v1/mouse/move",
+            json={"x": 5, "y": 6},
+            headers=_operation_headers(new_lease, 1),
+        )
+        fresh_mutation = client.post(
+            "/v1/mouse/move",
+            json={"x": 7, "y": 8},
+            headers=_operation_headers(after_expiry_lease, 0),
+        )
 
+    assert busy.json()["code"] == "session_busy"
     assert released.status_code == 200
     assert same.json()["code"] == "run_sealed"
     assert new["run_id"] == "run-new"
+    assert stale_after_release.json()["code"] == "lease_stale"
+    assert new_mutation.status_code == 200
     assert expired_same.json()["code"] == "run_sealed"
     assert after_expiry["run_id"] == "run-after-expiry"
+    assert stale_after_expiry.json()["code"] == "lease_stale"
+    assert fresh_mutation.status_code == 200
 
 
 def test_restart_seals_zero_operation_run(tmp_path) -> None:

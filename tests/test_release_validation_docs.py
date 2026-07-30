@@ -29,6 +29,7 @@ FRESH_DISTRIBUTION_COMMANDS = (
     "mkdir -p dist/release",
     "uv build --out-dir dist/release",
 )
+HANDOFF_TEST_SELECTOR = "-k test_modal_deployed_function_session_handoff_smoke"
 
 
 def test_release_checklist_matches_ci_package_metadata_checker() -> None:
@@ -78,3 +79,23 @@ def test_release_docs_reference_existing_benchmark_cli_tests() -> None:
     assert "tests/benchmarks/test_action_batch_cli.py" in checklist
     assert (ROOT / "tests" / "benchmarks" / "test_report_cli.py").exists()
     assert (ROOT / "tests" / "benchmarks" / "test_action_batch_cli.py").exists()
+
+
+def test_manual_handoff_workflow_targets_only_the_bounded_handoff_smoke() -> None:
+    handoff = (ROOT / ".github" / "workflows" / "modal-handoff-smoke.yml").read_text(
+        encoding="utf-8"
+    )
+    release = (ROOT / ".github" / "workflows" / "release-validation.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "workflow_dispatch:" in handoff
+    assert "environment: modal-smoke" in handoff
+    assert "group: protected-modal-handoff-smoke" in handoff
+    assert "tests/modal_function_session_handoff_smoke_app.py" in handoff
+    assert HANDOFF_TEST_SELECTOR in handoff
+    assert "MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE" in handoff
+    assert "MODAL_COMPUTER_USE_RUN_V1_SMOKE" not in handoff
+    assert "MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE" not in handoff
+    assert "tests/modal_function_session_handoff_smoke_app.py" not in release
+    assert HANDOFF_TEST_SELECTOR not in release

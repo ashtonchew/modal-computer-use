@@ -131,12 +131,19 @@ creates an App for the handoff. One Function invocation enters one borrow contex
 same lease and daemon connection across its repeated screenshot, application-owned model, and
 action steps. Native `borrow_async()` is canonical for async Modal Functions; `borrow()` remains
 available for synchronous Functions. The borrow `run_id` is an application-generated unique ID for
-one trajectory and cannot be reused after that durable run is sealed. Each async borrow renews its
-lease from one private worker thread and a dedicated blocking HTTP transport, so ordinary blocking
-Python I/O on the Function event loop does not starve heartbeats. Screenshots, actions, model calls,
-other async inputs, and cancellation remain native async work on that event loop. Prefer native
-async model and application clients; use `asyncio.to_thread()` only as compatibility guidance for
-blocking I/O that cannot yet be made async.
+one trajectory: it is the stable execution identity and cannot be reused after that durable run is
+sealed. Modal FunctionCall, input, and task identifiers are private orchestration metadata, not
+retry fences. If infrastructure dispatches overlapping attempts, the first attempt that acquires
+the target lease wins and the others receive `SessionBusyError`. After any ambiguity following
+acquisition, automatic takeover with the same run ID is rejected even after release or heartbeat
+expiry. The application must reconcile the prior run and use a fresh run ID to continue.
+
+Each async borrow renews its lease from one private worker thread and a dedicated blocking HTTP
+transport, so ordinary blocking Python I/O on the Function event loop does not starve heartbeats.
+Screenshots, actions, model calls, other async inputs, and cancellation remain native async work on
+that event loop. Async Function code must not block the event loop. Prefer native async model and
+application clients; use `asyncio.to_thread()` only for unavoidable blocking I/O, and move
+CPU-bound work to a separate process or Function.
 
 Modal Function `region=...` is a container placement request. It must exactly match the handle's
 `requested_modal_region`. Modal's `routing_region=...` controls routing of Function inputs and
@@ -363,11 +370,15 @@ desktop was rolled back or terminated.
 
 The deployed application trajectory receives the same stable application `run_id` that it passes
 to `handle.borrow_async(run_id=run_id, ...)`. The daemon lease and durable operation receipts are
-the final mutation fence if infrastructure ambiguity dispatches duplicate Functions. They do not
-close the cross-system persistence gap or recover a lost provider call handle. The deployer still
-owns identity, authorization, quotas, billing, retention, auditing, durable task/result storage,
-and reconciliation. Keep screenshot/action bytes on the direct daemon/runner path rather than
-turning the gateway into a latency-sensitive primitive proxy.
+the final mutation fence if infrastructure ambiguity dispatches duplicate Functions; private
+FunctionCall, input, and task identifiers are only orchestration metadata. The first attempt to
+acquire the target lease wins. The application must not use the same run ID for automatic takeover
+after acquired-run ambiguity: it reconciles the application record and continues under a fresh run
+ID only after the target reaches a safe closed or recovered state. These fences do not close the
+cross-system persistence gap or recover a lost provider call handle. The deployer still owns
+identity, authorization, quotas, billing, retention, auditing, durable task/result storage, and
+reconciliation. Keep screenshot/action bytes on the direct daemon/runner path rather than turning
+the gateway into a latency-sensitive primitive proxy.
 
 ## Cleanup
 
@@ -415,12 +426,11 @@ visible through `Volume.read_file`. They restore snapshots with `snapshot_direct
 
 ### Protected deployed-Function handoff smoke
 
-The `Release Validation` workflow includes one opt-in handoff smoke in its protected
-`modal-smoke` job. It remains `workflow_dispatch`-only and runs only when
-`run_modal_smoke=true` is approved for the GitHub `modal-smoke` environment. The Modal workspace
-must have a dedicated non-production Environment named `modal-computer-use-smoke`; the protected
-service user must be able to deploy Functions and create Sandboxes there. Do not point the job at a
-production Environment.
+The dedicated `Modal Function Handoff Smoke` workflow runs only through `workflow_dispatch` after
+approval for the GitHub `modal-smoke` environment. It does not run the broader paid Modal
+integration suite first. The Modal workspace must have a dedicated non-production Environment
+named `modal-computer-use-smoke`; the protected service user must be able to deploy Functions and
+create Sandboxes there. Do not point the job at a production Environment.
 
 For each approved run, the workflow creates private random App and owner labels, deploys the
 test-only App from the checked-out package source, and resolves its Function with

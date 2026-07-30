@@ -13,6 +13,7 @@ from modal_computer_use.errors import (
     DaemonHTTPError,
     OperationNotAppliedError,
     OperationResultUnavailableError,
+    SessionBusyError,
     SessionLeaseLostError,
 )
 from modal_computer_use.session_lease import (
@@ -74,6 +75,19 @@ class _SyncTransport:
 class _AsyncTransport(_SyncTransport):
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         return super().request(method, path, **kwargs)
+
+
+def test_second_borrower_maps_active_run_conflict_to_session_busy() -> None:
+    class BusyTransport(_SyncTransport):
+        def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+            if path == "/v1/leases/acquire":
+                raise DaemonHTTPError("private active run", code="session_busy")
+            return super().request(method, path, **kwargs)
+
+    coordinator = SessionLeaseCoordinator(BusyTransport(), run_id="same-run")
+
+    with pytest.raises(SessionBusyError):
+        coordinator.acquire()
 
 
 def _exception_graph(error: BaseException) -> list[BaseException]:
