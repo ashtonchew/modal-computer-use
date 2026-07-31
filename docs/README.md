@@ -48,4 +48,6 @@ tracked artifact eligibility, and the [archive policy](archive/README.md) define
 
 - [Release checklist](release-checklist.md): verification, packaging, protected smoke tests, and
   release review.
+- [Drafts](drafts/README.md): write, preview, and export long-form articles built on tracked
+  benchmark evidence.
 - The repository [README](../README.md) is the short project introduction and first-run path.
