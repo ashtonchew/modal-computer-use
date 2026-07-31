@@ -1,8 +1,5 @@
 # How I got computer-use clicks to under 10 ms on Modal
 
-
-
----
 A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in a sandbox and your computer-use agent (CUA) takes the wheel. It asks for a screenshot, looks at the screen, sends back some action like a click or to type.
 
 E2B & Daytona provide their own computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters, roughly 10 sentences, with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.5 seconds. A huge waste that adds up as computer-use is increasingly used in realistic longer-horizon tasks. 
@@ -33,7 +30,7 @@ The desktop is a Linux machine in a Sandbox, and the daemon inside it owns the s
 
 The desktop already ran in a Modal Sandbox. What if the client ran on Modal too?
 
-So to test this, I ran the same client code used to drive requests into the desktop in two places. First from my laptop. Then from a Modal Function, a primitive that gives an autoscaled container for application code. I requested `us-west-2` for the Function and for the Sandbox, which keeps both physically close together.  From each, I measured the a simple "move-and-click" task: The client sends an x and y coordinate and which mouse button to press, and the reply is the coordinate the pointer landed on. Barely anything travels in either direction, so nearly all of what it costs is the trip itself.
+So to test this, I ran the same client code used to drive requests into the desktop in two places. First from my laptop. Then from a Modal Function, a primitive that gives an autoscaled container for application code. I requested `us-west-2` for the Function and for the Sandbox, which keeps both physically close together.  From each, I measured a simple "move-and-click" task: The client sends an x and y coordinate and which mouse button to press, and the reply is the coordinate the pointer landed on. Barely anything travels in either direction, so nearly all of what it costs is the trip itself.
 
 From my laptop the move-and-click task took 39.3 ms. From the Modal Function it took only 4.7 ms.
 
@@ -65,7 +62,7 @@ Deleting a per-action `xdotool` process took a move plus one click from about 14
 
 ## A process for every click
 
-On my laptop a click feels like one event, its just a single click after all. The actual system underneath sees three: pointer motion, button press, button release, each delivered to whichever application owns that spot on the screen. [macOS routes them through Quartz](https://developer.apple.com/documentation/coregraphics/cgevent); my Sandbox runs a Linux desktop under X11. Either way, an agent's `click(x, y)` has to become those separate events before an application can respond to it.
+On my laptop a click feels like one event, it's just a single click after all. The actual system underneath sees three: pointer motion, button press, button release, each delivered to whichever application owns that spot on the screen. [macOS routes them through Quartz](https://developer.apple.com/documentation/coregraphics/cgevent); my Sandbox runs a Linux desktop under X11. Either way, an agent's `click(x, y)` has to become those separate events before an application can respond to it.
 
 My first implementation handed that translation to [`xdotool`](https://github.com/jordansissel/xdotool), the standard command-line tool for X11 automation. It already knew how to talk to the display and synthesize input, and one line of shell per action was hard to argue with. Every API action launched a new `xdotool` process.
 
@@ -79,7 +76,7 @@ An agent has no glance. The model produces a click, the client sends it, and the
 
 Interestingly, the fix was the same one as the screenshot handler but applied at a lower level. I kept XTest and stopped launching a program to reach it every time. The optimized daemon loads the X11 client libraries once and holds a single display connection open for its lifetime, so everything `xdotool` did per action now happens at startup instead. A click became three XTest calls from code that is already running, with nothing forked and no connection opened or closed. Each request takes the input lock, pushes the motion, press, and release, and synchronizes with the X server once at the end.
 
-That last sync is the job is a replacement for what the old path use to give. A process cannot exit without closing its display connection, and closing it sends whatever Xlib still has buffered, so waiting for `xdotool` to exit was also waiting for the events to land. Nothing closes a connection held open for the daemon's lifetime, so without an explicit flush the daemon could report a click that never reached the screen. This workaround allows us to reuse an X11 client without running into major issues.
+That last sync replaces something the old path did for free. A process cannot exit without closing its display connection, and closing it sends whatever Xlib still has buffered, so waiting for `xdotool` to exit was also waiting for the events to land. Nothing closes a connection held open for the daemon's lifetime, so without an explicit flush the daemon could report a click that never reached the screen. This workaround allows us to reuse an X11 client without running into major issues.
 
 [4_input-session.png  ::  Per-action xdotool setup compared with one persistent X11 input connection]
 
@@ -150,11 +147,11 @@ The biggest ratio in the table belongs to typing. The 1,000-character case took 
 
 [7_warm-results.png  ::  Warm p50 latency across five providers, with Modal optimized fastest on every task]
 
-Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal simple column is the public `ComputerSandbox` configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture. The computer-use SDK's of Daytona, E2B, and Tzafon stayed on their defaults. 
+Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal simple column is the public `ComputerSandbox` configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture. The computer-use SDKs of Daytona, E2B, and Tzafon stayed on their defaults. 
 
 Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.
 
-The four-click row is where batching shows up. Modal optimized, Modal simple, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls, which turned into eight transport requests. Adding three clicks cost the two Modal rows about 3 ms and 16 ms, respectively. It cost E2B about 650 ms and Daytona about 1,160 ms!! The request path had become more expensive than the input it carried.
+The four-click row is where batching shows up. Modal optimized, Modal simple, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls, which turned into eight transport requests. Adding three clicks cost the two Modal rows about 3 ms and 16 ms, respectively. It cost E2B about 650 ms and Daytona about 1,160 ms! The request path had become more expensive than the input it carried.
 
 ## What counts as the next frame?
 
@@ -172,7 +169,7 @@ Click to first changed frame: 76 ms p50 and 88 ms p95, across 30 samples.
 
 A first changed frame answers one narrow question: have new pixels appeared yet? It can replace a fixed sleep when the first visual response is all the agent needs. It cannot tell me that **Save** finished. A blinking cursor or an intermediate paint can satisfy the pixel check first, and a successful save can leave the watched region unchanged. Before a dependent action, the caller still needs an application-specific condition, such as the saved confirmation appearing.
 
-This is an experimental feature that will matter even more as CUA get faster over time. In tailored use cases, I can foresee the need for application-layer changed frame contracts as a naive optimization.
+This is an experimental feature that will matter even more as CUAs get faster over time. In tailored use cases, I can foresee the need for application-layer changed frame contracts as a naive optimization.
 
 ## Under a cent a minute
 
