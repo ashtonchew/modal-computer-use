@@ -186,6 +186,26 @@ def test_anthropic_batch_schema_exposes_only_canonical_provider_fields() -> None
     }.isdisjoint(properties)
 
 
+@pytest.mark.parametrize("tool_version", ["computer_20250124", "computer_20251124"])
+def test_anthropic_batch_scroll_amount_requires_positive_integer(
+    tool_version: str,
+) -> None:
+    example = load_example("anthropic_message_server.py")
+    tool = example._computer_batch_tool_definition(
+        tool_version=tool_version,
+        enable_zoom=True,
+        max_batch_actions=50,
+    )
+
+    scroll = _schema_action_variant(tool, "scroll")
+
+    assert scroll["properties"]["scroll_amount"] == {
+        "type": "integer",
+        "minimum": 1,
+    }
+    assert {"scroll_direction", "scroll_amount"} <= set(scroll["required"])
+
+
 @pytest.mark.parametrize(
     ("tool_version", "click_properties"),
     [
