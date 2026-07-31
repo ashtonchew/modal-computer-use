@@ -1,7 +1,6 @@
 # `modal-computer-use` canonical product specification
 
-- **Status:** active specification for the repository's `1.0.0` source state; not a tagged or PyPI
-  release
+- **Status:** active specification for the repository's `1.0.0` source state
 - **Prepared:** 2026-07-30
 - **Revision:** v8, canonical contract and maturity truth-up for the `1.0.0` source state
 - **Base implementation audited:** `71fc9e6` (`origin/main` at final review)
@@ -47,7 +46,7 @@ repository has advanced by 371 commits from the v7 landing (`3a30e69`) to the v8
 
 | Area | v8 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `1.0.0`; Python 3.12+ and `uv` are the maintained development baseline. The repository has no matching release tag and the package is not on PyPI. |
+| Source version | The package, daemon, and OpenAPI report `1.0.0`; Python 3.12+ and `uv` are the maintained development baseline. Check the repository release page before you treat the version as published. |
 | Modal SDK | The compatible line remains `modal~=1.5.2`; v8 updates the lock from 1.5.2 to the latest audited 1.5.x patch, 1.5.3. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -673,8 +672,8 @@ Primary references:
 
 ## 17. Versioning and compatibility
 
-- Package, daemon, and checked-in OpenAPI versions are `1.0.0`, but there is no `1.0.0` release tag
-  and the README explicitly directs source installation because the package is not on PyPI.
+- Package, daemon, and checked-in OpenAPI versions are `1.0.0`. Check the repository release page
+  before you treat the version as published.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
   core.

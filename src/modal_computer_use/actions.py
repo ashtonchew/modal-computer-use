@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from .models import ComputerAction, parse_action
 
@@ -88,5 +89,5 @@ def normalize_key_combo(keys: str | Iterable[str]) -> list[str]:
     return [normalize_key(part) for part in parts]
 
 
-def normalize_actions(actions: Iterable[ComputerAction | dict]) -> list[ComputerAction]:
+def normalize_actions(actions: Iterable[ComputerAction | dict[str, Any]]) -> list[ComputerAction]:
     return [parse_action(action) for action in actions]

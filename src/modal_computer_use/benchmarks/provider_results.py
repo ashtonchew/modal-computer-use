@@ -467,22 +467,53 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
     boundaries = payload["boundaries"]
     artifacts = payload["tracked_artifacts"]
     topology = payload["request_topology"]
+    counts = payload["sample_counts"]
+    default_columns = _COLUMNS[1:]
     lines = [
         f"# Provider benchmark results, {payload['evidence_date']}",
         "",
         "**Evidence status:** eligible",
         "",
-        "Provider-default values are median [observed min–max] milliseconds. Modal optimized "  # noqa: RUF001
-        "values are p50 / p95 milliseconds.",
+        "## Read this before comparing results",
         "",
-        f"| Case | {' | '.join(headline['columns'])} |",
-        f"| --- | {' | '.join('---:' for _ in headline['columns'])} |",
+        "This is a point-in-time independent benchmark, not a service-level promise. This "
+        "project is not affiliated with or endorsed by Modal, Daytona, E2B, or Tzafon. "
+        "Product names and trademarks belong to their owners.",
+        "",
+        "The provider-default results use three samples from an external public-SDK caller. "
+        "The Modal optimized results use 30 samples from a Modal Function with the same "
+        "requested region as its targets. They differ in sample count, caller topology, "
+        "ingress, and configuration. Read them as two separate experiments, not as an "
+        "apples-to-apples provider ranking.",
+        "",
+        "## Provider-default comparison",
+        "",
+        "Values are median [observed min–max] milliseconds over three samples. These columns "  # noqa: RUF001
+        "share the external-caller methodology described below.",
+        "",
+        f"| Case | {' | '.join(label for _, label in default_columns)} |",
+        f"| --- | {' | '.join('---:' for _ in default_columns)} |",
     ]
     for row in headline["rows"]:
-        values = [_format_value(row["values"][key]) for key, _ in _COLUMNS]
+        values = [_format_value(row["values"][key]) for key, _ in default_columns]
         lines.append(f"| {row['label']} | {' | '.join(values)} |")
+    lines.extend(
+        [
+            "",
+            "## Modal optimized result",
+            "",
+            "Values are p50 / p95 milliseconds over 30 samples. This table describes the "
+            "optimized Modal deployment only. Do not combine it with the provider-default "
+            "table to claim controlled speedups.",
+            "",
+            "| Case | Modal optimized p50 / p95 |",
+            "| --- | ---: |",
+        ]
+    )
+    for row in headline["rows"]:
+        value = _format_value(row["values"]["modal_optimized"])
+        lines.append(f"| {row['label']} | {value} |")
     experiment = payload["experiment"]
-    counts = payload["sample_counts"]
     lines.extend(
         [
             "",

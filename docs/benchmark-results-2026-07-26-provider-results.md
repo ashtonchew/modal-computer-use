@@ -2,17 +2,39 @@
 
 **Evidence status:** eligible
 
-Provider-default values are median [observed min–max] milliseconds. Modal optimized values are p50 / p95 milliseconds.
+## Read this before comparing results
 
-| Case | Modal optimized | Modal default | Daytona default | E2B default | Tzafon default |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Product create to validated screenshot | 10246.36 / 17073.80 | 10101.33 [7334.62–10916.58] | 10549.67 [10472.58–10561.09] | 1388.91 [1335.77–2627.98] | 283.03 [277.04–316.21] |
-| Full screenshot native/default | 32.42 / 34.71 | 126.86 [126.10–127.49] | 588.74 [574.12–609.17] | 191.70 [190.52–201.18] | 132.38 [106.47–139.29] |
-| One coordinate click | 4.43 / 5.06 | 209.01 [205.09–209.87] | 381.63 [380.76–384.16] | 221.15 [217.39–224.00] | 154.49 [153.29–157.77] |
-| Four coordinate clicks | 7.02 / 8.41 | 227.56 [225.30–228.82] | 1548.00 [1414.12–1552.59] | 887.19 [886.77–912.69] | 474.00 [465.58–483.22] |
-| Type 100 | 9.95 / 10.62 | 249.57 [248.41–254.24] | 806.05 [666.84–809.89] | 4104.69 [4080.06–4117.33] | 111.80 [105.05–116.70] |
-| Type 1000 | 49.58 / 52.35 | 248.09 [247.99–250.17] | 5519.92 [5395.29–5540.48] | 41085.75 [40867.36–41426.72] | 145.78 [135.79–155.12] |
-| Non-login shell command | 8.98 / 10.14 | 83.89 [80.91–84.31] | 287.97 [286.15–290.64] | 59.18 [56.56–59.59] | 58.03 [57.47–58.13] |
+This is a point-in-time independent benchmark, not a service-level promise. This project is not affiliated with or endorsed by Modal, Daytona, E2B, or Tzafon. Product names and trademarks belong to their owners.
+
+The provider-default results use three samples from an external public-SDK caller. The Modal optimized results use 30 samples from a Modal Function with the same requested region as its targets. They differ in sample count, caller topology, ingress, and configuration. Read them as two separate experiments, not as an apples-to-apples provider ranking.
+
+## Provider-default comparison
+
+Values are median [observed min–max] milliseconds over three samples. These columns share the external-caller methodology described below.
+
+| Case | Modal default | Daytona default | E2B default | Tzafon default |
+| --- | ---: | ---: | ---: | ---: |
+| Product create to validated screenshot | 10101.33 [7334.62–10916.58] | 10549.67 [10472.58–10561.09] | 1388.91 [1335.77–2627.98] | 283.03 [277.04–316.21] |
+| Full screenshot native/default | 126.86 [126.10–127.49] | 588.74 [574.12–609.17] | 191.70 [190.52–201.18] | 132.38 [106.47–139.29] |
+| One coordinate click | 209.01 [205.09–209.87] | 381.63 [380.76–384.16] | 221.15 [217.39–224.00] | 154.49 [153.29–157.77] |
+| Four coordinate clicks | 227.56 [225.30–228.82] | 1548.00 [1414.12–1552.59] | 887.19 [886.77–912.69] | 474.00 [465.58–483.22] |
+| Type 100 | 249.57 [248.41–254.24] | 806.05 [666.84–809.89] | 4104.69 [4080.06–4117.33] | 111.80 [105.05–116.70] |
+| Type 1000 | 248.09 [247.99–250.17] | 5519.92 [5395.29–5540.48] | 41085.75 [40867.36–41426.72] | 145.78 [135.79–155.12] |
+| Non-login shell command | 83.89 [80.91–84.31] | 287.97 [286.15–290.64] | 59.18 [56.56–59.59] | 58.03 [57.47–58.13] |
+
+## Modal optimized result
+
+Values are p50 / p95 milliseconds over 30 samples. This table describes the optimized Modal deployment only. Do not combine it with the provider-default table to claim controlled speedups.
+
+| Case | Modal optimized p50 / p95 |
+| --- | ---: |
+| Product create to validated screenshot | 10246.36 / 17073.80 |
+| Full screenshot native/default | 32.42 / 34.71 |
+| One coordinate click | 4.43 / 5.06 |
+| Four coordinate clicks | 7.02 / 8.41 |
+| Type 100 | 9.95 / 10.62 |
+| Type 1000 | 49.58 / 52.35 |
+| Non-login shell command | 8.98 / 10.14 |
 
 ## Tzafon claim boundary
 

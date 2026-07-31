@@ -36,7 +36,12 @@ ARCHIVE_DISPOSITION_RE = re.compile(r"^>\s+\*\*Disposition:\*\*\s+\S", re.MULTIL
 
 def _markdown_files() -> list[Path]:
     """Return user-facing Markdown, excluding non-document trees by construction."""
-    roots = [ROOT / "README.md", ROOT / "SECURITY.md"]
+    roots = [
+        ROOT / "README.md",
+        ROOT / "SECURITY.md",
+        ROOT / "CONTRIBUTING.md",
+        ROOT / "CODE_OF_CONDUCT.md",
+    ]
     return [path for path in [*roots, *sorted(DOCS.rglob("*.md"))] if path.is_file()]
 
 
@@ -237,16 +242,17 @@ def test_historical_modal_optimization_evidence_is_commit_pinned() -> None:
         assert replacement in source
 
 
-def test_unreleased_changelog_has_pre_release_compatibility_migrations() -> None:
+def test_v1_changelog_has_compatibility_migrations() -> None:
     source = CHANGELOG.read_text(encoding="utf-8")
+    release = source[source.index("## 1.0.0 - 2026-07-31") : source.index("## 0.1.0")]
 
     for removed, replacement in (
         ("SandboxManager", "ComputerSandboxManager"),
         ("modal_workspace_billing_report", "modal_billing_report"),
         ("XTestPointerController", "X11InputSession"),
     ):
-        assert f"| `{removed}` | `{replacement}` |" in source
-    assert "without a deprecation window" in source
+        assert f"| `{removed}` | `{replacement}` |" in release
+    assert "without a deprecation window" in release
 
 
 def test_documentation_map_links_each_current_top_level_doc_once() -> None:

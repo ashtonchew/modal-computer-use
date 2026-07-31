@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## 1.0.0 - 2026-07-31
+
 - Added the canonical v8 product specification, archived v7, and classified stable, experimental,
   benchmark-only, and application-owned surfaces against the 1.0.0 source state.
 - Updated the locked Modal SDK to 1.5.3 and explicitly scoped daemon Connect Tokens to port 8080.
@@ -9,16 +13,22 @@
 - Added a documentation map, a configuration reference, and link and configuration checks.
 - Added a security policy that requires private vulnerability reporting before a public release,
   and clarified runtime security guidance.
+- Added contribution guidance, a code of conduct, issue forms, a pull request template, and monthly
+  dependency updates.
 - Updated package metadata to use PEP 639 license fields and well-known project URLs.
+- Marked the distribution as typed, added downstream type-consumer checks, and tightened the
+  bounded mypy configuration.
 - Added the Modal optimized lifecycle benchmark, eligibility-gated tracked provider evidence, and a
   current five-provider report.
+- Removed legacy root benchmark output, added a repository hygiene check, and separated provider
+  defaults from optimized Modal results in the current report.
 - Classified the July 19 Modal optimization harness as commit-pinned historical evidence; current
   measurements use the maintained benchmark workflows.
 - Removed the legacy July 19 Modal optimization runner, sanitizer, execution modules, and tests while
   preserving its tracked JSON artifacts and archived reports as commit-pinned provenance.
 
-This pre-release cutover removes compatibility-only names without a deprecation window. Update
-imports before adopting the cutover:
+This release removes compatibility-only names without a deprecation window. Update imports before
+you adopt version 1.0.0:
 
 | Removed compatibility name | Canonical replacement | Required migration |
 | --- | --- | --- |

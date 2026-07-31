@@ -12,6 +12,7 @@ from typing import Any
 from modal_computer_use.actions import is_supported_key
 from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacted_action
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
+from modal_computer_use.daemon.desktop.screenshots import CapturedScreenshot
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
 from modal_computer_use.daemon.leases import LeaseCredentials, lease_credentials_from_headers
 from modal_computer_use.daemon.receipts import (
@@ -127,7 +128,7 @@ async def run_with_screenshot_bytes(
     payload: ActionBatchRequest,
     context: ActionBatchContext,
     idempotency_key: str | None = None,
-):
+) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
     if not payload.screenshot_after:
         raise DaemonError(
             "raw action observation requires screenshot_after",
@@ -148,7 +149,7 @@ async def _run(
     *,
     idempotency_key: str | None,
     raw_screenshot_after: bool,
-):
+) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
     try:
         return await _run_impl(
             payload,
@@ -169,7 +170,7 @@ async def _run_impl(
     *,
     idempotency_key: str | None,
     raw_screenshot_after: bool,
-):
+) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
     cached = (
