@@ -144,6 +144,42 @@ Each arm runs one warmup and 30 measured samples. The arms compare to each other
 artifact records the configuration differences that stop them from replacing the 2026-07-24
 subprocess A/B values.
 
+The same three arms were rerun on 2026-07-31 at the canonical 1 core and 2048 MiB shape that the
+rest of the current measurements use. The tracked artifact is
+[`benchmark-data/modal-subprocess-runner-ab-1cpu-2026-07-31.json`](../benchmark-data/modal-subprocess-runner-ab-1cpu-2026-07-31.json)
+and it came from three runs of this command:
+
+```bash
+for backend in asyncio threaded isolated-asyncio; do
+  uv run computer-use benchmark modal-colocated-client \
+    --app-name modal-computer-use-subprocess-ab-1cpu \
+    --runner-only \
+    --modal-region us-west-2 \
+    --modal-ingress attested-tunnel \
+    --daemon-http-version 1.1 \
+    --runner-path inherited \
+    --surface daemon-http \
+    --browser chromium \
+    --resource-profile browser \
+    --modal-cpu 1 \
+    --modal-memory-mib 2048 \
+    --runner-cpu 1 \
+    --runner-memory-mib 2048 \
+    --input-rate-limit-per-sec 0 \
+    --input-backend xtest \
+    --subprocess-backend "$backend" \
+    --iterations 30 \
+    --output "benchmark-results/subprocess-ab-1cpu-2026-07-31/$backend.json"
+done
+```
+
+Run the arms back to back and keep the default branch quiet for the length of the run, then check
+that all three arms report one `git_revision` before promoting them. The rerun changes the p50
+ordering between the two candidate fixes, so read the two artifacts together rather than
+substituting one for the other. The rerun records the 2026-07-30 figures under
+`comparison_baseline` and binds them by SHA-256. That pair varies date and requested shape at once,
+so it does not isolate the effect of shape.
+
 Dropping `--runner-only` keeps the external-caller arm, which turns the same command into a
 caller-placement comparison. The tracked artifact in
 [`benchmark-data/modal-caller-placement-us-west-2-2026-07-31.json`](../benchmark-data/modal-caller-placement-us-west-2-2026-07-31.json)
