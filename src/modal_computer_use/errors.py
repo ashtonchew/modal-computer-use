@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from modal_computer_use.operation_kinds import STABLE_OPERATION_KINDS
@@ -178,14 +177,3 @@ class SessionRecoveryRequiredError(SessionBorrowError):
     """Raised when explicit recovery is required before further operations."""
 
     message = "the session requires recovery before further operations"
-
-
-class ProcessExecutionError(ComputerUseError):
-    """Raised when a desktop subprocess command fails."""
-
-
-@dataclass(frozen=True)
-class ErrorInfo:
-    code: str
-    message: str
-    details: dict[str, Any] | None = None

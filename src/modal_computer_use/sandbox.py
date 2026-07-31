@@ -915,22 +915,6 @@ def modal_billing_report(
     )
 
 
-def modal_workspace_billing_report(
-    *,
-    start: datetime,
-    end: datetime | None,
-    resolution: str,
-    tag_names: list[str] | None,
-) -> list[object]:
-    """Compatibility wrapper for callers of the previous workspace-only adapter."""
-    return modal_billing_report(
-        start=start,
-        end=end,
-        resolution=resolution,
-        tag_names=tag_names,
-    )
-
-
 def _daemon_bearer_from_auth(auth: dict[str, str]) -> str:
     return auth["COMPUTER_USE_TUNNEL_TOKEN"]
 

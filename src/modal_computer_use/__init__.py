@@ -46,7 +46,7 @@ from .latency import (
     pool_config_identity,
     validate_first_frame,
 )
-from .manager import ComputerSandboxManager, SandboxManager
+from .manager import ComputerSandboxManager
 from .models import (
     ActionBatchResult,
     ActionBatchTiming,
@@ -144,7 +144,6 @@ __all__ = [
     "SandboxAmbiguousError",
     "SandboxCleanupItem",
     "SandboxCleanupResult",
-    "SandboxManager",
     "SandboxRef",
     "SandboxRegistry",
     "SandboxUnavailableError",

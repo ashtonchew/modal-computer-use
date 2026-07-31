@@ -685,10 +685,6 @@ def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
 
 
-# Compatibility for integrations that imported the pointer-specific class before it was deepened.
-XTestPointerController = X11InputSession
-
-
 __all__ = [
     "ButtonEvent",
     "KeyEvent",
@@ -701,6 +697,5 @@ __all__ = [
     "X11InputStateConflictError",
     "X11InputUnavailableError",
     "X11KeyboardState",
-    "XTestPointerController",
     "XTestUnavailableError",
 ]

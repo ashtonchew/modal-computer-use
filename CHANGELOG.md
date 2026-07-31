@@ -23,6 +23,14 @@ imports before adopting the cutover:
 | `SandboxManager` | `ComputerSandboxManager` | Replace `from modal_computer_use import SandboxManager` and rename constructor and type references; behavior and arguments are unchanged. |
 | `modal_workspace_billing_report` | `modal_billing_report` | Import from `modal_computer_use.sandbox`; omit `environment_name` for the previous workspace-scoped behavior or pass an environment name for environment-scoped billing. |
 | `XTestPointerController` | `X11InputSession` | Replace the import from `modal_computer_use.daemon.desktop.xtest`; the `display=` constructor and pointer methods are unchanged, and the canonical session also owns keyboard input. |
+| `browser_image` | `default_image` | Call `default_image(profile="browser" or "browser-gpu", browser=..., browser_prewarm=True)` from `modal_computer_use.image`. |
+| `modal_computer_use.transports.local.HTTPTransport` | `modal_computer_use.transports.HTTPTransport` | Import the canonical transport from its package export or from `modal_computer_use.transports.http`. |
+| `transform_point` | `CoordinateSpace.to_desktop` | Keep the point unchanged when no coordinate space applies; otherwise call `coordinate_space.to_desktop(point)` directly. |
+| `sandbox_ref_from_values` | `SandboxRef.model_validate` | Pass the previous value mapping directly to `SandboxRef.model_validate(...)`. |
+| `ProcessExecutionError` | `ActionResult` and `DaemonHTTPError` | Inspect `ActionResult.ok` for a completed command failure; catch `DaemonHTTPError` for a failed daemon request. |
+| `ErrorInfo` | `DaemonHTTPError` | Read `code`, the exception message, and `details` from `DaemonHTTPError`, or retain an application-owned error model. |
+| `modal_computer_use.adapters.anthropic.schemas.AnthropicComputerAction` | `AnthropicAdapter.normalize` | Pass a provider action mapping to `AnthropicAdapter.normalize`; consume its canonical `ComputerAction`-shaped mapping instead of importing the unused provider `TypedDict`. |
+| `BrowserKind` | `BrowserConfig` | Use `BrowserConfig(kind="firefox" or "chromium")` for validated public configuration; deep desktop modules no longer expose a separate alias. |
 
 ## 0.1.0
 
