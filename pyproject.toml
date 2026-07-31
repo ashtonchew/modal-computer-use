@@ -23,7 +23,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "websockets>=13.0",
   "pillow>=10.0",
-  "xxhash>=3.6",
+  "xxhash>=3.8.1",
 ]
 
 [project.urls]
