@@ -20,9 +20,13 @@ Each screenshot request left my laptop, crossed into Modal, reached the warm dae
 
 The desktop already ran on Modal. What if the client did too?
 
-I moved the same Python client off my laptop and into a Modal Function, an autoscaled container for application code, and requested `us-west-2` for both the Function and the target Sandbox. We change the location of the caller, and fixed the region of the caller and receiver, to be as close as possible.
+The desktop is a Linux machine in a Sandbox, and the daemon inside it owns the screen and the mouse. The client is the code that asks for a screenshot and sends back a click, and it can run anywhere that can reach the daemon.
 
-And then, our same move-and-click task fell from 32.4 ms to 4.6 ms.
+I ran the same client in two places and measured the same move-and-click from each, in one benchmark run against one desktop and over the same authenticated route. First from my laptop. Then from a Modal Function, an autoscaled container for application code. I requested `us-west-2` for the Function and for the Sandbox.
+
+From my laptop the move-and-click took 32.4 ms. From the Function it took 4.6 ms.
+
+The daemon itself did about a millisecond of work in both cases. The trip to the desktop and back took 31 ms from my laptop and 3.6 ms from the Function.
 
 Requesting `us-west-2` for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 29 ms.
 
