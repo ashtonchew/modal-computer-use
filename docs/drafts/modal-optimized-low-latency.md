@@ -28,6 +28,8 @@ From my laptop the move-and-click took 32.4 ms. From the Function it took 4.6 ms
 
 The daemon itself did about a millisecond of work in both cases. The trip to the desktop and back took 31 ms from my laptop and 3.6 ms from the Function.
 
+A screenshot went from 80 ms to 39 ms in the same comparison. The click gained more because a click request carries almost nothing in either direction, so nearly all of its cost is the trip. A screenshot carries a PNG back, and capturing and encoding it happens on the desktop no matter where the client runs.
+
 Requesting `us-west-2` for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 37 ms.
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)

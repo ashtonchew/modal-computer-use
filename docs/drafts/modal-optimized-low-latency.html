@@ -180,6 +180,7 @@
 <p>I ran the same client in two places and measured the same move-and-click from each, in one benchmark run against one desktop and over the same authenticated route. First from my laptop. Then from a Modal Function, an autoscaled container for application code. I requested <code>us-west-2</code> for the Function and for the Sandbox.</p>
 <p>From my laptop the move-and-click took 32.4 ms. From the Function it took 4.6 ms.</p>
 <p>The daemon itself did about a millisecond of work in both cases. The trip to the desktop and back took 31 ms from my laptop and 3.6 ms from the Function.</p>
+<p>A screenshot went from 80 ms to 39 ms in the same comparison. The click gained more because a click request carries almost nothing in either direction, so nearly all of its cost is the trip. A screenshot carries a PNG back, and capturing and encoding it happens on the desktop no matter where the client runs.</p>
 <p>Requesting <code>us-west-2</code> for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 37 ms.</p>
 <p><img src="../assets/modal-optimized-screenshot-paths.svg" alt="Default and optimized Modal screenshot request paths" /></p>
 <h2>Why did every screenshot start a process?</h2>
