@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "modal-computer-use contributors" }]
 dependencies = [
   "anyio>=4",
-  "fastapi>=0.115",
+  "fastapi>=0.140.13",
   "h2>=4.1",
   "httpx[http2]>=0.27",
   "hypercorn>=0.17",
