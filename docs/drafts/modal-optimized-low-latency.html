@@ -244,7 +244,7 @@
 <p><img src="../assets/modal-optimized-warm-results.svg" alt="Warm p50 latency across five providers, with Modal optimized fastest on every task" /></p>
 <p>Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal simple column is the public <code>ComputerSandbox</code> configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture. The computer-use SDK's of Daytona, E2B, and Tzafon stayed on their defaults.</p>
 <p>Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.</p>
-<p>The four-click row is where batching shows up. Modal optimized, Modal simple, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls, which turned turned into eight transport requests. Adding three clicks cost the two Modal rows about 3 ms and 16 ms, respectively. It cost E2B about 650 ms and Daytona about 1,160 ms!! The request path had become more expensive than the input it carried.</p>
+<p>The four-click row is where batching shows up. Modal optimized, Modal simple, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls, which turned into eight transport requests. Adding three clicks cost the two Modal rows about 3 ms and 16 ms, respectively. It cost E2B about 650 ms and Daytona about 1,160 ms!! The request path had become more expensive than the input it carried.</p>
 <h2>What counts as the next frame?</h2>
 <p>A 10 ms click does not mean the application has drawn anything. When an agent clicks <strong>Save</strong> and immediately asks for a screenshot, the input request can succeed before the application repaints, and the frame that comes back still shows the unsaved form. The model reads that as failure and clicks <strong>Save</strong> again.</p>
 <p>My first detector polled: wait an interval, capture a frame, compare it with the baseline, repeat. That works, and every miss costs a full capture.</p>
@@ -272,6 +272,69 @@
 <li>External mechanisms: <a href="https://openai.com/index/previewing-gpt-5-6-sol/">OpenAI's GPT-5.6 Sol preview</a>, <a href="https://developers.openai.com/api/docs/guides/tools-computer-use">OpenAI Computer use</a>, <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use">Anthropic parallel tool use</a>, <a href="https://github.com/browser-use/browser-use/blob/main/browser_use/agent/service.py">Browser Use's multi-action implementation</a>, <a href="https://rustdesk.com/docs/en/self-host/">RustDesk self-hosting</a>, <a href="https://developer.apple.com/documentation/coregraphics/cgevent">Quartz event services</a>, <a href="https://github.com/jordansissel/xdotool"><code>xdotool</code>'s XTest/Xlib implementation</a>, <a href="https://www.x.org/releases/X11R7.6/doc/xextproto/xtest.html">the XTest protocol specification</a>, <a href="https://python-mss.readthedocs.io/latest/release-history/v10.2.0.html">MSS shared-memory capture</a>, <a href="https://www.x.org/releases/X11R7.6/doc/libX11/specs/libX11/libX11.html">X11 selection ownership</a>, and Modal's <a href="https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds">sandbox architecture account</a>.</li>
 <li>Source revisions: the warm table's optimized column ran at <code>a497671</code> and its four default columns ran at <code>7cb39f7</code>. One commit separates those revisions, and it touched only documentation, examples, and tests, so the <code>src/</code> diff between them is empty.</li>
 </ul>
+<p>The results image rounds this table, which keeps the p95s.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>Task</th>
+<th style="text-align:right">Modal optimized p50 / p95</th>
+<th style="text-align:right">Daytona default p50 / p95 / ratio</th>
+<th style="text-align:right">E2B default p50 / p95 / ratio</th>
+<th style="text-align:right">Modal simple in this library p50 / p95 / ratio</th>
+<th style="text-align:right">Tzafon default p50 / p95 / ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Full screenshot, provider-native format</td>
+<td style="text-align:right">37.25 / 48.76 ms</td>
+<td style="text-align:right">563.57 / 603.79 ms / 15.13x</td>
+<td style="text-align:right">198.78 / 223.20 ms / 5.34x</td>
+<td style="text-align:right">115.80 / 132.91 ms / 3.11x</td>
+<td style="text-align:right">154.25 / 192.53 ms / 4.14x</td>
+</tr>
+<tr>
+<td>One click on the screen</td>
+<td style="text-align:right">9.85 / 16.85 ms</td>
+<td style="text-align:right">386.40 / 394.19 ms / 39.22x</td>
+<td style="text-align:right">209.86 / 213.42 ms / 21.30x</td>
+<td style="text-align:right">214.09 / 218.19 ms / 21.73x</td>
+<td style="text-align:right">130.27 / 170.55 ms / 13.22x</td>
+</tr>
+<tr>
+<td>Four ordered clicks</td>
+<td style="text-align:right">12.52 / 22.07 ms</td>
+<td style="text-align:right">1,546.74 / 1,577.44 ms / 123.50x</td>
+<td style="text-align:right">860.68 / 897.95 ms / 68.72x</td>
+<td style="text-align:right">230.10 / 235.09 ms / 18.37x</td>
+<td style="text-align:right">458.03 / 499.49 ms / 36.57x</td>
+</tr>
+<tr>
+<td>Type 100 characters</td>
+<td style="text-align:right">15.76 / 28.15 ms</td>
+<td style="text-align:right">805.55 / 812.84 ms / 51.11x</td>
+<td style="text-align:right">4,083.30 / 4,156.65 ms / 259.08x</td>
+<td style="text-align:right">259.67 / 270.18 ms / 16.48x</td>
+<td style="text-align:right">85.16 / 101.65 ms / 5.40x</td>
+</tr>
+<tr>
+<td>Type 1,000 characters</td>
+<td style="text-align:right">53.35 / 79.69 ms</td>
+<td style="text-align:right">5,528.38 / 5,554.88 ms / 103.63x</td>
+<td style="text-align:right">40,914.66 / 41,374.28 ms / 766.95x</td>
+<td style="text-align:right">263.95 / 269.71 ms / 4.95x</td>
+<td style="text-align:right">185.03 / 188.37 ms / 3.47x</td>
+</tr>
+<tr>
+<td>Non-login shell command</td>
+<td style="text-align:right">11.69 / 14.12 ms</td>
+<td style="text-align:right">285.33 / 294.57 ms / 24.40x</td>
+<td style="text-align:right">55.90 / 69.27 ms / 4.78x</td>
+<td style="text-align:right">72.64 / 158.22 ms / 6.21x</td>
+<td style="text-align:right">31.73 / 33.35 ms / 2.71x</td>
+</tr>
+</tbody>
+</table></div>
 
   </main>
 </body>
