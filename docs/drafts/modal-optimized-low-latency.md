@@ -60,7 +60,7 @@ I kept XTest and deleted the process. The daemon loads the X11 client libraries 
 
 ![Per-action xdotool setup compared with one persistent X11 input connection](../assets/modal-optimized-input-session.svg)
 
-Inside the daemon, the mean for a move plus one click went from about 146 ms to 1.2 ms, a 128x speedup.
+Inside the daemon, the mean for a move plus one click went from about 146 ms to 1.2 ms, a 127x speedup.
 
 Four move-and-click pairs went from 444 ms to 4.8 ms, a near 100x speedup. Typing gained less, for a more interesting reason. Every character costs at least a key-down and a key-up, plus modifiers when the layout needs them (on a US keyboard, `!` is Shift held over `1`), so the events start to matter on their own. A hundred characters fell from about 120 ms to 21 ms, and a thousand from 607 ms to 201 ms. Deleting one process per action does nothing about the two thousand events a thousand characters still have to emit.
 
@@ -163,8 +163,6 @@ I run the benchmark from a Function that serves one invocation and then exits. E
 Creating a fresh Modal desktop and receiving its first validated screenshot still takes 7.8 seconds. That timer covers Sandbox allocation, desktop startup, daemon readiness, and the first frame, and I have not split it by stage. Another provider's template startup time does not tell me which of those four to attack.
 
 The next run needs a timestamp at each boundary. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs in the image instead. Choosing before that trace would be guessing.
-
-Startup is a measurement problem: I know it costs 7.8 seconds and I do not know where the time goes. Readiness is the harder one. Once a click costs a millisecond, the slow and uncertain part of a turn is deciding when the screen is worth looking at again, and the first changed frame is the closest thing I have to an answer.
 
 A fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.
 
