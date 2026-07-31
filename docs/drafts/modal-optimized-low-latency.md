@@ -4,17 +4,13 @@
 
 A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite sandbox company. A Linux desktop runs in someone's datacenter and the model drives it over an API. It asks for a screenshot, looks at the screen, sends back a click or some text to type. E2B & Daytona give native computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters (roughly 10 sentences) with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.4 seconds. A huge waste that adds up as computer-use is used in long-horizon tasks. So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.06 seconds.
 
-Then I tried a more realistic computer-use task: How long does one screenshot and one click take? The screenshot + action loop is what an agent repeats, once a turn, for as long as the task runs. E2B took about 420 ms. Daytona took about 480 ms. Before I optimized anything, my simple Modal setup took about 550 ms. After optimizations, it took only 38 ms, an order of magnitude quicker.
+Then I tried a more realistic computer-use task: How long does one screenshot and one click take? The screenshot + action loop is what an agent repeats, once a turn, for as long as the task runs. E2B took about 420 ms. Daytona took about 480 ms. Before I optimized anything, my simple Modal setup took about 550 ms. After optimizations, it took only 38 ms, ~14x faster.
 
 Over fifty total agent turns, counting no model time at all, 550 ms a turn is 27 seconds spent on nothing but processing screenshots and clicks. At 38 ms it is under two seconds.
 
 [OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, hundreds of milliseconds in the computer interface stop hiding behind slow generation. Longer trajectories make it worse, because the delay is paid on every turn before the user sees anything. Infra will be the next issue in frontier computer-use agents.
 
-Building on primitives instead of a product meant I could change things a computer-use API keeps on its own side of the boundary: where the caller runs, how it processes clicks, what a single request is allowed to contain, and how a Function hands work to a Sandbox. A custom framework built on Modal primitives.
-
-I took the idea from RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). It connects to the remote machine once, when the session starts, and reuses that connection for everything after. Moving your mouse sends an event over a connection that is already open. Contrast this with existing computer-use APIs that reconnect for each event, suitable only for short agentic tasks.
-
-Branching off the idea of decoupling connection and usage. I mapped out the latency
+I took the idea from RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). It connects to the remote machine once, when the session starts, and reuses that connection for everything after. Moving your mouse sends an event over a connection that is already open. My first and simple Modal setup did the opposite. Every action launched something, used it once, and would throw it away. I identified the various odd ways this happens, over and over again, and saved that time using Modal infra tricks.
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
