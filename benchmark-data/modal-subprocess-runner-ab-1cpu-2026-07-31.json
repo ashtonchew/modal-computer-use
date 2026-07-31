@@ -1,0 +1,281 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-subprocess-runner-ab",
+  "variant": "canonical-1cpu-shape",
+  "generated_at": "2026-07-31T18:30:00+00:00",
+  "status": "candidate",
+  "scope": "Three-arm daemon subprocess-runner A/B for shell-command-echo-v2 on the shipping attested-tunnel path, measured from a co-located Modal runner at the canonical 1 core and 2048 MiB shape that the rest of this repository's current measurements use. It reruns the 2026-07-30 A/B design at a smaller requested shape.",
+  "provenance": {
+    "source_sha": "f330baaf4c2d020829cd22fdc2d83ef0646948d7",
+    "harness_state": "clean",
+    "git_worktree_clean": true,
+    "modal_app": "modal-computer-use-subprocess-ab-1cpu",
+    "modal_sdk_version": "1.5.3",
+    "package_version": "1.0.0",
+    "raw_artifact_directory": "benchmark-results/subprocess-ab-1cpu-2026-07-31",
+    "raw_artifacts_tracked": false,
+    "generator": null,
+    "assembly": "hand-authored from the ignored raw arms; no generator and no sanitizer exists for this artifact shape",
+    "arm_order": [
+      "asyncio",
+      "threaded",
+      "isolated-asyncio"
+    ],
+    "arms_measured_sequentially": true,
+    "source_revision_consistent": true,
+    "default_branch_moved_during_measurement": false,
+    "window_utc": {
+      "first_arm_completed_at": "2026-07-31T18:02:14.270552+00:00",
+      "last_arm_completed_at": "2026-07-31T18:08:03.225965+00:00"
+    }
+  },
+  "configuration": {
+    "requested": {
+      "benchmark_command": "modal-colocated-client",
+      "browser": "chromium",
+      "daemon_http_version": "1.1",
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "iterations": 30,
+      "modal_cpu": 1.0,
+      "modal_ingress": "attested-tunnel",
+      "modal_memory_mib": 2048,
+      "modal_region": "us-west-2",
+      "resource_profile": "browser",
+      "runner_cpu": 1.0,
+      "runner_memory_mib": 2048,
+      "runner_only": true,
+      "runner_path": "inherited",
+      "surface": "daemon-http"
+    },
+    "observed": {
+      "browser": "chromium",
+      "canonical_surface_name": "modal-daemon-attested-tunnel",
+      "daemon_http_version": "1.1",
+      "external_caller_included": false,
+      "image_identity": "inline:chromium",
+      "ingress_kind": "modal-attested-encrypted-tunnel",
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "modal_ingress": "attested-tunnel",
+      "modal_region": "us-west-2",
+      "modal_runner_path": "inherited",
+      "modal_runner_region": "us-west-2",
+      "resolved_cpu": 1.0,
+      "resolved_gpu": null,
+      "resolved_memory_gib": 2.0,
+      "resource_profile": "browser",
+      "runner_preflight": "ok",
+      "surface": "daemon-http",
+      "transport_http_versions": [
+        "HTTP/1.1"
+      ]
+    },
+    "safe_configuration_sha256": "9381cf2ab972d6c57f550ab55788a74a907099a40f219fb4dfb4b37bbea65941"
+  },
+  "semantics": {
+    "command_nonlogin_shell_echo": {
+      "benchmark_semantics": "shell-command-echo-v2",
+      "shell_mode": "non_login",
+      "argv": [
+        "sh",
+        "-c",
+        "printf '42\\n'"
+      ],
+      "timeout_seconds": 30,
+      "transport_shape": "argv"
+    }
+  },
+  "key_naming": {
+    "arm_keys": "asyncio, threaded and isolated-asyncio name the daemon subprocess backend, which is the only setting that differs between the arms. asyncio runs subprocesses on the daemon's shared event loop, threaded runs them on a thread pool, and isolated-asyncio runs them on a private event loop.",
+    "measurement_keys": "total, daemon and caller_transport_overhead carry the same meaning as in modal-subprocess-runner-ab-2026-07-30 and map to samples_ms, daemon_samples_ms and overhead_samples_ms in the raw arms.",
+    "distribution_keys": "total_distribution reports plain statistics over the same 30 total samples. mean_excluding_largest and mean_excluding_two_largest drop the one and two largest sorted samples, so a reader can see how much of each arm's mean rests on its extremes without depending on any outlier-threshold rule."
+  },
+  "subprocess_runner_ab": {
+    "metric": "modal-colocated shell-command-echo-v2 milliseconds",
+    "case": "command_nonlogin_shell_echo",
+    "iterations_per_arm": 30,
+    "warmup_iterations": 1,
+    "p50_method": "statistics.median",
+    "p95_method": "linear interpolation on sorted values at rank 0.95*(n-1)",
+    "observed_p50_ordering": [
+      "threaded",
+      "isolated-asyncio",
+      "asyncio"
+    ],
+    "asyncio": {
+      "raw_artifact": "benchmark-results/subprocess-ab-1cpu-2026-07-31/asyncio.json",
+      "raw_artifact_sha256": "48e4d009eb8882013eec591bacc5edac890f3638420763acc4cfae305836a6e1",
+      "measured_at": "2026-07-31T18:02:14.270552+00:00",
+      "successful_iterations": 30,
+      "failures": 0,
+      "sample_stability_status": "outlier_sensitive",
+      "total": {
+        "p50": 63.28590300000059,
+        "p95": 247.8512548999992
+      },
+      "daemon": {
+        "p50": 56.53446200000012,
+        "p95": 241.07133524999767
+      },
+      "caller_transport_overhead": {
+        "p50": 6.721340999995981,
+        "p95": 7.7782156000013805
+      },
+      "total_distribution": {
+        "sample_count": 30,
+        "mean": 85.38093453333359,
+        "max": 398.02226399999796,
+        "mean_excluding_largest": 74.6001990344831,
+        "mean_excluding_two_largest": 63.14149700000035
+      }
+    },
+    "threaded": {
+      "raw_artifact": "benchmark-results/subprocess-ab-1cpu-2026-07-31/threaded.json",
+      "raw_artifact_sha256": "1f78851dca70abc290fb615b925da8b21d8a2801532160f53370117a69257f18",
+      "measured_at": "2026-07-31T18:05:21.372796+00:00",
+      "successful_iterations": 30,
+      "failures": 0,
+      "sample_stability_status": "stable",
+      "total": {
+        "p50": 10.66654249999921,
+        "p95": 13.04391950000019
+      },
+      "daemon": {
+        "p50": 6.873940000000189,
+        "p95": 9.282359200000379
+      },
+      "caller_transport_overhead": {
+        "p50": 3.618637999999841,
+        "p95": 4.527189849997802
+      },
+      "total_distribution": {
+        "sample_count": 30,
+        "mean": 10.653114633333397,
+        "max": 13.496486000001084,
+        "mean_excluding_largest": 10.555067344827615,
+        "mean_excluding_two_largest": 10.465730892857168
+      }
+    },
+    "isolated-asyncio": {
+      "raw_artifact": "benchmark-results/subprocess-ab-1cpu-2026-07-31/isolated-asyncio.json",
+      "raw_artifact_sha256": "0983e8e10ae311b48bd57401bbb0be084552059260e0d3a14f875b0fa19472af",
+      "measured_at": "2026-07-31T18:08:03.225965+00:00",
+      "successful_iterations": 30,
+      "failures": 0,
+      "sample_stability_status": "outlier_sensitive",
+      "total": {
+        "p50": 13.75396549999941,
+        "p95": 18.776513500000647
+      },
+      "daemon": {
+        "p50": 8.56449700000006,
+        "p95": 12.740329900001868
+      },
+      "caller_transport_overhead": {
+        "p50": 5.001920499998036,
+        "p95": 6.001190399999954
+      },
+      "total_distribution": {
+        "sample_count": 30,
+        "mean": 21.530461399999727,
+        "max": 232.72994899999944,
+        "mean_excluding_largest": 14.247720448275595,
+        "mean_excluding_two_largest": 14.08311342857108
+      }
+    }
+  },
+  "comparison_baseline": {
+    "artifact": "benchmark-data/modal-subprocess-runner-ab-2026-07-30.json",
+    "artifact_sha256": "262b68fb14ea6fad1a948a9fb26c7f6dfa5f00b61cfb581c84535be42dbfd6b9",
+    "date": "2026-07-30",
+    "requested_shape": {
+      "modal_cpu": 4.0,
+      "modal_memory_mib": 8192,
+      "runner_cpu": 4.0,
+      "runner_memory_mib": 8192
+    },
+    "shared_with_this_run": [
+      "benchmark command",
+      "case and semantics",
+      "ingress",
+      "runner path",
+      "region",
+      "input backend",
+      "iterations and warmup"
+    ],
+    "differs_from_this_run": [
+      "date",
+      "requested cpu and memory"
+    ],
+    "is_shape_ablation": false,
+    "supersedes_baseline": false,
+    "note": "The two runs vary date and requested shape at once, so the pair does not isolate the effect of shape. The figures are carried here so both runs can be read side by side and are bound to the tracked 2026-07-30 artifact by SHA-256. Neither run replaces the other.",
+    "observed_p50_ordering": [
+      "isolated-asyncio",
+      "threaded",
+      "asyncio"
+    ],
+    "arms": {
+      "asyncio": {
+        "total": {
+          "p50": 54.90595200000037,
+          "p95": 219.92788569999882
+        },
+        "daemon": {
+          "p50": 49.534644500001335,
+          "p95": 214.753257949997
+        },
+        "caller_transport_overhead": {
+          "p50": 5.222455500000223,
+          "p95": 5.809947500000322
+        }
+      },
+      "threaded": {
+        "total": {
+          "p50": 10.617587999999678,
+          "p95": 13.161663449999136
+        },
+        "daemon": {
+          "p50": 6.7867264999996735,
+          "p95": 8.99796054999857
+        },
+        "caller_transport_overhead": {
+          "p50": 3.809115500000182,
+          "p95": 4.339098949999708
+        }
+      },
+      "isolated-asyncio": {
+        "total": {
+          "p50": 7.584464999999874,
+          "p95": 8.67549800000038
+        },
+        "daemon": {
+          "p50": 5.331084500001637,
+          "p95": 5.843138550000759
+        },
+        "caller_transport_overhead": {
+          "p50": 2.286975499999677,
+          "p95": 2.8009997999999916
+        }
+      }
+    }
+  },
+  "verification": {
+    "subprocess_runner_ab_failures": 0,
+    "subprocess_runner_ab_successful_iterations_per_arm": 30,
+    "subprocess_runner_ab_cursor_readback": "passed for all three arms",
+    "subprocess_runner_ab_typing_readback": "passed for all three arms",
+    "subprocess_runner_ab_runner_preflight": "passed for all three arms",
+    "subprocess_runner_ab_sandbox_cleanup": "checked live during the run and not reconstructible from the raw arms, so it is recorded here as an operator observation and is not guarded"
+  },
+  "limitations": [
+    "The three arms are comparable to each other. They are not drop-in replacements for the 2026-07-30 subprocess A/B values, which were measured on a different date at a different requested shape.",
+    "Each arm is one run on one date. The artifact carries no across-day replication. For the same case, p50 in this repository's tracked warm artifacts for 2026-07-26, 2026-07-28 and 2026-07-30 moved by factors between about 1.3 and 2.2, so a single day's ordering between two close arms is weak evidence.",
+    "The comparison against the 2026-07-30 A/B varies date and requested shape at once. It is not a clean shape ablation, and no causal claim about cores or memory follows from the pair.",
+    "The isolated-asyncio arm carries one 232.73 ms total sample. Its mean is 21.53 ms over all 30 samples, 14.25 ms once that sample is dropped, and 14.08 ms once the two largest are dropped, while its p50 of 13.75 ms is unaffected. Read its mean and its max as tail observations.",
+    "The asyncio arm is outlier sensitive in the same way. Two of its 30 total samples sit near 395 ms and 398 ms and carry its p95; its mean drops from 85.38 ms to 63.14 ms once they are removed.",
+    "This artifact is not cited by docs/drafts/modal-optimized-low-latency.md and does not supersede benchmark-data/modal-subprocess-runner-ab-2026-07-30.json, which remains that draft's source.",
+    "This is a portable-shell ablation. It moves command execution and other subprocess-backed compatibility paths. It does not move native XTest input, native Xlib window operations, MSS screenshots, or command runtime itself."
+  ]
+}
