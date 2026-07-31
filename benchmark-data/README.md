@@ -18,6 +18,12 @@ This directory contains tracked benchmark references that have been sanitized an
   binds each arm by SHA-256, and is guarded by pinning assertions in
   `tests/benchmarks/test_provider_artifacts.py`. Its arms compare to each other only; do not restate
   them against a run with a different runner path, requested resources, or command payload.
+- Caller-placement evidence has no generator and no sanitizer. It is assembled by hand from the
+  ignored raw draws, binds each draw by SHA-256, and is guarded by pinning assertions in
+  `tests/benchmarks/test_provider_artifacts.py`. Both of its arms share one ingress, so no
+  measurement key may name a transport; the ingress is recorded once under
+  `configuration.observed`. Two draws are recorded, one pinned and one replication, and they are
+  never averaged.
 
 ## Combined provider report inputs
 

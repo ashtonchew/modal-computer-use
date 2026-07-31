@@ -1,0 +1,746 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-caller-placement",
+  "generated_at": "2026-07-31T11:00:00+00:00",
+  "status": "candidate",
+  "scope": "Caller-placement comparison for the daemon-http surface on the shipping attested-tunnel path. One target desktop in us-west-2 was driven by an external caller on a developer laptop and by a co-located Modal runner in the same requested region, within one run, at one warmup and 30 measured samples per case per arm.",
+  "provenance": {
+    "source_sha": "df6543483fbe06c3ac1b070e7824de99ffb5f9d4",
+    "harness_state": "clean",
+    "git_worktree_clean": true,
+    "modal_app": "modal-computer-use-caller-placement",
+    "modal_sdk_version": "1.5.3",
+    "package_version": "1.0.0",
+    "raw_artifact_directory": "benchmark-results/caller-placement-2026-07-31",
+    "raw_artifacts_tracked": false,
+    "generator": null,
+    "assembly": "hand-authored from the ignored raw draws; no generator or sanitizer exists for this artifact shape"
+  },
+  "configuration": {
+    "requested": {
+      "benchmark_command": "modal-colocated-client",
+      "browser": "chromium",
+      "caller_region_label": "dev-laptop-us-west",
+      "daemon_http_version": "1.1",
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "iterations": 30,
+      "modal_cpu": 1.0,
+      "modal_ingress": "attested-tunnel",
+      "modal_memory_mib": 2048,
+      "modal_region": "us-west-2",
+      "resource_profile": "browser",
+      "runner_cpu": 1.0,
+      "runner_memory_mib": 2048,
+      "runner_path": "inherited",
+      "subprocess_backend": "isolated-asyncio",
+      "surface": "daemon-http"
+    },
+    "observed": {
+      "browser": "chromium",
+      "canonical_surface_name": "modal-daemon-attested-tunnel",
+      "colocated_runner_region_label": "modal-runner:us-west-2",
+      "daemon_http_version": "1.1",
+      "external_caller_included": true,
+      "external_caller_region_label": "dev-laptop-us-west",
+      "image_identity": "inline:chromium",
+      "ingress_kind": "modal-attested-encrypted-tunnel",
+      "ingress_shared_by_both_arms": true,
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "modal_ingress": "attested-tunnel",
+      "modal_region": "us-west-2",
+      "modal_runner_path": "inherited",
+      "modal_runner_region": "us-west-2",
+      "resolved_cpu": 1.0,
+      "resolved_gpu": null,
+      "resolved_memory_gib": 2.0,
+      "resource_profile": "browser",
+      "runner_preflight": "ok",
+      "subprocess_backend": "isolated-asyncio",
+      "surface": "daemon-http",
+      "transport_http_versions": [
+        "HTTP/1.1"
+      ]
+    },
+    "safe_configuration_sha256": "c020a520330449c9379346c17739e340ef48a9837a42afa4da25253218ce21a6"
+  },
+  "draw_selection": {
+    "pinned_draw": 1,
+    "replication_draw": 2,
+    "basis": "provenance rather than the measured values",
+    "note": "Two draws of the same command ran about five minutes apart. Draw 1 measured both arms at df6543483fbe06c3ac1b070e7824de99ffb5f9d4. Draw 2 did not, because unrelated pull requests landed on the repository default branch between its two arms, so its external caller measured at df6543483fbe06c3ac1b070e7824de99ffb5f9d4 while its co-located runner launched at 942c3a86b985fb2df047483364debb6e19801991. Draw 1 is pinned because it is the draw with one source revision across both arms. The two revisions differ only by dead-code removal and import canonicalization, and nothing under benchmarks/ or in transports/http.py differs between them, so draw 2 remains usable as replication."
+  },
+  "key_naming": {
+    "arm_keys": "external_caller and colocated_runner name where the caller ran, which is the variable this benchmark changes. They do not name a transport, because both arms shared one ingress.",
+    "measurement_keys": "total, daemon and caller_transport_overhead carry the same meaning as in modal-subprocess-runner-ab-2026-07-30 and map to samples_ms, daemon_samples_ms and overhead_samples_ms in the raw draws.",
+    "why_not_connect": "The 2026-07-24 competitive artifact spelled its ingress into the external-caller key name, which carried the word connect. That word named the Modal Connect runner path. This benchmark used the attested-tunnel ingress with the inherited runner path, so any key carrying the word connect would assert a transport this benchmark never exercised. The ingress is recorded once under configuration.observed instead of being spelled into every measurement key, and the guard test asserts that no key below caller_placement names a transport."
+  },
+  "caller_placement": {
+    "metric": "modal daemon-http operation milliseconds, by caller location",
+    "arms": {
+      "external_caller": "client process on a developer laptop, reaching the target over the attested tunnel",
+      "colocated_runner": "client process on a Modal runner sandbox in the same requested region as the target, reaching the target over the same attested tunnel"
+    },
+    "iterations_per_arm": 30,
+    "warmup_iterations": 1,
+    "p50_method": "statistics.median",
+    "p95_method": "linear interpolation on sorted values at rank 0.95*(n-1)",
+    "cases_measured": [
+      "click_then_screenshot",
+      "command_echo",
+      "command_nonlogin_shell_echo",
+      "coordinate_click",
+      "coordinate_click_sequence",
+      "move_click",
+      "move_click_sequence",
+      "screenshot_full",
+      "type_1000_chars",
+      "type_100_chars"
+    ],
+    "pinned_run": {
+      "draw": 1,
+      "role": "pinned",
+      "raw_artifact": "benchmark-results/caller-placement-2026-07-31/attested-tunnel-1cpu-draw1.json",
+      "raw_artifact_sha256": "99fd420f14156b64af3af179b711ecdafa291e8927ae82d1477e54ca15fe40cb",
+      "generated_at": "2026-07-31T10:32:00.164743+00:00",
+      "both_arms_measured_one_target_desktop": true,
+      "source_sha_external_caller": "df6543483fbe06c3ac1b070e7824de99ffb5f9d4",
+      "source_sha_colocated_runner": "df6543483fbe06c3ac1b070e7824de99ffb5f9d4",
+      "source_revision_consistent": true,
+      "cases": {
+        "click_then_screenshot": {
+          "external_caller": {
+            "total": {
+              "p50": 84.99343751464039,
+              "p95": 87.44509988464415
+            },
+            "daemon": {
+              "p50": 25.23418200000016,
+              "p95": 25.87979964999878
+            },
+            "caller_transport_overhead": {
+              "p50": 59.96349915355381,
+              "p95": 62.846012178058785
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 38.230560499998845,
+              "p95": 39.593814649999985
+            },
+            "daemon": {
+              "p50": 29.702908500013336,
+              "p95": 31.4607581499871
+            },
+            "caller_transport_overhead": {
+              "p50": 8.107572000001895,
+              "p95": 8.892650550009762
+            }
+          }
+        },
+        "command_echo": {
+          "external_caller": {
+            "total": {
+              "p50": 71.58064539544284,
+              "p95": 169.21185448300048
+            },
+            "daemon": {
+              "p50": 32.666868499998,
+              "p95": 130.54658585000416
+            },
+            "caller_transport_overhead": {
+              "p50": 38.552270499767616,
+              "p95": 39.578415412943
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 42.42843649999983,
+              "p95": 88.28117144999953
+            },
+            "daemon": {
+              "p50": 38.55147250000357,
+              "p95": 80.60145495000484
+            },
+            "caller_transport_overhead": {
+              "p50": 3.7614845000062402,
+              "p95": 7.356180700008784
+            }
+          }
+        },
+        "command_nonlogin_shell_echo": {
+          "external_caller": {
+            "total": {
+              "p50": 44.43214600905776,
+              "p95": 46.8014896963723
+            },
+            "daemon": {
+              "p50": 6.190512499998135,
+              "p95": 7.808737250000062
+            },
+            "caller_transport_overhead": {
+              "p50": 37.841657136379325,
+              "p95": 39.63790188474654
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 11.148588999999376,
+              "p95": 14.103811799999551
+            },
+            "daemon": {
+              "p50": 7.371789500012937,
+              "p95": 9.970872099994207
+            },
+            "caller_transport_overhead": {
+              "p50": 3.535652999992145,
+              "p95": 4.683394400009355
+            }
+          }
+        },
+        "coordinate_click": {
+          "external_caller": {
+            "total": {
+              "p50": 40.334312594495714,
+              "p95": 41.345439467113465
+            },
+            "daemon": {
+              "p50": 1.1320060000006293,
+              "p95": 1.5433924500005247
+            },
+            "caller_transport_overhead": {
+              "p50": 39.11250293412216,
+              "p95": 40.21366296711282
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 3.958654999999922,
+              "p95": 4.475016199999793
+            },
+            "daemon": {
+              "p50": 0.7469255000103203,
+              "p95": 0.9303746000213662
+            },
+            "caller_transport_overhead": {
+              "p50": 3.157823499993384,
+              "p95": 3.739074549997845
+            }
+          }
+        },
+        "coordinate_click_sequence": {
+          "external_caller": {
+            "total": {
+              "p50": 43.718541390262544,
+              "p95": 51.2169935624115
+            },
+            "daemon": {
+              "p50": 4.810929999999658,
+              "p95": 8.11138825000057
+            },
+            "caller_transport_overhead": {
+              "p50": 38.76441794808194,
+              "p95": 43.480717760854745
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 7.4880680000006805,
+              "p95": 11.544678849999976
+            },
+            "daemon": {
+              "p50": 3.9228159999993295,
+              "p95": 7.113682549999101
+            },
+            "caller_transport_overhead": {
+              "p50": 3.6448544999911903,
+              "p95": 4.71259595000557
+            }
+          }
+        },
+        "move_click": {
+          "external_caller": {
+            "total": {
+              "p50": 39.26943801343441,
+              "p95": 40.16364378621802
+            },
+            "daemon": {
+              "p50": 1.4245140000017642,
+              "p95": 1.798180599999632
+            },
+            "caller_transport_overhead": {
+              "p50": 37.85689152735472,
+              "p95": 38.558389154529316
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 4.6504235000002225,
+              "p95": 6.159562050000654
+            },
+            "daemon": {
+              "p50": 1.3103704999934962,
+              "p95": 2.2252358000031327
+            },
+            "caller_transport_overhead": {
+              "p50": 3.3729335000014515,
+              "p95": 4.150260550001228
+            }
+          }
+        },
+        "move_click_sequence": {
+          "external_caller": {
+            "total": {
+              "p50": 45.17360404133797,
+              "p95": 48.581758432555944
+            },
+            "daemon": {
+              "p50": 5.880869000000288,
+              "p95": 8.230420799999823
+            },
+            "caller_transport_overhead": {
+              "p50": 38.9993905609316,
+              "p95": 41.73729342166314
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 9.433956499999674,
+              "p95": 15.107657900000856
+            },
+            "daemon": {
+              "p50": 5.498563499997999,
+              "p95": 9.554019550004963
+            },
+            "caller_transport_overhead": {
+              "p50": 3.9033674999933154,
+              "p95": 5.395066900004862
+            }
+          }
+        },
+        "screenshot_full": {
+          "external_caller": {
+            "total": {
+              "p50": 86.79583354387432,
+              "p95": 90.12950604083017
+            },
+            "daemon": {
+              "p50": 22.6038415000005,
+              "p95": 23.298692550001476
+            },
+            "caller_transport_overhead": {
+              "p50": 64.44636752330268,
+              "p95": 67.014113440832
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 38.110908000000165,
+              "p95": 40.2548785999997
+            },
+            "daemon": {
+              "p50": 22.57310499999221,
+              "p95": 23.285406949992193
+            },
+            "caller_transport_overhead": {
+              "p50": 15.53878700000011,
+              "p95": 17.2312528500143
+            }
+          }
+        },
+        "type_1000_chars": {
+          "external_caller": {
+            "total": {
+              "p50": 88.00533344037831,
+              "p95": 102.20272679580376
+            },
+            "daemon": {
+              "p50": 49.677799000001244,
+              "p95": 64.3860569000008
+            },
+            "caller_transport_overhead": {
+              "p50": 38.45023989725149,
+              "p95": 39.815136062762235
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 54.10872600000083,
+              "p95": 65.70995714999971
+            },
+            "daemon": {
+              "p50": 49.94912600000134,
+              "p95": 61.64651489998504
+            },
+            "caller_transport_overhead": {
+              "p50": 4.217830499990249,
+              "p95": 4.907071450001688
+            }
+          }
+        },
+        "type_100_chars": {
+          "external_caller": {
+            "total": {
+              "p50": 45.988500118255615,
+              "p95": 47.819591825827956
+            },
+            "daemon": {
+              "p50": 7.545984000000061,
+              "p95": 8.682693199998148
+            },
+            "caller_transport_overhead": {
+              "p50": 38.44593854170242,
+              "p95": 39.5292597559596
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 10.250275000000642,
+              "p95": 10.705646100000443
+            },
+            "daemon": {
+              "p50": 6.761088000004634,
+              "p95": 7.306425550009976
+            },
+            "caller_transport_overhead": {
+              "p50": 3.4394255000034235,
+              "p95": 3.840164100004273
+            }
+          }
+        }
+      }
+    },
+    "replication_run": {
+      "draw": 2,
+      "role": "replication, recorded beside the pinned run and never averaged into it",
+      "raw_artifact": "benchmark-results/caller-placement-2026-07-31/attested-tunnel-1cpu-draw2.json",
+      "raw_artifact_sha256": "282214aeb69f850e14b485998bfdf5ec85c0899aa06a5a64c7d3f2c1b57151c9",
+      "generated_at": "2026-07-31T10:37:23.130338+00:00",
+      "both_arms_measured_one_target_desktop": true,
+      "source_sha_external_caller": "df6543483fbe06c3ac1b070e7824de99ffb5f9d4",
+      "source_sha_colocated_runner": "942c3a86b985fb2df047483364debb6e19801991",
+      "source_revision_consistent": false,
+      "cases": {
+        "click_then_screenshot": {
+          "external_caller": {
+            "total": {
+              "p50": 84.0304164448753,
+              "p95": 100.29517505317924
+            },
+            "daemon": {
+              "p50": 25.359452500001822,
+              "p95": 28.018343549997656
+            },
+            "caller_transport_overhead": {
+              "p50": 58.353212694125745,
+              "p95": 74.94670195317991
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 42.812091499999205,
+              "p95": 53.10509290000036
+            },
+            "daemon": {
+              "p50": 33.48404999999843,
+              "p95": 43.306967599993115
+            },
+            "caller_transport_overhead": {
+              "p50": 8.76791899999052,
+              "p95": 11.573789200012637
+            }
+          }
+        },
+        "command_echo": {
+          "external_caller": {
+            "total": {
+              "p50": 68.99158307351172,
+              "p95": 170.59519179165318
+            },
+            "daemon": {
+              "p50": 34.13213849999863,
+              "p95": 131.6173378000015
+            },
+            "caller_transport_overhead": {
+              "p50": 34.97845696521651,
+              "p95": 36.461229678587515
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 48.7761674999998,
+              "p95": 68.85095000000035
+            },
+            "daemon": {
+              "p50": 44.6999800000043,
+              "p95": 61.93151670000529
+            },
+            "caller_transport_overhead": {
+              "p50": 4.283188999996135,
+              "p95": 5.356312400016081
+            }
+          }
+        },
+        "command_nonlogin_shell_echo": {
+          "external_caller": {
+            "total": {
+              "p50": 41.79383302107453,
+              "p95": 43.518739100545645
+            },
+            "daemon": {
+              "p50": 6.669295499996508,
+              "p95": 8.50214115000298
+            },
+            "caller_transport_overhead": {
+              "p50": 34.92187047630324,
+              "p95": 36.844808302438636
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 13.329555500000367,
+              "p95": 20.02887525000014
+            },
+            "daemon": {
+              "p50": 8.948829999994246,
+              "p95": 13.428217000002007
+            },
+            "caller_transport_overhead": {
+              "p50": 4.575977999995651,
+              "p95": 7.4594140500100705
+            }
+          }
+        },
+        "coordinate_click": {
+          "external_caller": {
+            "total": {
+              "p50": 36.614728975109756,
+              "p95": 37.97645641025156
+            },
+            "daemon": {
+              "p50": 1.0092664999987733,
+              "p95": 1.1678995999995223
+            },
+            "caller_transport_overhead": {
+              "p50": 35.52197447510963,
+              "p95": 36.94434006025257
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 4.57555799999998,
+              "p95": 5.906875449999837
+            },
+            "daemon": {
+              "p50": 0.8273259999924676,
+              "p95": 1.266107699986207
+            },
+            "caller_transport_overhead": {
+              "p50": 3.619362500008272,
+              "p95": 4.63636164999075
+            }
+          }
+        },
+        "coordinate_click_sequence": {
+          "external_caller": {
+            "total": {
+              "p50": 40.4612289275974,
+              "p95": 41.81823545368388
+            },
+            "daemon": {
+              "p50": 4.969200999999757,
+              "p95": 6.0455044000006435
+            },
+            "caller_transport_overhead": {
+              "p50": 35.44960551187337,
+              "p95": 36.688896261248516
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 8.706572500000398,
+              "p95": 10.821328899999827
+            },
+            "daemon": {
+              "p50": 4.628799000002459,
+              "p95": 6.191797950008038
+            },
+            "caller_transport_overhead": {
+              "p50": 4.2506824999977155,
+              "p95": 4.912743649997964
+            }
+          }
+        },
+        "move_click": {
+          "external_caller": {
+            "total": {
+              "p50": 36.70289600268006,
+              "p95": 38.055322924628854
+            },
+            "daemon": {
+              "p50": 1.5523684999987353,
+              "p95": 1.9376562000008588
+            },
+            "caller_transport_overhead": {
+              "p50": 35.05036141626405,
+              "p95": 36.576495774627375
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 4.680361499999286,
+              "p95": 5.223278099999273
+            },
+            "daemon": {
+              "p50": 1.2401589999910811,
+              "p95": 1.519361500000116
+            },
+            "caller_transport_overhead": {
+              "p50": 3.3878005000014255,
+              "p95": 4.02840395000057
+            }
+          }
+        },
+        "move_click_sequence": {
+          "external_caller": {
+            "total": {
+              "p50": 41.977666900493205,
+              "p95": 43.691797531209886
+            },
+            "daemon": {
+              "p50": 6.308783499997972,
+              "p95": 7.673673200000053
+            },
+            "caller_transport_overhead": {
+              "p50": 35.52309088597383,
+              "p95": 36.932097650342754
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 13.033381500000552,
+              "p95": 18.061592349999593
+            },
+            "daemon": {
+              "p50": 7.716145499998106,
+              "p95": 12.569496400000439
+            },
+            "caller_transport_overhead": {
+              "p50": 4.926533000007005,
+              "p95": 6.043671599999277
+            }
+          }
+        },
+        "screenshot_full": {
+          "external_caller": {
+            "total": {
+              "p50": 84.77506251074374,
+              "p95": 87.86983316531405
+            },
+            "daemon": {
+              "p50": 22.799217000001093,
+              "p95": 23.558158550000208
+            },
+            "caller_transport_overhead": {
+              "p50": 62.03441403446597,
+              "p95": 64.57706651322769
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 39.53991449999972,
+              "p95": 43.626677450000344
+            },
+            "daemon": {
+              "p50": 23.045488999997588,
+              "p95": 24.074991249995037
+            },
+            "caller_transport_overhead": {
+              "p50": 16.55753199998955,
+              "p95": 19.668272999997868
+            }
+          }
+        },
+        "type_1000_chars": {
+          "external_caller": {
+            "total": {
+              "p50": 83.94287503324449,
+              "p95": 91.92708386108279
+            },
+            "daemon": {
+              "p50": 47.672673999999304,
+              "p95": 56.0868280999987
+            },
+            "caller_transport_overhead": {
+              "p50": 35.62331245660921,
+              "p95": 36.73959655447803
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 59.660332499999136,
+              "p95": 85.95493825000017
+            },
+            "daemon": {
+              "p50": 54.265899499995385,
+              "p95": 81.01832850000646
+            },
+            "caller_transport_overhead": {
+              "p50": 4.834875999992327,
+              "p95": 5.923019699993935
+            }
+          }
+        },
+        "type_100_chars": {
+          "external_caller": {
+            "total": {
+              "p50": 42.85108402837068,
+              "p95": 47.246835473924875
+            },
+            "daemon": {
+              "p50": 7.466045000001031,
+              "p95": 9.446426700000995
+            },
+            "caller_transport_overhead": {
+              "p50": 35.34911997521384,
+              "p95": 38.45131807392653
+            }
+          },
+          "colocated_runner": {
+            "total": {
+              "p50": 11.195665000000687,
+              "p95": 13.542746199999819
+            },
+            "daemon": {
+              "p50": 7.3268234999943616,
+              "p95": 9.437737150003045
+            },
+            "caller_transport_overhead": {
+              "p50": 3.7960640000083146,
+              "p95": 4.270026549997397
+            }
+          }
+        }
+      }
+    }
+  },
+  "verification": {
+    "caller_placement_failures": 0,
+    "caller_placement_successful_iterations_per_arm": 30,
+    "caller_placement_cursor_readback": "passed for both arms in both draws",
+    "caller_placement_typing_readback": "passed for both arms in both draws",
+    "caller_placement_runner_preflight": "passed for both draws",
+    "caller_placement_leaked_sandboxes": 0
+  },
+  "limitations": [
+    "Draw 2 is replication only. Its co-located arm launched at a newer repository revision than its external arm because the default branch moved while the run was in flight. The selection of draw 1 was made on that provenance ground and not on the measured values, which agree closely across the two draws.",
+    "Both arms measured one target desktop over one attested-tunnel ingress. The runner path is inherited, so the co-located arm reuses the target base URL rather than opening a second ingress. The artifact reports nothing about other ingress choices.",
+    "The arms ran in sequence rather than at the same moment. The external arm finished first and the co-located arm about two and a half minutes later. The comparison holds the target fixed and does not hold the moment fixed.",
+    "caller_transport_overhead is the quantity caller placement moves. Read total as that overhead plus daemon-side work, and read daemon as target-side work that placement should leave alone.",
+    "Daemon-side p50 moves in both directions between arms even though both arms drove one daemon process. Several cases record a higher daemon p50 from the co-located arm. That spread is target-side variance on a 1 CPU desktop, so per-case totals carry noise that caller placement did not cause.",
+    "The target and the runner were each pinned to 1 CPU and 2048 MiB. Daemon-side numbers, especially the command and typing cases, are sensitive to that ceiling and do not restate runs at larger resource requests.",
+    "The external caller ran on a developer laptop over ordinary consumer networking. Its absolute overhead carries that network path and does not generalize to every external caller.",
+    "Two draws on one date in one requested region. The artifact carries no across-day replication, and the replication draw is recorded beside the pinned draw rather than averaged into it."
+  ]
+}
