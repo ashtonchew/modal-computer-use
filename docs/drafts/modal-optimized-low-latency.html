@@ -257,7 +257,7 @@
 <p>Modal bills a Function and a Sandbox for the seconds each one is alive. The two together cost under a cent a minute. Between runs, it costs nothing. The entire benchmark run cost only about 6 cents.</p>
 <h2>Startup now takes 10 seconds</h2>
 <p>Creating a fresh Modal desktop and receiving its first validated screenshot right now takes 10.2 seconds.</p>
-<p>Further work needs a timestamp at lifecycle boundaries. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs on the image instead. I deliberately kept this Modal computer-use SDK lightweight to allow for customization as those changes would change the cost curve.</p>
+<p>Further work needs a timestamp at lifecycle boundaries. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs on the image instead. A pool or a heavier image each buy startup time at a price, so I kept this SDK light enough that the choice belongs to whoever runs it.</p>
 <h2>Computer-use SDKs for fun and profit</h2>
 <p>On Modal, a fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.</p>
 <p>Not one of them was available to me on a computer-use API, because each one is a seam a product owns: where the client runs, what a single request carries, how the daemon holds the display, who owns a child process. Modal provided the seams. A Sandbox and a Function are separate things I could place in the same region, and cost efficiency came from intuitive knobs to control resources.</p>

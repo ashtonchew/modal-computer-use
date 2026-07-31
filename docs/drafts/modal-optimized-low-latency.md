@@ -182,7 +182,7 @@ Modal bills a Function and a Sandbox for the seconds each one is alive. The two 
 
 Creating a fresh Modal desktop and receiving its first validated screenshot right now takes 10.2 seconds.
 
-Further work needs a timestamp at lifecycle boundaries. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs on the image instead. I deliberately kept this Modal computer-use SDK lightweight to allow for customization as those changes would change the cost curve.
+Further work needs a timestamp at lifecycle boundaries. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs on the image instead. A pool or a heavier image each buy startup time at a price, so I kept this SDK light enough that the choice belongs to whoever runs it.
 
 ## Computer-use SDKs for fun and profit
 
