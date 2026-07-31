@@ -130,8 +130,14 @@ class FakeSandboxObject:
     def wait_until_ready(self, *, timeout: int) -> None:
         self.wait_until_ready_calls.append(timeout)
 
-    def create_connect_token(self, *, user_metadata: dict[str, str]) -> FakeConnectToken:
+    def create_connect_token(
+        self,
+        *,
+        user_metadata: dict[str, str],
+        port: int,
+    ) -> FakeConnectToken:
         assert user_metadata["sdk"] == "modal-computer-use"
+        assert port == 8080
         return FakeConnectToken()
 
     def exec(

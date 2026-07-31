@@ -91,7 +91,8 @@ class _OwnedSandbox:
         self.terminate_calls = 0
         self.credential_calls = 0
 
-    def create_connect_token(self, **_kwargs: object) -> _ConnectToken:
+    def create_connect_token(self, **kwargs: object) -> _ConnectToken:
+        assert kwargs["port"] == 8080
         self.credential_calls += 1
         return _ConnectToken()
 
@@ -1010,7 +1011,8 @@ class _AsyncTarget:
         self.calls.append("get_tags.aio")
         return self._tags
 
-    async def _create_connect_token(self, **_kwargs: object) -> _ConnectToken:
+    async def _create_connect_token(self, **kwargs: object) -> _ConnectToken:
+        assert kwargs["port"] == 8080
         self.calls.append("create_connect_token.aio")
         return _ConnectToken()
 

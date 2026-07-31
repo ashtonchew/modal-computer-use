@@ -1321,7 +1321,8 @@ class ComputerSandbox:
         if wait and hasattr(sandbox, "wait_until_ready"):
             sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
         token_info = sandbox.create_connect_token(
-            user_metadata={"sdk": "modal-computer-use", "version": __version__}
+            user_metadata={"sdk": "modal-computer-use", "version": __version__},
+            port=8080,
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
         base_url, token = _client_ingress_parts(
@@ -1425,7 +1426,8 @@ class ComputerSandbox:
             raise ValueError("attach requires sandbox_id, name, run_id, or base_url")
         metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
         token_info = sandbox.create_connect_token(
-            user_metadata={"sdk": "modal-computer-use", "version": __version__}
+            user_metadata={"sdk": "modal-computer-use", "version": __version__},
+            port=8080,
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
         computer = cls(
@@ -1923,7 +1925,8 @@ def modal_daemon_endpoint(
     sandbox = _require_modal_backing(computer, path=path)
     if path == "connect":
         token_info = sandbox.create_connect_token(
-            user_metadata={"sdk": "modal-computer-use", "runner_path": path}
+            user_metadata={"sdk": "modal-computer-use", "runner_path": path},
+            port=8080,
         )
         base_url, token = _connect_token_parts(token_info)
         return ModalDaemonEndpoint(
@@ -2084,7 +2087,8 @@ def create_modal_benchmark_computer(
             timing.mark("container_ready")
         if transport == "connect-endpoint":
             token_info = sandbox.create_connect_token(
-                user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-direct-path"}
+                user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-direct-path"},
+                port=8080,
             )
             base_url, token = _connect_token_parts(token_info)
             timing.mark("connect_endpoint_ready")
@@ -2859,7 +2863,8 @@ def _borrow_modal_function_session(
         if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
             raise SessionTargetMismatchError()
         token_info = sandbox.create_connect_token(
-            user_metadata={"sdk": "modal-computer-use", "version": __version__}
+            user_metadata={"sdk": "modal-computer-use", "version": __version__},
+            port=8080,
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
         base_url, token = _borrow_ingress_parts_sync(
@@ -2927,7 +2932,8 @@ async def _borrow_modal_function_session_async(
         if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
             raise SessionTargetMismatchError()
         token_info = await sandbox.create_connect_token.aio(
-            user_metadata={"sdk": "modal-computer-use", "version": __version__}
+            user_metadata={"sdk": "modal-computer-use", "version": __version__},
+            port=8080,
         )
         connect_base_url, connect_token = _connect_token_parts(token_info)
         base_url, token = await _borrow_ingress_parts_async(

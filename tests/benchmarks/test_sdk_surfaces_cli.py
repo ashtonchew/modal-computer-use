@@ -470,8 +470,9 @@ def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch,
         base_url = "https://daemon.example.modal.host"
 
     class FakeSandbox:
-        def create_connect_token(self, *, user_metadata: dict[str, str]):
+        def create_connect_token(self, *, user_metadata: dict[str, str], port: int):
             assert user_metadata["benchmark"] == "modal-ingress-ab"
+            assert port == 8080
             return SimpleNamespace(url="https://connect.example", token="connect-token")
 
     class CreatedComputer:

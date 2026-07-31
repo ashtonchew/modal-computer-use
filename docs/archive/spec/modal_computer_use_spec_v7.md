@@ -1,5 +1,16 @@
 # `modal-computer-use`: Daytona-style computer-use primitives on Modal
 
+> **Archive category:** Superseded
+> **Date or revision:** 2026-05-14, v7
+> **Question:** What daemon, SDK, validation, redaction, and artifact contracts shipped in the
+> post-v6 hardening train?
+> **Disposition:** [Specification v8](../../spec/modal_computer_use_spec_v8.md) superseded this
+> hardened-daemon contract after later 1.0.0-source features made its coverage incomplete. v7
+> received narrow maintenance edits through 2026-07-24 but does not canonically cover observation
+> transports, Modal Function handoff, trajectory leases, durable operation receipts, or
+> application-owned run orchestration. Preserve the historical body; add corrections only as
+> explicit notes.
+
 **Status:** implementation specification of the shipped v0.1 daemon and SDK, post-hardening
 **Prepared:** 2026-05-11 (v4 baseline), 2026-05-12 (v5/v6), 2026-05-14 (v7 truth-up)
 **Revision:** v7, shipped-daemon hardening on top of the v6 UV-first architecture
