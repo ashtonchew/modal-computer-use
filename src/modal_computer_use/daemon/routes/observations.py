@@ -1239,11 +1239,6 @@ async def _send_changed_frame(
     )
 
 
-async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region) -> str | None:
-    sha256, _timing = await _capture_region_source_sha256_with_timing(websocket, region=region)
-    return sha256
-
-
 async def _capture_region_source_sha256_with_timing(
     websocket: WebSocket,
     *,
@@ -2092,15 +2087,6 @@ async def _capture_frame_with_timing(
         "_current_tile_hashes": None,
     }
     return metadata, delta["payload"], capture_timing
-
-
-async def _capture_raw_frame(
-    websocket: WebSocket,
-    request: ObservationStreamRequest,
-    options: ScreenshotOptions,
-) -> CapturedRawScreenshot | None:
-    raw, _timing = await _capture_raw_frame_with_timing(websocket, request, options)
-    return raw
 
 
 async def _capture_raw_frame_with_timing(

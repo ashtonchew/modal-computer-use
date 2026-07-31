@@ -197,12 +197,6 @@ def _safe_trace_text(value: str | None) -> str | None:
     return sanitize_text(value)
 
 
-def _screenshot_uri(result: ActionItemResult) -> str | None:
-    output = result.output or {}
-    uri = output.get("artifact_uri")
-    return uri if isinstance(uri, str) else None
-
-
 def _coordinate_space(result: ActionItemResult) -> Any:
     output = result.output or {}
     return output.get("coordinate_space")

@@ -44,9 +44,6 @@ class ReadinessCache:
                 self._snapshot = None
             return ready, list(errors)
 
-    def invalidate(self) -> None:
-        self._snapshot = None
-
     def mark_ready(self) -> None:
         if self.ttl_seconds <= 0:
             return
