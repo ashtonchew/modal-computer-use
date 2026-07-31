@@ -14,6 +14,10 @@ This directory contains tracked benchmark references that have been sanitized an
   `scripts/sanitize_modal_optimized_frontier_benchmark.py`. Its V1/V2 ratio must remain labeled
   `optimized-frontier-path-ratio` and `descriptive-best-system`; it cannot be relabeled as a backend
   causal speedup.
+- Subprocess-runner A/B evidence has no generator. It is assembled by hand from the ignored raw arms,
+  binds each arm by SHA-256, and is guarded by pinning assertions in
+  `tests/benchmarks/test_provider_artifacts.py`. Its arms compare to each other only; do not restate
+  them against a run with a different runner path, requested resources, or command payload.
 
 ## Combined provider report inputs
 
