@@ -2,7 +2,7 @@
 
 *The same warm path returns a full 1024x768 PNG in 29 ms.*
 
-A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite sandbox company. A Linux desktop runs in someone's datacenter and the model drives it over an API. It asks for a screenshot, looks at the screen, sends back a click or some text to type. E2B & Daytona give native computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters (roughly 10 sentences) with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.4 seconds. A huge waste that adds up as computer-use is used in long-horizon tasks. So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.06 seconds.
+A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in someone's datacenter and the model drives it over an API. It asks for a screenshot, looks at the screen, sends back a click or some text to type. E2B & Daytona give native computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters (roughly 10 sentences) with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.4 seconds. A huge waste that adds up as computer-use is used in long-horizon tasks. So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.06 seconds.
 
 Then I tried a more realistic computer-use task: How long does one screenshot and one click take? The screenshot + action loop is what an agent repeats, once a turn, for as long as the task runs. E2B took about 420 ms. Daytona took about 480 ms. Before I optimized anything, my simple Modal setup took about 550 ms. After optimizations, it took only 38 ms, ~14x faster.
 
@@ -20,11 +20,11 @@ Each screenshot request left my laptop, crossed into Modal, reached the warm dae
 
 The desktop already ran on Modal. What if the client did too?
 
-I moved the same Python client off my laptop and into a Modal Function, an autoscaled container for application code, and requested `us-west-2` for both the Function and the target Sandbox. The target and the authenticated request path stayed fixed. The only thing that changed was where the caller sat.
+I moved the same Python client off my laptop and into a Modal Function, an autoscaled container for application code, and requested `us-west-2` for both the Function and the target Sandbox. We change the location of the caller, and fixed the region of the caller and receiver, to be as close as possible.
 
-One move-and-click fell from 32.4 ms to 4.6 ms.
+And then, our same move-and-click task fell from 32.4 ms to 4.6 ms.
 
-A shared requested region is a scheduling policy, not a physical guarantee. The Function and the Sandbox can still land on different hosts or availability zones, and traffic still goes through authenticated ingress. What changed is that the recurring route no longer left Modal. In the final warm run, a full screenshot came back in 29 ms.
+Requesting `us-west-2` for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 29 ms.
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)
 
@@ -161,6 +161,10 @@ Creating a fresh Modal desktop and receiving its first validated screenshot stil
 The next run needs a timestamp at each boundary. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs in the image instead. Choosing before that trace would be guessing.
 
 Startup is a measurement problem: I know it costs 7.8 seconds and I do not know where the time goes. Readiness is the harder one. Once a click costs a millisecond, the slow and uncertain part of a turn is deciding when the screen is worth looking at again, and the first changed frame is the closest thing I have to an answer.
+
+A fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.
+
+Not one of them was available to me on a computer-use API, because each one is a seam a product owns: where the client runs, what a single request carries, how the daemon holds the display, who owns a child process. Modal sells the seams. A Sandbox and a Function are separate things I could place in the same region, and I paid for the second one only while it ran. That is how a general-purpose compute platform ended up faster on the repeated loop than the companies that sell this as a product.
 
 ## Source notes
 
