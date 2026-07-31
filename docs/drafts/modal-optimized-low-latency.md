@@ -178,17 +178,19 @@ This is an experimental feature that will matter even more as CUA get faster ove
 
 Modal bills a Function and a Sandbox for the seconds each one is alive. The two together cost under a cent a minute. Between runs, it costs nothing. The entire benchmark run cost only about 6 cents.
 
-## Startup now takes 10.2 seconds
+## Startup now takes 10 seconds
 
-Creating a fresh Modal desktop and receiving its first validated screenshot now takes 10.2 seconds. That timer covers Sandbox allocation, desktop startup, daemon readiness, and the first frame, and I have not split it by stage. Another provider's template startup time does not tell me which of those four to attack.
+Creating a fresh Modal desktop and receiving its first validated screenshot right now takes 10.2 seconds.
 
-The next run needs a timestamp at each boundary. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs in the image instead. Choosing before that trace would be guessing.
+The next run needs a timestamp at each boundary. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs on the image instead. I deliberately kept this Modal computer-use SDK lightweight to allow for customization as those changes would change the cost curve.
 
-A fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.
+## Computer-use SDKs for fun and profit
+
+On Modal, a fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.
 
 Not one of them was available to me on a computer-use API, because each one is a seam a product owns: where the client runs, what a single request carries, how the daemon holds the display, who owns a child process. Modal provided the seams. A Sandbox and a Function are separate things I could place in the same region, and cost efficiency came from intuitive knobs to control resources.
 
-That is how a general-purpose AI infra platform ended up faster on the repeated loop than the companies that sell this as a product. The future is customization.
+That is how I tuned Modal's general-purpose AI infra platform to be faster than the companies that sell this as a product. The future is customization.
 
 ## Source notes
 
