@@ -14,7 +14,7 @@ uv run python scripts/export_openapi.py --check
 uv run ruff check .
 uv run mypy src
 uv run pytest -q
-uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json
+uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-results/benchmark-report.json
 ```
 
 The mock benchmark is a deterministic CLI and artifact smoke check. For live prerequisites,
@@ -69,6 +69,7 @@ Run the same fail-on-match boundary scans as CI:
 ! rg "(^|[^A-Za-z0-9_])(import|from) +(openai|anthropic)" src
 ! rg "NetworkFileSystem" src
 ! rg -n "print\([^\n]*(vnc_url|debug\.vnc_url|\.uri|artifact_uri|token|data_base64|raw_path|stdout|stderr)" examples docs README.md
+uv run python scripts/check_repository_hygiene.py
 ```
 
 Confirm that:
@@ -80,8 +81,8 @@ Confirm that:
   tests.
 - noVNC is off by default, and logs and examples do not expose tokens, noVNC URLs, typed or
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
-- Before a public release, GitHub private vulnerability reporting is enabled and the form linked
-  from `SECURITY.md` is tested without repository access.
+- GitHub private vulnerability reporting is enabled before publication, and the form linked from
+  `SECURITY.md` is tested without repository access.
 
 ## Protected Modal verification
 

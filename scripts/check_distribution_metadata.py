@@ -12,6 +12,7 @@ from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
+TYPING_MARKER = "modal_computer_use/py.typed"
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,9 @@ def _validate_wheel(path: Path, *, expected: ExpectedMetadata) -> None:
         metadata_path = _one_matching_path(names, ".dist-info/METADATA", archive=path)
         _validate_metadata(archive.read(metadata_path), archive=path, expected=expected)
 
+        if TYPING_MARKER not in names:
+            raise ValueError(f"{path}: missing bundled typing marker at {TYPING_MARKER}")
+
         metadata_root = PurePosixPath(metadata_path).parent
         for license_file in expected.license_files:
             license_path = str(metadata_root / "licenses" / license_file)
@@ -112,6 +116,8 @@ def _validate_sdist(path: Path, *, expected: ExpectedMetadata) -> None:
         if metadata_file is None:
             raise ValueError(f"{path}: cannot read {metadata_path}")
         _validate_metadata(metadata_file.read(), archive=path, expected=expected)
+
+        _one_matching_path(names, f"/src/{TYPING_MARKER}", archive=path)
 
         source_root = PurePosixPath(metadata_path).parent
         for license_file in expected.license_files:

@@ -119,7 +119,7 @@ class DaemonClient:
 
     def model_list(self, model: type[T], method: str, path: str, **kwargs: Any) -> list[T]:
         payload = self.transport.request(method, path, **kwargs).json()
-        return TypeAdapter(list[model]).validate_python(payload)  # type: ignore[valid-type]
+        return TypeAdapter(list[model]).validate_python(payload)
 
     def download(self, path: str, local_path: str | Path) -> Path:
         return self.transport.stream_download(path, local_path)
@@ -261,7 +261,7 @@ class AsyncDaemonClient:
 
     async def model_list(self, model: type[T], method: str, path: str, **kwargs: Any) -> list[T]:
         payload = (await self.transport.request(method, path, **kwargs)).json()
-        return TypeAdapter(list[model]).validate_python(payload)  # type: ignore[valid-type]
+        return TypeAdapter(list[model]).validate_python(payload)
 
     async def download(self, path: str, local_path: str | Path) -> Path:
         return await self.transport.stream_download(path, local_path)

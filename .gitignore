@@ -1,5 +1,8 @@
 .venv/
 .env
+.env.*
+!.env.example
+!.env.*.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -14,3 +17,5 @@ htmlcov/
 # Local raw, candidate, rejected, and replayable benchmark evidence.
 benchmark-results/*
 !benchmark-results/README.md
+# Legacy root-level benchmark output. Write new output under benchmark-results/.
+/benchmark*.json

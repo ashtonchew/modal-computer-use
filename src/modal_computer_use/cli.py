@@ -1762,7 +1762,7 @@ def _modal_colocated_surfaces(
         if parser is not None:
             parser.error(f"invalid co-located benchmark surface: {', '.join(invalid)}")
         raise SystemExit(f"invalid co-located benchmark surface: {', '.join(invalid)}")
-    return values  # type: ignore[return-value]
+    return values
 
 
 def _modal_colocated_runner_paths(args: argparse.Namespace) -> list[str]:
@@ -1955,7 +1955,7 @@ def _sdk_surfaces(
         if parser is not None:
             parser.error(f"invalid benchmark surface: {', '.join(invalid)}")
         raise SystemExit(f"invalid benchmark surface: {', '.join(invalid)}")
-    return values  # type: ignore[return-value]
+    return values
 
 
 def _compare_providers(
@@ -1976,7 +1976,7 @@ def _compare_providers(
         if parser is not None:
             parser.error(f"invalid provider: {', '.join(invalid)}")
         raise SystemExit(f"invalid provider: {', '.join(invalid)}")
-    return values  # type: ignore[return-value]
+    return values
 
 
 def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:

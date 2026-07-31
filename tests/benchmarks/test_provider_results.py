@@ -432,7 +432,9 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
         "Type 1000",
         "Non-login shell command",
     ]
-    assert markdown.count("| Case | Modal optimized |") == 1
+    assert markdown.count("## Provider-default comparison") == 1
+    assert markdown.count("| Case | Modal optimized p50 / p95 |") == 1
+    assert "not as an apples-to-apples provider ranking" in markdown
     assert markdown.count("## Modal-only experimental result") == 1
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in markdown
     assert "Tzafon 1280x720 JPEG" in markdown

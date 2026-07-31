@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from modal_computer_use.models import ActionResult
 
 from .base import AsyncNamespace, Namespace
@@ -15,10 +17,10 @@ class BrowserNamespace(Namespace):
             )
         )
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, Any]:
         return dict(self._client.get_json("/v1/browser/status"))
 
-    def render_metrics(self, url: str, timeout_seconds: float = 30.0) -> dict:
+    def render_metrics(self, url: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
         return dict(
             self._client.post_json(
                 "/v1/browser/render-metrics",
@@ -38,10 +40,12 @@ class AsyncBrowserNamespace(AsyncNamespace):
             )
         )
 
-    async def status(self) -> dict:
+    async def status(self) -> dict[str, Any]:
         return dict(await self._client.get_json("/v1/browser/status"))
 
-    async def render_metrics(self, url: str, timeout_seconds: float = 30.0) -> dict:
+    async def render_metrics(
+        self, url: str, timeout_seconds: float = 30.0
+    ) -> dict[str, Any]:
         return dict(
             await self._client.post_json(
                 "/v1/browser/render-metrics",

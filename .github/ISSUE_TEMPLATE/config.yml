@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/ashtonchew/modal-computer-use/security/advisories/new
+    about: Report a vulnerability in private.
+  - name: Usage documentation
+    url: https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md
+    about: Read the guides before you open an issue.

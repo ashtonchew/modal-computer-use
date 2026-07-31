@@ -19,7 +19,7 @@ These results captured the then-current provider comparison after normalizing th
 ## Artifacts
 
 - Modal daemon, 10x:
-  `/Users/ashtonchew/projects/modal-computer-use/benchmark-sdk-modal-connect-1024x768-2026-05-17.json`
+  `benchmark-results/benchmark-sdk-modal-connect-1024x768-2026-05-17.json`
 - Daytona and first E2B attempt, 10x:
   `benchmark-results/provider-compare-daytona-e2b-10x-20260517.json`
 - E2B rerun, 10x, with longer sandbox lifetime:

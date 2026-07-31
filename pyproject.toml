@@ -73,9 +73,15 @@ python_version = "3.12"
 packages = ["modal_computer_use"]
 strict = false
 check_untyped_defs = true
-ignore_missing_imports = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+extra_checks = true
+no_implicit_reexport = true
+strict_equality = true
 warn_unreachable = true
-warn_unused_ignores = false
+warn_redundant_casts = true
+warn_unused_ignores = true
 disable_error_code = [
   "arg-type",
   "assignment",
@@ -83,8 +89,11 @@ disable_error_code = [
   "no-any-return",
   "union-attr",
   "valid-type",
-  "var-annotated",
 ]
+
+[[tool.mypy.overrides]]
+module = ["modal", "modal.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

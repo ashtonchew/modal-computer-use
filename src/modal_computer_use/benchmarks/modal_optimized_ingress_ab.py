@@ -330,10 +330,16 @@ def _run_interleaved_cases(
     cases: dict[str, Any] = {}
     for case_name, factory in factories.items():
         operations = {arm: factory(clients[arm]) for arm in _ARMS}
-        samples = {arm: [] for arm in _ARMS}
-        failures = {arm: [] for arm in _ARMS}
-        observed_http_versions = {arm: set() for arm in _ARMS}
-        observed_input_backends = {arm: set() for arm in _ARMS}
+        samples: dict[ModalOptimizedIngress, list[float]] = {arm: [] for arm in _ARMS}
+        failures: dict[ModalOptimizedIngress, list[dict[str, str | int]]] = {
+            arm: [] for arm in _ARMS
+        }
+        observed_http_versions: dict[ModalOptimizedIngress, set[str]] = {
+            arm: set() for arm in _ARMS
+        }
+        observed_input_backends: dict[ModalOptimizedIngress, set[str]] = {
+            arm: set() for arm in _ARMS
+        }
         for phase, rounds in (("warmup", warmup_iterations), ("measure", iterations)):
             for iteration in range(rounds):
                 order = _ARMS if iteration % 2 == 0 else tuple(reversed(_ARMS))

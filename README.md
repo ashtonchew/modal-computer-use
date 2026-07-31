@@ -10,22 +10,25 @@ desktops on Modal.
 The project provides daemon-first control primitives. Autonomous agent orchestration and model
 loops stay in application code or examples.
 
+This is an independent community project for Modal.
+
 ## Install from source
 
 Use Python 3.12 or later and `uv`. The package is not on PyPI. Install it from GitHub:
 
 ```bash
-uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git"
+uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.0.0"
 ```
 
 Add the Modal extra when the application will create Modal Sandboxes:
 
 ```bash
-uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git"
+uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.0.0"
 ```
 
 The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later. Contributors should
 instead follow the [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md).
+The install commands pin the `v1.0.0` source tag.
 
 ## Run locally
 
@@ -115,6 +118,7 @@ describes SDK semantics and behavioral contracts.
 - [Performance](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/performance.md)
 - [Troubleshooting](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/troubleshooting.md)
 - [Release checklist](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/release-checklist.md)
+- [Contributing guide](https://github.com/ashtonchew/modal-computer-use/blob/main/CONTRIBUTING.md)
 
 Provider examples are available for [OpenAI](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/03_openai_computer_loop.py)
 and [Anthropic](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/anthropic_message_server.py).

@@ -64,7 +64,9 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
     rendered = render_provider_results_markdown(combined)
     report = report_path.read_text(encoding="utf-8")
     assert report == rendered
-    assert report.count("| Case | Modal optimized |") == 1
+    assert report.count("## Provider-default comparison") == 1
+    assert report.count("| Case | Modal optimized p50 / p95 |") == 1
+    assert "not as an apples-to-apples provider ranking" in report
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in report
     assert "75.25 / 88.78 ms" in report
     for forbidden in (

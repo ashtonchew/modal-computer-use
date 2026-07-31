@@ -9,6 +9,7 @@ from typing import get_type_hints
 
 import modal_computer_use
 import modal_computer_use.actions as actions
+import modal_computer_use.daemon.actions as daemon_actions
 import modal_computer_use.errors as errors
 import modal_computer_use.image as image
 import modal_computer_use.manager as manager_module
@@ -45,6 +46,22 @@ def test_root_all_contains_unique_importable_canonical_names() -> None:
     assert "ComputerSandboxManager" in modal_computer_use.__all__
     for name in modal_computer_use.__all__:
         assert hasattr(modal_computer_use, name), name
+
+
+def test_exported_functions_have_complete_annotations() -> None:
+    for module in (modal_computer_use, daemon_actions):
+        for name in module.__all__:
+            value = getattr(module, name)
+            if not inspect.isfunction(value):
+                continue
+            signature = inspect.signature(value)
+            assert signature.return_annotation is not inspect.Signature.empty, name
+            missing = [
+                parameter.name
+                for parameter in signature.parameters.values()
+                if parameter.annotation is inspect.Signature.empty
+            ]
+            assert not missing, f"{name} has unannotated parameters: {missing}"
 
 
 def test_canonical_manager_billing_and_x11_replacements_behave(monkeypatch) -> None:

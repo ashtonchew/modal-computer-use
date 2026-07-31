@@ -558,7 +558,7 @@ type ComputerAction = Annotated[
     Field(discriminator="type"),
 ]
 
-ComputerActionAdapter = TypeAdapter(ComputerAction)
+ComputerActionAdapter: TypeAdapter[ComputerAction] = TypeAdapter(ComputerAction)
 
 
 def parse_action(action: ComputerAction | dict[str, Any]) -> ComputerAction:
