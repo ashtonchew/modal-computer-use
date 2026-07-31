@@ -31,6 +31,7 @@ from modal_computer_use.models import (
     ActionItemResult,
     ActionResult,
     Screenshot,
+    parse_action,
 )
 
 DEFAULT_MODEL = "claude-sonnet-5"
@@ -369,7 +370,7 @@ def _execute_computer_batch(
         if not isinstance(action, dict):
             return _batch_preflight_failure(actions, failed_index=index)
         try:
-            adapter.normalize(action)
+            parse_action(adapter.normalize(action))
         except Exception:
             return _batch_preflight_failure(actions, failed_index=index)
         provider_actions.append(action)

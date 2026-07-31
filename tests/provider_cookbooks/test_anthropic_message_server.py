@@ -360,6 +360,41 @@ def test_anthropic_computer_batch_executes_one_ordered_batch() -> None:
     assert computer.screenshots.full_calls == 0
 
 
+def test_anthropic_computer_batch_rejects_zero_scroll_before_dispatch() -> None:
+    example = load_example("anthropic_message_server.py")
+    computer = RecordingComputer()
+    client, create = _client(
+        [
+            _response(
+                _tool_use(
+                    "tool_batch",
+                    name="computer_batch",
+                    tool_input={
+                        "actions": [
+                            {"action": "mouse_move", "coordinate": [10, 20]},
+                            {
+                                "action": "scroll",
+                                "scroll_direction": "down",
+                                "scroll_amount": 0,
+                            }
+                        ]
+                    },
+                )
+            ),
+            _terminal_response(),
+        ]
+    )
+
+    _run(example, client=client, computer=computer)
+
+    assert computer.actions.batches == []
+    tool_result = create.calls[1]["messages"][2]["content"][0]
+    assert tool_result["is_error"] is True
+    assert "[computer_batch] stopped at actions[1] (0 completed, 1 skipped)" in _text_blocks(
+        tool_result
+    )
+
+
 def test_anthropic_computer_batch_reports_skipped_actions_without_secrets() -> None:
     example = load_example("anthropic_message_server.py")
     batch_result = ActionBatchResult(
