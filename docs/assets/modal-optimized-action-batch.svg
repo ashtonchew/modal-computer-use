@@ -77,6 +77,6 @@
   <text class="small" x="872" y="396" text-anchor="middle">Completed clicks remain</text>
   <path class="path" d="M1208 208 V304" marker-end="url(#arrow-sage)"/>
   <rect class="result" x="1136" y="304" width="144" height="104" rx="8"/>
-  <text class="metric" x="1208" y="351" text-anchor="middle">14 ms</text>
+  <text class="metric" x="1208" y="351" text-anchor="middle">11.5 ms</text>
   <text class="small" x="1208" y="381" text-anchor="middle">Four clicks</text>
 </svg>

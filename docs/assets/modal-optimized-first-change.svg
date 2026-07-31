@@ -44,7 +44,7 @@
   <text class="decision-label" x="608" y="290" text-anchor="middle">Pixels</text>
   <text class="decision-label" x="608" y="313" text-anchor="middle">changed?</text>
   <rect class="result" x="776" y="248" width="280" height="96" rx="8"/>
-  <text class="metric" x="916" y="288" text-anchor="middle">65 ms</text>
+  <text class="metric" x="916" y="288" text-anchor="middle">76 ms</text>
   <text class="small" x="916" y="319" text-anchor="middle">Return the same verified frame</text>
   <line class="path" x1="680" y1="296" x2="776" y2="296" marker-end="url(#arrow-sage)"/>
   <text class="arrow-label" x="728" y="276" text-anchor="middle">Changed</text>

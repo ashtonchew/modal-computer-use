@@ -49,8 +49,8 @@
   <text class="label" x="1000" y="132" text-anchor="middle">OS child</text>
   <text class="label" x="1000" y="153" text-anchor="middle">process</text>
   <rect class="box" x="1168" y="72" width="144" height="136" rx="8"/>
-  <text class="metric" x="1240" y="133" text-anchor="middle">249 ms p95</text>
-  <text class="small" x="1240" y="163" text-anchor="middle">56 ms median</text>
+  <text class="metric" x="1240" y="133" text-anchor="middle">220 ms p95</text>
+  <text class="small" x="1240" y="163" text-anchor="middle">55 ms median</text>
 
   <line class="path" x1="176" y1="140" x2="224" y2="140" marker-end="url(#arrow-neutral)"/>
   <text class="arrow-label" x="200" y="115" text-anchor="middle">Run</text>
@@ -84,8 +84,8 @@
   <text class="label" x="1000" y="372" text-anchor="middle">OS child</text>
   <text class="label" x="1000" y="393" text-anchor="middle">process</text>
   <rect class="primary" x="1168" y="312" width="144" height="136" rx="8"/>
-  <text class="metric" x="1240" y="373" text-anchor="middle">11 ms p95</text>
-  <text class="small" x="1240" y="403" text-anchor="middle">10 ms median</text>
+  <text class="metric" x="1240" y="373" text-anchor="middle">8.7 ms p95</text>
+  <text class="small" x="1240" y="403" text-anchor="middle">7.6 ms median</text>
 
   <line class="path-opt" x1="176" y1="380" x2="224" y2="380" marker-end="url(#arrow-sage)"/>
   <text class="arrow-label-opt" x="200" y="355" text-anchor="middle">Run</text>
