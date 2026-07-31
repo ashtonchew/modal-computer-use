@@ -45,7 +45,7 @@ uv run computer-use benchmark compare \
   --resource-profile browser \
   --browser chromium \
   --iterations 3 \
-  --env-file /Users/ashtonchew/projects/modal-computer-use/.env \
+  --env-file /path/to/untracked/.env \
   --output benchmark-results/candidates/provider-compare-live-20260718-v3.json \
   --json
 ```

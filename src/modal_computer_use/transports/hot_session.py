@@ -11,7 +11,10 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
+from modal_computer_use.transports.metadata import MetadataHeaders, resolve_metadata_headers
 from modal_computer_use.transports.websocket_url import daemon_websocket_url
+
+_OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,8 @@ class HotSessionBinaryResult:
 class HotSessionTransport:
     """Persistent daemon control channel for latency-sensitive primitive loops."""
 
+    _MUTATING_OPS = frozenset({"run_actions", "run_raw_screenshot"})
+
     def __init__(
         self,
         base_url: str,
@@ -32,10 +37,14 @@ class HotSessionTransport:
         token: str | None = None,
         timeout: float = 30.0,
         websocket: ClientConnection | None = None,
+        _metadata_headers: MetadataHeaders | None = None,
+        _mutation_executor: Any | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self._metadata_headers = _metadata_headers
+        self._mutation_executor = _mutation_executor
         self._ids = itertools.count(1)
         self._lock = threading.RLock()
         self._websocket = websocket or self._connect(timeout=timeout)
@@ -58,8 +67,21 @@ class HotSessionTransport:
         return self.request("ping", {})
 
     def request(self, op: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if op in self._MUTATING_OPS and self._mutation_executor is not None:
+            return self._mutation_executor(
+                lambda metadata: self._request(op, payload, metadata=metadata)
+            )
+        return self._request(op, payload)
+
+    def _request(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
-            message = self._send(op, payload)
+            message = self._send(op, payload, metadata=metadata)
         if message.get("type") == "error":
             self._raise_hot_error(message)
         if message.get("type") != "result":
@@ -71,8 +93,21 @@ class HotSessionTransport:
         return result if isinstance(result, dict) else {}
 
     def request_binary(self, op: str, payload: dict[str, Any]) -> HotSessionBinaryResult:
+        if op in self._MUTATING_OPS and self._mutation_executor is not None:
+            return self._mutation_executor(
+                lambda metadata: self._request_binary(op, payload, metadata=metadata)
+            )
+        return self._request_binary(op, payload)
+
+    def _request_binary(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> HotSessionBinaryResult:
         with self._lock:
-            message = self._send(op, payload)
+            message = self._send(op, payload, metadata=metadata)
             if message.get("type") == "error":
                 self._raise_hot_error(message)
             if message.get("type") != "binary":
@@ -98,11 +133,13 @@ class HotSessionTransport:
         )
 
     def _connect(self, *, timeout: float) -> ClientConnection:
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
+        headers = resolve_metadata_headers(self._metadata_headers)
+        if self.token:
+            headers.setdefault("Authorization", f"Bearer {self.token}")
         try:
             return connect(
                 _websocket_url(self.base_url, "/v1/session/hot"),
-                additional_headers=headers,
+                additional_headers=headers or None,
                 open_timeout=timeout,
                 max_size=8 * 1024 * 1024,
                 compression=None,
@@ -112,13 +149,26 @@ class HotSessionTransport:
                 raise AuthenticationError("hot session authentication failed") from exc
             raise
 
-    def _send(self, op: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _send(
+        self,
+        op: str,
+        payload: dict[str, Any],
+        *,
+        metadata: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         request_id = str(next(self._ids))
-        self._websocket.send(json.dumps({"id": request_id, "op": op, "payload": payload}))
-        message = self._websocket.recv(timeout=self.timeout)
-        if not isinstance(message, str):
+        message_payload: dict[str, Any] = {
+            "id": request_id,
+            "op": op,
+            "payload": payload,
+        }
+        if metadata is not None and _OPERATION_SEQUENCE_HEADER in metadata:
+            message_payload["sequence"] = metadata[_OPERATION_SEQUENCE_HEADER]
+        self._websocket.send(json.dumps(message_payload))
+        raw = self._websocket.recv(timeout=self.timeout)
+        if not isinstance(raw, str):
             raise DaemonHTTPError("unexpected hot session frame", code="hot_session_protocol_error")
-        data = json.loads(message)
+        data = json.loads(raw)
         if not isinstance(data, dict) or data.get("id") != request_id:
             raise DaemonHTTPError(
                 "unexpected hot session response id",

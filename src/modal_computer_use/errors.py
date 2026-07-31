@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+
+from modal_computer_use.operation_kinds import STABLE_OPERATION_KINDS
 
 
 class ComputerUseError(Exception):
@@ -86,12 +87,93 @@ class SandboxAmbiguousError(SandboxUnavailableError):
     """Raised when an attach query matches multiple sandboxes."""
 
 
-class ProcessExecutionError(ComputerUseError):
-    """Raised when a desktop subprocess command fails."""
+class SessionBorrowError(ComputerUseError):
+    """Base class for safe session-borrow failures."""
+
+    message = "the session could not be borrowed"
+
+    def __init__(self, *_redacted: object, **_redacted_details: object) -> None:
+        super().__init__(self.message)
 
 
-@dataclass(frozen=True)
-class ErrorInfo:
-    code: str
-    message: str
-    details: dict[str, Any] | None = None
+class SessionCompatibilityError(SessionBorrowError):
+    """Raised when a session does not support the requested handoff protocol."""
+
+    message = "the session is not compatible with the requested handoff protocol"
+
+
+class SessionEnvironmentMismatchError(SessionCompatibilityError):
+    """Raised when the runtime environment does not match the session policy."""
+
+    message = "the runtime environment does not match the session policy"
+
+
+class SessionPlacementMismatchError(SessionCompatibilityError):
+    """Raised when Function placement does not match the session policy."""
+
+    message = "the Function placement does not match the session policy"
+
+
+class SessionTargetMismatchError(SessionBorrowError):
+    """Raised when the live target does not match the session handle."""
+
+    message = "the live target does not match the session handle"
+
+
+class SessionBusyError(SessionBorrowError):
+    """Raised when another run owns the session lease."""
+
+    message = "the session is already borrowed"
+
+
+class SessionLeaseLostError(SessionBorrowError):
+    """Raised when a borrower no longer owns the session lease."""
+
+    message = "the session lease was lost"
+
+
+class RunSequenceConflictError(SessionBorrowError):
+    """Raised when a run operation conflicts with the accepted sequence."""
+
+    message = "the run operation sequence conflicts with session state"
+
+
+class ActionOutcomeUnknownError(SessionBorrowError):
+    """Raised when an action may have executed but its outcome is unknown."""
+
+    message = "the action outcome is unknown"
+
+
+class OperationResultUnavailableError(SessionBorrowError):
+    """Raised when a retained operation result is no longer available."""
+
+    message = "the operation result is unavailable"
+
+    def __init__(
+        self,
+        *,
+        sequence: int,
+        operation_kind: str | None,
+    ) -> None:
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+            raise ValueError("sequence must be a nonnegative integer")
+        if operation_kind is not None and (
+            not isinstance(operation_kind, str)
+            or operation_kind not in STABLE_OPERATION_KINDS
+        ):
+            raise ValueError("operation_kind must be a stable daemon operation kind or None")
+        super().__init__()
+        self.sequence = sequence
+        self.operation_kind = operation_kind
+
+
+class OperationNotAppliedError(SessionBorrowError):
+    """Raised when durable receipt resolution proves an operation did not run."""
+
+    message = "the operation was not applied"
+
+
+class SessionRecoveryRequiredError(SessionBorrowError):
+    """Raised when explicit recovery is required before further operations."""
+
+    message = "the session requires recovery before further operations"

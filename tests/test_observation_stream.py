@@ -3169,6 +3169,49 @@ def test_observation_transport_run_actions_observe_change_receives_correlated_fr
     assert transport.receive_frame().payload == b"old"
 
 
+def test_leased_sync_observation_waits_for_match_and_buffers_unrelated_frames() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "frame", "id": "other", "seq": 1, "kind": "keyframe"}),
+            b"old",
+            json.dumps(
+                {
+                    "type": "frame",
+                    "id": "1",
+                    "seq": 2,
+                    "kind": "patch",
+                    "trigger": "run_actions_capture",
+                }
+            ),
+            b"new",
+        ]
+    )
+    events: list[str] = []
+
+    def execute(request):
+        events.append("entered")
+        result = request({"x-computer-use-operation-sequence": "7"})
+        events.append("completed")
+        return result
+
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+        _metadata_headers={"x-computer-use-lease-id": "lease"},
+        _mutation_executor=execute,
+    )
+
+    transport.run_actions_capture({"actions": []})
+
+    assert events == ["entered", "completed"]
+    sent = json.loads(websocket.sent[0])
+    assert sent["sequence"] == "7"
+    assert "x-computer-use-lease-id" not in sent
+    assert transport.receive_frame().payload == b"old"
+    assert transport.receive_frame().payload == b"new"
+
+
 def test_observation_transport_rejects_invalid_binary_payload_at_metadata_boundary() -> None:
     websocket = _FakeWebSocket(
         [

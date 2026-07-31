@@ -45,7 +45,7 @@ async def start(request: Request) -> LifecycleResult:
         await request.app.state.supervisor.start()
         return LifecycleResult(ok=True, status="running")
 
-    return await run_idle_only_mutation(request, operation)
+    return await run_idle_only_mutation(request, operation, semantic_data={})
 
 
 @router.post("/stop")
@@ -54,7 +54,7 @@ async def stop(request: Request) -> LifecycleResult:
         await request.app.state.supervisor.stop()
         return LifecycleResult(ok=True, status="stopped")
 
-    return await run_idle_only_mutation(request, operation)
+    return await run_idle_only_mutation(request, operation, semantic_data={})
 
 
 @router.post("/restart")
@@ -63,4 +63,4 @@ async def restart(request: Request) -> LifecycleResult:
         await request.app.state.supervisor.restart()
         return LifecycleResult(ok=True, status="running")
 
-    return await run_idle_only_mutation(request, operation)
+    return await run_idle_only_mutation(request, operation, semantic_data={})

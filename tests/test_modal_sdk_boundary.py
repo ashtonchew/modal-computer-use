@@ -130,8 +130,14 @@ class FakeSandboxObject:
     def wait_until_ready(self, *, timeout: int) -> None:
         self.wait_until_ready_calls.append(timeout)
 
-    def create_connect_token(self, *, user_metadata: dict[str, str]) -> FakeConnectToken:
+    def create_connect_token(
+        self,
+        *,
+        user_metadata: dict[str, str],
+        port: int,
+    ) -> FakeConnectToken:
         assert user_metadata["sdk"] == "modal-computer-use"
+        assert port == 8080
         return FakeConnectToken()
 
     def exec(
@@ -334,6 +340,8 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs
     assert kwargs["tags"]["computer-use.run_id"] == "run-123"
+    assert "computer-use.session_id" not in kwargs["tags"]
+    assert "computer-use.version" in kwargs["tags"]
     assert kwargs["tags"]["computer-use.owner"] == "alice"
     assert kwargs["tags"]["computer-use.artifacts_dir"] == "/home/desktop/artifacts"
     assert "computer-use.created_at" in kwargs["tags"]
@@ -863,7 +871,7 @@ def test_create_selects_named_image_without_inline_fallback(monkeypatch) -> None
     assert kwargs["tags"]["computer-use.image_identity"] == (
         f"modal-computer-use-chromium:{revision}"
     )
-    assert FakeApp.lookups == [("modal-computer-use", True, "prod")]
+    assert FakeApp.lookups == [("modal-computer-use", True, None)]
     assert selected == [
         {
             "revision": revision,
@@ -872,6 +880,26 @@ def test_create_selects_named_image_without_inline_fallback(monkeypatch) -> None
             "environment_name": "prod",
         }
     ]
+
+
+def test_create_uses_runtime_modal_environment_for_app_lookup(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(
+        run_id="run-123",
+        runtime={"modal_environment": "runtime-prod", "modal_region": "us-west"},
+        image={
+            "source": "named",
+            "revision": "a" * 40,
+            "environment_name": "image-prod",
+        },
+    )
+    monkeypatch.setattr("modal_computer_use.sandbox.named_image", lambda **_kwargs: object())
+
+    ComputerSandbox.create(config=config, wait=False)
+
+    assert FakeApp.lookups == [("modal-computer-use", True, "runtime-prod")]
+    _, create_kwargs = FakeSandbox.create_calls[0]
+    assert "environment_name" not in create_kwargs
 
 
 def test_create_preserves_reserved_computer_use_tags(monkeypatch) -> None:

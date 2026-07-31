@@ -106,9 +106,13 @@ The raw screenshot call is `screenshots.full_bytes(format="png", processing="dae
 ([`screenshots.py`](../src/modal_computer_use/namespaces/screenshots.py)). The validator rejects an
 empty payload, forces a full Pillow decode with `image.load()`, and checks format and exact geometry
 ([`latency.py`](../src/modal_computer_use/latency.py)). This is the required parsed and validated
-terminal boundary. The existing benchmark contract starts before `ComputerSandbox.create` and ends
-after a protected image decode
-([`modal_optimization.py`](../src/modal_computer_use/benchmarks/modal_optimization.py)).
+terminal boundary. The historical benchmark contract starts before `ComputerSandbox.create` and
+ends after a protected image decode. That contract remains
+available in the [July 19 evidence artifact](../benchmark-data/modal-optimization-results-2026-07-19.json)
+and its [commit-pinned benchmark source](https://github.com/ashtonchew/modal-computer-use/blob/8c21cf1338fd747dca57bca6941c307270069712/src/modal_computer_use/benchmarks/modal_optimization.py).
+Current measurements use the maintained
+[`modal_optimized_provider.py`](../src/modal_computer_use/benchmarks/modal_optimized_provider.py)
+workflow.
 
 Record sub-stage marks, but do not replace the primary metric with them: create returned, Modal TCP
 ready, Connect token returned, daemon `/readyz` true, response headers received, response body

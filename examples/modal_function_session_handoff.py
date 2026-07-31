@@ -11,34 +11,90 @@ Deploy this module once before calling ``run_example``:
 
 from __future__ import annotations
 
+import asyncio
+import sys
+import uuid
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
-from modal_computer_use import ComputerConfig, ComputerSandbox, ComputerSessionHandle
+from modal_computer_use import (
+    ComputerConfig,
+    ComputerSandbox,
+    ComputerSessionHandle,
+    OperationResultUnavailableError,
+)
+
+_examples_dir = str(Path(__file__).resolve().parent)
+if _examples_dir not in sys.path:
+    sys.path.insert(0, _examples_dir)
+
+from run_gateway.domain import TrajectoryOutcome, TrajectoryStatus  # noqa: E402
 
 FUNCTION_REGION = "us-west"  # Replace with one measured Modal region selector.
 APP_NAME = "computer-use-function-handoff"
 
 
-def choose_action_with_model(*, task: str, screenshot: object, turn: int) -> dict[str, object]:
+async def choose_action_with_model(
+    *, task: str, screenshot: object, turn: int
+) -> dict[str, object]:
     """Placeholder for the application's provider-specific model call."""
     _ = (task, screenshot, turn)
     return {"type": "wait", "duration_ms": 50}
 
 
-def run_trajectory_body(
+async def run_trajectory_body(
     handle: ComputerSessionHandle,
     task: str,
     *,
+    run_id: str,
     function_region: str = FUNCTION_REGION,
     max_turns: int = 3,
-) -> dict[str, object]:
+) -> dict[str, str]:
     """Hold one borrowed connection across the repeated observe/decide/act loop."""
-    with handle.borrow(function_region=function_region) as computer:
-        for turn in range(max_turns):
-            screenshot = computer.screenshots.full(format="png", processing="daemon")
-            action = choose_action_with_model(task=task, screenshot=screenshot, turn=turn)
-            computer.actions.run([action])
-    return {"completed": True, "turns": max_turns}
+    async with handle.borrow_async(
+        run_id=run_id, function_region=function_region
+    ) as computer:
+        try:
+            for turn in range(max_turns):
+                screenshot = await computer.screenshots.full(
+                    format="png", processing="daemon"
+                )
+                action = await choose_action_with_model(
+                    task=task, screenshot=screenshot, turn=turn
+                )
+                await computer.actions.run([action])
+        except OperationResultUnavailableError:
+            await computer.observe_after_result_loss()
+            return TrajectoryOutcome(TrajectoryStatus.INDETERMINATE).as_dict()
+    return TrajectoryOutcome(TrajectoryStatus.SUCCEEDED).as_dict()
+
+
+async def run_distinct_trajectories_body(
+    handles: list[ComputerSessionHandle],
+    tasks: list[str],
+    run_ids: list[str],
+    *,
+    function_region: str = FUNCTION_REGION,
+) -> list[dict[str, str]]:
+    """Run independent trajectories concurrently, one lease per desktop."""
+    if not (len(handles) == len(tasks) == len(run_ids)):
+        raise ValueError("handles, tasks, and run_ids must have equal lengths")
+    if len({handle.sandbox_id for handle in handles}) != len(handles):
+        raise ValueError("each concurrent trajectory requires a distinct desktop handle")
+    return list(
+        await asyncio.gather(
+            *(
+                run_trajectory_body(
+                    handle,
+                    task,
+                    run_id=run_id,
+                    function_region=function_region,
+                )
+                for handle, task, run_id in zip(handles, tasks, run_ids, strict=True)
+            )
+        )
+    )
 
 
 try:
@@ -47,6 +103,7 @@ except ImportError:
     modal = None
     app = None
     run_trajectory = None
+    run_distinct_trajectories = None
 else:
     app = modal.App(APP_NAME)
     function_image = modal.Image.debian_slim().pip_install("modal-computer-use[modal]")
@@ -59,11 +116,27 @@ else:
         max_containers=4,
         timeout=900,
     )
-    def run_trajectory(
+    async def run_trajectory(
         handle: ComputerSessionHandle,
         task: str,
-    ) -> dict[str, object]:
-        return run_trajectory_body(handle, task)
+        run_id: str,
+    ) -> dict[str, str]:
+        return await run_trajectory_body(handle, task, run_id=run_id)
+
+    @app.function(
+        image=function_image,
+        region=FUNCTION_REGION,
+        retries=0,
+        min_containers=0,
+        max_containers=4,
+        timeout=900,
+    )
+    async def run_distinct_trajectories(
+        handles: list[ComputerSessionHandle],
+        tasks: list[str],
+        run_ids: list[str],
+    ) -> list[dict[str, str]]:
+        return await run_distinct_trajectories_body(handles, tasks, run_ids)
 
 
 def run_example(
@@ -80,15 +153,18 @@ def run_example(
     deployed = modal.Function.from_name(APP_NAME, "run_trajectory")
     config = ComputerConfig(
         ingress="attested-tunnel",
-        runtime={"modal_region": FUNCTION_REGION},
+        runtime={"modal_environment": "main", "modal_region": FUNCTION_REGION},
     )
     with ComputerSandbox.create(config=config, app_name=APP_NAME) as owner:
         handle = owner.session_handle()
+        run_id = f"trajectory_{uuid.uuid4().hex}"
         if not spawn:
-            return {"mode": "remote", "result": deployed.remote(handle, task)}
-        call = deployed.spawn(handle, task)
+            return {"mode": "remote", "result": deployed.remote(handle, task, run_id)}
+        call = deployed.spawn(handle, task, run_id)
         if cancel_spawned:
             call.cancel()
+            with suppress(Exception):
+                call.get()
             return {"mode": "spawn", "cancel_requested": True}
         return {"mode": "spawn", "result": call.get()}
 

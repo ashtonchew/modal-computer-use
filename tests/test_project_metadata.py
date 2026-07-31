@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
+import tarfile
 import tomllib
+import zipfile
 from email.message import Message
 from pathlib import Path
 
@@ -53,6 +56,10 @@ def test_project_version_matches_runtime_and_openapi() -> None:
     assert project["version"] == modal_computer_use.__version__ == openapi["info"]["version"]
 
 
+def test_typed_package_marker_is_present_in_source() -> None:
+    assert (ROOT / "src" / "modal_computer_use" / "py.typed").is_file()
+
+
 def _core_metadata_bytes(*, version: str | None = None, duplicate_url: bool = False) -> bytes:
     expected = load_expected_metadata()
     metadata = Message()
@@ -95,6 +102,70 @@ def test_distribution_metadata_rejects_duplicate_project_url_labels() -> None:
 
     with pytest.raises(ValueError, match="duplicate Project-URL label"):
         _parse_project_urls(metadata)
+
+
+def _write_sdist_member(archive: tarfile.TarFile, name: str, data: bytes) -> None:
+    member = tarfile.TarInfo(name)
+    member.size = len(data)
+    archive.addfile(member, io.BytesIO(data))
+
+
+def test_distribution_checker_accepts_typing_marker_in_wheel_and_sdist(
+    tmp_path: Path,
+) -> None:
+    metadata = _core_metadata_bytes()
+    wheel = tmp_path / "modal_computer_use-1.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, mode="w") as archive:
+        archive.writestr("modal_computer_use/py.typed", b"")
+        archive.writestr("modal_computer_use-1.0.0.dist-info/METADATA", metadata)
+        archive.writestr("modal_computer_use-1.0.0.dist-info/licenses/LICENSE", b"MIT")
+
+    sdist = tmp_path / "modal_computer_use-1.0.0.tar.gz"
+    with tarfile.open(sdist, mode="w:gz") as archive:
+        root = "modal_computer_use-1.0.0"
+        _write_sdist_member(archive, f"{root}/PKG-INFO", metadata)
+        _write_sdist_member(archive, f"{root}/LICENSE", b"MIT")
+        _write_sdist_member(archive, f"{root}/src/modal_computer_use/py.typed", b"")
+
+    expected = load_expected_metadata()
+    CHECKER.validate_distribution(wheel, expected=expected)
+    CHECKER.validate_distribution(sdist, expected=expected)
+
+
+def test_strict_downstream_mypy_accepts_root_imports(tmp_path: Path) -> None:
+    config = tmp_path / "mypy.ini"
+    config.write_text("[mypy]\nstrict = True\npython_version = 3.12\n", encoding="utf-8")
+    consumer = tmp_path / "consumer.py"
+    consumer.write_text(
+        """from typing import assert_type
+
+from modal_computer_use import ComputerConfig, Point, RuntimeConfig, __version__
+
+config = ComputerConfig()
+assert_type(config, ComputerConfig)
+assert_type(config.runtime, RuntimeConfig)
+assert_type(Point(x=1, y=2).x, int)
+assert_type(__version__, str)
+""",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter and module
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            "--config-file",
+            str(config),
+            str(consumer),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_distribution_checker_requires_exactly_one_wheel_and_sdist(tmp_path: Path) -> None:

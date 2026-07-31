@@ -18,6 +18,17 @@ This directory contains tracked benchmark references that have been sanitized an
   binds each arm by SHA-256, and is guarded by pinning assertions in
   `tests/benchmarks/test_provider_artifacts.py`. Its arms compare to each other only; do not restate
   them against a run with a different runner path, requested resources, or command payload.
+- The 2026-07-31 one-core rerun is the single exception to the rule above, and it is a narrow one.
+  It carries the 2026-07-30 figures under `comparison_baseline`, bound to that artifact by SHA-256
+  so they cannot drift, and it carries them only so both runs can be read side by side. The pair
+  varies date and requested shape at once, so it is not a shape ablation, no causal claim about
+  cores or memory follows from it, and neither run supersedes the other.
+- Caller-placement evidence has no generator and no sanitizer. It is assembled by hand from the
+  ignored raw draws, binds each draw by SHA-256, and is guarded by pinning assertions in
+  `tests/benchmarks/test_provider_artifacts.py`. Both of its arms share one ingress, so no
+  measurement key may name a transport; the ingress is recorded once under
+  `configuration.observed`. Two draws are recorded, one pinned and one replication, and they are
+  never averaged.
 
 ## Combined provider report inputs
 

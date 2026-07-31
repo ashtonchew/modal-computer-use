@@ -12,16 +12,21 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   core:
     name: Core checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
 
@@ -47,7 +52,10 @@ jobs:
         run: uv run pytest -q
 
       - name: Generate benchmark report
-        run: uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-report.json
+        run: uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-results/benchmark-report.json
+
+      - name: Check repository hygiene
+        run: uv run python scripts/check_repository_hygiene.py
 
       - name: Run boundary scans
         run: |
@@ -56,20 +64,22 @@ jobs:
           ! rg -n "print\([^\n]*(vnc_url|debug\.vnc_url|\.uri|artifact_uri|token|data_base64|raw_path|stdout|stderr)" examples docs README.md
 
       - name: Upload benchmark report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: benchmark-report
-          path: benchmark-report.json
+          path: benchmark-results/benchmark-report.json
 
   package:
     name: Package checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
 
@@ -176,7 +186,7 @@ jobs:
           PY
 
       - name: Upload distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: distributions
           path: dist/release/*
@@ -186,12 +196,18 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke
     environment: modal-smoke
+    timeout-minutes: 30
+    concurrency:
+      group: protected-modal-smoke
+      cancel-in-progress: false
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
 

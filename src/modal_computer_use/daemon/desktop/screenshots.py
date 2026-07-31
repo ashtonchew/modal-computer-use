@@ -421,19 +421,6 @@ class _MSSCaptureSession:
         self._screenshotter = None
 
 
-def _capture_mss_png(source: Region, *, display: str) -> bytes | None:
-    try:
-        capture = _MSSCaptureSession(display=display).grab(source)
-    except ImportError:
-        return None
-    if capture is None:
-        return None
-    try:
-        return _encode_mss_png(capture)
-    except Exception:
-        return None
-
-
 def _capture_command(
     path: Path,
     *,

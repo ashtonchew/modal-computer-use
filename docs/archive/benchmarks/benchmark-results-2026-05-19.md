@@ -22,7 +22,7 @@ worktree env file:
 ```sh
 uv run computer-use benchmark compare \
   --providers daytona,e2b \
-  --env-file /Users/ashtonchew/projects/modal-computer-use/.worktrees/provider-benchamark/.env \
+  --env-file /path/to/untracked/.env \
   --iterations 10 \
   --output benchmark-results/provider-screenshot-debug-daytona-e2b-10x-20260519.json
 ```

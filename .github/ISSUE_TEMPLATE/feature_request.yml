@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a focused improvement to modal-computer-use.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem. Do not start with the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the behavior that would solve the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Describe current workarounds or other designs that you considered.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: State whether this affects the daemon, SDK, Modal orchestration, adapters, or documentation.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched for an existing issue or proposal.
+          required: true

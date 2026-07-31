@@ -15,7 +15,6 @@ from urllib.request import urlopen
 
 from modal_computer_use.models import ActionResult, X11Window
 
-BrowserKind = Literal["firefox", "chromium"]
 BrowserGpuMode = Literal["auto", "off", "chromium-vulkan"]
 
 DEFAULT_BROWSER_PROFILE_DIR = "/home/desktop/.cache/modal-computer-use/browser-profile"

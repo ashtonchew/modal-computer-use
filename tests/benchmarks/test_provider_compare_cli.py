@@ -199,9 +199,10 @@ def test_provider_compare_cli_accepts_tzafon() -> None:
 
 
 def test_provider_compare_parser_accepts_repeated_tzafon_provider(
-    monkeypatch, capsys
+    monkeypatch, tmp_path, capsys
 ) -> None:
     monkeypatch.delenv("TZAFON_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(
         ["benchmark", "compare", "--provider", "tzafon", "--iterations", "1"]

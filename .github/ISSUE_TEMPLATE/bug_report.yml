@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible problem in modal-computer-use.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities here. Use the private link in SECURITY.md.
+        Remove tokens, noVNC URLs, screenshots, recordings, clipboard text, typed text, and artifact data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the problem and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: List the smallest set of steps that reproduces the problem.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: State what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the package revision, Python version, backend, operating system, and relevant dependency versions.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Add a short traceback or log excerpt after you remove sensitive data.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched for an existing issue.
+          required: true
+        - label: I removed sensitive data from this report.
+          required: true

@@ -39,8 +39,10 @@ The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verif
 
 `ComputerSandbox.session_handle()` returns a frozen, versioned `ComputerSessionHandle` for an
 SDK-owned Modal desktop created with an explicit requested region and either `attested-tunnel` or
-`connect` ingress. The handle serializes only `schema_version`, sandbox ID, app name,
-`requested_modal_region`, ingress, daemon HTTP version, and config hash. The sandbox ID is hidden
+`connect` ingress and `vnc_mode="off" | "view_only"`. Control-mode noVNC targets cannot produce or
+enter a handoff. The v2 handle serializes only its protocol version, sandbox/session identity, app
+and Modal environment, `requested_modal_region`, ingress, daemon HTTP version, vnc policy, and
+config hash. Sandbox/session identity is hidden
 from `repr()` but necessarily remains in JSON or cloudpickle/pickle data so Modal can reconnect.
 Endpoint URLs, bearer or Connect credentials, noVNC URLs, tags, prompts, typed text, screenshots,
 and artifacts are never fields on the handle.
@@ -49,34 +51,150 @@ The handle is routing identity, not a bearer credential or an authorization boun
 or publish it. A public HTTP wrapper must authenticate callers and authorize the target before it
 invokes the deployed Function; the Function's Modal identity is what resolves fresh access.
 
-Use the synchronous borrow context inside a user-owned Modal Function:
+For non-Python clients, the
+[application-owned run gateway example](../examples/modal_run_gateway.py) provides a bounded
+spawn-and-poll HTTP control plane. It accepts only opaque application `desktop_key`, `task_key`,
+and required `idempotency_key` values. The host application must inject its principal resolver,
+ownership catalogs, atomic durable run store, and one deployed trajectory Function dispatcher.
+There is no permissive resolver or in-memory production store. Responses contain only the stable
+application run ID and sanitized state; provider call identities, handles, task text, results,
+endpoints, and tokens stay private.
+
+The gateway's closed lifecycle is `reserved -> dispatching -> running`, followed by a terminal
+state or `cancellation_requested`. Every admitted record has an absolute `deadline_at`; extending
+a reconciliation interval never extends that deadline. One application-store admission transaction authoritatively
+handles replay, quota, exclusive ownership of a stable application desktop identity, run creation,
+and creation of a payload-free pending dispatch intent. Versioned HMAC-SHA256 bindings keep raw
+idempotency keys and internal desktop/task identities out of the run record. A matching replay is
+returned before capacity checks; mismatched replay, desktop contention, and tenant quota exhaustion
+return sanitized errors without writes. A second atomic claim moves both the run and intent before
+the sole winner may spawn, including on replay after admission commit. The intent is not an
+automatic delivery queue and has no worker or delivered state.
+A safe cancellation or expiry before dispatch atomically revokes the still-pending intent while it
+releases capacity.
+A stale dispatch claim becomes `indeterminate` and is never automatically spawned again. Modal
+Function dispatch and durable persistence are not one transaction: the stable application run ID
+fences a repeated `borrow_async(run_id=run_id, ...)`, but it cannot reconstruct a missing
+FunctionCall identity after a dispatch/persistence gap.
+
+`GET /v1/runs/{run_id}` is a durable read and never polls Modal or advances state. The cancel route
+only records `cancellation_requested`, its request time, and a bounded cancellation deadline. A
+scheduled application reconciler owns polling and provider cancellation. It keyset-scans a bounded
+number of bounded pages and atomically leases each due record; every write requires both the opaque
+lease token and expected record version. Overlapping reconciler containers are therefore safe.
+Single-container Modal settings are cost controls, not correctness primitives.
+
+Pending polls reset the consecutive provider-error counter. Transiently unavailable polls use
+capped exponential backoff and become `indeterminate` at the configured error cap. At the absolute
+run deadline, recovery first persists cancellation intent, then polls before requesting
+`cancel(terminate_containers=False)`. Cancellation recovery polls before each request and remains
+`cancellation_requested` after an accepted or transiently failed request. Missing call identity,
+irrecoverable provider ambiguity, an error cap, or the cancellation deadline seals the record as
+`indeterminate`; it continues to hold quota and its desktop claim.
+
+The `RunStore` contract is intentionally incompatible with the former `reserve_if_absent` example.
+Adapters need an explicit migration, drain, or backfill. Existing SHA-only rows cannot safely infer
+desktop claims and must not be upgraded implicitly. Terminal `succeeded`, `failed`, and `cancelled`
+transitions release quota and the desktop claim exactly once; `indeterminate` retains both.
+For HMAC rotation, add the replacement as active and retain every referenced prior key for
+verification. Migrate, drain, or expire all rows and tombstones using a retiring version, verify no
+references remain, and only then remove that key. A missing retained key version is an internal
+configuration/migration failure: admission fails closed with no writes rather than treating an old
+identity as new. The example intentionally provides no migration worker or database adapter.
+
+The store contract also owns operator recovery and retention. `SAFE_RELEASE` and `SAFE_REPLACE`
+require a sealed `indeterminate` record, expected version, and non-empty actor, reason, and audit
+identity. Replacement atomically seals the old record and creates a successor with a fresh run and
+idempotency identity; it never reopens the ambiguous run. There is deliberately no production admin
+HTTP route. Retention may compact only released `succeeded`, `failed`, or `cancelled` records after
+the configured interval. Active, leased, cancellation, unresolved-audit, and all `indeterminate`
+records are protected. Replay tombstones must remain authoritative through their fencing window,
+and admission must consult them before quota or desktop acquisition.
+
+The gateway dispatcher calls the user-owned trajectory Function with
+`(handle, task, run_id, deadline_at)`. The deadline is the original timezone-aware absolute value
+from admission, so Function retries or container replacement cannot silently restart the wall-clock
+budget.
+
+Use the native-async borrow context inside an async user-owned Modal Function:
 
 ```python
 FUNCTION_REGION = "us-west"
 
 
-def trajectory(handle: ComputerSessionHandle, task: str) -> None:
-    with handle.borrow(function_region=FUNCTION_REGION) as computer:
+async def trajectory(handle: ComputerSessionHandle, task: str, run_id: str) -> None:
+    async with handle.borrow_async(
+        run_id=run_id, function_region=FUNCTION_REGION
+    ) as computer:
         for _ in range(3):
-            screenshot = computer.screenshots.full()
-            action = application_model_call(task, screenshot)
-            computer.actions.run([action])
+            screenshot = await computer.screenshots.full()
+            action = await application_model_call(task, screenshot)
+            await computer.actions.run([action])
 ```
 
-Constructing the context does not contact Modal or create credentials. Entering it requires exact
-equality between `function_region` and `requested_modal_region`, attaches once by sandbox ID and
-app name, requests fresh access, requires daemon readiness, and compares the live config hash. It
+Constructing the context does not contact Modal or create credentials. Entering it requires an
+application-generated `run_id` unique to that one trajectory/borrow; a durably sealed run ID cannot
+be reused. It also requires a positive finite readiness timeout, Modal's official deployed-Function
+runtime marker `MODAL_IS_REMOTE=1`, `MODAL_ENVIRONMENT`, exact equality between
+`function_region` and `requested_modal_region`, and handle/vnc policy before credential issuance.
+It then validates the live object, SDK marker, config tag, and policy-bound session tag before
+requesting fresh access, and requires daemon readiness. It
 does not retry, fall back to another transport, replay a callback, or replay an action. A failed
 endpoint, authorization, readiness, or config check propagates and closes any created client.
 Leaving the context detaches the borrower and never terminates the desktop; the creator retains
 lifecycle ownership. Borrow contexts are one-shot.
 
-This surface is synchronous only. A native async context may be added later without changing this
-contract; wrapping the synchronous API in a fake async facade is not supported. Daemon locking is
-per primitive action or action batch, not an exclusive lease for an entire trajectory. The
-application must prevent two Function invocations from running trajectories against the same
-desktop concurrently. This contract does not claim multi-tenant safety. If an action reports that
-input may be partial, the Function must not automatically replay it.
+The compact session tag combines randomness with a digest over the handle's app name, Modal
+environment, requested region, ingress, daemon HTTP version, VNC policy, and config hash. Borrow
+recomputes that digest from the handle and requires an exact live session-tag match, so changing any
+of those routing or policy fields is rejected before credentials are issued without consuming more
+of Modal's 10-tag Sandbox budget.
+
+`borrow_async()` is canonical for async Modal Functions and uses Modal's native `.aio` calls.
+Borrowed async application code, including model calls, must not block the event loop so the
+independent heartbeat and other desktop trajectories can progress. `borrow()` remains supported
+for synchronous callers. Entry acquires one exclusive daemon trajectory
+lease and starts an independent heartbeat. Every borrower-reachable mutation receives one gap-free
+sequence shared across HTTP, hot-session, and observation transports; an ordered action batch uses
+one sequence, while read-only calls consume none. Artifact/auto screenshot storage is a mutation;
+inline/raw capture is read-only.
+
+There is no automatic retry, fallback, callback replay, or action replay after possible dispatch.
+On a lost response the borrower resolves that exact sequence from the daemon's durable receipt:
+proven missing raises `OperationNotAppliedError`, completed-without-result raises
+`OperationResultUnavailableError`, and indeterminate work raises `ActionOutcomeUnknownError` or
+`SessionRecoveryRequiredError`. `OperationResultUnavailableError` exposes only the completed
+operation's nonnegative `sequence` and an allowlisted `operation_kind` when the daemon supplied a
+known stable route label; its message and representation remain generic.
+
+After that specific completed-without-result error, the borrowed facade provides one explicit
+read-only recovery convenience:
+
+```python
+try:
+    await computer.actions.run(actions)
+except OperationResultUnavailableError as exc:
+    frame = await computer.observe_after_result_loss()
+    # Decide from visible state, then leave this borrow. Use exc.sequence and
+    # exc.operation_kind only as safe diagnostic metadata.
+```
+
+`observe_after_result_loss()` accepts no options. It always captures the full screen as an inline
+PNG with daemon processing, creates no artifact, consumes no operation sequence, and may be called
+repeatedly while the borrow remains open. The original result is neither retained nor replayed.
+Observation success never clears the mutation block: every later mutation in that borrow still
+fails, so any application-elected continuation must leave the context and use a fresh run ID.
+Other read-only namespaces remain available; this helper does not create generic result recovery
+for commands or artifacts.
+
+A reobserved frame shows only one later visible state. It cannot reconstruct intermediate frames
+or animation, prove readiness, or establish semantic success. It also cannot reveal invisible
+command, clipboard, download, filesystem, network, or other effects outside the captured screen.
+All receipt outcomes seal the current borrow; only an indeterminate target requires owner recovery.
+The original `ComputerSandbox` owner can inspect `recovery_status()` and call
+`acknowledge_recovery(incident_id=...)`; attached objects without its private owner proof fail
+closed. Exclusive lease ownership prevents overlapping trajectories for one desktop but is not a
+claim that one desktop is safe for multiple tenants.
 
 Keyboard typing accepts `method="auto" | "keystrokes" | "clipboard" | "xdotool"`.
 `keystrokes` is the canonical direct-input behavior and uses the configured native or compatibility
@@ -341,4 +459,4 @@ commit visibility, reload behavior, and concurrency guidance.
 
 For complete route schemas and request/response models, see the generated
 [OpenAPI schema](openapi.json). The active product specification is
-[modal-computer-use specification v7](spec/modal_computer_use_spec_v7.md).
+[modal-computer-use specification v8](spec/modal_computer_use_spec_v8.md).

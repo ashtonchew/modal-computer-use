@@ -19,6 +19,7 @@ async def launch(payload: LaunchRequest, request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="app_launch_failed",
         fallback_message="app launch failed",
     )
@@ -44,6 +45,7 @@ async def open_artifact(payload: OpenArtifactRequest, request: Request) -> Actio
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="artifact_open_failed",
         fallback_message="artifact open failed",
     )

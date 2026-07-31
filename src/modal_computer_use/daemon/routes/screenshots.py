@@ -82,7 +82,11 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
             artifact_store=request.app.state.artifacts,
         )
 
-    return await run_screenshot_capture(request, operation)
+    return await run_screenshot_capture(
+        request,
+        operation,
+        mutation_semantic_data=payload if options.storage in {"artifact", "auto"} else None,
+    )
 
 
 @router.post(
@@ -128,7 +132,11 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
             artifact_store=request.app.state.artifacts,
         )
 
-    return await run_screenshot_capture(request, operation)
+    return await run_screenshot_capture(
+        request,
+        operation,
+        mutation_semantic_data=payload if options.storage in {"artifact", "auto"} else None,
+    )
 
 
 @router.post(
@@ -172,11 +180,11 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
         scaled_dimension(region.height, payload.scale),
     )
     options = ScreenshotOptions(
-        format=payload.format,  # type: ignore[arg-type]
+        format=payload.format,
         quality=payload.quality,
         scale=payload.scale,
         show_cursor=payload.show_cursor,
-        storage=payload.storage,  # type: ignore[arg-type]
+        storage=payload.storage,
     )
     async def operation() -> Screenshot:
         return await request.app.state.backend.screenshot(
@@ -185,7 +193,11 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
             artifact_store=request.app.state.artifacts,
         )
 
-    return await run_screenshot_capture(request, operation)
+    return await run_screenshot_capture(
+        request,
+        operation,
+        mutation_semantic_data=payload if options.storage in {"artifact", "auto"} else None,
+    )
 
 
 @router.post(
@@ -208,7 +220,7 @@ async def zoom_raw(payload: ZoomScreenshotRequest, request: Request) -> Response
         scaled_dimension(region.height, payload.scale),
     )
     options = ScreenshotOptions(
-        format=payload.format,  # type: ignore[arg-type]
+        format=payload.format,
         quality=payload.quality,
         scale=payload.scale,
         show_cursor=payload.show_cursor,

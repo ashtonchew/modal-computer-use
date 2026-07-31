@@ -3,7 +3,7 @@
 > **Archive category:** Superseded
 > **Date or revision:** 2026-05-11, v6
 > **Question:** How should the v5 architecture use UV-first packaging and developer tooling?
-> **Disposition:** [Specification v7](../../spec/modal_computer_use_spec_v7.md) superseded this
+> **Disposition:** [Specification v7](modal_computer_use_spec_v7.md) superseded this
 > design with the shipped-contract truth-up. Preserve the historical body; add corrections only as
 > explicit notes.
 

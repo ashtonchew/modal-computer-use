@@ -55,7 +55,7 @@ Install the Modal extra and authenticate before a live run:
 
 ```bash
 uv sync --extra modal
-uv run modal token new
+uv run modal setup
 ```
 
 The following command creates a billable Sandbox, waits for it, runs the selected surface, and
@@ -144,6 +144,80 @@ Each arm runs one warmup and 30 measured samples. The arms compare to each other
 artifact records the configuration differences that stop them from replacing the 2026-07-24
 subprocess A/B values.
 
+The same three arms were rerun on 2026-07-31 at the canonical 1 core and 2048 MiB shape that the
+rest of the current measurements use. The tracked artifact is
+[`benchmark-data/modal-subprocess-runner-ab-1cpu-2026-07-31.json`](../benchmark-data/modal-subprocess-runner-ab-1cpu-2026-07-31.json)
+and it came from three runs of this command:
+
+```bash
+for backend in asyncio threaded isolated-asyncio; do
+  uv run computer-use benchmark modal-colocated-client \
+    --app-name modal-computer-use-subprocess-ab-1cpu \
+    --runner-only \
+    --modal-region us-west-2 \
+    --modal-ingress attested-tunnel \
+    --daemon-http-version 1.1 \
+    --runner-path inherited \
+    --surface daemon-http \
+    --browser chromium \
+    --resource-profile browser \
+    --modal-cpu 1 \
+    --modal-memory-mib 2048 \
+    --runner-cpu 1 \
+    --runner-memory-mib 2048 \
+    --input-rate-limit-per-sec 0 \
+    --input-backend xtest \
+    --subprocess-backend "$backend" \
+    --iterations 30 \
+    --output "benchmark-results/subprocess-ab-1cpu-2026-07-31/$backend.json"
+done
+```
+
+Run the arms back to back and keep the default branch quiet for the length of the run, then check
+that all three arms report one `git_revision` before promoting them. The rerun changes the p50
+ordering between the two candidate fixes, so read the two artifacts together rather than
+substituting one for the other. The rerun records the 2026-07-30 figures under
+`comparison_baseline` and binds them by SHA-256. That pair varies date and requested shape at once,
+so it does not isolate the effect of shape.
+
+Dropping `--runner-only` keeps the external-caller arm, which turns the same command into a
+caller-placement comparison. The tracked artifact in
+[`benchmark-data/modal-caller-placement-us-west-2-2026-07-31.json`](../benchmark-data/modal-caller-placement-us-west-2-2026-07-31.json)
+came from two draws of this command:
+
+```bash
+uv run computer-use benchmark modal-colocated-client \
+  --app-name modal-computer-use-caller-placement \
+  --modal-region us-west-2 \
+  --caller-region-label dev-laptop-us-west \
+  --modal-ingress attested-tunnel \
+  --daemon-http-version 1.1 \
+  --runner-path inherited \
+  --surface daemon-http \
+  --browser chromium \
+  --resource-profile browser \
+  --modal-cpu 1 \
+  --modal-memory-mib 2048 \
+  --runner-cpu 1 \
+  --runner-memory-mib 2048 \
+  --input-rate-limit-per-sec 0 \
+  --input-backend xtest \
+  --subprocess-backend isolated-asyncio \
+  --iterations 30 \
+  --output benchmark-results/caller-placement-2026-07-31/attested-tunnel-1cpu-draw1.json
+```
+
+One run measures both arms against one target desktop, so the external caller and the co-located
+runner drive the same daemon. Because `--runner-path inherited` reuses the target base URL, both arms
+also share the attested-tunnel ingress, which is why the tracked artifact records the ingress once
+under `configuration.observed` rather than naming it in any measurement key.
+
+The second draw used the same command with a `draw2` output path. The tracked artifact pins draw 1
+and records draw 2 as replication. Draw 1 is pinned because unrelated pull requests landed on the
+default branch while draw 2 was in flight, so draw 2's co-located runner launched at a newer revision
+than its own external arm. Keep the default branch quiet for the length of a run, and check that both
+arms of a draw report one `git_revision` before promoting it.
+
 Use `modal-action-batching-ab` for the publishable four-click A/B alone. It launches one Modal
 Function, creates one Connect target with the same requested region, checks their observed placement,
 performs one warmup plus 30 measured iterations per arm, and runs terminal cleanup. The command will
@@ -219,6 +293,15 @@ check, and cleanup gate passes. Both target phases use the SDK's default atteste
 Modal Connect authorizes the daemon before recurring requests move to the encrypted tunnel. The
 resources are billable.
 
+The run creates two kinds of machine, and each takes its own resource request. `--modal-cpu` and
+`--modal-memory-mib` size every target Sandbox, which runs a full desktop. `--runner-cpu` and
+`--runner-memory-mib` size the Modal Function that creates those targets and issues their daemon
+requests. An omitted runner flag inherits the matching target value, so a command written before
+these flags existed still requests one shape for both machines and still reports `runner_cpu`,
+`runner_memory_mib`, `target_cpu`, and `target_memory_mib` as equal. The runner holds the HTTP
+client inside the warm-operation timer, so a different runner shape is a different configuration:
+rerun both phases and report the shapes rather than comparing across them.
+
 First-visual-change measurements are experimental. They confirm a changed frame by its hash under
 the documented boundary. They do not measure application settle or semantic readiness. Read the
 [Alpha observation guide](experimental-visual-change-observation.md) before using that surface.
@@ -271,6 +354,31 @@ The E2B benchmark target uses a one-hour session lifetime so the 30-sample warm 
 This changes how long the benchmark desktop remains available, not the public screenshot, input,
 or command methods inside the timer. The SDK's five-minute default expires during repeated
 1,000-character typing calls and leaves later command and verification rows on a dead session.
+
+## Reproduce the historical July 19 Modal optimization evidence
+
+[`modal-optimization-results-2026-07-19.json`](../benchmark-data/modal-optimization-results-2026-07-19.json)
+is retained as immutable historical evidence. Its legacy optimization harness is not a current workflow.
+Its recorded command manifests are provenance, not instructions to run against the current tree.
+
+Reproduce the execution only from a separate worktree at source revision
+`8c21cf1338fd747dca57bca6941c307270069712`, following the artifact's `command_manifest` and
+`v2_command_manifest`. The tracked artifact records execution date `2026-07-19`, sanitizer and
+normalizer revision `6f860de38df716c7cfdc0a23b186049751f34cd8`, and an open, unmerged dependency
+revision `37f977f80de93800c005caeec7ead5222b00b040`. Re-normalization additionally requires the
+private raw artifact named by its provenance and a checkout of the recorded normalizer revision.
+The current checkout is not a valid reproduction environment for those legacy commands.
+
+Use these maintained workflows for new evidence:
+
+| Measurement goal | Current workflow or evidence |
+| --- | --- |
+| Optimized lifecycle and warm operations | `computer-use benchmark modal-optimized-provider`; [`modal-optimized-provider-2026-07-30.json`](../benchmark-data/modal-optimized-provider-2026-07-30.json) |
+| Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
+| Combined provider report | `computer-use benchmark provider-results` over the validated tracked inputs |
+| Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |
+| Placement comparison | `computer-use benchmark modal-region-ab`, then `modal-region-summary` |
+| Modal V2 candidate or optimized-frontier experiments | Use [`run_modal_v2_candidate_benchmark.py`](../scripts/run_modal_v2_candidate_benchmark.py) or [`run_modal_optimized_frontier_benchmark.py`](../scripts/run_modal_optimized_frontier_benchmark.py) with the archived gated methodology linked below |
 
 ## Retain and publish artifacts
 
@@ -404,12 +512,19 @@ Live provider and Modal commands can create billable resources. Before a run:
    unit, minimum charge, and the rates that apply to the requested resources.
 2. Count the maximum target and runner instances, including warmups, measured attempts, permitted
    replacements, retries, and concurrent arms. Use configured lifecycle timeouts, not expected
-   latency, as the maximum duration.
+   latency, as the maximum duration. Where a command sizes its runner and its targets separately,
+   price the two shapes separately.
 3. Calculate an explicit ceiling: resource rate multiplied by maximum billable duration and instance
    count, plus fixed operation, storage, snapshot, data-transfer, and minimum charges. State any
    omitted or unknown charge.
 4. Record the ceiling with the run plan. Configure a provider budget or quota when available, and do
    not start when the ceiling exceeds the approved amount.
+
+Modal charges CPU and memory on whichever is higher, the request or the actual usage, and enforces a
+floor of 0.125 physical cores per container, where one physical core is two vCPU
+([Resources](https://modal.com/docs/guide/resources) and [Pricing](https://modal.com/pricing), both
+accessed 2026-07-29). A request above real usage is billed in full, so size each machine from its own
+measured usage rather than copying the other's shape.
 
 The commands on this page do not enforce a maximum-cost gate. They can continue creating billable
 resources until the benchmark finishes or a lifecycle limit stops it. Use an isolated app or project

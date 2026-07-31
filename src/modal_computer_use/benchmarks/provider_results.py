@@ -9,12 +9,37 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .modal_optimized_provider import (
+    OPTIMIZED_MODAL_INGRESS,
     PRODUCT_CREATE_CASE,
     validate_modal_optimized_provider_artifact,
 )
 
 SCHEMA_VERSION = 4
+# Ingress and machine shape an optimized evidence run may have been taken under. A run
+# must match one entry exactly; entries are never edited, only appended, so artifacts
+# tracked under an earlier shape keep validating. The runner Function and the target
+# Sandbox are always sized identically so the pair is scheduled and priced the same way.
+OPTIMIZED_EVIDENCE_TOPOLOGIES = (
+    {
+        "modal_ingress": "connect",
+        "runner_cpu": 4.0,
+        "runner_memory_mib": 8192,
+        "target_cpu": 4.0,
+        "target_memory_mib": 8192,
+    },
+    {
+        "modal_ingress": OPTIMIZED_MODAL_INGRESS,
+        "runner_cpu": 1.0,
+        "runner_memory_mib": 2048,
+        "target_cpu": 1.0,
+        "target_memory_mib": 2048,
+    },
+)
 SANITIZED_MODAL_INPUT_SCHEMA_VERSION = 1
+# `run_wall_clock_ms` is the raw run's `runner_dispatch.elapsed_ms`: how long the whole
+# benchmark dispatch took. The sanitizer always emits it, but artifacts sanitized before it
+# existed cannot be regenerated without their raw runs, so validation tolerates its absence.
+_OPTIONAL_SANITIZED_OPTIMIZED_KEYS = {"run_wall_clock_ms"}
 MINIMUM_ELIGIBLE_SOURCE_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
 OPAQUE_TZAFON_SETTLE_SENTENCE = (
     "Tzafon settle semantics are opaque at this API boundary, so its action "
@@ -442,22 +467,53 @@ def render_provider_results_markdown(payload: dict[str, Any]) -> str:
     boundaries = payload["boundaries"]
     artifacts = payload["tracked_artifacts"]
     topology = payload["request_topology"]
+    counts = payload["sample_counts"]
+    default_columns = _COLUMNS[1:]
     lines = [
         f"# Provider benchmark results, {payload['evidence_date']}",
         "",
         "**Evidence status:** eligible",
         "",
-        "Provider-default values are median [observed min–max] milliseconds. Modal optimized "  # noqa: RUF001
-        "values are p50 / p95 milliseconds.",
+        "## Read this before comparing results",
         "",
-        f"| Case | {' | '.join(headline['columns'])} |",
-        f"| --- | {' | '.join('---:' for _ in headline['columns'])} |",
+        "This is a point-in-time independent benchmark, not a service-level promise. This "
+        "project is not affiliated with or endorsed by Modal, Daytona, E2B, or Tzafon. "
+        "Product names and trademarks belong to their owners.",
+        "",
+        "The provider-default results use three samples from an external public-SDK caller. "
+        "The Modal optimized results use 30 samples from a Modal Function with the same "
+        "requested region as its targets. They differ in sample count, caller topology, "
+        "ingress, and configuration. Read them as two separate experiments, not as an "
+        "apples-to-apples provider ranking.",
+        "",
+        "## Provider-default comparison",
+        "",
+        "Values are median [observed min–max] milliseconds over three samples. These columns "  # noqa: RUF001
+        "share the external-caller methodology described below.",
+        "",
+        f"| Case | {' | '.join(label for _, label in default_columns)} |",
+        f"| --- | {' | '.join('---:' for _ in default_columns)} |",
     ]
     for row in headline["rows"]:
-        values = [_format_value(row["values"][key]) for key, _ in _COLUMNS]
+        values = [_format_value(row["values"][key]) for key, _ in default_columns]
         lines.append(f"| {row['label']} | {' | '.join(values)} |")
+    lines.extend(
+        [
+            "",
+            "## Modal optimized result",
+            "",
+            "Values are p50 / p95 milliseconds over 30 samples. This table describes the "
+            "optimized Modal deployment only. Do not combine it with the provider-default "
+            "table to claim controlled speedups.",
+            "",
+            "| Case | Modal optimized p50 / p95 |",
+            "| --- | ---: |",
+        ]
+    )
+    for row in headline["rows"]:
+        value = _format_value(row["values"]["modal_optimized"])
+        lines.append(f"| {row['label']} | {value} |")
     experiment = payload["experiment"]
-    counts = payload["sample_counts"]
     lines.extend(
         [
             "",
@@ -790,10 +846,14 @@ def sanitize_modal_optimized_input(
         "optimized daemon-http surface",
     )
     verification = _mapping(surface.get("verification"), "optimized verification")
+    dispatch = _mapping(payload.get("runner_dispatch"), "optimized runner dispatch")
     result = {
         "schema_version": SANITIZED_MODAL_INPUT_SCHEMA_VERSION,
         "benchmark": "sanitized-modal-optimized-provider",
         "status": "eligible",
+        "run_wall_clock_ms": _require_finite_nonnegative(
+            dispatch.get("elapsed_ms"), "optimized run wall clock"
+        ),
         "provenance": {
             "evidence_harness_sha": evidence_harness_sha,
             "raw_sha256": raw_sha256,
@@ -954,6 +1014,7 @@ def validate_sanitized_modal_optimized_input(payload: dict[str, Any]) -> None:
             "cases",
         },
         "sanitized optimized input",
+        optional=_OPTIONAL_SANITIZED_OPTIMIZED_KEYS,
     )
     if (
         payload.get("schema_version") != SANITIZED_MODAL_INPUT_SCHEMA_VERSION
@@ -961,6 +1022,10 @@ def validate_sanitized_modal_optimized_input(payload: dict[str, Any]) -> None:
         or payload.get("status") != "eligible"
     ):
         raise ProviderResultsError("sanitized optimized input schema is unsupported")
+    if "run_wall_clock_ms" in payload:
+        _require_finite_nonnegative(
+            payload.get("run_wall_clock_ms"), "sanitized optimized run wall clock"
+        )
     _validate_safe_value(payload)
     provenance = _validated_sanitized_provenance(payload)
     configuration = _mapping(payload.get("configuration"), "optimized configuration")
@@ -1178,17 +1243,13 @@ def _validated_optimized_cases(
     _require_ok(run, "Modal optimized runner")
     expected = {
         "modal_region": "us-west-2",
-        "modal_ingress": "connect",
         "daemon_http_version": "1.1",
         "browser": "chromium",
         "browser_prewarm": False,
         "image_revision": expected_harness_commit,
-        "runner_cpu": 4.0,
-        "runner_memory_mib": 8192,
-        "target_cpu": 4.0,
-        "target_memory_mib": 8192,
         "input_rate_limit_per_sec": 0,
         "subprocess_backend": "isolated-asyncio",
+        **_matched_optimized_topology(metadata),
     }
     for key, value in expected.items():
         if metadata.get(key) != value:
@@ -1487,15 +1548,10 @@ def _validate_sanitized_optimized_configuration(
         "modal_region": "us-west-2",
         "modal_cloud_provider": "CLOUD_PROVIDER_AWS",
         "modal_runner_kind": "modal-function",
-        "modal_ingress": "connect",
         "daemon_http_version": "1.1",
         "browser": "chromium",
         "browser_prewarm": False,
         "image_revision": evidence_harness_sha,
-        "runner_cpu": 4.0,
-        "runner_memory_mib": 8192,
-        "target_cpu": 4.0,
-        "target_memory_mib": 8192,
         "input_rate_limit_per_sec": 0,
         "subprocess_backend": "isolated-asyncio",
         "measured_iterations": 30,
@@ -1503,9 +1559,22 @@ def _validate_sanitized_optimized_configuration(
         "observed_target_placement_match": True,
         "external_caller_included": False,
         "runner_startup_in_product_create_boundary": False,
+        **_matched_optimized_topology(configuration),
     }
     if configuration != expected:
         raise ProviderResultsError("sanitized optimized configuration is not exact")
+
+
+def _matched_optimized_topology(configuration: dict[str, Any]) -> dict[str, Any]:
+    """Return the declared topology this configuration matches.
+
+    Falls back to the oldest declared topology when nothing matches, so the caller's
+    own comparison reports the mismatch with its usual message.
+    """
+    for topology in OPTIMIZED_EVIDENCE_TOPOLOGIES:
+        if all(configuration.get(key) == value for key, value in topology.items()):
+            return dict(topology)
+    return dict(OPTIMIZED_EVIDENCE_TOPOLOGIES[0])
 
 
 def _sample_quantiles(case: dict[str, Any]) -> tuple[float, float]:
@@ -1559,8 +1628,14 @@ def _mapping(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def _require_exact_keys(value: dict[str, Any], expected: set[str], label: str) -> None:
-    if set(value) != expected:
+def _require_exact_keys(
+    value: dict[str, Any],
+    expected: set[str],
+    label: str,
+    *,
+    optional: set[str] | None = None,
+) -> None:
+    if set(value) - (optional or set()) != expected:
         raise ProviderResultsError(f"{label} has unexpected or missing fields")
 
 

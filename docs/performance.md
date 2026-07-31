@@ -2,13 +2,29 @@
 
 Most latency in a computer-use loop comes from network round trips and screenshot encoding. This page lists the knobs that matter.
 
+## Receipt durability cost
+
+Each leased mutation crosses one target-local SQLite WAL commit with `synchronous=FULL` before the
+daemon dispatches the mutation. Terminal receipt bookkeeping remains `synchronous=NORMAL`, so the
+stronger synchronization cost is paid only at the safety boundary that prevents dispatch without a
+surviving `IN_PROGRESS` receipt. This is a surviving-target-filesystem guarantee, not remote
+persistence or desktop reconstruction after Sandbox loss.
+
+Measure the incremental cost on the intended runtime filesystem with alternating `FULL` and
+`NORMAL` pre-dispatch transactions, after warmup and with the same schema and terminal bookkeeping.
+Treat that local microbenchmark as deployment evidence rather than a production latency claim. Do
+not replace the safety boundary with a network filesystem or move the SQLite WAL to a Modal Volume.
+
 ## Modal Function handoff capacity
 
 A `ComputerSessionHandle` lets a Modal Function mint a fresh connection to an existing desktop and
 keep it for the whole repeated screenshot/model/action trajectory. Context construction is local;
 credential creation, readiness, and live config verification happen once on entry. This removes
 per-turn attach overhead, but does not remove action or batch round trips and does not retry failed
-or possibly partial work.
+or possibly partial work. Entry is restricted to a deployed Function runtime
+(`MODAL_IS_REMOTE=1`). A compact existing session tag binds app, environment, requested region,
+ingress, HTTP version, VNC policy, and config hash, so the safety check consumes no additional tag
+capacity.
 
 Set the Function's `region` placement request to the handle's exact `requested_modal_region`.
 `routing_region` affects Function input/output routing and is not a substitute. A shared requested
@@ -20,7 +36,8 @@ Choose Function capacity as an explicit latency/cost tradeoff:
 - `min_containers=0` scales the Function to zero and can add cold-start latency.
 - Positive warm capacity spends more to reduce idle-to-first-invocation delay.
 - `max_containers` and application admission control must prevent concurrent trajectories for one
-  desktop. Daemon input locking is only per action or batch, not per trajectory.
+  desktop. The daemon lease excludes overlapping trajectories per target; mutations still serialize
+  through one per-borrow sequence coordinator.
 - Use `retries=0` to avoid configured retries; Modal may still reschedule a crashed Function
   container, so the complete trajectory is not exactly-once.
 
@@ -28,7 +45,22 @@ Cancellation stops the Function invocation, not the target desktop and not prior
 borrower detaches on normal return or Python exception and the creator terminates only after remote
 and spawned work has reached a terminal outcome. Capacity planning must include the separately
 running Sandbox cost. This is a single-trajectory ownership contract, not a multi-tenant safety
-claim. The public surface is synchronous; native async borrowing may be added later.
+claim. `borrow_async()` is canonical for async Modal Functions and avoids blocking the event loop;
+`borrow()` is the supported synchronous variant. Modal async concurrent inputs run as asyncio tasks
+and cancellation arrives as `asyncio.CancelledError`; sync cancellation can terminate the Function
+container, which is another reason to prefer the native async surface for concurrent capacity.
+Lease heartbeat renewal for each async borrow runs on one private thread with a dedicated blocking
+transport, so ordinary blocking Python I/O does not starve the lease. Application model calls and
+other work should still use native async clients so screenshots, actions, cancellation delivery,
+and distinct-desktop tasks remain responsive. Use `asyncio.to_thread()` only as a compatibility
+bridge for blocking I/O. It does not make CPU-bound or GIL-holding work safe, and the heartbeat
+worker does not make a blocked event loop responsive.
+
+One Function invocation should hold the complete repeated loop. Function concurrency is useful for
+distinct desktop handles, not overlapping work on one handle. The executable example includes a
+concurrent distinct-target variant and rejects duplicate target handles. Lease heartbeat uses a
+separate daemon coordination lock, so a target operation longer than the lease TTL can remain owned
+while backend work holds the input lock.
 
 ## Batch actions
 
@@ -76,10 +108,12 @@ browser, iteration count, or image revision:
 
 ```bash
 uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http \
-  --input-backend xtest --iterations 10 --output benchmark-input-xtest.json
+  --input-backend xtest --iterations 10 \
+  --output benchmark-results/benchmark-input-xtest.json
 
 uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http \
-  --input-backend xdotool --iterations 10 --output benchmark-input-xdotool.json
+  --input-backend xdotool --iterations 10 \
+  --output benchmark-results/benchmark-input-xdotool.json
 ```
 
 Compare `daemon_summary_ms` for `move_click`, `move_click_sequence`, `type_100_chars`, and
@@ -457,7 +491,7 @@ uv run computer-use benchmark modal-colocated-client \
   --browser chromium \
   --iterations 10 \
   --observation-profile causal-action-observe-diagnostic \
-  --output modal-action-observe-diagnostics-us-west-browser-10x-YYYYMMDD.json
+  --output benchmark-results/modal-action-observe-diagnostics-us-west-browser-10x-YYYYMMDD.json
 ```
 
 Use this for diagnostic PRs. The profile includes 0B/5KB/50KB/250KB transport probes plus the
@@ -551,7 +585,8 @@ requested and fails.
 The report emits JSON with top-level run metadata, safe daemon version/capability metadata,
 benchmark entries keyed by name, raw millisecond samples, timing summaries, screenshot byte-size
 summaries, structured failures, and explicit `not_measured` entries for future Modal/Sandbox.exec
-cases unless live comparison is requested. Use `--output benchmark-report.json` to also write the
+cases unless live comparison is requested. Use
+`--output benchmark-results/benchmark-report.json` to also write the
 same JSON to disk. The reported `base_url` strips URL userinfo, query strings, and fragments so
 tokens are not copied into saved reports.
 
@@ -825,7 +860,7 @@ uv run computer-use benchmark modal-region-ab --iterations 30 \
   --modal-region default --modal-region us-west --modal-region us-east \
   --modal-ingress attested-tunnel --daemon-http-version 1.1 \
   --caller-region-label dev-laptop-us-west \
-  --output modal-region-ab-attested-h1-30x-YYYYMMDD.json
+  --output benchmark-results/modal-region-ab-attested-h1-30x-YYYYMMDD.json
 ```
 
 The helper creates one fresh Modal sandbox per region, keeps the ingress/resource/image knobs fixed,
@@ -836,7 +871,8 @@ Modal placement.
 Render a copyable markdown table from the JSON artifact with:
 
 ```bash
-uv run computer-use benchmark modal-region-summary modal-region-ab-attested-h1-30x-YYYYMMDD.json
+uv run computer-use benchmark modal-region-summary \
+  benchmark-results/modal-region-ab-attested-h1-30x-YYYYMMDD.json
 ```
 
 Record the caller location, ingress, daemon HTTP version, image profile, resource profile, and
@@ -862,7 +898,7 @@ uv run computer-use benchmark modal-colocated-client --iterations 30 \
   --runner-path inherited --runner-path connect --runner-path target-loopback \
   --observation-profile causal-action-observe-diagnostic \
   --caller-region-label dev-laptop-us-west \
-  --output modal-colocated-client-us-west-30x-YYYYMMDD.json
+  --output benchmark-results/modal-colocated-client-us-west-30x-YYYYMMDD.json
 ```
 
 This creates one target desktop sandbox in the selected region, runs the selected benchmark surfaces
@@ -1269,7 +1305,7 @@ This baseline was captured from the repository root on `main` after PR #14 merge
 
 ```bash
 uv run computer-use benchmark sdk --mock-local --iterations 10 \
-  --output benchmark-sdk-mock-local-2026-05-16.json
+  --output benchmark-results/benchmark-sdk-mock-local-2026-05-16.json
 ```
 
 The run used mock-local mode, created no Modal sandbox, requested no GPU, and made no provider API
@@ -1303,7 +1339,7 @@ uv run computer-use benchmark sdk \
   --browser chromium \
   --resource-profile browser \
   --iterations 10 \
-  --output benchmark-sdk-modal-nogpu-2026-05-17-rerun.json
+  --output benchmark-results/benchmark-sdk-modal-nogpu-2026-05-17-rerun.json
 ```
 
 The run created one `browser` resource-profile sandbox, prewarmed Chromium, and measured the
@@ -1316,8 +1352,7 @@ Environment metadata:
 - `modal_cold_create_to_ready_ms`: `10042.95`
 - `resource_profile`: `browser`
 - `browser`: `chromium`
-- `modal_run_id`: `run_d414387310d04d82`
-- `modal_sandbox_id`: `sb-lRBMLiEuXSwlbXnkWJIZzG`
+- Modal run and Sandbox identifiers: omitted because resource identifiers are sensitive.
 
 | Surface | Case | Status | Mean ms | p95 ms | Notes |
 | --- | --- | --- | ---: | ---: | --- |
@@ -1342,10 +1377,10 @@ iteration:
 
 ```bash
 uv run computer-use benchmark sdk --mock-local --surfaces daemon-http --iterations 10 \
-  --output benchmark-sdk-mock-local-2026-05-17-defaults.json
+  --output benchmark-results/benchmark-sdk-mock-local-2026-05-17-defaults.json
 
 uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http --iterations 10 \
-  --output benchmark-sdk-modal-connect-1024x768-2026-05-17.json
+  --output benchmark-results/benchmark-sdk-modal-connect-1024x768-2026-05-17.json
 ```
 
 The `daemon-http` key remains for CLI compatibility, but the recorded canonical labels are
@@ -1384,15 +1419,15 @@ iterations, and one warmup iteration per case. All three runs exited with `ok=tr
 ```bash
 uv run computer-use benchmark sdk --create-modal-sandbox --modal-ingress attested-tunnel \
   --surfaces daemon-http --iterations 10 \
-  --output benchmark-sdk-modal-attested-tunnel-1024x768-2026-05-18.json
+  --output benchmark-results/benchmark-sdk-modal-attested-tunnel-1024x768-2026-05-18.json
 
 uv run computer-use benchmark sdk --create-modal-sandbox --modal-ingress tunnel \
   --surfaces daemon-http --iterations 10 \
-  --output benchmark-sdk-modal-tunnel-1024x768-2026-05-18.json
+  --output benchmark-results/benchmark-sdk-modal-tunnel-1024x768-2026-05-18.json
 
 uv run computer-use benchmark sdk --create-modal-sandbox --modal-ingress connect \
   --surfaces daemon-http --iterations 10 \
-  --output benchmark-sdk-modal-connect-1024x768-2026-05-18.json
+  --output benchmark-results/benchmark-sdk-modal-connect-1024x768-2026-05-18.json
 ```
 
 | Canonical label | Auth path | Cold create ms | Batch 5 actions ms | Separate 5 actions ms | Move+click ms | 4x move/click ms | Screenshot ms | Type 100 chars ms | Type 1000 chars ms |
@@ -1412,7 +1447,7 @@ To isolate token/auth overhead from fresh-sandbox variance, run the same-sandbox
 
 ```bash
 uv run computer-use benchmark modal-ingress-ab --iterations 10 \
-  --output benchmark-sdk-modal-ingress-ab-1024x768-2026-05-18.json
+  --output benchmark-results/benchmark-sdk-modal-ingress-ab-1024x768-2026-05-18.json
 ```
 
 That command creates one raw-tunnel sandbox, runs the daemon surface with the static tunnel token,

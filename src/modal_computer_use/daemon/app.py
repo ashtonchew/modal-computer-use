@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import OrderedDict, deque
@@ -23,8 +24,10 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputUnavailableError,
 )
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
+from modal_computer_use.daemon.leases import LeaseCoordinator
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.readiness import ReadinessCache
+from modal_computer_use.daemon.receipts import ReceiptJournal
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
@@ -45,11 +48,13 @@ from .routes import (
     hot_session,
     input,
     keyboard,
+    leases,
     lifecycle,
     mouse,
     observations,
     processes,
     recordings,
+    recovery,
     screenshots,
     session,
     windows,
@@ -61,10 +66,18 @@ logger = logging.getLogger("modal_computer_use.daemon.app")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     supervisor: Supervisor = app.state.supervisor
+    await app.state.receipt_journal.start()
     await supervisor.start()
     app.state.browser_prewarm = None
     startup_url = app.state.settings.browser_open_url_on_start
-    if startup_url:
+    recovery_status = await app.state.receipt_journal.recovery_status()
+    if recovery_status["recovery_required"]:
+        app.state.browser_prewarm = ActionResult(
+            ok=False,
+            message="browser startup skipped while target recovery is required",
+            output={"code": "recovery_required"},
+        )
+    elif startup_url:
         try:
             app.state.browser_prewarm = await app.state.backend.open_url(
                 startup_url,
@@ -91,9 +104,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         try:
+            lease_expiry_task = app.state.lease_expiry_task
+            if lease_expiry_task is not None:
+                lease_expiry_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await lease_expiry_task
             await supervisor.stop()
         finally:
-            app.state.backend.close()
+            try:
+                app.state.backend.close()
+            finally:
+                await app.state.receipt_journal.close()
 
 
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
@@ -119,6 +140,10 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         subprocess_backend=settings.subprocess_backend,
     )
     app.state.input_lock = asyncio.Lock()
+    app.state.lease_lock = asyncio.Lock()
+    app.state.lease_coordinator = LeaseCoordinator()
+    app.state.lease_expiry_task = None
+    app.state.receipt_journal = ReceiptJournal(settings.runtime_dir)
     app.state.readiness_cache = ReadinessCache(settings.readiness_cache_ttl_ms)
     app.state.artifacts = ArtifactStore(
         settings.artifacts_dir,
@@ -278,6 +303,8 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     for router in (
         health.router,
+        leases.router,
+        recovery.router,
         lifecycle.router,
         processes.router,
         mouse.router,

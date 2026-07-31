@@ -24,6 +24,7 @@ async def start(payload: RecordingStartRequest, request: Request) -> Recording:
     return await run_recording_start(
         request,
         operation,
+        semantic_data=payload,
         rollback=lambda rec: request.app.state.recordings.delete(rec.id),
     )
 
@@ -36,10 +37,11 @@ async def stop(recording_id: str, request: Request) -> Recording:
     rec = await run_idle_only_mutation(
         request,
         operation,
+        semantic_data={"recording_id": recording_id},
         enforce_after=("recordings", "artifacts"),
         rollback=lambda _rec: request.app.state.recordings.delete(recording_id),
+        after_success=lambda _rec: request.app.state.recordings.append_manifest(recording_id),
     )
-    request.app.state.recordings.append_manifest(recording_id)
     return rec
 
 
@@ -72,7 +74,11 @@ async def delete(recording_id: str, request: Request) -> dict[str, bool]:
         request.app.state.recordings.delete(recording_id)
         return {"ok": True}
 
-    return await run_idle_only_mutation(request, operation)
+    return await run_idle_only_mutation(
+        request,
+        operation,
+        semantic_data={"recording_id": recording_id},
+    )
 
 
 @dashboard_router.get("/recordings/ui", response_class=HTMLResponse)

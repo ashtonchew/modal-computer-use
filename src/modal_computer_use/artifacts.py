@@ -121,14 +121,14 @@ class ArtifactStore:
         return ArtifactInfo(
             path=public_path,
             uri=f"artifact://{public_path}",
-            kind=kind,  # type: ignore[arg-type]
+            kind=kind,
             size_bytes=size,
             content_type=content_type,
             sha256=digest,
             created_at=datetime.fromtimestamp(stat.st_ctime, tz=UTC),
             modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
             created_by_call_id=created_by_call_id,
-            retention_class=retention_class,  # type: ignore[arg-type]
+            retention_class=retention_class,
         )
 
     def write_bytes(

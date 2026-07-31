@@ -1,5 +1,6 @@
 from ._version import __version__
-from .client import DaemonClient
+from .borrowed import AsyncBorrowedComputer, BorrowedComputer
+from .client import AsyncDaemonClient, DaemonClient
 from .config import (
     ActionConfig,
     BrowserConfig,
@@ -13,13 +14,25 @@ from .config import (
     StorageConfig,
 )
 from .errors import (
+    ActionOutcomeUnknownError,
     BrowserReadinessError,
     ConfigConflictError,
     FrameValidationError,
+    OperationNotAppliedError,
+    OperationResultUnavailableError,
+    RunSequenceConflictError,
     SandboxAmbiguousError,
     SandboxUnavailableError,
+    SessionBorrowError,
+    SessionBusyError,
+    SessionCompatibilityError,
+    SessionEnvironmentMismatchError,
+    SessionLeaseLostError,
+    SessionPlacementMismatchError,
+    SessionRecoveryRequiredError,
+    SessionTargetMismatchError,
 )
-from .hot_session import HotSessionClient
+from .hot_session import AsyncHotSessionClient, HotSessionClient
 from .latency import (
     SessionStartupTiming,
     WarmPoolClaim,
@@ -33,7 +46,7 @@ from .latency import (
     pool_config_identity,
     validate_first_frame,
 )
-from .manager import ComputerSandboxManager, SandboxManager
+from .manager import ComputerSandboxManager
 from .models import (
     ActionBatchResult,
     ActionBatchTiming,
@@ -58,9 +71,11 @@ from .models import (
     SandboxRef,
     Screenshot,
     ScreenshotOptions,
+    SessionRecoveryAcknowledgement,
+    SessionRecoveryStatus,
     X11Window,
 )
-from .observations import ActionObservationResult, ObservationClient
+from .observations import ActionObservationResult, AsyncObservationClient, ObservationClient
 from .registry import SandboxRegistry
 from .sandbox import (
     ComputerSandbox,
@@ -82,9 +97,15 @@ __all__ = [
     "ActionDecision",
     "ActionItemResult",
     "ActionObservationResult",
+    "ActionOutcomeUnknownError",
     "ActionResult",
     "ArtifactInfo",
     "ArtifactSyncResult",
+    "AsyncBorrowedComputer",
+    "AsyncDaemonClient",
+    "AsyncHotSessionClient",
+    "AsyncObservationClient",
+    "BorrowedComputer",
     "BrowserConfig",
     "BrowserReadinessError",
     "BudgetConfig",
@@ -111,22 +132,34 @@ __all__ = [
     "ModalVolumeMount",
     "NetworkConfig",
     "ObservationClient",
+    "OperationNotAppliedError",
+    "OperationResultUnavailableError",
     "Point",
     "ProcessStatus",
     "Recording",
     "Region",
     "ResourceConfig",
+    "RunSequenceConflictError",
     "RuntimeConfig",
     "SandboxAmbiguousError",
     "SandboxCleanupItem",
     "SandboxCleanupResult",
-    "SandboxManager",
     "SandboxRef",
     "SandboxRegistry",
     "SandboxUnavailableError",
     "Screenshot",
     "ScreenshotOptions",
+    "SessionBorrowError",
+    "SessionBusyError",
+    "SessionCompatibilityError",
+    "SessionEnvironmentMismatchError",
+    "SessionLeaseLostError",
+    "SessionPlacementMismatchError",
+    "SessionRecoveryAcknowledgement",
+    "SessionRecoveryRequiredError",
+    "SessionRecoveryStatus",
     "SessionStartupTiming",
+    "SessionTargetMismatchError",
     "StorageConfig",
     "WarmPoolClaim",
     "WarmPoolClaimMetrics",

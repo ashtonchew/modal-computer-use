@@ -16,6 +16,7 @@ async def release_all(request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data={},
         fallback_code="release_all_failed",
         fallback_message="release all failed",
     )

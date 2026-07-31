@@ -32,7 +32,11 @@ async def process_restart(name: str, request: Request) -> ProcessStatus:
         await request.app.state.supervisor.restart(name)
         return request.app.state.supervisor.status(name)
 
-    return await run_idle_only_mutation(request, operation)
+    return await run_idle_only_mutation(
+        request,
+        operation,
+        semantic_data={"process": name},
+    )
 
 
 @router.get("/{name}/logs")

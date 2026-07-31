@@ -614,8 +614,34 @@ def main(argv: list[str] | None = None) -> int:
     optimized_provider_parser = benchmark_subparsers.add_parser("modal-optimized-provider")
     optimized_provider_parser.add_argument("--modal-region", required=True)
     optimized_provider_parser.add_argument("--image-revision", required=True)
-    optimized_provider_parser.add_argument("--modal-cpu", type=float, default=4.0)
-    optimized_provider_parser.add_argument("--modal-memory-mib", type=int, default=8192)
+    optimized_provider_parser.add_argument(
+        "--modal-cpu",
+        type=float,
+        default=4.0,
+        help=(
+            "physical cores requested for each target Sandbox; also the runner Function "
+            "request when --runner-cpu is omitted"
+        ),
+    )
+    optimized_provider_parser.add_argument(
+        "--modal-memory-mib",
+        type=int,
+        default=8192,
+        help=(
+            "memory requested for each target Sandbox; also the runner Function request "
+            "when --runner-memory-mib is omitted"
+        ),
+    )
+    optimized_provider_parser.add_argument(
+        "--runner-cpu",
+        type=float,
+        help="physical cores requested for the runner Function; defaults to --modal-cpu",
+    )
+    optimized_provider_parser.add_argument(
+        "--runner-memory-mib",
+        type=int,
+        help="memory requested for the runner Function; defaults to --modal-memory-mib",
+    )
     optimized_provider_parser.add_argument("--browser", choices=["chromium"], default="chromium")
     optimized_provider_parser.add_argument("--iterations", type=_positive_int, default=30)
     optimized_provider_parser.add_argument("--warmup-iterations", type=_nonnegative_int, default=1)
@@ -798,6 +824,7 @@ def main(argv: list[str] | None = None) -> int:
                 "nonpublishable counts require --pilot; publishable runs use 30 measured "
                 "and 1 warmup"
             )
+        _validate_optimized_provider_resource_args(args, parser=optimized_provider_parser)
         return _benchmark_modal_optimized_provider(args)
     if args.benchmark_command == "modal-optimized-ingress-ab":
         if not args.pilot and (args.iterations != 30 or args.warmup_iterations != 2):
@@ -838,6 +865,8 @@ def _benchmark_modal_optimized_provider(args: argparse.Namespace) -> int:
         image_revision=args.image_revision,
         cpu=args.modal_cpu,
         memory_mib=args.modal_memory_mib,
+        runner_cpu=args.runner_cpu,
+        runner_memory_mib=args.runner_memory_mib,
         browser=args.browser,
         iterations=args.iterations,
         warmup_iterations=args.warmup_iterations,
@@ -1733,7 +1762,7 @@ def _modal_colocated_surfaces(
         if parser is not None:
             parser.error(f"invalid co-located benchmark surface: {', '.join(invalid)}")
         raise SystemExit(f"invalid co-located benchmark surface: {', '.join(invalid)}")
-    return values  # type: ignore[return-value]
+    return values
 
 
 def _modal_colocated_runner_paths(args: argparse.Namespace) -> list[str]:
@@ -1754,7 +1783,8 @@ def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:
     if sandbox is None:
         raise SandboxUnavailableError("modal ingress A/B benchmark requires a Modal sandbox")
     token_info = sandbox.create_connect_token(
-        user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-ingress-ab"}
+        user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-ingress-ab"},
+        port=8080,
     )
     connect_base_url, connect_token = _connect_token_parts(token_info)
     connect_client = DaemonClient(base_url=connect_base_url, token=connect_token)
@@ -1885,6 +1915,23 @@ def _validate_modal_create_args(
         parser.error("--input-rate-limit-per-sec must be non-negative")
 
 
+def _validate_optimized_provider_resource_args(
+    args: argparse.Namespace,
+    *,
+    parser: argparse.ArgumentParser,
+) -> None:
+    """Reject bad runner and target shapes before the frozen benchmark config raises."""
+    for flag, value in (("--modal-cpu", args.modal_cpu), ("--runner-cpu", args.runner_cpu)):
+        if value is not None and value <= 0:
+            parser.error(f"{flag} must be greater than 0")
+    for flag, value in (
+        ("--modal-memory-mib", args.modal_memory_mib),
+        ("--runner-memory-mib", args.runner_memory_mib),
+    ):
+        if value is not None and value < 128:
+            parser.error(f"{flag} must be at least 128")
+
+
 def _sdk_surfaces(
     args: argparse.Namespace,
     *,
@@ -1908,7 +1955,7 @@ def _sdk_surfaces(
         if parser is not None:
             parser.error(f"invalid benchmark surface: {', '.join(invalid)}")
         raise SystemExit(f"invalid benchmark surface: {', '.join(invalid)}")
-    return values  # type: ignore[return-value]
+    return values
 
 
 def _compare_providers(
@@ -1929,7 +1976,7 @@ def _compare_providers(
         if parser is not None:
             parser.error(f"invalid provider: {', '.join(invalid)}")
         raise SystemExit(f"invalid provider: {', '.join(invalid)}")
-    return values  # type: ignore[return-value]
+    return values
 
 
 def _has_live_external_provider(providers: list[ComparisonProvider]) -> bool:

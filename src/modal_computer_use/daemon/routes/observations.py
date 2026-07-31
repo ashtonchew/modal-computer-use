@@ -406,7 +406,14 @@ async def _handle_observation_message(
             action_request = ActionBatchRequest.model_validate(
                 stream_request.model_dump(mode="json", exclude={"capture_delay_ms"})
             )
-            action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
+            action_result = await run_batch(
+                action_request,
+                ActionBatchContext(
+                    websocket.app.state,
+                    websocket.headers,
+                    operation_sequence=message.get("sequence"),
+                ),
+            )
             if stream_request.capture_delay_ms > 0:
                 await asyncio.sleep(stream_request.capture_delay_ms / 1000)
             await _send_next_frame(
@@ -496,7 +503,14 @@ async def _handle_observation_message(
             )
             signal_prepare_ms = _elapsed_ms(signal_prepare_started)
             action_started = perf_counter()
-            action_result = await run_batch(action_request, ActionBatchContext(websocket.app.state))
+            action_result = await run_batch(
+                action_request,
+                ActionBatchContext(
+                    websocket.app.state,
+                    websocket.headers,
+                    operation_sequence=message.get("sequence"),
+                ),
+            )
             action_ended = perf_counter()
             action_wall_ms = (action_ended - action_started) * 1000
             capture_delay_wall_ms = 0.0
@@ -1223,11 +1237,6 @@ async def _send_changed_frame(
         },
         frame_encoding_override=frame_encoding_override,
     )
-
-
-async def _capture_region_source_sha256(websocket: WebSocket, *, region: Region) -> str | None:
-    sha256, _timing = await _capture_region_source_sha256_with_timing(websocket, region=region)
-    return sha256
 
 
 async def _capture_region_source_sha256_with_timing(
@@ -2078,15 +2087,6 @@ async def _capture_frame_with_timing(
         "_current_tile_hashes": None,
     }
     return metadata, delta["payload"], capture_timing
-
-
-async def _capture_raw_frame(
-    websocket: WebSocket,
-    request: ObservationStreamRequest,
-    options: ScreenshotOptions,
-) -> CapturedRawScreenshot | None:
-    raw, _timing = await _capture_raw_frame_with_timing(websocket, request, options)
-    return raw
 
 
 async def _capture_raw_frame_with_timing(

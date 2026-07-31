@@ -7,6 +7,8 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+CONTEXT = ROOT / "CONTEXT.md"
+CHANGELOG = ROOT / "CHANGELOG.md"
 DOC_MAP = DOCS / "README.md"
 ARCHIVE_MAP = DOCS / "archive" / "README.md"
 ARCHIVE = DOCS / "archive"
@@ -34,7 +36,12 @@ ARCHIVE_DISPOSITION_RE = re.compile(r"^>\s+\*\*Disposition:\*\*\s+\S", re.MULTIL
 
 def _markdown_files() -> list[Path]:
     """Return user-facing Markdown, excluding non-document trees by construction."""
-    roots = [ROOT / "README.md", ROOT / "SECURITY.md"]
+    roots = [
+        ROOT / "README.md",
+        ROOT / "SECURITY.md",
+        ROOT / "CONTRIBUTING.md",
+        ROOT / "CODE_OF_CONDUCT.md",
+    ]
     return [path for path in [*roots, *sorted(DOCS.rglob("*.md"))] if path.is_file()]
 
 
@@ -175,6 +182,24 @@ def test_root_readme_repository_links_are_absolute_https() -> None:
     )
 
 
+def test_onboarding_docs_use_canonical_setup_guidance() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Python 3.12 or later" in readme
+    assert "quickstart.py" in readme
+    assert "uv run python quickstart.py" in readme
+
+    onboarding_docs = [
+        ROOT / "README.md",
+        DOCS / "modal-deployment.md",
+        DOCS / "benchmarking.md",
+    ]
+    for path in onboarding_docs:
+        source = path.read_text(encoding="utf-8")
+        assert "uv run modal setup" in source, path.relative_to(ROOT)
+        assert "uv run modal token new" not in source, path.relative_to(ROOT)
+
+
 def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
     section = source[
@@ -184,6 +209,50 @@ def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> Non
     ]
 
     assert "uv run computer-use benchmark modal-optimized-provider" in section
+
+
+def test_external_provider_benchmarks_are_current_but_benchmark_only() -> None:
+    source = CONTEXT.read_text(encoding="utf-8")
+
+    assert "may live in this repository" in source
+    assert "`benchmark compare` and `benchmark provider-results` are maintained" in source
+    assert "not public SDK compatibility contracts" in source
+    assert "branch-only `benchmark compare`" not in source
+    assert "lives outside the SDK release path" not in source
+
+
+def test_historical_modal_optimization_evidence_is_commit_pinned() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+
+    assert "modal-optimization-results-2026-07-19.json" in source
+    assert "8c21cf1338fd747dca57bca6941c307270069712" in source
+    assert "6f860de38df716c7cfdc0a23b186049751f34cd8" in source
+    assert "37f977f80de93800c005caeec7ead5222b00b040" in source
+    assert "not a current workflow" in source
+    assert "current checkout is not a valid reproduction environment" in source
+    for replacement in (
+        "modal-optimized-provider",
+        "benchmark compare",
+        "provider-results",
+        "daemon-observation-stream",
+        "modal-region-ab",
+        "run_modal_v2_candidate_benchmark.py",
+        "run_modal_optimized_frontier_benchmark.py",
+    ):
+        assert replacement in source
+
+
+def test_v1_changelog_has_compatibility_migrations() -> None:
+    source = CHANGELOG.read_text(encoding="utf-8")
+    release = source[source.index("## 1.0.0 - 2026-07-31") : source.index("## 0.1.0")]
+
+    for removed, replacement in (
+        ("SandboxManager", "ComputerSandboxManager"),
+        ("modal_workspace_billing_report", "modal_billing_report"),
+        ("XTestPointerController", "X11InputSession"),
+    ):
+        assert f"| `{removed}` | `{replacement}` |" in release
+    assert "without a deprecation window" in release
 
 
 def test_documentation_map_links_each_current_top_level_doc_once() -> None:
@@ -235,5 +304,6 @@ def test_active_and_archived_specifications_have_one_owner() -> None:
     active_names = {path.name for path in (DOCS / "spec").glob("*.md")}
     archived_names = {path.name for path in (ARCHIVE / "spec").glob("*.md")}
 
-    assert "modal_computer_use_spec_v7.md" in active_names
+    assert "modal_computer_use_spec_v8.md" in active_names
+    assert "modal_computer_use_spec_v7.md" in archived_names
     assert active_names.isdisjoint(archived_names)

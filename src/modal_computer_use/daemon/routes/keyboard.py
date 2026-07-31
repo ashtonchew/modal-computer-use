@@ -34,6 +34,7 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="keyboard_type_failed",
         fallback_message="keyboard type failed",
     )
@@ -53,6 +54,7 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="keyboard_press_failed",
         fallback_message="keyboard press failed",
     )
@@ -71,6 +73,7 @@ async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="keyboard_hotkey_failed",
         fallback_message="keyboard hotkey failed",
     )
@@ -102,6 +105,7 @@ async def hold(payload: HoldRequest, request: Request) -> ActionResult:
     return await run_input_action(
         request,
         operation,
+        semantic_data=payload,
         fallback_code="keyboard_hold_failed",
         fallback_message="keyboard hold failed",
     )

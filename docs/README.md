@@ -29,7 +29,8 @@ specifications preserve design history.
 - [Performance](performance.md): stable latency mechanisms and tuning guidance.
 - [Security](security.md): runtime threat model and operational controls.
 - [Glossary](glossary.md): project terms.
-- [Active specification](spec/modal_computer_use_spec_v7.md): detailed shipped design and contract
+- [Active specification](spec/modal_computer_use_spec_v8.md): canonical architecture, maturity,
+  safety, and product-contract
   history.
 
 ## Benchmark
@@ -46,6 +47,9 @@ tracked artifact eligibility, and the [archive policy](archive/README.md) define
 
 ## Contribute and release
 
+- [Contributing guide](../CONTRIBUTING.md): report issues, propose changes, run local checks, and
+  submit pull requests.
+- [Code of conduct](../CODE_OF_CONDUCT.md): follow the community behavior and reporting policy.
 - [Release checklist](release-checklist.md): verification, packaging, protected smoke tests, and
   release review.
 - [Drafts](drafts/README.md): write, preview, and export long-form articles built on tracked

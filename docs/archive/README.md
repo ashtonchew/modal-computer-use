@@ -24,7 +24,7 @@ Do not silently revise archived evidence to match current behavior. Add a short 
 disposition note when later context is necessary.
 
 Current product contracts remain in [API](../api.md), [configuration](../configuration.md), and the
-[active specification](../spec/modal_computer_use_spec_v7.md). Current benchmark procedure remains
+[active specification](../spec/modal_computer_use_spec_v8.md). Current benchmark procedure remains
 in [benchmarking](../benchmarking.md). Machine-readable current evidence remains in
 [`benchmark-data/`](../../benchmark-data/).
 
@@ -33,7 +33,10 @@ in [benchmarking](../benchmarking.md). Machine-readable current evidence remains
 - [Specification v5](spec/modal_computer_use_spec_v5.md) records the architecture before the
   UV-first tooling revision. Specification v6 superseded it.
 - [Specification v6](spec/modal_computer_use_spec_v6.md) records the UV-first design before the
-  active v7 contract.
+  shipped-contract truth-up.
+- [Specification v7](spec/modal_computer_use_spec_v7.md) records the hardened daemon and SDK
+  contract whose coverage became incomplete as later 1.0.0-source observation, handoff, lease,
+  receipt, and application-run orchestration features landed.
 
 ## Archived benchmarks
 

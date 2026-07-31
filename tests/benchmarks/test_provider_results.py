@@ -22,6 +22,7 @@ from modal_computer_use.benchmarks.provider_results import (
     sanitize_modal_observation_input,
     sanitize_modal_optimized_input,
     validate_provider_results,
+    validate_sanitized_modal_optimized_input,
 )
 
 HARNESS_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
@@ -431,7 +432,9 @@ def test_builder_renders_exact_headline_order_and_one_modal_experiment() -> None
         "Type 1000",
         "Non-login shell command",
     ]
-    assert markdown.count("| Case | Modal optimized |") == 1
+    assert markdown.count("## Provider-default comparison") == 1
+    assert markdown.count("| Case | Modal optimized p50 / p95 |") == 1
+    assert "not as an apples-to-apples provider ranking" in markdown
     assert markdown.count("## Modal-only experimental result") == 1
     assert OPAQUE_TZAFON_SETTLE_SENTENCE in markdown
     assert "Tzafon 1280x720 JPEG" in markdown
@@ -956,6 +959,41 @@ def test_sanitizer_generation_is_deterministic_and_check_detects_drift(
         module.main([*argv, "--check"])
 
 
+def test_optimized_sanitizer_keeps_run_wall_clock_and_drops_the_rest_of_dispatch() -> None:
+    raw = _raw_optimized_artifact()
+    raw["runner_dispatch"]["elapsed_ms"] = 520874.78650012054
+
+    result = sanitize_modal_optimized_input(
+        raw, raw_sha256="2" * 64, evidence_harness_sha=HARNESS_SHA
+    )
+
+    assert result["run_wall_clock_ms"] == 520874.78650012054
+    rendered = json.dumps(result, sort_keys=True)
+    assert "runner_dispatch" not in rendered
+    assert "included_in_product_create_samples" not in rendered
+
+
+def test_sanitized_optimized_run_wall_clock_must_be_a_finite_nonnegative_number() -> None:
+    for bad in (-1.0, math.inf, math.nan, "520874", True, None):
+        payload = _optimized_artifact()
+        payload["run_wall_clock_ms"] = bad
+        with pytest.raises(ProviderResultsError, match="run wall clock"):
+            validate_sanitized_modal_optimized_input(payload)
+
+
+def test_sanitized_optimized_input_still_rejects_unknown_top_level_keys() -> None:
+    payload = _optimized_artifact()
+    payload["modal_sandbox_id"] = "sb-123"
+    with pytest.raises(ProviderResultsError, match="unexpected or missing fields"):
+        validate_sanitized_modal_optimized_input(payload)
+
+
+def test_sanitized_optimized_input_accepts_artifacts_predating_the_wall_clock() -> None:
+    payload = _optimized_artifact()
+    del payload["run_wall_clock_ms"]
+    validate_sanitized_modal_optimized_input(payload)
+
+
 @pytest.mark.parametrize("raw_factory", [_raw_optimized_artifact, _raw_observation_artifact])
 def test_modal_input_sanitizers_reject_dirty_raw_evidence(raw_factory) -> None:
     raw = raw_factory()
@@ -1008,6 +1046,8 @@ def test_modal_input_sanitizer_is_deterministic_allowlisted_and_checkable(
         b"failure_text",
         b"stdout",
         b"stderr",
+        b"runner_dispatch",
+        b"included_in_product_create_samples",
     ):
         assert forbidden not in rendered
     out_paths[0].write_text("{}\n", encoding="utf-8")

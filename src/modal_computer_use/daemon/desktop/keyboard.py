@@ -742,7 +742,7 @@ class X11KeyboardController:
                 if cleanup:
                     self._xtest.emit(cleanup)
             except Exception:
-                exc._possible_held_key = possible_hold  # type: ignore[attr-defined]
+                exc._possible_held_key = possible_hold
             raise
         return _held_key_from_emission(
             stroke.keycode,

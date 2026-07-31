@@ -183,8 +183,9 @@ def test_modal_colocated_client_runs_runner_path_matrix() -> None:
     class TargetSandbox:
         object_id = "sb-target"
 
-        def create_connect_token(self, *, user_metadata):
+        def create_connect_token(self, *, user_metadata, port):
             assert user_metadata["sdk"] == "modal-computer-use"
+            assert port == 8080
             return SimpleNamespace(url="https://connect.modal.run/sb-target", token="connect-token")
 
     class CreatedComputer:

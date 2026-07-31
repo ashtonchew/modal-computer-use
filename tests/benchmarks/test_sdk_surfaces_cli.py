@@ -470,8 +470,9 @@ def test_benchmark_modal_ingress_ab_compares_tokens_on_same_sandbox(monkeypatch,
         base_url = "https://daemon.example.modal.host"
 
     class FakeSandbox:
-        def create_connect_token(self, *, user_metadata: dict[str, str]):
+        def create_connect_token(self, *, user_metadata: dict[str, str], port: int):
             assert user_metadata["benchmark"] == "modal-ingress-ab"
+            assert port == 8080
             return SimpleNamespace(url="https://connect.example", token="connect-token")
 
     class CreatedComputer:
@@ -993,7 +994,93 @@ def test_benchmark_modal_optimized_provider_supports_explicit_pilot(monkeypatch,
     assert calls[0].pilot is True
     assert calls[0].cpu == 4.0
     assert calls[0].memory_mib == 8192
+    assert calls[0].resolved_runner_cpu == 4.0
+    assert calls[0].resolved_runner_memory_mib == 8192
     assert json.loads(capsys.readouterr().out)["eligibility"] == "pilot_ineligible"
+
+
+def test_benchmark_modal_optimized_provider_sizes_runner_and_target_separately(
+    monkeypatch, capsys
+) -> None:
+    calls = []
+
+    def fake_run(config):
+        calls.append(config)
+        return {
+            "schema_version": 1,
+            "benchmark": "modal-optimized-provider",
+            "ok": True,
+            "eligibility": "pilot_ineligible",
+        }
+
+    monkeypatch.setattr(cli, "run_modal_optimized_provider_benchmark", fake_run)
+    assert (
+        cli.main(
+            [
+                "benchmark",
+                "modal-optimized-provider",
+                "--modal-region",
+                "us-west-2",
+                "--image-revision",
+                "a" * 40,
+                "--modal-cpu",
+                "1",
+                "--modal-memory-mib",
+                "4096",
+                "--runner-cpu",
+                "0.5",
+                "--runner-memory-mib",
+                "1024",
+                "--iterations",
+                "1",
+                "--warmup-iterations",
+                "0",
+                "--pilot",
+            ]
+        )
+        == 0
+    )
+    assert calls[0].cpu == 1.0
+    assert calls[0].memory_mib == 4096
+    assert calls[0].resolved_runner_cpu == 0.5
+    assert calls[0].resolved_runner_memory_mib == 1024
+    assert json.loads(capsys.readouterr().out)["eligibility"] == "pilot_ineligible"
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "message"),
+    [
+        ("--modal-cpu", "0", "--modal-cpu must be greater than 0"),
+        ("--runner-cpu", "0", "--runner-cpu must be greater than 0"),
+        ("--runner-cpu", "-0.5", "--runner-cpu must be greater than 0"),
+        ("--modal-memory-mib", "127", "--modal-memory-mib must be at least 128"),
+        ("--runner-memory-mib", "127", "--runner-memory-mib must be at least 128"),
+    ],
+)
+def test_benchmark_modal_optimized_provider_rejects_invalid_shapes(
+    flag: str, value: str, message: str, capsys
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "benchmark",
+                "modal-optimized-provider",
+                "--modal-region",
+                "us-west-2",
+                "--image-revision",
+                "a" * 40,
+                flag,
+                value,
+                "--iterations",
+                "1",
+                "--warmup-iterations",
+                "0",
+                "--pilot",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert message in capsys.readouterr().err
 
 
 def test_benchmark_modal_optimized_provider_rejects_small_publishable_run(capsys) -> None:

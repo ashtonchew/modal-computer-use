@@ -4,11 +4,9 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from ._version import __version__
 from .config import ComputerConfig
-from .models import SandboxRef
 
 
 def new_run_id(prefix: str = "run") -> str:
@@ -57,7 +55,3 @@ def warm_pool_tags(
         "computer-use": "true",
         "computer-use.created_at": created_at_tag(created_at),
     }
-
-
-def sandbox_ref_from_values(**values: Any) -> SandboxRef:
-    return SandboxRef.model_validate(values)

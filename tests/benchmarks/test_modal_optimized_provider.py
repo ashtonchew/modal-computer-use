@@ -19,12 +19,23 @@ from modal_computer_use.benchmarks.modal_optimized_provider import (
 REVISION = "a" * 40
 
 
-def _config(*, iterations: int = 30, warmup_iterations: int = 1, pilot: bool = False):
+def _config(
+    *,
+    iterations: int = 30,
+    warmup_iterations: int = 1,
+    pilot: bool = False,
+    cpu: float = 4.0,
+    memory_mib: int = 8192,
+    runner_cpu: float | None = None,
+    runner_memory_mib: int | None = None,
+):
     return ModalOptimizedProviderConfig(
         region="us-west-2",
         image_revision=REVISION,
-        cpu=4.0,
-        memory_mib=8192,
+        cpu=cpu,
+        memory_mib=memory_mib,
+        runner_cpu=runner_cpu,
+        runner_memory_mib=runner_memory_mib,
         browser="chromium",
         iterations=iterations,
         warmup_iterations=warmup_iterations,
@@ -38,6 +49,40 @@ def test_optimized_provider_uses_attested_tunnel_after_inconclusive_ingress_ab()
 
     assert OPTIMIZED_MODAL_INGRESS == "attested-tunnel"
     assert computer_config.ingress == "attested-tunnel"
+
+
+def test_unset_runner_shape_inherits_the_target_request() -> None:
+    config = _config(cpu=2.0, memory_mib=4096)
+
+    assert config.resolved_runner_cpu == 2.0
+    assert config.resolved_runner_memory_mib == 4096
+
+
+def test_target_sandbox_keeps_its_own_shape_when_the_runner_is_smaller() -> None:
+    config = _config(cpu=1.0, memory_mib=4096, runner_cpu=0.5, runner_memory_mib=1024)
+    computer_config = _computer_config(config, run_id="safe-test-run")
+
+    assert config.resolved_runner_cpu == 0.5
+    assert config.resolved_runner_memory_mib == 1024
+    assert computer_config.resources.cpu == 1.0
+    assert computer_config.resources.memory_mib == 4096
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("cpu", 0.0, "cpu must be positive"),
+        ("memory_mib", 127, "memory_mib must be at least 128"),
+        ("runner_cpu", 0.0, "runner_cpu must be positive"),
+        ("runner_cpu", -0.5, "runner_cpu must be positive"),
+        ("runner_memory_mib", 127, "runner_memory_mib must be at least 128"),
+    ],
+)
+def test_config_rejects_invalid_resource_requests(
+    field: str, value: float, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _config(**{field: value})
 
 
 def _warm_surface(iterations: int) -> dict[str, object]:
@@ -82,6 +127,36 @@ def _warm_surface(iterations: int) -> dict[str, object]:
                 },
             }
         },
+    }
+
+
+def _runner_result() -> dict[str, object]:
+    return {
+        "ok": True,
+        "failures": [],
+        "product_create": {
+            "name": "product_create_to_first_screenshot",
+            "status": "ok",
+            "definition": "create through validated frame",
+            "iterations": 1,
+            "successful_iterations": 1,
+            "warmup_iterations": 0,
+            "successful_warmup_iterations": 0,
+            "replacement_samples": 0,
+            "fresh_target_per_attempt": True,
+            "targets_created": 1,
+            "target_attempts": 1,
+            "targets_reused": 0,
+            "target_placements_verified": 1,
+            "samples_ms": [10.0],
+            "summary_ms": {"p50": 10.0, "p95": 10.0},
+            "cleanup": {"attempted": 1, "succeeded": 1, "failures": []},
+            "failures": [],
+        },
+        "surfaces": _safe_warm_surfaces(_warm_surface(1)),
+        "warm_target_cleanup": {"attempted": True, "succeeded": True, "error_type": None},
+        "warm_target_placement_verified": True,
+        "runner_placement": {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
     }
 
 
@@ -262,33 +337,7 @@ def test_outer_benchmark_dispatches_once_and_pilot_is_ineligible() -> None:
             surface_benchmark=lambda **_kwargs: {},
         )
 
-    remote_result = {
-        "ok": True,
-        "failures": [],
-        "product_create": {
-            "name": "product_create_to_first_screenshot",
-            "status": "ok",
-            "definition": "create through validated frame",
-            "iterations": 1,
-            "successful_iterations": 1,
-            "warmup_iterations": 0,
-            "successful_warmup_iterations": 0,
-            "replacement_samples": 0,
-            "fresh_target_per_attempt": True,
-            "targets_created": 1,
-            "target_attempts": 1,
-            "targets_reused": 0,
-            "target_placements_verified": 1,
-            "samples_ms": [10.0],
-            "summary_ms": {"p50": 10.0, "p95": 10.0},
-            "cleanup": {"attempted": 1, "succeeded": 1, "failures": []},
-            "failures": [],
-        },
-        "surfaces": _safe_warm_surfaces(_warm_surface(1)),
-        "warm_target_cleanup": {"attempted": True, "succeeded": True, "error_type": None},
-        "warm_target_placement_verified": True,
-        "runner_placement": {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
-    }
+    remote_result = _runner_result()
 
     def fake_launch(_entrypoint, **kwargs):
         nonlocal dispatches
@@ -330,6 +379,96 @@ def test_outer_benchmark_dispatches_once_and_pilot_is_ineligible() -> None:
 
     with pytest.raises(ValueError, match="publishable"):
         validate_modal_optimized_provider_artifact(result, require_publishable=True)
+
+
+def test_distinct_shapes_reach_the_runner_function_and_the_artifact_metadata() -> None:
+    launches: list[dict[str, object]] = []
+
+    def fake_launch(_entrypoint, **kwargs):
+        launches.append(kwargs)
+        return _runner_result()
+
+    result = run_modal_optimized_provider_benchmark(
+        _config(
+            iterations=1,
+            warmup_iterations=0,
+            pilot=True,
+            cpu=1.0,
+            memory_mib=4096,
+            runner_cpu=0.5,
+            runner_memory_mib=1024,
+        ),
+        function_launcher=fake_launch,
+        cleanup_sweep=lambda **_kwargs: {
+            "cleanup_succeeded": True,
+            "remaining_sandboxes": 0,
+        },
+        clock=iter(range(10)).__next__,
+    )
+
+    assert launches[0]["cpu"] == 0.5
+    assert launches[0]["memory_mib"] == 1024
+    metadata = result["metadata"]
+    assert metadata["runner_cpu"] == 0.5
+    assert metadata["runner_memory_mib"] == 1024
+    assert metadata["target_cpu"] == 1.0
+    assert metadata["target_memory_mib"] == 4096
+    resources = metadata["provenance"]["resolved_resources"]
+    assert resources["cpu"]["requested"] == 1.0
+    assert resources["memory"]["requested"] == 4.0
+    validate_modal_optimized_provider_artifact(result, require_publishable=False)
+
+
+def test_shorthand_shape_reports_one_request_for_both_machines() -> None:
+    launches: list[dict[str, object]] = []
+
+    def fake_launch(_entrypoint, **kwargs):
+        launches.append(kwargs)
+        return _runner_result()
+
+    result = run_modal_optimized_provider_benchmark(
+        _config(iterations=1, warmup_iterations=0, pilot=True),
+        function_launcher=fake_launch,
+        cleanup_sweep=lambda **_kwargs: {
+            "cleanup_succeeded": True,
+            "remaining_sandboxes": 0,
+        },
+        clock=iter(range(10)).__next__,
+    )
+
+    assert (launches[0]["cpu"], launches[0]["memory_mib"]) == (4.0, 8192)
+    assert result["metadata"]["runner_cpu"] == result["metadata"]["target_cpu"] == 4.0
+    assert (
+        result["metadata"]["runner_memory_mib"]
+        == result["metadata"]["target_memory_mib"]
+        == 8192
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("runner_cpu", 0.0),
+        ("runner_cpu", "4"),
+        ("target_cpu", -1.0),
+        ("runner_memory_mib", 127),
+        ("target_memory_mib", 8192.0),
+    ],
+)
+def test_validator_rejects_out_of_range_requested_resources(field: str, value: object) -> None:
+    result = run_modal_optimized_provider_benchmark(
+        _config(iterations=1, warmup_iterations=0, pilot=True),
+        function_launcher=lambda _entrypoint, **_kwargs: _runner_result(),
+        cleanup_sweep=lambda **_kwargs: {
+            "cleanup_succeeded": True,
+            "remaining_sandboxes": 0,
+        },
+        clock=iter(range(10)).__next__,
+    )
+    result["metadata"][field] = value
+
+    with pytest.raises(ValueError, match=field):
+        validate_modal_optimized_provider_artifact(result, require_publishable=False)
 
 
 def test_outer_benchmark_sweeps_after_runner_failure_without_serializing_details() -> None:

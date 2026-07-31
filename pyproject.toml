@@ -12,6 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "modal-computer-use contributors" }]
 dependencies = [
+  "anyio>=4",
   "fastapi>=0.115",
   "h2>=4.1",
   "httpx[http2]>=0.27",
@@ -37,9 +38,9 @@ modal = ["modal~=1.5.2"]
 openai = ["openai>=2.36"]
 anthropic = ["anthropic>=0.101"]
 bench-daytona = ["daytona==0.175.0"]
-bench-e2b = ["e2b-desktop==2.3.1"]
+bench-e2b = ["e2b-desktop==2.4.2"]
 bench-tzafon = ["tzafon==2.44.1"]
-bench-providers = ["daytona==0.175.0", "e2b-desktop==2.3.1", "tzafon==2.44.1"]
+bench-providers = ["daytona==0.175.0", "e2b-desktop==2.4.2", "tzafon==2.44.1"]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
@@ -72,9 +73,15 @@ python_version = "3.12"
 packages = ["modal_computer_use"]
 strict = false
 check_untyped_defs = true
-ignore_missing_imports = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+extra_checks = true
+no_implicit_reexport = true
+strict_equality = true
 warn_unreachable = true
-warn_unused_ignores = false
+warn_redundant_casts = true
+warn_unused_ignores = true
 disable_error_code = [
   "arg-type",
   "assignment",
@@ -82,8 +89,11 @@ disable_error_code = [
   "no-any-return",
   "union-attr",
   "valid-type",
-  "var-annotated",
 ]
+
+[[tool.mypy.overrides]]
+module = ["modal", "modal.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -115,13 +115,13 @@ Every one of the 20 final pilot lifecycles terminated its target and runner, det
 and completed its run-tagged sweep. The final phase sweep enumerated both `Sandbox.list()` and
 `Sandbox._experimental_list()` and observed zero resources before and after cleanup.
 
-| Run ID | Source | Retained attempts | Phase cleanup | Remaining V1 | Remaining V2 |
-| --- | --- | ---: | --- | ---: | ---: |
-| `run_1a5a60b346c24cb6` | Final clean pilot | 20 | Passed | 0 | 0 |
-| `run_25620820b4624db9` | Rejected delta-baseline diagnostic | 2 | Passed | 0 | 0 |
-| `run_e0d1469fef294bf6` | Rejected readiness diagnostic | 5 | Passed | 0 | 0 |
-| `run_b2c2b87d306e4958` | Earlier signal-safe diagnostic | 1 | Passed | 0 | 0 |
-| `run_129080cb614240a9` | Earlier detached-run recovery | Contaminated | Passed | 0 | 0 |
+| Run | Retained attempts | Phase cleanup | Remaining V1 | Remaining V2 |
+| --- | ---: | --- | ---: | ---: |
+| Final clean pilot | 20 | Passed | 0 | 0 |
+| Rejected delta-baseline diagnostic | 2 | Passed | 0 | 0 |
+| Rejected readiness diagnostic | 5 | Passed | 0 | 0 |
+| Earlier signal-safe diagnostic | 1 | Passed | 0 | 0 |
+| Earlier detached-run recovery | Contaminated | Passed | 0 | 0 |
 
 All ad hoc path diagnostics also ended with both listing APIs at zero.
 
