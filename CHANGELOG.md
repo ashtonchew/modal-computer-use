@@ -14,6 +14,8 @@
   current five-provider report.
 - Classified the July 19 Modal optimization harness as commit-pinned historical evidence; current
   measurements use the maintained benchmark workflows.
+- Removed the legacy July 19 Modal optimization runner, sanitizer, execution modules, and tests while
+  preserving its tracked JSON artifacts and archived reports as commit-pinned provenance.
 
 This pre-release cutover removes compatibility-only names without a deprecation window. Update
 imports before adopting the cutover:
