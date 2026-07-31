@@ -38,7 +38,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = REPO / "docs" / "drafts" / "modal-optimized-low-latency.md"
 IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 STRIP_PREFIX = "modal-optimized-"
+BLOB_URL = "https://github.com/ashtonchew/modal-computer-use/blob/main/"
+EXTERNAL_SCHEMES = ("http://", "https://", "data:", "mailto:", "ftp:", "tel:")
 
 
 def ensure_cairo() -> None:
@@ -106,16 +109,42 @@ def png_name(position: int, asset: Path) -> str:
     return f"{position}_{stem}.png"
 
 
-def paste_copy(source: Path, names: dict[Path, str]) -> str:
-    """The draft with each image reference replaced by the PNG that belongs there.
+def absolute_link(source: Path, target: str) -> str | None:
+    """The GitHub URL for a link the draft states relative to its own folder.
 
-    The alt text is kept, because it is the caption a reader would want and it
-    says which figure the placeholder stands for.
+    The draft cites artifacts by relative path, which resolves where the draft
+    lives and nowhere else. paste.md sits one folder deeper, and the published
+    copy sits on a site that has no repository under it at all, so a relative
+    path is wrong in both places. Returns None for anything already absolute or
+    pointing outside the repository, leaving the original text alone.
+    """
+    if target.startswith(EXTERNAL_SCHEMES) or target.startswith(("/", "#")):
+        return None
+    path, _, fragment = target.partition("#")
+    if not path:
+        return None
+    resolved = (source.parent / path).resolve()
+    try:
+        relative = resolved.relative_to(REPO)
+    except ValueError:
+        return None
+    if not resolved.exists():
+        return None
+    return f"{BLOB_URL}{relative}" + (f"#{fragment}" if fragment else "")
+
+
+def paste_copy(source: Path, names: dict[Path, str]) -> str:
+    """The draft rewritten for pasting into a publishing surface.
+
+    Image references become placeholders naming the PNG that belongs there, and
+    the alt text is kept, because it is the caption a reader would want and it
+    says which figure the placeholder stands for. Every remaining relative link
+    becomes a GitHub URL, so the citations survive the move off disk.
     """
 
-    def swap(match: re.Match[str]) -> str:
+    def swap_image(match: re.Match[str]) -> str:
         target = match.group(1)
-        if target.startswith(("http://", "https://", "data:")):
+        if target.startswith(EXTERNAL_SCHEMES):
             return match.group(0)
         resolved = (source.parent / target).resolve()
         name = names.get(resolved)
@@ -124,7 +153,16 @@ def paste_copy(source: Path, names: dict[Path, str]) -> str:
         alt = match.group(0)[2 : match.group(0).index("](")]
         return f"[{name}  ::  {alt}]"
 
-    return IMAGE.sub(swap, source.read_text(encoding="utf-8"))
+    def swap_link(match: re.Match[str]) -> str:
+        url = absolute_link(source, match.group(1))
+        if url is None:
+            return match.group(0)
+        return match.group(0).replace(f"({match.group(1)})", f"({url})")
+
+    # Images first: the placeholder has no parentheses, so the link pass cannot
+    # see what is left of one and try to rewrite it.
+    text = IMAGE.sub(swap_image, source.read_text(encoding="utf-8"))
+    return LINK.sub(swap_link, text)
 
 
 def main() -> int:

@@ -52,6 +52,11 @@ Any PNG the run did not write is deleted, which is what stops a reorder from lea
 behind. Most publishing surfaces cannot resolve the relative asset paths, so they need the prose and
 the uploads separately; `paste.md` is the prose, and the placeholder says which file to drop where.
 
+The draft cites artifacts by path relative to its own folder, which resolves where the draft lives
+and nowhere else. `paste.md` sits one folder deeper, and the published copy sits on a site with no
+repository under it, so the export rewrites every relative link to a `blob/main` URL on GitHub. The
+draft keeps its relative paths. Those URLs resolve once the repository is public.
+
 Rendering uses cairosvg. On macOS, Homebrew installs libcairo outside the dyld search path and
 cairocffi resolves it by soname at import, so the script locates the library and re-execs itself with
 `DYLD_LIBRARY_PATH` set. Install it with `brew install cairo` if the script reports it missing.
