@@ -9,11 +9,32 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .modal_optimized_provider import (
+    OPTIMIZED_MODAL_INGRESS,
     PRODUCT_CREATE_CASE,
     validate_modal_optimized_provider_artifact,
 )
 
 SCHEMA_VERSION = 4
+# Ingress and machine shape an optimized evidence run may have been taken under. A run
+# must match one entry exactly; entries are never edited, only appended, so artifacts
+# tracked under an earlier shape keep validating. The runner Function and the target
+# Sandbox are always sized identically so the pair is scheduled and priced the same way.
+OPTIMIZED_EVIDENCE_TOPOLOGIES = (
+    {
+        "modal_ingress": "connect",
+        "runner_cpu": 4.0,
+        "runner_memory_mib": 8192,
+        "target_cpu": 4.0,
+        "target_memory_mib": 8192,
+    },
+    {
+        "modal_ingress": OPTIMIZED_MODAL_INGRESS,
+        "runner_cpu": 1.0,
+        "runner_memory_mib": 2048,
+        "target_cpu": 1.0,
+        "target_memory_mib": 2048,
+    },
+)
 SANITIZED_MODAL_INPUT_SCHEMA_VERSION = 1
 MINIMUM_ELIGIBLE_SOURCE_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
 OPAQUE_TZAFON_SETTLE_SENTENCE = (
@@ -1178,17 +1199,13 @@ def _validated_optimized_cases(
     _require_ok(run, "Modal optimized runner")
     expected = {
         "modal_region": "us-west-2",
-        "modal_ingress": "connect",
         "daemon_http_version": "1.1",
         "browser": "chromium",
         "browser_prewarm": False,
         "image_revision": expected_harness_commit,
-        "runner_cpu": 4.0,
-        "runner_memory_mib": 8192,
-        "target_cpu": 4.0,
-        "target_memory_mib": 8192,
         "input_rate_limit_per_sec": 0,
         "subprocess_backend": "isolated-asyncio",
+        **_matched_optimized_topology(metadata),
     }
     for key, value in expected.items():
         if metadata.get(key) != value:
@@ -1487,15 +1504,10 @@ def _validate_sanitized_optimized_configuration(
         "modal_region": "us-west-2",
         "modal_cloud_provider": "CLOUD_PROVIDER_AWS",
         "modal_runner_kind": "modal-function",
-        "modal_ingress": "connect",
         "daemon_http_version": "1.1",
         "browser": "chromium",
         "browser_prewarm": False,
         "image_revision": evidence_harness_sha,
-        "runner_cpu": 4.0,
-        "runner_memory_mib": 8192,
-        "target_cpu": 4.0,
-        "target_memory_mib": 8192,
         "input_rate_limit_per_sec": 0,
         "subprocess_backend": "isolated-asyncio",
         "measured_iterations": 30,
@@ -1503,9 +1515,22 @@ def _validate_sanitized_optimized_configuration(
         "observed_target_placement_match": True,
         "external_caller_included": False,
         "runner_startup_in_product_create_boundary": False,
+        **_matched_optimized_topology(configuration),
     }
     if configuration != expected:
         raise ProviderResultsError("sanitized optimized configuration is not exact")
+
+
+def _matched_optimized_topology(configuration: dict[str, Any]) -> dict[str, Any]:
+    """Return the declared topology this configuration matches.
+
+    Falls back to the oldest declared topology when nothing matches, so the caller's
+    own comparison reports the mismatch with its usual message.
+    """
+    for topology in OPTIMIZED_EVIDENCE_TOPOLOGIES:
+        if all(configuration.get(key) == value for key, value in topology.items()):
+            return dict(topology)
+    return dict(OPTIMIZED_EVIDENCE_TOPOLOGIES[0])
 
 
 def _sample_quantiles(case: dict[str, Any]) -> tuple[float, float]:
