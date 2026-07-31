@@ -38,9 +38,9 @@ modal = ["modal~=1.5.2"]
 openai = ["openai>=2.36"]
 anthropic = ["anthropic>=0.101"]
 bench-daytona = ["daytona==0.175.0"]
-bench-e2b = ["e2b-desktop==2.3.1"]
+bench-e2b = ["e2b-desktop==2.4.2"]
 bench-tzafon = ["tzafon==2.44.1"]
-bench-providers = ["daytona==0.175.0", "e2b-desktop==2.3.1", "tzafon==2.44.1"]
+bench-providers = ["daytona==0.175.0", "e2b-desktop==2.4.2", "tzafon==2.44.1"]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
