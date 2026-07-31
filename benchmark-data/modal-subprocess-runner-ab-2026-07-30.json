@@ -8,7 +8,6 @@
     "source_sha": "7c8e6810ee7fc1da4046590525b0e8d48e1fd919",
     "harness_state": "clean",
     "git_worktree_clean": true,
-    "modal_workspace": "modal-ai-hackathon",
     "modal_app": "modal-computer-use-subproc-ab",
     "modal_sdk_version": "1.5.2",
     "package_version": "1.0.0",
