@@ -1,9 +1,8 @@
-# How I got computer-use clicks to less than 10 ms on Modal
+# How I got computer-use clicks to under 10 ms on Modal
 
 
 
--
-
+---
 A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in a sandbox and your computer-use agent (CUA) takes the wheel. It asks for a screenshot, looks at the screen, sends back some action like a click or to type.
 
 E2B & Daytona provide their own computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters, roughly 10 sentences, with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.5 seconds. A huge waste that adds up as computer-use is increasingly used in realistic longer-horizon tasks. 
