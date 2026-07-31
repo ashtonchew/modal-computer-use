@@ -1,6 +1,6 @@
 # How I got computer-use clicks to 10 ms on Modal
 
-*The same warm path returns a full 1024x768 PNG in 29 ms.*
+*The same warm path returns a full 1024x768 PNG in 37 ms.*
 
 A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in someone's datacenter and the model drives it over an API. It asks for a screenshot, looks at the screen, sends back a click or some text to type. E2B & Daytona give native computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters (roughly 10 sentences) with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.5 seconds. A huge waste that adds up as computer-use is used in long-horizon tasks. So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.05 seconds.
 
@@ -28,7 +28,7 @@ From my laptop the move-and-click took 32.4 ms. From the Function it took 4.6 ms
 
 The daemon itself did about a millisecond of work in both cases. The trip to the desktop and back took 31 ms from my laptop and 3.6 ms from the Function.
 
-Requesting `us-west-2` for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 29 ms.
+Requesting `us-west-2` for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 37 ms.
 
 ![Default and optimized Modal screenshot request paths](../assets/modal-optimized-screenshot-paths.svg)
 
@@ -117,24 +117,24 @@ My generic subprocess helper assumed a child's output mattered. It created pipes
 
 `xclip` has nothing to say on stdout or stderr. I pointed both at `DEVNULL` instead of creating pipes. The request now returns as soon as `xclip` owns the selection, and the process stays alive for the paste that comes later.
 
-## The warm results, and where 650x comes from
+## The warm results, and where 770x comes from
 
-A full screenshot returned in 29 ms. One click took 10 ms.
+A full screenshot returned in 37 ms. One click took 10 ms.
 
-The biggest ratio in the table belongs to typing. The 1,000-character case took 63 ms through my optimized Modal path, which sends every character over the persistent XTest connection, against about 41 seconds through E2B's computer-use SDK. That is where 650x comes from, and it describes the two tested default paths, not every configuration either product can be run in.
+The biggest ratio in the table belongs to typing. The 1,000-character case took 53 ms through my optimized Modal path, which sends every character over the persistent XTest connection, against about 41 seconds through E2B's computer-use SDK. That is where 770x comes from, and it describes the two tested default paths, not every configuration either product can be run in.
 
 | Warm operation | Modal optimized p50 / p95 | Modal default in this library p50 / p95 / ratio | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Full screenshot, provider-native format | 28.69 / 43.96 ms | 229.94 / 235.78 ms / 8.02x | 264.85 / 297.67 ms / 9.23x | 212.75 / 225.28 ms / 7.42x | 146.14 / 168.34 ms / 5.09x |
-| One click on the screen | 9.69 / 15.55 ms | 323.81 / 331.35 ms / 33.43x | 216.04 / 221.02 ms / 22.31x | 210.56 / 214.88 ms / 21.74x | 125.75 / 127.92 ms / 12.98x |
-| Four ordered clicks | 13.64 / 21.98 ms | 342.68 / 349.16 ms / 25.12x | 865.55 / 1,061.66 ms / 63.45x | 855.81 / 876.02 ms / 62.74x | 455.96 / 531.37 ms / 33.42x |
-| Type 100 characters | 15.27 / 20.69 ms | 379.28 / 389.18 ms / 24.84x | 638.50 / 706.86 ms / 41.81x | 4,090.74 / 4,194.92 ms / 267.86x | 82.27 / 85.45 ms / 5.39x |
-| Type 1,000 characters | 63.34 / 83.91 ms | 378.40 / 413.17 ms / 5.97x | 5,356.25 / 5,425.81 ms / 84.57x | 41,048.75 / 41,619.86 ms / 648.12x | 181.03 / 212.66 ms / 2.86x |
-| Non-login shell command | 9.54 / 17.03 ms | 182.43 / 346.47 ms / 19.12x | 116.92 / 120.86 ms / 12.26x | 52.18 / 54.35 ms / 5.47x | 29.60 / 30.84 ms / 3.10x |
+| Full screenshot, provider-native format | 37.25 / 48.76 ms | 115.80 / 132.91 ms / 3.11x | 563.57 / 603.79 ms / 15.13x | 198.78 / 223.20 ms / 5.34x | 154.25 / 192.53 ms / 4.14x |
+| One click on the screen | 9.85 / 16.85 ms | 214.09 / 218.19 ms / 21.73x | 386.40 / 394.19 ms / 39.22x | 209.86 / 213.42 ms / 21.30x | 130.27 / 170.55 ms / 13.22x |
+| Four ordered clicks | 12.52 / 22.07 ms | 230.10 / 235.09 ms / 18.37x | 1,546.74 / 1,577.44 ms / 123.50x | 860.68 / 897.95 ms / 68.72x | 458.03 / 499.49 ms / 36.57x |
+| Type 100 characters | 15.76 / 28.15 ms | 259.67 / 270.18 ms / 16.48x | 805.55 / 812.84 ms / 51.11x | 4,083.30 / 4,156.65 ms / 259.08x | 85.16 / 101.65 ms / 5.40x |
+| Type 1,000 characters | 53.35 / 79.69 ms | 263.95 / 269.71 ms / 4.95x | 5,528.38 / 5,554.88 ms / 103.63x | 40,914.66 / 41,374.28 ms / 766.95x | 185.03 / 188.37 ms / 3.47x |
+| Non-login shell command | 11.69 / 14.12 ms | 72.64 / 158.22 ms / 6.21x | 285.33 / 294.57 ms / 24.40x | 55.90 / 69.27 ms / 4.78x | 31.73 / 33.35 ms / 2.71x |
 
-Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal default column is the public `ComputerSandbox` configuration in this library at the same revision, and it already included MSS screenshot capture, so its screenshot row reflects caller placement and configuration rather than the capture change. Daytona, E2B, and Tzafon stayed on their defaults. Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.
+Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal default column is the public `ComputerSandbox` configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture, so its screenshot row reflects caller placement and configuration rather than the capture change. Daytona, E2B, and Tzafon stayed on their defaults. Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.
 
-The four-click row is where batching shows up. Modal optimized, Modal default, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls turned into eight transport requests. Adding three clicks cost the two Modal rows about 4 ms and 19 ms. It cost Daytona and E2B about 650 ms each. The request path had become more expensive than the input it carried.
+The four-click row is where batching shows up. Modal optimized, Modal default, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls turned into eight transport requests. Adding three clicks cost the two Modal rows about 3 ms and 16 ms. It cost E2B about 650 ms and Daytona about 1,160 ms. The request path had become more expensive than the input it carried.
 
 ## What counts as the next frame?
 
@@ -146,21 +146,19 @@ XDamage is an X11 extension that reports when a region of the display has been r
 
 A repaint can redraw identical pixels, so the notification alone cannot prove the screen changed. After each wake-up the daemon captures the full-resolution RGB frame and hashes every pixel, then compares that digest with the baseline before any resizing or PNG encoding. A matching hash sends the detector back to sleep. A different hash gets encoded and returned as the next screenshot. XDamage decides when to look. The hash decides whether anything happened.
 
-Click to first changed frame: 65 ms p50 and 76 ms p95, across 30 samples.
+Click to first changed frame: 76 ms p50 and 88 ms p95, across 30 samples.
 
 ![XDamage hints or polling trigger a pixel check, while application readiness remains caller-owned](../assets/modal-optimized-first-change.svg)
 
 A first changed frame answers one narrow question: have new pixels appeared yet? It can replace a fixed sleep when the first visual response is all the agent needs. It cannot tell me that **Save** finished. A blinking cursor or an intermediate paint can satisfy the pixel check first, and a successful save can leave the watched region unchanged. Before a dependent action, the caller still needs an application-specific condition, such as the saved confirmation appearing.
 
-## Three cents a minute
+## Under a cent a minute
 
-Modal bills a Function and a Sandbox for the seconds each one is alive. A run costs about 3 cents a minute for the two together, and I pay nothing between runs.
+Modal bills a Function and a Sandbox for the seconds each one is alive. The two together cost under a cent a minute. Between runs, it costs me nothing. The entire benchmark run cost only about 6 cents.
 
-I run the benchmark from a Function that serves one invocation and then exits. Each target desktop lives only as long as the samples that use it. The 2026-07-28 run made 31 of them, and I can put a floor of about 12 cents on what it cost. The artifact records 241 seconds of sample latency and no wall clock, so everything between the samples went unpriced: the create and terminate calls around each desktop, the Function's own startup, and the gaps while the harness moved between cases. The next run should stamp a clock at both ends.
+## Startup now takes 10.2 seconds
 
-## Startup still takes 7.8 seconds
-
-Creating a fresh Modal desktop and receiving its first validated screenshot still takes 7.8 seconds. That timer covers Sandbox allocation, desktop startup, daemon readiness, and the first frame, and I have not split it by stage. Another provider's template startup time does not tell me which of those four to attack.
+Creating a fresh Modal desktop and receiving its first validated screenshot now takes 10.2 seconds. That timer covers Sandbox allocation, desktop startup, daemon readiness, and the first frame, and I have not split it by stage. Another provider's template startup time does not tell me which of those four to attack.
 
 The next run needs a timestamp at each boundary. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs in the image instead. Choosing before that trace would be guessing.
 
@@ -170,7 +168,7 @@ Not one of them was available to me on a computer-use API, because each one is a
 
 ## Source notes
 
-- Current warm measurements: [Modal optimized samples, 2026-07-28](../../benchmark-data/modal-optimized-provider-2026-07-28.json), [provider-default samples, 2026-07-28](../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json), [changed-frame samples, 2026-07-28](../../benchmark-data/modal-observation-2026-07-28.json), [four-click batching A/B, 2026-07-29](../../benchmark-data/modal-action-batching-ab-2026-07-29.json), [Connect versus attested-tunnel A/B, 2026-07-29](../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json), and [subprocess-runner A/B, 2026-07-30](../../benchmark-data/modal-subprocess-runner-ab-2026-07-30.json). The warm table predates ingress standardization and uses Connect; the subsequent controlled A/B found no clear ingress winner, and the current optimized path uses the repository's standardized attested ingress. The command section cites the 2026-07-30 subprocess-runner A/B, which ran 30 measured samples and one warmup per arm over the attested-tunnel path; its status is candidate because the run was not preregistered. Its shell-command figures are a different measurement from the table's shell-command row, which comes from the 2026-07-28 provider run. The shared-loop arm's p95 rests on two of its thirty samples; without them that arm's mean falls from 74.7 ms to 54.8 ms. The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.
+- Current warm measurements: [Modal optimized samples, 2026-07-30](../../benchmark-data/modal-optimized-provider-2026-07-30.json), [provider-default samples, 2026-07-30](../../benchmark-data/provider-compare-coordinate-command-2026-07-30.json), [changed-frame samples, 2026-07-30](../../benchmark-data/modal-observation-2026-07-30.json), [four-click batching A/B, 2026-07-29](../../benchmark-data/modal-action-batching-ab-2026-07-29.json), [Connect versus attested-tunnel A/B, 2026-07-29](../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json), and [subprocess-runner A/B, 2026-07-30](../../benchmark-data/modal-subprocess-runner-ab-2026-07-30.json). The warm table predates ingress standardization and uses Connect; the subsequent controlled A/B found no clear ingress winner, and the current optimized path uses the repository's standardized attested ingress. The command section cites the 2026-07-30 subprocess-runner A/B, which ran 30 measured samples and one warmup per arm over the attested-tunnel path; its status is candidate because the run was not preregistered. Its shell-command figures are a different measurement from the table's shell-command row. That row's Modal optimized cell comes from the 2026-07-30 optimized run and its other cells come from the 2026-07-30 provider-default run. The shared-loop arm's p95 rests on two of its thirty samples; without them that arm's mean falls from 74.7 ms to 54.8 ms. The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.
 - Historical diagnostics: [provider benchmark results, 2026-07-26](../benchmark-results-2026-07-26-provider-results.md), [combined sanitized result](../../benchmark-data/provider-results-2026-07-26.json), [Connect caller-placement evidence](../../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json), [native X11 input benchmark](../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md), and [command runner A/B context](../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json). The Modal-default screenshot diagnostic separately summarized 22.83 ms p50 for daemon capture and encoding, 126.86 ms end to end, and a 103.91 ms remainder. Those summaries used different samples, so I do not add the component medians or label the remainder as network time. The ten-sample subprocess-runner A/B in that context artifact predates the process-group safety fix and is superseded by the 2026-07-30 run. The two are not interchangeable: the older arms used the Connect runner path, did not pin CPU or memory, and measured a slightly different shell payload. At ten samples per arm the thread pool and the private loop were within noise of each other, and the thirty-sample run is what separates them. The historical command benchmark asked for `sh -lc`; the current comparison gives every provider the same logical `sh -c` command and requires exit zero with exact stdout `"42\n"`.
 - Implementation and contracts: [performance documentation](../performance.md), [benchmarking methodology](../benchmarking.md), [visual-change observation contract](../experimental-visual-change-observation.md), and [create-to-validated-screenshot method](../../research/modal-optimized-create-benchmark-method.md).
 - Product surfaces: [E2B Computer use](https://e2b.dev/docs/use-cases/computer-use) and [Daytona Computer Use](https://www.daytona.io/docs/en/computer-use/).

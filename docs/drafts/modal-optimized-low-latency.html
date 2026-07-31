@@ -166,7 +166,7 @@
 <body>
   <main>
     <h1>How I got computer-use clicks to 10 ms on Modal</h1>
-<p><em>The same warm path returns a full 1024x768 PNG in 29 ms.</em></p>
+<p><em>The same warm path returns a full 1024x768 PNG in 37 ms.</em></p>
 <p>A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in someone's datacenter and the model drives it over an API. It asks for a screenshot, looks at the screen, sends back a click or some text to type. E2B &amp; Daytona give native computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters (roughly 10 sentences) with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.5 seconds. A huge waste that adds up as computer-use is used in long-horizon tasks. So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.05 seconds.</p>
 <p>Then I tried a more realistic computer-use task: How long does one screenshot and one click take? The screenshot + action loop is what an agent repeats, once a turn, for as long as the task runs. E2B took about 410 ms. Daytona took about 950 ms. Before I optimized anything, my simple Modal setup took about 330 ms, already faster than both. After optimizations, it took only 47 ms, ~7x faster.</p>
 <p>Over fifty total agent turns, counting no model time at all, 330 ms a turn is 16 seconds spent on nothing but processing screenshots and clicks. At 47 ms it is under two and a half.</p>
@@ -180,7 +180,7 @@
 <p>I ran the same client in two places and measured the same move-and-click from each, in one benchmark run against one desktop and over the same authenticated route. First from my laptop. Then from a Modal Function, an autoscaled container for application code. I requested <code>us-west-2</code> for the Function and for the Sandbox.</p>
 <p>From my laptop the move-and-click took 32.4 ms. From the Function it took 4.6 ms.</p>
 <p>The daemon itself did about a millisecond of work in both cases. The trip to the desktop and back took 31 ms from my laptop and 3.6 ms from the Function.</p>
-<p>Requesting <code>us-west-2</code> for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 29 ms.</p>
+<p>Requesting <code>us-west-2</code> for both machines bounds how far apart Modal can put them. Inside the region I get no say. The Function and the Sandbox can land on different hosts and in different buildings, and every request still goes through authenticated ingress. What a request can no longer do is cross the country to my laptop and back. In the final run, a full screenshot came back in 37 ms.</p>
 <p><img src="../assets/modal-optimized-screenshot-paths.svg" alt="Default and optimized Modal screenshot request paths" /></p>
 <h2>Why did every screenshot start a process?</h2>
 <p>With the route shortened, I went looking inside the screenshot handler. Every frame launched a command-line capture program, wrote a temporary PNG to disk, reopened the file, and returned its bytes of an image. A computer-use agent needs a screenshot (almost) every single request, so the fifty-turn loop from the opening spawns fifty of those processes and writes fifty temporary files. The screenshot handler of the past was certainly built without that fact in mind.</p>
@@ -227,9 +227,9 @@
 <p>Under X11 there is no central buffer holding clipboard text. A client process owns the selection, and when another application pastes, X11 goes back to that process and asks it for the bytes. That is why <code>xclip</code> leaves a small process alive after a write: if the process exits, the clipboard is empty. In my daemon, that necessary background process was also holding the HTTP request open.</p>
 <p>My generic subprocess helper assumed a child's output mattered. It created pipes for stdout and stderr, then called <code>communicate()</code>, which waits until every process holding the write ends has closed them. The long-lived <code>xclip</code> owner had inherited those handles and had no reason to close them. From the outside the failure looked absurd. The agent copies a shell command, the selection is ready, a paste from any application would work, and the copy request is still open.</p>
 <p><code>xclip</code> has nothing to say on stdout or stderr. I pointed both at <code>DEVNULL</code> instead of creating pipes. The request now returns as soon as <code>xclip</code> owns the selection, and the process stays alive for the paste that comes later.</p>
-<h2>The warm results, and where 650x comes from</h2>
-<p>A full screenshot returned in 29 ms. One click took 10 ms.</p>
-<p>The biggest ratio in the table belongs to typing. The 1,000-character case took 63 ms through my optimized Modal path, which sends every character over the persistent XTest connection, against about 41 seconds through E2B's computer-use SDK. That is where 650x comes from, and it describes the two tested default paths, not every configuration either product can be run in.</p>
+<h2>The warm results, and where 770x comes from</h2>
+<p>A full screenshot returned in 37 ms. One click took 10 ms.</p>
+<p>The biggest ratio in the table belongs to typing. The 1,000-character case took 53 ms through my optimized Modal path, which sends every character over the persistent XTest connection, against about 41 seconds through E2B's computer-use SDK. That is where 770x comes from, and it describes the two tested default paths, not every configuration either product can be run in.</p>
 <div class="table-scroll"><table>
 <thead>
 <tr>
@@ -244,75 +244,74 @@
 <tbody>
 <tr>
 <td>Full screenshot, provider-native format</td>
-<td style="text-align:right">28.69 / 43.96 ms</td>
-<td style="text-align:right">229.94 / 235.78 ms / 8.02x</td>
-<td style="text-align:right">264.85 / 297.67 ms / 9.23x</td>
-<td style="text-align:right">212.75 / 225.28 ms / 7.42x</td>
-<td style="text-align:right">146.14 / 168.34 ms / 5.09x</td>
+<td style="text-align:right">37.25 / 48.76 ms</td>
+<td style="text-align:right">115.80 / 132.91 ms / 3.11x</td>
+<td style="text-align:right">563.57 / 603.79 ms / 15.13x</td>
+<td style="text-align:right">198.78 / 223.20 ms / 5.34x</td>
+<td style="text-align:right">154.25 / 192.53 ms / 4.14x</td>
 </tr>
 <tr>
 <td>One click on the screen</td>
-<td style="text-align:right">9.69 / 15.55 ms</td>
-<td style="text-align:right">323.81 / 331.35 ms / 33.43x</td>
-<td style="text-align:right">216.04 / 221.02 ms / 22.31x</td>
-<td style="text-align:right">210.56 / 214.88 ms / 21.74x</td>
-<td style="text-align:right">125.75 / 127.92 ms / 12.98x</td>
+<td style="text-align:right">9.85 / 16.85 ms</td>
+<td style="text-align:right">214.09 / 218.19 ms / 21.73x</td>
+<td style="text-align:right">386.40 / 394.19 ms / 39.22x</td>
+<td style="text-align:right">209.86 / 213.42 ms / 21.30x</td>
+<td style="text-align:right">130.27 / 170.55 ms / 13.22x</td>
 </tr>
 <tr>
 <td>Four ordered clicks</td>
-<td style="text-align:right">13.64 / 21.98 ms</td>
-<td style="text-align:right">342.68 / 349.16 ms / 25.12x</td>
-<td style="text-align:right">865.55 / 1,061.66 ms / 63.45x</td>
-<td style="text-align:right">855.81 / 876.02 ms / 62.74x</td>
-<td style="text-align:right">455.96 / 531.37 ms / 33.42x</td>
+<td style="text-align:right">12.52 / 22.07 ms</td>
+<td style="text-align:right">230.10 / 235.09 ms / 18.37x</td>
+<td style="text-align:right">1,546.74 / 1,577.44 ms / 123.50x</td>
+<td style="text-align:right">860.68 / 897.95 ms / 68.72x</td>
+<td style="text-align:right">458.03 / 499.49 ms / 36.57x</td>
 </tr>
 <tr>
 <td>Type 100 characters</td>
-<td style="text-align:right">15.27 / 20.69 ms</td>
-<td style="text-align:right">379.28 / 389.18 ms / 24.84x</td>
-<td style="text-align:right">638.50 / 706.86 ms / 41.81x</td>
-<td style="text-align:right">4,090.74 / 4,194.92 ms / 267.86x</td>
-<td style="text-align:right">82.27 / 85.45 ms / 5.39x</td>
+<td style="text-align:right">15.76 / 28.15 ms</td>
+<td style="text-align:right">259.67 / 270.18 ms / 16.48x</td>
+<td style="text-align:right">805.55 / 812.84 ms / 51.11x</td>
+<td style="text-align:right">4,083.30 / 4,156.65 ms / 259.08x</td>
+<td style="text-align:right">85.16 / 101.65 ms / 5.40x</td>
 </tr>
 <tr>
 <td>Type 1,000 characters</td>
-<td style="text-align:right">63.34 / 83.91 ms</td>
-<td style="text-align:right">378.40 / 413.17 ms / 5.97x</td>
-<td style="text-align:right">5,356.25 / 5,425.81 ms / 84.57x</td>
-<td style="text-align:right">41,048.75 / 41,619.86 ms / 648.12x</td>
-<td style="text-align:right">181.03 / 212.66 ms / 2.86x</td>
+<td style="text-align:right">53.35 / 79.69 ms</td>
+<td style="text-align:right">263.95 / 269.71 ms / 4.95x</td>
+<td style="text-align:right">5,528.38 / 5,554.88 ms / 103.63x</td>
+<td style="text-align:right">40,914.66 / 41,374.28 ms / 766.95x</td>
+<td style="text-align:right">185.03 / 188.37 ms / 3.47x</td>
 </tr>
 <tr>
 <td>Non-login shell command</td>
-<td style="text-align:right">9.54 / 17.03 ms</td>
-<td style="text-align:right">182.43 / 346.47 ms / 19.12x</td>
-<td style="text-align:right">116.92 / 120.86 ms / 12.26x</td>
-<td style="text-align:right">52.18 / 54.35 ms / 5.47x</td>
-<td style="text-align:right">29.60 / 30.84 ms / 3.10x</td>
+<td style="text-align:right">11.69 / 14.12 ms</td>
+<td style="text-align:right">72.64 / 158.22 ms / 6.21x</td>
+<td style="text-align:right">285.33 / 294.57 ms / 24.40x</td>
+<td style="text-align:right">55.90 / 69.27 ms / 4.78x</td>
+<td style="text-align:right">31.73 / 33.35 ms / 2.71x</td>
 </tr>
 </tbody>
 </table></div>
-<p>Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal default column is the public <code>ComputerSandbox</code> configuration in this library at the same revision, and it already included MSS screenshot capture, so its screenshot row reflects caller placement and configuration rather than the capture change. Daytona, E2B, and Tzafon stayed on their defaults. Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.</p>
-<p>The four-click row is where batching shows up. Modal optimized, Modal default, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls turned into eight transport requests. Adding three clicks cost the two Modal rows about 4 ms and 19 ms. It cost Daytona and E2B about 650 ms each. The request path had become more expensive than the input it carried.</p>
+<p>Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal default column is the public <code>ComputerSandbox</code> configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture, so its screenshot row reflects caller placement and configuration rather than the capture change. Daytona, E2B, and Tzafon stayed on their defaults. Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.</p>
+<p>The four-click row is where batching shows up. Modal optimized, Modal default, and Tzafon each accepted one four-click request. Daytona needed four requests, and four E2B SDK calls turned into eight transport requests. Adding three clicks cost the two Modal rows about 3 ms and 16 ms. It cost E2B about 650 ms and Daytona about 1,160 ms. The request path had become more expensive than the input it carried.</p>
 <h2>What counts as the next frame?</h2>
 <p>A 10 ms click does not mean the application has drawn anything. When an agent clicks <strong>Save</strong> and immediately asks for a screenshot, the input request can succeed before the application repaints, and the frame that comes back still shows the unsaved form. The model reads that as failure and clicks <strong>Save</strong> again.</p>
 <p>My first detector polled: wait an interval, capture a frame, compare it with the baseline, repeat. That works, and every miss costs a full capture.</p>
 <p>XDamage is an X11 extension that reports when a region of the display has been repainted. I arm a watcher before the action and treat its notification as a cue to capture instead of a fixed schedule. Where XDamage is unavailable, the detector polls.</p>
 <p>A repaint can redraw identical pixels, so the notification alone cannot prove the screen changed. After each wake-up the daemon captures the full-resolution RGB frame and hashes every pixel, then compares that digest with the baseline before any resizing or PNG encoding. A matching hash sends the detector back to sleep. A different hash gets encoded and returned as the next screenshot. XDamage decides when to look. The hash decides whether anything happened.</p>
-<p>Click to first changed frame: 65 ms p50 and 76 ms p95, across 30 samples.</p>
+<p>Click to first changed frame: 76 ms p50 and 88 ms p95, across 30 samples.</p>
 <p><img src="../assets/modal-optimized-first-change.svg" alt="XDamage hints or polling trigger a pixel check, while application readiness remains caller-owned" /></p>
 <p>A first changed frame answers one narrow question: have new pixels appeared yet? It can replace a fixed sleep when the first visual response is all the agent needs. It cannot tell me that <strong>Save</strong> finished. A blinking cursor or an intermediate paint can satisfy the pixel check first, and a successful save can leave the watched region unchanged. Before a dependent action, the caller still needs an application-specific condition, such as the saved confirmation appearing.</p>
-<h2>Three cents a minute</h2>
-<p>Modal bills a Function and a Sandbox for the seconds each one is alive. A run costs about 3 cents a minute for the two together, and I pay nothing between runs.</p>
-<p>I run the benchmark from a Function that serves one invocation and then exits. Each target desktop lives only as long as the samples that use it. The 2026-07-28 run made 31 of them, and I can put a floor of about 12 cents on what it cost. The artifact records 241 seconds of sample latency and no wall clock, so everything between the samples went unpriced: the create and terminate calls around each desktop, the Function's own startup, and the gaps while the harness moved between cases. The next run should stamp a clock at both ends.</p>
-<h2>Startup still takes 7.8 seconds</h2>
-<p>Creating a fresh Modal desktop and receiving its first validated screenshot still takes 7.8 seconds. That timer covers Sandbox allocation, desktop startup, daemon readiness, and the first frame, and I have not split it by stage. Another provider's template startup time does not tell me which of those four to attack.</p>
+<h2>Under a cent a minute</h2>
+<p>Modal bills a Function and a Sandbox for the seconds each one is alive. The two together cost under a cent a minute. Between runs, it costs me nothing. The entire benchmark run cost only about 6 cents.</p>
+<h2>Startup now takes 10.2 seconds</h2>
+<p>Creating a fresh Modal desktop and receiving its first validated screenshot now takes 10.2 seconds. That timer covers Sandbox allocation, desktop startup, daemon readiness, and the first frame, and I have not split it by stage. Another provider's template startup time does not tell me which of those four to attack.</p>
 <p>The next run needs a timestamp at each boundary. If allocation dominates, a pool of ready desktops is worth testing. If desktop or daemon startup dominates, the work belongs in the image instead. Choosing before that trace would be guessing.</p>
 <p>A fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.</p>
 <p>Not one of them was available to me on a computer-use API, because each one is a seam a product owns: where the client runs, what a single request carries, how the daemon holds the display, who owns a child process. Modal sells the seams. A Sandbox and a Function are separate things I could place in the same region, and I paid for the second one only while it ran. That is how a general-purpose compute platform ended up faster on the repeated loop than the companies that sell this as a product.</p>
 <h2>Source notes</h2>
 <ul>
-<li>Current warm measurements: <a href="../../benchmark-data/modal-optimized-provider-2026-07-28.json">Modal optimized samples, 2026-07-28</a>, <a href="../../benchmark-data/provider-compare-coordinate-command-2026-07-28.json">provider-default samples, 2026-07-28</a>, <a href="../../benchmark-data/modal-observation-2026-07-28.json">changed-frame samples, 2026-07-28</a>, <a href="../../benchmark-data/modal-action-batching-ab-2026-07-29.json">four-click batching A/B, 2026-07-29</a>, <a href="../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json">Connect versus attested-tunnel A/B, 2026-07-29</a>, and <a href="../../benchmark-data/modal-subprocess-runner-ab-2026-07-30.json">subprocess-runner A/B, 2026-07-30</a>. The warm table predates ingress standardization and uses Connect; the subsequent controlled A/B found no clear ingress winner, and the current optimized path uses the repository's standardized attested ingress. The command section cites the 2026-07-30 subprocess-runner A/B, which ran 30 measured samples and one warmup per arm over the attested-tunnel path; its status is candidate because the run was not preregistered. Its shell-command figures are a different measurement from the table's shell-command row, which comes from the 2026-07-28 provider run. The shared-loop arm's p95 rests on two of its thirty samples; without them that arm's mean falls from 74.7 ms to 54.8 ms. The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.</li>
+<li>Current warm measurements: <a href="../../benchmark-data/modal-optimized-provider-2026-07-30.json">Modal optimized samples, 2026-07-30</a>, <a href="../../benchmark-data/provider-compare-coordinate-command-2026-07-30.json">provider-default samples, 2026-07-30</a>, <a href="../../benchmark-data/modal-observation-2026-07-30.json">changed-frame samples, 2026-07-30</a>, <a href="../../benchmark-data/modal-action-batching-ab-2026-07-29.json">four-click batching A/B, 2026-07-29</a>, <a href="../../benchmark-data/modal-optimized-ingress-ab-2026-07-29.json">Connect versus attested-tunnel A/B, 2026-07-29</a>, and <a href="../../benchmark-data/modal-subprocess-runner-ab-2026-07-30.json">subprocess-runner A/B, 2026-07-30</a>. The warm table predates ingress standardization and uses Connect; the subsequent controlled A/B found no clear ingress winner, and the current optimized path uses the repository's standardized attested ingress. The command section cites the 2026-07-30 subprocess-runner A/B, which ran 30 measured samples and one warmup per arm over the attested-tunnel path; its status is candidate because the run was not preregistered. Its shell-command figures are a different measurement from the table's shell-command row. That row's Modal optimized cell comes from the 2026-07-30 optimized run and its other cells come from the 2026-07-30 provider-default run. The shared-loop arm's p95 rests on two of its thirty samples; without them that arm's mean falls from 74.7 ms to 54.8 ms. The 50-turn opener is arithmetic over separate warm p50s, not a full agent trajectory.</li>
 <li>Historical diagnostics: <a href="../benchmark-results-2026-07-26-provider-results.md">provider benchmark results, 2026-07-26</a>, <a href="../../benchmark-data/provider-results-2026-07-26.json">combined sanitized result</a>, <a href="../../benchmark-data/modal-optimized-competitive-us-west-2-2026-07-24.json">Connect caller-placement evidence</a>, <a href="../archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md">native X11 input benchmark</a>, and <a href="../../benchmark-data/tzafon-coordinate-command-context-2026-07-24.json">command runner A/B context</a>. The Modal-default screenshot diagnostic separately summarized 22.83 ms p50 for daemon capture and encoding, 126.86 ms end to end, and a 103.91 ms remainder. Those summaries used different samples, so I do not add the component medians or label the remainder as network time. The ten-sample subprocess-runner A/B in that context artifact predates the process-group safety fix and is superseded by the 2026-07-30 run. The two are not interchangeable: the older arms used the Connect runner path, did not pin CPU or memory, and measured a slightly different shell payload. At ten samples per arm the thread pool and the private loop were within noise of each other, and the thirty-sample run is what separates them. The historical command benchmark asked for <code>sh -lc</code>; the current comparison gives every provider the same logical <code>sh -c</code> command and requires exit zero with exact stdout <code>&quot;42\n&quot;</code>.</li>
 <li>Implementation and contracts: <a href="../performance.md">performance documentation</a>, <a href="../benchmarking.md">benchmarking methodology</a>, <a href="../experimental-visual-change-observation.md">visual-change observation contract</a>, and <a href="../../research/modal-optimized-create-benchmark-method.md">create-to-validated-screenshot method</a>.</li>
 <li>Product surfaces: <a href="https://e2b.dev/docs/use-cases/computer-use">E2B Computer use</a> and <a href="https://www.daytona.io/docs/en/computer-use/">Daytona Computer Use</a>.</li>
