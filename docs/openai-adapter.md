@@ -3,6 +3,12 @@
 `OpenAIAdapter` converts OpenAI computer actions to the core [action schema](glossary.md#action-schema).
 The adapter does not call the OpenAI API.
 
+Install the Modal and provider extras before running the browser example:
+
+```bash
+uv sync --extra modal --extra openai
+```
+
 ## Responses API integration
 
 Use the Responses API and the `computer` tool for new integrations:
@@ -15,18 +21,34 @@ response = client.responses.create(
 )
 ```
 
-Process each `computer_call` as follows:
+Collect every `computer_call` in a response. Normalize and validate every action list before any
+call mutates the desktop. Apply policy checks and expanded-action limits during the same preflight.
+If a later call or action fails preflight, do not dispatch any call from that response.
 
-1. Run each item in `actions[]` in the given order.
-2. Capture the screen after the actions finish.
-3. Return one `computer_call_output` for the call.
-4. Set `previous_response_id` to the ID of the previous response.
-5. Stop when the response has no `computer_call`.
+Map each preflighted action list to one ordered daemon batch:
 
-Set limits for turns, actions, action time, and total time. Count every provider response as one
-turn. If the final allowed response requests an action, stop before executing it because the loop
-cannot return the required action output within its turn budget. See
-[examples/03_openai_computer_loop.py](../examples/03_openai_computer_loop.py) for a complete loop.
+```python
+batch_result = adapter.apply_many(
+    actions,
+    continue_on_error=False,
+    screenshot_after=True,
+)
+post_batch_screenshot = batch_result.screenshot
+```
+
+Return one `computer_call_output` for each `computer_call`. Preserve call ID and response order.
+Set `previous_response_id` to the preceding response ID. Stop when a response has no
+`computer_call`.
+
+Set separate limits for provider turns, trajectory actions, expanded batch actions, action time,
+batch time, and total elapsed time. Count normalized action trees, including nested modifier
+actions. Reserve time for the fused final frame within the daemon batch deadline. If the final
+provider action is `screenshot`, reuse its native image result. Otherwise use the fused post-batch
+frame. Do not issue a separate screenshot request.
+
+If the final allowed response requests an action, stop before execution. The loop cannot return the
+required action output within its turn budget. See
+[the complete OpenAI loop](../examples/03_openai_computer_loop.py).
 
 Do not use the deprecated `computer-use-preview` model or the `computer_use_preview` tool in new
 code. The current tool does not use the preview display fields, preview action shape, or
@@ -73,8 +95,10 @@ Use `openai_computer_call_output()` to make a provider response from a native `S
 ```python
 from modal_computer_use.adapters.openai import openai_computer_call_output
 
-shot = computer.screenshots.full()
-input_item = openai_computer_call_output(shot, call_id="call_123")
+input_item = openai_computer_call_output(
+    post_batch_screenshot,
+    call_id="call_123",
+)
 ```
 
 The helper does not call OpenAI. It does not control the model loop.
@@ -82,20 +106,6 @@ The helper does not call OpenAI. It does not control the model loop.
 Use `openai_screenshot_metadata()` to record safe screenshot metadata. The result contains the
 dimensions, format, SHA-256, artifact URI, capture time, and coordinate space. It does not contain
 image bytes or base64 data.
-
-## Adapter example
-
-```python
-from modal_computer_use import ComputerSandbox
-from modal_computer_use.adapters.openai import OpenAIAdapter
-
-computer = ComputerSandbox.local(token="dev")
-computer.wait_until_ready()
-
-adapter = OpenAIAdapter(computer)
-adapter.apply({"type": "click", "x": 500, "y": 300, "button": "left"})
-adapter.apply({"type": "type", "text": "hello"})
-```
 
 ## Coordinate spaces
 
@@ -119,7 +129,23 @@ The adapter converts model coordinates to desktop coordinates. It does not chang
 you do not supply a coordinate space.
 
 The optional `before_action` hook receives the normalized native action. The hook can reject the
-action before the daemon receives it.
+action before the daemon receives it. For response-wide atomic preflight, run the hook over every
+normalized action tree before dispatching the first call.
+
+## Modal deployment
+
+For a latency-sensitive deployment, create one target browser Sandbox and invoke one user-owned
+Modal Function for the provider loop. Borrow one session connection for the complete trajectory.
+Keep provider credentials and model state inside the user-owned Function.
+
+Select a common requested Modal region only after measuring the intended workload. A shared region
+request does not promise the same host or availability zone. It does not guarantee a latency gain.
+Keep `attested-tunnel` as the default ingress.
+
+The [session handoff example](../examples/modal_function_session_handoff.py) shows the ownership and
+connection lifecycle. See [Modal deployment](modal-deployment.md) for Sandbox readiness and Function
+capacity. See [Performance](performance.md) for the measurement boundaries of batching and fused
+action/frame capture.
 
 ## Safety
 
