@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-subprocess-runner-ab",
+  "generated_at": "2026-07-30T09:15:00+00:00",
+  "status": "candidate",
+  "scope": "Three-arm daemon subprocess-runner A/B for shell-command-echo-v2 on the shipping attested-tunnel path, measured from a co-located Modal runner",
+  "provenance": {
+    "source_sha": "7c8e6810ee7fc1da4046590525b0e8d48e1fd919",
+    "harness_state": "clean",
+    "git_worktree_clean": true,
+    "modal_workspace": "modal-ai-hackathon",
+    "modal_app": "modal-computer-use-subproc-ab",
+    "modal_sdk_version": "1.5.2",
+    "package_version": "1.0.0",
+    "raw_artifact_directory": "benchmark-results/subprocess-runner-ab-2026-07-30",
+    "raw_artifacts_tracked": false
+  },
+  "configuration": {
+    "requested": {
+      "benchmark_command": "modal-colocated-client",
+      "browser": "chromium",
+      "daemon_http_version": "1.1",
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "iterations": 30,
+      "modal_cpu": 4.0,
+      "modal_ingress": "attested-tunnel",
+      "modal_memory_mib": 8192,
+      "modal_region": "us-west-2",
+      "resource_profile": "browser",
+      "runner_cpu": 4.0,
+      "runner_memory_mib": 8192,
+      "runner_only": true,
+      "runner_path": "inherited",
+      "surface": "daemon-http"
+    },
+    "observed": {
+      "browser": "chromium",
+      "canonical_surface_name": "modal-daemon-attested-tunnel",
+      "daemon_http_version": "1.1",
+      "external_caller_included": false,
+      "image_identity": "inline:chromium",
+      "input_backend": "xtest",
+      "input_rate_limit_per_sec": 0,
+      "modal_ingress": "attested-tunnel",
+      "modal_region": "us-west-2",
+      "modal_runner_path": "inherited",
+      "modal_runner_region": "us-west-2",
+      "resolved_cpu": 4.0,
+      "resolved_gpu": null,
+      "resolved_memory_gib": 8.0,
+      "resource_profile": "browser",
+      "runner_preflight": "ok",
+      "surface": "daemon-http",
+      "transport_http_versions": [
+        "HTTP/1.1"
+      ]
+    },
+    "safe_configuration_sha256": "eff9e716a84a11bdd0fa54e9edca502b2faff393b5f315e6f87a793fac3cd033"
+  },
+  "semantics": {
+    "command_nonlogin_shell_echo": {
+      "benchmark_semantics": "shell-command-echo-v2",
+      "shell_mode": "non_login",
+      "argv": [
+        "sh",
+        "-c",
+        "printf '42\\n'"
+      ],
+      "timeout_seconds": 30,
+      "transport_shape": "argv"
+    }
+  },
+  "subprocess_runner_ab": {
+    "metric": "modal-colocated shell-command-echo-v2 milliseconds",
+    "case": "command_nonlogin_shell_echo",
+    "iterations_per_arm": 30,
+    "warmup_iterations": 1,
+    "p50_method": "statistics.median",
+    "p95_method": "linear interpolation on sorted values at rank 0.95*(n-1)",
+    "asyncio": {
+      "raw_artifact": "benchmark-results/subprocess-runner-ab-2026-07-30/asyncio.json",
+      "raw_artifact_sha256": "e7c13b02d8d80691e367899890506364ceab0278f294c65b05c9f5cc5db3d3a6",
+      "successful_iterations": 30,
+      "failures": 0,
+      "total": {
+        "p50": 54.90595200000037,
+        "p95": 219.92788569999882
+      },
+      "daemon": {
+        "p50": 49.534644500001335,
+        "p95": 214.753257949997
+      },
+      "caller_transport_overhead": {
+        "p50": 5.222455500000223,
+        "p95": 5.809947500000322
+      }
+    },
+    "threaded": {
+      "raw_artifact": "benchmark-results/subprocess-runner-ab-2026-07-30/threaded.json",
+      "raw_artifact_sha256": "ecf808416f5e2a148ad2fc5fa3344a2c8a0e418d8837613d88a2242bc716529c",
+      "successful_iterations": 30,
+      "failures": 0,
+      "total": {
+        "p50": 10.617587999999678,
+        "p95": 13.161663449999136
+      },
+      "daemon": {
+        "p50": 6.7867264999996735,
+        "p95": 8.99796054999857
+      },
+      "caller_transport_overhead": {
+        "p50": 3.809115500000182,
+        "p95": 4.339098949999708
+      }
+    },
+    "isolated-asyncio": {
+      "raw_artifact": "benchmark-results/subprocess-runner-ab-2026-07-30/isolated-asyncio.json",
+      "raw_artifact_sha256": "c87c1f19527ee264726c1c41ac8bc9300fb8e6adef5f88ed8b4c9590d19dfd56",
+      "successful_iterations": 30,
+      "failures": 0,
+      "total": {
+        "p50": 7.584464999999874,
+        "p95": 8.67549800000038
+      },
+      "daemon": {
+        "p50": 5.331084500001637,
+        "p95": 5.843138550000759
+      },
+      "caller_transport_overhead": {
+        "p50": 2.286975499999677,
+        "p95": 2.8009997999999916
+      }
+    }
+  },
+  "verification": {
+    "subprocess_runner_ab_failures": 0,
+    "subprocess_runner_ab_successful_iterations_per_arm": 30,
+    "subprocess_runner_ab_cursor_readback": "passed for all three arms",
+    "subprocess_runner_ab_typing_readback": "passed for all three arms",
+    "subprocess_runner_ab_runner_preflight": "passed for all three arms"
+  },
+  "limitations": [
+    "The three arms are comparable to each other. They are not drop-in replacements for the 2026-07-24 subprocess A/B numbers, which were measured under a different runner path, different requested resources, and a different command payload.",
+    "The 2026-07-24 arms used the connect runner path. These arms use the shipping attested-tunnel default with the inherited runner path.",
+    "These arms pin 4 CPU and 8192 MiB for both the target and the runner. The 2026-07-24 run did not request resources explicitly.",
+    "These arms measure argv [\"sh\", \"-c\", \"printf '42\\n'\"]. The 2026-07-24 record states argv [\"sh\", \"-c\", \"printf 42\"] for the same shell-command-echo-v2 semantics.",
+    "The asyncio arm is outlier sensitive. Two of its 30 total samples sit above the recorded high-outlier threshold and carry its p95; its mean drops from 74.70 ms to 54.76 ms once they are removed. Read its p95 as a tail observation, not a steady-state cost.",
+    "This is a portable-shell ablation. It moves command execution and other subprocess-backed compatibility paths. It does not move native XTest input, native Xlib window operations, MSS screenshots, or command runtime itself.",
+    "Each arm is one run on one date in one requested region. The artifact carries no across-day replication."
+  ]
+}
