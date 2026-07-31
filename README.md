@@ -4,12 +4,15 @@
 Python API covers mouse and keyboard input, screenshots, recordings, windows, artifacts, action
 batches, and optional provider adapters.
 
+Use it when computer-use agents or applications need typed, provider-neutral control of Linux
+desktops on Modal.
+
 The project provides daemon-first control primitives. Autonomous agent orchestration and model
 loops stay in application code or examples.
 
 ## Install from source
 
-Until a package release is published, install the current source directly from GitHub:
+Use Python 3.12 or later and `uv`. The package is not on PyPI. Install it from GitHub:
 
 ```bash
 uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git"
@@ -58,8 +61,10 @@ daemon terminal when finished.
 
 ## Run on Modal
 
-Configure Modal credentials once with `uv run modal token new`. Creating a Sandbox can incur Modal
+Configure Modal credentials once with `uv run modal setup`. Creating a Sandbox can incur Modal
 charges.
+
+Save this example as `quickstart.py`:
 
 ```python
 from modal_computer_use import ComputerConfig, ComputerSandbox
@@ -75,6 +80,12 @@ finally:
         computer.terminate(wait=True)
     finally:
         computer.detach()
+```
+
+Run the example:
+
+```bash
+uv run python quickstart.py
 ```
 
 This uses an inline desktop image and authenticated daemon access on port `8080`. noVNC is off by

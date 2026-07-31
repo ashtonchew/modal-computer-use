@@ -55,7 +55,7 @@ Install the Modal extra and authenticate before a live run:
 
 ```bash
 uv sync --extra modal
-uv run modal token new
+uv run modal setup
 ```
 
 The following command creates a billable Sandbox, waits for it, runs the selected surface, and
