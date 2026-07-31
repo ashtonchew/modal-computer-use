@@ -7,6 +7,8 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+CONTEXT = ROOT / "CONTEXT.md"
+CHANGELOG = ROOT / "CHANGELOG.md"
 DOC_MAP = DOCS / "README.md"
 ARCHIVE_MAP = DOCS / "archive" / "README.md"
 ARCHIVE = DOCS / "archive"
@@ -202,6 +204,49 @@ def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> Non
     ]
 
     assert "uv run computer-use benchmark modal-optimized-provider" in section
+
+
+def test_external_provider_benchmarks_are_current_but_benchmark_only() -> None:
+    source = CONTEXT.read_text(encoding="utf-8")
+
+    assert "may live in this repository" in source
+    assert "`benchmark compare` and `benchmark provider-results` are maintained" in source
+    assert "not public SDK compatibility contracts" in source
+    assert "branch-only `benchmark compare`" not in source
+    assert "lives outside the SDK release path" not in source
+
+
+def test_historical_modal_optimization_evidence_is_commit_pinned() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+
+    assert "modal-optimization-results-2026-07-19.json" in source
+    assert "8c21cf1338fd747dca57bca6941c307270069712" in source
+    assert "6f860de38df716c7cfdc0a23b186049751f34cd8" in source
+    assert "37f977f80de93800c005caeec7ead5222b00b040" in source
+    assert "not a current workflow" in source
+    assert "current checkout is not a valid reproduction environment" in source
+    for replacement in (
+        "modal-optimized-provider",
+        "benchmark compare",
+        "provider-results",
+        "daemon-observation-stream",
+        "modal-region-ab",
+        "run_modal_v2_candidate_benchmark.py",
+        "run_modal_optimized_frontier_benchmark.py",
+    ):
+        assert replacement in source
+
+
+def test_unreleased_changelog_has_pre_release_compatibility_migrations() -> None:
+    source = CHANGELOG.read_text(encoding="utf-8")
+
+    for removed, replacement in (
+        ("SandboxManager", "ComputerSandboxManager"),
+        ("modal_workspace_billing_report", "modal_billing_report"),
+        ("XTestPointerController", "X11InputSession"),
+    ):
+        assert f"| `{removed}` | `{replacement}` |" in source
+    assert "without a deprecation window" in source
 
 
 def test_documentation_map_links_each_current_top_level_doc_once() -> None:

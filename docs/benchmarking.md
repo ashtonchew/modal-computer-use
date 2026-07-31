@@ -281,6 +281,31 @@ This changes how long the benchmark desktop remains available, not the public sc
 or command methods inside the timer. The SDK's five-minute default expires during repeated
 1,000-character typing calls and leaves later command and verification rows on a dead session.
 
+## Reproduce the historical July 19 Modal optimization evidence
+
+[`modal-optimization-results-2026-07-19.json`](../benchmark-data/modal-optimization-results-2026-07-19.json)
+is retained as immutable historical evidence. Its legacy optimization harness is not a current workflow.
+Its recorded command manifests are provenance, not instructions to run against the current tree.
+
+Reproduce the execution only from a separate worktree at source revision
+`8c21cf1338fd747dca57bca6941c307270069712`, following the artifact's `command_manifest` and
+`v2_command_manifest`. The tracked artifact records execution date `2026-07-19`, sanitizer and
+normalizer revision `6f860de38df716c7cfdc0a23b186049751f34cd8`, and an open, unmerged dependency
+revision `37f977f80de93800c005caeec7ead5222b00b040`. Re-normalization additionally requires the
+private raw artifact named by its provenance and a checkout of the recorded normalizer revision.
+The current checkout is not a valid reproduction environment for those legacy commands.
+
+Use these maintained workflows for new evidence:
+
+| Measurement goal | Current workflow or evidence |
+| --- | --- |
+| Optimized lifecycle and warm operations | `computer-use benchmark modal-optimized-provider`; [`modal-optimized-provider-2026-07-30.json`](../benchmark-data/modal-optimized-provider-2026-07-30.json) |
+| Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
+| Combined provider report | `computer-use benchmark provider-results` over the validated tracked inputs |
+| Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |
+| Placement comparison | `computer-use benchmark modal-region-ab`, then `modal-region-summary` |
+| Modal V2 candidate or optimized-frontier experiments | Use [`run_modal_v2_candidate_benchmark.py`](../scripts/run_modal_v2_candidate_benchmark.py) or [`run_modal_optimized_frontier_benchmark.py`](../scripts/run_modal_optimized_frontier_benchmark.py) with the archived gated methodology linked below |
+
 ## Retain and publish artifacts
 
 `benchmark-results/` contains ignored raw output, candidates, preregistrations, rejected runs, and

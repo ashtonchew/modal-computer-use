@@ -12,6 +12,17 @@
 - Updated package metadata to use PEP 639 license fields and well-known project URLs.
 - Added the Modal optimized lifecycle benchmark, eligibility-gated tracked provider evidence, and a
   current five-provider report.
+- Classified the July 19 Modal optimization harness as commit-pinned historical evidence; current
+  measurements use the maintained benchmark workflows.
+
+This pre-release cutover removes compatibility-only names without a deprecation window. Update
+imports before adopting the cutover:
+
+| Removed compatibility name | Canonical replacement | Required migration |
+| --- | --- | --- |
+| `SandboxManager` | `ComputerSandboxManager` | Replace `from modal_computer_use import SandboxManager` and rename constructor and type references; behavior and arguments are unchanged. |
+| `modal_workspace_billing_report` | `modal_billing_report` | Import from `modal_computer_use.sandbox`; omit `environment_name` for the previous workspace-scoped behavior or pass an environment name for environment-scoped billing. |
+| `XTestPointerController` | `X11InputSession` | Replace the import from `modal_computer_use.daemon.desktop.xtest`; the `display=` constructor and pointer methods are unchanged, and the canonical session also owns keyboard input. |
 
 ## 0.1.0
 
