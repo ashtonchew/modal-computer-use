@@ -1783,7 +1783,8 @@ def _mint_tunnel_token_for_sandbox(computer: ComputerSandbox) -> str:
     if sandbox is None:
         raise SandboxUnavailableError("modal ingress A/B benchmark requires a Modal sandbox")
     token_info = sandbox.create_connect_token(
-        user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-ingress-ab"}
+        user_metadata={"sdk": "modal-computer-use", "benchmark": "modal-ingress-ab"},
+        port=8080,
     )
     connect_base_url, connect_token = _connect_token_parts(token_info)
     connect_client = DaemonClient(base_url=connect_base_url, token=connect_token)

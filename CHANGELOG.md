@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added the canonical v8 product specification, archived v7, and classified stable, experimental,
+  benchmark-only, and application-owned surfaces against the 1.0.0 source state.
+- Updated the locked Modal SDK to 1.5.3 and explicitly scoped daemon Connect Tokens to port 8080.
 - Reworked the project introduction with source installation and local and Modal quickstarts.
 - Added a documentation map, a configuration reference, and link and configuration checks.
 - Added a security policy that requires private vulnerability reporting before a public release,

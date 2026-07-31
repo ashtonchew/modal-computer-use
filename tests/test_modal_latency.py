@@ -588,6 +588,7 @@ class BoundarySandboxObject:
             raise TimeoutError("tcp readiness failed")
 
     def create_connect_token(self, **kwargs: Any) -> SimpleNamespace:
+        assert kwargs["port"] == 8080
         return SimpleNamespace(url="https://connect.example", token="test-token")
 
     def terminate(self, *, wait: bool = False) -> None:
