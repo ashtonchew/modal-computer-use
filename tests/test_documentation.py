@@ -175,6 +175,24 @@ def test_root_readme_repository_links_are_absolute_https() -> None:
     )
 
 
+def test_onboarding_docs_use_canonical_setup_guidance() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Python 3.12 or later" in readme
+    assert "quickstart.py" in readme
+    assert "uv run python quickstart.py" in readme
+
+    onboarding_docs = [
+        ROOT / "README.md",
+        DOCS / "modal-deployment.md",
+        DOCS / "benchmarking.md",
+    ]
+    for path in onboarding_docs:
+        source = path.read_text(encoding="utf-8")
+        assert "uv run modal setup" in source, path.relative_to(ROOT)
+        assert "uv run modal token new" not in source, path.relative_to(ROOT)
+
+
 def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
     section = source[

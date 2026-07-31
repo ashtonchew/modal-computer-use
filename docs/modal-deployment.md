@@ -447,7 +447,7 @@ For local Modal smoke tests, prefer Modal's native local auth:
 
 ```bash
 uv sync --extra modal
-uv run modal token new
+uv run modal setup
 uv run pytest -m modal
 ```
 
