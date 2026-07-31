@@ -36,6 +36,10 @@ OPTIMIZED_EVIDENCE_TOPOLOGIES = (
     },
 )
 SANITIZED_MODAL_INPUT_SCHEMA_VERSION = 1
+# `run_wall_clock_ms` is the raw run's `runner_dispatch.elapsed_ms`: how long the whole
+# benchmark dispatch took. The sanitizer always emits it, but artifacts sanitized before it
+# existed cannot be regenerated without their raw runs, so validation tolerates its absence.
+_OPTIONAL_SANITIZED_OPTIMIZED_KEYS = {"run_wall_clock_ms"}
 MINIMUM_ELIGIBLE_SOURCE_SHA = "e57ea35f04efdec4100ffa44196ee8599e9811b2"
 OPAQUE_TZAFON_SETTLE_SENTENCE = (
     "Tzafon settle semantics are opaque at this API boundary, so its action "
@@ -811,10 +815,14 @@ def sanitize_modal_optimized_input(
         "optimized daemon-http surface",
     )
     verification = _mapping(surface.get("verification"), "optimized verification")
+    dispatch = _mapping(payload.get("runner_dispatch"), "optimized runner dispatch")
     result = {
         "schema_version": SANITIZED_MODAL_INPUT_SCHEMA_VERSION,
         "benchmark": "sanitized-modal-optimized-provider",
         "status": "eligible",
+        "run_wall_clock_ms": _require_finite_nonnegative(
+            dispatch.get("elapsed_ms"), "optimized run wall clock"
+        ),
         "provenance": {
             "evidence_harness_sha": evidence_harness_sha,
             "raw_sha256": raw_sha256,
@@ -975,6 +983,7 @@ def validate_sanitized_modal_optimized_input(payload: dict[str, Any]) -> None:
             "cases",
         },
         "sanitized optimized input",
+        optional=_OPTIONAL_SANITIZED_OPTIMIZED_KEYS,
     )
     if (
         payload.get("schema_version") != SANITIZED_MODAL_INPUT_SCHEMA_VERSION
@@ -982,6 +991,10 @@ def validate_sanitized_modal_optimized_input(payload: dict[str, Any]) -> None:
         or payload.get("status") != "eligible"
     ):
         raise ProviderResultsError("sanitized optimized input schema is unsupported")
+    if "run_wall_clock_ms" in payload:
+        _require_finite_nonnegative(
+            payload.get("run_wall_clock_ms"), "sanitized optimized run wall clock"
+        )
     _validate_safe_value(payload)
     provenance = _validated_sanitized_provenance(payload)
     configuration = _mapping(payload.get("configuration"), "optimized configuration")
@@ -1584,8 +1597,14 @@ def _mapping(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def _require_exact_keys(value: dict[str, Any], expected: set[str], label: str) -> None:
-    if set(value) != expected:
+def _require_exact_keys(
+    value: dict[str, Any],
+    expected: set[str],
+    label: str,
+    *,
+    optional: set[str] | None = None,
+) -> None:
+    if set(value) - (optional or set()) != expected:
         raise ProviderResultsError(f"{label} has unexpected or missing fields")
 
 
