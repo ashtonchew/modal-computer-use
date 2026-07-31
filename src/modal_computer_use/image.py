@@ -243,17 +243,3 @@ def _inline_image_variant(
 def _require_full_revision(revision: str) -> None:
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise ValueError("named image revision must be a full 40-character Git revision")
-
-
-def browser_image(
-    *,
-    browser: Literal["firefox", "chromium"] = "firefox",
-    window_manager: Literal["xfce", "openbox"] = "xfce",
-    gpu: bool = False,
-) -> object:
-    return default_image(
-        profile="browser-gpu" if gpu else "browser",
-        browser=browser,
-        window_manager=window_manager,
-        browser_prewarm=True,
-    )

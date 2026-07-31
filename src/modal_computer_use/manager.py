@@ -879,7 +879,6 @@ def _raise_warm_cleanup_errors(
     raise cleanup_error
 
 
-SandboxManager = ComputerSandboxManager
 
 
 def _cleanup_item(

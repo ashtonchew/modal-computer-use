@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .models import ComputerAction, Point, parse_action
+from .models import ComputerAction, parse_action
 
 KEY_ALIASES: dict[str, str] = {
     "alt": "alt",
@@ -90,12 +90,3 @@ def normalize_key_combo(keys: str | Iterable[str]) -> list[str]:
 
 def normalize_actions(actions: Iterable[ComputerAction | dict]) -> list[ComputerAction]:
     return [parse_action(action) for action in actions]
-
-
-def transform_point(point: Point, coordinate_space: object | None) -> Point:
-    if coordinate_space is None:
-        return point
-    to_desktop = getattr(coordinate_space, "to_desktop", None)
-    if not callable(to_desktop):
-        return point
-    return to_desktop(point)
