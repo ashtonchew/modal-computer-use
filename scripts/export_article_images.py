@@ -18,6 +18,11 @@ Names are the position followed by the source stem with the article prefix
 removed, so docs/assets/modal-optimized-agent-loop.svg becomes 1_agent-loop.png.
 Renumbering after a reorder would otherwise leave the old files behind, so any
 PNG in the folder that this run did not write is deleted.
+
+The folder also gets paste.md, the draft with every image reference replaced by
+a visible placeholder naming the PNG that belongs there. Editors that cannot
+resolve relative paths, which is most of them, need the prose and the uploads
+separately, and the placeholder says which file goes where.
 """
 
 from __future__ import annotations
@@ -101,6 +106,27 @@ def png_name(position: int, asset: Path) -> str:
     return f"{position}_{stem}.png"
 
 
+def paste_copy(source: Path, names: dict[Path, str]) -> str:
+    """The draft with each image reference replaced by the PNG that belongs there.
+
+    The alt text is kept, because it is the caption a reader would want and it
+    says which figure the placeholder stands for.
+    """
+
+    def swap(match: re.Match[str]) -> str:
+        target = match.group(1)
+        if target.startswith(("http://", "https://", "data:")):
+            return match.group(0)
+        resolved = (source.parent / target).resolve()
+        name = names.get(resolved)
+        if name is None:
+            return match.group(0)
+        alt = match.group(0)[2 : match.group(0).index("](")]
+        return f"[{name}  ::  {alt}]"
+
+    return IMAGE.sub(swap, source.read_text(encoding="utf-8"))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
@@ -126,16 +152,23 @@ def main() -> int:
     import cairosvg
 
     written: set[Path] = set()
+    names: dict[Path, str] = {}
     for position, asset in enumerate(assets, start=1):
-        destination = output / png_name(position, asset)
+        name = png_name(position, asset)
+        destination = output / name
         cairosvg.svg2png(url=str(asset), write_to=str(destination), scale=args.scale)
         written.add(destination)
+        names[asset] = name
         print(f"{destination.relative_to(REPO)}  <-  {asset.relative_to(REPO)}")
 
     for stale in sorted(output.glob("*.png")):
         if stale not in written:
             stale.unlink()
             print(f"removed stale {stale.relative_to(REPO)}")
+
+    paste = output / "paste.md"
+    paste.write_text(paste_copy(source, names), encoding="utf-8")
+    print(f"{paste.relative_to(REPO)}")
 
     print(f"{len(written)} images at scale {args.scale:g} in {output.relative_to(REPO)}")
     return 0
