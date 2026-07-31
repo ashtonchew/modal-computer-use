@@ -1,4 +1,4 @@
-# How I got computer-use clicks to under 10 ms on Modal
+# How I Got Computer-Use Clicks to under 10 ms on Modal
 
 A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in a sandbox and your computer-use agent (CUA) takes the wheel. It asks for a screenshot, looks at the screen, sends back some action like a click or to type.
 
