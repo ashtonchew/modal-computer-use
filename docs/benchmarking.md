@@ -144,6 +144,44 @@ Each arm runs one warmup and 30 measured samples. The arms compare to each other
 artifact records the configuration differences that stop them from replacing the 2026-07-24
 subprocess A/B values.
 
+Dropping `--runner-only` keeps the external-caller arm, which turns the same command into a
+caller-placement comparison. The tracked artifact in
+[`benchmark-data/modal-caller-placement-us-west-2-2026-07-31.json`](../benchmark-data/modal-caller-placement-us-west-2-2026-07-31.json)
+came from two draws of this command:
+
+```bash
+uv run computer-use benchmark modal-colocated-client \
+  --app-name modal-computer-use-caller-placement \
+  --modal-region us-west-2 \
+  --caller-region-label dev-laptop-us-west \
+  --modal-ingress attested-tunnel \
+  --daemon-http-version 1.1 \
+  --runner-path inherited \
+  --surface daemon-http \
+  --browser chromium \
+  --resource-profile browser \
+  --modal-cpu 1 \
+  --modal-memory-mib 2048 \
+  --runner-cpu 1 \
+  --runner-memory-mib 2048 \
+  --input-rate-limit-per-sec 0 \
+  --input-backend xtest \
+  --subprocess-backend isolated-asyncio \
+  --iterations 30 \
+  --output benchmark-results/caller-placement-2026-07-31/attested-tunnel-1cpu-draw1.json
+```
+
+One run measures both arms against one target desktop, so the external caller and the co-located
+runner drive the same daemon. Because `--runner-path inherited` reuses the target base URL, both arms
+also share the attested-tunnel ingress, which is why the tracked artifact records the ingress once
+under `configuration.observed` rather than naming it in any measurement key.
+
+The second draw used the same command with a `draw2` output path. The tracked artifact pins draw 1
+and records draw 2 as replication. Draw 1 is pinned because unrelated pull requests landed on the
+default branch while draw 2 was in flight, so draw 2's co-located runner launched at a newer revision
+than its own external arm. Keep the default branch quiet for the length of a run, and check that both
+arms of a draw report one `git_revision` before promoting it.
+
 Use `modal-action-batching-ab` for the publishable four-click A/B alone. It launches one Modal
 Function, creates one Connect target with the same requested region, checks their observed placement,
 performs one warmup plus 30 measured iterations per arm, and runs terminal cleanup. The command will
