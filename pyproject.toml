@@ -37,10 +37,10 @@ Changelog = "https://github.com/ashtonchew/modal-computer-use/blob/main/CHANGELO
 modal = ["modal~=1.5.2"]
 openai = ["openai>=2.36"]
 anthropic = ["anthropic>=0.101"]
-bench-daytona = ["daytona==0.175.0"]
+bench-daytona = ["daytona==0.201.0"]
 bench-e2b = ["e2b-desktop==2.3.1"]
 bench-tzafon = ["tzafon==2.44.1"]
-bench-providers = ["daytona==0.175.0", "e2b-desktop==2.3.1", "tzafon==2.44.1"]
+bench-providers = ["daytona==0.201.0", "e2b-desktop==2.3.1", "tzafon==2.44.1"]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
