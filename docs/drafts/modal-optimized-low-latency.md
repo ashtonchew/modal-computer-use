@@ -10,6 +10,8 @@ E2B & Daytona provide their own computer-use SDKs, so I wanted to see how effici
 
 So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.05 seconds.
 
+![Typing 1,000 characters takes 41 seconds on E2B and 5.5 seconds on Daytona, and 0.05 seconds on the optimized Modal setup](../assets/modal-optimized-typing-comparison.svg)
+
 Then I tried to map out the most common task: The screenshot and action loop primitive is what a CUA repeats, once a turn, until the task is complete. So, how long does a screenshot and a single click take? Daytona took 950 ms, then E2B took about 410 ms. Before I optimized anything, my simple Modal setup took about 330 ms, already faster than both. After optimizing, the same task took only 47 ms, ~7x faster than the simple Modal setup.
 
 Let's see this in action: Over fifty total agent turns, counting no agent reasoning and generation time at all, Daytona's 950ms is 48 whole seconds spent on nothing but processing screenshots and clicks. E2B's 410ms is 21 seconds. And with the optimized Modal setup, 47ms turns to only ~2 seconds.
