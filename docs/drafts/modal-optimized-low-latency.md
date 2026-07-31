@@ -2,15 +2,11 @@
 
 *The same warm path returns a full 1024x768 PNG in 29 ms.*
 
-I built the fastest cloud computer-use API on Modal. A lot faster than E2B or Daytona.
+A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite sandbox company. A Linux desktop runs in someone's datacenter and the model drives it over an API. It asks for a screenshot, looks at the screen, sends back a click or some text to type. E2B & Daytona give native computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters (roughly 10 sentences) with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.4 seconds. A huge waste that adds up as computer-use is used in long-horizon tasks. So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.06 seconds.
 
-Sandboxes and Functions, wiring them together, I first built the simplest computer-use implementation I could: a Linux desktop inside a Sandbox, a HTTP daemon beside it, and an SDK that asks for screenshots and sends clicks.
+Then I tried a more realistic computer-use task: How long does one screenshot and one click take? The screenshot + action loop is what an agent repeats, once a turn, for as long as the task runs. E2B took about 420 ms. Daytona took about 480 ms. Before I optimized anything, my simple Modal setup took about 550 ms. After optimizations, it took only 38 ms, an order of magnitude quicker.
 
-With a simple Modal computer-use API, returning a screenshot of the screen and clicking once took about or half a second (550ms).
-
-E2B and Daytona ship computer-use APIs as a product primitive. To compare, I ran the same task of a screenshot and clicking a spot. E2B took ~420 ms and Daytona took about ~480 ms. Not bad.
-
-But, in a fifty-turn loop with one screenshot and one click pays that half-a-second lag 50 times. In that scenario, it comes to about 27 seconds spent on nothing but a simple screenshot and click. After all the work below, the Optimized Modal computer-use API runs all fifty turns in less than 2 seconds.
+Over fifty total agent turns, counting no model time at all, 550 ms a turn is 27 seconds spent on nothing but processing screenshots and clicks. At 38 ms it is under two seconds.
 
 [OpenAI says GPT-5.6 Sol on Cerebras can generate up to 750 tokens per second](https://openai.com/index/previewing-gpt-5-6-sol/). At that speed, hundreds of milliseconds in the computer interface stop hiding behind slow generation. Longer trajectories make it worse, because the delay is paid on every turn before the user sees anything. Infra will be the next issue in frontier computer-use agents.
 
