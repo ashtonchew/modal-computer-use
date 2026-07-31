@@ -47,7 +47,6 @@ class BorrowedComputer:
         "__base_url",
         "__client",
         "__coordinator",
-        "__http2",
         "__token",
     )
 
@@ -65,7 +64,6 @@ class BorrowedComputer:
         self.__active = True
         self.__base_url = base_url
         self.__token = token
-        self.__http2 = http2
 
     def __repr__(self) -> str:
         return "BorrowedComputer()"
@@ -246,7 +244,6 @@ class AsyncBorrowedComputer:
         "__base_url",
         "__client",
         "__coordinator",
-        "__http2",
         "__token",
     )
 
@@ -264,7 +261,6 @@ class AsyncBorrowedComputer:
         self.__active = True
         self.__base_url = base_url
         self.__token = token
-        self.__http2 = http2
 
     def __repr__(self) -> str:
         return "AsyncBorrowedComputer()"

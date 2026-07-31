@@ -357,11 +357,6 @@ def cleanup_modal_benchmark_run(
     return result
 
 
-def _list_modal_benchmark_sandboxes(runtime: Any, *, app_id: str) -> list[Any]:
-    sandboxes, _ = _list_modal_benchmark_sandboxes_with_inventory(runtime, app_id=app_id)
-    return sandboxes
-
-
 def _list_modal_benchmark_sandboxes_with_inventory(
     runtime: Any, *, app_id: str, run_id: str | None = None
 ) -> tuple[list[Any], dict[str, int | bool]]:

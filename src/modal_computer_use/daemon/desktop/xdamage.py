@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
-import os
 import select
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -497,11 +496,3 @@ def _union_rects(rects: tuple[XDamageRect, ...]) -> XDamageRect | None:
     if x1 <= x0 or y1 <= y0:
         return None
     return XDamageRect(x=x0, y=y0, width=x1 - x0, height=y1 - y0)
-
-
-def xdamage_supported_by_xdpyinfo(output: str) -> bool:
-    return any(line.strip() == "DAMAGE" for line in output.splitlines())
-
-
-def xdamage_display_from_env(default: str = ":99") -> str:
-    return os.getenv("DISPLAY") or default

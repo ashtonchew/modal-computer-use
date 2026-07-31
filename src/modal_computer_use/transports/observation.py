@@ -7,7 +7,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter, sleep
-from typing import Any, Literal
+from typing import Any
 
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
@@ -18,7 +18,6 @@ from modal_computer_use.transports.websocket_url import daemon_websocket_url
 
 FRAME_ENVELOPE_MAGIC = b"MCUO\x01"
 _OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
-FrameEncoding = Literal["json-binary", "binary-envelope"]
 
 
 @dataclass(frozen=True)
@@ -103,7 +102,6 @@ class ObservationStreamTransport:
         self.setup_retry_errors: list[dict[str, str]] = []
         self._next_id = 1
         self._pending_frames: deque[ObservationFrame] = deque()
-        self._frame_encoding: FrameEncoding = "json-binary"
         if websocket is None:
             self._websocket = self._connect_with_retries(timeout=timeout)
         else:
@@ -163,7 +161,6 @@ class ObservationStreamTransport:
                 return
 
     def start(self, payload: dict[str, Any]) -> None:
-        self._frame_encoding = _frame_encoding_from_payload(payload)
         request_id = self._send("start", payload)
         started = self._recv_json()
         if started.get("type") == "error":
@@ -635,13 +632,6 @@ def _setup_error_metadata(exc: Exception) -> dict[str, str]:
 
 def _elapsed_ms(started: float) -> float:
     return (perf_counter() - started) * 1000
-
-
-def _frame_encoding_from_payload(payload: dict[str, Any]) -> FrameEncoding:
-    value = payload.get("frame_encoding", "json-binary")
-    if value == "binary-envelope":
-        return "binary-envelope"
-    return "json-binary"
 
 
 def _decode_frame_envelope(message: bytes) -> tuple[dict[str, Any], bytes]:

@@ -327,10 +327,3 @@ def lease_credentials_from_headers(headers: _Headers) -> LeaseCredentials | None
         fence=fence,
         token=str(raw["token"]),
     )
-
-
-def validate_mutation_headers(state: Any, headers: _Headers) -> None:
-    coordinator: LeaseCoordinator | None = getattr(state, "lease_coordinator", None)
-    if coordinator is None:
-        return
-    coordinator.validate_mutation(lease_credentials_from_headers(headers))

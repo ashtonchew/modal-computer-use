@@ -15,10 +15,8 @@ from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
 
 from .metadata import MetadataHeaders, resolve_metadata_headers
 from .observation import (
-    FrameEncoding,
     ObservationFrame,
     _decode_frame_envelope,
-    _frame_encoding_from_payload,
 )
 from .websocket_url import daemon_websocket_url
 
@@ -63,7 +61,6 @@ class AsyncObservationStreamTransport:
         self._poisoned = False
         self._receiver_error: DaemonHTTPError | None = None
         self._next_id = 1
-        self._frame_encoding: FrameEncoding = "json-binary"
         self._transport_timing = False
         self._connect_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
@@ -109,7 +106,6 @@ class AsyncObservationStreamTransport:
                     return
 
     async def start(self, payload: dict[str, Any]) -> None:
-        self._frame_encoding = _frame_encoding_from_payload(payload)
         self._transport_timing = bool(payload.get("transport_timing"))
         result = await self._request("start", payload)
         if not isinstance(result, dict) or result.get("type") != "started":
