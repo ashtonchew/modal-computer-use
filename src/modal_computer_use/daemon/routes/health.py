@@ -38,7 +38,7 @@ async def version(request: Request, response: Response) -> VersionInfo:
     response.headers["x-computer-use-receipt-protocol"] = RECEIPT_PROTOCOL_VERSION
     return VersionInfo(
         daemon_version=__version__,
-        sdk_min_version="1.0.0",
+        sdk_min_version="1.1.0",
         sdk_max_version="1.x",
         image_profile=request.app.state.settings.image_profile,
         modal_computer_use_package=__version__,
