@@ -38,7 +38,7 @@ from modal_computer_use.sandbox import (
     probe_modal_candidate_placement,
     run_modal_daemon_command,
 )
-from modal_computer_use.state import compute_config_hash
+from modal_computer_use.state import APP_ID_TAG, compute_config_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -147,7 +147,13 @@ class FakeSandboxObject:
         env: dict[str, str] | None = None,
     ) -> object:
         self.exec_calls.append({"args": args, "timeout": timeout, "env": env})
-        return SimpleNamespace(args=args, timeout=timeout, env=env, returncode=0)
+        return SimpleNamespace(
+            args=args,
+            timeout=timeout,
+            env=env,
+            returncode=0,
+            stdout=SimpleNamespace(read=lambda: "bootstrap-token"),
+        )
 
     def terminate(self, *, wait: bool = False) -> None:
         self.terminate_wait_calls.append(wait)
@@ -177,7 +183,7 @@ class FakeSandboxObject:
 class FakeSandbox:
     create_calls: ClassVar[list[tuple[tuple[str, ...], dict[str, object]]]] = []
     experimental_create_calls: ClassVar[list[tuple[tuple[str, ...], dict[str, object]]]] = []
-    from_name_calls: ClassVar[list[tuple[str, str]]] = []
+    from_name_calls: ClassVar[list[tuple[str, str, str | None]]] = []
     from_id_calls: ClassVar[list[str]] = []
     list_calls: ClassVar[list[dict[str, str] | None]] = []
     experimental_list_calls: ClassVar[list[dict[str, str] | None]] = []
@@ -211,8 +217,14 @@ class FakeSandbox:
         return cls.created
 
     @classmethod
-    def from_name(cls, app_name: str, name: str) -> FakeSandboxObject:
-        cls.from_name_calls.append((app_name, name))
+    def from_name(
+        cls,
+        app_name: str,
+        name: str,
+        *,
+        environment_name: str | None = None,
+    ) -> FakeSandboxObject:
+        cls.from_name_calls.append((app_name, name, environment_name))
         if cls.from_name_error is not None:
             raise cls.from_name_error
         if cls.from_name_result is not None:
@@ -233,8 +245,21 @@ class FakeSandbox:
         tags: dict[str, str] | None = None,
         app_id: str | None = None,
     ) -> list[FakeSandboxObject]:
-        cls.list_calls.append(tags if app_id is None else {"app_id": app_id})
-        return [sandbox for sandbox in cls.listed if not sandbox.terminated]
+        call: dict[str, object] = {}
+        if app_id is not None:
+            call["app_id"] = app_id
+        if tags is not None:
+            call["tags"] = tags
+        cls.list_calls.append(call)
+        return [
+            sandbox
+            for sandbox in cls.listed
+            if not sandbox.terminated
+            and (
+                tags is None
+                or all(sandbox.get_tags().get(key) == value for key, value in tags.items())
+            )
+        ]
 
     @classmethod
     def _experimental_list(
@@ -243,8 +268,21 @@ class FakeSandbox:
         tags: dict[str, str] | None = None,
         app_id: str | None = None,
     ) -> list[FakeSandboxObject]:
-        cls.experimental_list_calls.append(tags if app_id is None else {"app_id": app_id})
-        return [sandbox for sandbox in cls.experimental_listed if not sandbox.terminated]
+        call: dict[str, object] = {}
+        if app_id is not None:
+            call["app_id"] = app_id
+        if tags is not None:
+            call["tags"] = tags
+        cls.experimental_list_calls.append(call)
+        return [
+            sandbox
+            for sandbox in cls.experimental_listed
+            if not sandbox.terminated
+            and (
+                tags is None
+                or all(sandbox.get_tags().get(key) == value for key, value in tags.items())
+            )
+        ]
 
 
 def fake_modal() -> SimpleNamespace:
@@ -334,15 +372,17 @@ def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
     assert kwargs["env"]["COMPUTER_USE_DAEMON_HTTP_VERSION"] == "1.1"
     assert kwargs["env"]["COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC"] == "20"
     assert kwargs["env"]["COMPUTER_USE_MAX_BATCH_DURATION_MS"] == "30000"
-    assert kwargs["env"]["COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY"] == "true"
+    assert kwargs["env"]["COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY"] == "false"
+    assert kwargs["env"]["COMPUTER_USE_REQUIRE_CONNECT_USER"] == "false"
     assert kwargs["encrypted_ports"] == [8080, 6080]
     assert "h2_ports" not in kwargs
     assert kwargs["readiness_probe"] == "tcp:8080"
     assert "environment_variables" not in kwargs
     assert kwargs["tags"]["computer-use.run_id"] == "run-123"
     assert "computer-use.session_id" not in kwargs["tags"]
-    assert "computer-use.version" in kwargs["tags"]
+    assert kwargs["tags"]["computer-use"] == "true"
     assert kwargs["tags"]["computer-use.owner"] == "alice"
+    assert kwargs["tags"][APP_ID_TAG] == "ap-modal-computer-use"
     assert kwargs["tags"]["computer-use.artifacts_dir"] == "/home/desktop/artifacts"
     assert "computer-use.created_at" in kwargs["tags"]
     assert kwargs["tags"]["custom"] == "tag"
@@ -367,6 +407,33 @@ def test_create_passes_modal_region_when_set(monkeypatch) -> None:
     _, kwargs = FakeSandbox.create_calls[0]
     assert kwargs["region"] == "us-west"
     assert computer._requested_modal_region == "us-west"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "app",
+        "block_network",
+        "encrypted_ports",
+        "env",
+        "h2_ports",
+        "inbound_cidr_allowlist",
+        "outbound_cidr_allowlist",
+        "outbound_domain_allowlist",
+        "readiness_probe",
+    ],
+)
+def test_create_rejects_security_owned_sandbox_kwargs(field: str) -> None:
+    with pytest.raises(ConfigConflictError, match="security-owned fields"):
+        ComputerSandbox.create(image=object(), wait=False, **{field: object()})
+
+
+def test_create_preserves_ordinary_modal_sandbox_kwargs(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    ComputerSandbox.create(image=object(), wait=False, cloud="aws")
+
+    assert FakeSandbox.create_calls[0][1]["cloud"] == "aws"
 
 
 def test_create_omits_modal_region_by_default(monkeypatch) -> None:
@@ -453,6 +520,8 @@ def test_candidate_v1_connect_uses_public_product_endpoint_without_tunnel(
     assert kwargs["cloud"] == "aws"
     assert kwargs["encrypted_ports"] == []
     assert "i6pn" not in kwargs
+    assert kwargs["env"]["COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY"] == "true"
+    assert kwargs["env"]["COMPUTER_USE_REQUIRE_CONNECT_USER"] == "true"
     assert computer.client.base_url == "https://sandbox-connect.example"
 
 
@@ -756,6 +825,7 @@ def test_candidate_placement_probe_can_observe_unpinned_cloud_and_cleans_up(
     assert FakeSandbox.create_calls[0][1]["tags"] == {
         "computer-use.benchmark": "modal-v2-placement-probe",
         "computer-use.run_id": "run-placement-placement-probe-v1",
+        APP_ID_TAG: "ap-candidate-placement-probe",
     }
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.terminate_wait_calls == [True]
@@ -792,7 +862,7 @@ def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
     monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
     with pytest.raises(ValueError, match="non-empty"):
         ModalBenchmarkAllocationContext(
-            app=object(),
+            app=SimpleNamespace(app_id="ap-throughput"),
             image=object(),
             run_id="run-123-throughput",
             cloud="",
@@ -802,7 +872,7 @@ def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
             benchmark_tag="modal-v2-candidate-throughput",
         )
     context = ModalBenchmarkAllocationContext(
-        app=object(),
+        app=SimpleNamespace(app_id="ap-throughput"),
         image=object(),
         run_id="run-123-throughput",
         cloud="aws",
@@ -819,6 +889,7 @@ def test_candidate_throughput_tags_every_allocation_for_run_scoped_cleanup(
         "computer-use.benchmark": "modal-v2-candidate-throughput",
         "computer-use.backend": "v1",
         "computer-use.run_id": "run-123-throughput-v1-1-0",
+        APP_ID_TAG: "ap-throughput",
     }
     assert terminate_calls == [True]
 
@@ -1213,11 +1284,22 @@ def test_create_marks_persistent_artifact_volume_mount(monkeypatch) -> None:
 
 def test_create_keeps_novnc_closed_by_default(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._attested_tunnel_parts",
+        lambda sandbox, *, connect_base_url, connect_token: (
+            connect_base_url,
+            "minted-token",
+        ),
+    )
 
-    ComputerSandbox.create(config=ComputerConfig(run_id="run-123"), image=object(), wait=False)
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(run_id="run-123"), image=object(), wait=False
+    )
 
     _, kwargs = FakeSandbox.create_calls[0]
     assert kwargs["encrypted_ports"] == [8080]
+    assert computer.client.transport.token == "minted-token"  # noqa: S105
+    assert computer.client.transport.token != kwargs["env"]["COMPUTER_USE_TUNNEL_TOKEN"]
 
 
 def test_create_connect_ingress_keeps_daemon_tunnel_closed(monkeypatch) -> None:
@@ -1364,15 +1446,92 @@ def test_create_uses_configured_vnc_password(monkeypatch) -> None:
 
 def test_attach_by_name_uses_current_from_name_signature(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_result = FakeSandboxObject(
+        name="desktop-1", tags={APP_ID_TAG: "ap-computer-app"}
+    )
 
     ComputerSandbox.attach(app_name="computer-app", name="desktop-1")
 
-    assert FakeSandbox.from_name_calls == [("computer-app", "desktop-1")]
-    assert FakeApp.lookups == []
+    assert FakeSandbox.from_name_calls == [("computer-app", "desktop-1", None)]
+    assert FakeApp.lookups == [("computer-app", False, None)]
+
+
+def test_attach_attested_wait_false_never_exposes_bootstrap_token(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_result = FakeSandboxObject(
+        name="desktop-1", tags={APP_ID_TAG: "ap-computer-app"}
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._attested_tunnel_parts",
+        lambda sandbox, *, connect_base_url, connect_token: (
+            connect_base_url,
+            "minted-token",
+        ),
+    )
+
+    computer = ComputerSandbox.attach(
+        app_name="computer-app",
+        name="desktop-1",
+        ingress="attested-tunnel",
+        wait=False,
+    )
+
+    assert computer.client.transport.token == "minted-token"  # noqa: S105
+    assert computer.client.transport.token != "bootstrap-token"  # noqa: S105
+
+
+def test_attach_scopes_name_and_registry_lookups_to_modal_environment(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_result = FakeSandboxObject(
+        name="desktop-1", tags={APP_ID_TAG: "ap-computer-app"}
+    )
+
+    ComputerSandbox.attach(
+        app_name="computer-app",
+        name="desktop-1",
+        modal_environment="production",
+    )
+
+    assert FakeSandbox.from_name_calls == [("computer-app", "desktop-1", "production")]
+    assert FakeApp.lookups == [("computer-app", False, "production")]
+
+
+def test_attach_legacy_name_requires_explicit_compatibility(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_result = FakeSandboxObject(name="desktop-1")
+
+    with pytest.raises(SandboxUnavailableError, match="app-owned"):
+        ComputerSandbox.attach(app_name="computer-app", name="desktop-1")
+
+    computer = ComputerSandbox.attach(
+        app_name="computer-app",
+        name="desktop-1",
+        allow_legacy_unscoped=True,
+    )
+
+    assert computer.metadata() is not None
+    assert computer.metadata().name == "desktop-1"
+
+
+def test_attach_rejects_wrong_app_tag_even_in_legacy_mode(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_result = FakeSandboxObject(
+        name="desktop-1", tags={APP_ID_TAG: "ap-other-app"}
+    )
+
+    with pytest.raises(SandboxUnavailableError, match="app-owned"):
+        ComputerSandbox.attach(
+            app_name="computer-app",
+            name="desktop-1",
+            allow_legacy_unscoped=True,
+        )
 
 
 def test_attach_wait_polls_daemon_when_requested(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_result = FakeSandboxObject(
+        name="desktop-1", tags={APP_ID_TAG: "ap-computer-app"}
+    )
     readiness_calls: list[float] = []
     monkeypatch.setattr(
         ComputerSandbox,
@@ -1440,20 +1599,35 @@ def test_wait_until_ready_timeout_reports_transient_error() -> None:
 def test_attach_by_run_id_lists_by_tags(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     FakeSandbox.listed = [
-        FakeSandboxObject(tags={"computer-use.run_id": "run-123", "computer-use": "true"})
+        FakeSandboxObject(
+            tags={
+                "computer-use.run_id": "run-123",
+                "computer-use": "true",
+                APP_ID_TAG: "ap-modal-computer-use",
+            }
+        )
     ]
 
     ComputerSandbox.attach(run_id="run-123")
 
-    assert FakeSandbox.list_calls == [{"computer-use.run_id": "run-123"}]
+    assert FakeSandbox.list_calls == [
+        {
+            "app_id": "ap-modal-computer-use",
+            "tags": {
+                "computer-use.run_id": "run-123",
+                APP_ID_TAG: "ap-modal-computer-use",
+            },
+        }
+    ]
 
 
 def test_attach_closes_new_client_when_readiness_fails_without_terminating_target(
     monkeypatch,
 ) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    target = FakeSandboxObject(sandbox_id="sb-target")
+    target = FakeSandboxObject(sandbox_id="sb-target", tags={APP_ID_TAG: "ap-modal-computer-use"})
     FakeSandbox.from_id_result = target
+    FakeSandbox.listed = [target]
     clients: list[object] = []
 
     class FailingClient:
@@ -1554,8 +1728,20 @@ def test_attach_preserves_readiness_timeout_when_client_cleanup_fails(
 def test_attach_by_run_id_ambiguous_matches_fail(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     FakeSandbox.listed = [
-        FakeSandboxObject(tags={"computer-use.run_id": "run-123", "computer-use": "true"}),
-        FakeSandboxObject(tags={"computer-use.run_id": "run-123", "computer-use": "true"}),
+        FakeSandboxObject(
+            tags={
+                "computer-use.run_id": "run-123",
+                "computer-use": "true",
+                APP_ID_TAG: "ap-modal-computer-use",
+            }
+        ),
+        FakeSandboxObject(
+            tags={
+                "computer-use.run_id": "run-123",
+                "computer-use": "true",
+                APP_ID_TAG: "ap-modal-computer-use",
+            }
+        ),
     ]
 
     try:
@@ -1579,6 +1765,7 @@ def test_attach_metadata_includes_safe_tags_run_id_and_config_hash(monkeypatch) 
                 "computer-use.config_hash": config_hash,
                 "computer-use.owner": "alice",
                 "computer-use.created_at": "2026-05-12T12:00:00Z",
+                APP_ID_TAG: "ap-computer-app",
                 "computer-use.artifacts_dir": "/home/desktop/artifacts",
             },
         )
@@ -1635,7 +1822,7 @@ def test_modal_sandbox_exec_once_creates_ephemeral_runner(monkeypatch) -> None:
     assert kwargs["encrypted_ports"] == []
     assert kwargs["cpu"] == 0.5
     assert kwargs["memory"] == 512
-    assert kwargs["tags"] == {"role": "runner"}
+    assert kwargs["tags"] == {"role": "runner", APP_ID_TAG: "ap-computer-app"}
     assert FakeSandbox.created is not None
     assert FakeSandbox.created.set_tags_calls == []
     assert FakeSandbox.created.exec_calls == [
@@ -1708,13 +1895,19 @@ def test_registry_lists_sandboxes_with_tags(monkeypatch) -> None:
                 "computer-use.config_hash": "abc",
                 "computer-use.owner": "alice",
                 "computer-use.created_at": "2026-05-12T12:00:00Z",
+                APP_ID_TAG: "ap-computer-app",
             },
         )
     ]
 
     refs = SandboxRegistry(app_name="computer-app").list()
 
-    assert FakeSandbox.list_calls == [{"computer-use": "true"}]
+    assert FakeSandbox.list_calls == [
+        {
+            "app_id": "ap-computer-app",
+            "tags": {APP_ID_TAG: "ap-computer-app"},
+        }
+    ]
     assert refs[0].name == "desktop-1"
     assert refs[0].run_id == "run-123"
     assert refs[0].owner == "alice"
@@ -1729,6 +1922,7 @@ def test_registry_invalid_created_at_does_not_crash_list(monkeypatch) -> None:
             tags={
                 "computer-use": "true",
                 "computer-use.created_at": "not-a-date",
+                APP_ID_TAG: "ap-computer-app",
             },
         )
     ]
@@ -1747,6 +1941,7 @@ def test_registry_list_older_than_filters_valid_created_at(monkeypatch) -> None:
             tags={
                 "computer-use": "true",
                 "computer-use.created_at": "2026-05-12T10:00:00Z",
+                APP_ID_TAG: "ap-computer-app",
             },
         ),
         FakeSandboxObject(
@@ -1754,9 +1949,13 @@ def test_registry_list_older_than_filters_valid_created_at(monkeypatch) -> None:
             tags={
                 "computer-use": "true",
                 "computer-use.created_at": "2026-05-12T12:00:00Z",
+                APP_ID_TAG: "ap-computer-app",
             },
         ),
-        FakeSandboxObject(sandbox_id="unknown", tags={"computer-use": "true"}),
+        FakeSandboxObject(
+            sandbox_id="unknown",
+            tags={"computer-use": "true", APP_ID_TAG: "ap-computer-app"},
+        ),
     ]
 
     refs = SandboxRegistry(app_name="computer-app").list_older_than(
@@ -1775,6 +1974,7 @@ def test_manager_cleanup_expired_dry_run_does_not_terminate(monkeypatch) -> None
             "computer-use.owner": "alice",
             "computer-use.run_id": "run-old",
             "computer-use.created_at": "2026-05-12T10:00:00Z",
+            APP_ID_TAG: "ap-computer-app",
         },
     )
     new = FakeSandboxObject(
@@ -1783,6 +1983,7 @@ def test_manager_cleanup_expired_dry_run_does_not_terminate(monkeypatch) -> None
             "computer-use": "true",
             "computer-use.owner": "alice",
             "computer-use.created_at": "2026-05-12T12:00:00Z",
+            APP_ID_TAG: "ap-computer-app",
         },
     )
     FakeSandbox.listed = [old, new]
@@ -1793,7 +1994,15 @@ def test_manager_cleanup_expired_dry_run_does_not_terminate(monkeypatch) -> None
         now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
     )
 
-    assert FakeSandbox.list_calls == [{"computer-use": "true", "computer-use.owner": "alice"}]
+    assert FakeSandbox.list_calls == [
+        {
+            "app_id": "ap-computer-app",
+            "tags": {
+                "computer-use.owner": "alice",
+                APP_ID_TAG: "ap-computer-app",
+            },
+        }
+    ]
     assert result.dry_run is True
     assert result.inspected_count == 2
     assert result.matched_count == 1
@@ -1813,6 +2022,7 @@ def test_manager_cleanup_expired_execute_terminates_only_expired(monkeypatch) ->
         tags={
             "computer-use": "true",
             "computer-use.created_at": "2026-05-12T10:00:00Z",
+            APP_ID_TAG: "ap-computer-app",
         },
     )
     new = FakeSandboxObject(
@@ -1820,6 +2030,7 @@ def test_manager_cleanup_expired_execute_terminates_only_expired(monkeypatch) ->
         tags={
             "computer-use": "true",
             "computer-use.created_at": "2026-05-12T11:30:00Z",
+            APP_ID_TAG: "ap-computer-app",
         },
     )
     FakeSandbox.listed = [old, new]
@@ -1838,12 +2049,49 @@ def test_manager_cleanup_expired_execute_terminates_only_expired(monkeypatch) ->
     assert new.terminated is False
 
 
+def test_manager_cleanup_never_terminates_unscoped_legacy_sandboxes(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    scoped = FakeSandboxObject(
+        sandbox_id="scoped",
+        tags={
+            "computer-use": "true",
+            "computer-use.created_at": "2026-05-12T10:00:00Z",
+            APP_ID_TAG: "ap-computer-app",
+        },
+    )
+    legacy = FakeSandboxObject(
+        sandbox_id="legacy",
+        tags={
+            "computer-use": "true",
+            "computer-use.created_at": "2026-05-12T10:00:00Z",
+        },
+    )
+    FakeSandbox.listed = [scoped, legacy]
+
+    result = ComputerSandboxManager(app_name="computer-app").cleanup_expired(
+        ttl_seconds=3600,
+        dry_run=False,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.inspected_count == 1
+    assert scoped.terminated is True
+    assert legacy.terminated is False
+
+
 def test_manager_cleanup_skips_missing_and_invalid_created_at(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    missing = FakeSandboxObject(sandbox_id="missing", tags={"computer-use": "true"})
+    missing = FakeSandboxObject(
+        sandbox_id="missing",
+        tags={"computer-use": "true", APP_ID_TAG: "ap-computer-app"},
+    )
     invalid = FakeSandboxObject(
         sandbox_id="invalid",
-        tags={"computer-use": "true", "computer-use.created_at": "not-a-date"},
+        tags={
+            "computer-use": "true",
+            "computer-use.created_at": "not-a-date",
+            APP_ID_TAG: "ap-computer-app",
+        },
     )
     FakeSandbox.listed = [missing, invalid]
 
@@ -1865,8 +2113,9 @@ def test_manager_cleanup_skips_missing_and_invalid_created_at(monkeypatch) -> No
 
 def test_manager_terminate_uses_modal_sandbox_id_without_connect_token(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    sandbox = FakeSandboxObject(sandbox_id="sb-terminate")
+    sandbox = FakeSandboxObject(sandbox_id="sb-terminate", tags={APP_ID_TAG: "ap-computer-app"})
     FakeSandbox.from_id_result = sandbox
+    FakeSandbox.listed = [sandbox]
 
     ComputerSandboxManager(app_name="computer-app").terminate("sb-terminate")
 
@@ -2050,8 +2299,8 @@ def test_registry_find_by_run_id_missing_returns_none(monkeypatch) -> None:
 def test_registry_find_by_run_id_ambiguous_fails(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     FakeSandbox.listed = [
-        FakeSandboxObject(tags={"computer-use.run_id": "run-123"}),
-        FakeSandboxObject(tags={"computer-use.run_id": "run-123"}),
+        FakeSandboxObject(tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-computer-app"}),
+        FakeSandboxObject(tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-computer-app"}),
     ]
 
     try:
@@ -2074,6 +2323,7 @@ def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
                 "computer-use": "true",
                 "computer-use.run_id": "run-123",
                 "computer-use.config_hash": compute_config_hash(config),
+                APP_ID_TAG: "ap-modal-computer-use",
             }
         )
     ]
@@ -2083,7 +2333,40 @@ def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
     assert computer.metadata() is not None
     assert computer.metadata().run_id == "run-123"
     assert computer._requested_modal_region == "us-west"
-    assert FakeSandbox.list_calls == [{"computer-use.run_id": "run-123"}]
+    assert FakeSandbox.list_calls == [
+        {
+            "app_id": "ap-modal-computer-use",
+            "tags": {
+                "computer-use.run_id": "run-123",
+                APP_ID_TAG: "ap-modal-computer-use",
+            },
+        }
+    ]
+    assert FakeSandbox.create_calls == []
+
+
+def test_attach_or_create_reuse_uses_runtime_modal_environment(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(
+        run_id="run-123",
+        runtime={"modal_environment": "production"},
+    )
+    FakeSandbox.listed = [
+        FakeSandboxObject(
+            tags={
+                "computer-use": "true",
+                "computer-use.run_id": "run-123",
+                "computer-use.config_hash": compute_config_hash(config),
+                APP_ID_TAG: "ap-modal-computer-use",
+            }
+        )
+    ]
+
+    computer = ComputerSandbox.attach_or_create(config=config, image=object(), wait=False)
+
+    assert computer.metadata() is not None
+    assert computer.metadata().run_id == "run-123"
+    assert FakeApp.lookups == [("modal-computer-use", False, "production")]
     assert FakeSandbox.create_calls == []
 
 
@@ -2110,6 +2393,7 @@ def test_attach_or_create_by_name_reuses_matching_config(monkeypatch) -> None:
             "computer-use": "true",
             "computer-use.run_id": "run-123",
             "computer-use.config_hash": compute_config_hash(config),
+            APP_ID_TAG: "ap-modal-computer-use",
         },
     )
 
@@ -2123,7 +2407,7 @@ def test_attach_or_create_by_name_reuses_matching_config(monkeypatch) -> None:
 
     assert computer.metadata() is not None
     assert computer.metadata().name == "desktop-1"
-    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1")]
+    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
     assert FakeSandbox.create_calls == []
 
 
@@ -2136,6 +2420,7 @@ def test_attach_or_create_config_hash_mismatch_raises_by_default(monkeypatch) ->
                 "computer-use": "true",
                 "computer-use.run_id": "run-123",
                 "computer-use.config_hash": "different",
+                APP_ID_TAG: "ap-modal-computer-use",
             }
         )
     ]
@@ -2158,6 +2443,7 @@ def test_attach_or_create_config_hash_mismatch_can_reuse_explicitly(monkeypatch)
                 "computer-use": "true",
                 "computer-use.run_id": "run-123",
                 "computer-use.config_hash": "different",
+                APP_ID_TAG: "ap-modal-computer-use",
             }
         )
     ]
@@ -2187,7 +2473,15 @@ def test_attach_or_create_missing_run_id_match_creates(monkeypatch) -> None:
         wait=False,
     )
 
-    assert FakeSandbox.list_calls == [{"computer-use.run_id": "run-123"}]
+    assert FakeSandbox.list_calls == [
+        {
+            "app_id": "ap-modal-computer-use",
+            "tags": {
+                "computer-use.run_id": "run-123",
+                APP_ID_TAG: "ap-modal-computer-use",
+            },
+        }
+    ]
     assert len(FakeSandbox.create_calls) == 1
 
 
@@ -2203,7 +2497,7 @@ def test_attach_or_create_by_name_missing_creates(monkeypatch) -> None:
         wait=False,
     )
 
-    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1")]
+    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
     assert len(FakeSandbox.create_calls) == 1
     assert FakeSandbox.create_calls[0][1]["name"] == "desktop-1"
 

@@ -255,15 +255,15 @@ class X11ScreenshotController:
     ) -> tuple[bytes, int, int, str]:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             temp_path = Path(handle.name)
-        started = perf_counter()
-        capture_backend = await self._capture_native_png(
-            temp_path,
-            options=options,
-            region=region,
-            prefer_scrot=prefer_native_png,
-        )
-        timings_ms["capture_ms"] = _elapsed_ms(started)
         try:
+            started = perf_counter()
+            capture_backend = await self._capture_native_png(
+                temp_path,
+                options=options,
+                region=region,
+                prefer_scrot=prefer_native_png,
+            )
+            timings_ms["capture_ms"] = _elapsed_ms(started)
             if prefer_native_png and _can_preserve_native_png(options):
                 started = perf_counter()
                 data = temp_path.read_bytes()

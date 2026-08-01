@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -102,7 +101,7 @@ def _redact_trace_result_payload(value: Any, *, path: str = "") -> tuple[Any, li
     redactions: list[str] = []
     if isinstance(value, dict):
         if _is_redaction_marker(value):
-            return value, [path] if path else []
+            return _normalized_redaction_marker(value), [path] if path else []
         redacted: dict[str, Any] = {}
         for key, item in value.items():
             item_path = f"{path}.{key}" if path else str(key)
@@ -221,6 +220,8 @@ def _redact_action_payload(
 ) -> tuple[Any, list[str]]:
     redactions: list[str] = []
     if isinstance(value, dict):
+        if _is_redaction_marker(value):
+            return _normalized_redaction_marker(value), [path] if path else []
         redacted: dict[str, Any] = {}
         is_type_action = value.get("type") == "type" and isinstance(value.get("text"), str)
         for key, item in value.items():
@@ -267,7 +268,6 @@ def _redacted_text(text: str) -> dict[str, Any]:
     return {
         "redacted": True,
         "length": len(text),
-        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
 
 
@@ -309,19 +309,25 @@ def _is_sensitive_trace_key(key: str) -> bool:
 
 def _redacted_sensitive_value(value: Any) -> dict[str, Any]:
     if _is_redaction_marker(value):
-        return value
-    marker: dict[str, Any] = {"redacted": True}
-    if isinstance(value, str):
-        marker["length"] = len(value)
-    elif isinstance(value, bytes):
-        marker["size_bytes"] = len(value)
-    elif isinstance(value, list | tuple | dict):
-        marker["items"] = len(value)
-    return marker
+        return _normalized_redaction_marker(value)
+    if isinstance(value, str | bytes | list | tuple | dict):
+        length = len(value)
+    elif value is None:
+        length = 0
+    else:
+        length = 1
+    return {"redacted": True, "length": length}
 
 
 def _is_redaction_marker(value: Any) -> bool:
     return isinstance(value, dict) and value.get("redacted") is True
+
+
+def _normalized_redaction_marker(value: dict[str, Any]) -> dict[str, Any]:
+    length = value.get("length", value.get("size_bytes", value.get("items", 0)))
+    if not isinstance(length, int) or isinstance(length, bool) or length < 0:
+        length = 0
+    return {"redacted": True, "length": length}
 
 
 def _provider_trace_metadata(

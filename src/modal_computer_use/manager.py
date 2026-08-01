@@ -100,7 +100,7 @@ class ComputerSandboxManager:
         current_time = _as_utc(now or datetime.now(UTC))
         cutoff = current_time - timedelta(seconds=ttl_seconds)
         tag_filter = (
-            {"computer-use": "true", "computer-use.owner": owner} if owner is not None else None
+            {"computer-use.owner": owner} if owner is not None else None
         )
         entries = self.registry.list_sandboxes_with_refs(tags=tag_filter)
 

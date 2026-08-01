@@ -35,6 +35,7 @@ from modal_computer_use.daemon.desktop.screenshots import (
 )
 from modal_computer_use.daemon.desktop.windows import X11WindowController
 from modal_computer_use.daemon.desktop.xtest import X11InputSession
+from modal_computer_use.daemon.process_environment import desktop_process_environment
 from modal_computer_use.models import (
     ActionResult,
     CoordinateSpace,
@@ -725,8 +726,7 @@ class X11DesktopBackend(MockDesktopBackend):
         check: bool = True,
         capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        env = dict(os.environ)
-        env["DISPLAY"] = self.display
+        env = desktop_process_environment(display=self.display)
         return await self._process_runner.run(
             *args,
             env=env,
@@ -737,8 +737,7 @@ class X11DesktopBackend(MockDesktopBackend):
         )
 
     async def _spawn(self, *args: str) -> subprocess.Popen[str]:
-        env = dict(os.environ)
-        env["DISPLAY"] = self.display
+        env = desktop_process_environment(display=self.display)
         return subprocess.Popen(  # noqa: S603 - daemon validates command shape before launch.
             args,
             env=env,

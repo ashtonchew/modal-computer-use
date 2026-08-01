@@ -411,11 +411,12 @@ The supported ingress policies are:
 
 | Policy | Contract |
 | --- | --- |
-| `attested-tunnel` | Default. Use Connect access to authenticate and obtain a short-lived daemon-issued tunnel bearer, then use the encrypted daemon tunnel. |
+| `attested-tunnel` | Default. Use an SDK-managed bootstrap bearer to obtain a short-lived daemon-issued bearer, then use the encrypted daemon tunnel. Attach and handoff recover the bootstrap bearer through the Modal control plane. |
 | `connect` | Use Modal Sandbox Connect access directly. Required when outbound networking is fully blocked. |
 | `tunnel` | Use the encrypted daemon tunnel. Intended for explicitly managed compatibility and benchmark paths. |
 
-Every SDK-created daemon Connect Token is explicitly scoped with `port=8080`. The daemon rejects
+Every SDK-created daemon Connect Token is explicitly scoped with `port=8080` and is used only for
+pure Connect ingress. Raw and attested tunnel modes do not trust verified-user headers. The daemon rejects
 `_modal_connect_token` query parameters to keep credentials out of URLs and logs. The SDK extracts
 a query token returned by older Modal shapes and sends it as a bearer header.
 
@@ -531,16 +532,24 @@ Security invariants:
 
 1. Query-string Connect tokens are rejected.
 2. Local-token mode is loopback-only.
-3. Verified-user headers are trusted only through the configured Modal proxy boundary.
-4. Unknown action keys, invalid coordinates, invalid regions, and unsupported keys fail before
+3. Missing authentication fails closed; unauthenticated local mode is explicit and loopback-only.
+4. Verified-user headers are trusted only in pure Connect mode. Raw and attested tunnels require
+   daemon bearer authentication even when a client supplies a verified-user-shaped header.
+5. Minted tunnel tokens cannot mint another token and expire according to daemon policy.
+6. HTTP responses are non-cacheable, JSON and WebSocket inputs are bounded, and artifact uploads
+   remain streamed.
+7. Unknown action keys, invalid coordinates, invalid regions, and unsupported keys fail before
    execution.
-5. Artifact paths reject absolute paths, traversal after repeated percent decoding, control
+8. Nested action depth, command arguments, drag points, and key collections are bounded before
+   execution.
+9. Artifact paths reject absolute paths, traversal after repeated percent decoding, control
    characters, protected control paths, and symlink escapes.
-6. Logs, traces, process diagnostics, command output, and error details pass through redaction.
-7. Budgets are reserved at the owning route before expensive or mutating work.
-8. noVNC is opt-in and its takeover semantics are explicit.
-9. Prompt-injection and sensitive-action policy remain above core.
-10. Ambiguous mutation state fails closed and is never hidden by transport fallback.
+10. Logs, traces, process diagnostics, command output, and error details pass through redaction.
+11. Budgets are reserved at the owning route before expensive or mutating work.
+12. noVNC is opt-in and its takeover semantics are explicit.
+13. Modal lifecycle operations verify the requested app and app-ownership tag.
+14. Prompt-injection and sensitive-action policy remain above core.
+15. Ambiguous mutation state fails closed and is never hidden by transport fallback.
 
 The maintained threat model is [`docs/security.md`](../security.md).
 
@@ -561,10 +570,9 @@ Persistence reports are explicit:
 ### 11.2 Traces
 
 Trace NDJSON records provider provenance, normalized actions, results, screenshot references,
-coordinate spaces, redactions, and errors. Typed text is replaced with a marker, length, and
-SHA-256. Generic sensitive strings such as clipboard text are replaced with a marker and length.
-Replay validates the entire trace and skips redacted input. Replay never turns redacted content
-back into executable text.
+coordinate spaces, redactions, and errors. Sensitive values are replaced with exactly a redaction
+marker and length; content hashes are not retained. Replay validates the entire trace and skips
+redacted input. Replay never turns redacted content back into executable text.
 
 ### 11.3 Observability
 
@@ -600,6 +608,11 @@ Warm capacity is ownership-sensitive. A claim verifies the live Sandbox, configu
 expiry, tags, and lock before use. A failed or unverifiable ownership read is terminal. Cleanup may
 terminate only exact, verified, application-owned targets. Dry-run is the default for broad
 expiry cleanup.
+
+New Sandboxes carry `computer-use.app_id`. List, attach, reuse, warm-capacity, and cleanup queries
+are scoped to Modal's app ID and verify the ownership tag. A migration-only
+`allow_legacy_unscoped` option may attach an untagged Sandbox already resolved inside the requested
+app. It never permits a conflicting tag or broad legacy cleanup.
 
 Modal Queues and object tags coordinate capacity; they are not an authorization database.
 
@@ -695,6 +708,7 @@ Every behavior change must add focused success and failure-path coverage. Before
 merge-ready handoff, the repository requires:
 
 ```bash
+uv sync --extra dev --extra modal --frozen
 uv run python scripts/export_openapi.py --check
 uv run ruff check .
 uv run mypy src
@@ -706,6 +720,9 @@ Boundary scans must confirm:
 - core has no `openai` or `anthropic` imports;
 - core has no `NetworkFileSystem` use;
 - examples and docs do not print secret-bearing URLs, tokens, artifacts, or content.
+- the frozen dependency graph passes audit;
+- Bandit and Semgrep report no material finding;
+- security regressions and the documented performance gates pass locally.
 
 Modal smoke tests are credential-gated. The deployed-Function handoff smoke is a protected manual
 workflow and validates one bounded handoff, not benchmark performance or continuous production

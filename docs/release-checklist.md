@@ -9,7 +9,7 @@ Run the same dependency, schema, lint, type, test, and benchmark-smoke commands 
 job:
 
 ```bash
-uv sync --extra dev --extra modal
+uv sync --extra dev --extra modal --frozen
 uv run python scripts/export_openapi.py --check
 uv run ruff check .
 uv run mypy src
@@ -70,6 +70,25 @@ Run the same fail-on-match boundary scans as CI:
 ! rg "NetworkFileSystem" src
 ! rg -n "print\([^\n]*(vnc_url|debug\.vnc_url|\.uri|artifact_uri|token|data_base64|raw_path|stdout|stderr)" examples docs README.md
 uv run python scripts/check_repository_hygiene.py
+uv export --frozen --all-extras --no-hashes --no-emit-project \
+  --output-file /tmp/modal-computer-use-audit-requirements.txt
+uvx --python 3.12 --from pip-audit pip-audit \
+  --requirement /tmp/modal-computer-use-audit-requirements.txt \
+  --no-deps --disable-pip
+uvx --from bandit bandit -q -lll -r src
+uvx semgrep scan --config p/security-audit --error src
+```
+
+Run the focused security regressions before the full suite:
+
+```bash
+uv run pytest \
+  tests/test_auth_security.py \
+  tests/test_daemon_validation.py \
+  tests/test_artifacts.py \
+  tests/test_recordings.py \
+  tests/test_trace_and_budgets.py \
+  tests/test_modal_sdk_boundary.py -q
 ```
 
 Confirm that:
@@ -83,6 +102,17 @@ Confirm that:
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
 - GitHub private vulnerability reporting is enabled before publication, and the form linked from
   `SECURITY.md` is tested without repository access.
+
+Security-sensitive hot-path changes also require local comparison against the merge base. For
+isolated validation, collect at least 60 warmed values across multiple worker processes for 1, 50,
+and 500 flat actions and nested depths 1 and 32. A regression requires statistical significance,
+more than 5%, and more than 0.05 ms. For daemon end-to-end latency, collect at least 30 interleaved
+baseline/candidate pairs and retain raw samples. A regression requires a bootstrap 95% lower bound,
+more than 5%, and more than 0.25 ms. Validation failures or changed rejection semantics fail the
+gate regardless of timing.
+
+These are local release gates. A hosted check that does not run because of billing or service
+availability does not replace or invalidate the local evidence.
 
 ## Protected Modal verification
 

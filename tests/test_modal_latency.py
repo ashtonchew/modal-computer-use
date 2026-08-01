@@ -572,8 +572,8 @@ class BoundaryProbe:
 
 class BoundaryApp:
     @classmethod
-    def lookup(cls, app_name: str, **kwargs: Any) -> str:
-        return f"app:{app_name}"
+    def lookup(cls, app_name: str, **kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(app_id=f"ap-{app_name}")
 
 
 class BoundarySandboxObject:
@@ -590,6 +590,9 @@ class BoundarySandboxObject:
     def create_connect_token(self, **kwargs: Any) -> SimpleNamespace:
         assert kwargs["port"] == 8080
         return SimpleNamespace(url="https://connect.example", token="test-token")
+
+    def tunnels(self) -> dict[int, SimpleNamespace]:
+        return {8080: SimpleNamespace(url="https://daemon.example.modal.host")}
 
     def terminate(self, *, wait: bool = False) -> None:
         self.terminate_wait_calls.append(wait)

@@ -22,7 +22,8 @@ dependencies = [
   "python-dotenv>=1.0",
   "uvicorn[standard]>=0.30",
   "websockets>=13.0",
-  "pillow>=10.0",
+  "pillow>=12.3.0",
+  "starlette>=1.0.1",
   "xxhash>=3.6",
 ]
 

@@ -5,8 +5,9 @@ import json
 import uuid
 from datetime import UTC, datetime
 
-from ._version import __version__
 from .config import ComputerConfig
+
+APP_ID_TAG = "computer-use.app_id"
 
 
 def new_run_id(prefix: str = "run") -> str:
@@ -29,12 +30,13 @@ def created_at_tag(now: datetime | None = None) -> str:
 def default_tags(
     config: ComputerConfig,
     *,
+    app_id: str,
     owner: str | None = None,
     created_at: datetime | None = None,
 ) -> dict[str, str]:
     tags = {
         "computer-use": "true",
-        "computer-use.version": __version__,
+        APP_ID_TAG: app_id,
         "computer-use.created_at": created_at_tag(created_at),
         "computer-use.config_hash": compute_config_hash(config),
         "computer-use.artifacts_dir": config.storage.artifacts_dir,
@@ -48,10 +50,12 @@ def default_tags(
 
 def warm_pool_tags(
     *,
+    app_id: str,
     created_at: datetime | None = None,
 ) -> dict[str, str]:
     """Return the minimal lifecycle tags needed by a bounded warm slot."""
     return {
         "computer-use": "true",
+        APP_ID_TAG: app_id,
         "computer-use.created_at": created_at_tag(created_at),
     }

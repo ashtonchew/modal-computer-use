@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import time
+import secrets
 from contextlib import suppress
 
 from fastapi import WebSocket
@@ -17,7 +17,10 @@ def daemon_websocket_auth_error(websocket: WebSocket) -> str | None:
     if settings.local_token:
         if not _is_loopback_websocket(websocket):
             return "local_token_requires_loopback"
-        if websocket.headers.get("authorization") != f"Bearer {settings.local_token}":
+        if not secrets.compare_digest(
+            websocket.headers.get("authorization", ""),
+            f"Bearer {settings.local_token}",
+        ):
             return "unauthorized"
         return None
     if settings.require_connect_user:
@@ -34,9 +37,11 @@ def daemon_websocket_auth_error(websocket: WebSocket) -> str | None:
             if isinstance(metadata, dict) and metadata.get("sdk") == "modal-computer-use":
                 return None
         return "invalid_verified_user_data"
-    return None
-
-
+    if settings.tunnel_token:
+        return "unauthorized"
+    if settings.allow_unauthenticated_loopback:
+        return None if _is_loopback_websocket(websocket) else "loopback_required"
+    return "authentication_required"
 def _is_loopback_websocket(websocket: WebSocket) -> bool:
     host = websocket.client.host if websocket.client else ""
     if host in {"localhost", "testclient"}:
@@ -49,14 +54,16 @@ def _is_loopback_websocket(websocket: WebSocket) -> bool:
 
 def _is_trusted_connect_proxy(websocket: WebSocket, *, trust_private: bool) -> bool:
     host = websocket.client.host if websocket.client else ""
-    if host in {"localhost", "testclient"}:
+    if host == "testclient":
         return True
+    if host == "localhost":
+        return trust_private
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
     if address.is_loopback:
-        return True
+        return trust_private
     return trust_private and (address.is_private or address.is_link_local)
 
 
@@ -65,17 +72,9 @@ def _has_valid_tunnel_token(websocket: WebSocket) -> bool:
     if not token:
         return False
     settings = websocket.app.state.settings
-    if settings.tunnel_token and token == settings.tunnel_token:
+    if settings.tunnel_token and secrets.compare_digest(token, settings.tunnel_token):
         return True
-    sessions = getattr(websocket.app.state, "tunnel_sessions", {})
-    expires_at = sessions.get(token) if isinstance(sessions, dict) else None
-    if not isinstance(expires_at, int | float):
-        return False
-    if expires_at <= time.time():
-        with suppress(Exception):
-            sessions.pop(token, None)
-        return False
-    return True
+    return websocket.app.state.tunnel_sessions.validate(token)
 
 
 def _bearer_token(websocket: WebSocket) -> str | None:

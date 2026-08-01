@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -24,9 +25,14 @@ class HTTPTransport:
         http2: bool = False,
         client: httpx.Client | None = None,
         _metadata_headers: MetadataHeaders | None = None,
+        _token_resolver: Callable[[], str] | None = None,
     ) -> None:
+        if token is not None and _token_resolver is not None:
+            raise ValueError("token and _token_resolver are mutually exclusive")
         self.base_url = base_url.rstrip("/")
-        self.token = token
+        self._token = token
+        self._token_resolver = _token_resolver
+        self._token_lock = Lock()
         self.last_http_version: str | None = None
         self._client = client or httpx.Client(
             base_url=self.base_url,
@@ -35,6 +41,16 @@ class HTTPTransport:
         )
         self._metadata_headers = _metadata_headers
         self._tracer = get_tracer(name="modal_computer_use.sdk")
+
+    @property
+    def token(self) -> str | None:
+        if self._token is not None or self._token_resolver is None:
+            return self._token
+        with self._token_lock:
+            if self._token is None and self._token_resolver is not None:
+                self._token = self._token_resolver()
+                self._token_resolver = None
+        return self._token
 
     def close(self) -> None:
         self._client.close()

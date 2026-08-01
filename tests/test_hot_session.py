@@ -42,6 +42,23 @@ def test_hot_session_rejects_missing_auth(tmp_path) -> None:
     assert exc.value.code == 1008
 
 
+def test_hot_session_connection_limit_is_global(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev", max_hot_session_connections=1)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        client.websocket_connect("/v1/session/hot") as first,
+    ):
+        assert first.receive_json()["type"] == "ready"
+        with (
+            pytest.raises(WebSocketDisconnect) as exc_info,
+            client.websocket_connect("/v1/session/hot"),
+        ):
+            pass
+
+    assert exc_info.value.code == 1013
+
+
 def test_hot_session_runs_actions_and_raw_screenshot(test_client) -> None:
     with test_client.websocket_connect("/v1/session/hot") as websocket:
         assert websocket.receive_json()["type"] == "ready"

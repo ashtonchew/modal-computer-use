@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import subprocess
 from collections.abc import Awaitable, Callable, Sequence
 
@@ -17,6 +18,8 @@ class X11AppController:
         try:
             process = await self._spawn(command, *args)
         except OSError as exc:
+            if exc.errno == errno.E2BIG:
+                raise
             return ActionResult(
                 ok=False,
                 message="failed to launch application",

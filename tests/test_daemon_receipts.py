@@ -886,7 +886,7 @@ def test_terminal_commit_failure_immediately_quarantines_all_mutations(
     tmp_path, monkeypatch
 ) -> None:
     app = _app(tmp_path)
-    app.state.lease_coordinator.ttl_seconds = 0.02
+    app.state.lease_coordinator.ttl_seconds = 0.2
     with TestClient(
         app,
         headers={"Authorization": "Bearer dev"},
@@ -910,7 +910,7 @@ def test_terminal_commit_failure_immediately_quarantines_all_mutations(
             headers=_operation_headers(lease, 1),
         )
         recovery = client.get("/v1/recovery/status", headers=lease)
-        time.sleep(0.04)
+        time.sleep(0.25)
         after_expiry = client.post(
             "/v1/leases/acquire",
             json={"run_id": "run-after-terminal-failure"},

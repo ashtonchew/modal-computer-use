@@ -335,6 +335,11 @@ ComputerSandbox.attach(run_id="support-ticket-123")
 ComputerSandbox.attach(base_url="https://daemon.example", token="...")
 ```
 
+Modal-backed attachment is app-scoped. New Sandboxes carry `computer-use.app_id`, and ID, name,
+and run-ID attachment verify the requested app before returning a client. Set
+`allow_legacy_unscoped=True` only while migrating an untagged Sandbox that Modal already resolves
+inside that app. A conflicting app tag always fails.
+
 `run_id` is the canonical sandbox lifetime identifier. `request_id` is only a deprecated
 configuration alias for compatibility boundaries.
 
@@ -380,7 +385,12 @@ find by run ID, terminate by sandbox ID, and inspect stale sandboxes for cleanup
 prompts, provider policies, messages, or task loops.
 `cleanup_expired(ttl_seconds=..., owner=None, dry_run=True)` returns a `SandboxCleanupResult` with
 candidate, skipped, and error items. Missing or malformed creation timestamps are skipped;
-`dry_run=False` terminates only expired listed sandboxes with valid creation metadata.
+`dry_run=False` terminates only expired app-tagged sandboxes with valid creation metadata. Untagged
+legacy resources are never bulk terminated.
+
+`ComputerSandbox.create(..., **sandbox_kwargs)` rejects overrides of SDK-owned app, network,
+ingress, environment, readiness, and ownership-tag fields. Ordinary Modal arguments remain
+available when they do not replace those boundaries.
 
 `ComputerSandbox.snapshot_directory(path)` and `ComputerSandbox.mount_image(path, image)` expose
 the directory snapshot and restore signatures. `snapshot_filesystem()` is a compatibility helper
@@ -417,6 +427,9 @@ compound top-level item: nested actions run while the key is held, and the first
 releases the key and fails that `hold_key` item before later nested actions run.
 Nested `hold_key` action trees are canonical only through `/v1/actions/run`; the direct
 `/v1/keyboard/hold` route is primitive-only and accepts only `key` plus optional `duration_ms`.
+Nested trees are preflighted iteratively and fail closed. The default maximum depth is 32 and the
+configurable range is `1..128`; the depth limit cannot be disabled. Batch size remains 50 by
+default with a hard configuration maximum of 500 actions, including nested actions.
 Action budgets count attempted executable desktop actions after validation, including failed
 and timed-out actions. Screenshot and zoom actions count against screenshot/artifact budgets
 instead, and cursor-position queries do not consume the action budget. Successful action-route
@@ -437,6 +450,17 @@ oversized `screenshot_after` requests fail validation before any batch action ex
 tools such as `xdotool`. Command stdout/stderr and process log tails remain available to
 authenticated callers for debugging, but known secret-bearing substrings such as bearer tokens,
 noVNC URLs, and artifact URIs are sanitized before the daemon returns them.
+Command and app-launch vectors default to 65,536 arguments. Each argument is also bounded by the
+Linux encoded-byte limit derived from page size; kernel `E2BIG` failures return a sanitized `422`.
+Drag paths default to 1,024 points and key/modifier collections default to 64 entries. These
+collection caps can be explicitly disabled with zero. Typed and clipboard text rely on the 16 MiB
+JSON envelope instead of smaller field caps. Automatic long-text typing selects clipboard before
+native keymap expansion; explicit native typing emits bounded chunks.
+
+The daemon applies a 16 MiB default receive ceiling to HTTP bodies and WebSocket messages.
+Artifact PUTs are excluded because they stream. Hot-session and observation-stream WebSockets use
+global default connection caps of 64 and 16. Limit rejection happens at admission or protocol
+boundaries and adds no per-frame application accounting.
 
 `ComputerTrace` represents validated trace entries. Replay skips redacted typed text and emits
 results with screenshot bytes and base64 payloads redacted. The [trace and replay guide](trace-replay.md)

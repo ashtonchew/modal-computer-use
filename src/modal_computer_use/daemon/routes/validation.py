@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import errno
+import os
+from collections.abc import AsyncIterator, Sized
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -39,7 +41,7 @@ async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[b
 
 
 async def daemon_readiness(request: Request) -> tuple[bool, list[str]]:
-    ready, errors = await desktop_readiness(request, force=True)
+    ready, errors = await desktop_readiness(request)
     if request.app.state.settings.vnc_mode == "off":
         return ready, errors
     for name in ("x11vnc", "novnc"):
@@ -183,3 +185,76 @@ def validate_keys(*keys: str) -> None:
             code="unsupported_key",
             details={"keys": invalid},
         )
+
+
+def validate_collection_size(
+    values: object,
+    *,
+    maximum: int,
+    field: str,
+    code: str,
+) -> None:
+    if maximum == 0 or not isinstance(values, Sized):
+        return
+    count = len(values)
+    if count <= maximum:
+        return
+    raise DaemonError(
+        f"{field} exceeds the configured limit",
+        status_code=422,
+        code=code,
+        details={"field": field, "count": count, "maximum": maximum},
+    )
+
+
+def command_argument_byte_limit() -> int:
+    """Return Linux's effective maximum byte length for one argv element."""
+    try:
+        page_size = os.sysconf("SC_PAGESIZE")
+    except (OSError, ValueError):
+        page_size = 4096
+    return min(131_071, (32 * page_size) - 1)
+
+
+def validate_command_vector(
+    command: object,
+    *,
+    maximum_arguments: int,
+    field: str = "command",
+) -> None:
+    if not isinstance(command, (list, tuple)):
+        return
+    validate_collection_size(
+        command,
+        maximum=maximum_arguments,
+        field=field,
+        code="too_many_command_arguments",
+    )
+    maximum_bytes = command_argument_byte_limit()
+    for index, argument in enumerate(command):
+        if not isinstance(argument, str):
+            continue
+        encoded_bytes = len(os.fsencode(argument))
+        if encoded_bytes <= maximum_bytes:
+            continue
+        raise DaemonError(
+            "command argument exceeds the platform byte limit",
+            status_code=422,
+            code="command_argument_too_large",
+            details={
+                "field": f"{field}[{index}]",
+                "encoded_bytes": encoded_bytes,
+                "maximum_bytes": maximum_bytes,
+            },
+        )
+
+
+def map_e2big(exc: BaseException) -> DaemonError | None:
+    if not isinstance(exc, OSError) or exc.errno != errno.E2BIG:
+        return None
+    return DaemonError(
+        "command exceeds the platform execution limit",
+        status_code=422,
+        code="command_too_large",
+        details={"errno": "E2BIG"},
+    )

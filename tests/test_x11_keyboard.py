@@ -566,6 +566,45 @@ def test_auto_typing_preflights_full_text_then_uses_and_restores_clipboard() -> 
     ]
 
 
+def test_long_auto_typing_selects_clipboard_before_building_native_strokes(
+    monkeypatch,
+) -> None:
+    harness = KeyboardHarness()
+
+    def reject_amplification(_text: str):
+        raise AssertionError("long text must not build a per-character stroke list")
+
+    monkeypatch.setattr(harness.controller._keymap, "text", reject_amplification)
+
+    result = anyio.run(harness.controller.type_text, "a" * 100_000, 0, "auto")
+
+    assert result.output["method"] == "clipboard"
+    assert harness.clipboard == "previous clipboard"
+
+
+def test_long_explicit_native_typing_emits_bounded_batches() -> None:
+    harness = KeyboardHarness()
+    text = "a" * ((keyboard_module._NATIVE_TYPE_CHUNK_SIZE * 2) + 1)
+
+    result = anyio.run(harness.controller.type_text, text, 0, "keystrokes")
+
+    assert result.output["method"] == "keystrokes"
+    assert len(harness.session.emissions) == 3
+    assert max(map(len, harness.session.emissions)) <= (
+        keyboard_module._NATIVE_TYPE_CHUNK_SIZE * 2
+    )
+
+
+def test_long_explicit_native_typing_preflights_before_emission() -> None:
+    harness = KeyboardHarness()
+    text = ("a" * keyboard_module._NATIVE_TYPE_CHUNK_SIZE) + "🙂"
+
+    with pytest.raises(ValueError, match="not mapped"):
+        anyio.run(harness.controller.type_text, text, 0, "keystrokes")
+
+    assert harness.session.emissions == []
+
+
 def test_explicit_keystrokes_reject_unmapped_text_without_partial_injection() -> None:
     harness = KeyboardHarness()
 

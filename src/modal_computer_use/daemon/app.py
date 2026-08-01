@@ -28,8 +28,14 @@ from modal_computer_use.daemon.leases import LeaseCoordinator
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.readiness import ReadinessCache
 from modal_computer_use.daemon.receipts import ReceiptJournal
+from modal_computer_use.daemon.request_limits import (
+    RequestBodyLimitMiddleware,
+    RequestBodyTooLarge,
+)
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
+from modal_computer_use.daemon.tunnel_sessions import TunnelSessionStore
+from modal_computer_use.daemon.websocket_admission import WebSocketAdmission
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 from modal_computer_use.models import ActionResult
 from modal_computer_use.observability import get_tracer
@@ -109,7 +115,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 lease_expiry_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await lease_expiry_task
-            await supervisor.stop()
+            try:
+                await asyncio.to_thread(app.state.recordings.shutdown)
+            finally:
+                await supervisor.stop()
         finally:
             try:
                 app.state.backend.close()
@@ -153,7 +162,11 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     )
     app.state.recordings = RecordingRegistry(settings, artifact_store=app.state.artifacts)
     app.state.idempotency_cache = OrderedDict()
-    app.state.tunnel_sessions = {}
+    app.state.tunnel_sessions = TunnelSessionStore(max_sessions=settings.max_tunnel_sessions)
+    app.state.websocket_admission = WebSocketAdmission(
+        hot_limit=settings.max_hot_session_connections,
+        observation_limit=settings.max_observation_connections,
+    )
     app.state.action_count = 0
     app.state.screenshot_count = 0
     app.state.last_activity_at = time.monotonic()
@@ -163,6 +176,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         enabled=settings.otel_enabled,
         name="modal_computer_use.daemon",
     )
+    app.add_middleware(RequestBodyLimitMiddleware, max_bytes=settings.max_json_body_bytes)
     app.add_middleware(AuthMiddleware, settings=settings)
 
     @app.middleware("http")
@@ -270,6 +284,20 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
             },
         )
 
+    @app.exception_handler(RequestBodyTooLarge)
+    async def request_body_too_large_handler(
+        _request: Request, exc: RequestBodyTooLarge
+    ) -> JSONResponse:
+        return _error_response(
+            status_code=413,
+            code="request_body_too_large",
+            content={
+                "code": "request_body_too_large",
+                "message": "request body exceeds the configured byte limit",
+                "details": {"max_bytes": exc.max_bytes},
+            },
+        )
+
     @app.exception_handler(FileNotFoundError)
     async def not_found_handler(_request: Request, _exc: FileNotFoundError) -> JSONResponse:
         return _error_response(
@@ -344,7 +372,7 @@ def _validation_errors_without_inputs(exc: RequestValidationError) -> list[dict[
 
 
 def _is_action_payload_validation_error(request: Request, exc: RequestValidationError) -> bool:
-    if request.url.path not in {"/v1/actions/run", "/v1/actions/validate"}:
+    if request.scope.get("path") not in {"/v1/actions/run", "/v1/actions/validate"}:
         return False
     for item in exc.errors():
         loc = item.get("loc", ())
@@ -357,7 +385,7 @@ def _error_response(*, status_code: int, code: str, content: dict[str, object]) 
     return JSONResponse(
         status_code=status_code,
         content=content,
-        headers={"x-computer-use-error-code": code},
+        headers={"x-computer-use-error-code": code, "cache-control": "no-store"},
     )
 
 
