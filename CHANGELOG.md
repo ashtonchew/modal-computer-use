@@ -4,6 +4,23 @@
 
 No changes yet.
 
+## 1.1.0 - 2026-07-31
+
+- Hardened daemon authentication to fail closed, made unauthenticated local mode explicit, blocked
+  minted tunnel sessions from reminting, and added optional non-evicting session capacity.
+- Added non-cacheable HTTP responses, 16 MiB HTTP/WebSocket defaults, global WebSocket admission
+  caps, bounded nested actions, command arguments, drag paths, and key collections.
+- Made artifact quota commits atomic, stopped active recordings during shutdown, removed hashes
+  from sensitive redaction markers, and excluded VNC passwords from config repr and serialization.
+- Scoped Modal create, attach, reuse, list, and cleanup behavior to the owning app. Added an
+  explicit legacy unscoped attach option without permitting bulk legacy cleanup.
+- Updated the frozen security-relevant dependency set, including Starlette, Pillow, AnyIO, h2,
+  WebSockets, OpenAI, and Anthropic.
+
+The v1.1 daemon requires a v1.1 SDK for the default attested-tunnel flow. Upgrade SDK and daemon
+together. The v1.0.0 tag was a private source milestone, not a GitHub Release or PyPI distribution.
+Version 1.1.0 is the first public GitHub Release.
+
 ## 1.0.0 - 2026-07-31
 
 - Added the canonical v8 product specification, archived v7, and classified stable, experimental,

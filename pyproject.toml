@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modal-computer-use"
-version = "1.0.0"
+version = "1.1.0"
 description = "Daemon-first Modal-native computer-use primitives for Linux desktops"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,7 +22,8 @@ dependencies = [
   "python-dotenv>=1.0",
   "uvicorn[standard]>=0.30",
   "websockets>=13.0",
-  "pillow>=10.0",
+  "pillow>=12.3.0",
+  "starlette>=1.0.1",
   "xxhash>=3.6",
 ]
 

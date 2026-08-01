@@ -10,7 +10,7 @@ from modal_computer_use.artifacts import ArtifactStore, normalize_artifact_path
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.daemon.supervisor import Supervisor
-from modal_computer_use.errors import ArtifactPathError
+from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
 
 
 @pytest.mark.parametrize(
@@ -202,6 +202,27 @@ def test_artifact_route_rejects_raw_supervisor_logs(tmp_path) -> None:
     assert "raw-log-secret" not in artifact_log.text
 
 
+def test_artifact_routes_reject_active_recording_target(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        recording = client.post("/v1/recordings", json={}).json()
+        public_path = recording["artifact_uri"].removeprefix("artifact://")
+        write = client.put(f"/v1/artifacts/{public_path}", content=b"replacement")
+        delete = client.delete(f"/v1/artifacts/{public_path}")
+
+    assert write.status_code == 409
+    assert write.json()["code"] == "artifact_in_use"
+    assert delete.status_code == 409
+    assert delete.json()["code"] == "artifact_in_use"
+
+
 def test_artifact_route_reports_conflict_when_target_is_directory(tmp_path) -> None:
     settings = DaemonSettings(
         backend="mock",
@@ -244,6 +265,88 @@ def test_artifact_route_reports_conflict_when_parent_is_file(tmp_path) -> None:
 
     assert response.status_code == 409
     assert response.json()["code"] == "artifact_path_conflict"
+
+
+def test_artifact_upload_rechecks_quota_before_atomic_replace(tmp_path, monkeypatch) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    app.state.artifacts.write_bytes("report.txt", b"original")
+
+    def reject_commit(_target, _incoming_size) -> None:
+        raise BudgetExceededError("artifact byte budget exceeded")
+
+    monkeypatch.setattr(app.state.artifacts, "_enforce_write_budget", reject_commit)
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.put("/v1/artifacts/report.txt", content=b"replacement")
+
+    assert response.status_code == 429
+    assert app.state.artifacts.read_bytes("report.txt") == b"original"
+
+
+def test_artifact_upload_restores_target_and_manifest_on_commit_failure(
+    tmp_path, monkeypatch
+) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    app.state.artifacts.write_bytes("report.txt", b"original")
+    manifest_before = app.state.artifacts.manifest_path.read_bytes()
+
+    def fail_manifest(_info) -> None:
+        with app.state.artifacts.manifest_path.open("ab") as handle:
+            handle.write(b"partial")
+        raise OSError("manifest write failed")
+
+    monkeypatch.setattr(app.state.artifacts, "append_manifest", fail_manifest)
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.put("/v1/artifacts/report.txt", content=b"replacement")
+
+    assert response.status_code == 500
+    assert app.state.artifacts.read_bytes("report.txt") == b"original"
+    assert app.state.artifacts.manifest_path.read_bytes() == manifest_before
+
+
+def test_artifact_upload_reuses_streaming_digest_without_second_read(
+    tmp_path, monkeypatch
+) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    original_info = app.state.artifacts._info
+    calls: list[tuple[int | None, str | None]] = []
+
+    def tracked_info(path, **kwargs):
+        calls.append((kwargs.get("known_size_bytes"), kwargs.get("known_sha256")))
+        return original_info(path, **kwargs)
+
+    monkeypatch.setattr(app.state.artifacts, "_info", tracked_info)
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.put("/v1/artifacts/report.txt", content=b"content")
+
+    assert response.status_code == 200
+    assert response.json()["size_bytes"] == 7
+    assert calls == [(7, response.json()["sha256"])]
 
 
 def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:

@@ -107,6 +107,8 @@ class ArtifactStore:
         public_path: str,
         created_by_call_id: str | None = None,
         retention_class: str = "ephemeral",
+        known_size_bytes: int | None = None,
+        known_sha256: str | None = None,
     ) -> ArtifactInfo:
         stat = path.stat()
         kind = "directory" if path.is_dir() else "file"
@@ -114,9 +116,13 @@ class ArtifactStore:
         size = None
         content_type = None
         if path.is_file():
-            data = path.read_bytes()
-            digest = hashlib.sha256(data).hexdigest()
-            size = len(data)
+            if known_size_bytes is not None and known_sha256 is not None:
+                size = known_size_bytes
+                digest = known_sha256
+            else:
+                data = path.read_bytes()
+                digest = hashlib.sha256(data).hexdigest()
+                size = len(data)
             content_type = mimetypes.guess_type(path.name)[0]
         return ArtifactInfo(
             path=public_path,
@@ -168,6 +174,8 @@ class ArtifactStore:
             public_path=relative,
             created_by_call_id=created_by_call_id,
             retention_class=retention_class,
+            known_size_bytes=len(data),
+            known_sha256=hashlib.sha256(data).hexdigest(),
         )
         if content_type:
             info.content_type = content_type

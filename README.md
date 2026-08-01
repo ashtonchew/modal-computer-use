@@ -17,18 +17,18 @@ This is an independent community project for Modal.
 Use Python 3.12 or later and `uv`. The package is not on PyPI. Install it from GitHub:
 
 ```bash
-uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.0.0"
+uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.1.0"
 ```
 
 Add the Modal extra when the application will create Modal Sandboxes:
 
 ```bash
-uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.0.0"
+uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.1.0"
 ```
 
 The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later. Contributors should
 instead follow the [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md).
-The install commands pin the `v1.0.0` source tag.
+The install commands pin the `v1.1.0` GitHub Release. The project is not published to PyPI.
 
 ## Run locally
 
@@ -61,6 +61,10 @@ finally:
 
 The command prints `1024 768` followed by the screenshot's SHA-256 digest. Press Ctrl-C in the
 daemon terminal when finished.
+
+The daemon refuses to start without token or Connect authentication. For a local process that
+intentionally has no token, set `COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK=true`; that mode may
+bind only to loopback.
 
 ## Run on Modal
 
@@ -130,6 +134,6 @@ its control routes as an unauthenticated public service. Treat bearer tokens, no
 clipboard text, screenshots, recordings, and artifacts as secrets.
 
 See the [security policy](https://github.com/ashtonchew/modal-computer-use/blob/main/SECURITY.md) for
-the current reporting process and the public-release prerequisite. See
+the current reporting process. See
 [runtime security](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/security.md) for
 authentication, redaction, noVNC, artifact, and provider-adapter guidance.

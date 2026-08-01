@@ -32,9 +32,9 @@ Configure the Sandbox through `ComputerConfig` and the creation arguments:
   Outbound allowlists restrict egress. The inbound CIDR allowlist restricts incoming tunnel and
   Connect traffic, not egress. All allowlists default to `None`; see
   [Configuration](configuration.md#network-and-ingress) for field definitions.
-- **Daemon ingress** defaults to an attested encrypted tunnel: Modal Connect authenticates the
-  bootstrap request, then the daemon mints a short-lived bearer token for low-latency tunnel calls
-  on port `8080`. Set `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
+- **Daemon ingress** defaults to an attested encrypted tunnel: an SDK-managed bootstrap bearer
+  mints a short-lived token for low-latency tunnel calls on port `8080`. Set
+  `ComputerConfig(ingress="connect")` to keep all daemon traffic on Modal
   Connect, or `ingress="tunnel"` for a static daemon bearer token in trusted benchmark harnesses.
 - **Region placement** is controlled by `ComputerConfig(runtime={"modal_region": "..."})` for new
   sandboxes. Leave it unset to let Modal choose placement. Pin it only after measuring from the

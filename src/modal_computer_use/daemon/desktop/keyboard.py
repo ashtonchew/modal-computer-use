@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import subprocess
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -30,6 +30,7 @@ InputBackend = Literal["auto", "xtest", "xdotool"]
 TypingMethod = Literal["auto", "keystrokes", "xdotool", "clipboard"]
 
 _LOCK_MASK = 1 << 1
+_NATIVE_TYPE_CHUNK_SIZE = 4096
 _KEYSYM_NAMES = {
     "alt": "Alt_L",
     "BackSpace": "BackSpace",
@@ -201,6 +202,30 @@ class XkbKeymapResolver:
                 return None
             strokes.append(stroke)
         return strokes
+
+    def text_chunks(
+        self,
+        text: str,
+        *,
+        chunk_size: int,
+    ) -> Iterator[list[_KeyStroke]] | None:
+        """Preflight the full text, then resolve it in bounded chunks."""
+        snapshot = self._snapshot()
+        for character in text:
+            if self._character(character, snapshot) is None:
+                return None
+
+        def chunks() -> Iterator[list[_KeyStroke]]:
+            for start in range(0, len(text), chunk_size):
+                strokes: list[_KeyStroke] = []
+                for character in text[start : start + chunk_size]:
+                    stroke = self._character(character, snapshot)
+                    if stroke is None:  # pragma: no cover - the snapshot was preflighted.
+                        raise RuntimeError("preflighted XKB mapping changed unexpectedly")
+                    strokes.append(stroke)
+                yield strokes
+
+        return chunks()
 
     def character(self, character: str) -> _KeyStroke | None:
         return self._character(character, self._snapshot())
@@ -601,22 +626,36 @@ class X11KeyboardController:
             await self._type_via_xdotool(text, delay_ms)
             return "xdotool"
 
+        if method == "auto" and len(text) > 80:
+            await self._type_via_clipboard(text)
+            return "clipboard"
+
         if self._native_enabled():
             try:
-                strokes = self._keymap.text(text)
+                use_chunks = method == "keystrokes" and len(text) > _NATIVE_TYPE_CHUNK_SIZE
+                if use_chunks:
+                    chunked_strokes = self._keymap.text_chunks(
+                        text,
+                        chunk_size=_NATIVE_TYPE_CHUNK_SIZE,
+                    )
+                    strokes = None
+                else:
+                    chunked_strokes = None
+                    strokes = self._keymap.text(text)
             except X11InputUnavailableError:
                 if self._configured_backend != "auto":
                     raise
                 strokes = None
+                chunked_strokes = None
                 native_unavailable = True
             else:
                 native_unavailable = False
-            if strokes is not None:
-                if method == "auto" and len(text) > 80:
-                    await self._type_via_clipboard(text)
-                    return "clipboard"
+            if strokes is not None or chunked_strokes is not None:
                 try:
-                    await self._type_via_native(strokes, delay_ms)
+                    if chunked_strokes is not None:
+                        await self._type_via_native_chunks(chunked_strokes, delay_ms)
+                    else:
+                        await self._type_via_native(strokes or (), delay_ms)
                 except X11InputUnavailableError:
                     if self._configured_backend != "auto":
                         raise
@@ -633,6 +672,25 @@ class X11KeyboardController:
             return "clipboard"
         await self._type_via_xdotool(text, delay_ms)
         return "xdotool"
+
+    async def _type_via_native_chunks(
+        self,
+        chunks: Iterable[Sequence[_KeyStroke]],
+        delay_ms: int,
+    ) -> None:
+        emitted = False
+        for strokes in chunks:
+            if emitted and delay_ms > 0:
+                await asyncio.sleep(delay_ms / 1000)
+            try:
+                await self._type_via_native(strokes, delay_ms)
+            except (X11InputInjectionError, X11InputUnavailableError) as exc:
+                if emitted:
+                    raise X11InputInjectionError(
+                        "typing may have been partially injected"
+                    ) from exc
+                raise
+            emitted = True
 
     async def _type_via_native(self, strokes: Sequence[_KeyStroke], delay_ms: int) -> None:
         if delay_ms == 0:

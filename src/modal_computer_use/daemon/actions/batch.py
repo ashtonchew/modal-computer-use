@@ -171,6 +171,28 @@ async def _run_impl(
     idempotency_key: str | None,
     raw_screenshot_after: bool,
 ) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
+    action_nodes, action_count, preflight_errors = _preflight_action_tree(
+        payload.actions,
+        max_actions=context.state.settings.max_batch_actions,
+        max_depth=context.state.settings.max_action_depth,
+    )
+    if action_count > context.state.settings.max_batch_actions:
+        raise DaemonError(
+            "batch exceeds max_batch_actions",
+            status_code=413,
+            code="batch_too_large",
+            details={
+                "max_batch_actions": context.state.settings.max_batch_actions,
+                "action_count": action_count,
+            },
+        )
+    if preflight_errors:
+        raise DaemonError(
+            "action validation failed",
+            status_code=422,
+            code="action_validation_failed",
+            details={"errors": preflight_errors},
+        )
     effective_idempotency_key = _effective_idempotency_key(payload, idempotency_key)
     request_fingerprint = _request_fingerprint(payload)
     cached = (
@@ -207,20 +229,9 @@ async def _run_impl(
                         classification="known_cached_result",
                     )
                 return cached, None
-    action_count = _count_action_tree(payload.actions)
-    if action_count > context.state.settings.max_batch_actions:
-        raise DaemonError(
-            "batch exceeds max_batch_actions",
-            status_code=413,
-            code="batch_too_large",
-            details={
-                "max_batch_actions": context.state.settings.max_batch_actions,
-                "action_count": action_count,
-            },
-        )
     await _ensure_desktop_ready(context)
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
-    validation_errors = _validate_batch_request(payload, context)
+    validation_errors = _validate_batch_request(payload, context, action_nodes=action_nodes)
     if validation_errors:
         raise DaemonError(
             "action validation failed",
@@ -691,7 +702,11 @@ def _prune_idempotency_cache(context: ActionBatchContext) -> None:
         cache.popitem(last=False)
 
 
-def _validate_action_timeouts(payload: ActionBatchRequest, max_action_timeout_ms: int) -> list[str]:
+def _validate_action_timeouts(
+    payload: ActionBatchRequest,
+    max_action_timeout_ms: int,
+    action_nodes: list[tuple[str, Any]],
+) -> list[str]:
     errors: list[str] = []
     if payload.max_action_timeout_ms is not None and (
         payload.max_action_timeout_ms > max_action_timeout_ms
@@ -700,7 +715,7 @@ def _validate_action_timeouts(payload: ActionBatchRequest, max_action_timeout_ms
             "max_action_timeout_ms "
             f"{payload.max_action_timeout_ms} exceeds configured maximum {max_action_timeout_ms}"
         )
-    for action_path, action in _iter_timeout_actions(payload.actions):
+    for action_path, action in action_nodes:
         timeout_ms = getattr(action, "timeout_ms", None)
         if timeout_ms is not None and timeout_ms > max_action_timeout_ms:
             errors.append(
@@ -710,30 +725,55 @@ def _validate_action_timeouts(payload: ActionBatchRequest, max_action_timeout_ms
     return errors
 
 
-def _validate_batch_request(payload: ActionBatchRequest, context: ActionBatchContext) -> list[str]:
+def _validate_batch_request(
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+    *,
+    action_nodes: list[tuple[str, Any]] | None = None,
+) -> list[str]:
+    preflight_errors: list[str] = []
+    action_count = 0
+    if action_nodes is None:
+        action_nodes, action_count, preflight_errors = _preflight_action_tree(
+            payload.actions,
+            max_actions=context.state.settings.max_batch_actions,
+            max_depth=context.state.settings.max_action_depth,
+        )
+    else:
+        action_count = len(action_nodes)
     errors = _validate_actions(
-        payload.actions,
+        action_nodes,
         width=context.state.backend.width,
         height=context.state.backend.height,
+        max_drag_points=context.state.settings.max_drag_points,
+        max_key_collection_size=context.state.settings.max_key_collection_size,
     )
-    action_count = _count_action_tree(payload.actions)
+    errors[:0] = preflight_errors
     if action_count > context.state.settings.max_batch_actions:
         errors.append(
             "batch exceeds max_batch_actions "
             f"{context.state.settings.max_batch_actions} "
             f"with {action_count} total actions"
         )
-    errors.extend(_validate_action_timeouts(payload, context.state.settings.max_action_timeout_ms))
-    errors.extend(_validate_screenshot_pixel_budget(payload, context))
+    errors.extend(
+        _validate_action_timeouts(
+            payload,
+            context.state.settings.max_action_timeout_ms,
+            action_nodes,
+        )
+    )
+    errors.extend(_validate_screenshot_pixel_budget(payload, context, action_nodes))
     return errors
 
 
 def _validate_screenshot_pixel_budget(
-    payload: ActionBatchRequest, context: ActionBatchContext
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+    action_nodes: list[tuple[str, Any]],
 ) -> list[str]:
     errors: list[str] = []
     backend = context.state.backend
-    for action_path, action in _iter_action_tree(payload.actions):
+    for action_path, action in action_nodes:
         if isinstance(action, ScreenshotAction):
             options = action.options or ScreenshotOptions()
             errors.extend(
@@ -805,33 +845,44 @@ def _enforce_screenshot_options_pixels(
         )
 
 
-def _iter_timeout_actions(actions: list[Any], *, path: str = "actions"):
-    yield from _iter_action_tree(actions, path=path)
-
-
-def _iter_action_tree(actions: list[Any], *, path: str = "actions"):
-    for index, action in enumerate(actions):
-        action_path = f"{path}[{index}]"
-        yield action_path, action
-        if isinstance(action, HoldKeyAction) and action.actions:
-            nested = []
-            for nested_action in action.actions:
-                with suppress(Exception):
-                    nested.append(parse_action(nested_action))
-            yield from _iter_action_tree(nested, path=f"{action_path}.actions")
-
-
-def _count_action_tree(actions: list[Any]) -> int:
+def _preflight_action_tree(
+    actions: list[Any],
+    *,
+    max_actions: int,
+    max_depth: int,
+) -> tuple[list[tuple[str, Any]], int, list[str]]:
+    """Parse and bound a nested hold tree without recursive Python calls."""
+    nodes: list[tuple[str, Any]] = []
+    errors: list[str] = []
     count = 0
-    for action in actions:
+    stack: list[tuple[str, Any, int]] = [
+        (f"actions[{index}]", action, 1)
+        for index, action in reversed(list(enumerate(actions)))
+    ]
+    while stack:
+        action_path, candidate, depth = stack.pop()
         count += 1
-        if isinstance(action, HoldKeyAction) and action.actions:
-            nested = []
-            for nested_action in action.actions:
-                with suppress(Exception):
-                    nested.append(parse_action(nested_action))
-            count += _count_action_tree(nested)
-    return count
+        if count > max_actions:
+            return nodes, count, errors
+        try:
+            action = candidate if not isinstance(candidate, dict) else parse_action(candidate)
+        except Exception:
+            errors.append(f"{action_path} is invalid")
+            continue
+        nodes.append((action_path, action))
+        if not isinstance(action, HoldKeyAction) or not action.actions:
+            continue
+        if depth >= max_depth:
+            errors.append(
+                f"{action_path}.actions exceeds max_action_depth {max_depth}"
+            )
+            continue
+        nested_path = f"{action_path}.actions"
+        stack.extend(
+            (f"{nested_path}[{index}]", nested_action, depth + 1)
+            for index, nested_action in reversed(list(enumerate(action.actions)))
+        )
+    return nodes, count, errors
 
 
 def _effective_action_timeout_ms(
@@ -1395,18 +1446,40 @@ def _nested_hold_error(
 
 
 def _validate_actions(
-    actions: list[Any],
+    action_nodes: list[tuple[str, Any]],
     *,
     width: int | None,
     height: int | None,
-    path: str = "actions",
+    max_drag_points: int,
+    max_key_collection_size: int,
 ) -> list[str]:
     errors: list[str] = []
-    for index, action in enumerate(actions):
-        action_path = f"{path}[{index}]"
-        key_errors = _key_validation_errors(action, field=action_path)
-        errors.extend(key_errors)
-        for point in _action_points(action):
+    for action_path, action in action_nodes:
+        key_collection = _key_collection(action)
+        key_collection_too_large = (
+            max_key_collection_size > 0
+            and key_collection is not None
+            and len(key_collection) > max_key_collection_size
+        )
+        if key_collection_too_large:
+            errors.append(
+                f"{action_path} key collection has {len(key_collection)} entries; "
+                f"maximum is {max_key_collection_size}"
+            )
+        else:
+            errors.extend(_key_validation_errors(action, field=action_path))
+        drag_path_too_large = (
+            isinstance(action, DragAction)
+            and max_drag_points > 0
+            and action.path is not None
+            and len(action.path) > max_drag_points
+        )
+        if drag_path_too_large:
+            errors.append(
+                f"{action_path}.path has {len(action.path)} points; "
+                f"maximum is {max_drag_points}"
+            )
+        for point in _action_points(action, include_path=not drag_path_too_large):
             if width is not None and point.x >= width:
                 errors.append(f"{action_path} x coordinate {point.x} exceeds desktop width {width}")
             if height is not None and point.y >= height:
@@ -1421,24 +1494,17 @@ def _validate_actions(
             and (region.right > width or region.bottom > height)
         ):
             errors.append(f"{action_path} region extends beyond desktop geometry")
-        if isinstance(action, HoldKeyAction) and action.actions:
-            parsed_nested = []
-            for nested_index, nested_action in enumerate(action.actions):
-                try:
-                    parsed = parse_action(nested_action)
-                except Exception as exc:
-                    errors.append(f"{action_path}.actions[{nested_index}] is invalid: {exc}")
-                    continue
-                parsed_nested.append(parsed)
-            errors.extend(
-                _validate_actions(
-                    parsed_nested,
-                    width=width,
-                    height=height,
-                    path=f"{action_path}.actions",
-                )
-            )
     return errors
+
+
+def _key_collection(action: Any) -> list[str] | None:
+    if isinstance(action, KeyPressAction | ClickAction | DoubleClickAction | TripleClickAction):
+        return action.modifiers
+    if isinstance(action, DragAction):
+        return action.modifiers
+    if isinstance(action, HotkeyAction):
+        return action.keys
+    return None
 
 
 def _key_validation_errors(action: Any, *, field: str) -> list[str]:
@@ -1465,7 +1531,7 @@ def _nested_hold_actions(action: HoldKeyAction) -> list[Any]:
     return [parse_action(item) for item in action.actions or []]
 
 
-def _action_points(action: Any) -> list[Point]:
+def _action_points(action: Any, *, include_path: bool = True) -> list[Point]:
     points: list[Point] = []
     x = getattr(action, "x", None)
     y = getattr(action, "y", None)
@@ -1477,6 +1543,6 @@ def _action_points(action: Any) -> list[Point]:
         if isinstance(px, int) and isinstance(py, int):
             points.append(Point(x=px, y=py))
     path = getattr(action, "path", None)
-    if path:
+    if include_path and path:
         points.extend(path)
     return points

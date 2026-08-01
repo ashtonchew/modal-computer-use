@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import sys
@@ -22,14 +21,11 @@ def redact(value: Any) -> Any:
         for key, item in value.items():
             lowered = str(key).lower()
             if _is_sensitive_log_key(lowered):
-                if isinstance(item, str):
-                    result[key] = {
-                        "redacted": True,
-                        "length": len(item),
-                        "sha256": hashlib.sha256(item.encode()).hexdigest(),
-                    }
+                if isinstance(item, str | bytes | list | tuple | dict):
+                    length = len(item)
                 else:
-                    result[key] = {"redacted": True}
+                    length = 0 if item is None else 1
+                result[key] = {"redacted": True, "length": length}
             else:
                 result[key] = redact(item)
         return result

@@ -20,7 +20,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputUnavailableError,
 )
 from modal_computer_use.daemon.routes import actions as action_routes
-from modal_computer_use.models import ActionResult, CoordinateSpace, sha256_bytes
+from modal_computer_use.models import ActionResult, CoordinateSpace, Point, sha256_bytes
 
 
 def test_action_batch_stop_on_error(test_client) -> None:
@@ -1781,6 +1781,103 @@ def test_hold_key_nested_actions_count_against_batch_limit(tmp_path) -> None:
     assert response.json()["code"] == "batch_too_large"
     assert app.state.backend.cursor.x == 0
     assert app.state.backend.cursor.y == 0
+    assert app.state.action_count == 0
+
+
+def test_nested_hold_depth_is_rejected_before_input(tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from modal_computer_use.daemon.app import create_app
+    from modal_computer_use.daemon.settings import DaemonSettings
+
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_action_depth=2,
+        )
+    )
+    payload = {
+        "actions": [
+            {
+                "type": "hold_key",
+                "key": "shift",
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "ctrl",
+                        "actions": [{"type": "move", "x": 10, "y": 20}],
+                    }
+                ],
+            }
+        ]
+    }
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post("/v1/actions/run", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert "max_action_depth 2" in response.json()["details"]["errors"][0]
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+
+
+def test_batch_collection_limits_apply_to_nested_actions(tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from modal_computer_use.daemon.app import create_app
+    from modal_computer_use.daemon.settings import DaemonSettings
+
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_drag_points=2,
+            max_key_collection_size=2,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "hold_key",
+                        "key": "shift",
+                        "actions": [
+                            {"type": "hotkey", "keys": ["ctrl", "shift", "t"]}
+                        ],
+                    }
+                ]
+            },
+        )
+        drag_response = client.post(
+            "/v1/actions/run",
+            json={
+                "actions": [
+                    {
+                        "type": "drag",
+                        "path": [
+                            {"x": 1, "y": 1},
+                            {"x": 2, "y": 2},
+                            {"x": 3, "y": 3},
+                        ],
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "action_validation_failed"
+    assert "maximum is 2" in response.json()["details"]["errors"][0]
+    assert drag_response.status_code == 422
+    assert "maximum is 2" in drag_response.json()["details"]["errors"][0]
     assert app.state.action_count == 0
 
 

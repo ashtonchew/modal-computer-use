@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.logging import JsonFormatter
+from modal_computer_use.daemon.process_environment import desktop_process_environment
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload
@@ -29,8 +30,41 @@ def test_health_and_readyz_do_not_require_auth(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
 
     with TestClient(app) as client:
-        assert client.get("/healthz").status_code == 200
-        assert client.get("/readyz").status_code == 200
+        health = client.get("/healthz")
+        ready = client.get("/readyz")
+
+    assert health.status_code == 200
+    assert ready.status_code == 200
+    assert health.headers["cache-control"] == "no-store"
+    assert ready.headers["cache-control"] == "no-store"
+
+
+def test_daemon_fails_closed_without_authentication(tmp_path) -> None:
+    app = _app(tmp_path, require_connect_user=False)
+
+    with TestClient(app) as client:
+        response = client.get("/v1/version")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "authentication_required"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_explicit_unauthenticated_mode_is_loopback_only(tmp_path) -> None:
+    app = _app(
+        tmp_path,
+        require_connect_user=False,
+        allow_unauthenticated_loopback=True,
+    )
+
+    with TestClient(app) as local_client:
+        local = local_client.get("/v1/version")
+    with TestClient(app, client=("203.0.113.10", 50000)) as public_client:
+        public = public_client.get("/v1/version")
+
+    assert local.status_code == 200
+    assert public.status_code == 401
+    assert public.json()["code"] == "loopback_required"
 
 
 def test_local_token_mode_rejects_missing_and_invalid_bearer_token(tmp_path) -> None:
@@ -124,7 +158,10 @@ def test_require_connect_user_rejects_spoofed_private_clients_by_default(tmp_pat
     with TestClient(
         app,
         client=("10.0.0.5", 50000),
-        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+        headers={
+            "Host": "connect.modal.run",
+            "X-Verified-User-Data": '{"sdk":"modal-computer-use"}',
+        },
     ) as client:
         response = client.get("/v1/version")
 
@@ -143,11 +180,36 @@ def test_require_connect_user_can_opt_into_private_connect_proxy_trust(tmp_path)
     with TestClient(
         app,
         client=("10.0.0.5", 50000),
-        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+        headers={
+            "Host": "connect.modal.run",
+            "X-Verified-User-Data": '{"sdk":"modal-computer-use"}',
+        },
     ) as client:
         response = client.get("/v1/version")
 
     assert response.status_code == 200
+
+
+def test_raw_tunnel_host_cannot_claim_connect_verified_user(tmp_path) -> None:
+    app = _app(
+        tmp_path,
+        require_connect_user=False,
+        tunnel_token="bootstrap-token",
+        trust_private_connect_proxy=False,
+    )
+
+    with TestClient(
+        app,
+        client=("127.0.0.1", 50000),
+        headers={
+            "Host": "sandbox.w.modal.host",
+            "X-Verified-User-Data": '{"sdk":"modal-computer-use"}',
+        },
+    ) as client:
+        response = client.get("/v1/version")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
 
 
 def test_static_tunnel_bearer_preserves_connect_proxy_authentication(tmp_path) -> None:
@@ -162,7 +224,10 @@ def test_static_tunnel_bearer_preserves_connect_proxy_authentication(tmp_path) -
     with TestClient(
         app,
         client=("10.0.0.5", 50000),
-        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+        headers={
+            "Host": "connect.modal.run",
+            "X-Verified-User-Data": '{"sdk":"modal-computer-use"}',
+        },
     ) as client:
         response = client.get("/v1/version")
 
@@ -188,6 +253,103 @@ def test_attested_tunnel_token_allows_public_tunnel_request(tmp_path) -> None:
 
     assert minted.status_code == 200
     assert response.status_code == 200
+
+
+def test_minted_tunnel_token_cannot_mint_another_token(tmp_path) -> None:
+    app = _app(tmp_path, require_connect_user=True)
+
+    with TestClient(
+        app,
+        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+    ) as client:
+        minted = client.post("/v1/session/tunnel-authorize")
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"Authorization": f"Bearer {minted.json()['token']}"},
+    ) as client:
+        remint = client.post("/v1/session/tunnel-authorize")
+
+    assert minted.status_code == 200
+    assert remint.status_code == 403
+    assert remint.json()["code"] == "tunnel_authorization_not_allowed"
+
+
+def test_minted_tunnel_token_cannot_access_privileged_process_routes(tmp_path) -> None:
+    app = _app(tmp_path, require_connect_user=True)
+
+    with TestClient(
+        app,
+        headers={"X-Verified-User-Data": '{"sdk":"modal-computer-use"}'},
+    ) as client:
+        minted = client.post("/v1/session/tunnel-authorize")
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"Authorization": f"Bearer {minted.json()['token']}"},
+    ) as client:
+        command = client.post("/v1/commands/run", json={"command": ["env"]})
+        launch = client.post(
+            "/v1/apps/launch",
+            json={"command": "sh", "args": ["-c", "env"]},
+        )
+
+    assert command.status_code == 403
+    assert command.json()["code"] == "privileged_auth_required"
+    assert launch.status_code == 403
+    assert launch.json()["code"] == "privileged_auth_required"
+
+
+def test_static_bootstrap_tunnel_token_can_mint_session_token(tmp_path) -> None:
+    app = _app(
+        tmp_path,
+        require_connect_user=True,
+        tunnel_token="bootstrap-token",
+    )
+
+    with TestClient(
+        app,
+        client=("203.0.113.10", 50000),
+        headers={"Authorization": "Bearer bootstrap-token"},
+    ) as client:
+        response = client.post("/v1/session/tunnel-authorize")
+
+    assert response.status_code == 200
+    assert response.json()["token"] != "bootstrap-token"  # noqa: S105 - test value
+
+
+def test_malformed_host_cannot_bypass_authentication(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    with TestClient(app) as client:
+        response = client.get("/v1/version", headers={"Host": "testserver/%2fv1/version"})
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
+
+
+def test_all_http_responses_disable_caching(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        success = client.get("/v1/version")
+        error = client.get("/v1/not-found")
+
+    assert success.headers["cache-control"] == "no-store"
+    assert error.headers["cache-control"] == "no-store"
+
+
+def test_http_json_body_limit_excludes_streamed_artifact_uploads(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev", max_json_body_bytes=8)
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        rejected = client.post("/v1/keyboard/type", json={"text": "long secret"})
+        artifact = client.put("/v1/artifacts/data.bin", content=b"0123456789")
+
+    assert rejected.status_code == 413
+    assert rejected.json()["code"] == "request_body_too_large"
+    assert rejected.headers["cache-control"] == "no-store"
+    assert artifact.status_code == 200
 
 
 def test_static_tunnel_token_allows_public_tunnel_request(tmp_path) -> None:
@@ -270,8 +432,9 @@ def test_json_formatter_redacts_provider_credentials_in_extra() -> None:
     payload = json.loads(formatter.format(record))
     serialized = json.dumps(payload)
 
-    assert payload["api_key"]["redacted"] is True
-    assert payload["password"]["redacted"] is True
+    assert payload["api_key"] == {"redacted": True, "length": 14}
+    assert payload["password"] == {"redacted": True, "length": 9}
+    assert "sha256" not in serialized
     assert "sk-test-secret" not in serialized
     assert "pw-secret" not in serialized
 
@@ -356,6 +519,37 @@ def test_json_formatter_sanitizes_secret_patterns_in_neutral_extra_fields() -> N
     assert "sk-test-secret" not in serialized
 
 
+def test_json_formatter_sanitizes_generic_secret_environment_assignments() -> None:
+    formatter = JsonFormatter()
+    record = logging.getLogger("modal_computer_use.test").makeRecord(
+        "modal_computer_use.test",
+        logging.INFO,
+        __file__,
+        1,
+        "safe message",
+        (),
+        exc_info=None,
+        extra={
+            "extra": {
+                "note": (
+                    "COMPUTER_USE_VNC_PASSWORD=vnc-secret "
+                    "API_KEY=api-secret SERVICE_TOKEN=token-secret"
+                )
+            }
+        },
+    )
+
+    payload = json.loads(formatter.format(record))
+    serialized = json.dumps(payload)
+
+    assert payload["note"] == (
+        "COMPUTER_USE_VNC_PASSWORD=[redacted] API_KEY=[redacted] SERVICE_TOKEN=[redacted]"
+    )
+    assert "vnc-secret" not in serialized
+    assert "api-secret" not in serialized
+    assert "token-secret" not in serialized
+
+
 def test_sanitize_payload_redacts_sensitive_numeric_values() -> None:
     payload = sanitize_payload(
         {
@@ -368,10 +562,10 @@ def test_sanitize_payload_redacts_sensitive_numeric_values() -> None:
         }
     )
 
-    assert payload["token"] == {"redacted": True}
-    assert payload["api_key"] == {"redacted": True}
-    assert payload["password"] == {"redacted": True}
-    assert payload["nested"]["artifact_bytes"] == {"redacted": True}
+    assert payload["token"] == {"redacted": True, "length": 1}
+    assert payload["api_key"] == {"redacted": True, "length": 1}
+    assert payload["password"] == {"redacted": True, "length": 1}
+    assert payload["nested"]["artifact_bytes"] == {"redacted": True, "length": 1}
     assert payload["safe_count"] == 7
     assert payload["empty_token"] is None
 
@@ -406,6 +600,38 @@ def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
     assert "message-secret" not in serialized
     assert "stdout-secret" not in serialized
     assert "stderr-secret" not in serialized
+
+
+def test_command_run_sanitizes_daemon_owned_secrets(tmp_path) -> None:
+    app = _app(
+        tmp_path,
+        local_token="local-secret",
+        tunnel_token="tunnel-secret",
+        vnc_password="vnc-secret",
+    )
+
+    async def run_command(command, timeout=30.0):
+        return ActionResult(
+            ok=True,
+            message="used local-secret",
+            output={
+                "returncode": 0,
+                "stdout": ("COMPUTER_USE_VNC_PASSWORD=vnc-secret\ntunnel-secret\nlocal-secret"),
+                "stderr": "",
+            },
+        )
+
+    app.state.backend.run_command = run_command
+
+    with TestClient(app, headers={"Authorization": "Bearer local-secret"}) as client:
+        response = client.post("/v1/commands/run", json={"command": ["env"]})
+
+    assert response.status_code == 200
+    serialized = response.text
+    assert "local-secret" not in serialized
+    assert "tunnel-secret" not in serialized
+    assert "vnc-secret" not in serialized
+    assert "COMPUTER_USE_VNC_PASSWORD=[redacted]" in serialized
 
 
 def test_type_action_daemon_error_details_are_sanitized(tmp_path) -> None:
@@ -605,3 +831,23 @@ def test_daemon_error_details_sanitize_secret_bearing_values(tmp_path) -> None:
     assert "stdout-secret" not in serialized
     assert "stderr-secret" not in serialized
     assert "url-secret" not in serialized
+
+
+def test_desktop_process_environment_strips_daemon_credentials() -> None:
+    env = desktop_process_environment(
+        display=":42",
+        environ={
+            "PATH": "/usr/bin",
+            "COMPUTER_USE_BROWSER": "chromium",
+            "COMPUTER_USE_TUNNEL_TOKEN": "bootstrap-secret",
+            "COMPUTER_USE_LOCAL_TOKEN": "local-secret",
+            "COMPUTER_USE_VNC_PASSWORD": "vnc-secret",
+            "COMPUTER_USE_FUTURE_CREDENTIAL": "future-secret",
+        },
+    )
+
+    assert env == {
+        "PATH": "/usr/bin",
+        "DISPLAY": ":42",
+        "COMPUTER_USE_BROWSER": "chromium",
+    }

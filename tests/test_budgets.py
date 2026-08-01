@@ -417,10 +417,11 @@ def test_recording_stop_enforces_idle_budget_before_stop(tmp_path) -> None:
         started = client.post("/v1/recordings", json={}).json()
         app.state.last_activity_at = time.monotonic() - 2
         response = client.post(f"/v1/recordings/{started['id']}/stop")
+        status_before_shutdown = app.state.recordings.get(started["id"]).status
 
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
-    assert app.state.recordings.get(started["id"]).status == "recording"
+    assert status_before_shutdown == "recording"
 
 
 def test_recording_delete_enforces_idle_budget_before_delete(tmp_path) -> None:
@@ -437,10 +438,11 @@ def test_recording_delete_enforces_idle_budget_before_delete(tmp_path) -> None:
         started = client.post("/v1/recordings", json={}).json()
         app.state.last_activity_at = time.monotonic() - 2
         response = client.delete(f"/v1/recordings/{started['id']}")
+        status_before_shutdown = app.state.recordings.get(started["id"]).status
 
     assert response.status_code == 429
     assert response.json()["code"] == "budget_exceeded"
-    assert app.state.recordings.get(started["id"]).status == "recording"
+    assert status_before_shutdown == "recording"
 
 
 def test_screenshot_artifact_write_is_rejected_before_file_persists(tmp_path) -> None:

@@ -5,11 +5,21 @@ from datetime import UTC, datetime
 
 from .errors import ModalNotInstalledError, SandboxAmbiguousError, SandboxUnavailableError
 from .models import SandboxRef
+from .state import APP_ID_TAG
 
 
 class SandboxRegistry:
-    def __init__(self, app_name: str = "modal-computer-use") -> None:
+    def __init__(
+        self,
+        app_name: str = "modal-computer-use",
+        *,
+        environment_name: str | None = None,
+        allow_legacy_unscoped: bool = False,
+    ) -> None:
         self.app_name = app_name
+        self.environment_name = environment_name
+        self.allow_legacy_unscoped = allow_legacy_unscoped
+        self._app_id: str | None = None
 
     def _modal(self) -> object:
         try:
@@ -26,7 +36,7 @@ class SandboxRegistry:
         return [self.ref_from_sandbox(sandbox) for sandbox in self.list_sandboxes(tags=tags)]
 
     def list_by_owner(self, owner: str) -> list[SandboxRef]:
-        return self.list(tags={"computer-use": "true", "computer-use.owner": owner})
+        return self.list(tags={"computer-use.owner": owner})
 
     def list_by_run_id(self, run_id: str) -> list[SandboxRef]:
         return self.list(tags={"computer-use.run_id": run_id})
@@ -40,7 +50,15 @@ class SandboxRegistry:
 
     def list_sandboxes(self, tags: dict[str, str] | None = None) -> list[object]:
         modal = self._modal()
-        return list(modal.Sandbox.list(tags=tags or {"computer-use": "true"}))
+        app_id = self._resolve_app_id(modal)
+        scoped_tags = tags or (
+            {"computer-use": "true"}
+            if self.allow_legacy_unscoped
+            else {APP_ID_TAG: app_id}
+        )
+        if not self.allow_legacy_unscoped:
+            scoped_tags = {**scoped_tags, APP_ID_TAG: app_id}
+        return list(modal.Sandbox.list(app_id=app_id, tags=scoped_tags))
 
     def list_sandboxes_with_refs(
         self,
@@ -77,9 +95,54 @@ class SandboxRegistry:
     def require_sandbox_by_id(self, sandbox_id: str) -> object:
         modal = self._modal()
         try:
-            return modal.Sandbox.from_id(sandbox_id)
+            sandbox = modal.Sandbox.from_id(sandbox_id)
         except Exception as exc:
             raise SandboxUnavailableError(f"no matching sandbox_id={sandbox_id} found") from exc
+        self.require_app_owned(sandbox, description=f"sandbox_id={sandbox_id}")
+        return sandbox
+
+    def require_app_owned(self, sandbox: object, *, description: str) -> None:
+        modal = self._modal()
+        app_id = self._resolve_app_id(modal)
+        sandbox_id = str(getattr(sandbox, "object_id", ""))
+        if not sandbox_id:
+            raise SandboxUnavailableError(f"no matching {description} found")
+        tags = _safe_tags(sandbox)
+        if tags.get(APP_ID_TAG) == app_id:
+            candidates = modal.Sandbox.list(app_id=app_id, tags={APP_ID_TAG: app_id})
+        elif self.allow_legacy_unscoped and APP_ID_TAG not in tags:
+            candidates = modal.Sandbox.list(app_id=app_id)
+        else:
+            raise SandboxUnavailableError(f"no app-owned {description} found")
+        if not any(
+            str(getattr(candidate, "object_id", "")) == sandbox_id
+            for candidate in candidates
+        ):
+            raise SandboxUnavailableError(f"no app-owned {description} found")
+
+    def require_app_tag(self, sandbox: object, *, description: str) -> None:
+        modal = self._modal()
+        app_id = self._resolve_app_id(modal)
+        tags = _safe_tags(sandbox)
+        if tags.get(APP_ID_TAG) == app_id:
+            return
+        if self.allow_legacy_unscoped and APP_ID_TAG not in tags:
+            return
+        raise SandboxUnavailableError(f"no app-owned {description} found")
+
+    def _resolve_app_id(self, modal: object) -> str:
+        if self._app_id is not None:
+            return self._app_id
+        try:
+            lookup_kwargs = {"create_if_missing": False}
+            if self.environment_name is not None:
+                lookup_kwargs["environment_name"] = self.environment_name
+            app = modal.App.lookup(self.app_name, **lookup_kwargs)
+            app_id = str(app.app_id)
+        except Exception as exc:
+            raise SandboxUnavailableError(f"no matching app={self.app_name} found") from exc
+        self._app_id = app_id
+        return app_id
 
     def require_one(
         self,

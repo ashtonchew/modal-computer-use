@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Any
 
 _SENSITIVE_PATTERNS = [
-    re.compile(r"((?:OPENAI|ANTHROPIC|API)_API_KEY\s*=\s*)[^\s]+", re.IGNORECASE),
+    re.compile(
+        r"(\b(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|PASSWORD|SECRET|TOKEN)\s*=\s*)[^\s]+",
+        re.IGNORECASE,
+    ),
     re.compile(r"((?:x-)?api-key\s*:\s*)[^\s]+", re.IGNORECASE),
     re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9._-]{6,}\b", re.IGNORECASE),
     re.compile(r"(_modal_connect_token=)[^&\s]+", re.IGNORECASE),
@@ -101,17 +103,11 @@ def is_sensitive_key(key: str) -> bool:
 
 def _redacted_value(value: Any) -> Any:
     if isinstance(value, dict) and value.get("redacted") is True:
-        return value
+        return _normalized_marker(value)
     if value is None:
         return value
-    marker: dict[str, Any] = {"redacted": True}
-    if isinstance(value, str):
-        marker["length"] = len(value)
-    elif isinstance(value, bytes):
-        marker["size_bytes"] = len(value)
-    elif isinstance(value, list | tuple | dict):
-        marker["items"] = len(value)
-    return marker
+    length = len(value) if isinstance(value, str | bytes | list | tuple | dict) else 1
+    return {"redacted": True, "length": length}
 
 
 def _replace_known_secrets(value: Any, replacements: list[tuple[str, str]]) -> Any:
@@ -129,11 +125,17 @@ def _replace_known_secrets(value: Any, replacements: list[tuple[str, str]]) -> A
                 return {
                     "redacted": True,
                     "length": len(secret),
-                    "sha256": hashlib.sha256(secret.encode("utf-8")).hexdigest(),
                 }
             value = value.replace(secret, replacement)
         return value
     return value
+
+
+def _normalized_marker(value: dict[Any, Any]) -> dict[str, Any]:
+    length = value.get("length", value.get("size_bytes", value.get("items", 0)))
+    if not isinstance(length, int) or isinstance(length, bool) or length < 0:
+        length = 0
+    return {"redacted": True, "length": length}
 
 
 def safe_exception_payload(exc: BaseException) -> dict[str, Any]:

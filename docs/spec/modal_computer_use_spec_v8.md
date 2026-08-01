@@ -1,9 +1,9 @@
 # `modal-computer-use` canonical product specification
 
-- **Status:** active specification for the repository's `1.0.0` source state
+- **Status:** active specification for the repository's `1.1.0` source state
 - **Prepared:** 2026-07-30
-- **Revision:** v8, canonical contract and maturity truth-up for the `1.0.0` source state
-- **Base implementation audited:** `71fc9e6` (`origin/main` at final review)
+- **Revision:** v8, canonical contract and maturity truth-up for the `1.1.0` source state
+- **Base implementation audited:** `2cd38f2` (security baseline); final release identity `v1.1.0`
 - **Repository:** `ashtonchew/modal-computer-use`
 - **Python package:** `modal_computer_use`
 
@@ -46,12 +46,12 @@ repository has advanced by 371 commits from the v7 landing (`3a30e69`) to the v8
 
 | Area | v8 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `1.0.0`; Python 3.12+ and `uv` are the maintained development baseline. Check the repository release page before you treat the version as published. |
+| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. `v1.1.0` is published only when its GitHub Release exists. |
 | Modal SDK | The compatible line remains `modal~=1.5.2`; v8 updates the lock from 1.5.2 to the latest audited 1.5.x patch, 1.5.3. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
 | Screenshots | MSS is the preferred cursor-hidden capture path, with bounded fallback and binary response routes. Captures report backend and coordinate metadata. |
-| Transport | `attested-tunnel` is the default Modal ingress. Connect access bootstraps a short-lived daemon-issued bearer for the encrypted tunnel. HTTP/2 is opt-in. |
+| Transport | `attested-tunnel` is the default Modal ingress. An SDK-managed bootstrap bearer authorizes a short-lived daemon-issued bearer for the encrypted tunnel. HTTP/2 is opt-in. |
 | Sessions | Sync and native-async daemon clients, persistent hot sessions, and observation WebSocket transports are implemented. |
 | Observations | The transport and action primitives are supported. First-visual-change composition remains Alpha and explicitly experimental. |
 | Handoff | A versioned `ComputerSessionHandle` can be passed to a deployed Modal Function. The Function resolves fresh access and borrows one exclusive trajectory lease. |
@@ -411,11 +411,12 @@ The supported ingress policies are:
 
 | Policy | Contract |
 | --- | --- |
-| `attested-tunnel` | Default. Use Connect access to authenticate and obtain a short-lived daemon-issued tunnel bearer, then use the encrypted daemon tunnel. |
+| `attested-tunnel` | Default. Use an SDK-managed bootstrap bearer to obtain a short-lived daemon-issued bearer, then use the encrypted daemon tunnel. Attach and handoff recover the bootstrap bearer through the Modal control plane. |
 | `connect` | Use Modal Sandbox Connect access directly. Required when outbound networking is fully blocked. |
 | `tunnel` | Use the encrypted daemon tunnel. Intended for explicitly managed compatibility and benchmark paths. |
 
-Every SDK-created daemon Connect Token is explicitly scoped with `port=8080`. The daemon rejects
+Every SDK-created daemon Connect Token is explicitly scoped with `port=8080` and is used only for
+pure Connect ingress. Raw and attested tunnel modes do not trust verified-user headers. The daemon rejects
 `_modal_connect_token` query parameters to keep credentials out of URLs and logs. The SDK extracts
 a query token returned by older Modal shapes and sends it as a bearer header.
 
@@ -531,16 +532,24 @@ Security invariants:
 
 1. Query-string Connect tokens are rejected.
 2. Local-token mode is loopback-only.
-3. Verified-user headers are trusted only through the configured Modal proxy boundary.
-4. Unknown action keys, invalid coordinates, invalid regions, and unsupported keys fail before
+3. Missing authentication fails closed; unauthenticated local mode is explicit and loopback-only.
+4. Verified-user headers are trusted only in pure Connect mode. Raw and attested tunnels require
+   daemon bearer authentication even when a client supplies a verified-user-shaped header.
+5. Minted tunnel tokens cannot mint another token and expire according to daemon policy.
+6. HTTP responses are non-cacheable, JSON and WebSocket inputs are bounded, and artifact uploads
+   remain streamed.
+7. Unknown action keys, invalid coordinates, invalid regions, and unsupported keys fail before
    execution.
-5. Artifact paths reject absolute paths, traversal after repeated percent decoding, control
+8. Nested action depth, command arguments, drag points, and key collections are bounded before
+   execution.
+9. Artifact paths reject absolute paths, traversal after repeated percent decoding, control
    characters, protected control paths, and symlink escapes.
-6. Logs, traces, process diagnostics, command output, and error details pass through redaction.
-7. Budgets are reserved at the owning route before expensive or mutating work.
-8. noVNC is opt-in and its takeover semantics are explicit.
-9. Prompt-injection and sensitive-action policy remain above core.
-10. Ambiguous mutation state fails closed and is never hidden by transport fallback.
+10. Logs, traces, process diagnostics, command output, and error details pass through redaction.
+11. Budgets are reserved at the owning route before expensive or mutating work.
+12. noVNC is opt-in and its takeover semantics are explicit.
+13. Modal lifecycle operations verify the requested app and app-ownership tag.
+14. Prompt-injection and sensitive-action policy remain above core.
+15. Ambiguous mutation state fails closed and is never hidden by transport fallback.
 
 The maintained threat model is [`docs/security.md`](../security.md).
 
@@ -561,10 +570,9 @@ Persistence reports are explicit:
 ### 11.2 Traces
 
 Trace NDJSON records provider provenance, normalized actions, results, screenshot references,
-coordinate spaces, redactions, and errors. Typed text is replaced with a marker, length, and
-SHA-256. Generic sensitive strings such as clipboard text are replaced with a marker and length.
-Replay validates the entire trace and skips redacted input. Replay never turns redacted content
-back into executable text.
+coordinate spaces, redactions, and errors. Sensitive values are replaced with exactly a redaction
+marker and length; content hashes are not retained. Replay validates the entire trace and skips
+redacted input. Replay never turns redacted content back into executable text.
 
 ### 11.3 Observability
 
@@ -600,6 +608,11 @@ Warm capacity is ownership-sensitive. A claim verifies the live Sandbox, configu
 expiry, tags, and lock before use. A failed or unverifiable ownership read is terminal. Cleanup may
 terminate only exact, verified, application-owned targets. Dry-run is the default for broad
 expiry cleanup.
+
+New Sandboxes carry `computer-use.app_id`. List, attach, reuse, warm-capacity, and cleanup queries
+are scoped to Modal's app ID and verify the ownership tag. A migration-only
+`allow_legacy_unscoped` option may attach an untagged Sandbox already resolved inside the requested
+app. It never permits a conflicting tag or broad legacy cleanup.
 
 Modal Queues and object tags coordinate capacity; they are not an authorization database.
 
@@ -672,8 +685,8 @@ Primary references:
 
 ## 17. Versioning and compatibility
 
-- Package, daemon, and checked-in OpenAPI versions are `1.0.0`. Check the repository release page
-  before you treat the version as published.
+- Package, daemon, and checked-in OpenAPI versions are `1.1.0`. The version is published only when
+  the matching GitHub Release exists.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
   core.
@@ -695,6 +708,7 @@ Every behavior change must add focused success and failure-path coverage. Before
 merge-ready handoff, the repository requires:
 
 ```bash
+uv sync --extra dev --extra modal --frozen
 uv run python scripts/export_openapi.py --check
 uv run ruff check .
 uv run mypy src
@@ -706,6 +720,9 @@ Boundary scans must confirm:
 - core has no `openai` or `anthropic` imports;
 - core has no `NetworkFileSystem` use;
 - examples and docs do not print secret-bearing URLs, tokens, artifacts, or content.
+- the frozen dependency graph passes audit;
+- Bandit and Semgrep report no material finding;
+- security regressions and the documented performance gates pass locally.
 
 Modal smoke tests are credential-gated. The deployed-Function handoff smoke is a protected manual
 workflow and validates one bounded handoff, not benchmark performance or continuous production
@@ -718,7 +735,7 @@ for packaging and CI parity.
 
 | Contract | Primary implementation | Pinning evidence |
 | --- | --- | --- |
-| Package and daemon 1.0 version | `pyproject.toml`, `_version.py`, daemon app | project metadata and OpenAPI tests |
+| Package and daemon 1.1 version | `pyproject.toml`, `_version.py`, daemon app | project metadata and OpenAPI tests |
 | Health, readiness, version, capabilities | `daemon/routes/health.py` | daemon route and readiness tests |
 | Auth and secret redaction | `daemon/auth.py`, `routes/websocket_auth.py`, `redaction.py`, `daemon/logging.py` | auth, observability, trace tests |
 | Strict config and environment mapping | `config.py`, `daemon/settings.py`, `configuration_reference.py` | config/settings/documentation tests |
@@ -745,7 +762,7 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is versioned `1.0.0`; remaining work is not the v7 roadmap.
+The repository source is versioned `1.1.0`; remaining work is not the v7 roadmap.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

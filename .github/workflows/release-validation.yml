@@ -63,12 +63,6 @@ jobs:
           ! rg "NetworkFileSystem" src
           ! rg -n "print\([^\n]*(vnc_url|debug\.vnc_url|\.uri|artifact_uri|token|data_base64|raw_path|stdout|stderr)" examples docs README.md
 
-      - name: Upload benchmark report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: benchmark-report
-          path: benchmark-results/benchmark-report.json
-
   package:
     name: Package checks
     runs-on: ubuntu-latest
@@ -184,12 +178,6 @@ jobs:
 
           assert version("modal-computer-use") == modal_computer_use.__version__
           PY
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: distributions
-          path: dist/release/*
 
   modal-smoke:
     name: Protected Modal smoke

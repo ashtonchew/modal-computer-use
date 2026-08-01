@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import secrets
 import subprocess
 from collections import deque
@@ -9,6 +8,8 @@ from pathlib import Path
 
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ProcessStatus
+
+from .process_environment import desktop_process_environment
 
 
 class Supervisor:
@@ -141,8 +142,7 @@ class Supervisor:
             return
         stdout = (self.log_dir / f"{name}.log").open("ab")
         stderr = (self.log_dir / f"{name}.stderr.log").open("ab")
-        env = dict(os.environ)
-        env["DISPLAY"] = self.settings.display
+        env = desktop_process_environment(display=self.settings.display)
         self.processes[name] = subprocess.Popen(  # noqa: S603
             command,
             stdout=stdout,

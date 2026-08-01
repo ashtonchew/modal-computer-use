@@ -48,6 +48,47 @@ def test_recording_delete_removes_metadata(test_client) -> None:
     assert test_client.get(f"/v1/recordings/{started['id']}").status_code == 404
 
 
+def test_recording_registry_shutdown_stops_all_active_recordings(tmp_path) -> None:
+    registry = RecordingRegistry(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    first = registry.start()
+    second = registry.start()
+
+    registry.shutdown()
+
+    assert registry.get(first.id).status == "stopped"
+    assert registry.get(second.id).status == "stopped"
+
+
+def test_daemon_lifespan_shuts_down_recordings(tmp_path, monkeypatch) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    called = False
+
+    def shutdown() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(app.state.recordings, "shutdown", shutdown)
+
+    with TestClient(app):
+        pass
+
+    assert called is True
+
+
 def test_recording_dashboard_requires_same_auth(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
@@ -129,6 +170,51 @@ class _StubbornProcess:
 
     def kill(self) -> None:
         self.killed = True
+
+
+class _BrokenWaitProcess:
+    def __init__(self) -> None:
+        self.stdin = None
+        self.terminated = False
+        self.killed = False
+        self._waits = 0
+
+    def poll(self) -> int | None:
+        return -15 if self.terminated else None
+
+    def wait(self, timeout: float | None = None) -> int:
+        self._waits += 1
+        if self._waits == 1:
+            raise OSError("wait failed")
+        return -15
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_recording_shutdown_force_stops_process_after_stop_error(tmp_path, monkeypatch) -> None:
+    process = _BrokenWaitProcess()
+
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _tool: "/usr/bin/ffmpeg")
+    registry = RecordingRegistry(
+        DaemonSettings(
+            backend="x11",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        ),
+        popen_factory=lambda *args, **kwargs: process,
+    )
+    started = registry.start(name="broken-wait")
+
+    registry.shutdown()
+
+    assert process.terminated is True
+    assert process.killed is False
+    assert started.id not in registry._processes
 
 
 def test_failed_recording_stop_reports_error_and_ffmpeg_tail(tmp_path, monkeypatch) -> None:

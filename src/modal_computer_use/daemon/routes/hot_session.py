@@ -28,14 +28,20 @@ async def hot_session(websocket: WebSocket) -> None:
     if auth_error is not None:
         await websocket.close(code=1008, reason=auth_error)
         return
-    await websocket.accept()
-    await websocket.send_json({"type": "ready", "protocol": "computer-use.hot-session.v1"})
-    try:
-        while True:
-            message = await websocket.receive_json()
-            await _handle_hot_session_message(websocket, message)
-    except WebSocketDisconnect:
+    if not await websocket.app.state.websocket_admission.acquire("hot"):
+        await websocket.close(code=1013, reason="connection_limit_reached")
         return
+    try:
+        await websocket.accept()
+        await websocket.send_json({"type": "ready", "protocol": "computer-use.hot-session.v1"})
+        try:
+            while True:
+                message = await websocket.receive_json()
+                await _handle_hot_session_message(websocket, message)
+        except WebSocketDisconnect:
+            return
+    finally:
+        await websocket.app.state.websocket_admission.release("hot")
 
 
 async def _handle_hot_session_message(websocket: WebSocket, message: Any) -> None:

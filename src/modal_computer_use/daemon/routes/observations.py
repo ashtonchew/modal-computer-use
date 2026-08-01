@@ -279,10 +279,13 @@ async def observation_stream(websocket: WebSocket) -> None:
     if auth_error is not None:
         await websocket.close(code=1008, reason=auth_error)
         return
-    await websocket.accept()
-    await websocket.send_json({"type": "ready", "protocol": PROTOCOL})
+    if not await websocket.app.state.websocket_admission.acquire("observation"):
+        await websocket.close(code=1013, reason="connection_limit_reached")
+        return
     state = _StreamState()
     try:
+        await websocket.accept()
+        await websocket.send_json({"type": "ready", "protocol": PROTOCOL})
         while True:
             if state.request is not None and not state.paused:
                 now = perf_counter()
@@ -307,6 +310,7 @@ async def observation_stream(websocket: WebSocket) -> None:
         return
     finally:
         _close_stream_resources(state)
+        await websocket.app.state.websocket_admission.release("observation")
 
 
 @router.post("/transport-probe")
