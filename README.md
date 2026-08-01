@@ -10,7 +10,7 @@ desktops on Modal.
 The project provides daemon-first control primitives. Autonomous agent orchestration and model
 loops stay in application code or examples.
 
-This is an independent community project for Modal.
+This is an independent project using Modal.
 
 ## Install from source
 
