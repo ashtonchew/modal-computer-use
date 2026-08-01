@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1152" height="624" viewBox="0 0 1152 624" role="img" aria-labelledby="title desc">
-  <title id="title">Warm p50 latency across five providers</title>
+  <title id="title">Warm p50 latency across four providers and five paths</title>
   <desc id="desc">A results table where the highlighted Modal optimized column is fastest on every task, including 9.9 ms for one click and 53.4 ms to type 1,000 characters against 40,915 ms on E2B, a 767x ratio.</desc>
   <defs>
     <style>

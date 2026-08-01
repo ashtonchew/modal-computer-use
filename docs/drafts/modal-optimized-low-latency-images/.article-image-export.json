@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "source": "docs/drafts/modal-optimized-low-latency.md",
+  "files": [
+    "1_typing-comparison.png",
+    "2_agent-loop.png",
+    "3_screenshot-paths.png",
+    "4_input-session.png",
+    "5_action-batch.png",
+    "6_command-loop-isolation.png",
+    "7_warm-results.png",
+    "8_first-change.png",
+    "paste.md"
+  ]
+}

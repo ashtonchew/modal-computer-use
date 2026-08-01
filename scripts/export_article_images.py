@@ -16,8 +16,8 @@ folder beside the draft.
 
 Names are the position followed by the source stem with the article prefix
 removed, so docs/assets/modal-optimized-agent-loop.svg becomes 1_agent-loop.png.
-Renumbering after a reorder would otherwise leave the old files behind, so any
-PNG in the folder that this run did not write is deleted.
+The bundle has a manifest of files created by this tool. Renumbering removes
+only stale PNGs listed in that manifest; unrelated files are never pruned.
 
 The folder also gets paste.md, the draft with every image reference replaced by
 a visible placeholder naming the PNG that belongs there. Editors that cannot
@@ -28,11 +28,13 @@ separately, and the placeholder says which file goes where.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -42,6 +44,12 @@ LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 STRIP_PREFIX = "modal-optimized-"
 BLOB_URL = "https://github.com/ashtonchew/modal-computer-use/blob/main/"
 EXTERNAL_SCHEMES = ("http://", "https://", "data:", "mailto:", "ftp:", "tel:")
+BUNDLE_MANIFEST = ".article-image-export.json"
+BUNDLE_VERSION = 1
+
+
+class BundleError(RuntimeError):
+    """The output directory is not a bundle this script can safely update."""
 
 
 def ensure_cairo() -> None:
@@ -107,6 +115,117 @@ def references(source: Path) -> list[Path]:
 def png_name(position: int, asset: Path) -> str:
     stem = asset.stem.removeprefix(STRIP_PREFIX)
     return f"{position}_{stem}.png"
+
+
+def default_output_for(source: Path) -> Path:
+    return source.with_name(f"{source.stem}-images").absolute()
+
+
+def safe_output_path(requested: Path) -> Path:
+    output = requested.absolute()
+    if output.is_symlink():
+        raise BundleError(f"Refusing symlinked output directory: {output}")
+    if output.exists() and not output.is_dir():
+        raise BundleError(f"Output path is not a directory: {output}")
+    return output
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
+def source_identity(source: Path) -> str:
+    try:
+        return source.relative_to(REPO).as_posix()
+    except ValueError:
+        return str(source)
+
+
+def owned_bundle_files(output: Path, source: Path) -> tuple[set[str], bool]:
+    """Return files the bundle owns and whether this is the canonical legacy bundle."""
+    manifest = output / BUNDLE_MANIFEST
+    if manifest.is_symlink():
+        raise BundleError(f"Refusing symlinked bundle manifest: {manifest}")
+    if not manifest.exists():
+        if not output.exists() or not any(output.iterdir()):
+            return set(), False
+        if output == default_output_for(source):
+            # Older canonical bundles predate the manifest. The first managed run may
+            # overwrite current export names, but it never deletes an unlisted file.
+            return set(), True
+        raise BundleError(
+            f"Refusing non-empty unowned output directory: {output}. "
+            "Choose an empty directory or a bundle created by this script."
+        )
+
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise BundleError(f"Cannot read bundle manifest {manifest}: {error}") from error
+    if not isinstance(payload, dict):
+        raise BundleError(f"Bundle manifest is not an object: {manifest}")
+    if payload.get("version") != BUNDLE_VERSION:
+        raise BundleError(f"Unsupported bundle manifest version in {manifest}")
+    if payload.get("source") != source_identity(source):
+        raise BundleError(f"Bundle manifest belongs to a different source: {manifest}")
+    files = payload.get("files")
+    if not isinstance(files, list) or not all(isinstance(name, str) for name in files):
+        raise BundleError(f"Bundle manifest has an invalid file list: {manifest}")
+    if any(Path(name).name != name or name == BUNDLE_MANIFEST for name in files):
+        raise BundleError(f"Bundle manifest contains an unsafe file name: {manifest}")
+    return set(files), False
+
+
+def write_bundle_manifest(output: Path, source: Path, files: set[str]) -> None:
+    manifest = output / BUNDLE_MANIFEST
+    payload = {
+        "version": BUNDLE_VERSION,
+        "source": source_identity(source),
+        "files": sorted(files),
+    }
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="x",
+            encoding="utf-8",
+            dir=output,
+            prefix=f"{BUNDLE_MANIFEST}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(json.dumps(payload, indent=2) + "\n")
+        temporary.replace(manifest)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def remove_stale_bundle_files(
+    output: Path, owned_files: set[str], current_files: set[str]
+) -> list[Path]:
+    removed: list[Path] = []
+    for name in sorted(owned_files - current_files):
+        stale = output / name
+        if stale.suffix == ".png" and (stale.exists() or stale.is_symlink()):
+            stale.unlink()
+            removed.append(stale)
+    return removed
+
+
+def unsafe_bundle_destinations(output: Path, files: set[str]) -> list[Path]:
+    return sorted(
+        (
+            destination
+            for name in files
+            if (destination := output / name).is_symlink()
+            or (destination.exists() and not destination.is_file())
+        ),
+        key=str,
+    )
 
 
 def absolute_link(source: Path, target: str) -> str | None:
@@ -184,31 +303,44 @@ def main() -> int:
     if missing:
         sys.exit("Referenced image is missing: " + ", ".join(str(m) for m in missing))
 
-    output = args.output or source.with_name(f"{source.stem}-images")
+    try:
+        output = safe_output_path(args.output or default_output_for(source))
+        owned_files, legacy_bundle = owned_bundle_files(output, source)
+    except BundleError as error:
+        sys.exit(str(error))
     output.mkdir(parents=True, exist_ok=True)
 
     import cairosvg
 
+    names = {asset: png_name(position, asset) for position, asset in enumerate(assets, start=1)}
+    current_files = {*names.values(), "paste.md"}
+    if not legacy_bundle:
+        conflicts = sorted(
+            name for name in current_files if (output / name).exists() and name not in owned_files
+        )
+        if conflicts:
+            sys.exit("Refusing to overwrite unowned bundle files: " + ", ".join(conflicts))
+    unsafe = unsafe_bundle_destinations(output, current_files)
+    if unsafe:
+        sys.exit("Refusing unsafe bundle destinations: " + ", ".join(map(str, unsafe)))
+
     written: set[Path] = set()
-    names: dict[Path, str] = {}
-    for position, asset in enumerate(assets, start=1):
-        name = png_name(position, asset)
+    for asset in assets:
+        name = names[asset]
         destination = output / name
         cairosvg.svg2png(url=str(asset), write_to=str(destination), scale=args.scale)
         written.add(destination)
-        names[asset] = name
-        print(f"{destination.relative_to(REPO)}  <-  {asset.relative_to(REPO)}")
+        print(f"{display_path(destination)}  <-  {display_path(asset)}")
 
-    for stale in sorted(output.glob("*.png")):
-        if stale not in written:
-            stale.unlink()
-            print(f"removed stale {stale.relative_to(REPO)}")
+    for stale in remove_stale_bundle_files(output, owned_files, current_files):
+        print(f"removed stale {display_path(stale)}")
 
     paste = output / "paste.md"
     paste.write_text(paste_copy(source, names), encoding="utf-8")
-    print(f"{paste.relative_to(REPO)}")
+    write_bundle_manifest(output, source, current_files)
+    print(display_path(paste))
 
-    print(f"{len(written)} images at scale {args.scale:g} in {output.relative_to(REPO)}")
+    print(f"{len(written)} images at scale {args.scale:g} in {display_path(output)}")
     return 0
 
 

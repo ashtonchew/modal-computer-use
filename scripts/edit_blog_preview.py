@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import mimetypes
 import secrets
@@ -801,6 +802,23 @@ def build_config(source: Path) -> EditorConfig:
     )
 
 
+def is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def is_ipv6_host(host: str) -> bool:
+    try:
+        return isinstance(ipaddress.ip_address(host.strip().rstrip(".")), ipaddress.IPv6Address)
+    except ValueError:
+        return False
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -812,6 +830,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--host", default="127.0.0.1", help="Interface to bind (default: %(default)s)"
     )
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Allow a non-loopback bind that exposes the editor and repository working tree",
+    )
     parser.add_argument("--port", type=int, default=8787, help="Port to bind, 0 picks a free one")
     parser.add_argument("--open", action="store_true", help="Open the page in a browser")
     return parser.parse_args(argv)
@@ -819,6 +842,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if is_ipv6_host(args.host):
+        print("IPv6 hosts are not supported; use an IPv4 address or localhost.", file=sys.stderr)
+        return 2
+    if not is_loopback_host(args.host) and not args.allow_remote:
+        print(
+            f"Refusing non-loopback host {args.host!r}; pass --allow-remote to expose the editor.",
+            file=sys.stderr,
+        )
+        return 2
+    if not is_loopback_host(args.host):
+        print(
+            "Warning: remote editor access exposes the repository working tree and the page "
+            "token that can write the draft.",
+            file=sys.stderr,
+        )
     source = args.source.resolve()
     if not source.is_file():
         print(f"No such draft: {source}", file=sys.stderr)

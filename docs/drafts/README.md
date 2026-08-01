@@ -23,7 +23,9 @@ uv run --script scripts/edit_blog_preview.py --source docs/drafts/<slug>.md --po
 The editor writes the Markdown and nothing else. It runs no git commands, so saving in the browser
 leaves the change in the working tree for you to commit. It refuses to save when the file changed on
 disk underneath it, which is what keeps a browser session and a terminal edit from overwriting each
-other.
+other. The editor binds to loopback by default. A non-loopback `--host` also requires
+`--allow-remote`, because anyone who can load the page receives its write token and can browse the
+repository working tree.
 
 ## Render the preview
 
@@ -46,11 +48,14 @@ This walks the draft for image references in document order and writes, into `<s
   referenced second becomes `2_agent-loop.png`
 - `paste.md`, the draft with each image reference replaced by a placeholder naming the PNG that
   belongs at that spot
+- `.article-image-export.json`, the ownership manifest used to identify stale generated PNGs
 
 Numbering follows the article, not the assets folder, so moving a section renumbers the exports.
-Any PNG the run did not write is deleted, which is what stops a reorder from leaving an orphan
-behind. Most publishing surfaces cannot resolve the relative asset paths, so they need the prose and
-the uploads separately; `paste.md` is the prose, and the placeholder says which file to drop where.
+Only stale PNGs listed in the ownership manifest are deleted, which stops a reorder from leaving an
+orphan without touching unrelated files. A custom `--output` must be empty or already contain a
+matching manifest. Most publishing surfaces cannot resolve the relative asset paths, so they need
+the prose and the uploads separately; `paste.md` is the prose, and the placeholder says which file
+to drop where.
 
 The draft cites artifacts by path relative to its own folder, which resolves where the draft lives
 and nowhere else. `paste.md` sits one folder deeper, and the published copy sits on a site with no

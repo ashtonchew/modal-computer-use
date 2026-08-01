@@ -2,9 +2,9 @@
 
 A model that uses a computer needs a computer to use. Not yours, so you rent one from your favorite local sandbox company. A Linux desktop runs in a sandbox and your computer-use agent (CUA) takes the wheel. It asks for a screenshot, looks at the screen, sends back some action like a click or to type.
 
-E2B & Daytona provide their own computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters, roughly 10 sentences, with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.5 seconds. A huge waste that adds up as computer-use is increasingly used in realistic longer-horizon tasks. 
+E2B & Daytona provide their own computer-use SDKs, so I wanted to see how efficient they were. To type 1,000 characters, roughly 10 sentences, with no agent latency included, it took 41 seconds on E2B. And on Daytona, it took 5.5 seconds. A huge waste that adds up as computer-use is increasingly used in realistic longer-horizon tasks.
 
-So I built the fastest computer-use framework using Modal primitives. For the same 1000 character typing task, my optimized Modal setup took 0.05 seconds.
+Across the four providers and five paths in this benchmark, the computer-use framework I built with Modal primitives was fastest on every measured task. For the same 1,000-character typing task, my optimized Modal setup took 0.05 seconds.
 
 ![Typing 1,000 characters takes 41 seconds on E2B and 5.5 seconds on Daytona, and 0.05 seconds on the optimized Modal setup](../assets/modal-optimized-typing-comparison.svg)
 
@@ -16,7 +16,7 @@ Let's see this in action: Over fifty total agent turns, counting no agent reason
 
 I first thought of all the ways we use remote desktops today. For IT support, remote desktop control has to feel almost seamless. So, I searched for the most lightweight remote desktop control framework. Then I found RustDesk, an [open-source remote desktop system](https://rustdesk.com/docs/en/self-host/). I knew this was it, even the name RustDesk sounded fast. Looking inside, I saw that it connected to the remote machine once, when the session starts, and reuses that connection for everything after. For example, moving your mouse sends an event over a connection that is actively ready.
 
-My first Modal setup did the opposite. Every action launched, used that launch once, and would throw it away. It provided a quick way to push actions and not have to worry about complexity. But in the need for speed, I identified the various odd ways this waste happens, over and over again in different parts of the system, and saved that time using Modal primitives and engineering. To build the fastest computer-use SDK and open-source it.
+My first Modal setup did the opposite. Every action launched, used that launch once, and would throw it away. It provided a quick way to push actions and not have to worry about complexity. But in the need for speed, I identified the various odd ways this waste happens, over and over again in different parts of the system, and saved that time using Modal primitives and engineering. The result was an open-source SDK whose optimized path led the benchmark.
 
 ![Creation is separate from the repeated computer-use loop](../assets/modal-optimized-agent-loop.svg)
 
@@ -30,17 +30,17 @@ The desktop is a Linux machine in a Sandbox, and the daemon inside it owns the s
 
 The desktop already ran in a Modal Sandbox. What if the client ran on Modal too?
 
-So to test this, I ran the same client code used to drive requests into the desktop in two places. First from my laptop. Then from a Modal Function, a primitive that gives an autoscaled container for application code. I requested `us-west-2` for the Function and for the Sandbox, which keeps both physically close together.  From each, I measured a simple "move-and-click" task: The client sends an x and y coordinate and which mouse button to press, and the reply is the coordinate the pointer landed on. Barely anything travels in either direction, so nearly all of what it costs is the trip itself.
+So to test this, I ran the same client code used to drive requests into the desktop in two places. First from my laptop. Then from a Modal Function, a primitive that gives an autoscaled container for application code. I requested `us-west-2` for the Function and for the Sandbox, which keeps both physically close together. From each, I measured a simple "move-and-click" task: The client sends an x and y coordinate and which mouse button to press, and the reply is the coordinate the pointer landed on. Barely anything travels in either direction, so nearly all of what it costs is the trip itself.
 
 From my laptop the move-and-click task took 39.3 ms. From the Modal Function it took only 4.7 ms.
 
 Looking one layer deeper, the daemon itself processing the click did about a millisecond of work in both cases. Precisely, the trip to the desktop and back took 38 ms from my laptop and 3.4 ms from the Function.
 
-Then I ran the same comparison on a different task, a full screenshot. The client asks for a frame and a 1024x768 PNG comes back. It took 86.8 ms from my laptop and 38.1 ms from the Function. Looking into the function, why was it still 38.1 ms? 
+Then I ran the same comparison on a different task, a full screenshot. The client asks for a frame and a 1024x768 PNG comes back. It took 86.8 ms from my laptop and 38.1 ms from the Function. Looking into the function, why was it still 38.1 ms?
 
 To look deeper I isolated the capture/encode/transport cycle. Breaking down the remaining 38.1 ms from the Function, the desktop spent 23 ms capturing and encoding the frame, and so it spent that 23 ms whether the client ran on my laptop or in the Function.
 
-Zooming back out to the transport cycle, even colocated, a click carrying almost nothing still spent 3.4 ms on the trip from a Modal Function to the Modal Sandbox. Requesting `us-west-2` does not put the two machines as close as they could be. The Function and the Sandbox can still land in different buildings, and every request still goes through authenticated ingress. I use a Modal attested tunnel for this ingress. The authentication token is exchanged once at startup, but the routing happens on every request. 
+Zooming back out to the transport cycle, even colocated, a click carrying almost nothing still spent 3.4 ms on the trip from a Modal Function to the Modal Sandbox. Requesting `us-west-2` does not put the two machines as close as they could be. The Function and the Sandbox can still land in different buildings, and every request still goes through authenticated ingress. I use a Modal attested tunnel for this ingress. The authentication token is exchanged once at startup, but the routing happens on every request.
 
 You may ask why don't I delete this round trip entirely by running the client inside the Sandbox, but then my code would live in the machine I am isolating. Here are the two main issues with placing the client in the Sandbox: (1) Our Sandbox is an untrusted machine, (2) The client is tied to the Sandbox. To contrast, because we use autoscaling Modal Functions to host the client then we can use a single client to control many Sandboxes.
 
@@ -113,7 +113,7 @@ The daemon validates the entire batch of actions before it touches the desktop, 
 
 To test this, I sent a batch of four clicks. Four sequential requests took 26.8 ms. But, one ordered request took only 11.5 ms. The difference was in the three more trips through the request stack.
 
-This is a CUA-native optimization because batched actions are a new phenomenon that barely even existed for CUA. Increasingly, batched actions are very important because RL has shown emergent usage of batched actions when available in recent recipes.
+This matters because [OpenAI's current computer-use API](https://developers.openai.com/api/docs/guides/tools-computer-use) already returns ordered action lists. Keeping that list intact avoids paying one transport round trip per click.
 
 ## Why did command p95 jump to 220 ms?
 
@@ -145,9 +145,9 @@ In our optimized Modal setup: A full screenshot returned in 37 ms. One click too
 
 The biggest ratio in the table belongs to typing. The 1,000-character case took 53 ms through my optimized Modal path, which sends every character over the persistent XTest connection, against about 41 seconds through E2B's computer-use SDK. 770x faster with our setup.
 
-![Warm p50 latency across five providers, with Modal optimized fastest on every task](../assets/modal-optimized-warm-results.svg)
+![Warm p50 latency across four providers and five paths, with Modal optimized fastest on every task](../assets/modal-optimized-warm-results.svg)
 
-Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal simple column is the public `ComputerSandbox` configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture. The computer-use SDKs of Daytona, E2B, and Tzafon stayed on their defaults. 
+Every provider ran through its public default computer-use path, and only Modal optimized was tuned. The Modal simple column is the public `ComputerSandbox` configuration in this library, with identical source between the two runs' revisions, and it already included MSS screenshot capture. The computer-use SDKs of Daytona, E2B, and Tzafon stayed on their defaults.
 
 Each screenshot row uses that path's native format: Tzafon returned a 1280x720 JPEG, and Modal, Daytona, and E2B returned a 1024x768 PNG.
 
@@ -185,9 +185,9 @@ Further work needs a timestamp at lifecycle boundaries. If allocation dominates,
 
 On Modal, a fifty-turn task that spent sixteen seconds waiting now spends under two and a half. Every one of those changes was the same change. Something that was being built once per action became something built once per session.
 
-Not one of them was available to me on a computer-use API, because each one is a seam a product owns: where the client runs, what a single request carries, how the daemon holds the display, who owns a child process. Modal provided the seams. A Sandbox and a Function are separate things I could place in the same region, and cost efficiency came from intuitive knobs to control resources.
+The compared provider-default APIs did not expose these seams to me: where the client runs, what a single request carries, how the daemon holds the display, and who owns a child process. Modal did. A Sandbox and a Function are separate things I could place in the same region, and cost efficiency came from intuitive knobs to control resources.
 
-That is how I tuned Modal's general-purpose AI infra platform to be faster than the companies that sell this as a product. The future is customization.
+That is how I tuned Modal's general-purpose AI infra platform to lead this four-provider, five-path benchmark. The future is customization.
 
 ## Source notes
 
