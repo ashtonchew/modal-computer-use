@@ -22,6 +22,16 @@ def test_config_aliases_and_vnc_normalization() -> None:
     assert config.actions.post_action_delay_ms == 0
 
 
+def test_vnc_password_is_internal_only() -> None:
+    value = "vnc-secret"
+    config = ComputerConfig(vnc_password=value)
+
+    assert config.vnc_password == value
+    assert value not in repr(config)
+    assert "vnc_password" not in config.model_dump()
+    assert value not in config.model_dump_json()
+
+
 def test_runtime_modal_region_rejects_empty_string() -> None:
     with pytest.raises(ValidationError, match="modal_region must be non-empty"):
         ComputerConfig(runtime={"modal_region": "   "})

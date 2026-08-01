@@ -49,6 +49,12 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     assert settings.post_action_delay_ms == 0
     assert settings.readiness_cache_ttl_ms == 1_000
     assert settings.subprocess_backend == "isolated-asyncio"
+    assert settings.max_json_body_bytes == 16 * 1024 * 1024
+    assert settings.max_websocket_message_bytes == 16 * 1024 * 1024
+    assert settings.max_hot_session_connections == 64
+    assert settings.max_observation_connections == 16
+    assert settings.max_tunnel_sessions == 0
+    assert settings.max_action_depth == 32
 
 
 def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:
@@ -152,7 +158,7 @@ def test_daemon_entrypoint_reads_host_and_port_environment(monkeypatch) -> None:
     app = object()
     monkeypatch.setenv("COMPUTER_USE_DAEMON_HOST", "127.0.0.2")
     monkeypatch.setenv("COMPUTER_USE_DAEMON_PORT", "9090")
-    monkeypatch.setattr(daemon_main, "create_app", lambda: app)
+    monkeypatch.setattr(daemon_main, "create_app", lambda _settings: app)
     monkeypatch.setattr(
         daemon_main.uvicorn,
         "run",
@@ -161,7 +167,18 @@ def test_daemon_entrypoint_reads_host_and_port_environment(monkeypatch) -> None:
 
     daemon_main.main()
 
-    assert calls == [((app,), {"host": "127.0.0.2", "port": 9090, "log_config": None})]
+    assert calls == [
+        (
+            (app,),
+            {
+                "host": "127.0.0.2",
+                "port": 9090,
+                "log_config": None,
+                "ws_max_size": 16 * 1024 * 1024,
+                "ws_max_queue": 4,
+            },
+        )
+    ]
 
 
 def test_daemon_entrypoint_defaults_port_to_8080(monkeypatch) -> None:
@@ -169,7 +186,7 @@ def test_daemon_entrypoint_defaults_port_to_8080(monkeypatch) -> None:
     app = object()
     monkeypatch.delenv("COMPUTER_USE_DAEMON_PORT", raising=False)
     monkeypatch.setenv("COMPUTER_USE_DAEMON_HOST", "127.0.0.2")
-    monkeypatch.setattr(daemon_main, "create_app", lambda: app)
+    monkeypatch.setattr(daemon_main, "create_app", lambda _settings: app)
     monkeypatch.setattr(
         daemon_main.uvicorn,
         "run",
@@ -194,4 +211,59 @@ def test_daemon_entrypoint_uses_h2_runner_when_configured(monkeypatch) -> None:
 
     daemon_main.main()
 
-    assert calls == [{"host": "127.0.0.2", "port": 9090}]
+    assert calls[0]["host"] == "127.0.0.2"
+    assert calls[0]["port"] == 9090
+    assert isinstance(calls[0]["settings"], DaemonSettings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "setting"),
+    [
+        ("tunnel_token_ttl_seconds", 0, "COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS"),
+        ("max_tunnel_sessions", -1, "COMPUTER_USE_MAX_TUNNEL_SESSIONS"),
+        ("max_action_depth", 0, "COMPUTER_USE_MAX_ACTION_DEPTH"),
+        ("max_action_depth", 129, "COMPUTER_USE_MAX_ACTION_DEPTH"),
+        ("max_json_body_bytes", -1, "COMPUTER_USE_MAX_JSON_BODY_BYTES"),
+        ("max_websocket_message_bytes", -1, "COMPUTER_USE_MAX_WEBSOCKET_MESSAGE_BYTES"),
+        ("max_hot_session_connections", -1, "COMPUTER_USE_MAX_HOT_SESSION_CONNECTIONS"),
+        ("max_observation_connections", -1, "COMPUTER_USE_MAX_OBSERVATION_CONNECTIONS"),
+        ("max_command_arguments", -1, "COMPUTER_USE_MAX_COMMAND_ARGUMENTS"),
+        ("max_drag_points", -1, "COMPUTER_USE_MAX_DRAG_POINTS"),
+        ("max_key_collection_size", -1, "COMPUTER_USE_MAX_KEY_COLLECTION_SIZE"),
+    ],
+)
+def test_daemon_settings_reject_invalid_security_limits(
+    field: str,
+    value: int,
+    setting: str,
+) -> None:
+    with pytest.raises(ValueError, match=setting):
+        DaemonSettings(**{field: value})
+
+
+def test_daemon_entrypoint_rejects_unconfigured_authentication(monkeypatch) -> None:
+    monkeypatch.setattr(
+        daemon_main,
+        "get_settings",
+        lambda: DaemonSettings(require_connect_user=False),
+    )
+
+    with pytest.raises(ValueError, match="authentication is not configured"):
+        daemon_main.main()
+
+
+def test_daemon_entrypoint_restricts_explicit_unauthenticated_mode_to_loopback(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("COMPUTER_USE_DAEMON_HOST", "0.0.0.0")  # noqa: S104
+    monkeypatch.setattr(
+        daemon_main,
+        "get_settings",
+        lambda: DaemonSettings(
+            require_connect_user=False,
+            allow_unauthenticated_loopback=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="must bind to a loopback"):
+        daemon_main.main()

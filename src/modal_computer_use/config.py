@@ -216,7 +216,7 @@ class ComputerConfig(StrictBaseModel):
     request_id: str | None = Field(default=None, exclude=True)
     ingress: ModalIngress = "attested-tunnel"
     expose_vnc: VncMode | bool = "off"
-    vnc_password: str | None = None
+    vnc_password: str | None = Field(default=None, exclude=True, repr=False)
 
     @field_validator("expose_vnc", mode="before")
     @classmethod

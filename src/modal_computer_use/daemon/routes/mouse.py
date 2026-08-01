@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Response
 from modal_computer_use.daemon.routes.execution import run_input_action
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
+    validate_collection_size,
     validate_keys,
     validate_optional_point,
     validate_point,
@@ -43,6 +44,12 @@ def _report_input_backend(response: Response, backend_name: object) -> None:
 @router.post("/click")
 async def click(payload: MouseClickRequest, request: Request, response: Response) -> Point:
     validate_optional_point(request, x=payload.x, y=payload.y)
+    validate_collection_size(
+        payload.modifiers,
+        maximum=request.app.state.settings.max_key_collection_size,
+        field="modifiers",
+        code="too_many_keys",
+    )
     validate_keys(*payload.modifiers)
 
     async def operation() -> Point:
@@ -62,6 +69,12 @@ async def click(payload: MouseClickRequest, request: Request, response: Response
 
 @router.post("/drag")
 async def drag(payload: MouseDragRequest, request: Request, response: Response) -> Point:
+    validate_collection_size(
+        payload.path or [],
+        maximum=request.app.state.settings.max_drag_points,
+        field="path",
+        code="too_many_drag_points",
+    )
     start = None
     end = None
     if payload.start_x is not None and payload.start_y is not None:
@@ -72,6 +85,12 @@ async def drag(payload: MouseDragRequest, request: Request, response: Response) 
         validate_point(request, end, field="end")
     for index, point in enumerate(payload.path or []):
         validate_point(request, point, field=f"path[{index}]")
+    validate_collection_size(
+        payload.modifiers,
+        maximum=request.app.state.settings.max_key_collection_size,
+        field="modifiers",
+        code="too_many_keys",
+    )
     validate_keys(*payload.modifiers)
 
     async def operation() -> Point:

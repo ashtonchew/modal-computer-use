@@ -62,6 +62,10 @@ finally:
 The command prints `1024 768` followed by the screenshot's SHA-256 digest. Press Ctrl-C in the
 daemon terminal when finished.
 
+The daemon refuses to start without token or Connect authentication. For a local process that
+intentionally has no token, set `COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK=true`; that mode may
+bind only to loopback.
+
 ## Run on Modal
 
 Configure Modal credentials once with `uv run modal setup`. Creating a Sandbox can incur Modal

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.request import urlopen
 
+from modal_computer_use.daemon.process_environment import desktop_process_environment
 from modal_computer_use.models import ActionResult, X11Window
 
 BrowserGpuMode = Literal["auto", "off", "chromium-vulkan"]
@@ -192,8 +193,7 @@ def measure_chromium_render_metrics(
         "--no-first-run",
         "--no-default-browser-check",
     ]
-    env = dict(os.environ)
-    env["DISPLAY"] = display
+    env = desktop_process_environment(display=display)
     started = time.perf_counter()
     process = subprocess.Popen(  # noqa: S603
         args,
@@ -254,7 +254,9 @@ def _wait_for_cdp_target(port: int, *, timeout_seconds: float) -> dict[str, obje
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            with urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1) as response:
+            with urlopen(  # nosemgrep: dynamic-urllib-use-detected -- fixed loopback HTTP URL.
+                f"http://127.0.0.1:{port}/json/list", timeout=1
+            ) as response:
                 targets = json.loads(response.read().decode("utf-8"))
             for target in targets:
                 if target.get("type") == "page" and target.get("webSocketDebuggerUrl"):

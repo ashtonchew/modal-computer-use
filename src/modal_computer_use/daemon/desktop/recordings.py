@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.process_environment import desktop_process_environment
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ArtifactInfo, Recording
 from modal_computer_use.redaction import sanitize_text
@@ -75,8 +76,7 @@ class RecordingRegistry:
             ffmpeg_path = shutil.which("ffmpeg")
             if ffmpeg_path is None:
                 raise DaemonError("ffmpeg is not installed", code="recording_start_failed")
-            env = dict(os.environ)
-            env["DISPLAY"] = self.settings.display
+            env = desktop_process_environment(display=self.settings.display)
             command = _ffmpeg_args(
                 ffmpeg_path,
                 display=self.settings.display,
@@ -114,7 +114,7 @@ class RecordingRegistry:
         if rec.status != "recording":
             return rec
         path = Path(rec.path)
-        process = self._processes.pop(recording_id, None)
+        process = self._processes.get(recording_id)
         error = None
         stop_method = "none"
         if process is not None and process.poll() is None:
@@ -173,6 +173,7 @@ class RecordingRegistry:
             }
         )
         self._recordings[recording_id] = stopped
+        self._processes.pop(recording_id, None)
         if stopped.status == "stopped" and self.artifact_store is not None and append_manifest:
             self.artifact_store.append_manifest(_recording_artifact(stopped, path))
         return stopped
@@ -185,6 +186,13 @@ class RecordingRegistry:
 
     def list(self) -> list[Recording]:
         return list(self._recordings.values())
+
+    def is_active_artifact_path(self, public_path: str) -> bool:
+        artifact_uri = f"artifact://{public_path}"
+        return any(
+            recording.status == "recording" and recording.artifact_uri == artifact_uri
+            for recording in self._recordings.values()
+        )
 
     def get(self, recording_id: str) -> Recording:
         try:
@@ -208,6 +216,28 @@ class RecordingRegistry:
             Path(rec.stderr_path).unlink(missing_ok=True)
         self._stderr_paths.pop(recording_id, None)
         del self._recordings[recording_id]
+
+    def shutdown(self) -> None:
+        """Stop every active recording before the daemon exits."""
+        for recording_id, recording in list(self._recordings.items()):
+            if recording.status != "recording":
+                continue
+            try:
+                self.stop(recording_id)
+            except Exception:
+                self._force_stop_process(recording_id)
+
+    def _force_stop_process(self, recording_id: str) -> None:
+        process = self._processes.pop(recording_id, None)
+        if process is None or process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            with suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
 
     def total_size_bytes(self) -> int:
         total = 0

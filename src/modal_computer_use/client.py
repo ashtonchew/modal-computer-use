@@ -23,6 +23,7 @@ class DaemonClient:
         timeout: float = 30.0,
         http2: bool = False,
         transport: HTTPTransport | None = None,
+        _token_resolver: Callable[[], str] | None = None,
         _mutation_executor: Callable[[Callable[[Mapping[str, str]], Any]], Any] | None = None,
     ) -> None:
         self.transport = transport or HTTPTransport(
@@ -30,6 +31,7 @@ class DaemonClient:
             token=token,
             timeout=timeout,
             http2=http2,
+            _token_resolver=_token_resolver,
         )
         self._mutation_executor = _mutation_executor
 
@@ -51,9 +53,7 @@ class DaemonClient:
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
     ) -> Any:
-        response = self._request(
-            "POST", path, json=json, headers=headers, mutation=_mutation
-        )
+        response = self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         if not response.content:
             return None
         return response.json()
@@ -96,9 +96,7 @@ class DaemonClient:
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
     ) -> bytes:
-        return self._request(
-            "POST", path, json=json, headers=headers, mutation=_mutation
-        ).content
+        return self._request("POST", path, json=json, headers=headers, mutation=_mutation).content
 
     def post_bytes_with_headers(
         self,
@@ -108,9 +106,7 @@ class DaemonClient:
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
     ) -> tuple[bytes, Mapping[str, str]]:
-        response = self._request(
-            "POST", path, json=json, headers=headers, mutation=_mutation
-        )
+        response = self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         return response.content, response.headers
 
     def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:
@@ -197,9 +193,7 @@ class AsyncDaemonClient:
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
     ) -> Any:
-        response = await self._request(
-            "POST", path, json=json, headers=headers, mutation=_mutation
-        )
+        response = await self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         return response.json() if response.content else None
 
     async def put_json(
@@ -237,9 +231,7 @@ class AsyncDaemonClient:
         _mutation: bool = False,
     ) -> bytes:
         return (
-            await self._request(
-                "POST", path, json=json, headers=headers, mutation=_mutation
-            )
+            await self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         ).content
 
     async def post_bytes_with_headers(
@@ -250,9 +242,7 @@ class AsyncDaemonClient:
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
     ) -> tuple[bytes, Mapping[str, str]]:
-        response = await self._request(
-            "POST", path, json=json, headers=headers, mutation=_mutation
-        )
+        response = await self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         return response.content, response.headers
 
     async def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:

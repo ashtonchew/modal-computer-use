@@ -2,7 +2,15 @@
 
 ## Unreleased
 
-No changes yet.
+- Hardened daemon authentication to fail closed, made unauthenticated local mode explicit, blocked
+  minted tunnel sessions from reminting, and added optional non-evicting session capacity.
+- Added non-cacheable HTTP responses, 16 MiB HTTP/WebSocket defaults, global WebSocket admission
+  caps, bounded nested actions, command arguments, drag paths, and key collections.
+- Made artifact quota commits atomic, stopped active recordings during shutdown, removed hashes
+  from sensitive redaction markers, and excluded VNC passwords from config repr and serialization.
+- Scoped Modal create, attach, reuse, list, and cleanup behavior to the owning app. Added an
+  explicit legacy unscoped attach option without permitting bulk legacy cleanup.
+- Updated the frozen security-relevant dependency set, including Starlette and Pillow.
 
 ## 1.0.0 - 2026-07-31
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 
 import pytest
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 import modal_computer_use.daemon.readiness as readiness
 import modal_computer_use.daemon.routes.commands as command_routes
 from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.routes.validation import command_argument_byte_limit
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult, Point
 
@@ -57,6 +59,118 @@ def test_direct_mouse_drag_rejects_unsupported_modifiers_before_execution(test_c
     assert response.json()["code"] == "unsupported_key"
     assert app.state.backend.cursor == Point(x=0, y=0)
     assert app.state.action_count == 0
+
+
+def test_direct_input_collection_limits_reject_before_execution(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_drag_points=2,
+            max_key_collection_size=2,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        drag = client.post(
+            "/v1/mouse/drag",
+            json={"path": [{"x": 1, "y": 1}, {"x": 2, "y": 2}, {"x": 3, "y": 3}]},
+        )
+        hotkey = client.post(
+            "/v1/keyboard/hotkey",
+            json={"keys": ["ctrl", "shift", "t"]},
+        )
+
+    assert drag.status_code == 422
+    assert drag.json()["code"] == "too_many_drag_points"
+    assert drag.json()["details"] == {"field": "path", "count": 3, "maximum": 2}
+    assert hotkey.status_code == 422
+    assert hotkey.json()["code"] == "too_many_keys"
+    assert app.state.action_count == 0
+
+
+def test_command_limits_are_structured_and_do_not_echo_arguments(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_command_arguments=2,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/commands/run",
+            json={"command": ["printf", "secret-one", "secret-two"]},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "too_many_command_arguments"
+    assert response.json()["details"] == {
+        "field": "command",
+        "count": 3,
+        "maximum": 2,
+    }
+    assert "secret" not in response.text
+    assert app.state.action_count == 0
+
+
+def test_command_e2big_is_mapped_to_sanitized_422(test_client, app) -> None:
+    async def fail_command(_command, timeout=30.0):
+        del timeout
+        raise OSError(errno.E2BIG, "argument list includes secret-value")
+
+    app.state.backend.run_command = fail_command
+
+    response = test_client.post("/v1/commands/run", json={"command": ["true"]})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "command_too_large"
+    assert response.json()["details"] == {"errno": "E2BIG"}
+    assert "secret-value" not in response.text
+
+
+def test_command_argument_byte_limit_rejects_encoded_bytes_without_echo(test_client) -> None:
+    oversized = "s" * (command_argument_byte_limit() + 1)
+
+    response = test_client.post(
+        "/v1/apps/launch",
+        json={"command": "true", "args": [oversized]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "command_argument_too_large"
+    assert response.json()["details"] == {
+        "field": "command[1]",
+        "encoded_bytes": len(oversized),
+        "maximum_bytes": command_argument_byte_limit(),
+    }
+    assert oversized not in response.text
+
+
+def test_zero_command_argument_limit_is_explicitly_unlimited(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            max_command_arguments=0,
+        )
+    )
+
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        response = client.post(
+            "/v1/apps/launch",
+            json={"command": "true", "args": ["one", "two", "three"]},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 
 def test_action_batch_rejects_partial_mouse_button_coordinate_pairs(test_client) -> None:
@@ -938,7 +1052,7 @@ def test_action_success_refreshes_readiness_cache(tmp_path, monkeypatch) -> None
     assert readiness_calls == 1
 
 
-def test_readyz_forces_fresh_readiness_probe(tmp_path) -> None:
+def test_readyz_reuses_successful_readiness_probe_within_cache_ttl(tmp_path) -> None:
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -961,7 +1075,7 @@ def test_readyz_forces_fresh_readiness_probe(tmp_path) -> None:
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert readiness_calls == 2
+    assert readiness_calls == 1
 
 
 def test_missing_artifact_errors_do_not_echo_user_path(test_client) -> None:

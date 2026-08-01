@@ -62,7 +62,7 @@ from .namespaces import (
     WindowsNamespace,
 )
 from .observations import ObservationClient
-from .state import compute_config_hash, default_tags, new_run_id, warm_pool_tags
+from .state import APP_ID_TAG, compute_config_hash, default_tags, new_run_id, warm_pool_tags
 from .transports import (
     AsyncHTTPTransport,
     HotSessionTransport,
@@ -83,6 +83,20 @@ MODAL_OPERATION_TIMEOUT_SECONDS = 55
 MODAL_SNAPSHOT_RETENTION_SECONDS = 30 * 24 * 3600
 _ASYNC_BORROW_REQUEST_TIMEOUT_SECONDS = 30.0
 _ASYNC_HEARTBEAT_JOIN_TIMEOUT_SECONDS = 31.0
+_SECURITY_OWNED_SANDBOX_KWARGS = frozenset(
+    {
+        "app",
+        "block_network",
+        "encrypted_ports",
+        "env",
+        "h2_ports",
+        "inbound_cidr_allowlist",
+        "outbound_cidr_allowlist",
+        "outbound_domain_allowlist",
+        "readiness_probe",
+        "tags",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -222,6 +236,7 @@ class ModalBenchmarkAllocationContext:
                     "computer-use.benchmark": self.benchmark_tag,
                     "computer-use.backend": backend,
                     "computer-use.run_id": f"{self.run_id}-{backend}-{concurrency}-{index}",
+                    APP_ID_TAG: _modal_app_id(self.app),
                 },
             }
             if self.cloud is not None:
@@ -560,7 +575,7 @@ def modal_sandbox_exec_once(
         "timeout": runner_timeout_seconds,
         "idle_timeout": idle_timeout_seconds,
         "name": name,
-        "tags": tags,
+        "tags": {**(tags or {}), APP_ID_TAG: _modal_app_id(app)},
     }
     if backend not in {"v1", "v2"}:
         raise ValueError("backend must be v1 or v2")
@@ -592,8 +607,7 @@ def modal_sandbox_exec_once(
                 runner.terminate(wait=True)
             except Exception as cleanup_exc:
                 exc.add_note(
-                    "runner cleanup also failed: "
-                    f"terminate ({type(cleanup_exc).__name__})"
+                    f"runner cleanup also failed: terminate ({type(cleanup_exc).__name__})"
                 )
         raise
     if hasattr(runner, "terminate"):
@@ -714,6 +728,7 @@ def create_modal_benchmark_runner(
         "tags": {
             "computer-use.runner": runner_label,
             **(tags or {}),
+            APP_ID_TAG: _modal_app_id(app),
         },
     }
     if cloud is not None:
@@ -798,6 +813,7 @@ def probe_modal_candidate_placement(
         "computer-use.benchmark": "modal-v2-placement-probe",
         **(tags or {}),
         "computer-use.run_id": f"{run_id}-placement-probe-{backend}",
+        APP_ID_TAG: _modal_app_id(app),
     }
     _validate_sandbox_tags(sandbox_tags)
     create_kwargs: dict[str, Any] = {
@@ -1174,6 +1190,7 @@ class ComputerSandbox:
         tag_profile: Literal["default", "warm_pool"] = "default",
         **sandbox_kwargs: Any,
     ) -> ComputerSandbox:
+        _reject_security_owned_sandbox_kwargs(sandbox_kwargs)
         timing = timing or SessionStartupTiming()
         timing.mark("request_received")
         timing.unsupported(
@@ -1232,16 +1249,16 @@ class ComputerSandbox:
             vnc_mode=vnc_mode,
             artifact_volume_mounted=artifact_volume_mounted,
         )
+        app_id = _modal_app_id(app)
         base_tags = (
-            warm_pool_tags() if tag_profile == "warm_pool" else default_tags(config, owner=owner)
+            warm_pool_tags(app_id=app_id)
+            if tag_profile == "warm_pool"
+            else default_tags(config, app_id=app_id, owner=owner)
         )
         sandbox_tags = {**(tags or {}), **base_tags}
         config_hash = compute_config_hash(config)
         session_id: str | None = None
-        if (
-            config.runtime.modal_environment is not None
-            and config.runtime.modal_region is not None
-        ):
+        if config.runtime.modal_environment is not None and config.runtime.modal_region is not None:
             session_id = _session_policy_id_prefix(
                 app_name=app_name,
                 modal_environment=config.runtime.modal_environment,
@@ -1252,16 +1269,17 @@ class ComputerSandbox:
                 config_hash=config_hash,
             ) + _secrets.token_hex(8)
             sandbox_tags["computer-use.session_id"] = session_id
-        sandbox_tags["computer-use.image_identity"] = (
-            "custom"
-            if custom_image_supplied
-            else selected_image_identity(
-                source=config.image.source,
-                revision=config.image.revision,
-                profile=config.resources.profile,
-                browser=browser_kind,
+        if tag_profile != "warm_pool":
+            sandbox_tags["computer-use.image_identity"] = (
+                "custom"
+                if custom_image_supplied
+                else selected_image_identity(
+                    source=config.image.source,
+                    revision=config.image.revision,
+                    profile=config.resources.profile,
+                    browser=browser_kind,
+                )
             )
-        )
         _validate_sandbox_tags(sandbox_tags)
         http2 = config.network.daemon_http_version == "2"
         ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
@@ -1299,11 +1317,16 @@ class ComputerSandbox:
         sandbox = modal.Sandbox.create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
         if wait and hasattr(sandbox, "wait_until_ready"):
             sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        token_info = sandbox.create_connect_token(
-            user_metadata={"sdk": "modal-computer-use", "version": __version__},
-            port=8080,
-        )
-        connect_base_url, connect_token = _connect_token_parts(token_info)
+        if config.ingress == "connect":
+            token_info = sandbox.create_connect_token(
+                user_metadata={"sdk": "modal-computer-use", "version": __version__},
+                port=8080,
+            )
+            connect_base_url, connect_token = _connect_token_parts(token_info)
+        else:
+            connect_base_url = _tunnel_url(sandbox, 8080)
+            connect_token = tunnel_token
+            timing.mark("connect_token_ready")
         base_url, token = _client_ingress_parts(
             sandbox,
             ingress=config.ingress,
@@ -1324,8 +1347,25 @@ class ComputerSandbox:
             vnc_url=None,
             artifacts_dir=config.storage.artifacts_dir,
         )
+        token_resolver = None
+        if config.ingress == "attested-tunnel" and not wait:
+            token = None
+
+            def resolve_attested_token() -> str:
+                return _attested_tunnel_parts(
+                    sandbox,
+                    connect_base_url=connect_base_url,
+                    connect_token=connect_token,
+                )[1]
+
+            token_resolver = resolve_attested_token
         computer = cls(
-            DaemonClient(base_url=base_url, token=token, http2=http2),
+            DaemonClient(
+                base_url=base_url,
+                token=token,
+                http2=http2,
+                _token_resolver=token_resolver,
+            ),
             sandbox=sandbox,
             metadata=metadata,
         )
@@ -1377,6 +1417,8 @@ class ComputerSandbox:
         http2: bool = False,
         wait: bool = False,
         readiness_timeout: float = 120.0,
+        modal_environment: str | None = None,
+        allow_legacy_unscoped: bool = False,
     ) -> ComputerSandbox:
         if base_url:
             computer = cls(DaemonClient(base_url=base_url, token=token, http2=http2))
@@ -1393,24 +1435,58 @@ class ComputerSandbox:
                 "`uv sync --extra modal` in this repository or "
                 "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
-        if sandbox_id:
-            sandbox = modal.Sandbox.from_id(sandbox_id)
-        elif name:
-            sandbox = _sandbox_from_name(modal, app_name=app_name, name=name)
-        elif run_id:
-            from .registry import SandboxRegistry
+        from .registry import SandboxRegistry
 
-            sandbox = SandboxRegistry(app_name=app_name).require_sandbox_by_run_id(run_id)
+        registry = SandboxRegistry(
+            app_name=app_name,
+            environment_name=modal_environment,
+            allow_legacy_unscoped=allow_legacy_unscoped,
+        )
+        if sandbox_id:
+            sandbox = registry.require_sandbox_by_id(sandbox_id)
+        elif name:
+            sandbox = _sandbox_from_name(
+                modal,
+                app_name=app_name,
+                name=name,
+                environment_name=modal_environment,
+            )
+            registry.require_app_tag(sandbox, description=f"sandbox name={name}")
+        elif run_id:
+            sandbox = registry.require_sandbox_by_run_id(run_id)
         else:
             raise ValueError("attach requires sandbox_id, name, run_id, or base_url")
         metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
-        token_info = sandbox.create_connect_token(
-            user_metadata={"sdk": "modal-computer-use", "version": __version__},
-            port=8080,
-        )
-        connect_base_url, connect_token = _connect_token_parts(token_info)
+        if ingress == "connect":
+            token_info = sandbox.create_connect_token(
+                user_metadata={"sdk": "modal-computer-use", "version": __version__},
+                port=8080,
+            )
+            connect_base_url, connect_token = _connect_token_parts(token_info)
+        else:
+            connect_base_url = _tunnel_url(sandbox, 8080)
+            connect_token = _sandbox_daemon_bearer(sandbox)
+        token_resolver = None
+        if ingress == "attested-tunnel" and not wait:
+            bootstrap_base_url = connect_base_url
+            bootstrap_token = connect_token
+            connect_token = None
+
+            def resolve_attested_token() -> str:
+                return _attested_tunnel_parts(
+                    sandbox,
+                    connect_base_url=bootstrap_base_url,
+                    connect_token=bootstrap_token,
+                )[1]
+
+            token_resolver = resolve_attested_token
         computer = cls(
-            DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
+            DaemonClient(
+                base_url=connect_base_url,
+                token=connect_token,
+                http2=http2,
+                _token_resolver=token_resolver,
+            ),
             sandbox=sandbox,
             metadata=metadata,
         )
@@ -1446,6 +1522,7 @@ class ComputerSandbox:
         on_config_mismatch: ConfigMismatchPolicy = "raise",
         wait: bool = True,
         readiness_timeout: float | None = None,
+        allow_legacy_unscoped: bool = False,
         **kwargs: Any,
     ) -> ComputerSandbox:
         config = config or ComputerConfig()
@@ -1465,6 +1542,8 @@ class ComputerSandbox:
                     http2=config.network.daemon_http_version == "2",
                     wait=wait,
                     readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
+                    modal_environment=config.runtime.modal_environment,
+                    allow_legacy_unscoped=allow_legacy_unscoped,
                 )
                 _check_config_hash(
                     computer.metadata(),
@@ -1497,6 +1576,8 @@ class ComputerSandbox:
                     http2=config.network.daemon_http_version == "2",
                     wait=wait,
                     readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
+                    modal_environment=config.runtime.modal_environment,
+                    allow_legacy_unscoped=allow_legacy_unscoped,
                 )
                 _check_config_hash(
                     computer.metadata(),
@@ -1538,7 +1619,7 @@ class ComputerSandbox:
             raise SandboxUnavailableError("session handle app identity is unavailable")
         if metadata.app_name != policy.app_name or metadata.config_hash != policy.config_hash:
             raise SessionTargetMismatchError
-        if metadata.tags.get("computer-use") != "true":
+        if metadata.tags.get("computer-use") != "true" and APP_ID_TAG not in metadata.tags:
             raise SandboxUnavailableError("session handle target is not identified as SDK-owned")
         if metadata.tags.get("computer-use.config_hash") != policy.config_hash:
             raise SessionTargetMismatchError
@@ -1643,13 +1724,9 @@ class ComputerSandbox:
                         self.client.close()
                     except Exception as exc:
                         timeout_error.add_note(
-                            "readiness cleanup also failed: "
-                            f"client.close ({type(exc).__name__})"
+                            f"readiness cleanup also failed: client.close ({type(exc).__name__})"
                         )
-                if (
-                    self._readiness_failure_cleanup == "sandbox"
-                    and self._sandbox is not None
-                ):
+                if self._readiness_failure_cleanup == "sandbox" and self._sandbox is not None:
                     _terminate_failed_sandbox(self._sandbox)
                 raise timeout_error
             time.sleep(interval)
@@ -1723,18 +1800,14 @@ class ComputerSandbox:
             return
         status = self.browser.status()
         if status.get("configured_browser") != config.browser.kind:
-            raise BrowserReadinessError(
-                "configured browser does not match the requested browser"
-            )
+            raise BrowserReadinessError("configured browser does not match the requested browser")
         if not config.browser.prewarm:
             return
         prewarm_result = status.get("prewarm_result")
         if not isinstance(prewarm_result, dict) or prewarm_result.get("ok") is not True:
             raise BrowserReadinessError("browser prewarm did not succeed")
         if not isinstance(status.get("windows"), int) or status["windows"] < 1:
-            raise BrowserReadinessError(
-                "browser prewarm did not create a browser window"
-            )
+            raise BrowserReadinessError("browser prewarm did not create a browser window")
         if timing is not None:
             timing.mark("browser_ready")
 
@@ -1882,9 +1955,7 @@ class ComputerSandbox:
 def _required_loopback_bearer(computer: ComputerSandbox) -> str:
     bearer = getattr(computer, "_daemon_bearer", None)
     if not bearer:
-        raise SandboxUnavailableError(
-            "target-loopback requires an SDK-owned daemon bearer"
-        )
+        raise SandboxUnavailableError("target-loopback requires an SDK-owned daemon bearer")
     return bearer
 
 
@@ -2008,11 +2079,12 @@ def create_modal_benchmark_computer(
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(daemon_auth)
     env["COMPUTER_USE_DAEMON_HOST"] = (
-        "::"
-        if transport == "workspace-private-i6pn"
-        else "0.0.0.0"  # noqa: S104 - Modal tunnel/connect must accept external ingress.
+        "::" if transport == "workspace-private-i6pn" else "0.0.0.0"  # noqa: S104 - Modal tunnel/connect must accept external ingress.
     )
-    sandbox_tags = {**(tags or {}), **default_tags(config)}
+    sandbox_tags = {
+        **(tags or {}),
+        **default_tags(config, app_id=_modal_app_id(app)),
+    }
     sandbox_tags.update(
         {
             "computer-use.image_identity": selected_image_identity(
@@ -2045,9 +2117,7 @@ def create_modal_benchmark_computer(
     }
     if cloud is not None:
         create_kwargs["cloud"] = cloud
-    readiness_probe = (
-        None if transport == "workspace-private-i6pn" else _readiness_probe(runtime)
-    )
+    readiness_probe = None if transport == "workspace-private-i6pn" else _readiness_probe(runtime)
     if readiness_probe is not None:
         create_kwargs["readiness_probe"] = readiness_probe
     if backend == "v2":
@@ -2176,7 +2246,10 @@ def create_modal_v2_tunnel_computer(
     tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
     env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
     env.update(tunnel_auth)
-    sandbox_tags = {**(tags or {}), **default_tags(config)}
+    sandbox_tags = {
+        **(tags or {}),
+        **default_tags(config, app_id=_modal_app_id(app)),
+    }
     sandbox_tags["computer-use.image_identity"] = selected_image_identity(
         source=config.image.source,
         revision=config.image.revision,
@@ -2285,9 +2358,7 @@ def run_modal_daemon_command(
     exec_in_target: Callable[..., ModalSandboxExecResult] = modal_sandbox_exec_in_place,
 ) -> ModalSandboxExecResult:
     selected_region = (
-        None
-        if path == "target-loopback"
-        else _resolve_modal_runner_region(computer, modal_region)
+        None if path == "target-loopback" else _resolve_modal_runner_region(computer, modal_region)
     )
     command_tuple, endpoint, runner_env = _prepare_modal_daemon_command(
         computer,
@@ -2612,7 +2683,8 @@ def _daemon_environment(
         "COMPUTER_USE_SUBPROCESS_BACKEND": config.actions.subprocess_backend,
         "COMPUTER_USE_DAEMON_HTTP_VERSION": config.network.daemon_http_version,
         "COMPUTER_USE_TRACE_ACTIONS": str(config.actions.trace_actions).lower(),
-        "COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY": "true",
+        "COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY": str(config.ingress == "connect").lower(),
+        "COMPUTER_USE_REQUIRE_CONNECT_USER": str(config.ingress == "connect").lower(),
         "COMPUTER_USE_VNC_MODE": vnc_mode,
         "COMPUTER_USE_VNC_PASSWORD": (
             config.vnc_password or _secrets.token_urlsafe(24) if vnc_mode != "off" else ""
@@ -2767,6 +2839,32 @@ def _attested_tunnel_parts(
     return _tunnel_url(sandbox, 8080), token
 
 
+def _sandbox_daemon_bearer(sandbox: object) -> str:
+    process = sandbox.exec(
+        "python",
+        "-c",
+        ("import os, sys; sys.stdout.write(os.environ.get('COMPUTER_USE_TUNNEL_TOKEN', ''))"),
+        timeout=10,
+    )
+    token = _read_modal_process_stream(getattr(process, "stdout", "")).strip()
+    if not token:
+        raise SandboxUnavailableError("sandbox daemon bearer is unavailable")
+    return token
+
+
+async def _sandbox_daemon_bearer_async(sandbox: object) -> str:
+    process = await sandbox.exec.aio(
+        "python",
+        "-c",
+        ("import os, sys; sys.stdout.write(os.environ.get('COMPUTER_USE_TUNNEL_TOKEN', ''))"),
+        timeout=10,
+    )
+    token = (await process.stdout.read.aio()).strip()
+    if not token:
+        raise SandboxUnavailableError("sandbox daemon bearer is unavailable")
+    return token
+
+
 def _normalize_reuse_policy(reuse: bool | ReusePolicy) -> ReusePolicy:
     if reuse is True:
         return "by_run_id"
@@ -2831,9 +2929,7 @@ def _borrow_modal_function_session(
     try:
         import modal
     except ImportError as exc:
-        raise ModalNotInstalledError(
-            "session borrowing requires the modal extra"
-        ) from exc
+        raise ModalNotInstalledError("session borrowing requires the modal extra") from exc
     sandbox = modal.Sandbox.from_id(handle.sandbox_id)
     transport: HTTPTransport | None = None
     coordinator: object | None = None
@@ -2899,9 +2995,7 @@ async def _borrow_modal_function_session_async(
     try:
         import modal
     except ImportError as exc:
-        raise ModalNotInstalledError(
-            "session borrowing requires the modal extra"
-        ) from exc
+        raise ModalNotInstalledError("session borrowing requires the modal extra") from exc
     sandbox = await modal.Sandbox.from_id.aio(handle.sandbox_id)
     transport: AsyncHTTPTransport | None = None
     heartbeat_transport: HTTPTransport | None = None
@@ -3006,10 +3100,12 @@ def _borrow_ingress_parts_sync(
 ) -> tuple[str, str | None]:
     if handle.ingress == "connect":
         return connect_base_url, connect_token
+    tunnel_base_url = _tunnel_url(sandbox, 8080)
+    bootstrap_token = _sandbox_daemon_bearer(sandbox)
     return _attested_tunnel_parts(
         sandbox,
-        connect_base_url=connect_base_url,
-        connect_token=connect_token,
+        connect_base_url=tunnel_base_url,
+        connect_token=bootstrap_token,
     )
 
 
@@ -3022,7 +3118,13 @@ async def _borrow_ingress_parts_async(
 ) -> tuple[str, str | None]:
     if handle.ingress == "connect":
         return connect_base_url, connect_token
-    connect_client = AsyncDaemonClient(connect_base_url, token=connect_token)
+    tunnels = await sandbox.tunnels.aio()
+    tunnel = tunnels.get(8080) if isinstance(tunnels, dict) else None
+    tunnel_url = None if tunnel is None else getattr(tunnel, "url", None)
+    if not tunnel_url:
+        raise SandboxUnavailableError("Modal tunnel for port 8080 is not available")
+    bootstrap_token = await _sandbox_daemon_bearer_async(sandbox)
+    connect_client = AsyncDaemonClient(str(tunnel_url).rstrip("/"), token=bootstrap_token)
     try:
         payload = await connect_client.post_json("/v1/session/tunnel-authorize")
     finally:
@@ -3168,12 +3270,39 @@ def _readiness_probe(modal: object) -> object | None:
     return with_tcp(8080)
 
 
-def _sandbox_from_name(modal: object, *, app_name: str, name: str) -> object:
+def _sandbox_from_name(
+    modal: object,
+    *,
+    app_name: str,
+    name: str,
+    environment_name: str | None = None,
+) -> object:
     try:
-        return modal.Sandbox.from_name(app_name, name)
+        return modal.Sandbox.from_name(
+            app_name,
+            name,
+            environment_name=environment_name,
+        )
     except TypeError:
-        app = modal.App.lookup(app_name, create_if_missing=False)
+        lookup_kwargs = {"create_if_missing": False}
+        if environment_name is not None:
+            lookup_kwargs["environment_name"] = environment_name
+        app = modal.App.lookup(app_name, **lookup_kwargs)
         return modal.Sandbox.from_name(name, app=app)
+
+
+def _modal_app_id(app: object) -> str:
+    app_id = str(getattr(app, "app_id", ""))
+    if not app_id:
+        raise SandboxUnavailableError("Modal app identity is unavailable")
+    return app_id
+
+
+def _reject_security_owned_sandbox_kwargs(sandbox_kwargs: Mapping[str, object]) -> None:
+    conflicts = sorted(_SECURITY_OWNED_SANDBOX_KWARGS.intersection(sandbox_kwargs))
+    if conflicts:
+        joined = ", ".join(conflicts)
+        raise ConfigConflictError(f"sandbox_kwargs cannot override security-owned fields: {joined}")
 
 
 def _vnc_url(sandbox: object) -> str | None:

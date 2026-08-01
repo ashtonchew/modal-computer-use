@@ -130,7 +130,7 @@ class _ModalSandboxType:
 class _ModalApp:
     @classmethod
     def lookup(cls, _app_name: str, **_kwargs: object) -> object:
-        return object()
+        return SimpleNamespace(app_id=f"ap-{_app_name}")
 
 
 class _Client:

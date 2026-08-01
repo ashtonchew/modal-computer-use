@@ -75,7 +75,7 @@ Modal Function acting as the client, carries its own request and is not covered 
 | `network.outbound_cidr_allowlist` | unset | List of valid, non-empty CIDR strings or `None`; passed to Modal. `cidr_allowlist` and `allowlist` are compatibility input aliases. The `cidr_allowlist` property is deprecated. |
 | `network.outbound_domain_allowlist` | unset | List of non-empty domain strings or `None`; passed to Modal. |
 | `network.inbound_cidr_allowlist` | unset | List of valid, non-empty CIDR strings or `None`; passed to Modal. |
-| `ingress` | `"attested-tunnel"` | `"attested-tunnel"`, `"connect"`, or `"tunnel"`. Attested tunnel authorizes through Modal Connect before using tunnel ingress; connect stays on Connect; raw tunnel uses a daemon bearer token. |
+| `ingress` | `"attested-tunnel"` | `"attested-tunnel"`, `"connect"`, or `"tunnel"`. Attested tunnel mints a short-lived session from an SDK-managed bootstrap bearer; connect stays on Modal Connect; raw tunnel uses the bootstrap bearer directly. |
 
 ### Storage
 
@@ -135,22 +135,19 @@ All unset budgets are unlimited. Each configured value must be an integer of at 
 | `run_id` | generated at creation | Optional string mapped to `COMPUTER_USE_RUN_ID` and safe lifecycle tags. |
 | `request_id` | unset | Deprecated compatibility field. If `run_id` is absent, it warns and supplies `run_id`. It is excluded from serialized configuration. |
 | `expose_vnc` | `"off"` | `"off"`, `"view_only"`, or `"control"`; compatibility booleans map `false` to `"off"` and `true` to `"control"`. Maps to `COMPUTER_USE_VNC_MODE` and Modal port `6080` exposure. |
-| `vnc_password` | generated when needed | Optional secret mapped to `COMPUTER_USE_VNC_PASSWORD`. When VNC is enabled and it is unset, the SDK generates a password. It is excluded from configuration hashes and tags. Warm capacity does not accept an explicit password. |
+| `vnc_password` | generated when needed | Optional secret mapped to `COMPUTER_USE_VNC_PASSWORD`. When VNC is enabled and it is unset, the SDK generates a password. It is excluded from model serialization, repr output, configuration hashes, and tags. Warm capacity does not accept an explicit password. |
 
 ## Daemon and operator environment
 
-The SDK bounds above are enforced by `ComputerConfig`. A directly launched daemon parses integer
-environment variables with `int()` but does not duplicate all SDK range checks. Use the documented
-ranges for direct deployments. The daemon rejects unknown values only for
-`COMPUTER_USE_BACKEND`, `COMPUTER_USE_INPUT_BACKEND`, and `COMPUTER_USE_SUBPROCESS_BACKEND` during
-settings construction; other enumerations below are the supported values even where construction
-does not validate them centrally.
+The SDK bounds above are enforced by `ComputerConfig`. A directly launched daemon validates the
+security-owned ranges documented below during settings construction. Other integer settings still
+use `int()` and the documented range remains authoritative.
 
 ### Process, display, and browser
 
 | Variable | Direct-daemon default | Accepted values and ownership |
 | --- | --- | --- |
-| `COMPUTER_USE_DAEMON_HOST` | `127.0.0.1` when `COMPUTER_USE_LOCAL_TOKEN` is set; otherwise `0.0.0.0` | Bind address consumed by the daemon entry point. Modal orchestration may set `0.0.0.0` or `::` for its transport. |
+| `COMPUTER_USE_DAEMON_HOST` | `127.0.0.1` for local-token or explicit unauthenticated-loopback mode; otherwise `0.0.0.0` | Bind address consumed by the daemon entry point. Startup fails when authentication is unconfigured. Explicit unauthenticated mode may bind only to loopback. Modal orchestration sets `0.0.0.0` or `::` with authentication. |
 | `COMPUTER_USE_DAEMON_PORT` | `8080` | Integer TCP port consumed by the daemon entry point. |
 | `COMPUTER_USE_DAEMON_HTTP_VERSION` | HTTP/1.1 unless exactly `"2"` | `"1.1"` or `"2"`; `"2"` selects Hypercorn h2c, otherwise Uvicorn HTTP/1.1. SDK-generated from `network.daemon_http_version`. |
 | `DISPLAY` | `:99` | X display address. |
@@ -176,6 +173,7 @@ does not validate them centrally.
 | `COMPUTER_USE_INPUT_BACKEND` | `auto` | `auto`, `xtest`, or `xdotool`; validated. `auto` prefers persistent XTest/XKB and permits compatibility fallback only before native emission. |
 | `COMPUTER_USE_SUBPROCESS_BACKEND` | `isolated-asyncio` | `asyncio`, `threaded`, or `isolated-asyncio`; validated. SDK-generated from `actions.subprocess_backend`. |
 | `COMPUTER_USE_MAX_BATCH_ACTIONS` | `50` | Integer; SDK range `1..500`. |
+| `COMPUTER_USE_MAX_ACTION_DEPTH` | `32` | Integer `1..128`. Bounds nested `hold_key` action trees. It cannot be disabled. |
 | `COMPUTER_USE_MAX_BATCH_DURATION_MS` | `30000` | Integer milliseconds; SDK range `1..600000`. Caps the whole action batch, including nested execution. |
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | `5000` | Integer milliseconds; SDK range `1..300000`. Used when neither an action nor request supplies a timeout. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | `300000` | Integer milliseconds; SDK range `1..600000`. Rejects larger request/action timeouts. |
@@ -187,15 +185,32 @@ does not validate them centrally.
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | `1000` | Integer cache capacity. `0` disables retention. This has no `ComputerConfig` field. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `3600` | Integer cache TTL in seconds. This has no `ComputerConfig` field. |
 
+### Transport and collection bounds
+
+These settings bound attacker-controlled allocation or work. A zero value disables a limit only
+where stated. Artifact uploads are streamed and do not use the JSON request-body ceiling.
+
+| Variable | Default | Accepted values and ownership |
+| --- | --- | --- |
+| `COMPUTER_USE_MAX_JSON_BODY_BYTES` | `16777216` | Non-negative integer. Applies at the ASGI receive boundary. `0` explicitly disables the ceiling. Oversized requests return `413 request_body_too_large`. |
+| `COMPUTER_USE_MAX_WEBSOCKET_MESSAGE_BYTES` | `16777216` | Non-negative integer passed to the Uvicorn or Hypercorn protocol implementation. `0` explicitly disables the ceiling. |
+| `COMPUTER_USE_MAX_HOT_SESSION_CONNECTIONS` | `64` | Non-negative global hot-session WebSocket cap. `0` means unlimited. Rejected connections close with code `1013`. |
+| `COMPUTER_USE_MAX_OBSERVATION_CONNECTIONS` | `16` | Non-negative global observation-stream WebSocket cap. `0` means unlimited. Rejected connections close with code `1013`. |
+| `COMPUTER_USE_MAX_COMMAND_ARGUMENTS` | `65536` | Non-negative argument-count cap for command and app launch vectors. `0` means unlimited. Each argument remains subject to the Linux encoded-byte limit. |
+| `COMPUTER_USE_MAX_DRAG_POINTS` | `1024` | Non-negative drag-path point cap for direct and batch actions. `0` means unlimited. |
+| `COMPUTER_USE_MAX_KEY_COLLECTION_SIZE` | `64` | Non-negative cap for modifier and hotkey collections. `0` means unlimited. |
+
 ### Authentication and VNC
 
 | Variable | Default | Accepted values and ownership |
 | --- | --- | --- |
 | `COMPUTER_USE_LOCAL_TOKEN` | unset | Static bearer token for local/direct deployments. It also changes the default bind host to loopback. Secret. |
 | `COMPUTER_USE_TUNNEL_TOKEN` | unset | Static daemon bearer token for raw tunnel access and the SDK's attested-tunnel bootstrap. The SDK generates it for Modal-created Sandboxes. Secret. |
-| `COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS` | `3600` | Integer lifetime for tokens minted after `/v1/session/tunnel-authorize`. |
-| `COMPUTER_USE_REQUIRE_CONNECT_USER` | `true` | Boolean. Require Modal's verified-user header on protected control requests. Health and readiness probes remain unauthenticated. |
-| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | `false` | Boolean. The Modal SDK internally sets `true` because Connect reaches the daemon from private network space. Do not enable for an arbitrary untrusted reverse proxy. |
+| `COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS` | `3600` | Positive integer lifetime for tokens minted after `/v1/session/tunnel-authorize`. There is no arbitrary maximum. |
+| `COMPUTER_USE_MAX_TUNNEL_SESSIONS` | `0` | Non-negative active minted-session cap. `0` means unlimited. Expired sessions are pruned on access; reaching a configured cap rejects minting and does not evict active sessions. |
+| `COMPUTER_USE_REQUIRE_CONNECT_USER` | `true` | Boolean. Require Modal's verified-user header on protected control requests. The SDK sets this only for pure Connect ingress. Health and readiness probes remain unauthenticated. |
+| `COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK` | `false` | Explicit local-only escape hatch when no token or Connect authentication is configured. The daemon refuses a non-loopback bind in this mode. |
+| `COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY` | `false` | Boolean. The SDK sets `true` only for pure Connect ingress. Raw tunnel deployments must leave it off because tunnel clients control request headers. |
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | `true` | Boolean. Reject credentials in URL queries; keep enabled because URLs leak into logs and history. |
 | `COMPUTER_USE_VNC_MODE` | `off` | Supported: `off`, `view_only`, `control`. The SDK generates this from `expose_vnc`. |
 | `COMPUTER_USE_VNC_PASSWORD` | unset | noVNC/x11vnc password. If VNC is enabled and unset, the daemon supervisor generates one in its private runtime directory; the Modal SDK normally generates and injects one first. Secret. |

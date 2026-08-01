@@ -127,8 +127,14 @@ class DaemonSettings:
     tunnel_token_ttl_seconds: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS", 3_600)
     )
+    max_tunnel_sessions: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_TUNNEL_SESSIONS", 0)
+    )
     require_connect_user: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_REQUIRE_CONNECT_USER", True)
+    )
+    allow_unauthenticated_loopback: bool = field(
+        default_factory=lambda: _bool_env("COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK", False)
     )
     trust_private_connect_proxy: bool = field(
         default_factory=lambda: _bool_env("COMPUTER_USE_TRUST_PRIVATE_CONNECT_PROXY", False)
@@ -146,6 +152,32 @@ class DaemonSettings:
     )
     max_batch_duration_ms: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_MAX_BATCH_DURATION_MS", 30_000)
+    )
+    max_action_depth: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_ACTION_DEPTH", 32)
+    )
+    max_json_body_bytes: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_JSON_BODY_BYTES", 16_777_216)
+    )
+    max_websocket_message_bytes: int = field(
+        default_factory=lambda: _int_env(
+            "COMPUTER_USE_MAX_WEBSOCKET_MESSAGE_BYTES", 16_777_216
+        )
+    )
+    max_hot_session_connections: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_HOT_SESSION_CONNECTIONS", 64)
+    )
+    max_observation_connections: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_OBSERVATION_CONNECTIONS", 16)
+    )
+    max_command_arguments: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_COMMAND_ARGUMENTS", 65_536)
+    )
+    max_drag_points: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_DRAG_POINTS", 1_024)
+    )
+    max_key_collection_size: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_MAX_KEY_COLLECTION_SIZE", 64)
     )
     input_rate_limit_per_sec: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 20)
@@ -197,6 +229,29 @@ class DaemonSettings:
             self.subprocess_backend,
             {"asyncio", "isolated-asyncio", "threaded"},
         )
+        _require_range("COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS", self.tunnel_token_ttl_seconds, 1)
+        _require_range("COMPUTER_USE_MAX_TUNNEL_SESSIONS", self.max_tunnel_sessions, 0)
+        _require_range("COMPUTER_USE_MAX_BATCH_ACTIONS", self.max_batch_actions, 1, 500)
+        _require_range("COMPUTER_USE_MAX_ACTION_DEPTH", self.max_action_depth, 1, 128)
+        _require_range("COMPUTER_USE_MAX_JSON_BODY_BYTES", self.max_json_body_bytes, 0)
+        _require_range(
+            "COMPUTER_USE_MAX_WEBSOCKET_MESSAGE_BYTES",
+            self.max_websocket_message_bytes,
+            0,
+        )
+        _require_range(
+            "COMPUTER_USE_MAX_HOT_SESSION_CONNECTIONS",
+            self.max_hot_session_connections,
+            0,
+        )
+        _require_range(
+            "COMPUTER_USE_MAX_OBSERVATION_CONNECTIONS",
+            self.max_observation_connections,
+            0,
+        )
+        _require_range("COMPUTER_USE_MAX_COMMAND_ARGUMENTS", self.max_command_arguments, 0)
+        _require_range("COMPUTER_USE_MAX_DRAG_POINTS", self.max_drag_points, 0)
+        _require_range("COMPUTER_USE_MAX_KEY_COLLECTION_SIZE", self.max_key_collection_size, 0)
 
 
 def get_settings() -> DaemonSettings:
@@ -207,3 +262,10 @@ def _require_choice(name: str, value: str, allowed: set[str]) -> None:
     if value not in allowed:
         choices = ", ".join(sorted(allowed))
         raise ValueError(f"{name} must be one of: {choices}")
+
+
+def _require_range(name: str, value: int, minimum: int, maximum: int | None = None) -> None:
+    if value < minimum or (maximum is not None and value > maximum):
+        if maximum is None:
+            raise ValueError(f"{name} must be at least {minimum}")
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")

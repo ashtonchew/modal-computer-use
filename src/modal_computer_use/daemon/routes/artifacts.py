@@ -95,17 +95,44 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                 ):
                     target = store.resolve(public_path)
                     _ensure_writable_artifact_target(target)
+                    _reject_active_recording_target(request, public_path)
+                    budget_policy(request).enforce_artifact_write(public_path, total)
+                    store._enforce_write_budget(target, total)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     store._reject_symlink_components(public_path)
-                    temp_path.replace(target)
-                    info = store._info(target, public_path=public_path)
-                    content_type = request.headers.get("content-type")
-                    if content_type:
-                        info.content_type = content_type
-                    store.append_manifest(info)
-                    budget_policy(request).enforce("artifacts")
-                    budget_policy(request).touch_activity()
-                    return info
+                    manifest_existed = store.manifest_path.exists()
+                    manifest_size = (
+                        store.manifest_path.stat().st_size if manifest_existed else 0
+                    )
+                    backup_path = _backup_existing_target(target, temp_dir=temp_dir)
+                    try:
+                        temp_path.replace(target)
+                        info = store._info(
+                            target,
+                            public_path=public_path,
+                            known_size_bytes=total,
+                            known_sha256=content_digest.hexdigest(),
+                        )
+                        content_type = request.headers.get("content-type")
+                        if content_type:
+                            info.content_type = content_type
+                        store.append_manifest(info)
+                        budget_policy(request).enforce("artifacts")
+                    except Exception:
+                        target.unlink(missing_ok=True)
+                        if backup_path is not None:
+                            backup_path.replace(target)
+                        _restore_manifest(
+                            store.manifest_path,
+                            existed=manifest_existed,
+                            size=manifest_size,
+                        )
+                        raise
+                    else:
+                        if backup_path is not None:
+                            backup_path.unlink(missing_ok=True)
+                        budget_policy(request).touch_activity()
+                        return info
             finally:
                 temp_path.unlink(missing_ok=True)
     except ArtifactPathError:
@@ -128,10 +155,41 @@ def _ensure_writable_artifact_target(target: Path) -> None:
         )
 
 
+def _backup_existing_target(target: Path, *, temp_dir: Path) -> Path | None:
+    if not target.exists():
+        return None
+    with tempfile.NamedTemporaryFile(dir=temp_dir, delete=False) as handle:
+        backup_path = Path(handle.name)
+    backup_path.unlink()
+    target.replace(backup_path)
+    return backup_path
+
+
+def _restore_manifest(path: Path, *, existed: bool, size: int) -> None:
+    if not existed:
+        path.unlink(missing_ok=True)
+        return
+    if not path.exists():
+        return
+    with path.open("r+b") as handle:
+        handle.truncate(size)
+
+
+def _reject_active_recording_target(request: Request, public_path: str) -> None:
+    if request.app.state.recordings.is_active_artifact_path(public_path):
+        raise DaemonError(
+            "artifact is owned by an active recording",
+            status_code=409,
+            code="artifact_in_use",
+        )
+
+
 @router.delete("/{path:path}")
 async def delete_artifact(path: str, request: Request) -> dict[str, bool]:
     async def operation() -> dict[str, bool]:
-        request.app.state.artifacts.delete(path)
+        public_path = normalize_artifact_path(path)
+        _reject_active_recording_target(request, public_path)
+        request.app.state.artifacts.delete(public_path)
         return {"ok": True}
 
     return await run_idle_only_mutation(

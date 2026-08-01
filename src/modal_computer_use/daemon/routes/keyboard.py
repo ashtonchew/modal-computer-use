@@ -9,7 +9,7 @@ from modal_computer_use.daemon.routes.execution import (
     raise_for_failed_action_result,
     run_input_action,
 )
-from modal_computer_use.daemon.routes.validation import validate_keys
+from modal_computer_use.daemon.routes.validation import validate_collection_size, validate_keys
 from modal_computer_use.daemon.schemas import HoldRequest, HotkeyRequest, KeyRequest, TypeRequest
 from modal_computer_use.models import ActionResult
 from modal_computer_use.redaction import sanitize_payload_with_secrets
@@ -42,6 +42,12 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
 
 @router.post("/press")
 async def press(payload: KeyRequest, request: Request) -> ActionResult:
+    validate_collection_size(
+        payload.modifiers,
+        maximum=request.app.state.settings.max_key_collection_size,
+        field="modifiers",
+        code="too_many_keys",
+    )
     validate_keys(payload.key, *payload.modifiers)
 
     async def operation() -> ActionResult:
@@ -62,6 +68,12 @@ async def press(payload: KeyRequest, request: Request) -> ActionResult:
 
 @router.post("/hotkey")
 async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
+    validate_collection_size(
+        payload.keys,
+        maximum=request.app.state.settings.max_key_collection_size,
+        field="keys",
+        code="too_many_keys",
+    )
     validate_keys(*payload.keys)
 
     async def operation() -> ActionResult:

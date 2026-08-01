@@ -602,6 +602,24 @@ def test_x11_screenshot_uses_native_png_when_smaller(monkeypatch) -> None:
     assert screenshot.height == 10
 
 
+def test_x11_screenshot_removes_temp_file_when_native_capture_fails(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    temp_paths: list[Path] = []
+    monkeypatch.setattr(screenshots_module._MSSCaptureSession, "grab", lambda *_args: None)
+
+    async def fail_capture(path: Path, **_kwargs) -> str:
+        temp_paths.append(path)
+        raise RuntimeError("capture failed")
+
+    monkeypatch.setattr(backend._screenshots, "_capture_native_png", fail_capture)
+
+    with pytest.raises(RuntimeError, match="capture failed"):
+        anyio.run(backend.screenshot, ScreenshotOptions())
+
+    assert temp_paths
+    assert all(not path.exists() for path in temp_paths)
+
+
 def test_x11_screenshot_uses_reencoded_png_when_smaller(monkeypatch) -> None:
     backend = RecordingX11Backend()
     native_png = b"native-png" * 10

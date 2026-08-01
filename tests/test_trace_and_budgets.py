@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 
 from fastapi.testclient import TestClient
 
@@ -40,7 +39,6 @@ def test_action_trace_redacts_typed_text(tmp_path) -> None:
     assert entries[0].normalized_action["text"] == {
         "redacted": True,
         "length": 12,
-        "sha256": hashlib.sha256(b"secret value").hexdigest(),
     }
     assert entries[0].redactions == ["text"]
 
@@ -156,7 +154,6 @@ def test_action_trace_redacts_nested_hold_typed_text(tmp_path) -> None:
     assert entries[0].normalized_action["actions"][0]["text"] == {
         "redacted": True,
         "length": 13,
-        "sha256": hashlib.sha256(b"nested secret").hexdigest(),
     }
     assert entries[0].redactions == ["actions[0].text"]
 
@@ -231,7 +228,11 @@ def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) 
                             "policy": "fixture",
                             PROVIDER_ACTION_METADATA_KEY: {
                                 "type": "type",
-                                "text": {"redacted": True, "length": 12},
+                                "text": {
+                                    "redacted": True,
+                                    "length": 12,
+                                    "sha256": "caller-supplied-fingerprint",
+                                },
                             },
                             PROVIDER_ACTION_REDACTIONS_METADATA_KEY: ["text"],
                         },
@@ -253,7 +254,6 @@ def test_action_trace_promotes_redacted_provider_action_from_metadata(tmp_path) 
     assert entries[0].normalized_action["text"] == {
         "redacted": True,
         "length": 12,
-        "sha256": hashlib.sha256(b"secret value").hexdigest(),
     }
     assert entries[0].redactions == ["text", "provider_action.text"]
 
@@ -334,8 +334,8 @@ def test_action_trace_redacts_sensitive_metadata(tmp_path) -> None:
     entries = load_trace(tmp_path / "traces" / "actions.ndjson")
     assert entries[0].normalized_action is not None
     metadata = entries[0].normalized_action["metadata"]
-    assert metadata["authorization"]["redacted"] is True
-    assert metadata["url"]["redacted"] is True
+    assert metadata["authorization"] == {"redacted": True, "length": 22}
+    assert metadata["url"] == {"redacted": True, "length": 44}
     assert metadata["note"] == "Bearer [redacted] [redacted]"
     assert entries[0].redactions == [
         "metadata.authorization",
