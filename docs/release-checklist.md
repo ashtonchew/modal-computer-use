@@ -37,6 +37,8 @@ mkdir -p dist/release
 uv build --out-dir dist/release
 uvx --from 'twine>=6.2.0' twine check dist/release/*
 uv run python scripts/check_distribution_metadata.py dist/release/*
+(cd dist/release && shasum -a 256 *.whl *.tar.gz > SHA256SUMS)
+(cd dist/release && shasum -a 256 -c SHA256SUMS)
 ```
 
 The metadata checker verifies the wheel and source distribution, including the MIT license
@@ -60,6 +62,11 @@ uv pip install --python /tmp/mcu-sdist-smoke/bin/python dist/release/*.tar.gz
 The release workflow also imports the installed wheel outside the checkout, instantiates the mock
 daemon, verifies both console-script entry points, starts the installed daemon, and probes
 `/healthz`, `/readyz`, `/v1/version`, and `/v1/capabilities`.
+
+Normal pull requests and main builds validate the mock report, wheel, and source distribution
+without uploading them. GitHub keeps new Actions logs for 14 days. Release assets live only on the
+immutable GitHub Release. Historical private-era logs and artifacts are deleted separately because
+retention changes are not retroactive.
 
 ## Architecture and security scans
 
@@ -100,8 +107,9 @@ Confirm that:
   tests.
 - noVNC is off by default, and logs and examples do not expose tokens, noVNC URLs, typed or
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
-- GitHub private vulnerability reporting is enabled before publication, and the form linked from
-  `SECURITY.md` is tested without repository access.
+- Immediately after the repository becomes public and before publishing `v1.1.0`, GitHub private
+  vulnerability reporting is enabled. Verify the API and signed-out form without submitting a
+  fake report.
 
 Security-sensitive hot-path changes also require local comparison against the merge base. For
 isolated validation, collect at least 60 warmed values across multiple worker processes for 1, 50,
@@ -154,14 +162,17 @@ Before creating a tag or uploading artifacts, confirm that:
 - `CHANGELOG.md` has a dated entry for that version and no release change remains only under
   `Unreleased`.
 - The release tag points to the exact verified source commit and uses the repository's version-tag
-  convention.
-- The wheel and source distribution were built from that clean tagged commit; retain their hashes
-  with the release record.
+  convention. `v1.1.0` uses an annotated unsigned tag.
+- The wheel and source distribution were built from that clean tagged commit. `SHA256SUMS` verifies
+  both files.
 - The checked-in OpenAPI schema has no unexplained regeneration diff.
 - The README, documentation, changelog, issue tracker, and security-policy project URLs resolve to
   their intended public pages.
 - Protected Modal verification passed for changes that affect Modal creation, ingress, images,
   Volumes, snapshots, noVNC, attach/reuse, or cleanup.
+- Immutable GitHub Releases are enabled. Create the release as a draft, attach the wheel, source
+  distribution, and `SHA256SUMS`, then publish them together and verify the tag, assets, immutable
+  state, and release attestation.
 
-Do not describe a source version as published until the package index and repository release both
-contain the corresponding artifact and tag.
+This project publishes GitHub Releases only and is not published to PyPI. Do not call a version
+published until its immutable GitHub Release contains the matching tag and all three assets.

@@ -20,7 +20,11 @@ from modal_computer_use.models import ActionResult, Point, ProcessStatus, Screen
 def test_health_version_capabilities(test_client) -> None:
     assert test_client.get("/healthz").json() == {"ok": True}
     assert test_client.get("/readyz").json()["ready"] is True
-    assert test_client.get("/v1/version").json()["api_version"] == "v1"
+    version = test_client.get("/v1/version").json()
+    assert version["api_version"] == "v1"
+    assert version["daemon_version"] == "1.1.0"
+    assert version["sdk_min_version"] == "1.1.0"
+    assert version["sdk_max_version"] == "1.x"
     caps = test_client.get("/v1/capabilities").json()
     assert "mouse" in caps["primitives"]
     assert caps["input_backend"] == "mock"

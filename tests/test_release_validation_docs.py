@@ -116,3 +116,14 @@ def test_workflows_pin_actions_and_limit_default_token_permissions() -> None:
         assert source.count("persist-credentials: false") == source.count(
             "actions/checkout@"
         )
+
+
+def test_release_workflow_keeps_validation_output_ephemeral() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "release-validation.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "actions/upload-artifact@" not in workflow
+    assert "Generate benchmark report" in workflow
+    assert "Validate wheel install" in workflow
+    assert "Validate sdist install" in workflow
