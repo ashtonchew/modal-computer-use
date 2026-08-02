@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-optimized-provider-cost-estimate",
+  "status": "estimate",
+  "billing_reconciled": false,
+  "pricing_recorded_on": "2026-07-29",
+  "currency": "USD",
+  "provenance": {
+    "measurement_artifact": "benchmark-data/modal-optimized-provider-2026-07-30.json",
+    "measurement_artifact_sha256": "a2bc1c9755848ebe25b4949872821150b7f8a26686fdfd75d571c31d226bbb24",
+    "source_sha": "a49767175fb99f9c06ca042a0703eb31d43ffa2d",
+    "pricing_research": "research/modal-computer-use-provider-cost-comparison-2026-07-29.md",
+    "pricing_research_sha256": "365fd5d6413b0486d776634e8beac89673aa3178be6c15ef268fa593bc0c78ed"
+  },
+  "inputs": {
+    "run_wall_clock_ms": 520874.78650012054,
+    "billed_duration_seconds_assumption": 520.8747865001205,
+    "region_multiplier": 1.75,
+    "function_runner": {
+      "cpu_cores": 1,
+      "memory_gib": 2
+    },
+    "target_sandbox": {
+      "cpu_cores": 1,
+      "memory_gib": 2
+    },
+    "rates": {
+      "function_cpu_usd_per_core_second": 0.0000131,
+      "function_memory_usd_per_gib_second": 0.00000222,
+      "sandbox_cpu_usd_per_core_second": 0.00003942,
+      "sandbox_memory_usd_per_gib_second": 0.00000667
+    }
+  },
+  "formula": {
+    "function_usd_per_second_before_region": 0.000017539999999999998,
+    "sandbox_usd_per_second_before_region": 0.000052759999999999996,
+    "combined_usd_per_second_after_region": 0.000123025,
+    "expression": "duration_seconds * region_multiplier * ((function_cpu * runner_cores + function_memory * runner_gib) + (sandbox_cpu * target_cores + sandbox_memory * target_gib))",
+    "estimated_total_usd": 0.06408062060917732,
+    "estimated_usd_per_minute": 0.0073815,
+    "rounded_claim_usd": 0.06
+  },
+  "interpretation": [
+    "This is a list-price reconstruction from the recorded wall-clock duration and the rates recorded on 2026-07-29, not an invoice.",
+    "The duration assumption applies the full recorded run wall time to one Function runner and one target Sandbox concurrently."
+  ],
+  "exclusions": [
+    "image builds",
+    "storage and Volumes",
+    "network and data transfer",
+    "model or API usage",
+    "plan fees, credits, negotiated discounts, and taxes",
+    "additional fresh lifecycle Sandboxes and any non-overlapping resource lifetimes"
+  ],
+  "pricing_sources": [
+    "https://modal.com/pricing",
+    "https://modal.com/docs/guide/resources#billing",
+    "https://modal.com/docs/guide/sandbox-resources",
+    "https://modal.com/docs/guide/region-selection"
+  ]
+}
