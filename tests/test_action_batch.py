@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import threading
 from datetime import UTC, datetime
 from io import BytesIO
+from typing import get_type_hints
 
 import pytest
 from PIL import Image
 
+import modal_computer_use.daemon.actions as daemon_actions
 from modal_computer_use.daemon.desktop.screenshots import (
     CapturedRawScreenshot,
     CapturedScreenshot,
@@ -21,6 +24,22 @@ from modal_computer_use.daemon.desktop.xtest import (
 )
 from modal_computer_use.daemon.routes import actions as action_routes
 from modal_computer_use.models import ActionResult, CoordinateSpace, Point, sha256_bytes
+
+
+def test_daemon_action_exports_have_complete_resolvable_annotations() -> None:
+    for name in daemon_actions.__all__:
+        value = getattr(daemon_actions, name)
+        if not inspect.isfunction(value):
+            continue
+        signature = inspect.signature(value)
+        assert signature.return_annotation is not inspect.Signature.empty, name
+        missing = [
+            parameter.name
+            for parameter in signature.parameters.values()
+            if parameter.annotation is inspect.Signature.empty
+        ]
+        assert not missing, f"{name} has unannotated parameters: {missing}"
+        get_type_hints(value)
 
 
 def test_action_batch_stop_on_error(test_client) -> None:

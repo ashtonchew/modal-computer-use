@@ -13,6 +13,7 @@ from modal_computer_use.image import (
     DESKTOP_APT_PACKAGES,
     _named_image_recipe,
     _published_named_image_identities,
+    default_image,
     named_image,
     named_image_name,
     publish_named_images,
@@ -28,6 +29,47 @@ REVISION = "0123456789abcdef0123456789abcdef01234567"
 def test_desktop_image_omits_unused_xsel_package() -> None:
     assert "xclip" in DESKTOP_APT_PACKAGES
     assert "xsel" not in DESKTOP_APT_PACKAGES
+
+
+def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch) -> None:
+    class FakeImage:
+        def __init__(self) -> None:
+            self.packages: tuple[str, ...] = ()
+            self.environment: dict[str, str] = {}
+
+        @classmethod
+        def debian_slim(cls, *, python_version: str) -> FakeImage:
+            assert python_version == "3.12"
+            return cls()
+
+        def apt_install(self, *packages: str) -> FakeImage:
+            self.packages = packages
+            return self
+
+        def pip_install_from_pyproject(self, _path: str) -> FakeImage:
+            return self
+
+        def env(self, environment: dict[str, str]) -> FakeImage:
+            self.environment = environment
+            return self
+
+        def add_local_python_source(self, _package: str) -> FakeImage:
+            return self
+
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: SimpleNamespace(Image=FakeImage),
+    )
+
+    image = default_image(
+        profile="browser",
+        browser="firefox",
+        browser_prewarm=True,
+    )
+
+    assert isinstance(image, FakeImage)
+    assert "firefox-esr" in image.packages
+    assert image.environment["COMPUTER_USE_BROWSER_PREWARM"] == "true"
 
 
 def test_network_config_uses_current_modal_names_and_legacy_aliases() -> None:
@@ -345,6 +387,9 @@ def test_named_image_publication_preflight_uses_modal_cli_and_fails_closed(monke
 
 def test_modal_billing_report_uses_workspace_or_environment(monkeypatch) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
+    start = SimpleNamespace(name="start")
+    end = SimpleNamespace(name="end")
+    tag_names = ["benchmark"]
 
     class Billing:
         def __init__(self, scope: str) -> None:
@@ -365,22 +410,31 @@ def test_modal_billing_report_uses_workspace_or_environment(monkeypatch) -> None
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal)
 
     workspace = modal_billing_report(
-        start=SimpleNamespace(),
-        end=None,
+        start=start,
+        end=end,
         resolution="h",
-        tag_names=["benchmark"],
+        tag_names=tag_names,
     )
     environment = modal_billing_report(
-        start=SimpleNamespace(),
-        end=None,
+        start=start,
+        end=end,
         resolution="h",
-        tag_names=["benchmark"],
+        tag_names=tag_names,
         environment_name="prod",
     )
 
     assert len(workspace) == 1
     assert len(environment) == 1
-    assert [scope for scope, _ in calls] == ["workspace", "environment:prod"]
+    expected_kwargs = {
+        "start": start,
+        "end": end,
+        "resolution": "h",
+        "tag_names": tag_names,
+    }
+    assert calls == [
+        ("workspace", expected_kwargs),
+        ("environment:prod", expected_kwargs),
+    ]
 
 
 def test_benchmark_provenance_records_complete_safe_inputs(monkeypatch) -> None:
