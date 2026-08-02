@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import io
 import json
 import subprocess
@@ -10,6 +11,7 @@ import tomllib
 import zipfile
 from email.message import Message
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -58,6 +60,40 @@ def test_project_version_matches_runtime_and_openapi() -> None:
 
 def test_typed_package_marker_is_present_in_source() -> None:
     assert (ROOT / "src" / "modal_computer_use" / "py.typed").is_file()
+
+
+def test_root_exported_functions_have_complete_resolvable_annotations() -> None:
+    for name in modal_computer_use.__all__:
+        value = getattr(modal_computer_use, name)
+        if not inspect.isfunction(value):
+            continue
+        signature = inspect.signature(value)
+        assert signature.return_annotation is not inspect.Signature.empty, name
+        missing = [
+            parameter.name
+            for parameter in signature.parameters.values()
+            if parameter.annotation is inspect.Signature.empty
+        ]
+        assert not missing, f"{name} has unannotated parameters: {missing}"
+        get_type_hints(value)
+
+
+def test_public_computer_sandbox_class_type_hints_resolve() -> None:
+    public_classes = (
+        modal_computer_use.ComputerSandboxManager,
+        modal_computer_use.ComputerSandbox,
+    )
+    for cls in public_classes:
+        for name, descriptor in vars(cls).items():
+            if name.startswith("_"):
+                continue
+            value = (
+                descriptor.__func__
+                if isinstance(descriptor, classmethod | staticmethod)
+                else descriptor
+            )
+            if inspect.isfunction(value):
+                get_type_hints(value)
 
 
 def _core_metadata_bytes(*, version: str | None = None, duplicate_url: bool = False) -> bytes:
