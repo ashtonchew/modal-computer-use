@@ -1074,3 +1074,232 @@ def _walk_keys(node: object) -> list[str]:
     if isinstance(node, list):
         return [key for item in node for key in _walk_keys(item)]
     return []
+
+
+def _load_benchmark_artifact(name: str) -> tuple[Path, dict[str, object]]:
+    path = REPO_ROOT / "benchmark-data" / name
+    return path, json.loads(path.read_text())
+
+
+def _assert_recomputed_summary(samples: list[float], summary: dict[str, float]) -> None:
+    assert len(samples) == 30
+    assert summary["mean"] == pytest.approx(statistics.fmean(samples), abs=1e-12)
+    assert summary["p50"] == float(statistics.median(samples))
+    assert summary["p95"] == pytest.approx(_percentile(sorted(samples), 95), abs=1e-12)
+
+
+def _assert_companion_secret_safe(path: Path) -> None:
+    serialized = path.read_text().lower()
+    for forbidden in (
+        "modal.host",
+        "sb-",
+        "run_",
+        "api_key",
+        "access_token",
+        "base_url",
+        "bearer",
+        "://",
+        "/users/",
+        "sandbox_id",
+    ):
+        assert forbidden not in serialized
+
+
+def test_subprocess_sample_companion_restores_exact_recomputation() -> None:
+    path, samples = _load_benchmark_artifact("modal-subprocess-runner-ab-samples-2026-07-30.json")
+    summary_path = REPO_ROOT / samples["provenance"]["summary_artifact"]
+    summary = json.loads(summary_path.read_text())
+
+    assert samples["status"] == "recovered_supporting_evidence"
+    assert samples["provenance"]["samples_tracked"] is True
+    assert (
+        hashlib.sha256(summary_path.read_bytes()).hexdigest()
+        == samples["provenance"]["summary_artifact_sha256"]
+    )
+
+    for backend, arm in samples["arms"].items():
+        summary_arm = summary["subprocess_runner_ab"][backend]
+        for label, samples_key in (
+            ("total", "samples_ms"),
+            ("daemon", "daemon_samples_ms"),
+            ("caller_transport_overhead", "overhead_samples_ms"),
+        ):
+            values = arm[samples_key]
+            assert len(values) == samples["measurement"]["iterations_per_arm"]
+            assert summary_arm[label] == {
+                "p50": float(statistics.median(values)),
+                "p95": _percentile(sorted(values), 95),
+            }
+
+        raw_path = REPO_ROOT / arm["raw_artifact"]
+        if raw_path.exists():
+            assert hashlib.sha256(raw_path.read_bytes()).hexdigest() == arm["raw_artifact_sha256"]
+            raw_case = json.loads(raw_path.read_text())["runs"]["modal_colocated_runner"][
+                "surfaces"
+            ]["daemon-http"]["cases"][samples["measurement"]["case"]]
+            for samples_key in (
+                "samples_ms",
+                "daemon_samples_ms",
+                "overhead_samples_ms",
+            ):
+                assert arm[samples_key] == raw_case[samples_key]
+
+    _assert_companion_secret_safe(path)
+
+
+def test_batching_replication_is_recomputable_and_non_superseding() -> None:
+    path, artifact = _load_benchmark_artifact(
+        "modal-action-batching-ab-replication-2026-08-02.json"
+    )
+    historical_path = REPO_ROOT / artifact["historical_context"]["source_artifact"]
+
+    assert artifact["status"] == "replication"
+    assert artifact["provenance"]["harness_state"] == "clean"
+    assert artifact["historical_context"]["historical_samples_available"] is False
+    assert artifact["historical_context"]["supersedes_historical_result"] is False
+    assert (
+        hashlib.sha256(historical_path.read_bytes()).hexdigest()
+        == artifact["historical_context"]["source_artifact_sha256"]
+    )
+
+    for case in ("batch_4_clicks", "separate_4_clicks"):
+        measured = artifact["cases"][case]
+        _assert_recomputed_summary(measured["samples_ms"], measured["summary_ms"])
+
+    comparison = artifact["comparison"]
+    batch_p50 = artifact["cases"]["batch_4_clicks"]["summary_ms"]["p50"]
+    separate_p50 = artifact["cases"]["separate_4_clicks"]["summary_ms"]["p50"]
+    assert comparison["batch_p50_ms"] == batch_p50
+    assert comparison["separate_p50_ms"] == separate_p50
+    assert comparison["speedup"] == separate_p50 / batch_p50
+    assert comparison["delta_ms"] == separate_p50 - batch_p50
+    assert artifact["verification"] == {
+        "eligibility": "publishable",
+        "failures": 0,
+        "replacement_samples": 0,
+        "placement_verified": True,
+        "target_cleanup_succeeded": True,
+        "final_cleanup_succeeded": True,
+        "remaining_sandboxes": 0,
+    }
+
+    raw_path = REPO_ROOT / artifact["provenance"]["raw_artifact"]
+    if raw_path.exists():
+        assert (
+            hashlib.sha256(raw_path.read_bytes()).hexdigest()
+            == artifact["provenance"]["raw_artifact_sha256"]
+        )
+    _assert_companion_secret_safe(path)
+
+
+def test_native_x11_replication_is_recomputable_and_non_superseding() -> None:
+    path, artifact = _load_benchmark_artifact(
+        "modal-native-x11-backend-ab-replication-2026-08-02.json"
+    )
+    cases = ("move_click", "move_click_sequence", "type_100_chars", "type_1000_chars")
+
+    assert artifact["status"] == "replication"
+    assert artifact["provenance"]["harness_state"] == "clean"
+    assert artifact["historical_context"]["historical_samples_available"] is False
+    assert artifact["historical_context"]["supersedes_historical_result"] is False
+    assert artifact["historical_context"]["historical_status"] == (
+        "archived_dirty_worktree_diagnostic"
+    )
+    report_path = REPO_ROOT / artifact["historical_context"]["source_report"]
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == artifact[
+        "historical_context"
+    ]["source_report_sha256"]
+
+    for arm in artifact["arms"].values():
+        assert arm["verification"]["cursor_position"]["status"] == "ok"
+        assert arm["verification"]["type_text"]["status"] == "ok"
+        for case in cases:
+            measured = arm["cases"][case]
+            _assert_recomputed_summary(measured["samples_ms"], measured["summary_ms"])
+            _assert_recomputed_summary(measured["daemon_samples_ms"], measured["daemon_summary_ms"])
+
+        raw_path = REPO_ROOT / arm["raw_artifact"]
+        if raw_path.exists():
+            assert hashlib.sha256(raw_path.read_bytes()).hexdigest() == arm["raw_artifact_sha256"]
+            raw_cases = json.loads(raw_path.read_text())["surfaces"]["daemon-http"]["cases"]
+            for case in cases:
+                assert arm["cases"][case]["samples_ms"] == raw_cases[case]["samples_ms"]
+                assert (
+                    arm["cases"][case]["daemon_samples_ms"] == raw_cases[case]["daemon_samples_ms"]
+                )
+
+    for case in cases:
+        xtest = artifact["arms"]["xtest"]["cases"][case]["daemon_samples_ms"]
+        xdotool = artifact["arms"]["xdotool"]["cases"][case]["daemon_samples_ms"]
+        comparison = artifact["comparison"]["cases"][case]
+        assert comparison["xtest_daemon_mean_ms"] == pytest.approx(
+            statistics.fmean(xtest), abs=1e-12
+        )
+        assert comparison["xdotool_daemon_mean_ms"] == pytest.approx(
+            statistics.fmean(xdotool), abs=1e-12
+        )
+        assert comparison["xdotool_over_xtest"] == pytest.approx(
+            statistics.fmean(xdotool) / statistics.fmean(xtest), abs=1e-12
+        )
+
+    _assert_companion_secret_safe(path)
+
+
+def test_six_cent_estimate_recomputes_but_is_not_billing_evidence() -> None:
+    _, estimate = _load_benchmark_artifact("modal-optimized-provider-cost-estimate-2026-07-30.json")
+    measurement_path = REPO_ROOT / estimate["provenance"]["measurement_artifact"]
+    measurement = json.loads(measurement_path.read_text())
+    pricing_path = REPO_ROOT / estimate["provenance"]["pricing_research"]
+
+    assert estimate["status"] == "estimate"
+    assert estimate["billing_reconciled"] is False
+    assert (
+        hashlib.sha256(measurement_path.read_bytes()).hexdigest()
+        == estimate["provenance"]["measurement_artifact_sha256"]
+    )
+    assert hashlib.sha256(pricing_path.read_bytes()).hexdigest() == estimate[
+        "provenance"
+    ]["pricing_research_sha256"]
+    assert estimate["inputs"]["run_wall_clock_ms"] == measurement["run_wall_clock_ms"]
+    assert estimate["inputs"]["billed_duration_seconds_assumption"] == (
+        measurement["run_wall_clock_ms"] / 1000
+    )
+    assert estimate["inputs"]["region_multiplier"] == 1.75
+    assert estimate["inputs"]["rates"] == {
+        "function_cpu_usd_per_core_second": 0.0000131,
+        "function_memory_usd_per_gib_second": 0.00000222,
+        "sandbox_cpu_usd_per_core_second": 0.00003942,
+        "sandbox_memory_usd_per_gib_second": 0.00000667,
+    }
+    assert estimate["inputs"]["function_runner"] == {"cpu_cores": 1, "memory_gib": 2}
+    assert estimate["inputs"]["target_sandbox"] == {"cpu_cores": 1, "memory_gib": 2}
+    assert measurement["configuration"]["runner_cpu"] == 1.0
+    assert measurement["configuration"]["runner_memory_mib"] == 2048
+    assert measurement["configuration"]["target_cpu"] == 1.0
+    assert measurement["configuration"]["target_memory_mib"] == 2048
+
+    inputs = estimate["inputs"]
+    rates = inputs["rates"]
+    function_rate = (
+        rates["function_cpu_usd_per_core_second"] * inputs["function_runner"]["cpu_cores"]
+        + rates["function_memory_usd_per_gib_second"] * inputs["function_runner"]["memory_gib"]
+    )
+    sandbox_rate = (
+        rates["sandbox_cpu_usd_per_core_second"] * inputs["target_sandbox"]["cpu_cores"]
+        + rates["sandbox_memory_usd_per_gib_second"] * inputs["target_sandbox"]["memory_gib"]
+    )
+    combined_rate = inputs["region_multiplier"] * (function_rate + sandbox_rate)
+    total = inputs["billed_duration_seconds_assumption"] * combined_rate
+
+    assert estimate["formula"]["function_usd_per_second_before_region"] == function_rate
+    assert estimate["formula"]["sandbox_usd_per_second_before_region"] == sandbox_rate
+    assert estimate["formula"]["combined_usd_per_second_after_region"] == combined_rate
+    assert estimate["formula"]["estimated_usd_per_minute"] == combined_rate * 60
+    assert estimate["formula"]["estimated_total_usd"] == total
+    assert total == pytest.approx(0.06408062060917732)
+    assert estimate["formula"]["rounded_claim_usd"] == 0.06
+    assert "image builds" in estimate["exclusions"]
+    assert (
+        "additional fresh lifecycle Sandboxes and any non-overlapping resource lifetimes"
+        in (estimate["exclusions"])
+    )
