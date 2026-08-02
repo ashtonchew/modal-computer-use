@@ -483,4 +483,4 @@ commit visibility, reload behavior, and concurrency guidance.
 
 For complete route schemas and request/response models, see the generated
 [OpenAPI schema](openapi.json). The active product specification is
-[modal-computer-use specification v8](spec/modal_computer_use_spec_v8.md).
+[modal-computer-use product specification](spec/product-spec.md).

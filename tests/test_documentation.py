@@ -300,10 +300,9 @@ def test_archived_documents_have_one_index_entry_and_structured_disposition() ->
         assert ARCHIVE_DISPOSITION_RE.search(source), f"{relative} needs a disposition"
 
 
-def test_active_and_archived_specifications_have_one_owner() -> None:
+def test_product_specification_has_one_stable_owner() -> None:
     active_names = {path.name for path in (DOCS / "spec").glob("*.md")}
     archived_names = {path.name for path in (ARCHIVE / "spec").glob("*.md")}
 
-    assert "modal_computer_use_spec_v8.md" in active_names
-    assert "modal_computer_use_spec_v7.md" in archived_names
-    assert active_names.isdisjoint(archived_names)
+    assert active_names == {"product-spec.md"}
+    assert not archived_names

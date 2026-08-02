@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-No changes yet.
+- Moved the canonical product specification to the stable `docs/spec/product-spec.md` path and
+  removed superseded specification revisions and branch-owned article working files from `main`.
 
 ## 1.1.0 - 2026-07-31
 

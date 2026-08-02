@@ -104,5 +104,5 @@ The design borrows operational patterns from Daytona's computer-use primitives, 
 
 ## Formal spec
 
-See [spec/modal_computer_use_spec_v8.md](spec/modal_computer_use_spec_v8.md) for the canonical
+See the [product specification](spec/product-spec.md) for the canonical
 architecture, maturity boundaries, route ownership, and rationale.

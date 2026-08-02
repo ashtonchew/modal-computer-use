@@ -29,9 +29,8 @@ specifications preserve design history.
 - [Performance](performance.md): stable latency mechanisms and tuning guidance.
 - [Security](security.md): runtime threat model and operational controls.
 - [Glossary](glossary.md): project terms.
-- [Active specification](spec/modal_computer_use_spec_v8.md): canonical architecture, maturity,
-  safety, and product-contract
-  history.
+- [Product specification](spec/product-spec.md): canonical architecture, maturity, safety, and
+  product-contract history.
 
 ## Benchmark
 

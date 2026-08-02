@@ -275,7 +275,7 @@
     "The comparison against the 2026-07-30 A/B varies date and requested shape at once. It is not a clean shape ablation, and no causal claim about cores or memory follows from the pair.",
     "The isolated-asyncio arm carries one 232.73 ms total sample. Its mean is 21.53 ms over all 30 samples, 14.25 ms once that sample is dropped, and 14.08 ms once the two largest are dropped, while its p50 of 13.75 ms is unaffected. Read its mean and its max as tail observations.",
     "The asyncio arm is outlier sensitive in the same way. Two of its 30 total samples sit near 395 ms and 398 ms and carry its p95; its mean drops from 85.38 ms to 63.14 ms once they are removed.",
-    "This artifact is not cited by docs/drafts/modal-optimized-low-latency.md and does not supersede benchmark-data/modal-subprocess-runner-ab-2026-07-30.json, which remains that draft's source.",
+    "This artifact does not supersede benchmark-data/modal-subprocess-runner-ab-2026-07-30.json. Later article work used that earlier artifact and is maintained on its publication branch, not this branch.",
     "This is a portable-shell ablation. It moves command execution and other subprocess-backed compatibility paths. It does not move native XTest input, native Xlib window operations, MSS screenshots, or command runtime itself."
   ]
 }
