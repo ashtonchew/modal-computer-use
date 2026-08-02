@@ -10,7 +10,8 @@
 The v8 patch also updates the locked Modal SDK from 1.5.2 to 1.5.3 and scopes every daemon Connect
 Token to port 8080.
 
-v8 supersedes v7. It records the system that exists after the native-input, observation,
+Revision v8 supersedes all earlier product-specification revisions. It records the system that
+exists after the native-input, observation,
 performance, Modal 1.5.2, session-handoff, durable-receipt, and application-run-gateway work. It
 also separates implemented product contracts from experimental observation semantics, benchmark-only
 paths, and application-owned orchestration examples.
@@ -29,8 +30,8 @@ The source-of-truth order is:
 3. Maintained guides under [`docs/`](../README.md) define operational procedures and detailed
    semantics.
 4. This specification defines architecture, ownership, maturity, and cross-surface invariants.
-5. Files under [`research/`](../../research/README.md), benchmark reports, and archived
-   specifications are evidence or history, not product contracts.
+5. Files under [`research/`](../../research/README.md) and benchmark reports are evidence or
+   history, not product contracts. Earlier specification revisions remain available in Git history.
 
 If this document conflicts with a checked-in schema or pinning test, the executable source wins and
 the specification must be corrected. `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe requirements
@@ -39,10 +40,11 @@ for future changes. Present-tense statements describe the baseline above.
 v8 does not make benchmark helpers, experimental Modal APIs, example control planes, or provider
 model loops part of the stable core API.
 
-## 1. v7 to v8 delta
+## 1. Revision v8 baseline changes
 
-v7 documented the hardened daemon and SDK shortly after their initial implementation. The
-repository has advanced by 371 commits from the v7 landing (`3a30e69`) to the v8 baseline.
+The immediately preceding revision documented the hardened daemon and SDK shortly after their
+initial implementation. The repository advanced by 371 commits from that revision's landing
+(`3a30e69`) to the v8 baseline. Earlier specification revisions are available only in Git history.
 
 | Area | v8 canonical state |
 | --- | --- |
@@ -62,8 +64,8 @@ repository has advanced by 371 commits from the v7 landing (`3a30e69`) to the v8
 | Application orchestration | A bounded application-owned run-gateway example documents admission, idempotency, deadlines, reconciliation, cancellation, and operator recovery. It is not a permissive production service. |
 | Evidence | Provider comparisons and Modal optimization experiments use sanitized, provenance-bound artifacts and explicit eligibility states. Benchmark claims do not redefine the SDK contract. |
 
-The historical v7 commit-by-commit hardening record remains in
-[`docs/archive/spec/modal_computer_use_spec_v7.md`](../archive/spec/modal_computer_use_spec_v7.md).
+Earlier specification revisions remain available in Git history and are not current product
+contracts.
 
 ## 2. Product definition
 
@@ -179,7 +181,7 @@ have begun.
 | Alpha / experimental | `_experimental_act_until_visual_change()` and first-visual-change semantics. It composes stable action and observation primitives but does not promise semantic readiness. |
 | Benchmark-only | Modal V2 candidate creation, optimized-frontier paths, transport-floor probes, provider harness internals, and unpublished/raw result handling. |
 | Application-owned example | Provider model loops, session broker, co-located runner/broker, Modal Function trajectory body, and run gateway. Callers must supply identity, authorization, durable storage, policy, and operational ownership. |
-| Historical | Specifications v5-v7 and archived/rejected benchmark reports. |
+| Historical | Earlier specification revisions in Git history and archived/rejected benchmark reports. |
 
 A future change MUST state its maturity. Experimental or benchmark-only code cannot become stable
 through naming, documentation links, or successful benchmark results alone.
@@ -762,7 +764,8 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is versioned `1.1.0`; remaining work is not the v7 roadmap.
+The repository source is versioned `1.1.0`; remaining work is not inherited from an earlier
+revision's roadmap.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.
