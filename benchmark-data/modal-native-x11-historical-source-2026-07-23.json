@@ -2,7 +2,7 @@
   "schema_version": 1,
   "benchmark": "modal-native-x11-backend-ab",
   "status": "historical_source_manifest",
-  "scope": "Exact source and session provenance for the archived dirty-worktree three-sample XTest versus xdotool diagnostic",
+  "scope": "Exact source and recorded run provenance for the archived dirty-worktree three-sample XTest versus xdotool diagnostic",
   "archive_ref": {
     "name": "archive/native-x11-input-2026-07-23",
     "kind": "annotated_tag",
@@ -57,13 +57,14 @@
     "harness_reported_worktree_clean": false,
     "captured_after_final_comparison_at": "2026-07-24T00:25:28.891Z"
   },
-  "source_session": {
-    "session_id": "019f913b-8e85-77a0-9268-7e9533462e2f",
+  "recorded_run_timeline": {
     "started_at": "2026-07-23T23:07:07.282Z",
-    "locator": ".codex/sessions/2026/07/23/rollout-2026-07-23T16-07-07-019f913b-8e85-77a0-9268-7e9533462e2f.jsonl",
-    "sha256": "450b642f4ae2638f2ada049dbfa42667d84d33101a0e34e2ba3c49075272f13f",
-    "byte_count": 20445755,
-    "line_count": 10340,
+    "raw_record": {
+      "tracked": false,
+      "sha256": "450b642f4ae2638f2ada049dbfa42667d84d33101a0e34e2ba3c49075272f13f",
+      "byte_count": 20445755,
+      "line_count": 10340
+    },
     "events": {
       "xtest_command_submitted_at": "2026-07-24T00:23:56.017Z",
       "xtest_report_generated_at": "2026-07-24T00:24:13.913381+00:00",
@@ -94,7 +95,7 @@
       "typing_method": "keystrokes",
       "typing_delay_ms": 0
     },
-    "session_reported_results": {
+    "recorded_comparison_results": {
       "precision": "milliseconds rounded to three decimals and speedups rounded to two decimals by the recorded comparison command",
       "move_click": {
         "xtest_daemon_mean_ms": 1.146,
@@ -169,7 +170,7 @@
   },
   "limitations": [
     "The archive tag preserves the exact post-run source snapshot, not the external temporary raw reports.",
-    "The source session preserves rounded aggregate output but not the three raw sample arrays or raw artifact digests.",
+    "The recorded comparison preserves rounded aggregate output but not the three raw sample arrays or raw artifact digests.",
     "The clean 2026-08-02 replication confirms direction under a different run and does not replace or supersede this historical diagnostic."
   ]
 }
