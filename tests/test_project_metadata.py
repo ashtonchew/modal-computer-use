@@ -28,6 +28,13 @@ CHECKER_SPEC.loader.exec_module(CHECKER)
 _parse_project_urls = CHECKER._parse_project_urls
 _validate_metadata = CHECKER._validate_metadata
 load_expected_metadata = CHECKER.load_expected_metadata
+SDIST_ONLY_INCLUDE = (
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "pyproject.toml",
+    "src/modal_computer_use",
+)
 
 
 def test_project_uses_current_license_and_url_metadata() -> None:
@@ -122,7 +129,8 @@ def _core_metadata_bytes(*, version: str | None = None, duplicate_url: bool = Fa
 
 
 def test_distribution_metadata_expectations_come_from_pyproject() -> None:
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    document = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = document["project"]
     expected = load_expected_metadata()
 
     assert expected.name == project["name"]
@@ -130,6 +138,10 @@ def test_distribution_metadata_expectations_come_from_pyproject() -> None:
     assert expected.license_expression == project["license"]
     assert expected.license_files == tuple(project["license-files"])
     assert expected.project_urls == project["urls"]
+    assert expected.sdist_only_include == SDIST_ONLY_INCLUDE
+    assert tuple(
+        document["tool"]["hatch"]["build"]["targets"]["sdist"]["only-include"]
+    ) == SDIST_ONLY_INCLUDE
 
 
 def test_distribution_metadata_rejects_source_version_mismatch() -> None:
@@ -156,6 +168,30 @@ def _write_sdist_member(archive: tarfile.TarFile, name: str, data: bytes) -> Non
     archive.addfile(member, io.BytesIO(data))
 
 
+def _write_valid_sdist(
+    archive: tarfile.TarFile,
+    *,
+    metadata: bytes,
+    omitted: frozenset[str] = frozenset(),
+    extra_members: tuple[str, ...] = (),
+) -> None:
+    root = "modal_computer_use-1.0.0"
+    members = {
+        ".gitignore": b"dist/",
+        "PKG-INFO": metadata,
+        "LICENSE": b"MIT",
+        "README.md": b"# modal-computer-use",
+        "CHANGELOG.md": b"# Changelog",
+        "pyproject.toml": b"[build-system]",
+        f"src/{CHECKER.TYPING_MARKER}": b"",
+    }
+    for name, data in members.items():
+        if name not in omitted:
+            _write_sdist_member(archive, f"{root}/{name}", data)
+    for name in extra_members:
+        _write_sdist_member(archive, f"{root}/{name}", b"unexpected")
+
+
 def test_distribution_checker_accepts_typing_marker_in_wheel_and_sdist(
     tmp_path: Path,
 ) -> None:
@@ -168,14 +204,39 @@ def test_distribution_checker_accepts_typing_marker_in_wheel_and_sdist(
 
     sdist = tmp_path / "modal_computer_use-1.0.0.tar.gz"
     with tarfile.open(sdist, mode="w:gz") as archive:
-        root = "modal_computer_use-1.0.0"
-        _write_sdist_member(archive, f"{root}/PKG-INFO", metadata)
-        _write_sdist_member(archive, f"{root}/LICENSE", b"MIT")
-        _write_sdist_member(archive, f"{root}/src/modal_computer_use/py.typed", b"")
+        _write_valid_sdist(archive, metadata=metadata)
 
     expected = load_expected_metadata()
     CHECKER.validate_distribution(wheel, expected=expected)
     CHECKER.validate_distribution(sdist, expected=expected)
+
+
+def test_distribution_checker_rejects_unexpected_sdist_member(tmp_path: Path) -> None:
+    sdist = tmp_path / "modal_computer_use-1.0.0.tar.gz"
+    with tarfile.open(sdist, mode="w:gz") as archive:
+        _write_valid_sdist(
+            archive,
+            metadata=_core_metadata_bytes(),
+            extra_members=("docs/drafts/article.md",),
+        )
+
+    with pytest.raises(ValueError, match="unexpected sdist members"):
+        CHECKER.validate_distribution(sdist, expected=load_expected_metadata())
+
+
+def test_distribution_checker_rejects_missing_required_sdist_member(
+    tmp_path: Path,
+) -> None:
+    sdist = tmp_path / "modal_computer_use-1.0.0.tar.gz"
+    with tarfile.open(sdist, mode="w:gz") as archive:
+        _write_valid_sdist(
+            archive,
+            metadata=_core_metadata_bytes(),
+            omitted=frozenset({"CHANGELOG.md"}),
+        )
+
+    with pytest.raises(ValueError, match=r"missing required sdist members.*CHANGELOG\.md"):
+        CHECKER.validate_distribution(sdist, expected=load_expected_metadata())
 
 
 def test_strict_downstream_mypy_accepts_root_imports(tmp_path: Path) -> None:

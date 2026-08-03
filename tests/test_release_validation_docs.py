@@ -11,7 +11,7 @@ METADATA_CHECK_COMMAND = (
 UNPINNED_TWINE_CHECK_COMMAND = "uvx twine check dist/*"
 STALE_BENCHMARK_TEST_PATH = "tests/test_benchmark_cli.py"
 SHARED_CORE_COMMANDS = (
-    "uv sync --extra dev --extra modal",
+    "uv sync --extra dev --extra modal --frozen",
     "uv run python scripts/export_openapi.py --check",
     "uv run ruff check .",
     "uv run mypy src",
@@ -30,6 +30,11 @@ FRESH_DISTRIBUTION_COMMANDS = (
     "test ! -e dist/release",
     "mkdir -p dist/release",
     "uv build --out-dir dist/release",
+)
+FROZEN_SYNC_COMMAND = "uv sync --extra dev --extra modal --frozen"
+RELEASE_BUNDLE_COMMAND = "uv run python scripts/check_release_bundle.py prepare"
+RELEASE_CANDIDATE_COMMAND = (
+    "uv run python scripts/check_release_candidate.py --tag v1.1.0"
 )
 HANDOFF_TEST_SELECTOR = "-k test_modal_deployed_function_session_handoff_smoke"
 
@@ -56,6 +61,32 @@ def test_release_build_uses_a_fresh_dedicated_output_directory() -> None:
     for command in FRESH_DISTRIBUTION_COMMANDS:
         assert command in workflow
         assert command in checklist
+
+
+def test_release_checklist_keeps_one_approved_distribution_build() -> None:
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+
+    assert FROZEN_SYNC_COMMAND in checklist
+    assert RELEASE_BUNDLE_COMMAND in checklist
+    assert RELEASE_CANDIDATE_COMMAND in checklist
+    assert "curated source distribution file set" in checklist
+    assert "built once from that clean tagged commit" in checklist
+    assert "Upload the wheel and source distribution from `dist/release` to TestPyPI" in checklist
+    assert "Record approval for the production" in checklist
+    assert "Upload the same approved files from `dist/release` to PyPI" in checklist
+    assert "--index-url https://test.pypi.org" in checklist
+    assert "--index-url https://pypi.org" in checklist
+    assert 'uv add "modal-computer-use[modal]"' in checklist
+    assert "Attach the same wheel, source" in checklist
+    assert "distribution, and `dist/SHA256SUMS`" in checklist
+
+
+def test_release_checklist_scans_every_public_ref_before_visibility() -> None:
+    checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
+
+    assert "Every branch and tag that will become public has been listed" in checklist
+    assert "complete reachable history" in checklist
+    assert "repeat the scan from a fresh clone before you change repository visibility" in checklist
 
 
 def test_release_checklist_matches_commands_it_claims_to_share_with_ci() -> None:
@@ -123,5 +154,5 @@ def test_release_workflow_keeps_validation_output_ephemeral() -> None:
 
     assert "actions/upload-artifact@" not in workflow
     assert "Generate benchmark report" in workflow
-    assert "Validate wheel install" in workflow
-    assert "Validate sdist install" in workflow
+    assert "Validate installed distributions" in workflow
+    assert "scripts/smoke_distribution_install.py --distributions dist/release" in workflow
