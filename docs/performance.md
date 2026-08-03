@@ -2,6 +2,8 @@
 
 Most latency in a computer-use loop comes from network round trips and screenshot encoding. This page lists the knobs that matter.
 
+For a shorter production workflow, start with [Optimize Modal for production](modal-optimization.md).
+
 Native async provisioning improves event-loop behavior and cancellation cleanup. It does not make
 Sandbox allocation or desktop startup intrinsically faster. Warm trajectory measurements begin
 after provisioning, credential creation, readiness, and borrow entry.
