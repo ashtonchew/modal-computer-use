@@ -4,8 +4,8 @@
 > **Date or revision:** 2026-07-18; harness `74edc6317ea4bac61ef512d7a68060445cf42720`
 > **Question:** What did the neutral Modal, Daytona, and E2B default paths measure from one
 > external caller?
-> **Disposition:** The [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md)
-> replaces this reference with the five-provider table, current boundaries, and small-sample
+> **Disposition:** The later [2026-07-26 provider report](benchmark-results-2026-07-26-provider-results.md)
+> replaced this reference with a five-provider table, revised boundaries, and small-sample
 > display policy.
 
 This is the retained 2026-07-18 reference for the neutral `provider-default` SDK comparison. It

@@ -29,8 +29,9 @@ _Avoid_: modal-exec, provider, primitive API
   product API.
 - A **Sandbox Exec Surface** is a Modal-native benchmark baseline, not the SDK's preferred primitive API.
 - The public SDK benchmark command is named `benchmark sdk`; documentation may describe the measured entries as **Benchmark Surfaces**.
-- `benchmark compare` and `benchmark provider-results` are maintained benchmark-only workflows,
-  not public SDK compatibility contracts.
+- `benchmark compare` is a maintained benchmark-only workflow. `benchmark provider-results`
+  remains available to verify archived combined evidence. Neither is a public SDK compatibility
+  contract.
 - Sanitized, revision-bound provider evidence may be tracked in `benchmark-data/`. Credentials,
   private raw results, endpoints, and provider resource identifiers remain untracked.
 

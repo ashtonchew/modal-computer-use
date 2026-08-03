@@ -39,8 +39,6 @@ specifications preserve design history.
 - [Benchmarking](benchmarking.md): run benchmarks and interpret, retain, or publish their output.
 - [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md): eligible p50,
   p95, configuration, and provenance for the README comparison.
-- [Provider results, 2026-07-26](benchmark-results-2026-07-26-provider-results.md): earlier eligible
-  provider-default, Modal-optimized, and Modal-only experimental evidence.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
   diagnostic, and historical reports and protocols.
 

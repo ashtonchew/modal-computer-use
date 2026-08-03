@@ -57,6 +57,11 @@ Diagnostic reports:
 - [Fallback ownership result, 2026-07-24](benchmarks/benchmark-results-2026-07-24-fallback-ownership.md)
   records cleanup and runner-path investigation.
 
+Historical reports:
+
+- [Provider results, 2026-07-26](benchmarks/benchmark-results-2026-07-26-provider-results.md)
+  retain the earlier lifecycle and hash-confirmed visual-change evidence.
+
 Historical protocols:
 
 - [Modal V2 candidate methodology](benchmarks/modal-v2-candidate-benchmark.md) defines the matched
