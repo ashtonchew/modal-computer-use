@@ -56,8 +56,25 @@ def test_bundle_and_release_assets_remain_the_same_bytes() -> None:
     )
     assert source.count("sha256sum --check ../SHA256SUMS") == 3
     assert "--draft" in github_release
+    assert "scripts/check_github_release.py tag" in github_release
+    assert '--expected-commit "$GITHUB_SHA"' in github_release
+    assert "scripts/check_github_release.py state" in github_release
+    assert "scripts/check_github_release.py assets" in github_release
     assert github_release.index("gh release create") < github_release.index("gh release upload")
+    assert github_release.index("gh release upload") < github_release.index(
+        "scripts/check_github_release.py assets"
+    )
+    assert github_release.index("scripts/check_github_release.py assets") < github_release.index(
+        "--draft=false"
+    )
     assert github_release.index("gh release upload") < github_release.index("--draft=false")
+    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in github_release
+    assert "fetch-depth: 0" in github_release
+    assert "persist-credentials: false" in github_release
+    assert "if: steps.release.outputs.state == 'draft'" in github_release
+    assert "for attempt in 1 2 3 4 5 6" in github_release
+    assert 'if [ "$attempt" -eq 6 ]' in github_release
+    assert "sleep 5" in github_release
     assert "gh release verify \"$GITHUB_REF_NAME\"" in github_release
     assert github_release.count("gh release verify-asset") == 3
     assert "GH_REPO: ${{ github.repository }}" in github_release

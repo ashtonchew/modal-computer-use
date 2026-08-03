@@ -226,6 +226,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Retrieve release bundle
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -236,34 +242,59 @@ jobs:
         working-directory: dist/release
         run: sha256sum --check ../SHA256SUMS
 
-      - name: Create or resume draft release
+      - name: Verify current remote tag
+        run: >-
+          python3 scripts/check_github_release.py tag
+          --tag "$GITHUB_REF_NAME"
+          --expected-commit "$GITHUB_SHA"
+
+      - name: Create or resume release
+        id: release
         run: |
-          if release_state="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)"
-          then
-            if [ "$release_state" != "true" ]; then
-              echo "::error::release $GITHUB_REF_NAME is already published"
-              exit 1
-            fi
-          else
+          release_state="$(
+            python3 scripts/check_github_release.py state --tag "$GITHUB_REF_NAME"
+          )"
+          if [ "$release_state" = "missing" ]; then
             gh release create "$GITHUB_REF_NAME" \
               --draft \
               --verify-tag \
               --title "$GITHUB_REF_NAME" \
               --notes-from-tag
+            release_state="draft"
           fi
+          echo "state=$release_state" >> "$GITHUB_OUTPUT"
 
-      - name: Attach and publish release assets
+      - name: Attach release assets
+        if: steps.release.outputs.state == 'draft'
         run: |
           gh release upload "$GITHUB_REF_NAME" \
             dist/release/*.whl \
             dist/release/*.tar.gz \
             dist/SHA256SUMS \
             --clobber
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Verify complete release asset set
+        run: >-
+          python3 scripts/check_github_release.py assets
+          --tag "$GITHUB_REF_NAME"
+          --distributions dist/release
+          --checksums dist/SHA256SUMS
+
+      - name: Publish draft release
+        if: steps.release.outputs.state == 'draft'
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
 
       - name: Verify immutable release and assets
         run: |
-          gh release verify "$GITHUB_REF_NAME"
+          for attempt in 1 2 3 4 5 6; do
+            if gh release verify "$GITHUB_REF_NAME"; then
+              break
+            fi
+            if [ "$attempt" -eq 6 ]; then
+              exit 1
+            fi
+            sleep 5
+          done
           gh release verify-asset "$GITHUB_REF_NAME" dist/release/*.whl
           gh release verify-asset "$GITHUB_REF_NAME" dist/release/*.tar.gz
           gh release verify-asset "$GITHUB_REF_NAME" dist/SHA256SUMS
