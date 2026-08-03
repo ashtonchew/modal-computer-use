@@ -8,21 +8,13 @@ using Modal.
 
 ## Quick start
 
-Use Python 3.12 or later and `uv`. The package is not on PyPI, and `v1.1.0` has not yet been tagged or
-published as a GitHub Release. Install the current source with the Modal extra:
+Use Python 3.12 or later and `uv`. Install the Modal extra from PyPI:
 
 ```bash
-uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
+uv add "modal-computer-use[modal]"
 ```
 
-The `main` ref is mutable. Pin a reviewed full commit SHA for reproducible use. The Modal extra
-supports the Modal 1.5 line and requires Modal 1.5.2 or later.
-
-Configure Modal credentials once. Creating a Sandbox can incur Modal charges.
-
-```bash
-uv run modal setup
-```
+The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later.
 
 Save this as `quickstart.py`:
 
@@ -135,7 +127,7 @@ The mock backend supports deterministic tests and CI. The X11 backend supports l
 development. Install the core package without the Modal extra when connecting to an existing daemon:
 
 ```bash
-uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
+uv add "modal-computer-use"
 ```
 
 The [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md)
