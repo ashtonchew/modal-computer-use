@@ -79,6 +79,25 @@ def test_plan_command_never_creates_resources_or_output(
     assert not output_root.exists()
 
 
+def test_run_command_rejects_dirty_worktree_before_creating_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dirty_source = {**SOURCE, "git_worktree_clean": False}
+    output_root = tmp_path / "dirty-run-output"
+    monkeypatch.setattr(MATRIX, "_source_state", lambda: dirty_source)
+    monkeypatch.setattr(
+        MATRIX,
+        "execute_matrix",
+        lambda *_args, **_kwargs: pytest.fail("dirty run executed the matrix"),
+    )
+
+    with pytest.raises(RuntimeError, match="requires a clean Git worktree"):
+        MATRIX.main(["run", "--output-root", str(output_root)])
+
+    assert not output_root.exists()
+
+
 def test_execute_matrix_uses_fresh_sandboxes_probes_versions_and_writes_raw_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -126,6 +145,7 @@ def test_execute_matrix_uses_fresh_sandboxes_probes_versions_and_writes_raw_arti
     assert len(benchmark_calls) == 12
     assert all(computer.terminated == [True] for computer in computers)
     assert all(computer.client.closed is True for computer in computers)
+    assert all(computer.detach_calls == 0 for computer in computers)
     for computer, scheduled in zip(computers, plan["schedule"], strict=True):
         create = computer.create_kwargs
         config = create["config"]
@@ -192,6 +212,32 @@ def test_cell_terminates_and_closes_client_when_benchmark_raises() -> None:
     assert computer.client.closed is True
 
 
+def test_termination_failure_closes_client_and_fails_matrix(tmp_path: Path) -> None:
+    computer = _FakeComputer(1, terminate_error=RuntimeError("termination failed"))
+    plan = MATRIX.build_plan(output_root=tmp_path, order_seed=7, source=SOURCE)
+
+    with pytest.raises(RuntimeError, match="matrix cell cleanup failed"):
+        MATRIX.execute_matrix(
+            plan,
+            output_root=tmp_path,
+            computer_factory=lambda **_kwargs: computer,
+            benchmark_runner=lambda **_kwargs: {
+                "ok": True,
+                "metadata": {"environment": {}},
+            },
+            run_id_factory=lambda: "run-cleanup-failure",
+        )
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert computer.cleanup_events == ["terminate", "client_close"]
+    assert computer.client.closed is True
+    assert computer.detach_calls == 0
+    assert manifest["status"] == "failed"
+    assert manifest["cells"][0]["status"] == "failed"
+    assert manifest["cells"][0]["error_type"] == "RuntimeError"
+    assert all(cell["status"] == "pending" for cell in manifest["cells"][1:])
+
+
 def test_runtime_probe_rejects_empty_command_output() -> None:
     computer = SimpleNamespace(
         commands=SimpleNamespace(
@@ -207,15 +253,18 @@ def test_runtime_probe_rejects_empty_command_output() -> None:
 
 
 class _FakeComputer:
-    def __init__(self, index: int) -> None:
+    def __init__(self, index: int, *, terminate_error: Exception | None = None) -> None:
         self.index = index
+        self.cleanup_events: list[str] = []
         self.client = SimpleNamespace(
             base_url="https://connect.modal.run/safe",
             closed=False,
-            close=lambda: setattr(self.client, "closed", True),
+            close=self._close_client,
         )
         self.commands = _FakeCommands()
+        self.detach_calls = 0
         self.terminated: list[bool] = []
+        self.terminate_error = terminate_error
         self.create_kwargs: dict[str, Any] = {}
 
     def first_valid_frame(self, _config: Any) -> bytes:
@@ -228,7 +277,18 @@ class _FakeComputer:
         return {"cloud": "aws", "region": "us-west-2"}
 
     def terminate(self, *, wait: bool = False) -> None:
+        self.cleanup_events.append("terminate")
         self.terminated.append(wait)
+        if self.terminate_error is not None:
+            raise self.terminate_error
+
+    def detach(self) -> None:
+        self.detach_calls += 1
+        self.cleanup_events.append("detach")
+
+    def _close_client(self) -> None:
+        self.cleanup_events.append("client_close")
+        self.client.closed = True
 
 
 class _FakeCommands:
