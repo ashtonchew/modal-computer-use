@@ -49,13 +49,14 @@ When the `with` block ends, the SDK terminates the Sandbox and closes the connec
 ## Core API
 
 `ComputerSandbox` is the primary synchronous entry point. `AsyncComputerSandbox` provides native
-async Modal creation and attachment with the same ownership rules; see the
+async Modal creation, attachment, and named acquisition with the same ownership rules; see the
 [async owner example](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_modal_owner.py).
 `AsyncDaemonClient` connects to an existing daemon without blocking the event loop.
 
 | Task | Representative API |
 | --- | --- |
-| Create or connect | `ComputerSandbox.create()`, `ComputerSandbox.attach()`, `AsyncComputerSandbox.create()` |
+| Create or attach | `ComputerSandbox.create()`, `ComputerSandbox.attach()`, `AsyncComputerSandbox.create()`, `AsyncComputerSandbox.attach()` |
+| Acquire by name | `ComputerSandbox.attach_or_create(name=...)`, `AsyncComputerSandbox.attach_or_create(name=...)` |
 | Input | `computer.mouse.move()`, `computer.keyboard.type()`, `computer.clipboard.get_text()` |
 | Observe | `computer.screenshots.full()`, `computer.display.info()`, `computer.windows.list()` |
 | Browser and apps | `computer.browser.open_url()`, `computer.apps.launch()` |
@@ -92,6 +93,10 @@ terminates the Sandbox automatically when the block ends. `ComputerSandbox.attac
 existing Sandbox. Leaving an attached `with` block closes the SDK connection but keeps the Sandbox
 running.
 
+`ComputerSandbox.attach_or_create(name=...)` and its async counterpart acquire a compatible live
+Sandbox with that app-scoped name, or create one if it is missing. If the call creates the Sandbox,
+leaving the block terminates it. If the Sandbox already existed, leaving the block keeps it running.
+
 A daemon inside the Sandbox executes desktop actions, captures screenshots and recordings, runs
 commands, and reads or writes files through `computer.artifacts`.
 
@@ -100,6 +105,7 @@ commands, and reads or writes files through `computer.artifacts`.
 | Workflow | Example |
 | --- | --- |
 | Configure and prewarm a browser | [`browser_profile.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/browser_profile.py) |
+| Acquire one named desktop from async code | [`async_named_desktop.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_named_desktop.py) |
 | Attach without taking lifecycle ownership | [`attach_existing_sandbox.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/attach_existing_sandbox.py) |
 | Capture and download a recording | [`recording_lifecycle.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/recording_lifecycle.py) |
 | Persist artifacts with a Modal Volume | [`volume_artifacts.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/volume_artifacts.py) |
