@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 TYPING_MARKER = "modal_computer_use/py.typed"
+SDIST_BACKEND_REQUIRED_FILES = frozenset({".gitignore", "PKG-INFO"})
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class ExpectedMetadata:
     license_expression: str
     license_files: tuple[str, ...]
     project_urls: dict[str, str]
+    sdist_only_include: tuple[str, ...]
 
 
 def load_expected_metadata(pyproject: Path = ROOT / "pyproject.toml") -> ExpectedMetadata:
@@ -33,6 +35,9 @@ def load_expected_metadata(pyproject: Path = ROOT / "pyproject.toml") -> Expecte
         license_expression=project["license"],
         license_files=tuple(project["license-files"]),
         project_urls=dict(project["urls"]),
+        sdist_only_include=tuple(
+            document["tool"]["hatch"]["build"]["targets"]["sdist"]["only-include"]
+        ),
     )
 
 
@@ -110,16 +115,57 @@ def _validate_wheel(path: Path, *, expected: ExpectedMetadata) -> None:
 
 def _validate_sdist(path: Path, *, expected: ExpectedMetadata) -> None:
     with tarfile.open(path, mode="r:gz") as archive:
-        names = archive.getnames()
+        members = archive.getmembers()
+        names = [member.name for member in members]
         metadata_path = _one_matching_path(names, "/PKG-INFO", archive=path)
         metadata_file = archive.extractfile(metadata_path)
         if metadata_file is None:
             raise ValueError(f"{path}: cannot read {metadata_path}")
         _validate_metadata(metadata_file.read(), archive=path, expected=expected)
 
-        _one_matching_path(names, f"/src/{TYPING_MARKER}", archive=path)
-
         source_root = PurePosixPath(metadata_path).parent
+        included_paths = tuple(PurePosixPath(item) for item in expected.sdist_only_include)
+        included_files = {
+            included_path
+            for included_path in included_paths
+            if (ROOT / included_path).is_file()
+        }
+        included_directories = set(included_paths) - included_files
+        backend_required_paths = {
+            PurePosixPath(item) for item in SDIST_BACKEND_REQUIRED_FILES
+        }
+        regular_paths: set[PurePosixPath] = set()
+        unexpected_paths: list[str] = []
+        for member in members:
+            if not member.isfile():
+                continue
+            member_path = PurePosixPath(member.name)
+            try:
+                relative_path = member_path.relative_to(source_root)
+            except ValueError:
+                unexpected_paths.append(member.name)
+                continue
+            regular_paths.add(relative_path)
+            if relative_path in backend_required_paths:
+                continue
+            if relative_path in included_files:
+                continue
+            if any(directory in relative_path.parents for directory in included_directories):
+                continue
+            unexpected_paths.append(member.name)
+
+        if unexpected_paths:
+            raise ValueError(f"{path}: unexpected sdist members: {sorted(unexpected_paths)!r}")
+
+        required_paths = {
+            *backend_required_paths,
+            *included_files,
+            PurePosixPath("src") / TYPING_MARKER,
+        }
+        missing_paths = sorted(str(item) for item in required_paths - regular_paths)
+        if missing_paths:
+            raise ValueError(f"{path}: missing required sdist members: {missing_paths!r}")
+
         for license_file in expected.license_files:
             license_path = str(source_root / license_file)
             if license_path not in names:
@@ -138,7 +184,7 @@ def validate_distribution(path: Path, *, expected: ExpectedMetadata) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate license and project URL metadata in built distributions."
+        description="Validate metadata and file boundaries in built distributions."
     )
     parser.add_argument("distributions", nargs="+", type=Path)
     args = parser.parse_args()
