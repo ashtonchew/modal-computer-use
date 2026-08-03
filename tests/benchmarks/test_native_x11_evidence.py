@@ -487,3 +487,66 @@ def test_native_x11_historical_source_manifest_binds_provenance_and_claims() -> 
     serialized = path.read_text().lower()
     for forbidden in ("modal.host", "sandbox_id", "run_id", "bearer", "/users/"):
         assert forbidden not in serialized
+
+
+def test_native_x11_termination_reconciliation_is_pinned_complete_and_secret_safe() -> None:
+    path, artifact = evidence.load_benchmark_artifact(
+        "modal-native-x11-sandbox-termination-reconciliation-2026-08-03.json"
+    )
+    matrix_source = artifact["source_artifacts"]["matrix"]
+    runner_source = artifact["source_artifacts"]["runner"]
+    matrix_path = evidence.REPO_ROOT / matrix_source["path"]
+    runner_path = evidence.REPO_ROOT / runner_source["path"]
+
+    evidence.assert_sha256(matrix_path, matrix_source["sha256"])
+    evidence.assert_sha256(runner_path, runner_source["sha256"])
+
+    matrix = json.loads(matrix_path.read_text())
+    reconciliation = artifact["reconciliation"]
+    reconciled_cells = reconciliation["cells"]
+    matrix_cell_ids = {cell["cell_id"] for cell in matrix["cells"]}
+    reconciled_cell_ids = {cell["cell_id"] for cell in reconciled_cells}
+
+    assert len(matrix_cell_ids) == 12
+    assert reconciled_cell_ids == matrix_cell_ids
+    assert reconciliation["expected_cell_count"] == len(matrix_cell_ids)
+    assert reconciliation["private_id_count"] == 12
+    assert reconciliation["private_id_unique_count"] == 12
+    assert reconciliation["found_count"] == 12
+    assert reconciliation["finished_count"] == 12
+    assert reconciliation["running_count"] == 0
+    assert reconciliation["lookup_error_count"] == 0
+    assert reconciliation["exit_code_counts"] == {"137": 12}
+    assert all(
+        cell["state"] == "finished" and cell["exit_code"] == 137 for cell in reconciled_cells
+    )
+
+    assert artifact["runner_cleanup"]["historical_runner_detach_attempted"] is False
+    assert artifact["runner_cleanup"]["recorded_operations"] == [
+        {"operation": "ComputerSandbox.terminate", "wait": True},
+        {"operation": "DaemonClient.close"},
+    ]
+    assert artifact["reconciliation_scope"] == {
+        "modal_control_plane_reconciled": True,
+        "audit_log_reconciled": False,
+        "billing_reconciled": False,
+    }
+    assert artifact["secret_safety"]["secret_safe_projection"] is True
+    assert reconciliation["private_ids_tracked"] is False
+
+    serialized = path.read_text().lower()
+    assert serialized.count("https://") == 1
+    assert "https://modal.com/docs/guide/sandboxes#return-codes" in serialized
+    for forbidden in (
+        "modal.host",
+        "sb-",
+        'sandbox_id"',
+        'run_id"',
+        "access_token",
+        "api_key",
+        "bearer ",
+        "base_url",
+        'endpoint"',
+        "/users/",
+    ):
+        assert forbidden not in serialized

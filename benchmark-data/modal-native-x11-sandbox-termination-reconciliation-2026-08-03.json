@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "artifact": "modal-native-x11-sandbox-termination-reconciliation",
+  "generated_at": "2026-08-03T19:38:38.895907+00:00",
+  "status": "modal_control_plane_reconciled",
+  "evidence_scope": {
+    "establishes": "A read-only Modal lookup found all 12 private Sandbox IDs retained by the native X11 runner matrix. Each Sandbox was finished with exit code 137.",
+    "does_not_establish": [
+      "The Modal audit log contains 12 successful sandbox.terminate events.",
+      "The provider invoice contains charges for these 12 Sandboxes.",
+      "The historical runner detached its local Modal handles."
+    ]
+  },
+  "source_artifacts": {
+    "matrix": {
+      "path": "benchmark-data/modal-native-x11-runner-matrix-2026-08-02.json",
+      "sha256": "6cafbfe573d753d2450ca41e4af7804a77673889951dd31d736f66f32d4b09e5"
+    },
+    "runner": {
+      "path": "scripts/benchmarks/native_x11_runner_matrix.py",
+      "sha256": "5cebfd25d3063f0db55528c06b5c6137ae94356442feaf4d2f1fdbdc17dc0027"
+    },
+    "raw_manifest": {
+      "path": "benchmark-results/native-x11-runner-matrix-2026-08-02/manifest.json",
+      "sha256": "1e1b16a5f201e72f0deda1d6b44acc590b7e5c79d9f30db4f22241066343bed1",
+      "tracked": false
+    }
+  },
+  "reconciliation": {
+    "reconciled_at": "2026-08-03T19:38:38.895907+00:00",
+    "provider": "Modal",
+    "sdk_version": "1.5.3",
+    "method": "Sandbox.from_id(private_id).poll()",
+    "method_is_read_only": true,
+    "expected_cell_count": 12,
+    "private_id_count": 12,
+    "private_id_unique_count": 12,
+    "found_count": 12,
+    "finished_count": 12,
+    "running_count": 0,
+    "lookup_error_count": 0,
+    "exit_code_counts": {
+      "137": 12
+    },
+    "private_id_set_sha256": "6f5b9b58563225dc77dba855de932cf192857e2cef10e7a58d7bd01d7307305d",
+    "private_id_digest_scope": "Unique private Modal Sandbox IDs, sorted by UTF-8 byte order, newline-delimited, with a final newline.",
+    "private_ids_tracked": false,
+    "cells": [
+      {
+        "cell_id": "b01-xdotool-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b01-xdotool-isolated-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b01-xtest-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b01-xtest-isolated-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b02-xdotool-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b02-xdotool-isolated-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b02-xtest-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b02-xtest-isolated-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b03-xdotool-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b03-xdotool-isolated-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b03-xtest-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      },
+      {
+        "cell_id": "b03-xtest-isolated-asyncio",
+        "state": "finished",
+        "exit_code": 137
+      }
+    ]
+  },
+  "runner_cleanup": {
+    "recorded_operations": [
+      {
+        "operation": "ComputerSandbox.terminate",
+        "wait": true
+      },
+      {
+        "operation": "DaemonClient.close"
+      }
+    ],
+    "historical_runner_detach_attempted": false
+  },
+  "reconciliation_scope": {
+    "modal_control_plane_reconciled": true,
+    "audit_log_reconciled": false,
+    "billing_reconciled": false
+  },
+  "exit_code_interpretation": {
+    "value": 137,
+    "meaning": "Modal documents exit code 137 for a Sandbox terminated by the user.",
+    "boundary": "The exit code supports the digest-pinned runner record. It does not independently identify the caller.",
+    "documentation": "https://modal.com/docs/guide/sandboxes#return-codes"
+  },
+  "secret_safety": {
+    "secret_safe_projection": true,
+    "excluded_fields": [
+      "Modal Sandbox IDs",
+      "run IDs",
+      "URLs and endpoints",
+      "tokens",
+      "raw provider payloads"
+    ]
+  }
+}
