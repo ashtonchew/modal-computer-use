@@ -48,7 +48,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 
 | Area | v8 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. The prepared source is unreleased: no `v1.1.0` tag or matching GitHub Release exists. |
+| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. The prepared source is unreleased: no `v1.1.0` tag, matching GitHub Release, or PyPI distribution exists. |
 | Modal SDK | The compatible line remains `modal~=1.5.2`; v8 updates the lock from 1.5.2 to the latest audited 1.5.x patch, 1.5.3. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -727,7 +727,7 @@ Primary references:
 ## 17. Versioning and compatibility
 
 - Package, daemon, and checked-in OpenAPI versions are `1.1.0`. That source version remains
-  unreleased until the matching tag and GitHub Release exist.
+  unreleased until the matching tag, GitHub Release, and PyPI distribution exist.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
   core.

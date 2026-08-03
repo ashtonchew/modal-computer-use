@@ -64,9 +64,9 @@ daemon, verifies both console-script entry points, starts the installed daemon, 
 `/healthz`, `/readyz`, `/v1/version`, and `/v1/capabilities`.
 
 Normal pull requests and main builds validate the mock report, wheel, and source distribution
-without uploading them. GitHub keeps new Actions logs for 14 days. Release assets live only on the
-immutable GitHub Release. Historical private-era logs and artifacts are deleted separately because
-retention changes are not retroactive.
+without uploading them. GitHub keeps new Actions logs for 14 days. Published distributions live on
+PyPI and the immutable GitHub Release. Historical private-era logs and artifacts are deleted
+separately because retention changes are not retroactive.
 
 ## Architecture and security scans
 
@@ -170,9 +170,12 @@ Before creating a tag or uploading artifacts, confirm that:
   their intended public pages.
 - Protected Modal verification passed for changes that affect Modal creation, ingress, images,
   Volumes, snapshots, noVNC, attach/reuse, or cleanup.
+- PyPI Trusted Publishing is configured for this repository and release environment. Publish the
+  verified wheel and source distribution from the tagged commit, then confirm both files and the
+  expected version are available on PyPI.
 - Immutable GitHub Releases are enabled. Create the release as a draft, attach the wheel, source
   distribution, and `SHA256SUMS`, then publish them together and verify the tag, assets, immutable
   state, and release attestation.
 
-This project publishes GitHub Releases only and is not published to PyPI. Do not call a version
-published until its immutable GitHub Release contains the matching tag and all three assets.
+Do not call a version published until PyPI exposes the wheel and source distribution and the
+immutable GitHub Release contains the matching tag, both distributions, and `SHA256SUMS`.

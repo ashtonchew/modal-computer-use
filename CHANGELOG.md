@@ -42,7 +42,8 @@ yet. The changes below remain unreleased.
 
 The v1.1 daemon requires a v1.1 SDK for the default attested-tunnel flow. Upgrade SDK and daemon
 together. The v1.0.0 tag was a private source milestone, not a GitHub Release or PyPI distribution.
-Version 1.1.0 is intended to be the first public GitHub Release, but it is not published yet.
+Version 1.1.0 is intended to be the first public GitHub Release and PyPI distribution, but it is not
+published yet.
 
 ## 1.0.0 - 2026-07-31
 
