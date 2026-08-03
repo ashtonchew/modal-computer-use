@@ -12,7 +12,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from types import MappingProxyType
+from typing import Any, Literal, cast
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from ._version import __version__
@@ -23,7 +24,6 @@ from .errors import (
     BrowserReadinessError,
     ConfigConflictError,
     ModalNotInstalledError,
-    SandboxAmbiguousError,
     SandboxUnavailableError,
     SessionCompatibilityError,
     SessionEnvironmentMismatchError,
@@ -72,6 +72,7 @@ from .transports import (
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
+_SandboxLifecycleMode = Literal["local", "owned", "attached", "detached"]
 ModalDaemonEndpointPath = Literal["inherited", "connect", "target-loopback"]
 ModalBenchmarkBackend = Literal["v1", "v2"]
 ModalBenchmarkTransport = Literal[
@@ -136,6 +137,42 @@ class _SessionHandoffPolicy:
     daemon_http_version: Literal["1.1", "2"]
     vnc_mode: Literal["off", "view_only", "control"]
     config_hash: str
+
+
+@dataclass(frozen=True, repr=False)
+class _SandboxCreateInputs:
+    config: ComputerConfig
+    app_name: str
+    name: str | None
+    image: object | None
+    custom_image_supplied: bool
+    artifact_volume_mounted: bool
+    vnc_mode: Literal["off", "view_only", "control"]
+    caller_tags: Mapping[str, str]
+    app_tags: Mapping[str, str]
+    secrets: tuple[object, ...]
+    volumes: Mapping[str, object]
+    owner: str | None
+    tag_profile: Literal["default", "warm_pool"]
+    sandbox_kwargs: Mapping[str, Any]
+    app_lookup_kwargs: Mapping[str, object]
+
+
+@dataclass(frozen=True, repr=False)
+class _SandboxCreatePlan:
+    inputs: _SandboxCreateInputs
+    sandbox_tags: Mapping[str, str]
+    config_hash: str
+    session_id: str | None
+    daemon_bearer: str
+    http2: bool
+    create_kwargs: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class _AttachSelector:
+    kind: Literal["sandbox_id", "name", "run_id", "base_url"]
+    value: str
 
 
 @dataclass
@@ -469,11 +506,7 @@ class _TimedSandboxInstance:
         wait_until_ready = getattr(  # noqa: B009 - dynamic Modal SDK type
             self._sandbox, "wait_until_ready"
         )
-        try:
-            result = wait_until_ready(*args, **kwargs)
-        except Exception:
-            _terminate_failed_sandbox(self._sandbox)
-            raise
+        result = wait_until_ready(*args, **kwargs)
         self._timing.mark("tcp_ready")
         return result
 
@@ -481,11 +514,7 @@ class _TimedSandboxInstance:
         create_access = getattr(  # noqa: B009 - dynamic Modal SDK type
             self._sandbox, "create_connect_token"
         )
-        try:
-            result = create_access(*args, **kwargs)
-        except Exception:
-            _terminate_failed_sandbox(self._sandbox)
-            raise
+        result = create_access(*args, **kwargs)
         self._timing.mark("connect_token_ready")
         return result
 
@@ -1125,6 +1154,231 @@ def _validate_borrow_request(
         raise SessionCompatibilityError
 
 
+def _prepare_sandbox_create_inputs(
+    *,
+    config: ComputerConfig | None,
+    app_name: str,
+    name: str | None,
+    image: object | None,
+    expose_vnc: bool | str | None,
+    tags: Mapping[str, str] | None,
+    app_tags: Mapping[str, str] | None,
+    secrets: Sequence[object] | None,
+    volumes: Mapping[str, object] | None,
+    owner: str | None,
+    tag_profile: Literal["default", "warm_pool"],
+    sandbox_kwargs: Mapping[str, Any],
+) -> _SandboxCreateInputs:
+    _reject_security_owned_sandbox_kwargs(sandbox_kwargs)
+    resolved_config = ComputerConfig() if config is None else config.model_copy(deep=True)
+    if not resolved_config.run_id:
+        resolved_config.run_id = new_run_id()
+    prepared_volumes = _prepare_volume_mounts(dict(volumes or {}))
+    artifact_volume_mounted = _has_artifact_volume_mount(
+        prepared_volumes,
+        resolved_config.storage.artifacts_dir,
+    )
+    if resolved_config.storage.persist_artifacts and not artifact_volume_mounted:
+        raise ConfigConflictError(
+            "persist_artifacts=True requires a Volume mounted at storage.artifacts_dir "
+            "or one of its parent directories"
+        )
+    vnc_mode = normalize_vnc_mode(
+        expose_vnc if expose_vnc is not None else resolved_config.expose_vnc
+    )
+    custom_image_supplied = image is not None
+    app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
+    if resolved_config.runtime.modal_environment is not None:
+        app_lookup_kwargs["environment_name"] = resolved_config.runtime.modal_environment
+    return _SandboxCreateInputs(
+        config=resolved_config,
+        app_name=app_name,
+        name=name,
+        image=image,
+        custom_image_supplied=custom_image_supplied,
+        artifact_volume_mounted=artifact_volume_mounted,
+        vnc_mode=vnc_mode,
+        caller_tags=MappingProxyType(dict(tags or {})),
+        app_tags=MappingProxyType(dict(app_tags or {})),
+        secrets=tuple(secrets or ()),
+        volumes=MappingProxyType(prepared_volumes),
+        owner=owner,
+        tag_profile=tag_profile,
+        sandbox_kwargs=MappingProxyType(dict(sandbox_kwargs)),
+        app_lookup_kwargs=MappingProxyType(app_lookup_kwargs),
+    )
+
+
+def _resolve_sandbox_create_image(inputs: _SandboxCreateInputs) -> object:
+    if inputs.image is not None:
+        return inputs.image
+    config = inputs.config
+    browser_kind = config.browser.kind if config.browser else None
+    if config.image.source == "named":
+        return named_image(
+            revision=config.image.revision or "",
+            profile=config.resources.profile,
+            browser=browser_kind,
+            environment_name=config.image.environment_name,
+        )
+    return default_image(
+        profile=config.resources.profile,
+        browser=browser_kind,
+        window_manager=config.desktop.window_manager,
+        browser_prewarm=config.browser.prewarm if config.browser else False,
+    )
+
+
+def _build_sandbox_create_plan(
+    inputs: _SandboxCreateInputs,
+    *,
+    app: object,
+    modal: object,
+    image: object,
+) -> _SandboxCreatePlan:
+    config = inputs.config
+    env = _daemon_environment(
+        config,
+        vnc_mode=inputs.vnc_mode,
+        artifact_volume_mounted=inputs.artifact_volume_mounted,
+    )
+    app_id = _modal_app_id(app)
+    base_tags = (
+        warm_pool_tags(app_id=app_id)
+        if inputs.tag_profile == "warm_pool"
+        else default_tags(config, app_id=app_id, owner=inputs.owner)
+    )
+    sandbox_tags = {**inputs.caller_tags, **base_tags}
+    config_hash = compute_config_hash(config)
+    session_id: str | None = None
+    if config.runtime.modal_environment is not None and config.runtime.modal_region is not None:
+        session_id = _session_policy_id_prefix(
+            app_name=inputs.app_name,
+            modal_environment=config.runtime.modal_environment,
+            requested_modal_region=config.runtime.modal_region,
+            ingress=config.ingress,
+            daemon_http_version=config.network.daemon_http_version,
+            vnc_mode=inputs.vnc_mode,
+            config_hash=config_hash,
+        ) + _secrets.token_hex(8)
+        sandbox_tags["computer-use.session_id"] = session_id
+    browser_kind = config.browser.kind if config.browser else None
+    if inputs.tag_profile != "warm_pool":
+        sandbox_tags["computer-use.image_identity"] = (
+            "custom"
+            if inputs.custom_image_supplied
+            else selected_image_identity(
+                source=config.image.source,
+                revision=config.image.revision,
+                profile=config.resources.profile,
+                browser=browser_kind,
+            )
+        )
+    _validate_sandbox_tags(sandbox_tags)
+    http2 = config.network.daemon_http_version == "2"
+    ports = _encrypted_ports_for_ingress(
+        config.ingress,
+        vnc_mode=inputs.vnc_mode,
+        http2=http2,
+    )
+    h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
+    daemon_bearer = _secrets.token_urlsafe(32)
+    env["COMPUTER_USE_TUNNEL_TOKEN"] = daemon_bearer
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image,
+        "cpu": config.resources.cpu,
+        "memory": config.resources.memory_mib,
+        "gpu": config.resources.gpu,
+        "encrypted_ports": ports,
+        "timeout": config.runtime.timeout_seconds,
+        "idle_timeout": config.runtime.idle_timeout_seconds,
+        "secrets": list(inputs.secrets),
+        "volumes": dict(inputs.volumes),
+        "env": env,
+        "block_network": config.network.block_all,
+        "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
+        "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
+        "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
+        "name": inputs.name,
+        "tags": sandbox_tags,
+        **inputs.sandbox_kwargs,
+    }
+    if h2_ports:
+        create_kwargs["h2_ports"] = h2_ports
+    if config.runtime.modal_region:
+        create_kwargs["region"] = config.runtime.modal_region
+    readiness_probe = _readiness_probe(modal)
+    if readiness_probe is not None:
+        create_kwargs["readiness_probe"] = readiness_probe
+    return _SandboxCreatePlan(
+        inputs=inputs,
+        sandbox_tags=MappingProxyType(sandbox_tags),
+        config_hash=config_hash,
+        session_id=session_id,
+        daemon_bearer=daemon_bearer,
+        http2=http2,
+        create_kwargs=MappingProxyType(create_kwargs),
+    )
+
+
+def _materialize_sandbox_create_kwargs(plan: _SandboxCreatePlan) -> dict[str, Any]:
+    kwargs = dict(plan.create_kwargs)
+    kwargs["secrets"] = list(plan.inputs.secrets)
+    kwargs["volumes"] = dict(plan.inputs.volumes)
+    kwargs["env"] = dict(plan.create_kwargs["env"])
+    kwargs["tags"] = dict(plan.sandbox_tags)
+    return kwargs
+
+
+def _metadata_from_create_plan(plan: _SandboxCreatePlan, sandbox: object) -> SandboxRef:
+    inputs = plan.inputs
+    config = inputs.config
+    tags = dict(plan.sandbox_tags)
+    return SandboxRef(
+        sandbox_id=getattr(sandbox, "object_id", "unknown"),
+        app_name=inputs.app_name,
+        name=inputs.name,
+        run_id=config.run_id,
+        owner=tags.get("computer-use.owner"),
+        created_at=_created_at_from_tags(tags),
+        config_hash=plan.config_hash,
+        status="started",
+        tags=tags,
+        vnc_url=None,
+        artifacts_dir=config.storage.artifacts_dir,
+    )
+
+
+def _validate_attach_selector(
+    *,
+    sandbox_id: str | None,
+    name: str | None,
+    run_id: str | None,
+    base_url: str | None,
+    token: str | None,
+) -> _AttachSelector:
+    selectors = {
+        "sandbox_id": sandbox_id,
+        "name": name,
+        "run_id": run_id,
+        "base_url": base_url,
+    }
+    selected = [(kind, value) for kind, value in selectors.items() if value is not None]
+    if len(selected) != 1:
+        raise ValueError("attach requires exactly one of sandbox_id, name, run_id, or base_url")
+    kind, raw_value = selected[0]
+    value = raw_value.strip()
+    if not value:
+        raise ValueError(f"{kind} must be a non-empty string")
+    if token is not None and kind != "base_url":
+        raise ValueError("token is valid only when attaching by base_url")
+    return _AttachSelector(
+        kind=cast(Literal["sandbox_id", "name", "run_id", "base_url"], kind),
+        value=value,
+    )
+
+
 class ComputerSandbox:
     def __init__(
         self,
@@ -1133,6 +1387,7 @@ class ComputerSandbox:
         sandbox: object | None = None,
         metadata: SandboxRef | None = None,
         startup_timing: SessionStartupTiming | None = None,
+        _lifecycle_mode: _SandboxLifecycleMode | None = None,
     ) -> None:
         self.client = client
         self._sandbox = sandbox
@@ -1141,7 +1396,11 @@ class ComputerSandbox:
         self._session_handoff_policy: _SessionHandoffPolicy | None = None
         self._daemon_bearer: str | None = None
         self.startup_timing = startup_timing
-        self._readiness_failure_cleanup: Literal["none", "client", "sandbox"] = "none"
+        self._lifecycle_mode: _SandboxLifecycleMode = (
+            _lifecycle_mode
+            if _lifecycle_mode is not None
+            else ("owned" if sandbox is not None else "local")
+        )
         self._readiness_stage_count = 0
         self.lifecycle = LifecycleNamespace(client)
         self.mouse = MouseNamespace(client)
@@ -1169,7 +1428,10 @@ class ComputerSandbox:
         token: str | None = None,
         timeout: float = 30.0,
     ) -> ComputerSandbox:
-        return cls(DaemonClient(base_url=base_url, token=token, timeout=timeout))
+        return cls(
+            DaemonClient(base_url=base_url, token=token, timeout=timeout),
+            _lifecycle_mode="local",
+        )
 
     @classmethod
     def create(
@@ -1190,7 +1452,6 @@ class ComputerSandbox:
         tag_profile: Literal["default", "warm_pool"] = "default",
         **sandbox_kwargs: Any,
     ) -> ComputerSandbox:
-        _reject_security_owned_sandbox_kwargs(sandbox_kwargs)
         timing = timing or SessionStartupTiming()
         timing.mark("request_received")
         timing.unsupported(
@@ -1201,6 +1462,20 @@ class ComputerSandbox:
             "daemon_started",
             "the daemon process does not yet emit an attested startup timestamp",
         )
+        inputs = _prepare_sandbox_create_inputs(
+            config=config,
+            app_name=app_name,
+            name=name,
+            image=image,
+            expose_vnc=expose_vnc,
+            tags=tags,
+            app_tags=app_tags,
+            secrets=secrets,
+            volumes=volumes,
+            owner=owner,
+            tag_profile=tag_profile,
+            sandbox_kwargs=sandbox_kwargs,
+        )
         try:
             import modal
         except ImportError as exc:
@@ -1210,198 +1485,108 @@ class ComputerSandbox:
                 "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
         modal = _TimedModalRuntime(modal, timing)
-
-        config = config or ComputerConfig()
-        if not config.run_id:
-            config.run_id = new_run_id()
-        volumes = _prepare_volume_mounts(volumes or {})
-        artifact_volume_mounted = _has_artifact_volume_mount(volumes, config.storage.artifacts_dir)
-        if config.storage.persist_artifacts and not artifact_volume_mounted:
-            raise ConfigConflictError(
-                "persist_artifacts=True requires a Volume mounted at storage.artifacts_dir "
-                "or one of its parent directories"
-            )
-        vnc_mode = normalize_vnc_mode(expose_vnc if expose_vnc is not None else config.expose_vnc)
-        custom_image_supplied = image is not None
-        browser_kind = config.browser.kind if config.browser else None
-        if image is None and config.image.source == "named":
-            image = named_image(
-                revision=config.image.revision or "",
-                profile=config.resources.profile,
-                browser=browser_kind,
-                environment_name=config.image.environment_name,
-            )
-        elif image is None:
-            image = default_image(
-                profile=config.resources.profile,
-                browser=browser_kind,
-                window_manager=config.desktop.window_manager,
-                browser_prewarm=config.browser.prewarm if config.browser else False,
-            )
-        app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
-        if config.runtime.modal_environment is not None:
-            app_lookup_kwargs["environment_name"] = config.runtime.modal_environment
-        app = modal.App.lookup(app_name, **app_lookup_kwargs)
-        if app_tags:
-            _set_modal_object_tags(app, app_tags)
-        env = _daemon_environment(
-            config,
-            vnc_mode=vnc_mode,
-            artifact_volume_mounted=artifact_volume_mounted,
+        resolved_image = _resolve_sandbox_create_image(inputs)
+        app = modal.App.lookup(inputs.app_name, **dict(inputs.app_lookup_kwargs))
+        if inputs.app_tags:
+            _set_modal_object_tags(app, dict(inputs.app_tags))
+        plan = _build_sandbox_create_plan(
+            inputs,
+            app=app,
+            modal=modal,
+            image=resolved_image,
         )
-        app_id = _modal_app_id(app)
-        base_tags = (
-            warm_pool_tags(app_id=app_id)
-            if tag_profile == "warm_pool"
-            else default_tags(config, app_id=app_id, owner=owner)
-        )
-        sandbox_tags = {**(tags or {}), **base_tags}
-        config_hash = compute_config_hash(config)
-        session_id: str | None = None
-        if config.runtime.modal_environment is not None and config.runtime.modal_region is not None:
-            session_id = _session_policy_id_prefix(
-                app_name=app_name,
-                modal_environment=config.runtime.modal_environment,
-                requested_modal_region=config.runtime.modal_region,
-                ingress=config.ingress,
-                daemon_http_version=config.network.daemon_http_version,
-                vnc_mode=vnc_mode,
-                config_hash=config_hash,
-            ) + _secrets.token_hex(8)
-            sandbox_tags["computer-use.session_id"] = session_id
-        if tag_profile != "warm_pool":
-            sandbox_tags["computer-use.image_identity"] = (
-                "custom"
-                if custom_image_supplied
-                else selected_image_identity(
-                    source=config.image.source,
-                    revision=config.image.revision,
-                    profile=config.resources.profile,
-                    browser=browser_kind,
+        sandbox: object | None = None
+        computer: ComputerSandbox | None = None
+        try:
+            sandbox = modal.Sandbox.create(
+                "python",
+                "-m",
+                "modal_computer_use.daemon",
+                **_materialize_sandbox_create_kwargs(plan),
+            )
+            config = plan.inputs.config
+            if wait and hasattr(sandbox, "wait_until_ready"):
+                sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            if config.ingress == "connect":
+                token_info = sandbox.create_connect_token(
+                    user_metadata={"sdk": "modal-computer-use", "version": __version__},
+                    port=8080,
                 )
+                connect_base_url, connect_token = _connect_token_parts(token_info)
+            else:
+                connect_base_url = _tunnel_url(sandbox, 8080)
+                connect_token = plan.daemon_bearer
+                timing.mark("connect_token_ready")
+            base_url, token = _client_ingress_parts(
+                sandbox,
+                ingress=config.ingress,
+                connect_base_url=connect_base_url,
+                connect_token=connect_token,
+                tunnel_token=plan.daemon_bearer,
             )
-        _validate_sandbox_tags(sandbox_tags)
-        http2 = config.network.daemon_http_version == "2"
-        ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
-        h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
-        daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
-        env.update(daemon_auth)
-        tunnel_token = _daemon_bearer_from_auth(daemon_auth)
-        create_kwargs: dict[str, Any] = {
-            "app": app,
-            "image": image,
-            "cpu": config.resources.cpu,
-            "memory": config.resources.memory_mib,
-            "gpu": config.resources.gpu,
-            "encrypted_ports": ports,
-            "timeout": config.runtime.timeout_seconds,
-            "idle_timeout": config.runtime.idle_timeout_seconds,
-            "secrets": secrets or [],
-            "volumes": volumes,
-            "env": env,
-            "block_network": config.network.block_all,
-            "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
-            "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
-            "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
-            "name": name,
-            "tags": sandbox_tags,
-            **sandbox_kwargs,
-        }
-        if h2_ports:
-            create_kwargs["h2_ports"] = h2_ports
-        if config.runtime.modal_region:
-            create_kwargs["region"] = config.runtime.modal_region
-        readiness_probe = _readiness_probe(modal)
-        if readiness_probe is not None:
-            create_kwargs["readiness_probe"] = readiness_probe
-        sandbox = modal.Sandbox.create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
-        if wait and hasattr(sandbox, "wait_until_ready"):
-            sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        if config.ingress == "connect":
-            token_info = sandbox.create_connect_token(
-                user_metadata={"sdk": "modal-computer-use", "version": __version__},
-                port=8080,
-            )
-            connect_base_url, connect_token = _connect_token_parts(token_info)
-        else:
-            connect_base_url = _tunnel_url(sandbox, 8080)
-            connect_token = tunnel_token
-            timing.mark("connect_token_ready")
-        base_url, token = _client_ingress_parts(
-            sandbox,
-            ingress=config.ingress,
-            connect_base_url=connect_base_url,
-            connect_token=connect_token,
-            tunnel_token=tunnel_token,
-        )
-        metadata = SandboxRef(
-            sandbox_id=getattr(sandbox, "object_id", "unknown"),
-            app_name=app_name,
-            name=name,
-            run_id=config.run_id,
-            owner=sandbox_tags.get("computer-use.owner"),
-            created_at=_created_at_from_tags(sandbox_tags),
-            config_hash=config_hash,
-            status="started",
-            tags=sandbox_tags,
-            vnc_url=None,
-            artifacts_dir=config.storage.artifacts_dir,
-        )
-        token_resolver = None
-        if config.ingress == "attested-tunnel" and not wait:
-            token = None
+            metadata = _metadata_from_create_plan(plan, sandbox)
+            token_resolver = None
+            if config.ingress == "attested-tunnel" and not wait:
+                token = None
 
-            def resolve_attested_token() -> str:
-                return _attested_tunnel_parts(
+                def resolve_attested_token() -> str:
+                    return _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=connect_base_url,
+                        connect_token=connect_token,
+                    )[1]
+
+                token_resolver = resolve_attested_token
+            computer = cls(
+                DaemonClient(
+                    base_url=base_url,
+                    token=token,
+                    http2=plan.http2,
+                    _token_resolver=token_resolver,
+                ),
+                sandbox=sandbox,
+                metadata=metadata,
+                _lifecycle_mode="owned",
+            )
+            computer.startup_timing = timing
+            computer._daemon_bearer = plan.daemon_bearer
+            if wait:
+                computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            if wait and config.ingress == "attested-tunnel":
+                computer.client.close()
+                base_url, token = _attested_tunnel_parts(
                     sandbox,
                     connect_base_url=connect_base_url,
                     connect_token=connect_token,
-                )[1]
-
-            token_resolver = resolve_attested_token
-        computer = cls(
-            DaemonClient(
-                base_url=base_url,
-                token=token,
-                http2=http2,
-                _token_resolver=token_resolver,
-            ),
-            sandbox=sandbox,
-            metadata=metadata,
-        )
-        computer.startup_timing = timing
-        computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
-        computer._readiness_failure_cleanup = "sandbox"
-        if wait:
-            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        if wait and config.ingress == "attested-tunnel":
-            computer.client.close()
-            base_url, token = _attested_tunnel_parts(
-                sandbox,
-                connect_base_url=connect_base_url,
-                connect_token=connect_token,
+                )
+                computer = cls(
+                    DaemonClient(base_url=base_url, token=token, http2=plan.http2),
+                    sandbox=sandbox,
+                    metadata=metadata,
+                    _lifecycle_mode="owned",
+                )
+                computer.startup_timing = timing
+                computer._daemon_bearer = plan.daemon_bearer
+                computer._readiness_stage_count = 1
+                timing.mark("attestation_ready")
+                computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            computer._requested_modal_region = config.runtime.modal_region
+            computer._session_handoff_policy = _session_handoff_policy(
+                config,
+                session_id=plan.session_id,
+                app_name=inputs.app_name,
+                vnc_mode=inputs.vnc_mode,
+                config_hash=metadata.config_hash or plan.config_hash,
             )
-            computer = cls(
-                DaemonClient(base_url=base_url, token=token, http2=http2),
-                sandbox=sandbox,
-                metadata=metadata,
-            )
-            computer.startup_timing = timing
-            computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
-            computer._readiness_failure_cleanup = "sandbox"
-            computer._readiness_stage_count = 1
-            timing.mark("attestation_ready")
-            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        computer._requested_modal_region = config.runtime.modal_region
-        computer._session_handoff_policy = _session_handoff_policy(
-            config,
-            session_id=session_id,
-            app_name=app_name,
-            vnc_mode=vnc_mode,
-            config_hash=metadata.config_hash or compute_config_hash(config),
-        )
-        computer._readiness_failure_cleanup = "none"
-        return computer
+            return computer
+        except BaseException as exc:
+            if sandbox is not None:
+                _cleanup_failed_created_sandbox(
+                    sandbox,
+                    client=None if computer is None else computer.client,
+                    primary=exc,
+                )
+            raise
 
     @classmethod
     def attach(
@@ -1420,12 +1605,27 @@ class ComputerSandbox:
         modal_environment: str | None = None,
         allow_legacy_unscoped: bool = False,
     ) -> ComputerSandbox:
-        if base_url:
-            computer = cls(DaemonClient(base_url=base_url, token=token, http2=http2))
+        selector = _validate_attach_selector(
+            sandbox_id=sandbox_id,
+            name=name,
+            run_id=run_id,
+            base_url=base_url,
+            token=token,
+        )
+        if selector.kind == "base_url":
+            computer = cls(
+                DaemonClient(base_url=selector.value, token=token, http2=http2),
+                _lifecycle_mode="attached",
+            )
             if wait:
-                computer._readiness_failure_cleanup = "client"
-                computer.wait_until_ready(timeout=readiness_timeout)
-                computer._readiness_failure_cleanup = "none"
+                try:
+                    computer.wait_until_ready(timeout=readiness_timeout)
+                except BaseException as exc:
+                    try:
+                        computer.client.close()
+                    except BaseException as cleanup_exc:
+                        _note_cleanup_failure(exc, "client.close", cleanup_exc)
+                    raise
             return computer
         try:
             import modal
@@ -1442,73 +1642,106 @@ class ComputerSandbox:
             environment_name=modal_environment,
             allow_legacy_unscoped=allow_legacy_unscoped,
         )
-        if sandbox_id:
-            sandbox = registry.require_sandbox_by_id(sandbox_id)
-        elif name:
+        if selector.kind == "sandbox_id":
+            sandbox = registry.require_sandbox_by_id(selector.value)
+        elif selector.kind == "name":
             sandbox = _sandbox_from_name(
                 modal,
                 app_name=app_name,
-                name=name,
+                name=selector.value,
                 environment_name=modal_environment,
             )
-            registry.require_app_tag(sandbox, description=f"sandbox name={name}")
-        elif run_id:
-            sandbox = registry.require_sandbox_by_run_id(run_id)
+            try:
+                registry.require_app_tag(sandbox, description="sandbox name")
+            except BaseException as exc:
+                _cleanup_failed_attached_sandbox(sandbox, client=None, primary=exc)
+                raise
         else:
-            raise ValueError("attach requires sandbox_id, name, run_id, or base_url")
-        metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
-        if ingress == "connect":
-            token_info = sandbox.create_connect_token(
-                user_metadata={"sdk": "modal-computer-use", "version": __version__},
-                port=8080,
-            )
-            connect_base_url, connect_token = _connect_token_parts(token_info)
-        else:
-            connect_base_url = _tunnel_url(sandbox, 8080)
-            connect_token = _sandbox_daemon_bearer(sandbox)
-        token_resolver = None
-        if ingress == "attested-tunnel" and not wait:
-            bootstrap_base_url = connect_base_url
-            bootstrap_token = connect_token
-            connect_token = None
+            sandbox = registry.require_sandbox_by_run_id(selector.value)
+        return cls._attach_resolved_sandbox(
+            sandbox,
+            app_name=app_name,
+            ingress=ingress,
+            http2=http2,
+            wait=wait,
+            readiness_timeout=readiness_timeout,
+        )
 
-            def resolve_attested_token() -> str:
-                return _attested_tunnel_parts(
-                    sandbox,
-                    connect_base_url=bootstrap_base_url,
-                    connect_token=bootstrap_token,
-                )[1]
+    @classmethod
+    def _attach_resolved_sandbox(
+        cls,
+        sandbox: object,
+        *,
+        app_name: str,
+        ingress: ModalIngress,
+        http2: bool,
+        wait: bool,
+        readiness_timeout: float,
+    ) -> ComputerSandbox:
+        client: DaemonClient | None = None
+        try:
+            metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
+            if ingress == "connect":
+                token_info = sandbox.create_connect_token(
+                    user_metadata={"sdk": "modal-computer-use", "version": __version__},
+                    port=8080,
+                )
+                connect_base_url, connect_token = _connect_token_parts(token_info)
+            else:
+                connect_base_url = _tunnel_url(sandbox, 8080)
+                connect_token = _sandbox_daemon_bearer(sandbox)
+            token_resolver = None
+            if ingress == "attested-tunnel" and not wait:
+                bootstrap_base_url = connect_base_url
+                bootstrap_token = connect_token
+                connect_token = None
 
-            token_resolver = resolve_attested_token
-        computer = cls(
-            DaemonClient(
+                def resolve_attested_token() -> str:
+                    return _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=bootstrap_base_url,
+                        connect_token=bootstrap_token,
+                    )[1]
+
+                token_resolver = resolve_attested_token
+            client = DaemonClient(
                 base_url=connect_base_url,
                 token=connect_token,
                 http2=http2,
                 _token_resolver=token_resolver,
-            ),
-            sandbox=sandbox,
-            metadata=metadata,
-        )
-        if wait:
-            computer._readiness_failure_cleanup = "client"
-            computer.wait_until_ready(timeout=readiness_timeout)
-            if ingress == "attested-tunnel":
-                computer.client.close()
-                connect_base_url, connect_token = _attested_tunnel_parts(
-                    sandbox,
-                    connect_base_url=connect_base_url,
-                    connect_token=connect_token,
-                )
-                computer = cls(
-                    DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
-                    sandbox=sandbox,
-                    metadata=metadata,
-                )
-                computer._readiness_failure_cleanup = "client"
+            )
+            computer = cls(
+                client,
+                sandbox=sandbox,
+                metadata=metadata,
+                _lifecycle_mode="attached",
+            )
+            if wait:
                 computer.wait_until_ready(timeout=readiness_timeout)
-            computer._readiness_failure_cleanup = "none"
-        return computer
+                if ingress == "attested-tunnel":
+                    client.close()
+                    connect_base_url, connect_token = _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=connect_base_url,
+                        connect_token=connect_token,
+                    )
+                    client = DaemonClient(
+                        base_url=connect_base_url,
+                        token=connect_token,
+                        http2=http2,
+                    )
+                    computer = cls(
+                        client,
+                        sandbox=sandbox,
+                        metadata=metadata,
+                        _lifecycle_mode="attached",
+                    )
+                    computer._readiness_stage_count = 1
+                    computer.wait_until_ready(timeout=readiness_timeout)
+            return computer
+        except BaseException as exc:
+            _cleanup_failed_attached_sandbox(sandbox, client=client, primary=exc)
+            raise
 
     @classmethod
     def attach_or_create(
@@ -1525,60 +1758,80 @@ class ComputerSandbox:
         allow_legacy_unscoped: bool = False,
         **kwargs: Any,
     ) -> ComputerSandbox:
-        config = config or ComputerConfig()
+        config = ComputerConfig() if config is None else config.model_copy(deep=True)
         if run_id is not None:
             config.run_id = run_id
         if on_config_mismatch not in ("raise", "reuse"):
             raise ValueError("on_config_mismatch must be 'raise' or 'reuse'")
         reuse_policy = _normalize_reuse_policy(reuse)
         requested_hash = compute_config_hash(config)
-
+        sandbox: object | None = None
         if reuse_policy == "by_run_id" and config.run_id:
-            try:
-                computer = cls.attach(
-                    run_id=config.run_id,
-                    app_name=app_name,
-                    ingress=config.ingress,
-                    http2=config.network.daemon_http_version == "2",
-                    wait=wait,
-                    readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
-                    modal_environment=config.runtime.modal_environment,
-                    allow_legacy_unscoped=allow_legacy_unscoped,
-                )
-                _check_config_hash(
-                    computer.metadata(),
-                    requested_hash=requested_hash,
-                    on_config_mismatch=on_config_mismatch,
-                )
-                if computer.metadata() is not None and (
-                    computer.metadata().config_hash == requested_hash
-                ):
-                    computer._requested_modal_region = config.runtime.modal_region
-                    computer._session_handoff_policy = _session_handoff_policy(
-                        config,
-                        session_id=computer.metadata().tags.get("computer-use.session_id"),
-                        app_name=app_name,
-                        config_hash=requested_hash,
-                    )
-                return computer
-            except SandboxAmbiguousError:
-                raise
-            except SandboxUnavailableError:
-                pass
+            from .registry import SandboxRegistry
+
+            registry = SandboxRegistry(
+                app_name=app_name,
+                environment_name=config.runtime.modal_environment,
+                allow_legacy_unscoped=allow_legacy_unscoped,
+            )
+            sandbox = registry.find_sandbox_by_run_id(config.run_id)
+        elif reuse_policy == "by_run_id":
+            pass
         elif reuse_policy == "by_name":
             if not name:
                 raise ValueError("reuse='by_name' requires name")
             try:
-                computer = cls.attach(
-                    name=name,
+                import modal
+            except ImportError as exc:
+                raise ModalNotInstalledError(
+                    "ComputerSandbox.attach_or_create requires the modal extra, for example "
+                    "`uv sync --extra modal` in this repository or "
+                    "`uv add 'modal-computer-use[modal]'` downstream"
+                ) from exc
+            try:
+                sandbox = _sandbox_from_name(
+                    modal,
                     app_name=app_name,
-                    ingress=config.ingress,
-                    http2=config.network.daemon_http_version == "2",
-                    wait=wait,
-                    readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
-                    modal_environment=config.runtime.modal_environment,
-                    allow_legacy_unscoped=allow_legacy_unscoped,
+                    name=name,
+                    environment_name=config.runtime.modal_environment,
                 )
+            except Exception as exc:
+                if not _is_modal_not_found_error(exc):
+                    raise
+            if sandbox is not None:
+                from .registry import SandboxRegistry
+
+                try:
+                    SandboxRegistry(
+                        app_name=app_name,
+                        environment_name=config.runtime.modal_environment,
+                        allow_legacy_unscoped=allow_legacy_unscoped,
+                    ).require_app_tag(sandbox, description="sandbox name")
+                except BaseException as exc:
+                    _cleanup_failed_attached_sandbox(
+                        sandbox,
+                        client=None,
+                        primary=exc,
+                    )
+                    raise
+        elif reuse_policy != "never":
+            raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
+
+        if sandbox is not None:
+            timeout = (
+                config.runtime.readiness_timeout_seconds
+                if readiness_timeout is None
+                else readiness_timeout
+            )
+            computer = cls._attach_resolved_sandbox(
+                sandbox,
+                app_name=app_name,
+                ingress=config.ingress,
+                http2=config.network.daemon_http_version == "2",
+                wait=wait,
+                readiness_timeout=timeout,
+            )
+            try:
                 _check_config_hash(
                     computer.metadata(),
                     requested_hash=requested_hash,
@@ -1595,12 +1848,12 @@ class ComputerSandbox:
                         config_hash=requested_hash,
                     )
                 return computer
-            except SandboxAmbiguousError:
+            except BaseException as exc:
+                try:
+                    computer.detach()
+                except BaseException as cleanup_exc:
+                    _note_cleanup_failure(exc, "attached computer.detach", cleanup_exc)
                 raise
-            except SandboxUnavailableError:
-                pass
-        elif reuse_policy != "never":
-            raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
 
         return cls.create(config=config, app_name=app_name, name=name, wait=wait, **kwargs)
 
@@ -1716,19 +1969,9 @@ class ComputerSandbox:
                 last_error = exc
             if time.monotonic() >= deadline:
                 detail = _readiness_timeout_detail(last_payload, last_error)
-                timeout_error = TimeoutError(
+                raise TimeoutError(
                     f"daemon did not become ready before timeout ({timeout:g}s){detail}"
                 )
-                if self._readiness_failure_cleanup != "none":
-                    try:
-                        self.client.close()
-                    except Exception as exc:
-                        timeout_error.add_note(
-                            f"readiness cleanup also failed: client.close ({type(exc).__name__})"
-                        )
-                if self._readiness_failure_cleanup == "sandbox" and self._sandbox is not None:
-                    _terminate_failed_sandbox(self._sandbox)
-                raise timeout_error
             time.sleep(interval)
 
     def terminate(self, *, wait: bool = False) -> None:
@@ -1741,11 +1984,19 @@ class ComputerSandbox:
             self.stop()
 
     def detach(self) -> None:
-        try:
-            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
-                self._sandbox.detach()
-        finally:
-            self.client.close()
+        sandbox = self._sandbox
+        if sandbox is not None and hasattr(sandbox, "detach"):
+            try:
+                sandbox.detach()
+            except BaseException as exc:
+                try:
+                    self.client.close()
+                except BaseException as cleanup_exc:
+                    _note_cleanup_failure(exc, "client.close", cleanup_exc)
+                raise
+        self._sandbox = None
+        self._lifecycle_mode = "detached"
+        self.client.close()
 
     def metadata(self) -> SandboxRef | None:
         return self._metadata
@@ -1832,10 +2083,41 @@ class ComputerSandbox:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        try:
-            self.terminate()
-        finally:
-            self.client.close()
+        cleanup_errors: list[tuple[str, BaseException]] = []
+        operations: list[tuple[str, Callable[[], object]]]
+        if self._lifecycle_mode == "owned":
+            operations = [("sandbox.terminate", lambda: self.terminate(wait=True))]
+            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
+                operations.append(("sandbox.detach", self._sandbox.detach))
+            operations.append(("client.close", self.client.close))
+        elif self._lifecycle_mode == "attached":
+            operations = []
+            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
+                operations.append(("sandbox.detach", self._sandbox.detach))
+            operations.append(("client.close", self.client.close))
+        elif self._lifecycle_mode == "local":
+            operations = [("client.close", self.client.close)]
+        else:
+            operations = []
+        for operation_name, operation in operations:
+            try:
+                operation()
+            except BaseException as caught_cleanup_error:
+                cleanup_errors.append((operation_name, caught_cleanup_error))
+        if not cleanup_errors:
+            return
+        if isinstance(exc, BaseException):
+            for operation_name, recorded_error in cleanup_errors:
+                _note_cleanup_failure(exc, operation_name, recorded_error)
+            return
+        primary_name, primary_error = cleanup_errors[0]
+        for operation_name, recorded_error in cleanup_errors[1:]:
+            primary_error.add_note(
+                f"additional resource cleanup failed: {operation_name} "
+                f"({type(recorded_error).__name__})"
+            )
+        primary_error.add_note(f"resource cleanup operation: {primary_name}")
+        raise primary_error
 
     def debug_urls(self) -> DebugUrls:
         if self._sandbox is not None:
@@ -2488,6 +2770,51 @@ def _terminate_failed_sandbox(sandbox: object) -> None:
     if callable(terminate):
         with suppress(Exception):
             terminate(wait=True)
+
+
+def _note_cleanup_failure(primary: BaseException, operation: str, exc: BaseException) -> None:
+    primary.add_note(f"resource cleanup also failed: {operation} ({type(exc).__name__})")
+
+
+def _cleanup_failed_created_sandbox(
+    sandbox: object,
+    *,
+    client: DaemonClient | None,
+    primary: BaseException,
+) -> None:
+    operations: list[tuple[str, Callable[[], object]]] = []
+    if client is not None:
+        operations.append(("client.close", client.close))
+    terminate = getattr(sandbox, "terminate", None)
+    if callable(terminate):
+        operations.append(("sandbox.terminate", lambda: terminate(wait=True)))
+    detach = getattr(sandbox, "detach", None)
+    if callable(detach):
+        operations.append(("sandbox.detach", detach))
+    for operation_name, operation in operations:
+        try:
+            operation()
+        except BaseException as cleanup_exc:
+            _note_cleanup_failure(primary, operation_name, cleanup_exc)
+
+
+def _cleanup_failed_attached_sandbox(
+    sandbox: object,
+    *,
+    client: DaemonClient | None,
+    primary: BaseException,
+) -> None:
+    if client is not None:
+        try:
+            client.close()
+        except BaseException as cleanup_exc:
+            _note_cleanup_failure(primary, "client.close", cleanup_exc)
+    detach = getattr(sandbox, "detach", None)
+    if callable(detach):
+        try:
+            detach()
+        except BaseException as cleanup_exc:
+            _note_cleanup_failure(primary, "sandbox.detach", cleanup_exc)
 
 
 def _validate_sandbox_tags(tags: dict[str, str]) -> None:

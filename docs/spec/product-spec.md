@@ -216,8 +216,16 @@ Supported construction paths are:
 - `ComputerSandbox.attach_or_create(...)` for policy-bound reuse.
 
 `run_id` is the canonical Sandbox-lifetime identifier. `request_id` is a deprecated input alias.
-The creator owns termination. `detach()` closes the local Modal connection without claiming the
-remote Sandbox was terminated.
+The creator owns termination. Exiting a created context terminates and detaches its Modal Sandbox.
+Exiting an attached or reused context only detaches and closes its daemon connection. Local and
+direct-URL contexts close connections only. `detach()` transfers a created Sandbox to
+caller-managed ownership without claiming the remote Sandbox was terminated. A failed creation
+cleans up any allocated Sandbox; a failed attachment never terminates the existing target.
+
+`attach()` accepts exactly one of sandbox ID, name, run ID, or direct daemon URL. Direct tokens are
+valid only with a direct URL. `attach_or_create()` creates after a lookup only when Modal reports
+that the target is absent; ambiguous matches and operational failures never trigger allocation.
+Construction copies caller configuration before generating or overriding a run ID.
 
 ### 5.2 Namespaces
 

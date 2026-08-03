@@ -366,6 +366,9 @@ readiness, and detaches without terminating the caller-owned Sandbox:
 uv run python examples/attach_existing_sandbox.py --sandbox-id sb-...
 ```
 
+Pass exactly one selector. `token` is valid only with `base_url`; Modal-backed selectors resolve
+their authorization from the target Sandbox.
+
 Modal-backed attachment is app-scoped. New Sandboxes carry `computer-use.app_id`, and ID, name,
 and run-ID attachment verify the requested app before returning a client. Set
 `allow_legacy_unscoped=True` only while migrating an untagged Sandbox that Modal already resolves
@@ -393,6 +396,10 @@ For backward compatibility, `reuse=True` maps to `"by_run_id"` and `reuse=False`
 sandbox when creation arguments are supplied. Ambiguous run ID matches raise a structured
 `SandboxAmbiguousError` instead of selecting an arbitrary sandbox.
 
+Only a genuine Modal not-found result permits that creation fallback. Authentication failures,
+service failures, and other lookup errors propagate without creating a second Sandbox. The SDK
+deep-copies `ComputerConfig` before applying `run_id` or generating a new one.
+
 When reusing an existing sandbox and the sandbox has a `computer-use.config_hash` tag, the SDK
 compares it with `compute_config_hash(config)`. Mismatches fail closed with `ConfigConflictError`
 by default. Pass `on_config_mismatch="reuse"` only when the caller intentionally accepts the
@@ -408,6 +415,19 @@ The readiness timeout remains the primary error if client cleanup also fails; on
 exception type is attached as diagnostic context.
 Detaching closes the local client and Modal handle. It does not terminate an attached Sandbox; only
 the lifecycle owner should do that.
+
+Context cleanup reflects ownership:
+
+- `create()` owns its Modal Sandbox, so context exit terminates, detaches, and closes the client;
+- Modal-backed `attach()` and reused `attach_or_create()` handles detach and close without
+  terminating the remote Sandbox;
+- `local()` and direct `base_url` attachments close only their daemon connection;
+- an explicit `detach()` transfers a created Sandbox to caller-managed ownership and prevents a
+  later context exit from terminating it.
+
+Any failure after a new Sandbox is allocated terminates and detaches that resource. Attachment
+failure never terminates an existing Sandbox. Cleanup errors are recorded without replacing the
+original provisioning or readiness failure.
 
 Attached `ComputerSandbox.metadata()` returns Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does

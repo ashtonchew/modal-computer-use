@@ -108,6 +108,10 @@ Use `ComputerSandbox.attach()` for known handles:
 - `sandbox_id` attaches directly with `modal.Sandbox.from_id`.
 - `name` attaches with `modal.Sandbox.from_name` inside the selected app.
 - `run_id` lists sandboxes tagged with `computer-use.run_id`.
+- `base_url` connects directly to an existing daemon and does not resolve a Modal Sandbox.
+
+Pass exactly one selector. A `token` belongs only to the direct `base_url` path; Modal-backed
+attachments obtain their own daemon authorization.
 
 The executable [`attach_existing_sandbox.py`](../examples/attach_existing_sandbox.py) example waits
 for readiness and only detaches. It never terminates the existing Sandbox because attaching does not
@@ -121,6 +125,11 @@ raise `SandboxUnavailableError`.
 `reuse="never"`. The old boolean form is still accepted: `True` means `"by_run_id"` and `False`
 means `"never"`. Reuse policy is intentionally not part of `ComputerConfig`.
 
+Reuse falls back to creation only when the requested app, run ID, or name is genuinely absent.
+Authentication failures, service errors, and ambiguous matches remain errors; they never allocate
+a second Sandbox. The SDK copies the supplied configuration before applying a run ID or generating
+one, so creation and reuse do not rewrite the caller's model.
+
 Existing sandboxes are checked against the requested config when their
 `computer-use.config_hash` tag is available. A mismatch raises `ConfigConflictError` by default
 so incompatible desktop/runtime settings are not silently reused. Use
@@ -129,6 +138,17 @@ so incompatible desktop/runtime settings are not silently reused. Use
 Attached metadata is limited to operational fields such as sandbox ID, app name, sandbox
 name, run ID, owner, creation time, config hash, tags, and artifact directory. Connect tokens are
 never stored there.
+
+Lifecycle ownership follows the construction path. Exiting a context returned by `create()`
+terminates and detaches its owned Modal Sandbox. Exiting a context returned by `attach()` or a
+reuse branch only detaches and closes the daemon connection. A direct local or `base_url` context
+only closes its daemon connection. Calling `detach()` on a created computer transfers cleanup
+ownership to the caller, so a later context exit does not terminate that Sandbox. Explicit
+`terminate()` remains available when the caller intentionally wants to stop an attached target.
+
+If creation fails after Modal allocates a Sandbox, the SDK closes any daemon client, terminates the
+Sandbox, and detaches its local Modal handle while preserving the original exception. Failed
+attachment closes and detaches local handles but never terminates the existing target.
 
 Region placement only applies when a sandbox is created. `attach()` and the reuse branch of
 `attach_or_create()` cannot move an existing sandbox to a different Modal region. If a latency

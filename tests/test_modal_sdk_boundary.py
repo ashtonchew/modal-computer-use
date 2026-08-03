@@ -116,6 +116,7 @@ class FakeSandboxObject:
         self.snapshot_directory_calls: list[dict[str, object]] = []
         self.reload_volumes_calls: list[int] = []
         self.terminate_wait_calls: list[bool] = []
+        self.detach_calls = 0
         self.exec_calls: list[dict[str, object]] = []
         self.terminated = False
 
@@ -157,6 +158,9 @@ class FakeSandboxObject:
     def terminate(self, *, wait: bool = False) -> None:
         self.terminate_wait_calls.append(wait)
         self.terminated = True
+
+    def detach(self) -> None:
+        self.detach_calls += 1
 
     def tunnels(self) -> dict[int, object]:
         return {
@@ -311,14 +315,105 @@ def fake_sandbox_ref(sandbox_id: str = "sb-target") -> SandboxRef:
     )
 
 
-def test_computer_sandbox_context_manager_terminates_modal_sandbox() -> None:
+def test_computer_sandbox_context_manager_releases_owned_modal_sandbox() -> None:
     sandbox = FakeSandboxObject()
-    computer = ComputerSandbox(DaemonClient(base_url="http://127.0.0.1:1"), sandbox=sandbox)
+
+    class ClosingClient:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    client = ClosingClient()
+    computer = ComputerSandbox(client, sandbox=sandbox)
 
     with computer as active:
         assert active is computer
 
     assert sandbox.terminated is True
+    assert sandbox.terminate_wait_calls == [True]
+    assert sandbox.detach_calls == 1
+    assert client.close_calls == 1
+
+
+def test_attached_context_detaches_without_terminating_remote_sandbox() -> None:
+    sandbox = FakeSandboxObject()
+
+    class ClosingClient:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    client = ClosingClient()
+    computer = ComputerSandbox(client, sandbox=sandbox, _lifecycle_mode="attached")
+
+    with computer:
+        pass
+
+    assert sandbox.terminate_wait_calls == []
+    assert sandbox.detach_calls == 1
+    assert client.close_calls == 1
+
+
+def test_local_context_closes_connection_without_remote_lifecycle_action() -> None:
+    class ClosingClient:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    client = ClosingClient()
+    computer = ComputerSandbox(client, _lifecycle_mode="local")
+
+    with computer:
+        pass
+
+    assert client.close_calls == 1
+
+
+def test_explicit_detach_transfers_owned_sandbox_without_later_termination() -> None:
+    sandbox = FakeSandboxObject()
+
+    class ClosingClient:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    client = ClosingClient()
+    computer = ComputerSandbox(client, sandbox=sandbox)
+
+    with computer:
+        computer.detach()
+
+    assert sandbox.terminate_wait_calls == []
+    assert sandbox.detach_calls == 1
+    assert client.close_calls == 1
+
+
+def test_failed_explicit_detach_preserves_created_sandbox_ownership() -> None:
+    sandbox = FakeSandboxObject()
+
+    class ClosingClient:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    def fail_detach() -> None:
+        raise RuntimeError("modal detach failed")
+
+    sandbox.detach = fail_detach  # type: ignore[method-assign]
+    client = ClosingClient()
+    computer = ComputerSandbox(client, sandbox=sandbox)
+
+    with pytest.raises(RuntimeError, match="modal detach failed"):
+        computer.detach()
+
+    assert computer._sandbox is sandbox
+    assert computer._lifecycle_mode == "owned"
+    assert client.close_calls == 1
 
 
 def test_create_uses_current_modal_sandbox_contract(monkeypatch) -> None:
@@ -442,6 +537,47 @@ def test_create_omits_modal_region_by_default(monkeypatch) -> None:
 
     _, kwargs = FakeSandbox.create_calls[0]
     assert "region" not in kwargs
+
+
+def test_create_copies_config_before_generating_run_id(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig()
+
+    computer = ComputerSandbox.create(config=config, image=object(), wait=False)
+
+    assert config.run_id is None
+    assert computer.metadata() is not None
+    assert computer.metadata().run_id is not None
+    assert FakeSandbox.create_calls[0][1]["env"]["COMPUTER_USE_RUN_ID"] == (
+        computer.metadata().run_id
+    )
+
+
+def test_create_cleanup_preserves_primary_interrupt_and_continues(monkeypatch) -> None:
+    class PrimaryInterrupt(KeyboardInterrupt):
+        pass
+
+    class CleanupInterrupt(BaseException):
+        pass
+
+    def fail_readiness(self: FakeSandboxObject, *, timeout: int) -> None:
+        raise PrimaryInterrupt
+
+    def fail_termination(self: FakeSandboxObject, *, wait: bool = False) -> None:
+        raise CleanupInterrupt
+
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    monkeypatch.setattr(FakeSandboxObject, "wait_until_ready", fail_readiness)
+    monkeypatch.setattr(FakeSandboxObject, "terminate", fail_termination)
+
+    with pytest.raises(PrimaryInterrupt) as raised:
+        ComputerSandbox.create(image=object())
+
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.detach_calls == 1
+    assert getattr(raised.value, "__notes__", []) == [
+        "resource cleanup also failed: sandbox.terminate (CleanupInterrupt)"
+    ]
 
 
 def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
@@ -1418,6 +1554,50 @@ def test_attach_by_name_uses_current_from_name_signature(monkeypatch) -> None:
     assert FakeApp.lookups == [("computer-app", False, None)]
 
 
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        {},
+        {"sandbox_id": "sb-123", "name": "desktop-1"},
+        {"sandbox_id": "sb-123", "run_id": "run-123"},
+        {"name": "desktop-1", "base_url": "https://daemon.example"},
+    ],
+)
+def test_attach_requires_exactly_one_selector_before_modal_import(
+    monkeypatch,
+    selectors: dict[str, str],
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", None)
+
+    with pytest.raises(ValueError, match="exactly one"):
+        ComputerSandbox.attach(**selectors)
+
+
+@pytest.mark.parametrize("selector", ["sandbox_id", "name", "run_id", "base_url"])
+def test_attach_rejects_blank_selector(selector: str) -> None:
+    with pytest.raises(ValueError, match=f"{selector} must be a non-empty string"):
+        ComputerSandbox.attach(**{selector: " "})
+
+
+@pytest.mark.parametrize("selector", ["sandbox_id", "name", "run_id"])
+def test_attach_rejects_direct_token_for_modal_selector(selector: str) -> None:
+    with pytest.raises(ValueError, match="token is valid only"):
+        ComputerSandbox.attach(**{selector: "target", "token": "direct-token"})
+
+
+def test_attach_allows_direct_token_only_with_base_url(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", None)
+
+    computer = ComputerSandbox.attach(
+        base_url="https://daemon.example",
+        token="direct-token",
+    )
+
+    assert computer.client.base_url == "https://daemon.example"
+    assert computer.client.transport.token == "direct-token"  # noqa: S105
+    computer.detach()
+
+
 def test_attach_attested_wait_false_never_exposes_bootstrap_token(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     FakeSandbox.from_name_result = FakeSandboxObject(
@@ -1460,10 +1640,13 @@ def test_attach_scopes_name_and_registry_lookups_to_modal_environment(monkeypatc
 
 def test_attach_legacy_name_requires_explicit_compatibility(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    FakeSandbox.from_name_result = FakeSandboxObject(name="desktop-1")
+    target = FakeSandboxObject(name="desktop-1")
+    FakeSandbox.from_name_result = target
 
     with pytest.raises(SandboxUnavailableError, match="app-owned"):
         ComputerSandbox.attach(app_name="computer-app", name="desktop-1")
+
+    assert target.detach_calls == 1
 
     computer = ComputerSandbox.attach(
         app_name="computer-app",
@@ -1477,9 +1660,8 @@ def test_attach_legacy_name_requires_explicit_compatibility(monkeypatch) -> None
 
 def test_attach_rejects_wrong_app_tag_even_in_legacy_mode(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    FakeSandbox.from_name_result = FakeSandboxObject(
-        name="desktop-1", tags={APP_ID_TAG: "ap-other-app"}
-    )
+    target = FakeSandboxObject(name="desktop-1", tags={APP_ID_TAG: "ap-other-app"})
+    FakeSandbox.from_name_result = target
 
     with pytest.raises(SandboxUnavailableError, match="app-owned"):
         ComputerSandbox.attach(
@@ -1487,6 +1669,23 @@ def test_attach_rejects_wrong_app_tag_even_in_legacy_mode(monkeypatch) -> None:
             name="desktop-1",
             allow_legacy_unscoped=True,
         )
+
+    assert target.detach_calls == 1
+
+
+def test_attach_by_id_detaches_handle_when_app_validation_fails(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    target = FakeSandboxObject(
+        sandbox_id="sb-wrong-app",
+        tags={APP_ID_TAG: "ap-other-app"},
+    )
+    FakeSandbox.from_id_result = target
+
+    with pytest.raises(SandboxUnavailableError, match="app-owned"):
+        ComputerSandbox.attach(app_name="computer-app", sandbox_id="sb-wrong-app")
+
+    assert target.detach_calls == 1
+    assert target.terminate_wait_calls == []
 
 
 def test_attach_wait_polls_daemon_when_requested(monkeypatch) -> None:
@@ -1683,13 +1882,13 @@ def test_attach_preserves_readiness_timeout_when_client_cleanup_fails(
         )
 
     notes = getattr(raised.value, "__notes__", [])
-    assert notes == ["readiness cleanup also failed: client.close (CleanupFailure)"]
+    assert notes == ["resource cleanup also failed: client.close (CleanupFailure)"]
     assert "cleanup diagnostic payload" not in " ".join(notes)
 
 
 def test_attach_by_run_id_ambiguous_matches_fail(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    FakeSandbox.listed = [
+    targets = [
         FakeSandboxObject(
             tags={
                 "computer-use.run_id": "run-123",
@@ -1705,6 +1904,7 @@ def test_attach_by_run_id_ambiguous_matches_fail(monkeypatch) -> None:
             }
         ),
     ]
+    FakeSandbox.listed = targets
 
     try:
         ComputerSandbox.attach(run_id="run-123")
@@ -1712,6 +1912,9 @@ def test_attach_by_run_id_ambiguous_matches_fail(monkeypatch) -> None:
         assert "multiple matching run_id=run-123" in str(exc)
     else:
         raise AssertionError("expected ambiguous run_id attach to fail")
+
+    assert [target.detach_calls for target in targets] == [1, 1]
+    assert all(target.terminate_wait_calls == [] for target in targets)
 
 
 def test_attach_metadata_includes_safe_tags_run_id_and_config_hash(monkeypatch) -> None:
@@ -2273,6 +2476,96 @@ def test_registry_find_by_run_id_ambiguous_fails(monkeypatch) -> None:
         raise AssertionError("expected ambiguous registry lookup to fail")
 
 
+def test_registry_find_sandbox_by_run_id_returns_app_owned_match(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    owned = FakeSandboxObject(
+        sandbox_id="sb-owned",
+        tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-computer-app"},
+    )
+    unowned = FakeSandboxObject(
+        sandbox_id="sb-unowned",
+        tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-other-app"},
+    )
+    FakeSandbox.listed = [owned, unowned]
+
+    match = SandboxRegistry(app_name="computer-app").find_sandbox_by_run_id("run-123")
+
+    assert match is owned
+    assert FakeSandbox.list_calls == [
+        {
+            "app_id": "ap-computer-app",
+            "tags": {
+                "computer-use.run_id": "run-123",
+                APP_ID_TAG: "ap-computer-app",
+            },
+        }
+    ]
+
+
+def test_registry_find_sandbox_by_run_id_missing_returns_none(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.listed = [
+        FakeSandboxObject(
+            sandbox_id="sb-unowned",
+            tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-other-app"},
+        )
+    ]
+
+    assert SandboxRegistry(app_name="computer-app").find_sandbox_by_run_id("run-123") is None
+
+
+def test_registry_find_sandbox_by_run_id_missing_app_returns_none(monkeypatch) -> None:
+    modal_exception = pytest.importorskip("modal.exception")
+    runtime = fake_modal()
+
+    def lookup_missing_app(
+        cls: type[FakeApp],
+        app_name: str,
+        *,
+        create_if_missing: bool,
+        environment_name: str | None = None,
+    ) -> FakeAppObject:
+        raise modal_exception.NotFoundError(f"missing app: {app_name}")
+
+    monkeypatch.setattr(FakeApp, "lookup", classmethod(lookup_missing_app))
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+
+    assert SandboxRegistry(app_name="computer-app").find_sandbox_by_run_id("run-123") is None
+
+
+def test_registry_find_sandbox_by_run_id_app_lookup_failure_propagates(monkeypatch) -> None:
+    runtime = fake_modal()
+    lookup_failure = RuntimeError("modal authentication failed")
+
+    def fail_app_lookup(
+        cls: type[FakeApp],
+        app_name: str,
+        *,
+        create_if_missing: bool,
+        environment_name: str | None = None,
+    ) -> FakeAppObject:
+        raise lookup_failure
+
+    monkeypatch.setattr(FakeApp, "lookup", classmethod(fail_app_lookup))
+    monkeypatch.setitem(__import__("sys").modules, "modal", runtime)
+
+    with pytest.raises(SandboxUnavailableError, match="no matching app=computer-app") as exc:
+        SandboxRegistry(app_name="computer-app").find_sandbox_by_run_id("run-123")
+
+    assert exc.value.__cause__ is lookup_failure
+
+
+def test_registry_find_sandbox_by_run_id_ambiguous_fails(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.listed = [
+        FakeSandboxObject(tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-computer-app"}),
+        FakeSandboxObject(tags={"computer-use.run_id": "run-123", APP_ID_TAG: "ap-computer-app"}),
+    ]
+
+    with pytest.raises(SandboxAmbiguousError, match="multiple matching run_id=run-123"):
+        SandboxRegistry(app_name="computer-app").find_sandbox_by_run_id("run-123")
+
+
 def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(
@@ -2305,6 +2598,25 @@ def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
         }
     ]
     assert FakeSandbox.create_calls == []
+
+
+def test_attach_or_create_copies_config_before_applying_run_id_override(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="original")
+
+    computer = ComputerSandbox.attach_or_create(
+        config=config,
+        run_id="requested",
+        reuse="never",
+        image=object(),
+        wait=False,
+    )
+
+    assert config.run_id == "original"
+    assert computer.metadata() is not None
+    assert computer.metadata().run_id == "requested"
 
 
 def test_attach_or_create_reuse_uses_runtime_modal_environment(monkeypatch) -> None:
@@ -2346,6 +2658,25 @@ def test_attach_or_create_never_reuse_creates_without_listing(monkeypatch) -> No
     assert len(FakeSandbox.create_calls) == 1
 
 
+def test_attach_or_create_default_generates_run_id_without_mutating_config(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig()
+
+    computer = ComputerSandbox.attach_or_create(
+        config=config,
+        image=object(),
+        wait=False,
+    )
+
+    assert config.run_id is None
+    assert computer.metadata() is not None
+    assert computer.metadata().run_id is not None
+    assert FakeSandbox.list_calls == []
+    assert len(FakeSandbox.create_calls) == 1
+
+
 def test_attach_or_create_by_name_reuses_matching_config(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(run_id="run-123")
@@ -2370,6 +2701,28 @@ def test_attach_or_create_by_name_reuses_matching_config(monkeypatch) -> None:
     assert computer.metadata() is not None
     assert computer.metadata().name == "desktop-1"
     assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
+    assert FakeSandbox.create_calls == []
+
+
+def test_attach_or_create_by_name_detaches_rejected_app_target(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    target = FakeSandboxObject(
+        name="desktop-1",
+        tags={APP_ID_TAG: "ap-other-app"},
+    )
+    FakeSandbox.from_name_result = target
+
+    with pytest.raises(SandboxUnavailableError, match="app-owned"):
+        ComputerSandbox.attach_or_create(
+            config=ComputerConfig(run_id="run-123"),
+            reuse="by_name",
+            name="desktop-1",
+            image=object(),
+            wait=False,
+        )
+
+    assert target.detach_calls == 1
+    assert target.terminate_wait_calls == []
     assert FakeSandbox.create_calls == []
 
 
@@ -2448,8 +2801,9 @@ def test_attach_or_create_missing_run_id_match_creates(monkeypatch) -> None:
 
 
 def test_attach_or_create_by_name_missing_creates(monkeypatch) -> None:
+    modal_exception = pytest.importorskip("modal.exception")
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    FakeSandbox.from_name_error = SandboxUnavailableError("missing")
+    FakeSandbox.from_name_error = modal_exception.NotFoundError("missing")
 
     ComputerSandbox.attach_or_create(
         config=ComputerConfig(run_id="run-123"),
@@ -2462,6 +2816,24 @@ def test_attach_or_create_by_name_missing_creates(monkeypatch) -> None:
     assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
     assert len(FakeSandbox.create_calls) == 1
     assert FakeSandbox.create_calls[0][1]["name"] == "desktop-1"
+
+
+def test_attach_or_create_by_name_propagates_non_not_found_error(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    lookup_failure = RuntimeError("modal authentication failed")
+    FakeSandbox.from_name_error = lookup_failure
+
+    with pytest.raises(RuntimeError, match="modal authentication failed") as raised:
+        ComputerSandbox.attach_or_create(
+            config=ComputerConfig(run_id="run-123"),
+            reuse="by_name",
+            name="desktop-1",
+            image=object(),
+            wait=False,
+        )
+
+    assert raised.value is lookup_failure
+    assert FakeSandbox.create_calls == []
 
 
 def test_core_does_not_reference_modal_network_file_system() -> None:
