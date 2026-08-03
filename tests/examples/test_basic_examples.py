@@ -187,6 +187,53 @@ def test_async_modal_owner_uses_one_owned_context(monkeypatch, capsys) -> None:
     assert capsys.readouterr().out.strip() == "1024 768 digest"
 
 
+def test_async_named_desktop_uses_named_acquisition(monkeypatch, capsys) -> None:
+    example = _load_example("async_named_desktop.py")
+    events: list[object] = []
+
+    class FakeScreenshots:
+        @staticmethod
+        async def full(**kwargs: object) -> object:
+            events.append(("screenshot", kwargs))
+            return SimpleNamespace(width=1024, height=768)
+
+    class FakeComputer:
+        screenshots = FakeScreenshots()
+
+        @staticmethod
+        def metadata() -> object:
+            return SimpleNamespace(sandbox_id="sb-named")
+
+    class FakeContext:
+        async def __aenter__(self) -> FakeComputer:
+            events.append("enter")
+            return FakeComputer()
+
+        async def __aexit__(self, *_args: object) -> None:
+            events.append("exit")
+
+    monkeypatch.setattr(
+        example,
+        "AsyncComputerSandbox",
+        SimpleNamespace(
+            attach_or_create=lambda **kwargs: (
+                events.append(("attach_or_create", kwargs)) or FakeContext()
+            )
+        ),
+    )
+
+    asyncio.run(example.run("desktop-one"))
+
+    assert events[0][0] == "attach_or_create"
+    assert events[0][1]["name"] == "desktop-one"
+    assert events[1:] == [
+        "enter",
+        ("screenshot", {"show_cursor": True}),
+        "exit",
+    ]
+    assert capsys.readouterr().out.strip() == "sb-named 1024 768"
+
+
 def test_volume_example_requires_verified_persistence_and_cleans_up(monkeypatch, capsys) -> None:
     example = _load_example("volume_artifacts.py")
     calls: dict[str, Any] = {}

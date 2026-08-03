@@ -29,12 +29,7 @@ from .latency import (
 )
 from .models import SandboxCleanupItem, SandboxCleanupResult, SandboxRef
 from .registry import SandboxRegistry
-from .sandbox import (
-    ComputerSandbox,
-    ConfigMismatchPolicy,
-    ReusePolicy,
-    _is_modal_availability_error,
-)
+from .sandbox import ComputerSandbox, _is_modal_availability_error
 
 
 class ComputerSandboxManager:
@@ -56,11 +51,9 @@ class ComputerSandboxManager:
     def attach_or_create(
         self,
         *,
+        name: str,
         config: ComputerConfig | None = None,
         run_id: str | None = None,
-        name: str | None = None,
-        reuse: bool | ReusePolicy = "by_run_id",
-        on_config_mismatch: ConfigMismatchPolicy = "raise",
         **kwargs: object,
     ) -> ComputerSandbox:
         return ComputerSandbox.attach_or_create(
@@ -68,8 +61,6 @@ class ComputerSandboxManager:
             config=config,
             run_id=run_id,
             name=name,
-            reuse=reuse,
-            on_config_mismatch=on_config_mismatch,
             **kwargs,
         )
 

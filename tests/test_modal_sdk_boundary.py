@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -195,11 +196,15 @@ class FakeSandbox:
     experimental_listed: ClassVar[list[FakeSandboxObject]] = []
     from_name_result: ClassVar[FakeSandboxObject | None] = None
     from_name_error: ClassVar[Exception | None] = None
+    from_name_effects: ClassVar[list[FakeSandboxObject | BaseException]] = []
     from_id_result: ClassVar[FakeSandboxObject | None] = None
+    create_errors: ClassVar[list[BaseException]] = []
 
     @classmethod
     def create(cls, *args: str, **kwargs: object) -> FakeSandboxObject:
         cls.create_calls.append((args, kwargs))
+        if cls.create_errors:
+            raise cls.create_errors.pop(0)
         name = kwargs.get("name")
         tags = kwargs.get("tags")
         cls.created = FakeSandboxObject(
@@ -228,6 +233,11 @@ class FakeSandbox:
         environment_name: str | None = None,
     ) -> FakeSandboxObject:
         cls.from_name_calls.append((app_name, name, environment_name))
+        if cls.from_name_effects:
+            effect = cls.from_name_effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
         if cls.from_name_error is not None:
             raise cls.from_name_error
         if cls.from_name_result is not None:
@@ -288,6 +298,29 @@ class FakeSandbox:
         ]
 
 
+class _NamedNotFoundError(Exception):
+    pass
+
+
+class _NamedAlreadyExistsError(Exception):
+    pass
+
+
+def _install_named_error_classifiers(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._is_modal_not_found_error",
+        lambda exc: isinstance(exc, _NamedNotFoundError),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._is_modal_already_exists_error",
+        lambda exc: isinstance(exc, _NamedAlreadyExistsError),
+    )
+    return SimpleNamespace(
+        NotFoundError=_NamedNotFoundError,
+        AlreadyExistsError=_NamedAlreadyExistsError,
+    )
+
+
 def fake_modal() -> SimpleNamespace:
     FakeProbe.calls = []
     FakeApp.lookups = []
@@ -303,7 +336,9 @@ def fake_modal() -> SimpleNamespace:
     FakeSandbox.experimental_listed = []
     FakeSandbox.from_name_result = None
     FakeSandbox.from_name_error = None
+    FakeSandbox.from_name_effects = []
     FakeSandbox.from_id_result = None
+    FakeSandbox.create_errors = []
     return SimpleNamespace(App=FakeApp, Probe=FakeProbe, Sandbox=FakeSandbox)
 
 
@@ -2566,121 +2601,134 @@ def test_registry_find_sandbox_by_run_id_ambiguous_fails(monkeypatch) -> None:
         SandboxRegistry(app_name="computer-app").find_sandbox_by_run_id("run-123")
 
 
-def test_attach_or_create_by_run_id_reuses_matching_config(monkeypatch) -> None:
+def test_attach_or_create_requires_name_and_removes_legacy_policy_parameters() -> None:
+    signature = inspect.signature(ComputerSandbox.attach_or_create)
+
+    assert signature.parameters["name"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["name"].default is inspect.Parameter.empty
+    assert "run_id" in signature.parameters
+    assert "reuse" not in signature.parameters
+    assert "on_config_mismatch" not in signature.parameters
+    assert "allow_legacy_unscoped" not in signature.parameters
+    assert "tag_profile" not in signature.parameters
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    ["reuse", "on_config_mismatch", "allow_legacy_unscoped"],
+)
+def test_attach_or_create_rejects_removed_keywords_before_modal_io(
+    monkeypatch: pytest.MonkeyPatch,
+    keyword: str,
+) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    config = ComputerConfig(
-        run_id="run-123",
-        runtime={"modal_region": "us-west"},
-    )
-    FakeSandbox.listed = [
-        FakeSandboxObject(
-            tags={
-                "computer-use": "true",
-                "computer-use.run_id": "run-123",
-                "computer-use.config_hash": compute_config_hash(config),
-                APP_ID_TAG: "ap-modal-computer-use",
-            }
+
+    with pytest.raises(ValueError, match="unsupported attach_or_create keyword"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+            **{keyword: True},
         )
-    ]
 
-    computer = ComputerSandbox.attach_or_create(config=config, image=object(), wait=False)
-
-    assert computer.metadata() is not None
-    assert computer.metadata().run_id == "run-123"
-    assert computer._requested_modal_region == "us-west"
-    assert FakeSandbox.list_calls == [
-        {
-            "app_id": "ap-modal-computer-use",
-            "tags": {
-                "computer-use.run_id": "run-123",
-                APP_ID_TAG: "ap-modal-computer-use",
-            },
-        }
-    ]
+    assert FakeApp.lookups == []
+    assert FakeSandbox.from_name_calls == []
     assert FakeSandbox.create_calls == []
 
 
-def test_attach_or_create_copies_config_before_applying_run_id_override(
-    monkeypatch,
-) -> None:
+def test_attach_or_create_rejects_warm_pool_profile_before_modal_io(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    config = ComputerConfig(run_id="original")
 
-    computer = ComputerSandbox.attach_or_create(
-        config=config,
-        run_id="requested",
-        reuse="never",
-        image=object(),
-        wait=False,
-    )
-
-    assert config.run_id == "original"
-    assert computer.metadata() is not None
-    assert computer.metadata().run_id == "requested"
-
-
-def test_attach_or_create_reuse_uses_runtime_modal_environment(monkeypatch) -> None:
-    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    config = ComputerConfig(
-        run_id="run-123",
-        runtime={"modal_environment": "production"},
-    )
-    FakeSandbox.listed = [
-        FakeSandboxObject(
-            tags={
-                "computer-use": "true",
-                "computer-use.run_id": "run-123",
-                "computer-use.config_hash": compute_config_hash(config),
-                APP_ID_TAG: "ap-modal-computer-use",
-            }
+    with pytest.raises(ValueError, match="unsupported attach_or_create keyword"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+            tag_profile="warm_pool",
         )
-    ]
 
-    computer = ComputerSandbox.attach_or_create(config=config, image=object(), wait=False)
-
-    assert computer.metadata() is not None
-    assert computer.metadata().run_id == "run-123"
-    assert FakeApp.lookups == [("modal-computer-use", False, "production")]
+    assert FakeApp.lookups == []
+    assert FakeSandbox.from_name_calls == []
     assert FakeSandbox.create_calls == []
 
 
-def test_attach_or_create_never_reuse_creates_without_listing(monkeypatch) -> None:
+def test_attach_or_create_rejects_conflicting_run_id_inputs_before_modal_io(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
 
-    ComputerSandbox.attach_or_create(
-        config=ComputerConfig(run_id="run-123"),
-        reuse="never",
+    with pytest.raises(ValueError, match="run_id"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            config=ComputerConfig(run_id="config-run"),
+            run_id="explicit-run",
+            image=object(),
+            wait=False,
+        )
+
+    assert FakeApp.lookups == []
+    assert FakeSandbox.from_name_calls == []
+    assert FakeSandbox.create_calls == []
+
+
+def test_attach_or_create_missing_named_target_creates_with_exact_name(monkeypatch) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_error = modal_exception.NotFoundError("missing")
+
+    with ComputerSandbox.attach_or_create(
+        name="desktop-1",
+        run_id="run-123",
         image=object(),
         wait=False,
-    )
+        cloud="aws",
+    ) as computer:
+        assert computer.metadata() is not None
+        assert computer.metadata().name == "desktop-1"
+        assert computer.metadata().run_id == "run-123"
 
+    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
     assert FakeSandbox.list_calls == []
     assert len(FakeSandbox.create_calls) == 1
+    assert FakeSandbox.create_calls[0][1]["name"] == "desktop-1"
+    assert FakeSandbox.create_calls[0][1]["cloud"] == "aws"
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.terminate_wait_calls == [True]
+    assert FakeSandbox.created.detach_calls == 1
 
 
-def test_attach_or_create_default_generates_run_id_without_mutating_config(
+def test_attach_or_create_create_branch_uses_readiness_timeout(monkeypatch) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_error = modal_exception.NotFoundError("missing")
+    daemon_readiness_calls: list[float] = []
+    monkeypatch.setattr(
+        ComputerSandbox,
+        "wait_until_ready",
+        lambda self, timeout=120.0, interval=1.0: daemon_readiness_calls.append(timeout),
+    )
+
+    with ComputerSandbox.attach_or_create(
+        name="desktop-1",
+        config=ComputerConfig(run_id="run-123", ingress="connect"),
+        image=object(),
+        wait=True,
+        readiness_timeout=37,
+    ):
+        pass
+
+    assert FakeSandbox.created is not None
+    assert FakeSandbox.created.wait_until_ready_calls == [37]
+    assert daemon_readiness_calls == [37]
+
+
+def test_attach_or_create_existing_named_target_attaches_exact_id_and_preserves_owner(
     monkeypatch,
 ) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    config = ComputerConfig()
-
-    computer = ComputerSandbox.attach_or_create(
-        config=config,
-        image=object(),
-        wait=False,
-    )
-
-    assert config.run_id is None
-    assert computer.metadata() is not None
-    assert computer.metadata().run_id is not None
-    assert FakeSandbox.list_calls == []
-    assert len(FakeSandbox.create_calls) == 1
-
-
-def test_attach_or_create_by_name_reuses_matching_config(monkeypatch) -> None:
-    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    config = ComputerConfig(run_id="run-123")
-    FakeSandbox.from_name_result = FakeSandboxObject(
+    config = ComputerConfig(run_id="run-123", ingress="connect")
+    target = FakeSandboxObject(
+        sandbox_id="sb-existing",
         name="desktop-1",
         tags={
             "computer-use": "true",
@@ -2689,34 +2737,69 @@ def test_attach_or_create_by_name_reuses_matching_config(monkeypatch) -> None:
             APP_ID_TAG: "ap-modal-computer-use",
         },
     )
+    FakeSandbox.from_name_result = target
+
+    with ComputerSandbox.attach_or_create(
+        name="desktop-1",
+        config=config,
+        image=object(),
+        wait=False,
+    ) as computer:
+        assert computer.metadata() is not None
+        assert computer.metadata().sandbox_id == "sb-existing"
+
+    assert FakeSandbox.create_calls == []
+    assert target.terminate_wait_calls == []
+    assert target.detach_calls == 1
+
+
+def test_attach_or_create_omitted_run_id_adopts_existing_tag_before_hash(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    requested = ComputerConfig(ingress="connect")
+    existing_config = requested.model_copy(update={"run_id": "existing-run"})
+    target = FakeSandboxObject(
+        sandbox_id="sb-existing",
+        name="desktop-1",
+        tags={
+            "computer-use.run_id": "existing-run",
+            "computer-use.config_hash": compute_config_hash(existing_config),
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
+    )
+    FakeSandbox.from_name_result = target
 
     computer = ComputerSandbox.attach_or_create(
-        config=config,
-        reuse="by_name",
         name="desktop-1",
+        config=requested,
         image=object(),
         wait=False,
     )
 
+    assert requested.run_id is None
     assert computer.metadata() is not None
-    assert computer.metadata().name == "desktop-1"
-    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
-    assert FakeSandbox.create_calls == []
+    assert computer.metadata().run_id == "existing-run"
+    assert computer.metadata().sandbox_id == "sb-existing"
+    computer.detach()
 
 
-def test_attach_or_create_by_name_detaches_rejected_app_target(monkeypatch) -> None:
+def test_attach_or_create_explicit_run_id_conflict_with_existing_target_fails_closed(
+    monkeypatch,
+) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     target = FakeSandboxObject(
         name="desktop-1",
-        tags={APP_ID_TAG: "ap-other-app"},
+        tags={
+            "computer-use.run_id": "existing-run",
+            "computer-use.config_hash": "a" * 16,
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
     )
     FakeSandbox.from_name_result = target
 
-    with pytest.raises(SandboxUnavailableError, match="app-owned"):
+    with pytest.raises(ConfigConflictError, match="run_id"):
         ComputerSandbox.attach_or_create(
-            config=ComputerConfig(run_id="run-123"),
-            reuse="by_name",
             name="desktop-1",
+            run_id="requested-run",
             image=object(),
             wait=False,
         )
@@ -2726,114 +2809,239 @@ def test_attach_or_create_by_name_detaches_rejected_app_target(monkeypatch) -> N
     assert FakeSandbox.create_calls == []
 
 
-def test_attach_or_create_config_hash_mismatch_raises_by_default(monkeypatch) -> None:
+def test_attach_or_create_existing_target_requires_app_tag(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    target = FakeSandboxObject(
+        name="desktop-1",
+        tags={
+            "computer-use.run_id": "run-123",
+            "computer-use.config_hash": "a" * 16,
+            APP_ID_TAG: "ap-other-app",
+        },
+    )
+    FakeSandbox.from_name_result = target
+
+    with pytest.raises(SandboxUnavailableError, match="app-owned"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+        )
+
+    assert target.detach_calls == 1
+    assert target.terminate_wait_calls == []
+
+
+def test_attach_or_create_existing_target_requires_config_hash(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    target = FakeSandboxObject(
+        name="desktop-1",
+        tags={
+            "computer-use.run_id": "run-123",
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
+    )
+    FakeSandbox.from_name_result = target
+
+    with pytest.raises(ConfigConflictError, match="config_hash"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+        )
+
+    assert target.detach_calls == 1
+    assert target.terminate_wait_calls == []
+
+
+def test_attach_or_create_existing_target_requires_run_id_tag(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     config = ComputerConfig(run_id="run-123")
-    FakeSandbox.listed = [
-        FakeSandboxObject(
-            tags={
-                "computer-use": "true",
-                "computer-use.run_id": "run-123",
-                "computer-use.config_hash": "different",
-                APP_ID_TAG: "ap-modal-computer-use",
-            }
-        )
-    ]
-
-    try:
-        ComputerSandbox.attach_or_create(config=config, image=object(), wait=False)
-    except ConfigConflictError as exc:
-        assert exc.requested_hash == compute_config_hash(config)
-        assert exc.existing_hash == "different"
-        assert exc.sandbox_id == "sb-123"
-    else:
-        raise AssertionError("expected config mismatch to fail")
-
-
-def test_attach_or_create_config_hash_mismatch_can_reuse_explicitly(monkeypatch) -> None:
-    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    FakeSandbox.listed = [
-        FakeSandboxObject(
-            tags={
-                "computer-use": "true",
-                "computer-use.run_id": "run-123",
-                "computer-use.config_hash": "different",
-                APP_ID_TAG: "ap-modal-computer-use",
-            }
-        )
-    ]
-
-    computer = ComputerSandbox.attach_or_create(
-        config=ComputerConfig(
-            run_id="run-123",
-            runtime={"modal_region": "us-west"},
-        ),
-        on_config_mismatch="reuse",
-        image=object(),
-        wait=False,
+    target = FakeSandboxObject(
+        name="desktop-1",
+        tags={
+            "computer-use.config_hash": compute_config_hash(config),
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
     )
+    FakeSandbox.from_name_result = target
 
-    assert computer.metadata() is not None
-    assert computer.metadata().config_hash == "different"
-    assert computer._requested_modal_region is None
+    with pytest.raises(ConfigConflictError, match="run_id"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            config=config,
+            image=object(),
+            wait=False,
+        )
+
+    assert target.detach_calls == 1
+    assert target.terminate_wait_calls == []
+
+
+def test_attach_or_create_existing_target_rejects_config_hash_mismatch(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123")
+    target = FakeSandboxObject(
+        name="desktop-1",
+        tags={
+            "computer-use.run_id": "run-123",
+            "computer-use.config_hash": "different-hash",
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
+    )
+    FakeSandbox.from_name_result = target
+
+    with pytest.raises(ConfigConflictError, match="config_hash"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            config=config,
+            image=object(),
+            wait=False,
+        )
+
+    assert target.detach_calls == 1
+    assert target.terminate_wait_calls == []
     assert FakeSandbox.create_calls == []
 
 
-def test_attach_or_create_missing_run_id_match_creates(monkeypatch) -> None:
-    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-
-    ComputerSandbox.attach_or_create(
-        config=ComputerConfig(run_id="run-123"),
-        image=object(),
-        wait=False,
-    )
-
-    assert FakeSandbox.list_calls == [
-        {
-            "app_id": "ap-modal-computer-use",
-            "tags": {
-                "computer-use.run_id": "run-123",
-                APP_ID_TAG: "ap-modal-computer-use",
-            },
-        }
-    ]
-    assert len(FakeSandbox.create_calls) == 1
-
-
-def test_attach_or_create_by_name_missing_creates(monkeypatch) -> None:
-    modal_exception = pytest.importorskip("modal.exception")
-    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
-    FakeSandbox.from_name_error = modal_exception.NotFoundError("missing")
-
-    ComputerSandbox.attach_or_create(
-        config=ComputerConfig(run_id="run-123"),
-        reuse="by_name",
-        name="desktop-1",
-        image=object(),
-        wait=False,
-    )
-
-    assert FakeSandbox.from_name_calls == [("modal-computer-use", "desktop-1", None)]
-    assert len(FakeSandbox.create_calls) == 1
-    assert FakeSandbox.create_calls[0][1]["name"] == "desktop-1"
-
-
-def test_attach_or_create_by_name_propagates_non_not_found_error(monkeypatch) -> None:
+def test_attach_or_create_only_typed_not_found_creates(monkeypatch) -> None:
     monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
     lookup_failure = RuntimeError("modal authentication failed")
     FakeSandbox.from_name_error = lookup_failure
 
     with pytest.raises(RuntimeError, match="modal authentication failed") as raised:
         ComputerSandbox.attach_or_create(
-            config=ComputerConfig(run_id="run-123"),
-            reuse="by_name",
             name="desktop-1",
+            run_id="run-123",
             image=object(),
             wait=False,
         )
 
     assert raised.value is lookup_failure
     assert FakeSandbox.create_calls == []
+
+
+def test_attach_or_create_propagates_non_already_exists_create_error(monkeypatch) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_error = modal_exception.NotFoundError("missing")
+    create_failure = RuntimeError("modal create failed")
+    FakeSandbox.create_errors = [create_failure]
+
+    with pytest.raises(RuntimeError, match="modal create failed") as raised:
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+        )
+
+    assert raised.value is create_failure
+    assert len(FakeSandbox.create_calls) == 1
+
+
+def test_attach_or_create_already_exists_recovers_named_winner(monkeypatch) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123", ingress="connect")
+    winner = FakeSandboxObject(
+        sandbox_id="sb-winner",
+        name="desktop-1",
+        tags={
+            "computer-use.run_id": "run-123",
+            "computer-use.config_hash": compute_config_hash(config),
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
+    )
+    FakeSandbox.from_name_effects = [
+        modal_exception.NotFoundError("missing"),
+        winner,
+    ]
+    FakeSandbox.create_errors = [modal_exception.AlreadyExistsError("lost race")]
+
+    with ComputerSandbox.attach_or_create(
+        name="desktop-1",
+        config=config,
+        image=object(),
+        wait=False,
+    ) as computer:
+        assert computer.metadata() is not None
+        assert computer.metadata().sandbox_id == "sb-winner"
+
+    assert len(FakeSandbox.from_name_calls) == 2
+    assert len(FakeSandbox.create_calls) == 1
+    assert winner.terminate_wait_calls == []
+    assert winner.detach_calls == 1
+
+
+def test_attach_or_create_exhausts_three_disappearing_winner_cycles(monkeypatch) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    FakeSandbox.from_name_error = modal_exception.NotFoundError("missing")
+    FakeSandbox.create_errors = [
+        modal_exception.AlreadyExistsError("lost race 1"),
+        modal_exception.AlreadyExistsError("lost race 2"),
+        modal_exception.AlreadyExistsError("lost race 3"),
+    ]
+
+    with pytest.raises(SandboxUnavailableError, match="desktop-1"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+        )
+
+    assert len(FakeSandbox.from_name_calls) == 4
+    assert len(FakeSandbox.create_calls) == 3
+
+
+def test_attach_or_create_validates_create_only_inputs(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+
+    with pytest.raises(ConfigConflictError, match="security-owned fields"):
+        ComputerSandbox.attach_or_create(
+            name="desktop-1",
+            run_id="run-123",
+            image=object(),
+            wait=False,
+            env={"UNSAFE": "override"},
+        )
+
+    assert FakeSandbox.create_calls == []
+
+
+def test_attach_or_create_reused_target_uses_readiness_timeout(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123", ingress="connect")
+    target = FakeSandboxObject(
+        name="desktop-1",
+        tags={
+            "computer-use.run_id": "run-123",
+            "computer-use.config_hash": compute_config_hash(config),
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
+    )
+    FakeSandbox.from_name_result = target
+    readiness_calls: list[float] = []
+    monkeypatch.setattr(
+        ComputerSandbox,
+        "wait_until_ready",
+        lambda self, timeout=120.0, interval=1.0: readiness_calls.append(timeout),
+    )
+
+    computer = ComputerSandbox.attach_or_create(
+        name="desktop-1",
+        config=config,
+        image=object(),
+        wait=True,
+        readiness_timeout=37,
+    )
+
+    assert readiness_calls == [37]
+    computer.detach()
 
 
 def test_core_does_not_reference_modal_network_file_system() -> None:

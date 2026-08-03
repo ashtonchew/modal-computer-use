@@ -182,15 +182,17 @@ def test_root_readme_repository_links_are_absolute_https() -> None:
     )
 
 
-def test_onboarding_docs_use_canonical_setup_guidance() -> None:
+def test_onboarding_docs_use_canonical_install_and_setup_guidance() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "Python 3.12 or later" in readme
     assert "quickstart.py" in readme
     assert "uv run python quickstart.py" in readme
+    assert 'uv add "modal-computer-use[modal]"' in readme
+    assert "git+https://github.com/ashtonchew/modal-computer-use.git" not in readme
+    assert "uv run modal setup" not in readme
 
     onboarding_docs = [
-        ROOT / "README.md",
         DOCS / "modal-deployment.md",
         DOCS / "benchmarking.md",
     ]
@@ -206,7 +208,6 @@ def test_prepared_source_does_not_claim_an_unpublished_v1_1_release() -> None:
     specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
     assert "git@v1.1.0" not in readme
-    assert "has not yet been tagged" in readme
     assert "## 1.1.0 -" not in changelog
     assert "no `v1.1.0` tag or matching GitHub Release exists" in changelog
     assert "prepared, unreleased `1.1.0` source state" in specification

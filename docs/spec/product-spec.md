@@ -48,7 +48,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 
 | Area | v8 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. The prepared source is unreleased: no `v1.1.0` tag or matching GitHub Release exists. |
+| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. The prepared source is unreleased: no `v1.1.0` tag, matching GitHub Release, or PyPI distribution exists. |
 | Modal SDK | The compatible line remains `modal~=1.5.2`; v8 updates the lock from 1.5.2 to the latest audited 1.5.x patch, 1.5.3. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -213,19 +213,21 @@ Supported construction paths are:
 - `ComputerSandbox.local(...)` for an existing local daemon;
 - `ComputerSandbox.create(...)` for a new SDK-owned Modal Sandbox;
 - `ComputerSandbox.attach(...)` for an existing Sandbox;
-- `ComputerSandbox.attach_or_create(...)` for policy-bound reuse.
+- `ComputerSandbox.attach_or_create(name=...)` for one live named Sandbox.
 
-`run_id` is the canonical Sandbox-lifetime identifier. `request_id` is a deprecated input alias.
+`run_id` is the canonical Sandbox-lifetime correlation tag. `request_id` is a deprecated input alias.
 The creator owns termination. Exiting a created context terminates and detaches its Modal Sandbox.
-Exiting an attached or reused context only detaches and closes its daemon connection. Local and
+Exiting an attached or existing-target context only detaches and closes its daemon connection. Local and
 direct-URL contexts close connections only. `detach()` transfers a created Sandbox to
 caller-managed ownership without claiming the remote Sandbox was terminated. A failed creation
 cleans up any allocated Sandbox; a failed attachment never terminates the existing target.
 
 `attach()` accepts exactly one of sandbox ID, name, run ID, or direct daemon URL. Direct tokens are
-valid only with a direct URL. `attach_or_create()` creates after a lookup only when Modal reports
-that the target is absent; ambiguous matches and operational failures never trigger allocation.
-Construction copies caller configuration before generating or overriding a run ID.
+valid only with a direct URL. `attach_or_create(name=...)` requires a Modal Sandbox name and uses
+that app-scoped live name as its only allocation key. Run IDs remain correlation tags. Only a
+typed Modal not-found result permits creation. A named creation conflict performs a bounded lookup
+of the winner; operational failures never trigger another allocation. Construction copies caller
+configuration before adopting, generating, or validating a run ID.
 
 `AsyncComputerSandbox` is the stable native-async Modal lifecycle surface:
 
@@ -236,17 +238,18 @@ async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
     await computer.mouse.click(320, 240)
 ```
 
-`create()` and `attach()` return lazy, one-shot async context managers. They perform no Modal work
-until entry and yield only after the Sandbox and daemon are ready. Async attach accepts exactly one
-of sandbox ID, name, or run ID. Direct URLs use `AsyncDaemonClient`; the first async lifecycle
-contract does not include `attach_or_create()` or `wait=False`.
+`create()`, `attach()`, and `attach_or_create(name=...)` return lazy, one-shot async context
+managers. They perform no Modal work until entry and yield only after the Sandbox and daemon are
+ready. Async attach accepts exactly one of sandbox ID, name, or run ID. Direct URLs use
+`AsyncDaemonClient`; async orchestration does not include `wait=False`.
 
-Async creation and attachment use Modal-native `.aio` operations without worker-thread bridges.
-They share the synchronous path's copied configuration, image choice, tags, authorization,
-networking, and security-owned creation plan. Exiting a created context terminates and detaches its
-owned target. Exiting an attached context detaches without termination. Explicit async detachment
-transfers ownership. Failed or cancelled creation completes cleanup for any allocated resource
-before the primary error escapes. Importing the core package does not require Modal.
+Async creation, attachment, and named acquisition use Modal-native `.aio` operations without
+worker-thread bridges. They share the synchronous path's copied configuration, image choice, tags,
+authorization, networking, compatibility checks, and security-owned creation plan. Exiting a
+created context terminates and detaches its owned target. Exiting an attached or existing-target context
+detaches without termination. Explicit async detachment transfers ownership. Failed or cancelled
+creation completes cleanup for any allocated resource before the primary error escapes. Importing
+the core package does not require Modal.
 
 ### 5.2 Namespaces
 
@@ -724,7 +727,7 @@ Primary references:
 ## 17. Versioning and compatibility
 
 - Package, daemon, and checked-in OpenAPI versions are `1.1.0`. That source version remains
-  unreleased until the matching tag and GitHub Release exist.
+  unreleased until the matching tag, GitHub Release, and PyPI distribution exist.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
   core.

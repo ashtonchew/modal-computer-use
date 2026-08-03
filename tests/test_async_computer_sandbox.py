@@ -17,8 +17,12 @@ from modal_computer_use import (
     ComputerConfig,
     SessionStartupTiming,
 )
-from modal_computer_use.errors import SandboxAmbiguousError, SandboxUnavailableError
-from modal_computer_use.state import APP_ID_TAG
+from modal_computer_use.errors import (
+    ConfigConflictError,
+    SandboxAmbiguousError,
+    SandboxUnavailableError,
+)
+from modal_computer_use.state import APP_ID_TAG, compute_config_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -167,6 +171,10 @@ class _FakeModalRuntime:
         )
         self.listed: list[_FakeSandbox] = []
         self.create_hook: Callable[..., Awaitable[_FakeSandbox]] | None = None
+        self.create_effects: list[_FakeSandbox | BaseException] = []
+        self.from_name_effects: list[_FakeSandbox | BaseException] = []
+        self.create_kwargs: list[dict[str, object]] = []
+        self.from_name_calls: list[tuple[str, str, str | None]] = []
         self.App = SimpleNamespace(
             lookup=_AioCall("App.lookup", self._lookup_app, self.calls)
         )
@@ -183,9 +191,18 @@ class _FakeModalRuntime:
         assert "create_if_missing" in kwargs
         return self.app
 
-    async def _create(self, *_args: str, **_kwargs: object) -> _FakeSandbox:
+    async def _create(self, *_args: str, **kwargs: object) -> _FakeSandbox:
+        self.create_kwargs.append(dict(kwargs))
         if self.create_hook is not None:
             return await self.create_hook()
+        if self.create_effects:
+            effect = self.create_effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
+        self.created.name = (
+            kwargs.get("name") if isinstance(kwargs.get("name"), str) else None
+        )
         return self.created
 
     async def _from_id(self, sandbox_id: str) -> _FakeSandbox:
@@ -196,9 +213,17 @@ class _FakeModalRuntime:
         self,
         app_name: str,
         name: str,
-        **_kwargs: object,
+        **kwargs: object,
     ) -> _FakeSandbox:
         assert app_name == "modal-computer-use"
+        self.from_name_calls.append(
+            (app_name, name, kwargs.get("environment_name"))
+        )
+        if self.from_name_effects:
+            effect = self.from_name_effects.pop(0)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
         assert name == self.by_name.name
         return self.by_name
 
@@ -222,9 +247,415 @@ def _connect_config() -> ComputerConfig:
     return ComputerConfig(run_id="run-async", ingress="connect", expose_vnc="off")
 
 
+def _match_named_target(
+    target: _FakeSandbox,
+    config: ComputerConfig,
+    *,
+    run_id: str | None = None,
+) -> None:
+    effective_run_id = config.run_id if run_id is None else run_id
+    target.tags = {
+        "computer-use": "true",
+        APP_ID_TAG: "ap-async",
+        "computer-use.config_hash": compute_config_hash(config),
+        "computer-use.created_at": "2026-08-02T00:00:00Z",
+    }
+    if effective_run_id is not None:
+        target.tags["computer-use.run_id"] = effective_run_id
+
+
+class _NamedNotFoundError(Exception):
+    pass
+
+
+class _NamedAlreadyExistsError(Exception):
+    pass
+
+
+def _install_named_error_classifiers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._is_modal_not_found_error",
+        lambda exc: isinstance(exc, _NamedNotFoundError),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._is_modal_already_exists_error",
+        lambda exc: isinstance(exc, _NamedAlreadyExistsError),
+    )
+    return SimpleNamespace(
+        NotFoundError=_NamedNotFoundError,
+        AlreadyExistsError=_NamedAlreadyExistsError,
+    )
+
+
 def _assert_modal_calls_are_native(calls: list[str]) -> None:
     assert calls
     assert not [call for call in calls if call.endswith(".sync")]
+
+
+def test_async_attach_or_create_requires_name_and_removes_legacy_policy_parameters() -> None:
+    signature = inspect.signature(AsyncComputerSandbox.attach_or_create)
+
+    assert signature.parameters["name"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["name"].default is inspect.Parameter.empty
+    assert "run_id" in signature.parameters
+    assert "reuse" not in signature.parameters
+    assert "on_config_mismatch" not in signature.parameters
+    assert "allow_legacy_unscoped" not in signature.parameters
+    assert "readiness_timeout" not in signature.parameters
+    assert "tag_profile" not in signature.parameters
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "reuse",
+        "on_config_mismatch",
+        "allow_legacy_unscoped",
+        "wait",
+        "readiness_timeout",
+    ],
+)
+@pytest.mark.asyncio
+async def test_async_attach_or_create_rejects_removed_keywords_before_modal_io(
+    monkeypatch: pytest.MonkeyPatch,
+    keyword: str,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    with pytest.raises(ValueError, match="unsupported attach_or_create keyword"):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one",
+            run_id="run-async",
+            image=object(),
+            **{keyword: True},
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_rejects_warm_pool_profile_before_modal_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    with pytest.raises(ValueError, match="unsupported attach_or_create keyword"):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one",
+            run_id="run-async",
+            image=object(),
+            tag_profile="warm_pool",
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_rejects_conflicting_run_ids_before_modal_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    with pytest.raises(ValueError, match="run_id"):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one",
+            config=ComputerConfig(run_id="config-run"),
+            run_id="explicit-run",
+            image=object(),
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_missing_target_is_lazy_native_and_owned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    runtime = _install_runtime(monkeypatch)
+    runtime.from_name_effects = [modal_exception.NotFoundError("missing")]
+    readiness_timeouts: list[float] = []
+
+    async def ready(_client: AsyncDaemonClient, *, timeout: float) -> None:
+        readiness_timeouts.append(timeout)
+
+    async def prohibited_to_thread(*_args: object, **_kwargs: object) -> Any:
+        raise AssertionError("async named acquisition must not use asyncio.to_thread")
+
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+    monkeypatch.setattr(asyncio, "to_thread", prohibited_to_thread)
+    context = AsyncComputerSandbox.attach_or_create(
+        name="desktop-one",
+        config=ComputerConfig(
+            ingress="connect",
+            expose_vnc="off",
+            runtime={"readiness_timeout_seconds": 37},
+        ),
+        run_id="run-async",
+        image=object(),
+        cloud="aws",
+    )
+
+    assert not inspect.isawaitable(context)
+    assert runtime.calls == []
+    async with context as computer:
+        assert computer.metadata().name == "desktop-one"
+        assert computer.metadata().sandbox_id == "sb-created"
+        assert computer.metadata().run_id == "run-async"
+
+    assert runtime.from_name_calls == [("modal-computer-use", "desktop-one", None)]
+    assert len(runtime.create_kwargs) == 1
+    assert runtime.create_kwargs[0]["name"] == "desktop-one"
+    assert runtime.create_kwargs[0]["cloud"] == "aws"
+    assert readiness_timeouts == [37]
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 1
+    with pytest.raises(RuntimeError, match="only be entered once"):
+        await context.__aenter__()
+    _assert_modal_calls_are_native(runtime.calls)
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_existing_target_adopts_run_id_and_preserves_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+    requested = ComputerConfig(ingress="connect", expose_vnc="off")
+    requested.runtime.readiness_timeout_seconds = 41
+    existing = requested.model_copy(update={"run_id": "existing-run"})
+    _match_named_target(runtime.by_name, existing, run_id="existing-run")
+    readiness_timeouts: list[float] = []
+
+    async def ready(_client: AsyncDaemonClient, *, timeout: float) -> None:
+        readiness_timeouts.append(timeout)
+
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+
+    async with AsyncComputerSandbox.attach_or_create(
+        name="desktop-one",
+        config=requested,
+        image=object(),
+    ) as computer:
+        assert computer.metadata().sandbox_id == "sb-by-name"
+        assert computer.metadata().run_id == "existing-run"
+
+    assert requested.run_id is None
+    assert runtime.create_kwargs == []
+    assert readiness_timeouts == [41]
+    assert runtime.by_name.terminate_calls == []
+    assert runtime.by_name.detach_calls == 1
+    _assert_modal_calls_are_native(runtime.calls)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_type", "message"),
+    [
+        ("run_id", ConfigConflictError, "run_id"),
+        ("missing_run_id", ConfigConflictError, "run_id"),
+        ("app_tag", SandboxUnavailableError, "app-owned"),
+        ("config_hash", ConfigConflictError, "config_hash"),
+        ("hash_mismatch", ConfigConflictError, "config_hash"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_async_attach_or_create_existing_target_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+    config = _connect_config()
+    _match_named_target(runtime.by_name, config)
+    if mutation == "run_id":
+        runtime.by_name.tags["computer-use.run_id"] = "another-run"
+    elif mutation == "missing_run_id":
+        runtime.by_name.tags.pop("computer-use.run_id")
+    elif mutation == "app_tag":
+        runtime.by_name.tags[APP_ID_TAG] = "ap-another"
+    elif mutation == "config_hash":
+        runtime.by_name.tags.pop("computer-use.config_hash")
+    else:
+        runtime.by_name.tags["computer-use.config_hash"] = "different-hash"
+
+    with pytest.raises(error_type, match=message):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one",
+            config=config,
+            image=object(),
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.create_kwargs == []
+    assert runtime.by_name.terminate_calls == []
+    assert runtime.by_name.detach_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_only_typed_not_found_creates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+    lookup_failure = RuntimeError("modal authentication failed")
+    runtime.from_name_effects = [lookup_failure]
+
+    with pytest.raises(RuntimeError, match="modal authentication failed") as raised:
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one", run_id="run-async", image=object()
+        ):
+            raise AssertionError("unreachable")
+
+    assert raised.value is lookup_failure
+    assert runtime.create_kwargs == []
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_propagates_other_create_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    runtime = _install_runtime(monkeypatch)
+    runtime.from_name_effects = [modal_exception.NotFoundError("missing")]
+    create_failure = RuntimeError("modal create failed")
+    runtime.create_effects = [create_failure]
+
+    with pytest.raises(RuntimeError, match="modal create failed") as raised:
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one", run_id="run-async", image=object()
+        ):
+            raise AssertionError("unreachable")
+
+    assert raised.value is create_failure
+    assert len(runtime.create_kwargs) == 1
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_recovers_typed_already_exists_winner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    runtime = _install_runtime(monkeypatch)
+    config = _connect_config()
+    winner = _FakeSandbox(runtime.calls, sandbox_id="sb-winner", name="desktop-one")
+    _match_named_target(winner, config)
+    runtime.from_name_effects = [
+        modal_exception.NotFoundError("missing"),
+        winner,
+    ]
+    runtime.create_effects = [modal_exception.AlreadyExistsError("lost race")]
+
+    async def ready(_client: AsyncDaemonClient, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+    async with AsyncComputerSandbox.attach_or_create(
+        name="desktop-one", config=config, image=object()
+    ) as computer:
+        assert computer.metadata().sandbox_id == "sb-winner"
+
+    assert len(runtime.from_name_calls) == 2
+    assert len(runtime.create_kwargs) == 1
+    assert winner.terminate_calls == []
+    assert winner.detach_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_exhausts_three_disappearing_winner_cycles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    runtime = _install_runtime(monkeypatch)
+    runtime.from_name_effects = [modal_exception.NotFoundError("missing") for _ in range(4)]
+    runtime.create_effects = [
+        modal_exception.AlreadyExistsError(f"lost race {attempt}") for attempt in range(3)
+    ]
+
+    with pytest.raises(SandboxUnavailableError, match="desktop-one"):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one", run_id="run-async", image=object()
+        ):
+            raise AssertionError("unreachable")
+
+    assert len(runtime.from_name_calls) == 4
+    assert len(runtime.create_kwargs) == 3
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_validates_create_only_inputs_before_modal_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    with pytest.raises(ConfigConflictError, match="security-owned fields"):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one",
+            run_id="run-async",
+            image=object(),
+            env={"UNSAFE": "override"},
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_failure_cleans_created_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    runtime = _install_runtime(monkeypatch)
+    runtime.from_name_effects = [modal_exception.NotFoundError("missing")]
+    runtime.created.connect_token_error = RuntimeError("credential creation failed")
+
+    with pytest.raises(RuntimeError, match="credential creation failed"):
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one", config=_connect_config(), image=object()
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_async_attach_or_create_cancellation_during_creation_cleans_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_exception = _install_named_error_classifiers(monkeypatch)
+    runtime = _install_runtime(monkeypatch)
+    runtime.from_name_effects = [modal_exception.NotFoundError("missing")]
+    allocation_started = asyncio.Event()
+    allow_allocation = asyncio.Event()
+
+    async def allocate() -> _FakeSandbox:
+        allocation_started.set()
+        await allow_allocation.wait()
+        return runtime.created
+
+    runtime.create_hook = allocate
+
+    async def enter() -> None:
+        async with AsyncComputerSandbox.attach_or_create(
+            name="desktop-one", config=_connect_config(), image=object()
+        ):
+            raise AssertionError("unreachable")
+
+    task = asyncio.create_task(enter())
+    await allocation_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    allow_allocation.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=2)
+
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 1
 
 
 @pytest.mark.asyncio

@@ -362,7 +362,7 @@ adds `zoom`. Older versions reject newer actions instead of accepting them silen
 
 ## Modal orchestration signatures
 
-Native async creation and attachment are lazy, one-shot context managers:
+Native async creation, attachment, and named acquisition are lazy, one-shot context managers:
 
 ```python
 async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
@@ -370,12 +370,17 @@ async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
 
 async with AsyncComputerSandbox.attach(sandbox_id="sb-...") as computer:
     await computer.screenshots.full()
+
+async with AsyncComputerSandbox.attach_or_create(
+    name="support-desktop",
+    config=ComputerConfig(),
+) as computer:
+    await computer.screenshots.full()
 ```
 
-Modal work begins on entry, and both contexts are ready when they yield. Async attachment accepts
+Modal work begins on entry, and every context is ready when it yields. Async attachment accepts
 exactly one Modal selector: `sandbox_id`, `name`, or `run_id`. Direct daemon URLs belong to
-`AsyncDaemonClient`. The first async lifecycle slice intentionally omits `attach_or_create()` and
-`wait=False`.
+`AsyncDaemonClient`. Async orchestration does not expose `wait=False`.
 
 Exiting an async created context terminates, detaches, and closes its owned Sandbox. Exiting an
 async attached context detaches and closes without termination. `await computer.detach()`
@@ -384,8 +389,8 @@ stops either an owned or attached target. Failed or cancelled creation reclaims 
 Sandbox before the error escapes. Core imports remain usable without Modal installed; entering a
 provisioning context requires the Modal extra.
 
-See the executable [`async_modal_owner.py`](../examples/async_modal_owner.py) example for the
-created-owner path.
+See [`async_modal_owner.py`](../examples/async_modal_owner.py) for unconditional ownership and
+[`async_named_desktop.py`](../examples/async_named_desktop.py) for named acquisition.
 
 The SDK supports four explicit attach paths:
 
@@ -412,41 +417,41 @@ and run-ID attachment verify the requested app before returning a client. Set
 `allow_legacy_unscoped=True` only while migrating an untagged Sandbox that Modal already resolves
 inside that app. A conflicting app tag always fails.
 
-`run_id` is the canonical sandbox lifetime identifier. `request_id` is only a deprecated
-configuration alias for compatibility boundaries.
+`run_id` is the canonical Sandbox-lifetime correlation identifier. It is a tag, not an allocation
+lock. `request_id` is only a deprecated configuration alias for compatibility boundaries.
 
 `ComputerSandbox.create(wait=True)` waits for both Modal's sandbox readiness probe, when the
 installed Modal SDK exposes it, and the daemon `/readyz` endpoint. `wait=False` returns after the
 connect token is created and does not poll daemon desktop readiness.
 
-`ComputerSandbox.attach_or_create(...)` exposes resumable run-scoped attachment:
+`ComputerSandbox.attach_or_create(name=...)` acquires one live named Sandbox:
 
 ```python
 computer = ComputerSandbox.attach_or_create(
-    run_id="support-ticket-123",
+    name="support-desktop",
     config=ComputerConfig(),
-    reuse="by_run_id",  # "by_run_id", "by_name", or "never"
 )
 ```
 
-For backward compatibility, `reuse=True` maps to `"by_run_id"` and `reuse=False` maps to
-`"never"`. `reuse="by_name"` requires `name=...`. Missing run ID or name matches create a new
-sandbox when creation arguments are supplied. Ambiguous run ID matches raise a structured
-`SandboxAmbiguousError` instead of selecting an arbitrary sandbox.
+The required name is Modal's app-scoped live allocation key. The SDK first resolves the name. A
+genuine `NotFoundError` permits creation with that exact name. If a competing creator wins, Modal
+returns `AlreadyExistsError` and the SDK performs a bounded lookup of the winner. Run-ID tags are
+available for correlation and `attach(run_id=...)`, but never arbitrate creation.
 
-Only a genuine Modal not-found result permits that creation fallback. Authentication failures,
-service failures, and other lookup errors propagate without creating a second Sandbox. The SDK
-deep-copies `ComputerConfig` before applying `run_id` or generating a new one.
+Existing targets must carry the expected app and config-hash tags. If the caller omitted a run ID,
+the target's tagged run ID is adopted before the hash check. Explicit run-ID conflicts, missing
+run IDs, missing hashes, and hash mismatches fail closed with `ConfigConflictError`. Use
+`attach(name=...)` for an intentional connection to a legacy or incompatible target.
 
-When reusing an existing sandbox and the sandbox has a `computer-use.config_hash` tag, the SDK
-compares it with `compute_config_hash(config)`. Mismatches fail closed with `ConfigConflictError`
-by default. Pass `on_config_mismatch="reuse"` only when the caller intentionally accepts the
-existing sandbox configuration.
+Creation arguments such as `image`, VNC mode, tags, secrets, volumes, owner, and extra Modal
+Sandbox options are validated before acquisition but apply only when this call creates the target.
+They do not mutate an existing target or participate in its compatibility check. Named acquisition
+uses the default tag profile because its run-ID and config-hash tags are part of that check.
 
 `attach(...)` is non-blocking by default because callers may attach only to inspect metadata or
-terminate a sandbox. Pass `wait=True` to poll `/readyz` after attaching. `attach_or_create(...)`
-defaults to `wait=True` for both reused and newly-created sandboxes, so resumable workflows get a
-desktop-ready handle unless they explicitly pass `wait=False`.
+terminate a Sandbox. Pass `wait=True` to poll `/readyz` after attaching. Synchronous
+`attach_or_create(...)` defaults to `wait=True` for both branches. Native async named acquisition
+is always ready on entry.
 If readiness times out, `attach(...)` closes the client it created but does not terminate the
 existing target. This cleanup applies equally to Modal handles and direct `base_url` attachments.
 The readiness timeout remains the primary error if client cleanup also fails; only the cleanup
@@ -457,7 +462,7 @@ the lifecycle owner should do that.
 Context cleanup reflects ownership:
 
 - `create()` owns its Modal Sandbox, so context exit terminates, detaches, and closes the client;
-- Modal-backed `attach()` and reused `attach_or_create()` handles detach and close without
+- Modal-backed `attach()` and existing-target `attach_or_create()` handles detach and close without
   terminating the remote Sandbox;
 - `local()` and direct `base_url` attachments close only their daemon connection;
 - an explicit `detach()` transfers a created Sandbox to caller-managed ownership and prevents a
