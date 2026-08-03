@@ -175,13 +175,22 @@ def test_strict_downstream_mypy_accepts_root_imports(tmp_path: Path) -> None:
     consumer.write_text(
         """from typing import assert_type
 
-from modal_computer_use import ComputerConfig, Point, RuntimeConfig, __version__
+from modal_computer_use import (
+    AsyncDaemonClient,
+    ComputerConfig,
+    Point,
+    RuntimeConfig,
+    __version__,
+)
 
 config = ComputerConfig()
 assert_type(config, ComputerConfig)
 assert_type(config.runtime, RuntimeConfig)
 assert_type(Point(x=1, y=2).x, int)
 assert_type(__version__, str)
+
+async def use_async_client(client: AsyncDaemonClient) -> None:
+    assert_type(await client.mouse.position(), Point)
 """,
         encoding="utf-8",
     )

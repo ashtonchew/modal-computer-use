@@ -128,6 +128,35 @@ assert handle.handoff_protocol == "computer-use.session-handoff.v2"
     assert result.returncode == 0, result.stderr
 
 
+def test_async_daemon_client_composition_does_not_require_modal() -> None:
+    code = """
+import asyncio
+import importlib.abc
+import sys
+
+class Blocker(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname.split('.', 1)[0] == "modal":
+            raise ImportError(f"blocked optional dependency: {fullname}")
+        return None
+
+sys.meta_path.insert(0, Blocker())
+from modal_computer_use import AsyncDaemonClient
+
+async def main():
+    client = AsyncDaemonClient.local(token="dev")
+    assert client.mouse is client.mouse
+    await client.aclose()
+
+asyncio.run(main())
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_no_network_filesystem_usage() -> None:
     from pathlib import Path
 

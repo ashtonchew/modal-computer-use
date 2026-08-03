@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a typed native-async interface for existing daemons, including cached namespaces,
+  readiness, persistent action and observation connections, and connection-only cleanup.
 - Moved the canonical product specification to the stable `docs/spec/product-spec.md` path and
   removed superseded specification revisions and branch-owned article working files from `main`.
 
