@@ -3,8 +3,7 @@
 `modal-computer-use` turns a Modal Sandbox into a remotely controllable Linux desktop through a
 typed, provider-neutral Python SDK and an in-Sandbox daemon.
 
-The SDK handles desktop process supervision and control primitives. This is an independent project
-using Modal.
+This is an independent project using Modal.
 
 ## Quick start
 
@@ -49,8 +48,8 @@ When the `with` block ends, the SDK terminates the Sandbox and closes the connec
 
 ## Core API
 
-`ComputerSandbox` is the primary synchronous entry point. `AsyncComputerSandbox` provides the same
-Modal lifecycle for async applications; see the
+`ComputerSandbox` is the primary synchronous entry point. `AsyncComputerSandbox` provides native
+async Modal creation and attachment with the same ownership rules; see the
 [async owner example](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_modal_owner.py).
 `AsyncDaemonClient` connects to an existing daemon without blocking the event loop.
 
@@ -123,15 +122,9 @@ the model loop into the core package.
 
 ## Local development
 
-The mock backend supports deterministic tests and CI. The X11 backend supports local backend
-development. Install the core package without the Modal extra when connecting to an existing daemon:
-
-```bash
-uv add "modal-computer-use"
-```
-
-The [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md)
-covers daemon startup, synchronous and async clients, authentication, and repository checks.
+See the [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md)
+for daemon startup, mock and X11 backends, synchronous and async clients, authentication, and
+repository checks.
 
 ## Security
 
