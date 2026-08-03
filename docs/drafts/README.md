@@ -59,8 +59,9 @@ to drop where.
 
 The draft cites artifacts by path relative to its own folder, which resolves where the draft lives
 and nowhere else. `paste.md` sits one folder deeper, and the published copy sits on a site with no
-repository under it, so the export rewrites every relative link to a `blob/main` URL on GitHub. The
-draft keeps its relative paths. Those URLs resolve once the repository is public.
+repository under it, so the export rewrites every relative link to the dedicated article branch on
+GitHub. The draft keeps its relative paths. Those URLs resolve once the repository is public, even
+for supporting files that intentionally stay off `main`.
 
 Rendering uses cairosvg. On macOS, Homebrew installs libcairo outside the dyld search path and
 cairocffi resolves it by soname at import, so the script locates the library and re-execs itself with

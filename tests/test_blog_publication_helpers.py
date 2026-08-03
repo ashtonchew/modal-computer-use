@@ -13,6 +13,17 @@ import edit_blog_preview  # noqa: E402
 import export_article_images  # noqa: E402
 
 
+def test_export_links_to_the_dedicated_article_branch() -> None:
+    source = export_article_images.REPO / "docs/drafts/modal-optimized-low-latency.md"
+
+    url = export_article_images.absolute_link(source, "../../examples/async_modal_owner.py")
+
+    assert url == (
+        "https://github.com/ashtonchew/modal-computer-use/blob/"
+        "draft/modal-computer-use-latency-article/examples/async_modal_owner.py"
+    )
+
+
 def test_export_refuses_a_nonempty_unowned_output_directory(tmp_path) -> None:
     source = tmp_path / "article.md"
     source.write_text("draft", encoding="utf-8")
