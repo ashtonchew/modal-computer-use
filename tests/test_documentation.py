@@ -200,6 +200,18 @@ def test_onboarding_docs_use_canonical_setup_guidance() -> None:
         assert "uv run modal token new" not in source, path.relative_to(ROOT)
 
 
+def test_prepared_source_does_not_claim_an_unpublished_v1_1_release() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
+
+    assert "git@v1.1.0" not in readme
+    assert "has not yet been tagged" in readme
+    assert "## 1.1.0 -" not in changelog
+    assert "no `v1.1.0` tag or matching GitHub Release exists" in changelog
+    assert "prepared, unreleased `1.1.0` source state" in specification
+
+
 def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
     section = source[

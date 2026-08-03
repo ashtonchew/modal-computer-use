@@ -51,6 +51,16 @@ def test_project_uses_current_license_and_url_metadata() -> None:
     assert (ROOT / metadata["project"]["license-files"][0]).is_file()
 
 
+def test_dependency_metadata_uses_inline_pillow_typing_and_keeps_direct_h2() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+
+    assert "h2>=4.1" in project["dependencies"]
+    assert all(
+        requirement.lower() != "types-pillow"
+        for requirement in project["optional-dependencies"]["dev"]
+    )
+
+
 def test_project_version_matches_runtime_and_openapi() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     openapi = json.loads((ROOT / "docs" / "openapi.json").read_text(encoding="utf-8"))

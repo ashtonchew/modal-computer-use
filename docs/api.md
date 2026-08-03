@@ -358,6 +358,14 @@ ComputerSandbox.attach(run_id="support-ticket-123")
 ComputerSandbox.attach(base_url="https://daemon.example", token="...")
 ```
 
+The executable [`attach_existing_sandbox.py`](../examples/attach_existing_sandbox.py) example
+accepts exactly one Modal selector from command-line arguments or environment variables, waits for
+readiness, and detaches without terminating the caller-owned Sandbox:
+
+```bash
+uv run python examples/attach_existing_sandbox.py --sandbox-id sb-...
+```
+
 Modal-backed attachment is app-scoped. New Sandboxes carry `computer-use.app_id`, and ID, name,
 and run-ID attachment verify the requested app before returning a client. Set
 `allow_legacy_unscoped=True` only while migrating an untagged Sandbox that Modal already resolves
@@ -398,6 +406,8 @@ If readiness times out, `attach(...)` closes the client it created but does not 
 existing target. This cleanup applies equally to Modal handles and direct `base_url` attachments.
 The readiness timeout remains the primary error if client cleanup also fails; only the cleanup
 exception type is attached as diagnostic context.
+Detaching closes the local client and Modal handle. It does not terminate an attached Sandbox; only
+the lifecycle owner should do that.
 
 Attached `ComputerSandbox.metadata()` returns Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does

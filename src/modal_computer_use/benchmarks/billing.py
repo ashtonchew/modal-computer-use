@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
 from typing import Any
-from uuid import uuid4
 
 from ..errors import ModalNotInstalledError
 
@@ -24,18 +23,6 @@ BillingReportLoader = Callable[
     [datetime, datetime, str, list[str] | None],
     Iterable[Any],
 ]
-
-
-def new_benchmark_run_id() -> str:
-    return f"sdk_surface_{uuid4().hex[:16]}"
-
-
-def modal_surface_benchmark_tags(benchmark_run_id: str) -> dict[str, str]:
-    return {
-        "benchmark": "sdk-surfaces",
-        "benchmark_run_id": benchmark_run_id,
-        "surface": "daemon-http",
-    }
 
 
 def modal_billing_reconciliation_request(

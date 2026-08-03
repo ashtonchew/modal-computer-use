@@ -220,20 +220,6 @@ class X11InputSession:
     def resolve_keycode(self, name: str) -> int:
         return self.keysym_to_keycode(self.resolve_keysym(name))
 
-    def keycode_to_keysym(self, keycode: int, group: int, level: int) -> int:
-        self._validate_keycode(keycode)
-        with self._lock:
-            display = self._ensure_open()
-            assert self._x11 is not None
-            return int(
-                self._x11.XkbKeycodeToKeysym(
-                    ctypes.c_void_p(display),
-                    ctypes.c_ubyte(keycode),
-                    group,
-                    level,
-                )
-            )
-
     def keyboard_mapping(
         self,
         group: int,
@@ -273,12 +259,6 @@ class X11InputSession:
                 )
                 for keycode in range(minimum.value, maximum.value + 1)
             )
-
-    def keyboard_group(self) -> int:
-        return self._xkb_state().group
-
-    def modifier_state(self) -> int:
-        return self._xkb_state().mods
 
     def keyboard_state(self) -> X11KeyboardState:
         state = self._xkb_state()

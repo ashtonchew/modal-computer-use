@@ -1,9 +1,9 @@
 # `modal-computer-use` canonical product specification
 
-- **Status:** active specification for the repository's `1.1.0` source state
+- **Status:** active specification for the repository's prepared, unreleased `1.1.0` source state
 - **Prepared:** 2026-07-30
 - **Revision:** v8, canonical contract and maturity truth-up for the `1.1.0` source state
-- **Base implementation audited:** `2cd38f2` (security baseline); final release identity `v1.1.0`
+- **Base implementation audited:** `2cd38f2` (security baseline); planned release identity `v1.1.0`
 - **Repository:** `ashtonchew/modal-computer-use`
 - **Python package:** `modal_computer_use`
 
@@ -48,7 +48,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 
 | Area | v8 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. `v1.1.0` is published only when its GitHub Release exists. |
+| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. The prepared source is unreleased: no `v1.1.0` tag or matching GitHub Release exists. |
 | Modal SDK | The compatible line remains `modal~=1.5.2`; v8 updates the lock from 1.5.2 to the latest audited 1.5.x patch, 1.5.3. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -691,8 +691,8 @@ Primary references:
 
 ## 17. Versioning and compatibility
 
-- Package, daemon, and checked-in OpenAPI versions are `1.1.0`. The version is published only when
-  the matching GitHub Release exists.
+- Package, daemon, and checked-in OpenAPI versions are `1.1.0`. That source version remains
+  unreleased until the matching tag and GitHub Release exist.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
   core.
@@ -768,8 +768,8 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is versioned `1.1.0`; remaining work is not inherited from an earlier
-revision's roadmap.
+The repository source is prepared as version `1.1.0` but has not been tagged or published; remaining
+work is not inherited from an earlier revision's roadmap.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

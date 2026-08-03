@@ -26,9 +26,7 @@ from ..sandbox import (
 from ..state import new_run_id
 from .modal_v2_candidate import (
     ARM_V1_CONNECT,
-    ARM_V1_TUNNEL,
     ARM_V2_I6PN,
-    ARM_V2_TUNNEL,
     ModalV2CandidateConfig,
     arm_definitions,
     modal_cloud_matches,
@@ -810,11 +808,3 @@ def _estimated_target_cost(
         "included": ["target_cpu", "target_memory"],
         "excluded": ["runner_compute", "control_plane", "billing_adjustments"],
     }
-
-
-def candidate_backend_for_arm(arm: str) -> str:
-    if arm in {ARM_V1_CONNECT, ARM_V1_TUNNEL}:
-        return "v1"
-    if arm in {ARM_V2_TUNNEL, ARM_V2_I6PN}:
-        return "v2"
-    raise ValueError("unknown candidate arm")

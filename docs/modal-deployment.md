@@ -73,6 +73,19 @@ Readers already running with the same Volume still need `Volume.reload()` or
 `Sandbox.reload_volumes()` before they can observe committed changes. The SDK exposes
 `computer.reload_volumes(timeout=55)`, which uses Modal 1.5.2 blocking reload behavior.
 
+[`examples/volume_artifacts.py`](../examples/volume_artifacts.py) is the complete opt-in Volume v2
+workflow. It requires an explicit existing Volume name, or `--create-volume` to create that named
+Volume, and creating its Sandbox can incur Modal charges:
+
+```bash
+uv run python examples/volume_artifacts.py --volume-name computer-use-artifacts
+uv run python examples/volume_artifacts.py --volume-name computer-use-artifacts --create-volume
+```
+
+The example writes to a fresh run-scoped path, requires verified persistent sync, and terminates the
+Sandbox it owns. It deliberately retains the caller-selected Volume and persisted artifact; manage
+or delete that Volume separately when its data is no longer needed.
+
 Browser profiles are explicit. Use `ResourceConfig(profile="browser")` plus
 `BrowserConfig(kind="firefox", prewarm=True)` when Firefox startup dominates the measured workload;
 use `kind="chromium"` for Chromium. Use `profile="browser-gpu"` only with an explicit `gpu` value.
@@ -95,6 +108,10 @@ Use `ComputerSandbox.attach()` for known handles:
 - `sandbox_id` attaches directly with `modal.Sandbox.from_id`.
 - `name` attaches with `modal.Sandbox.from_name` inside the selected app.
 - `run_id` lists sandboxes tagged with `computer-use.run_id`.
+
+The executable [`attach_existing_sandbox.py`](../examples/attach_existing_sandbox.py) example waits
+for readiness and only detaches. It never terminates the existing Sandbox because attaching does not
+transfer lifecycle ownership.
 
 Run ID matches must be exact. If more than one running sandbox has the same run ID, the SDK raises
 `SandboxAmbiguousError` and the caller should attach by sandbox ID or name. Missing run ID matches
