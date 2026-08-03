@@ -1,189 +1,152 @@
 # modal-computer-use
 
-`modal-computer-use` turns a Modal Sandbox into a remotely controllable Linux desktop. Its typed
-Python API covers mouse and keyboard input, screenshots, recordings, windows, artifacts, action
-batches, and optional provider adapters.
+`modal-computer-use` turns a Modal Sandbox into a remotely controllable Linux desktop through a
+typed, provider-neutral Python SDK and an in-Sandbox daemon.
 
-Use it when computer-use agents or applications need typed, provider-neutral control of Linux
-desktops on Modal.
+The SDK handles desktop process supervision and control primitives. This is an independent project
+using Modal.
 
-The project provides daemon-first control primitives. Autonomous agent orchestration and model
-loops stay in application code or examples.
+## Quick start
 
-This is an independent project using Modal.
-
-## Install unreleased source
-
-Use Python 3.12 or later and `uv`. The package is not on PyPI, and `v1.1.0` has not yet been tagged
-or published as a GitHub Release. To evaluate the current unreleased source from `main`:
-
-```bash
-uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
-```
-
-Add the Modal extra when the application will create Modal Sandboxes:
+Use Python 3.12 or later and `uv`. The package is not on PyPI, and `v1.1.0` has not yet been tagged or
+published as a GitHub Release. Install the current source with the Modal extra:
 
 ```bash
 uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
 ```
 
-The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later. Contributors should
-instead follow the [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md).
-The `main` ref is mutable; downstream evaluations should replace it with a reviewed full commit SHA
-for reproducibility. Release-tag installation guidance will be added only after the matching GitHub
-Release exists.
+The `main` ref is mutable. Pin a reviewed full commit SHA for reproducible use. The Modal extra
+supports the Modal 1.5 line and requires Modal 1.5.2 or later.
 
-## Run locally
-
-Start a deterministic mock desktop in one terminal:
+Configure Modal credentials once. Creating a Sandbox can incur Modal charges.
 
 ```bash
-COMPUTER_USE_BACKEND=mock \
-COMPUTER_USE_LOCAL_TOKEN=dev \
-COMPUTER_USE_REQUIRE_CONNECT_USER=false \
-COMPUTER_USE_ARTIFACTS_DIR=/tmp/modal-computer-use/artifacts \
-COMPUTER_USE_RECORDINGS_DIR=/tmp/modal-computer-use/recordings \
-COMPUTER_USE_TRACE_DIR=/tmp/modal-computer-use/traces \
-  uv run computer-use-daemon
+uv run modal setup
 ```
 
-Connect from another terminal:
+Save this as `quickstart.py`:
 
 ```python
-from modal_computer_use import ComputerSandbox
+from modal_computer_use import (
+    BrowserConfig,
+    ComputerConfig,
+    ComputerSandbox,
+    ResourceConfig,
+)
 
-computer = ComputerSandbox.local(base_url="http://127.0.0.1:8080", token="dev")
-try:
-    computer.wait_until_ready()
-    computer.mouse.move(100, 120)
-    screenshot = computer.screenshots.full(show_cursor=True)
+config = ComputerConfig(
+    resources=ResourceConfig(profile="browser"),
+    browser=BrowserConfig(kind="chromium"),
+)
+
+with ComputerSandbox.create(config=config) as computer:
+    computer.browser.open_url("https://example.com")
+    computer.mouse.move(320, 240)
+    screenshot = computer.screenshots.full()
+    screenshot.save("screenshot.png")
     print(screenshot.width, screenshot.height, screenshot.sha256)
-finally:
-    computer.detach()
 ```
 
-The command prints `1024 768` followed by the screenshot's SHA-256 digest. Press Ctrl-C in the
-daemon terminal when finished.
-
-For an async application, connect to that same daemon with the native async interface:
-
-```python
-import asyncio
-
-from modal_computer_use import AsyncDaemonClient
-
-
-async def main() -> None:
-    async with AsyncDaemonClient.local(token="dev") as computer:
-        await computer.wait_until_ready()
-        await computer.mouse.move(100, 120)
-        screenshot = await computer.screenshots.full(show_cursor=True)
-        print(screenshot.width, screenshot.height, screenshot.sha256)
-
-
-asyncio.run(main())
-```
-
-Closing `AsyncDaemonClient` closes its connections only. The terminal that started the daemon
-retains lifecycle ownership.
-
-The daemon refuses to start without token or Connect authentication. For a local process that
-intentionally has no token, set `COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK=true`; that mode may
-bind only to loopback.
-
-## Run on Modal
-
-Configure Modal credentials once with `uv run modal setup`. Creating a Sandbox can incur Modal
-charges.
-
-Save this example as `quickstart.py`:
-
-```python
-from modal_computer_use import ComputerConfig, ComputerSandbox
-
-computer = ComputerSandbox.create(config=ComputerConfig())
-try:
-    computer.wait_until_ready()
-    computer.mouse.move(100, 120)
-    screenshot = computer.screenshots.full(show_cursor=True)
-    print(screenshot.width, screenshot.height, screenshot.sha256)
-finally:
-    try:
-        computer.terminate(wait=True)
-    finally:
-        computer.detach()
-```
-
-Run the example:
+Run it:
 
 ```bash
 uv run python quickstart.py
 ```
 
-Async applications can provision and own the same desktop without blocking their event loop:
+When the `with` block ends, the SDK terminates the Sandbox and closes the connection.
+
+## Core API
+
+`ComputerSandbox` is the primary synchronous entry point. `AsyncComputerSandbox` provides the same
+Modal lifecycle for async applications; see the
+[async owner example](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_modal_owner.py).
+`AsyncDaemonClient` connects to an existing daemon without blocking the event loop.
+
+| Task | Representative API |
+| --- | --- |
+| Create or connect | `ComputerSandbox.create()`, `ComputerSandbox.attach()`, `AsyncComputerSandbox.create()` |
+| Input | `computer.mouse.move()`, `computer.keyboard.type()`, `computer.clipboard.get_text()` |
+| Observe | `computer.screenshots.full()`, `computer.display.info()`, `computer.windows.list()` |
+| Browser and apps | `computer.browser.open_url()`, `computer.apps.launch()` |
+| Execute | `computer.actions.run()`, `computer.commands.run()` |
+| Files and recordings | `computer.artifacts.download()`, `computer.recordings.start()` |
+| Operate | `computer.lifecycle.status()`, `computer.processes.logs(name)` |
+
+Action batches validate the full request before execution. They stop on the first error by default,
+can opt into `continue_on_error`, and can capture a trailing screenshot in the same request.
+
+Inside an active `ComputerSandbox`:
 
 ```python
-import asyncio
-
-from modal_computer_use import AsyncComputerSandbox, ComputerConfig
-
-
-async def main() -> None:
-    async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
-        await computer.mouse.move(100, 120)
-        screenshot = await computer.screenshots.full(show_cursor=True)
-        print(screenshot.width, screenshot.height, screenshot.sha256)
-
-
-asyncio.run(main())
+batch = computer.actions.run(
+    [
+        {"type": "move", "x": 320, "y": 240},
+        {"type": "click", "x": 320, "y": 240},
+    ],
+    screenshot_after=True,
+)
 ```
 
-Entering the context creates the Sandbox and waits for the daemon. Exiting terminates the created
-Sandbox. `AsyncComputerSandbox.attach(...)` is for a desktop owned elsewhere; its context detaches
-without terminating the target. The complete owner example is
-[`examples/async_modal_owner.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_modal_owner.py).
+`batch.screenshot` contains the trailing observation when the batch succeeds.
 
-This uses an inline desktop image and authenticated daemon access on port `8080`. noVNC is off by
-default. The [Modal deployment guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md)
-explains browser profiles, network policy, attach and reuse, Volumes, warm capacity, and cleanup.
+See the [API guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/api.md) for
+namespace semantics and the generated
+[OpenAPI schema](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openapi.json) for
+HTTP request and response shapes.
 
-## Capabilities
+## How it works
 
-- Typed synchronous and native-async SDK namespaces for lifecycle, input, display, screenshots,
-  recordings, browser and app control, processes, commands, artifacts, and debugging. Async code
-  can connect to an existing daemon with `AsyncDaemonClient` or provision Modal resources with
-  `AsyncComputerSandbox`.
-- Ordered action batches that stop on the first failure by default or continue when requested.
-- Local mock and X11 backends that use the same daemon API as Modal deployments.
-- OpenAI, Anthropic, and generic adapters that normalize actions without calling provider APIs or
-  importing provider SDKs into core modules.
-- Structured logs, traces, budgets, rate limits, secret redaction, and path-safe artifact access.
-- Reproducible benchmark tooling with tracked, sanitized evidence separated from raw local output.
+`ComputerSandbox.create()` starts a new Modal Sandbox. If you use it in a `with` block, the SDK
+terminates the Sandbox automatically when the block ends. `ComputerSandbox.attach()` connects to an
+existing Sandbox. Leaving an attached `with` block closes the SDK connection but keeps the Sandbox
+running.
 
-The generated [OpenAPI schema](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openapi.json)
-defines the HTTP request and response shapes. The [API guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/api.md)
-describes SDK semantics and behavioral contracts.
+A daemon inside the Sandbox executes desktop actions, captures screenshots and recordings, runs
+commands, and reads or writes files through `computer.artifacts`.
+
+## Examples
+
+| Workflow | Example |
+| --- | --- |
+| Configure and prewarm a browser | [`browser_profile.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/browser_profile.py) |
+| Attach without taking lifecycle ownership | [`attach_existing_sandbox.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/attach_existing_sandbox.py) |
+| Capture and download a recording | [`recording_lifecycle.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/recording_lifecycle.py) |
+| Persist artifacts with a Modal Volume | [`volume_artifacts.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/volume_artifacts.py) |
+| Hand a desktop to a Modal Function | [`modal_function_session_handoff.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/modal_function_session_handoff.py) |
+| Run an application-owned model loop | [OpenAI](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/03_openai_computer_loop.py) · [Anthropic](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/anthropic_message_server.py) |
+
+Provider adapters translate actions and screenshot results. They do not call provider APIs or move
+the model loop into the core package.
 
 ## Documentation
 
 - [Documentation map](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md)
-- [Configuration reference](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/configuration.md)
-- [Modal deployment](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md)
-- [Performance](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/performance.md)
-- [Troubleshooting](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/troubleshooting.md)
-- [Release checklist](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/release-checklist.md)
+- [Modal deployment](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md) ·
+  [Configuration](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/configuration.md) ·
+  [Artifacts](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/artifacts.md) ·
+  [Troubleshooting](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/troubleshooting.md)
+- [OpenAI adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openai-adapter.md) ·
+  [Anthropic adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/anthropic-adapter.md)
 - [Contributing guide](https://github.com/ashtonchew/modal-computer-use/blob/main/CONTRIBUTING.md)
 
-Provider examples are available for [OpenAI](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/03_openai_computer_loop.py)
-and [Anthropic](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/anthropic_message_server.py).
+## Local development
+
+The mock backend supports deterministic tests and CI. The X11 backend supports local backend
+development. Install the core package without the Modal extra when connecting to an existing daemon:
+
+```bash
+uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
+```
+
+The [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md)
+covers daemon startup, synchronous and async clients, authentication, and repository checks.
 
 ## Security
 
-The daemon can control the desktop, read clipboard contents, and access artifacts. Never expose
-its control routes as an unauthenticated public service. Treat bearer tokens, noVNC URLs, typed or
-clipboard text, screenshots, recordings, and artifacts as secrets.
+The daemon can control the desktop and access clipboard contents, screenshots, recordings, and
+artifacts. Do not expose it without authentication.
 
 See the [security policy](https://github.com/ashtonchew/modal-computer-use/blob/main/SECURITY.md) for
-the current reporting process. See
-[runtime security](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/security.md) for
-authentication, redaction, noVNC, artifact, and provider-adapter guidance.
+reporting vulnerabilities and the
+[runtime security guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/security.md)
+for deployment guidance.
