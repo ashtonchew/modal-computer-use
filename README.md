@@ -120,6 +120,29 @@ Run the example:
 uv run python quickstart.py
 ```
 
+Async applications can provision and own the same desktop without blocking their event loop:
+
+```python
+import asyncio
+
+from modal_computer_use import AsyncComputerSandbox, ComputerConfig
+
+
+async def main() -> None:
+    async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+        await computer.mouse.move(100, 120)
+        screenshot = await computer.screenshots.full(show_cursor=True)
+        print(screenshot.width, screenshot.height, screenshot.sha256)
+
+
+asyncio.run(main())
+```
+
+Entering the context creates the Sandbox and waits for the daemon. Exiting terminates the created
+Sandbox. `AsyncComputerSandbox.attach(...)` is for a desktop owned elsewhere; its context detaches
+without terminating the target. The complete owner example is
+[`examples/async_modal_owner.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_modal_owner.py).
+
 This uses an inline desktop image and authenticated daemon access on port `8080`. noVNC is off by
 default. The [Modal deployment guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md)
 explains browser profiles, network policy, attach and reuse, Volumes, warm capacity, and cleanup.
@@ -127,7 +150,9 @@ explains browser profiles, network policy, attach and reuse, Volumes, warm capac
 ## Capabilities
 
 - Typed synchronous and native-async SDK namespaces for lifecycle, input, display, screenshots,
-  recordings, browser and app control, processes, commands, artifacts, and debugging.
+  recordings, browser and app control, processes, commands, artifacts, and debugging. Async code
+  can connect to an existing daemon with `AsyncDaemonClient` or provision Modal resources with
+  `AsyncComputerSandbox`.
 - Ordered action batches that stop on the first failure by default or continue when requested.
 - Local mock and X11 backends that use the same daemon API as Modal deployments.
 - OpenAI, Anthropic, and generic adapters that normalize actions without calling provider APIs or

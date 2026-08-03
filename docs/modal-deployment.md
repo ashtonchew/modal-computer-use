@@ -1,6 +1,7 @@
 # Modal Deployment
 
-`ComputerSandbox.create()` lazily imports Modal, builds or accepts a Modal `Image`, and starts the daemon inside the sandbox:
+`ComputerSandbox.create()` and `AsyncComputerSandbox.create()` lazily import Modal, build or accept
+a Modal `Image`, and start the daemon inside the Sandbox:
 
 ```bash
 python -m modal_computer_use.daemon
@@ -20,6 +21,25 @@ a supported scheduling timestamp. The SDK reports scheduling and daemon process 
 observation stream with `timing=...`, and call `first_valid_frame(..., timing=...)` to extend the
 same timeline through browser readiness, baseline consumption, and a decoded frame with the
 configured geometry.
+
+## Native async provisioning
+
+`AsyncComputerSandbox.create()` and `AsyncComputerSandbox.attach()` are lazy async context
+managers. They begin Modal work on entry and yield only after both the Sandbox and daemon are
+ready. They use Modal's native `.aio` operations for app lookup, Sandbox creation or resolution,
+readiness, Connect tokens, tunnels, detachment, and termination. They do not call
+`asyncio.to_thread()`.
+
+The sync and async paths share the same copied configuration, image selection, tags, daemon
+authorization, ingress policy, security-owned arguments, and validation. Only the Modal and daemon
+I/O adapter differs. Native async provisioning keeps an application's event loop responsive and
+makes cancellation cleanup deterministic; it does not make Sandbox allocation or desktop startup
+intrinsically faster.
+
+Created contexts own their Sandbox and terminate it on exit. Attached contexts never terminate the
+remote owner. An explicit `await computer.detach()` transfers a created target to caller-managed
+ownership. If creation fails or is cancelled after allocation, cleanup closes connections,
+terminates the target, and detaches the local handle before the original error escapes.
 
 ## Sandbox configuration
 
@@ -110,6 +130,9 @@ Use `ComputerSandbox.attach()` for known handles:
 - `run_id` lists sandboxes tagged with `computer-use.run_id`.
 - `base_url` connects directly to an existing daemon and does not resolve a Modal Sandbox.
 
+`AsyncComputerSandbox.attach()` accepts the three Modal selectors: `sandbox_id`, `name`, or
+`run_id`. It has no direct-URL form; async direct connections use `AsyncDaemonClient`.
+
 Pass exactly one selector. A `token` belongs only to the direct `base_url` path; Modal-backed
 attachments obtain their own daemon authorization.
 
@@ -158,8 +181,10 @@ reject an incompatible reused sandbox.
 
 ### Hand a desktop to a Modal Function
 
-For a stateful model loop, create the desktop in an owner process, call `session_handle()`, and pass
-that value through normal Modal Function arguments. The complete executable pattern is
+Provision the desktop once in its owner process, call `session_handle()`, and pass that value
+through normal Modal Function arguments. The deployed Function enters `borrow_async()` once around
+the complete repeated screenshot, model, and action trajectory. It does not provision or borrow
+once per action. The complete executable pattern is
 [`examples/modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py). It
 keeps the native user-owned `@app.function` surface. Deploy that App once, then look up the deployed
 Function with `modal.Function.from_name(...)` and choose either `.remote(handle, task, run_id)` or

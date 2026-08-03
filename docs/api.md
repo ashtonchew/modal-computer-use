@@ -4,6 +4,7 @@ The SDK is a thin Python client over the daemon's HTTP API. Start with:
 
 ```python
 from modal_computer_use import (
+    AsyncComputerSandbox,
     AsyncDaemonClient,
     ComputerConfig,
     ComputerSandbox,
@@ -11,6 +12,18 @@ from modal_computer_use import (
     DaemonClient,
 )
 ```
+
+Choose the surface by who owns the desktop:
+
+| Application need | Surface | Lifecycle ownership |
+| --- | --- | --- |
+| Connect to a daemon that already exists | `AsyncDaemonClient` | Connections only |
+| Create or attach to a Modal desktop from async Python | `AsyncComputerSandbox` | Created desktops are owned; attached desktops are not |
+| Run one repeated trajectory in a deployed Modal Function | `ComputerSessionHandle.borrow_async()` | One lease and connection; the original owner keeps the Sandbox |
+
+`AsyncDaemonClient` connects to a daemon that is already running. `AsyncComputerSandbox` performs
+Modal provisioning and attachment without blocking the event loop. `borrow_async()` reconnects to
+an already-provisioned desktop for one complete deployed-Function trajectory.
 
 `AsyncDaemonClient` provides the same typed namespaces for a daemon that is already running:
 
@@ -34,7 +47,7 @@ The client owns its pooled HTTP connection and any WebSocket connections opened 
 `hot_session()` or `observation_stream()`. Exiting it closes those connections only. It does not
 stop the daemon or terminate a Modal Sandbox. Lifecycle operations remain explicit.
 
-Namespaces on `ComputerSandbox` and `AsyncDaemonClient`:
+Namespaces on `ComputerSandbox`, `AsyncComputerSandbox`, and `AsyncDaemonClient`:
 
 - `computer.mouse`: `click`, `move`, `drag`, `scroll`, `down`, `up`, `position`
 - `computer.keyboard`: `type`, `press`, `hotkey`, `hold`, `supported_keys`
@@ -60,12 +73,12 @@ The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verif
 
 ## Modal Function session handoff
 
-`ComputerSandbox.session_handle()` returns a frozen, versioned `ComputerSessionHandle` for an
-SDK-owned Modal desktop created with an explicit requested region and either `attested-tunnel` or
-`connect` ingress and `vnc_mode="off" | "view_only"`. Control-mode noVNC targets cannot produce or
-enter a handoff. The v2 handle serializes only its protocol version, sandbox/session identity, app
-and Modal environment, `requested_modal_region`, ingress, daemon HTTP version, vnc policy, and
-config hash. Sandbox/session identity is hidden
+`ComputerSandbox.session_handle()` and `AsyncComputerSandbox.session_handle()` return a frozen,
+versioned `ComputerSessionHandle` for an SDK-owned Modal desktop created with an explicit requested
+region and either `attested-tunnel` or `connect` ingress and `vnc_mode="off" | "view_only"`.
+Control-mode noVNC targets cannot produce or enter a handoff. The v2 handle serializes only its
+protocol version, sandbox/session identity, app and Modal environment, `requested_modal_region`,
+ingress, daemon HTTP version, vnc policy, and config hash. Sandbox/session identity is hidden
 from `repr()` but necessarily remains in JSON or cloudpickle/pickle data so Modal can reconnect.
 Endpoint URLs, bearer or Connect credentials, noVNC URLs, tags, prompts, typed text, screenshots,
 and artifacts are never fields on the handle.
@@ -348,6 +361,31 @@ Anthropic tool versions are gated. `computer_20241022` supports the reference ac
 adds `zoom`. Older versions reject newer actions instead of accepting them silently.
 
 ## Modal orchestration signatures
+
+Native async creation and attachment are lazy, one-shot context managers:
+
+```python
+async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+    await computer.mouse.click(320, 240)
+
+async with AsyncComputerSandbox.attach(sandbox_id="sb-...") as computer:
+    await computer.screenshots.full()
+```
+
+Modal work begins on entry, and both contexts are ready when they yield. Async attachment accepts
+exactly one Modal selector: `sandbox_id`, `name`, or `run_id`. Direct daemon URLs belong to
+`AsyncDaemonClient`. The first async lifecycle slice intentionally omits `attach_or_create()` and
+`wait=False`.
+
+Exiting an async created context terminates, detaches, and closes its owned Sandbox. Exiting an
+async attached context detaches and closes without termination. `await computer.detach()`
+transfers a created Sandbox to caller-managed ownership. `await computer.terminate()` explicitly
+stops either an owned or attached target. Failed or cancelled creation reclaims any allocated
+Sandbox before the error escapes. Core imports remain usable without Modal installed; entering a
+provisioning context requires the Modal extra.
+
+See the executable [`async_modal_owner.py`](../examples/async_modal_owner.py) example for the
+created-owner path.
 
 The SDK supports four explicit attach paths:
 

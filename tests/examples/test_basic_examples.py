@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -140,6 +141,50 @@ def test_attach_example_requires_exactly_one_selector(argv: list[str], monkeypat
 
     with pytest.raises(SystemExit):
         example.main(argv)
+
+
+def test_async_modal_owner_uses_one_owned_context(monkeypatch, capsys) -> None:
+    example = _load_example("async_modal_owner.py")
+    events: list[object] = []
+
+    class FakeComputer:
+        pass
+
+    class FakeContext:
+        async def __aenter__(self) -> FakeComputer:
+            events.append("enter")
+            return FakeComputer()
+
+        async def __aexit__(self, *_args: object) -> None:
+            events.append("exit")
+
+    async def move(*args: object) -> None:
+        events.append(("move", args))
+
+    async def screenshot(**kwargs: object) -> object:
+        events.append(("screenshot", kwargs))
+        return SimpleNamespace(width=1024, height=768, sha256="digest")
+
+    FakeComputer.mouse = SimpleNamespace(move=move)
+    FakeComputer.screenshots = SimpleNamespace(full=screenshot)
+    monkeypatch.setattr(
+        example,
+        "AsyncComputerSandbox",
+        SimpleNamespace(
+            create=lambda **kwargs: events.append(("create", kwargs)) or FakeContext()
+        ),
+    )
+
+    asyncio.run(example.run())
+
+    assert events[0][0] == "create"
+    assert events[1:] == [
+        "enter",
+        ("move", (100, 120)),
+        ("screenshot", {"show_cursor": True}),
+        "exit",
+    ]
+    assert capsys.readouterr().out.strip() == "1024 768 digest"
 
 
 def test_volume_example_requires_verified_persistence_and_cleans_up(monkeypatch, capsys) -> None:

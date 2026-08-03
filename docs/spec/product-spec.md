@@ -178,7 +178,7 @@ have begun.
 
 | Classification | Surfaces |
 | --- | --- |
-| Stable product contract | Public SDK namespaces; local and Modal Sandbox lifecycle; daemon HTTP primitives; action batches; binary screenshots; native/compatibility input; artifacts; traces; budgets; provider adapters; manager create/attach/reuse/cleanup; sync and async clients; hot-session protocol v1; observation-stream transport; versioned Modal Function handoff; borrowed trajectory fencing and receipt resolution. |
+| Stable product contract | Public SDK namespaces; synchronous and native-async Modal Sandbox lifecycle; daemon HTTP primitives; action batches; binary screenshots; native/compatibility input; artifacts; traces; budgets; provider adapters; manager create/attach/reuse/cleanup; sync and async clients; hot-session protocol v1; observation-stream transport; versioned Modal Function handoff; borrowed trajectory fencing and receipt resolution. |
 | Alpha / experimental | `_experimental_act_until_visual_change()` and first-visual-change semantics. It composes stable action and observation primitives but does not promise semantic readiness. |
 | Benchmark-only | Modal V2 candidate creation, optimized-frontier paths, transport-floor probes, provider harness internals, and unpublished/raw result handling. |
 | Application-owned example | Provider model loops, session broker, co-located runner/broker, Modal Function trajectory body, and run gateway. Callers must supply identity, authorization, durable storage, policy, and operational ownership. |
@@ -191,7 +191,7 @@ through naming, documentation links, or successful benchmark results alone.
 
 ### 5.1 Construction and lifecycle
 
-The primary entry point is `ComputerSandbox`.
+The synchronous entry point is `ComputerSandbox`.
 
 ```python
 from modal_computer_use import ComputerConfig, ComputerSandbox
@@ -227,6 +227,27 @@ valid only with a direct URL. `attach_or_create()` creates after a lookup only w
 that the target is absent; ambiguous matches and operational failures never trigger allocation.
 Construction copies caller configuration before generating or overriding a run ID.
 
+`AsyncComputerSandbox` is the stable native-async Modal lifecycle surface:
+
+```python
+from modal_computer_use import AsyncComputerSandbox, ComputerConfig
+
+async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+    await computer.mouse.click(320, 240)
+```
+
+`create()` and `attach()` return lazy, one-shot async context managers. They perform no Modal work
+until entry and yield only after the Sandbox and daemon are ready. Async attach accepts exactly one
+of sandbox ID, name, or run ID. Direct URLs use `AsyncDaemonClient`; the first async lifecycle
+contract does not include `attach_or_create()` or `wait=False`.
+
+Async creation and attachment use Modal-native `.aio` operations without worker-thread bridges.
+They share the synchronous path's copied configuration, image choice, tags, authorization,
+networking, and security-owned creation plan. Exiting a created context terminates and detaches its
+owned target. Exiting an attached context detaches without termination. Explicit async detachment
+transfers ownership. Failed or cancelled creation completes cleanup for any allocated resource
+before the primary error escapes. Importing the core package does not require Modal.
+
 ### 5.2 Namespaces
 
 The stable namespaces are:
@@ -254,7 +275,8 @@ The stable namespaces are:
 `DaemonClient` and `AsyncDaemonClient` provide synchronous and native-async interfaces to an
 existing daemon. `AsyncDaemonClient` owns its pooled HTTP connection and the WebSocket connections
 it opens. Closing it closes those connections only; it does not stop the daemon or terminate a
-Modal Sandbox. `AsyncBorrowedComputer` remains a separate lease-restricted trajectory interface.
+Modal Sandbox. `AsyncComputerSandbox` composes the same async namespaces with Modal lifecycle
+ownership. `AsyncBorrowedComputer` remains a separate lease-restricted trajectory interface.
 `ComputerSandbox.hot_session()` provides a persistent action/screenshot channel.
 `ComputerSandbox.observation_stream()` provides a correlated observation stream.
 
@@ -473,8 +495,8 @@ manifests, Volume synchronization, or application recovery.
 
 ### 9.1 Handle contract
 
-`ComputerSandbox.session_handle()` returns a frozen, versioned `ComputerSessionHandle` for an
-SDK-owned desktop created with:
+`ComputerSandbox.session_handle()` and `AsyncComputerSandbox.session_handle()` return a frozen,
+versioned `ComputerSessionHandle` for an SDK-owned desktop created with:
 
 - an explicit requested Modal region;
 - `attested-tunnel` or `connect` ingress;
@@ -484,8 +506,10 @@ The handle contains routing and policy identity, not bearer credentials. It omit
 tokens, noVNC URLs, task text, screenshots, and artifacts. Sandbox identity is necessarily present
 in serialized form and remains sensitive.
 
-Inside a deployed Modal Function, `borrow_async()` is canonical for async code and `borrow()` is
-available for synchronous code. Borrow entry:
+Provisioning happens once in the owner. Inside a deployed Modal Function, `borrow_async()` is
+canonical for async code and `borrow()` is available for synchronous code. One borrow surrounds
+the complete repeated trajectory; it never provisions the target and is not entered once per
+action. Borrow entry:
 
 1. verifies the deployed-Function environment and exact requested region declaration;
 2. resolves the live Sandbox through the Function's Modal identity;
