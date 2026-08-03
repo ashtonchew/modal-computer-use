@@ -100,6 +100,17 @@ leaving the block terminates it. If the Sandbox already existed, leaving the blo
 A daemon inside the Sandbox executes desktop actions, captures screenshots and recordings, runs
 commands, and reads or writes files through `computer.artifacts`.
 
+## Performance
+
+[![Warm-operation p50 latency on July 30, 2026. Modal optimized recorded the lowest p50 in each of six displayed rows; configurations and caller topologies differed.](https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/warm-operation-p50-2026-07-30.svg)](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)
+
+The figure shows July 2026 p50 latency for six computer-use cases, based on 30 successful samples
+per cell. Lower is better. Note that warm-operation latency starts after the desktop and client
+connection are ready.
+
+The [detailed report](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)
+gives p95 results and explains how each path was configured and measured.
+
 ## Examples
 
 | Workflow | Example |
@@ -112,19 +123,16 @@ commands, and reads or writes files through `computer.artifacts`.
 | Hand a desktop to a Modal Function | [`modal_function_session_handoff.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/modal_function_session_handoff.py) |
 | Run an application-owned model loop | [OpenAI](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/03_openai_computer_loop.py) · [Anthropic](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/anthropic_message_server.py) |
 
-Provider adapters translate actions and screenshot results. They do not call provider APIs or move
-the model loop into the core package.
-
 ## Documentation
 
-- [Documentation map](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md)
-- [Modal deployment](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md) ·
-  [Configuration](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/configuration.md) ·
-  [Artifacts](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/artifacts.md) ·
-  [Troubleshooting](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/troubleshooting.md)
-- [OpenAI adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openai-adapter.md) ·
-  [Anthropic adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/anthropic-adapter.md)
-- [Contributing guide](https://github.com/ashtonchew/modal-computer-use/blob/main/CONTRIBUTING.md)
+| Guide | What it covers |
+| --- | --- |
+| [Documentation map](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md) | Every maintained guide, grouped by task. |
+| [Modal deployment](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md) | Sandbox lifecycle, readiness, Function handoff, warm capacity, and cleanup. |
+| [Modal optimization](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-optimization.md) | Production guidance for caller placement, connection reuse, async orchestration, and per-turn work. |
+| [Performance](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/performance.md) and [benchmarking](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmarking.md) | Latency mechanisms, tuning evidence, benchmark commands, and publication rules. |
+| [OpenAI adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openai-adapter.md) and [Anthropic adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/anthropic-adapter.md) | Provider action and screenshot translation for application-owned model loops. |
+| [Contributing](https://github.com/ashtonchew/modal-computer-use/blob/main/CONTRIBUTING.md) | Development setup, required checks, and pull request expectations. |
 
 ## Local development
 
