@@ -337,6 +337,7 @@ class AsyncObservationClient:
         startup_timing: SessionStartupTiming | None = None,
     ) -> None:
         self.transport = transport
+        self._closed = False
         self.payload = _observation_payload(
             options,
             fps=fps,
@@ -357,7 +358,10 @@ class AsyncObservationClient:
         self._startup_timing = startup_timing
 
     async def aclose(self) -> None:
+        if self._closed:
+            return
         await self.transport.aclose()
+        self._closed = True
 
     async def __aenter__(self) -> AsyncObservationClient:
         return self

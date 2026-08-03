@@ -4,6 +4,8 @@ The SDK is a thin Python client over the daemon's HTTP API. Start with:
 
 ```python
 from modal_computer_use import (
+    AsyncComputerSandbox,
+    AsyncDaemonClient,
     ComputerConfig,
     ComputerSandbox,
     ComputerSessionHandle,
@@ -11,7 +13,41 @@ from modal_computer_use import (
 )
 ```
 
-Namespaces on `ComputerSandbox`:
+Choose the surface by who owns the desktop:
+
+| Application need | Surface | Lifecycle ownership |
+| --- | --- | --- |
+| Connect to a daemon that already exists | `AsyncDaemonClient` | Connections only |
+| Create or attach to a Modal desktop from async Python | `AsyncComputerSandbox` | Created desktops are owned; attached desktops are not |
+| Run one repeated trajectory in a deployed Modal Function | `ComputerSessionHandle.borrow_async()` | One lease and connection; the original owner keeps the Sandbox |
+
+`AsyncDaemonClient` connects to a daemon that is already running. `AsyncComputerSandbox` performs
+Modal provisioning and attachment without blocking the event loop. `borrow_async()` reconnects to
+an already-provisioned desktop for one complete deployed-Function trajectory.
+
+`AsyncDaemonClient` provides the same typed namespaces for a daemon that is already running:
+
+```python
+import asyncio
+
+from modal_computer_use import AsyncDaemonClient
+
+
+async def main() -> None:
+    async with AsyncDaemonClient.local(token="dev") as computer:
+        await computer.wait_until_ready()
+        await computer.mouse.move(100, 120)
+        await computer.screenshots.full(show_cursor=True)
+
+
+asyncio.run(main())
+```
+
+The client owns its pooled HTTP connection and any WebSocket connections opened through
+`hot_session()` or `observation_stream()`. Exiting it closes those connections only. It does not
+stop the daemon or terminate a Modal Sandbox. Lifecycle operations remain explicit.
+
+Namespaces on `ComputerSandbox`, `AsyncComputerSandbox`, and `AsyncDaemonClient`:
 
 - `computer.mouse`: `click`, `move`, `drag`, `scroll`, `down`, `up`, `position`
 - `computer.keyboard`: `type`, `press`, `hotkey`, `hold`, `supported_keys`
@@ -37,12 +73,12 @@ The checked-in OpenAPI schema lives at [openapi.json](openapi.json) and is verif
 
 ## Modal Function session handoff
 
-`ComputerSandbox.session_handle()` returns a frozen, versioned `ComputerSessionHandle` for an
-SDK-owned Modal desktop created with an explicit requested region and either `attested-tunnel` or
-`connect` ingress and `vnc_mode="off" | "view_only"`. Control-mode noVNC targets cannot produce or
-enter a handoff. The v2 handle serializes only its protocol version, sandbox/session identity, app
-and Modal environment, `requested_modal_region`, ingress, daemon HTTP version, vnc policy, and
-config hash. Sandbox/session identity is hidden
+`ComputerSandbox.session_handle()` and `AsyncComputerSandbox.session_handle()` return a frozen,
+versioned `ComputerSessionHandle` for an SDK-owned Modal desktop created with an explicit requested
+region and either `attested-tunnel` or `connect` ingress and `vnc_mode="off" | "view_only"`.
+Control-mode noVNC targets cannot produce or enter a handoff. The v2 handle serializes only its
+protocol version, sandbox/session identity, app and Modal environment, `requested_modal_region`,
+ingress, daemon HTTP version, vnc policy, and config hash. Sandbox/session identity is hidden
 from `repr()` but necessarily remains in JSON or cloudpickle/pickle data so Modal can reconnect.
 Endpoint URLs, bearer or Connect credentials, noVNC URLs, tags, prompts, typed text, screenshots,
 and artifacts are never fields on the handle.
@@ -326,6 +362,31 @@ adds `zoom`. Older versions reject newer actions instead of accepting them silen
 
 ## Modal orchestration signatures
 
+Native async creation and attachment are lazy, one-shot context managers:
+
+```python
+async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+    await computer.mouse.click(320, 240)
+
+async with AsyncComputerSandbox.attach(sandbox_id="sb-...") as computer:
+    await computer.screenshots.full()
+```
+
+Modal work begins on entry, and both contexts are ready when they yield. Async attachment accepts
+exactly one Modal selector: `sandbox_id`, `name`, or `run_id`. Direct daemon URLs belong to
+`AsyncDaemonClient`. The first async lifecycle slice intentionally omits `attach_or_create()` and
+`wait=False`.
+
+Exiting an async created context terminates, detaches, and closes its owned Sandbox. Exiting an
+async attached context detaches and closes without termination. `await computer.detach()`
+transfers a created Sandbox to caller-managed ownership. `await computer.terminate()` explicitly
+stops either an owned or attached target. Failed or cancelled creation reclaims any allocated
+Sandbox before the error escapes. Core imports remain usable without Modal installed; entering a
+provisioning context requires the Modal extra.
+
+See the executable [`async_modal_owner.py`](../examples/async_modal_owner.py) example for the
+created-owner path.
+
 The SDK supports four explicit attach paths:
 
 ```python
@@ -334,6 +395,17 @@ ComputerSandbox.attach(name="desktop-1", app_name="modal-computer-use")
 ComputerSandbox.attach(run_id="support-ticket-123")
 ComputerSandbox.attach(base_url="https://daemon.example", token="...")
 ```
+
+The executable [`attach_existing_sandbox.py`](../examples/attach_existing_sandbox.py) example
+accepts exactly one Modal selector from command-line arguments or environment variables, waits for
+readiness, and detaches without terminating the caller-owned Sandbox:
+
+```bash
+uv run python examples/attach_existing_sandbox.py --sandbox-id sb-...
+```
+
+Pass exactly one selector. `token` is valid only with `base_url`; Modal-backed selectors resolve
+their authorization from the target Sandbox.
 
 Modal-backed attachment is app-scoped. New Sandboxes carry `computer-use.app_id`, and ID, name,
 and run-ID attachment verify the requested app before returning a client. Set
@@ -362,6 +434,10 @@ For backward compatibility, `reuse=True` maps to `"by_run_id"` and `reuse=False`
 sandbox when creation arguments are supplied. Ambiguous run ID matches raise a structured
 `SandboxAmbiguousError` instead of selecting an arbitrary sandbox.
 
+Only a genuine Modal not-found result permits that creation fallback. Authentication failures,
+service failures, and other lookup errors propagate without creating a second Sandbox. The SDK
+deep-copies `ComputerConfig` before applying `run_id` or generating a new one.
+
 When reusing an existing sandbox and the sandbox has a `computer-use.config_hash` tag, the SDK
 compares it with `compute_config_hash(config)`. Mismatches fail closed with `ConfigConflictError`
 by default. Pass `on_config_mismatch="reuse"` only when the caller intentionally accepts the
@@ -375,6 +451,21 @@ If readiness times out, `attach(...)` closes the client it created but does not 
 existing target. This cleanup applies equally to Modal handles and direct `base_url` attachments.
 The readiness timeout remains the primary error if client cleanup also fails; only the cleanup
 exception type is attached as diagnostic context.
+Detaching closes the local client and Modal handle. It does not terminate an attached Sandbox; only
+the lifecycle owner should do that.
+
+Context cleanup reflects ownership:
+
+- `create()` owns its Modal Sandbox, so context exit terminates, detaches, and closes the client;
+- Modal-backed `attach()` and reused `attach_or_create()` handles detach and close without
+  terminating the remote Sandbox;
+- `local()` and direct `base_url` attachments close only their daemon connection;
+- an explicit `detach()` transfers a created Sandbox to caller-managed ownership and prevents a
+  later context exit from terminating it.
+
+Any failure after a new Sandbox is allocated terminates and detaches that resource. Attachment
+failure never terminates an existing Sandbox. Cleanup errors are recorded without replacing the
+original provisioning or readiness failure.
 
 Attached `ComputerSandbox.metadata()` returns Modal metadata when available: sandbox ID,
 app name, name, run ID, owner, creation time, config hash, tags, and artifact directory. It does
@@ -483,4 +574,4 @@ commit visibility, reload behavior, and concurrency guidance.
 
 For complete route schemas and request/response models, see the generated
 [OpenAPI schema](openapi.json). The active product specification is
-[modal-computer-use specification v8](spec/modal_computer_use_spec_v8.md).
+[modal-computer-use product specification](spec/product-spec.md).

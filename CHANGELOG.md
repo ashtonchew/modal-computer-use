@@ -2,10 +2,21 @@
 
 ## Unreleased
 
-No changes yet.
+The source tree is prepared as version 1.1.0, but no `v1.1.0` tag or matching GitHub Release exists
+yet. The changes below remain unreleased.
 
-## 1.1.0 - 2026-07-31
-
+- Added a typed native-async interface for existing daemons, including cached namespaces,
+  readiness, persistent action and observation connections, and connection-only cleanup.
+- Added native-async Modal creation and attachment through lazy `AsyncComputerSandbox` contexts.
+  Created contexts own termination, attached contexts detach only, and cancelled partial creation
+  reclaims allocated resources with Modal-native `.aio` operations.
+- Defined ownership-aware Sandbox cleanup for created, attached, reused, local, and explicitly
+  detached clients; failed creation now reclaims allocated resources without letting cleanup mask
+  the original error.
+- Made attachment selectors exact and limited reuse fallback to genuine Modal not-found results.
+  Creation and reuse now copy caller configuration before generating or overriding a run ID.
+- Moved the canonical product specification to the stable `docs/spec/product-spec.md` path and
+  removed superseded specification revisions and branch-owned article working files from `main`.
 - Hardened daemon authentication to fail closed, made unauthenticated local mode explicit, blocked
   minted tunnel sessions from reminting, and added optional non-evicting session capacity.
 - Added non-cacheable HTTP responses, 16 MiB HTTP/WebSocket defaults, global WebSocket admission
@@ -16,10 +27,19 @@ No changes yet.
   explicit legacy unscoped attach option without permitting bulk legacy cleanup.
 - Updated the frozen security-relevant dependency set, including Starlette, Pillow, AnyIO, h2,
   WebSockets, OpenAI, and Anthropic.
+- Removed the obsolete `types-Pillow` development stub package now that Pillow ships inline typing;
+  retained direct `h2` because the daemon's HTTP/2 runtime imports it.
+- Removed superseded numbered quickstarts and repaired the retained local input, existing-Sandbox
+  attach, local-daemon launcher, and Modal Volume v2 persistence examples.
+- Removed the benchmark `--json` compatibility flag; benchmark commands already emit JSON, so omit
+  the flag without changing output format.
+- Retired two pre-release internal import paths: use `modal_computer_use.tracing` instead of
+  `modal_computer_use.daemon.trace`, and `modal_computer_use.daemon.supervisor` instead of
+  `modal_computer_use.daemon.desktop.processes`.
 
 The v1.1 daemon requires a v1.1 SDK for the default attested-tunnel flow. Upgrade SDK and daemon
 together. The v1.0.0 tag was a private source milestone, not a GitHub Release or PyPI distribution.
-Version 1.1.0 is the first public GitHub Release.
+Version 1.1.0 is intended to be the first public GitHub Release, but it is not published yet.
 
 ## 1.0.0 - 2026-07-31
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import inspect
 import json
 from pathlib import Path
@@ -18,6 +19,26 @@ from modal_computer_use.transports import (
     AsyncHotSessionTransport,
     AsyncHTTPTransport,
     AsyncObservationStreamTransport,
+)
+
+ASYNC_NAMESPACE_NAMES = (
+    "actions",
+    "apps",
+    "artifacts",
+    "browser",
+    "clipboard",
+    "commands",
+    "debug",
+    "display",
+    "input",
+    "keyboard",
+    "lifecycle",
+    "mouse",
+    "processes",
+    "recordings",
+    "screenshots",
+    "session",
+    "windows",
 )
 
 
@@ -63,6 +84,141 @@ async def test_async_http_transport_reuses_client_and_injects_private_metadata(
     assert requests[0].headers["x-computer-use-fence"] == "1"
     assert requests[1].headers["x-computer-use-fence"] == "2"
     assert http_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_composes_cached_namespaces() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/mouse/move"
+        return httpx.Response(200, json={"x": 10, "y": 20}, request=request)
+
+    http_client = httpx.AsyncClient(
+        base_url="https://daemon.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AsyncDaemonClient(
+        "https://daemon.example",
+        transport=AsyncHTTPTransport("https://daemon.example", client=http_client),
+    )
+
+    for name in ASYNC_NAMESPACE_NAMES:
+        assert getattr(client, name) is getattr(client, name)
+    point = await client.mouse.move(10, 20)
+    assert (point.x, point.y) == (10, 20)
+
+    await client.aclose()
+    assert http_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_waits_until_ready(monkeypatch) -> None:
+    responses = iter(({"ready": False}, {"ready": True}))
+    client = AsyncDaemonClient("https://daemon.example")
+
+    async def get_json(path: str, **_kwargs: object) -> dict[str, bool]:
+        assert path == "/readyz"
+        return next(responses)
+
+    monkeypatch.setattr(client, "get_json", get_json)
+    await client.wait_until_ready(timeout=1.0, interval=0.001)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_readiness_timeout_is_sanitized(monkeypatch) -> None:
+    client = AsyncDaemonClient("https://daemon.example")
+
+    async def get_json(path: str, **_kwargs: object) -> dict[str, object]:
+        assert path == "/readyz"
+        return {"ready": False, "secret": "must-not-appear"}
+
+    monkeypatch.setattr(client, "get_json", get_json)
+    with pytest.raises(TimeoutError, match="daemon did not become ready") as exc:
+        await client.wait_until_ready(timeout=0.001, interval=0.001)
+
+    await client.aclose()
+    assert "must-not-appear" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_closes_child_connections(monkeypatch) -> None:
+    closed: list[str] = []
+    client = AsyncDaemonClient("https://daemon.example")
+    hot_session = client.hot_session()
+    observation = client.observation_stream()
+
+    async def close_hot_session() -> None:
+        closed.append("hot-session")
+
+    async def close_observation() -> None:
+        closed.append("observation")
+
+    monkeypatch.setattr(hot_session, "aclose", close_hot_session)
+    monkeypatch.setattr(observation, "aclose", close_observation)
+    async def close_transport() -> None:
+        closed.append("transport")
+
+    monkeypatch.setattr(client.transport, "aclose", close_transport)
+    await client.aclose()
+
+    assert set(closed[:2]) == {"hot-session", "observation"}
+    assert closed[2] == "transport"
+    with pytest.raises(RuntimeError, match="closing or closed"):
+        client.hot_session()
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_close_finishes_before_propagating_cancellation(
+    monkeypatch,
+) -> None:
+    close_started = asyncio.Event()
+    permit_close = asyncio.Event()
+    closed = asyncio.Event()
+    client = AsyncDaemonClient("https://daemon.example")
+
+    async def close_transport() -> None:
+        close_started.set()
+        await permit_close.wait()
+        closed.set()
+
+    monkeypatch.setattr(client.transport, "aclose", close_transport)
+    task = asyncio.create_task(client.aclose())
+    await close_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+
+    permit_close.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_does_not_retain_discarded_children() -> None:
+    client = AsyncDaemonClient("https://daemon.example")
+    client.hot_session()
+    client.observation_stream()
+    gc.collect()
+
+    assert not tuple(client._children)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_rejects_non_positive_readiness_interval() -> None:
+    client = AsyncDaemonClient("https://daemon.example")
+    with pytest.raises(ValueError, match="interval must be a positive finite number"):
+        await client.wait_until_ready(interval=0)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_daemon_client_local_defaults_to_loopback() -> None:
+    client = AsyncDaemonClient.local(token="dev")
+    assert client.base_url == "http://127.0.0.1:8080"
+    assert client.transport.token is not None
+    await client.aclose()
 
 
 @pytest.mark.asyncio

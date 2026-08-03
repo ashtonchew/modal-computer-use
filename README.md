@@ -10,25 +10,28 @@ desktops on Modal.
 The project provides daemon-first control primitives. Autonomous agent orchestration and model
 loops stay in application code or examples.
 
-This is an independent community project for Modal.
+This is an independent project using Modal.
 
-## Install from source
+## Install unreleased source
 
-Use Python 3.12 or later and `uv`. The package is not on PyPI. Install it from GitHub:
+Use Python 3.12 or later and `uv`. The package is not on PyPI, and `v1.1.0` has not yet been tagged
+or published as a GitHub Release. To evaluate the current unreleased source from `main`:
 
 ```bash
-uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.1.0"
+uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
 ```
 
 Add the Modal extra when the application will create Modal Sandboxes:
 
 ```bash
-uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.1.0"
+uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
 ```
 
 The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later. Contributors should
 instead follow the [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md).
-The install commands pin the `v1.1.0` GitHub Release. The project is not published to PyPI.
+The `main` ref is mutable; downstream evaluations should replace it with a reviewed full commit SHA
+for reproducibility. Release-tag installation guidance will be added only after the matching GitHub
+Release exists.
 
 ## Run locally
 
@@ -61,6 +64,28 @@ finally:
 
 The command prints `1024 768` followed by the screenshot's SHA-256 digest. Press Ctrl-C in the
 daemon terminal when finished.
+
+For an async application, connect to that same daemon with the native async interface:
+
+```python
+import asyncio
+
+from modal_computer_use import AsyncDaemonClient
+
+
+async def main() -> None:
+    async with AsyncDaemonClient.local(token="dev") as computer:
+        await computer.wait_until_ready()
+        await computer.mouse.move(100, 120)
+        screenshot = await computer.screenshots.full(show_cursor=True)
+        print(screenshot.width, screenshot.height, screenshot.sha256)
+
+
+asyncio.run(main())
+```
+
+Closing `AsyncDaemonClient` closes its connections only. The terminal that started the daemon
+retains lifecycle ownership.
 
 The daemon refuses to start without token or Connect authentication. For a local process that
 intentionally has no token, set `COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK=true`; that mode may
@@ -95,14 +120,39 @@ Run the example:
 uv run python quickstart.py
 ```
 
+Async applications can provision and own the same desktop without blocking their event loop:
+
+```python
+import asyncio
+
+from modal_computer_use import AsyncComputerSandbox, ComputerConfig
+
+
+async def main() -> None:
+    async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+        await computer.mouse.move(100, 120)
+        screenshot = await computer.screenshots.full(show_cursor=True)
+        print(screenshot.width, screenshot.height, screenshot.sha256)
+
+
+asyncio.run(main())
+```
+
+Entering the context creates the Sandbox and waits for the daemon. Exiting terminates the created
+Sandbox. `AsyncComputerSandbox.attach(...)` is for a desktop owned elsewhere; its context detaches
+without terminating the target. The complete owner example is
+[`examples/async_modal_owner.py`](https://github.com/ashtonchew/modal-computer-use/blob/main/examples/async_modal_owner.py).
+
 This uses an inline desktop image and authenticated daemon access on port `8080`. noVNC is off by
 default. The [Modal deployment guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md)
 explains browser profiles, network policy, attach and reuse, Volumes, warm capacity, and cleanup.
 
 ## Capabilities
 
-- Typed SDK namespaces for lifecycle, input, display, screenshots, recordings, browser and app
-  control, processes, commands, artifacts, and debugging.
+- Typed synchronous and native-async SDK namespaces for lifecycle, input, display, screenshots,
+  recordings, browser and app control, processes, commands, artifacts, and debugging. Async code
+  can connect to an existing daemon with `AsyncDaemonClient` or provision Modal resources with
+  `AsyncComputerSandbox`.
 - Ordered action batches that stop on the first failure by default or continue when requested.
 - Local mock and X11 backends that use the same daemon API as Modal deployments.
 - OpenAI, Anthropic, and generic adapters that normalize actions without calling provider APIs or

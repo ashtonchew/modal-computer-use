@@ -71,9 +71,7 @@ def test_release_checklist_matches_commands_it_claims_to_share_with_ci() -> None
 
 def test_release_docs_reference_existing_benchmark_cli_tests() -> None:
     checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
-    spec = (ROOT / "docs" / "spec" / "modal_computer_use_spec_v8.md").read_text(
-        encoding="utf-8"
-    )
+    spec = (ROOT / "docs" / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
     assert STALE_BENCHMARK_TEST_PATH not in checklist
     assert STALE_BENCHMARK_TEST_PATH not in spec

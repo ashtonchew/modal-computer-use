@@ -6,7 +6,13 @@ The design splits orchestration from execution. Orchestration (creating sandboxe
 
 ### SDK layer
 
-`ComputerSandbox` and `DaemonClient` live in the `modal_computer_use` package. They expose typed Python namespaces (`computer.mouse`, `computer.screenshots`, etc.) and send typed HTTP requests to the daemon. The SDK does not import `openai` or `anthropic`.
+`ComputerSandbox`, `AsyncComputerSandbox`, `DaemonClient`, and `AsyncDaemonClient` live in the
+`modal_computer_use` package. They expose typed Python namespaces (`computer.mouse`,
+`computer.screenshots`, etc.) and send typed HTTP requests to the daemon. Sync and async Modal
+provisioning share one security-sensitive creation plan and validation policy; only provider I/O
+changes at the adapter boundary. `ComputerSessionHandle.borrow_async()` is a separate leased
+trajectory surface for a desktop provisioned earlier. The SDK does not import `openai` or
+`anthropic`.
 
 ### Daemon layer
 
@@ -104,5 +110,5 @@ The design borrows operational patterns from Daytona's computer-use primitives, 
 
 ## Formal spec
 
-See [spec/modal_computer_use_spec_v8.md](spec/modal_computer_use_spec_v8.md) for the canonical
+See the [product specification](spec/product-spec.md) for the canonical
 architecture, maturity boundaries, route ownership, and rationale.

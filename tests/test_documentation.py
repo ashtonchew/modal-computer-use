@@ -200,6 +200,18 @@ def test_onboarding_docs_use_canonical_setup_guidance() -> None:
         assert "uv run modal token new" not in source, path.relative_to(ROOT)
 
 
+def test_prepared_source_does_not_claim_an_unpublished_v1_1_release() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
+
+    assert "git@v1.1.0" not in readme
+    assert "has not yet been tagged" in readme
+    assert "## 1.1.0 -" not in changelog
+    assert "no `v1.1.0` tag or matching GitHub Release exists" in changelog
+    assert "prepared, unreleased `1.1.0` source state" in specification
+
+
 def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
     section = source[
@@ -300,10 +312,9 @@ def test_archived_documents_have_one_index_entry_and_structured_disposition() ->
         assert ARCHIVE_DISPOSITION_RE.search(source), f"{relative} needs a disposition"
 
 
-def test_active_and_archived_specifications_have_one_owner() -> None:
+def test_product_specification_has_one_stable_owner() -> None:
     active_names = {path.name for path in (DOCS / "spec").glob("*.md")}
     archived_names = {path.name for path in (ARCHIVE / "spec").glob("*.md")}
 
-    assert "modal_computer_use_spec_v8.md" in active_names
-    assert "modal_computer_use_spec_v7.md" in archived_names
-    assert active_names.isdisjoint(archived_names)
+    assert active_names == {"product-spec.md"}
+    assert not archived_names

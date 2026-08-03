@@ -7,12 +7,13 @@ import math
 import os
 import secrets as _secrets
 import time
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from types import MappingProxyType
+from typing import Any, Literal, cast
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from ._version import __version__
@@ -31,7 +32,7 @@ from .errors import (
     SessionPlacementMismatchError,
     SessionTargetMismatchError,
 )
-from .hot_session import HotSessionClient
+from .hot_session import AsyncHotSessionClient, HotSessionClient
 from .image import default_image, named_image, selected_image_identity
 from .latency import SessionStartupTiming, validate_first_frame
 from .models import (
@@ -61,7 +62,7 @@ from .namespaces import (
     SessionNamespace,
     WindowsNamespace,
 )
-from .observations import ObservationClient
+from .observations import AsyncObservationClient, ObservationClient
 from .state import APP_ID_TAG, compute_config_hash, default_tags, new_run_id, warm_pool_tags
 from .transports import (
     AsyncHTTPTransport,
@@ -72,6 +73,7 @@ from .transports import (
 
 ReusePolicy = Literal["by_run_id", "by_name", "never"]
 ConfigMismatchPolicy = Literal["raise", "reuse"]
+_SandboxLifecycleMode = Literal["local", "owned", "attached", "detached"]
 ModalDaemonEndpointPath = Literal["inherited", "connect", "target-loopback"]
 ModalBenchmarkBackend = Literal["v1", "v2"]
 ModalBenchmarkTransport = Literal[
@@ -136,6 +138,42 @@ class _SessionHandoffPolicy:
     daemon_http_version: Literal["1.1", "2"]
     vnc_mode: Literal["off", "view_only", "control"]
     config_hash: str
+
+
+@dataclass(frozen=True, repr=False)
+class _SandboxCreateInputs:
+    config: ComputerConfig
+    app_name: str
+    name: str | None
+    image: object | None
+    custom_image_supplied: bool
+    artifact_volume_mounted: bool
+    vnc_mode: Literal["off", "view_only", "control"]
+    caller_tags: Mapping[str, str]
+    app_tags: Mapping[str, str]
+    secrets: tuple[object, ...]
+    volumes: Mapping[str, object]
+    owner: str | None
+    tag_profile: Literal["default", "warm_pool"]
+    sandbox_kwargs: Mapping[str, Any]
+    app_lookup_kwargs: Mapping[str, object]
+
+
+@dataclass(frozen=True, repr=False)
+class _SandboxCreatePlan:
+    inputs: _SandboxCreateInputs
+    sandbox_tags: Mapping[str, str]
+    config_hash: str
+    session_id: str | None
+    daemon_bearer: str
+    http2: bool
+    create_kwargs: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class _AttachSelector:
+    kind: Literal["sandbox_id", "name", "run_id", "base_url"]
+    value: str
 
 
 @dataclass
@@ -469,11 +507,7 @@ class _TimedSandboxInstance:
         wait_until_ready = getattr(  # noqa: B009 - dynamic Modal SDK type
             self._sandbox, "wait_until_ready"
         )
-        try:
-            result = wait_until_ready(*args, **kwargs)
-        except Exception:
-            _terminate_failed_sandbox(self._sandbox)
-            raise
+        result = wait_until_ready(*args, **kwargs)
         self._timing.mark("tcp_ready")
         return result
 
@@ -481,11 +515,7 @@ class _TimedSandboxInstance:
         create_access = getattr(  # noqa: B009 - dynamic Modal SDK type
             self._sandbox, "create_connect_token"
         )
-        try:
-            result = create_access(*args, **kwargs)
-        except Exception:
-            _terminate_failed_sandbox(self._sandbox)
-            raise
+        result = create_access(*args, **kwargs)
         self._timing.mark("connect_token_ready")
         return result
 
@@ -1125,6 +1155,231 @@ def _validate_borrow_request(
         raise SessionCompatibilityError
 
 
+def _prepare_sandbox_create_inputs(
+    *,
+    config: ComputerConfig | None,
+    app_name: str,
+    name: str | None,
+    image: object | None,
+    expose_vnc: bool | str | None,
+    tags: Mapping[str, str] | None,
+    app_tags: Mapping[str, str] | None,
+    secrets: Sequence[object] | None,
+    volumes: Mapping[str, object] | None,
+    owner: str | None,
+    tag_profile: Literal["default", "warm_pool"],
+    sandbox_kwargs: Mapping[str, Any],
+) -> _SandboxCreateInputs:
+    _reject_security_owned_sandbox_kwargs(sandbox_kwargs)
+    resolved_config = ComputerConfig() if config is None else config.model_copy(deep=True)
+    if not resolved_config.run_id:
+        resolved_config.run_id = new_run_id()
+    prepared_volumes = _prepare_volume_mounts(dict(volumes or {}))
+    artifact_volume_mounted = _has_artifact_volume_mount(
+        prepared_volumes,
+        resolved_config.storage.artifacts_dir,
+    )
+    if resolved_config.storage.persist_artifacts and not artifact_volume_mounted:
+        raise ConfigConflictError(
+            "persist_artifacts=True requires a Volume mounted at storage.artifacts_dir "
+            "or one of its parent directories"
+        )
+    vnc_mode = normalize_vnc_mode(
+        expose_vnc if expose_vnc is not None else resolved_config.expose_vnc
+    )
+    custom_image_supplied = image is not None
+    app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
+    if resolved_config.runtime.modal_environment is not None:
+        app_lookup_kwargs["environment_name"] = resolved_config.runtime.modal_environment
+    return _SandboxCreateInputs(
+        config=resolved_config,
+        app_name=app_name,
+        name=name,
+        image=image,
+        custom_image_supplied=custom_image_supplied,
+        artifact_volume_mounted=artifact_volume_mounted,
+        vnc_mode=vnc_mode,
+        caller_tags=MappingProxyType(dict(tags or {})),
+        app_tags=MappingProxyType(dict(app_tags or {})),
+        secrets=tuple(secrets or ()),
+        volumes=MappingProxyType(prepared_volumes),
+        owner=owner,
+        tag_profile=tag_profile,
+        sandbox_kwargs=MappingProxyType(dict(sandbox_kwargs)),
+        app_lookup_kwargs=MappingProxyType(app_lookup_kwargs),
+    )
+
+
+def _resolve_sandbox_create_image(inputs: _SandboxCreateInputs) -> object:
+    if inputs.image is not None:
+        return inputs.image
+    config = inputs.config
+    browser_kind = config.browser.kind if config.browser else None
+    if config.image.source == "named":
+        return named_image(
+            revision=config.image.revision or "",
+            profile=config.resources.profile,
+            browser=browser_kind,
+            environment_name=config.image.environment_name,
+        )
+    return default_image(
+        profile=config.resources.profile,
+        browser=browser_kind,
+        window_manager=config.desktop.window_manager,
+        browser_prewarm=config.browser.prewarm if config.browser else False,
+    )
+
+
+def _build_sandbox_create_plan(
+    inputs: _SandboxCreateInputs,
+    *,
+    app: object,
+    modal: object,
+    image: object,
+) -> _SandboxCreatePlan:
+    config = inputs.config
+    env = _daemon_environment(
+        config,
+        vnc_mode=inputs.vnc_mode,
+        artifact_volume_mounted=inputs.artifact_volume_mounted,
+    )
+    app_id = _modal_app_id(app)
+    base_tags = (
+        warm_pool_tags(app_id=app_id)
+        if inputs.tag_profile == "warm_pool"
+        else default_tags(config, app_id=app_id, owner=inputs.owner)
+    )
+    sandbox_tags = {**inputs.caller_tags, **base_tags}
+    config_hash = compute_config_hash(config)
+    session_id: str | None = None
+    if config.runtime.modal_environment is not None and config.runtime.modal_region is not None:
+        session_id = _session_policy_id_prefix(
+            app_name=inputs.app_name,
+            modal_environment=config.runtime.modal_environment,
+            requested_modal_region=config.runtime.modal_region,
+            ingress=config.ingress,
+            daemon_http_version=config.network.daemon_http_version,
+            vnc_mode=inputs.vnc_mode,
+            config_hash=config_hash,
+        ) + _secrets.token_hex(8)
+        sandbox_tags["computer-use.session_id"] = session_id
+    browser_kind = config.browser.kind if config.browser else None
+    if inputs.tag_profile != "warm_pool":
+        sandbox_tags["computer-use.image_identity"] = (
+            "custom"
+            if inputs.custom_image_supplied
+            else selected_image_identity(
+                source=config.image.source,
+                revision=config.image.revision,
+                profile=config.resources.profile,
+                browser=browser_kind,
+            )
+        )
+    _validate_sandbox_tags(sandbox_tags)
+    http2 = config.network.daemon_http_version == "2"
+    ports = _encrypted_ports_for_ingress(
+        config.ingress,
+        vnc_mode=inputs.vnc_mode,
+        http2=http2,
+    )
+    h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
+    daemon_bearer = _secrets.token_urlsafe(32)
+    env["COMPUTER_USE_TUNNEL_TOKEN"] = daemon_bearer
+    create_kwargs: dict[str, Any] = {
+        "app": app,
+        "image": image,
+        "cpu": config.resources.cpu,
+        "memory": config.resources.memory_mib,
+        "gpu": config.resources.gpu,
+        "encrypted_ports": ports,
+        "timeout": config.runtime.timeout_seconds,
+        "idle_timeout": config.runtime.idle_timeout_seconds,
+        "secrets": list(inputs.secrets),
+        "volumes": dict(inputs.volumes),
+        "env": env,
+        "block_network": config.network.block_all,
+        "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
+        "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
+        "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
+        "name": inputs.name,
+        "tags": sandbox_tags,
+        **inputs.sandbox_kwargs,
+    }
+    if h2_ports:
+        create_kwargs["h2_ports"] = h2_ports
+    if config.runtime.modal_region:
+        create_kwargs["region"] = config.runtime.modal_region
+    readiness_probe = _readiness_probe(modal)
+    if readiness_probe is not None:
+        create_kwargs["readiness_probe"] = readiness_probe
+    return _SandboxCreatePlan(
+        inputs=inputs,
+        sandbox_tags=MappingProxyType(sandbox_tags),
+        config_hash=config_hash,
+        session_id=session_id,
+        daemon_bearer=daemon_bearer,
+        http2=http2,
+        create_kwargs=MappingProxyType(create_kwargs),
+    )
+
+
+def _materialize_sandbox_create_kwargs(plan: _SandboxCreatePlan) -> dict[str, Any]:
+    kwargs = dict(plan.create_kwargs)
+    kwargs["secrets"] = list(plan.inputs.secrets)
+    kwargs["volumes"] = dict(plan.inputs.volumes)
+    kwargs["env"] = dict(plan.create_kwargs["env"])
+    kwargs["tags"] = dict(plan.sandbox_tags)
+    return kwargs
+
+
+def _metadata_from_create_plan(plan: _SandboxCreatePlan, sandbox: object) -> SandboxRef:
+    inputs = plan.inputs
+    config = inputs.config
+    tags = dict(plan.sandbox_tags)
+    return SandboxRef(
+        sandbox_id=getattr(sandbox, "object_id", "unknown"),
+        app_name=inputs.app_name,
+        name=inputs.name,
+        run_id=config.run_id,
+        owner=tags.get("computer-use.owner"),
+        created_at=_created_at_from_tags(tags),
+        config_hash=plan.config_hash,
+        status="started",
+        tags=tags,
+        vnc_url=None,
+        artifacts_dir=config.storage.artifacts_dir,
+    )
+
+
+def _validate_attach_selector(
+    *,
+    sandbox_id: str | None,
+    name: str | None,
+    run_id: str | None,
+    base_url: str | None,
+    token: str | None,
+) -> _AttachSelector:
+    selectors = {
+        "sandbox_id": sandbox_id,
+        "name": name,
+        "run_id": run_id,
+        "base_url": base_url,
+    }
+    selected = [(kind, value) for kind, value in selectors.items() if value is not None]
+    if len(selected) != 1:
+        raise ValueError("attach requires exactly one of sandbox_id, name, run_id, or base_url")
+    kind, raw_value = selected[0]
+    value = raw_value.strip()
+    if not value:
+        raise ValueError(f"{kind} must be a non-empty string")
+    if token is not None and kind != "base_url":
+        raise ValueError("token is valid only when attaching by base_url")
+    return _AttachSelector(
+        kind=cast(Literal["sandbox_id", "name", "run_id", "base_url"], kind),
+        value=value,
+    )
+
+
 class ComputerSandbox:
     def __init__(
         self,
@@ -1133,6 +1388,7 @@ class ComputerSandbox:
         sandbox: object | None = None,
         metadata: SandboxRef | None = None,
         startup_timing: SessionStartupTiming | None = None,
+        _lifecycle_mode: _SandboxLifecycleMode | None = None,
     ) -> None:
         self.client = client
         self._sandbox = sandbox
@@ -1141,7 +1397,11 @@ class ComputerSandbox:
         self._session_handoff_policy: _SessionHandoffPolicy | None = None
         self._daemon_bearer: str | None = None
         self.startup_timing = startup_timing
-        self._readiness_failure_cleanup: Literal["none", "client", "sandbox"] = "none"
+        self._lifecycle_mode: _SandboxLifecycleMode = (
+            _lifecycle_mode
+            if _lifecycle_mode is not None
+            else ("owned" if sandbox is not None else "local")
+        )
         self._readiness_stage_count = 0
         self.lifecycle = LifecycleNamespace(client)
         self.mouse = MouseNamespace(client)
@@ -1169,7 +1429,10 @@ class ComputerSandbox:
         token: str | None = None,
         timeout: float = 30.0,
     ) -> ComputerSandbox:
-        return cls(DaemonClient(base_url=base_url, token=token, timeout=timeout))
+        return cls(
+            DaemonClient(base_url=base_url, token=token, timeout=timeout),
+            _lifecycle_mode="local",
+        )
 
     @classmethod
     def create(
@@ -1190,7 +1453,6 @@ class ComputerSandbox:
         tag_profile: Literal["default", "warm_pool"] = "default",
         **sandbox_kwargs: Any,
     ) -> ComputerSandbox:
-        _reject_security_owned_sandbox_kwargs(sandbox_kwargs)
         timing = timing or SessionStartupTiming()
         timing.mark("request_received")
         timing.unsupported(
@@ -1201,6 +1463,20 @@ class ComputerSandbox:
             "daemon_started",
             "the daemon process does not yet emit an attested startup timestamp",
         )
+        inputs = _prepare_sandbox_create_inputs(
+            config=config,
+            app_name=app_name,
+            name=name,
+            image=image,
+            expose_vnc=expose_vnc,
+            tags=tags,
+            app_tags=app_tags,
+            secrets=secrets,
+            volumes=volumes,
+            owner=owner,
+            tag_profile=tag_profile,
+            sandbox_kwargs=sandbox_kwargs,
+        )
         try:
             import modal
         except ImportError as exc:
@@ -1210,198 +1486,108 @@ class ComputerSandbox:
                 "`uv add 'modal-computer-use[modal]'` downstream"
             ) from exc
         modal = _TimedModalRuntime(modal, timing)
-
-        config = config or ComputerConfig()
-        if not config.run_id:
-            config.run_id = new_run_id()
-        volumes = _prepare_volume_mounts(volumes or {})
-        artifact_volume_mounted = _has_artifact_volume_mount(volumes, config.storage.artifacts_dir)
-        if config.storage.persist_artifacts and not artifact_volume_mounted:
-            raise ConfigConflictError(
-                "persist_artifacts=True requires a Volume mounted at storage.artifacts_dir "
-                "or one of its parent directories"
-            )
-        vnc_mode = normalize_vnc_mode(expose_vnc if expose_vnc is not None else config.expose_vnc)
-        custom_image_supplied = image is not None
-        browser_kind = config.browser.kind if config.browser else None
-        if image is None and config.image.source == "named":
-            image = named_image(
-                revision=config.image.revision or "",
-                profile=config.resources.profile,
-                browser=browser_kind,
-                environment_name=config.image.environment_name,
-            )
-        elif image is None:
-            image = default_image(
-                profile=config.resources.profile,
-                browser=browser_kind,
-                window_manager=config.desktop.window_manager,
-                browser_prewarm=config.browser.prewarm if config.browser else False,
-            )
-        app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
-        if config.runtime.modal_environment is not None:
-            app_lookup_kwargs["environment_name"] = config.runtime.modal_environment
-        app = modal.App.lookup(app_name, **app_lookup_kwargs)
-        if app_tags:
-            _set_modal_object_tags(app, app_tags)
-        env = _daemon_environment(
-            config,
-            vnc_mode=vnc_mode,
-            artifact_volume_mounted=artifact_volume_mounted,
+        resolved_image = _resolve_sandbox_create_image(inputs)
+        app = modal.App.lookup(inputs.app_name, **dict(inputs.app_lookup_kwargs))
+        if inputs.app_tags:
+            _set_modal_object_tags(app, dict(inputs.app_tags))
+        plan = _build_sandbox_create_plan(
+            inputs,
+            app=app,
+            modal=modal,
+            image=resolved_image,
         )
-        app_id = _modal_app_id(app)
-        base_tags = (
-            warm_pool_tags(app_id=app_id)
-            if tag_profile == "warm_pool"
-            else default_tags(config, app_id=app_id, owner=owner)
-        )
-        sandbox_tags = {**(tags or {}), **base_tags}
-        config_hash = compute_config_hash(config)
-        session_id: str | None = None
-        if config.runtime.modal_environment is not None and config.runtime.modal_region is not None:
-            session_id = _session_policy_id_prefix(
-                app_name=app_name,
-                modal_environment=config.runtime.modal_environment,
-                requested_modal_region=config.runtime.modal_region,
-                ingress=config.ingress,
-                daemon_http_version=config.network.daemon_http_version,
-                vnc_mode=vnc_mode,
-                config_hash=config_hash,
-            ) + _secrets.token_hex(8)
-            sandbox_tags["computer-use.session_id"] = session_id
-        if tag_profile != "warm_pool":
-            sandbox_tags["computer-use.image_identity"] = (
-                "custom"
-                if custom_image_supplied
-                else selected_image_identity(
-                    source=config.image.source,
-                    revision=config.image.revision,
-                    profile=config.resources.profile,
-                    browser=browser_kind,
+        sandbox: object | None = None
+        computer: ComputerSandbox | None = None
+        try:
+            sandbox = modal.Sandbox.create(
+                "python",
+                "-m",
+                "modal_computer_use.daemon",
+                **_materialize_sandbox_create_kwargs(plan),
+            )
+            config = plan.inputs.config
+            if wait and hasattr(sandbox, "wait_until_ready"):
+                sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            if config.ingress == "connect":
+                token_info = sandbox.create_connect_token(
+                    user_metadata={"sdk": "modal-computer-use", "version": __version__},
+                    port=8080,
                 )
+                connect_base_url, connect_token = _connect_token_parts(token_info)
+            else:
+                connect_base_url = _tunnel_url(sandbox, 8080)
+                connect_token = plan.daemon_bearer
+                timing.mark("connect_token_ready")
+            base_url, token = _client_ingress_parts(
+                sandbox,
+                ingress=config.ingress,
+                connect_base_url=connect_base_url,
+                connect_token=connect_token,
+                tunnel_token=plan.daemon_bearer,
             )
-        _validate_sandbox_tags(sandbox_tags)
-        http2 = config.network.daemon_http_version == "2"
-        ports = _encrypted_ports_for_ingress(config.ingress, vnc_mode=vnc_mode, http2=http2)
-        h2_ports = _h2_ports_for_ingress(config.ingress, http2=http2)
-        daemon_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
-        env.update(daemon_auth)
-        tunnel_token = _daemon_bearer_from_auth(daemon_auth)
-        create_kwargs: dict[str, Any] = {
-            "app": app,
-            "image": image,
-            "cpu": config.resources.cpu,
-            "memory": config.resources.memory_mib,
-            "gpu": config.resources.gpu,
-            "encrypted_ports": ports,
-            "timeout": config.runtime.timeout_seconds,
-            "idle_timeout": config.runtime.idle_timeout_seconds,
-            "secrets": secrets or [],
-            "volumes": volumes,
-            "env": env,
-            "block_network": config.network.block_all,
-            "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
-            "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
-            "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
-            "name": name,
-            "tags": sandbox_tags,
-            **sandbox_kwargs,
-        }
-        if h2_ports:
-            create_kwargs["h2_ports"] = h2_ports
-        if config.runtime.modal_region:
-            create_kwargs["region"] = config.runtime.modal_region
-        readiness_probe = _readiness_probe(modal)
-        if readiness_probe is not None:
-            create_kwargs["readiness_probe"] = readiness_probe
-        sandbox = modal.Sandbox.create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
-        if wait and hasattr(sandbox, "wait_until_ready"):
-            sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        if config.ingress == "connect":
-            token_info = sandbox.create_connect_token(
-                user_metadata={"sdk": "modal-computer-use", "version": __version__},
-                port=8080,
-            )
-            connect_base_url, connect_token = _connect_token_parts(token_info)
-        else:
-            connect_base_url = _tunnel_url(sandbox, 8080)
-            connect_token = tunnel_token
-            timing.mark("connect_token_ready")
-        base_url, token = _client_ingress_parts(
-            sandbox,
-            ingress=config.ingress,
-            connect_base_url=connect_base_url,
-            connect_token=connect_token,
-            tunnel_token=tunnel_token,
-        )
-        metadata = SandboxRef(
-            sandbox_id=getattr(sandbox, "object_id", "unknown"),
-            app_name=app_name,
-            name=name,
-            run_id=config.run_id,
-            owner=sandbox_tags.get("computer-use.owner"),
-            created_at=_created_at_from_tags(sandbox_tags),
-            config_hash=config_hash,
-            status="started",
-            tags=sandbox_tags,
-            vnc_url=None,
-            artifacts_dir=config.storage.artifacts_dir,
-        )
-        token_resolver = None
-        if config.ingress == "attested-tunnel" and not wait:
-            token = None
+            metadata = _metadata_from_create_plan(plan, sandbox)
+            token_resolver = None
+            if config.ingress == "attested-tunnel" and not wait:
+                token = None
 
-            def resolve_attested_token() -> str:
-                return _attested_tunnel_parts(
+                def resolve_attested_token() -> str:
+                    return _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=connect_base_url,
+                        connect_token=connect_token,
+                    )[1]
+
+                token_resolver = resolve_attested_token
+            computer = cls(
+                DaemonClient(
+                    base_url=base_url,
+                    token=token,
+                    http2=plan.http2,
+                    _token_resolver=token_resolver,
+                ),
+                sandbox=sandbox,
+                metadata=metadata,
+                _lifecycle_mode="owned",
+            )
+            computer.startup_timing = timing
+            computer._daemon_bearer = plan.daemon_bearer
+            if wait:
+                computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            if wait and config.ingress == "attested-tunnel":
+                computer.client.close()
+                base_url, token = _attested_tunnel_parts(
                     sandbox,
                     connect_base_url=connect_base_url,
                     connect_token=connect_token,
-                )[1]
-
-            token_resolver = resolve_attested_token
-        computer = cls(
-            DaemonClient(
-                base_url=base_url,
-                token=token,
-                http2=http2,
-                _token_resolver=token_resolver,
-            ),
-            sandbox=sandbox,
-            metadata=metadata,
-        )
-        computer.startup_timing = timing
-        computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
-        computer._readiness_failure_cleanup = "sandbox"
-        if wait:
-            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        if wait and config.ingress == "attested-tunnel":
-            computer.client.close()
-            base_url, token = _attested_tunnel_parts(
-                sandbox,
-                connect_base_url=connect_base_url,
-                connect_token=connect_token,
+                )
+                computer = cls(
+                    DaemonClient(base_url=base_url, token=token, http2=plan.http2),
+                    sandbox=sandbox,
+                    metadata=metadata,
+                    _lifecycle_mode="owned",
+                )
+                computer.startup_timing = timing
+                computer._daemon_bearer = plan.daemon_bearer
+                computer._readiness_stage_count = 1
+                timing.mark("attestation_ready")
+                computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
+            computer._requested_modal_region = config.runtime.modal_region
+            computer._session_handoff_policy = _session_handoff_policy(
+                config,
+                session_id=plan.session_id,
+                app_name=inputs.app_name,
+                vnc_mode=inputs.vnc_mode,
+                config_hash=metadata.config_hash or plan.config_hash,
             )
-            computer = cls(
-                DaemonClient(base_url=base_url, token=token, http2=http2),
-                sandbox=sandbox,
-                metadata=metadata,
-            )
-            computer.startup_timing = timing
-            computer._daemon_bearer = _daemon_bearer_from_auth(daemon_auth)
-            computer._readiness_failure_cleanup = "sandbox"
-            computer._readiness_stage_count = 1
-            timing.mark("attestation_ready")
-            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-        computer._requested_modal_region = config.runtime.modal_region
-        computer._session_handoff_policy = _session_handoff_policy(
-            config,
-            session_id=session_id,
-            app_name=app_name,
-            vnc_mode=vnc_mode,
-            config_hash=metadata.config_hash or compute_config_hash(config),
-        )
-        computer._readiness_failure_cleanup = "none"
-        return computer
+            return computer
+        except BaseException as exc:
+            if sandbox is not None:
+                _cleanup_failed_created_sandbox(
+                    sandbox,
+                    client=None if computer is None else computer.client,
+                    primary=exc,
+                )
+            raise
 
     @classmethod
     def attach(
@@ -1420,12 +1606,27 @@ class ComputerSandbox:
         modal_environment: str | None = None,
         allow_legacy_unscoped: bool = False,
     ) -> ComputerSandbox:
-        if base_url:
-            computer = cls(DaemonClient(base_url=base_url, token=token, http2=http2))
+        selector = _validate_attach_selector(
+            sandbox_id=sandbox_id,
+            name=name,
+            run_id=run_id,
+            base_url=base_url,
+            token=token,
+        )
+        if selector.kind == "base_url":
+            computer = cls(
+                DaemonClient(base_url=selector.value, token=token, http2=http2),
+                _lifecycle_mode="attached",
+            )
             if wait:
-                computer._readiness_failure_cleanup = "client"
-                computer.wait_until_ready(timeout=readiness_timeout)
-                computer._readiness_failure_cleanup = "none"
+                try:
+                    computer.wait_until_ready(timeout=readiness_timeout)
+                except BaseException as exc:
+                    try:
+                        computer.client.close()
+                    except BaseException as cleanup_exc:
+                        _note_cleanup_failure(exc, "client.close", cleanup_exc)
+                    raise
             return computer
         try:
             import modal
@@ -1442,73 +1643,106 @@ class ComputerSandbox:
             environment_name=modal_environment,
             allow_legacy_unscoped=allow_legacy_unscoped,
         )
-        if sandbox_id:
-            sandbox = registry.require_sandbox_by_id(sandbox_id)
-        elif name:
+        if selector.kind == "sandbox_id":
+            sandbox = registry.require_sandbox_by_id(selector.value)
+        elif selector.kind == "name":
             sandbox = _sandbox_from_name(
                 modal,
                 app_name=app_name,
-                name=name,
+                name=selector.value,
                 environment_name=modal_environment,
             )
-            registry.require_app_tag(sandbox, description=f"sandbox name={name}")
-        elif run_id:
-            sandbox = registry.require_sandbox_by_run_id(run_id)
+            try:
+                registry.require_app_tag(sandbox, description="sandbox name")
+            except BaseException as exc:
+                _cleanup_failed_attached_sandbox(sandbox, client=None, primary=exc)
+                raise
         else:
-            raise ValueError("attach requires sandbox_id, name, run_id, or base_url")
-        metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
-        if ingress == "connect":
-            token_info = sandbox.create_connect_token(
-                user_metadata={"sdk": "modal-computer-use", "version": __version__},
-                port=8080,
-            )
-            connect_base_url, connect_token = _connect_token_parts(token_info)
-        else:
-            connect_base_url = _tunnel_url(sandbox, 8080)
-            connect_token = _sandbox_daemon_bearer(sandbox)
-        token_resolver = None
-        if ingress == "attested-tunnel" and not wait:
-            bootstrap_base_url = connect_base_url
-            bootstrap_token = connect_token
-            connect_token = None
+            sandbox = registry.require_sandbox_by_run_id(selector.value)
+        return cls._attach_resolved_sandbox(
+            sandbox,
+            app_name=app_name,
+            ingress=ingress,
+            http2=http2,
+            wait=wait,
+            readiness_timeout=readiness_timeout,
+        )
 
-            def resolve_attested_token() -> str:
-                return _attested_tunnel_parts(
-                    sandbox,
-                    connect_base_url=bootstrap_base_url,
-                    connect_token=bootstrap_token,
-                )[1]
+    @classmethod
+    def _attach_resolved_sandbox(
+        cls,
+        sandbox: object,
+        *,
+        app_name: str,
+        ingress: ModalIngress,
+        http2: bool,
+        wait: bool,
+        readiness_timeout: float,
+    ) -> ComputerSandbox:
+        client: DaemonClient | None = None
+        try:
+            metadata = _metadata_from_sandbox(sandbox, app_name=app_name)
+            if ingress == "connect":
+                token_info = sandbox.create_connect_token(
+                    user_metadata={"sdk": "modal-computer-use", "version": __version__},
+                    port=8080,
+                )
+                connect_base_url, connect_token = _connect_token_parts(token_info)
+            else:
+                connect_base_url = _tunnel_url(sandbox, 8080)
+                connect_token = _sandbox_daemon_bearer(sandbox)
+            token_resolver = None
+            if ingress == "attested-tunnel" and not wait:
+                bootstrap_base_url = connect_base_url
+                bootstrap_token = connect_token
+                connect_token = None
 
-            token_resolver = resolve_attested_token
-        computer = cls(
-            DaemonClient(
+                def resolve_attested_token() -> str:
+                    return _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=bootstrap_base_url,
+                        connect_token=bootstrap_token,
+                    )[1]
+
+                token_resolver = resolve_attested_token
+            client = DaemonClient(
                 base_url=connect_base_url,
                 token=connect_token,
                 http2=http2,
                 _token_resolver=token_resolver,
-            ),
-            sandbox=sandbox,
-            metadata=metadata,
-        )
-        if wait:
-            computer._readiness_failure_cleanup = "client"
-            computer.wait_until_ready(timeout=readiness_timeout)
-            if ingress == "attested-tunnel":
-                computer.client.close()
-                connect_base_url, connect_token = _attested_tunnel_parts(
-                    sandbox,
-                    connect_base_url=connect_base_url,
-                    connect_token=connect_token,
-                )
-                computer = cls(
-                    DaemonClient(base_url=connect_base_url, token=connect_token, http2=http2),
-                    sandbox=sandbox,
-                    metadata=metadata,
-                )
-                computer._readiness_failure_cleanup = "client"
+            )
+            computer = cls(
+                client,
+                sandbox=sandbox,
+                metadata=metadata,
+                _lifecycle_mode="attached",
+            )
+            if wait:
                 computer.wait_until_ready(timeout=readiness_timeout)
-            computer._readiness_failure_cleanup = "none"
-        return computer
+                if ingress == "attested-tunnel":
+                    client.close()
+                    connect_base_url, connect_token = _attested_tunnel_parts(
+                        sandbox,
+                        connect_base_url=connect_base_url,
+                        connect_token=connect_token,
+                    )
+                    client = DaemonClient(
+                        base_url=connect_base_url,
+                        token=connect_token,
+                        http2=http2,
+                    )
+                    computer = cls(
+                        client,
+                        sandbox=sandbox,
+                        metadata=metadata,
+                        _lifecycle_mode="attached",
+                    )
+                    computer._readiness_stage_count = 1
+                    computer.wait_until_ready(timeout=readiness_timeout)
+            return computer
+        except BaseException as exc:
+            _cleanup_failed_attached_sandbox(sandbox, client=client, primary=exc)
+            raise
 
     @classmethod
     def attach_or_create(
@@ -1525,60 +1759,80 @@ class ComputerSandbox:
         allow_legacy_unscoped: bool = False,
         **kwargs: Any,
     ) -> ComputerSandbox:
-        config = config or ComputerConfig()
+        config = ComputerConfig() if config is None else config.model_copy(deep=True)
         if run_id is not None:
             config.run_id = run_id
         if on_config_mismatch not in ("raise", "reuse"):
             raise ValueError("on_config_mismatch must be 'raise' or 'reuse'")
         reuse_policy = _normalize_reuse_policy(reuse)
         requested_hash = compute_config_hash(config)
-
+        sandbox: object | None = None
         if reuse_policy == "by_run_id" and config.run_id:
-            try:
-                computer = cls.attach(
-                    run_id=config.run_id,
-                    app_name=app_name,
-                    ingress=config.ingress,
-                    http2=config.network.daemon_http_version == "2",
-                    wait=wait,
-                    readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
-                    modal_environment=config.runtime.modal_environment,
-                    allow_legacy_unscoped=allow_legacy_unscoped,
-                )
-                _check_config_hash(
-                    computer.metadata(),
-                    requested_hash=requested_hash,
-                    on_config_mismatch=on_config_mismatch,
-                )
-                if computer.metadata() is not None and (
-                    computer.metadata().config_hash == requested_hash
-                ):
-                    computer._requested_modal_region = config.runtime.modal_region
-                    computer._session_handoff_policy = _session_handoff_policy(
-                        config,
-                        session_id=computer.metadata().tags.get("computer-use.session_id"),
-                        app_name=app_name,
-                        config_hash=requested_hash,
-                    )
-                return computer
-            except SandboxAmbiguousError:
-                raise
-            except SandboxUnavailableError:
-                pass
+            from .registry import SandboxRegistry
+
+            registry = SandboxRegistry(
+                app_name=app_name,
+                environment_name=config.runtime.modal_environment,
+                allow_legacy_unscoped=allow_legacy_unscoped,
+            )
+            sandbox = registry.find_sandbox_by_run_id(config.run_id)
+        elif reuse_policy == "by_run_id":
+            pass
         elif reuse_policy == "by_name":
             if not name:
                 raise ValueError("reuse='by_name' requires name")
             try:
-                computer = cls.attach(
-                    name=name,
+                import modal
+            except ImportError as exc:
+                raise ModalNotInstalledError(
+                    "ComputerSandbox.attach_or_create requires the modal extra, for example "
+                    "`uv sync --extra modal` in this repository or "
+                    "`uv add 'modal-computer-use[modal]'` downstream"
+                ) from exc
+            try:
+                sandbox = _sandbox_from_name(
+                    modal,
                     app_name=app_name,
-                    ingress=config.ingress,
-                    http2=config.network.daemon_http_version == "2",
-                    wait=wait,
-                    readiness_timeout=readiness_timeout or config.runtime.readiness_timeout_seconds,
-                    modal_environment=config.runtime.modal_environment,
-                    allow_legacy_unscoped=allow_legacy_unscoped,
+                    name=name,
+                    environment_name=config.runtime.modal_environment,
                 )
+            except Exception as exc:
+                if not _is_modal_not_found_error(exc):
+                    raise
+            if sandbox is not None:
+                from .registry import SandboxRegistry
+
+                try:
+                    SandboxRegistry(
+                        app_name=app_name,
+                        environment_name=config.runtime.modal_environment,
+                        allow_legacy_unscoped=allow_legacy_unscoped,
+                    ).require_app_tag(sandbox, description="sandbox name")
+                except BaseException as exc:
+                    _cleanup_failed_attached_sandbox(
+                        sandbox,
+                        client=None,
+                        primary=exc,
+                    )
+                    raise
+        elif reuse_policy != "never":
+            raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
+
+        if sandbox is not None:
+            timeout = (
+                config.runtime.readiness_timeout_seconds
+                if readiness_timeout is None
+                else readiness_timeout
+            )
+            computer = cls._attach_resolved_sandbox(
+                sandbox,
+                app_name=app_name,
+                ingress=config.ingress,
+                http2=config.network.daemon_http_version == "2",
+                wait=wait,
+                readiness_timeout=timeout,
+            )
+            try:
                 _check_config_hash(
                     computer.metadata(),
                     requested_hash=requested_hash,
@@ -1595,57 +1849,21 @@ class ComputerSandbox:
                         config_hash=requested_hash,
                     )
                 return computer
-            except SandboxAmbiguousError:
+            except BaseException as exc:
+                try:
+                    computer.detach()
+                except BaseException as cleanup_exc:
+                    _note_cleanup_failure(exc, "attached computer.detach", cleanup_exc)
                 raise
-            except SandboxUnavailableError:
-                pass
-        elif reuse_policy != "never":
-            raise ValueError("reuse must be 'by_run_id', 'by_name', 'never', True, or False")
 
         return cls.create(config=config, app_name=app_name, name=name, wait=wait, **kwargs)
 
     def session_handle(self) -> ComputerSessionHandle:
         """Return the safe reconnect policy for an SDK-owned Modal desktop."""
-        policy = self._session_handoff_policy
-        metadata = self._metadata
-        if self._sandbox is None or metadata is None or policy is None:
-            raise SandboxUnavailableError(
-                "session handles require an SDK-owned Modal desktop created by create() "
-                "or compatibly reused by attach_or_create()"
-            )
-        if metadata.sandbox_id == "unknown" or not metadata.sandbox_id.strip():
-            raise SandboxUnavailableError("session handle sandbox identity is unavailable")
-        if not policy.app_name.strip():
-            raise SandboxUnavailableError("session handle app identity is unavailable")
-        if metadata.app_name != policy.app_name or metadata.config_hash != policy.config_hash:
-            raise SessionTargetMismatchError
-        if metadata.tags.get("computer-use") != "true" and APP_ID_TAG not in metadata.tags:
-            raise SandboxUnavailableError("session handle target is not identified as SDK-owned")
-        if metadata.tags.get("computer-use.config_hash") != policy.config_hash:
-            raise SessionTargetMismatchError
-        if policy.modal_environment is None or not policy.modal_environment.strip():
-            raise SessionCompatibilityError
-        if policy.modal_region is None or not policy.modal_region.strip():
-            raise SessionCompatibilityError
-        if (
-            policy.session_id is None
-            or metadata.tags.get("computer-use.session_id") != policy.session_id
-        ):
-            raise SessionTargetMismatchError
-        if policy.ingress not in {"attested-tunnel", "connect"}:
-            raise SessionCompatibilityError
-        if policy.vnc_mode == "control":
-            raise SessionCompatibilityError
-        return ComputerSessionHandle(
-            sandbox_id=metadata.sandbox_id,
-            session_id=policy.session_id,
-            app_name=policy.app_name,
-            modal_environment=policy.modal_environment,
-            requested_modal_region=policy.modal_region,
-            ingress=policy.ingress,
-            daemon_http_version=policy.daemon_http_version,
-            vnc_mode=policy.vnc_mode,
-            config_hash=policy.config_hash,
+        return _session_handle_from_state(
+            sandbox=self._sandbox,
+            metadata=self._metadata,
+            policy=self._session_handoff_policy,
         )
 
     def start(self) -> object:
@@ -1716,19 +1934,9 @@ class ComputerSandbox:
                 last_error = exc
             if time.monotonic() >= deadline:
                 detail = _readiness_timeout_detail(last_payload, last_error)
-                timeout_error = TimeoutError(
+                raise TimeoutError(
                     f"daemon did not become ready before timeout ({timeout:g}s){detail}"
                 )
-                if self._readiness_failure_cleanup != "none":
-                    try:
-                        self.client.close()
-                    except Exception as exc:
-                        timeout_error.add_note(
-                            f"readiness cleanup also failed: client.close ({type(exc).__name__})"
-                        )
-                if self._readiness_failure_cleanup == "sandbox" and self._sandbox is not None:
-                    _terminate_failed_sandbox(self._sandbox)
-                raise timeout_error
             time.sleep(interval)
 
     def terminate(self, *, wait: bool = False) -> None:
@@ -1741,11 +1949,19 @@ class ComputerSandbox:
             self.stop()
 
     def detach(self) -> None:
-        try:
-            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
-                self._sandbox.detach()
-        finally:
-            self.client.close()
+        sandbox = self._sandbox
+        if sandbox is not None and hasattr(sandbox, "detach"):
+            try:
+                sandbox.detach()
+            except BaseException as exc:
+                try:
+                    self.client.close()
+                except BaseException as cleanup_exc:
+                    _note_cleanup_failure(exc, "client.close", cleanup_exc)
+                raise
+        self._sandbox = None
+        self._lifecycle_mode = "detached"
+        self.client.close()
 
     def metadata(self) -> SandboxRef | None:
         return self._metadata
@@ -1832,10 +2048,41 @@ class ComputerSandbox:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        try:
-            self.terminate()
-        finally:
-            self.client.close()
+        cleanup_errors: list[tuple[str, BaseException]] = []
+        operations: list[tuple[str, Callable[[], object]]]
+        if self._lifecycle_mode == "owned":
+            operations = [("sandbox.terminate", lambda: self.terminate(wait=True))]
+            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
+                operations.append(("sandbox.detach", self._sandbox.detach))
+            operations.append(("client.close", self.client.close))
+        elif self._lifecycle_mode == "attached":
+            operations = []
+            if self._sandbox is not None and hasattr(self._sandbox, "detach"):
+                operations.append(("sandbox.detach", self._sandbox.detach))
+            operations.append(("client.close", self.client.close))
+        elif self._lifecycle_mode == "local":
+            operations = [("client.close", self.client.close)]
+        else:
+            operations = []
+        for operation_name, operation in operations:
+            try:
+                operation()
+            except BaseException as caught_cleanup_error:
+                cleanup_errors.append((operation_name, caught_cleanup_error))
+        if not cleanup_errors:
+            return
+        if isinstance(exc, BaseException):
+            for operation_name, recorded_error in cleanup_errors:
+                _note_cleanup_failure(exc, operation_name, recorded_error)
+            return
+        primary_name, primary_error = cleanup_errors[0]
+        for operation_name, recorded_error in cleanup_errors[1:]:
+            primary_error.add_note(
+                f"additional resource cleanup failed: {operation_name} "
+                f"({type(recorded_error).__name__})"
+            )
+        primary_error.add_note(f"resource cleanup operation: {primary_name}")
+        raise primary_error
 
     def debug_urls(self) -> DebugUrls:
         if self._sandbox is not None:
@@ -1950,6 +2197,845 @@ class ComputerSandbox:
                 "mount_image requires a Modal-backed sandbox with Sandbox.mount_image support"
             )
         self._sandbox.mount_image(path, image)
+
+
+class AsyncComputerSandbox:
+    """Native-async owner or attachment for one Modal computer Sandbox.
+
+    Construct instances through :meth:`create` or :meth:`attach`. Both methods
+    return lazy async context managers and perform no Modal work until entry.
+    """
+
+    def __init__(
+        self,
+        client: AsyncDaemonClient,
+        *,
+        sandbox: object,
+        metadata: SandboxRef,
+        lifecycle_mode: Literal["owned", "attached"],
+        startup_timing: SessionStartupTiming | None = None,
+        session_handoff_policy: _SessionHandoffPolicy | None = None,
+    ) -> None:
+        self.client = client
+        self._sandbox: object | None = sandbox
+        self._metadata = metadata
+        self._lifecycle_mode: _SandboxLifecycleMode = lifecycle_mode
+        self._lifecycle_lock = asyncio.Lock()
+        self.startup_timing = startup_timing
+        self._session_handoff_policy = session_handoff_policy
+
+        self.lifecycle = client.lifecycle
+        self.mouse = client.mouse
+        self.keyboard = client.keyboard
+        self.clipboard = client.clipboard
+        self.screenshots = client.screenshots
+        self.recordings = client.recordings
+        self.display = client.display
+        self.windows = client.windows
+        self.processes = client.processes
+        self.actions = client.actions
+        self.input = client.input
+        self.artifacts = client.artifacts
+        self.browser = client.browser
+        self.apps = client.apps
+        self.commands = client.commands
+        self.debug = client.debug
+        self.session = client.session
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        config: ComputerConfig | None = None,
+        app_name: str = "modal-computer-use",
+        name: str | None = None,
+        image: object | None = None,
+        expose_vnc: bool | str | None = None,
+        tags: Mapping[str, str] | None = None,
+        app_tags: Mapping[str, str] | None = None,
+        secrets: Sequence[object] | None = None,
+        volumes: Mapping[str, object] | None = None,
+        owner: str | None = None,
+        timing: SessionStartupTiming | None = None,
+        tag_profile: Literal["default", "warm_pool"] = "default",
+        **sandbox_kwargs: Any,
+    ) -> AbstractAsyncContextManager[AsyncComputerSandbox]:
+        """Build a lazy context that owns a newly created Modal Sandbox."""
+        return _AsyncComputerSandboxContext(
+            lambda: _create_async_computer_sandbox(
+                config=config,
+                app_name=app_name,
+                name=name,
+                image=image,
+                expose_vnc=expose_vnc,
+                tags=tags,
+                app_tags=app_tags,
+                secrets=secrets,
+                volumes=volumes,
+                owner=owner,
+                timing=timing,
+                tag_profile=tag_profile,
+                sandbox_kwargs=sandbox_kwargs,
+            )
+        )
+
+    @classmethod
+    def attach(
+        cls,
+        *,
+        sandbox_id: str | None = None,
+        name: str | None = None,
+        run_id: str | None = None,
+        app_name: str = "modal-computer-use",
+        ingress: ModalIngress = "attested-tunnel",
+        http2: bool = False,
+        readiness_timeout: float = 120.0,
+        modal_environment: str | None = None,
+        allow_legacy_unscoped: bool = False,
+        timing: SessionStartupTiming | None = None,
+    ) -> AbstractAsyncContextManager[AsyncComputerSandbox]:
+        """Build a lazy context that attaches to an existing Modal Sandbox."""
+        return _AsyncComputerSandboxContext(
+            lambda: _attach_async_computer_sandbox(
+                sandbox_id=sandbox_id,
+                name=name,
+                run_id=run_id,
+                app_name=app_name,
+                ingress=ingress,
+                http2=http2,
+                readiness_timeout=readiness_timeout,
+                modal_environment=modal_environment,
+                allow_legacy_unscoped=allow_legacy_unscoped,
+                timing=timing,
+            )
+        )
+
+    def metadata(self) -> SandboxRef:
+        return self._metadata
+
+    def session_handle(self) -> ComputerSessionHandle:
+        """Return the safe reconnect policy for an asynchronously created desktop."""
+        return _session_handle_from_state(
+            sandbox=self._sandbox,
+            metadata=self._metadata,
+            policy=self._session_handoff_policy,
+        )
+
+    async def terminate(self, *, wait: bool = False) -> None:
+        async with self._lifecycle_lock:
+            sandbox = self._sandbox
+            if sandbox is None:
+                raise SandboxUnavailableError("the Modal Sandbox handle has been detached")
+            terminate = getattr(sandbox, "terminate", None)
+            terminate_aio = getattr(terminate, "aio", None)
+            if not callable(terminate_aio):
+                raise SandboxUnavailableError("Modal Sandbox.terminate.aio is unavailable")
+            await terminate_aio(wait=wait)
+
+    async def detach(self) -> None:
+        """Transfer lifecycle ownership and close this client's connections."""
+        await _detach_async_computer(self)
+
+    def hot_session(self, *, timeout: float = 30.0) -> AsyncHotSessionClient:
+        return self.client.hot_session(timeout=timeout)
+
+    def observation_stream(self, **kwargs: Any) -> AsyncObservationClient:
+        return self.client.observation_stream(**kwargs)
+
+
+class _AsyncComputerSandboxContext:
+    def __init__(
+        self,
+        factory: Callable[[], Awaitable[AsyncComputerSandbox]],
+    ) -> None:
+        self._factory = factory
+        self._computer: AsyncComputerSandbox | None = None
+        self._entered = False
+
+    async def __aenter__(self) -> AsyncComputerSandbox:
+        if self._entered:
+            raise RuntimeError("an async computer context can only be entered once")
+        self._entered = True
+        computer = await self._factory()
+        self._computer = computer
+        return computer
+
+    async def __aexit__(self, _exc_type: object, exc: object, _traceback: object) -> None:
+        computer, self._computer = self._computer, None
+        if computer is None:
+            return
+        await _close_async_computer_context(
+            computer,
+            primary=exc if isinstance(exc, BaseException) else None,
+        )
+
+
+async def _create_async_computer_sandbox(
+    *,
+    config: ComputerConfig | None,
+    app_name: str,
+    name: str | None,
+    image: object | None,
+    expose_vnc: bool | str | None,
+    tags: Mapping[str, str] | None,
+    app_tags: Mapping[str, str] | None,
+    secrets: Sequence[object] | None,
+    volumes: Mapping[str, object] | None,
+    owner: str | None,
+    timing: SessionStartupTiming | None,
+    tag_profile: Literal["default", "warm_pool"],
+    sandbox_kwargs: Mapping[str, Any],
+) -> AsyncComputerSandbox:
+    startup_timing = timing or SessionStartupTiming()
+    startup_timing.mark("request_received")
+    startup_timing.unsupported(
+        "scheduled",
+        "Modal V1 does not expose a supported scheduling timestamp",
+    )
+    startup_timing.unsupported(
+        "daemon_started",
+        "the daemon process does not yet emit an attested startup timestamp",
+    )
+    inputs = _prepare_sandbox_create_inputs(
+        config=config,
+        app_name=app_name,
+        name=name,
+        image=image,
+        expose_vnc=expose_vnc,
+        tags=tags,
+        app_tags=app_tags,
+        secrets=secrets,
+        volumes=volumes,
+        owner=owner,
+        tag_profile=tag_profile,
+        sandbox_kwargs=sandbox_kwargs,
+    )
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "AsyncComputerSandbox.create requires the modal extra, for example "
+            "`uv sync --extra modal` in this repository or "
+            "`uv add 'modal-computer-use[modal]'` downstream"
+        ) from exc
+
+    resolved_image = _resolve_sandbox_create_image(inputs)
+    app = await modal.App.lookup.aio(
+        inputs.app_name,
+        **dict(inputs.app_lookup_kwargs),
+    )
+    if inputs.app_tags:
+        await _set_modal_object_tags_async(app, dict(inputs.app_tags))
+    plan = _build_sandbox_create_plan(
+        inputs,
+        app=app,
+        modal=modal,
+        image=resolved_image,
+    )
+    startup_timing.mark("sandbox_create_started")
+    sandbox = await _allocate_modal_sandbox_async(
+        modal.Sandbox.create.aio(
+            "python",
+            "-m",
+            "modal_computer_use.daemon",
+            **_materialize_sandbox_create_kwargs(plan),
+        )
+    )
+    client: AsyncDaemonClient | None = None
+    try:
+        startup_timing.mark("sandbox_registered")
+        await sandbox.wait_until_ready.aio(
+            timeout=inputs.config.runtime.readiness_timeout_seconds
+        )
+        startup_timing.mark("tcp_ready")
+        client = await _async_daemon_client_for_sandbox(
+            sandbox,
+            ingress=inputs.config.ingress,
+            http2=plan.http2,
+            readiness_timeout=inputs.config.runtime.readiness_timeout_seconds,
+            daemon_bearer=plan.daemon_bearer,
+            timing=startup_timing,
+        )
+        metadata = _metadata_from_create_plan(plan, sandbox)
+        session_policy = _session_handoff_policy(
+            inputs.config,
+            session_id=plan.session_id,
+            app_name=inputs.app_name,
+            vnc_mode=inputs.vnc_mode,
+            config_hash=metadata.config_hash or plan.config_hash,
+        )
+        return AsyncComputerSandbox(
+            client,
+            sandbox=sandbox,
+            metadata=metadata,
+            lifecycle_mode="owned",
+            startup_timing=startup_timing,
+            session_handoff_policy=session_policy,
+        )
+    except BaseException as exc:
+        await _cleanup_failed_created_sandbox_async(
+            sandbox,
+            client=client,
+            primary=exc,
+        )
+        raise
+
+
+async def _attach_async_computer_sandbox(
+    *,
+    sandbox_id: str | None,
+    name: str | None,
+    run_id: str | None,
+    app_name: str,
+    ingress: ModalIngress,
+    http2: bool,
+    readiness_timeout: float,
+    modal_environment: str | None,
+    allow_legacy_unscoped: bool,
+    timing: SessionStartupTiming | None,
+) -> AsyncComputerSandbox:
+    selector = _validate_async_modal_attach_selector(
+        sandbox_id=sandbox_id,
+        name=name,
+        run_id=run_id,
+    )
+    _validate_async_readiness_timeout(readiness_timeout)
+    try:
+        import modal
+    except ImportError as exc:
+        raise ModalNotInstalledError(
+            "AsyncComputerSandbox.attach requires the modal extra, for example "
+            "`uv sync --extra modal` in this repository or "
+            "`uv add 'modal-computer-use[modal]'` downstream"
+        ) from exc
+
+    sandbox, tags = await _resolve_async_attach_target(
+        modal,
+        selector=selector,
+        app_name=app_name,
+        modal_environment=modal_environment,
+        allow_legacy_unscoped=allow_legacy_unscoped,
+    )
+    client: AsyncDaemonClient | None = None
+    try:
+        await sandbox.wait_until_ready.aio(timeout=readiness_timeout)
+        if timing is not None:
+            timing.mark("tcp_ready")
+        client = await _async_daemon_client_for_sandbox(
+            sandbox,
+            ingress=ingress,
+            http2=http2,
+            readiness_timeout=readiness_timeout,
+            daemon_bearer=None,
+            timing=timing,
+        )
+        return AsyncComputerSandbox(
+            client,
+            sandbox=sandbox,
+            metadata=_metadata_from_sandbox_tags(
+                sandbox,
+                app_name=app_name,
+                tags=tags,
+            ),
+            lifecycle_mode="attached",
+            startup_timing=timing,
+        )
+    except BaseException as exc:
+        await _cleanup_failed_attached_sandbox_async(
+            sandbox,
+            client=client,
+            primary=exc,
+        )
+        raise
+
+
+def _validate_async_modal_attach_selector(
+    *,
+    sandbox_id: str | None,
+    name: str | None,
+    run_id: str | None,
+) -> _AttachSelector:
+    selectors = {
+        "sandbox_id": sandbox_id,
+        "name": name,
+        "run_id": run_id,
+    }
+    selected = [(kind, value) for kind, value in selectors.items() if value is not None]
+    if len(selected) != 1:
+        raise ValueError("attach requires exactly one of sandbox_id, name, or run_id")
+    kind, raw_value = selected[0]
+    value = raw_value.strip()
+    if not value:
+        raise ValueError(f"{kind} must be a non-empty string")
+    return _AttachSelector(
+        kind=cast(Literal["sandbox_id", "name", "run_id"], kind),
+        value=value,
+    )
+
+
+def _validate_async_readiness_timeout(value: float) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        raise ValueError("readiness_timeout must be a positive finite number")
+
+
+async def _resolve_async_attach_target(
+    modal: object,
+    *,
+    selector: _AttachSelector,
+    app_name: str,
+    modal_environment: str | None,
+    allow_legacy_unscoped: bool,
+) -> tuple[object, dict[str, str]]:
+    lookup_kwargs: dict[str, object] = {"create_if_missing": False}
+    if modal_environment is not None:
+        lookup_kwargs["environment_name"] = modal_environment
+    app = await modal.App.lookup.aio(app_name, **lookup_kwargs)
+    app_id = _modal_app_id(app)
+
+    if selector.kind == "run_id":
+        scoped_tags = {"computer-use.run_id": selector.value}
+        if not allow_legacy_unscoped:
+            scoped_tags[APP_ID_TAG] = app_id
+        matches = await _list_modal_sandboxes_async(
+            modal,
+            app_id=app_id,
+            tags=scoped_tags,
+        )
+        if not matches:
+            raise SandboxUnavailableError(f"no matching run_id={selector.value} found")
+        if len(matches) > 1:
+            error = SandboxAmbiguousError(
+                f"multiple matching run_id={selector.value}s found; "
+                "attach by sandbox_id or name"
+            )
+            await _cleanup_rejected_async_sandboxes(matches, primary=error)
+            raise error
+        sandbox = matches[0]
+        try:
+            tags = await _read_modal_object_tags_async(sandbox) or {}
+            return sandbox, tags
+        except BaseException as exc:
+            await _cleanup_rejected_async_sandboxes([sandbox], primary=exc)
+            raise
+
+    if selector.kind == "sandbox_id":
+        try:
+            sandbox = await modal.Sandbox.from_id.aio(selector.value)
+        except Exception as exc:
+            raise SandboxUnavailableError(
+                f"no matching sandbox_id={selector.value} found"
+            ) from exc
+    else:
+        sandbox = await modal.Sandbox.from_name.aio(
+            app_name,
+            selector.value,
+            environment_name=modal_environment,
+        )
+
+    try:
+        tags = await _read_modal_object_tags_async(sandbox) or {}
+        _require_async_app_tag(
+            tags,
+            app_id=app_id,
+            allow_legacy_unscoped=allow_legacy_unscoped,
+            description=f"{selector.kind}={selector.value}",
+        )
+        if selector.kind == "sandbox_id":
+            membership_tags = (
+                None
+                if allow_legacy_unscoped and APP_ID_TAG not in tags
+                else {APP_ID_TAG: app_id}
+            )
+            candidates = await _list_modal_sandboxes_async(
+                modal,
+                app_id=app_id,
+                tags=membership_tags,
+            )
+            if not any(
+                str(getattr(candidate, "object_id", "")) == selector.value
+                for candidate in candidates
+            ):
+                raise SandboxUnavailableError(
+                    f"no app-owned sandbox_id={selector.value} found"
+                )
+        return sandbox, tags
+    except BaseException as exc:
+        await _cleanup_rejected_async_sandboxes([sandbox], primary=exc)
+        raise
+
+
+def _require_async_app_tag(
+    tags: Mapping[str, str],
+    *,
+    app_id: str,
+    allow_legacy_unscoped: bool,
+    description: str,
+) -> None:
+    if tags.get(APP_ID_TAG) == app_id:
+        return
+    if allow_legacy_unscoped and APP_ID_TAG not in tags:
+        return
+    raise SandboxUnavailableError(f"no app-owned {description} found")
+
+
+async def _list_modal_sandboxes_async(
+    modal: object,
+    *,
+    app_id: str,
+    tags: Mapping[str, str] | None,
+) -> list[object]:
+    kwargs: dict[str, object] = {"app_id": app_id}
+    if tags is not None:
+        kwargs["tags"] = dict(tags)
+    return [sandbox async for sandbox in modal.Sandbox.list.aio(**kwargs)]
+
+
+async def _async_daemon_client_for_sandbox(
+    sandbox: object,
+    *,
+    ingress: ModalIngress,
+    http2: bool,
+    readiness_timeout: float,
+    daemon_bearer: str | None,
+    timing: SessionStartupTiming | None,
+) -> AsyncDaemonClient:
+    if ingress == "connect":
+        token_info = await sandbox.create_connect_token.aio(
+            user_metadata={"sdk": "modal-computer-use", "version": __version__},
+            port=8080,
+        )
+        base_url, token = _connect_token_parts(token_info)
+        if timing is not None:
+            timing.mark("connect_token_ready")
+    else:
+        base_url = await _tunnel_url_async(sandbox, 8080)
+        token = daemon_bearer or await _sandbox_daemon_bearer_async(sandbox)
+        if timing is not None:
+            timing.mark("connect_token_ready")
+
+    client = AsyncDaemonClient(base_url, token=token, http2=http2)
+    try:
+        await client.wait_until_ready(timeout=readiness_timeout)
+        if timing is not None:
+            timing.mark("connect_ready")
+        if ingress != "attested-tunnel":
+            return client
+
+        payload = await client.post_json("/v1/session/tunnel-authorize")
+        attested_token = payload.get("token") if isinstance(payload, dict) else None
+        if not isinstance(attested_token, str) or not attested_token:
+            raise SandboxUnavailableError("daemon did not return an attested tunnel token")
+        await _finish_async_cleanup(
+            [("client.aclose", client.aclose)],
+            primary=None,
+        )
+        if timing is not None:
+            timing.mark("attestation_ready")
+        final_client = AsyncDaemonClient(
+            await _tunnel_url_async(sandbox, 8080),
+            token=attested_token,
+            http2=http2,
+        )
+        try:
+            await final_client.wait_until_ready(timeout=readiness_timeout)
+        except BaseException as exc:
+            await _finish_async_cleanup(
+                [("client.aclose", final_client.aclose)],
+                primary=exc,
+            )
+            raise
+        if timing is not None:
+            timing.mark("tunnel_ready")
+        return final_client
+    except BaseException as exc:
+        await _finish_async_cleanup(
+            [("client.aclose", client.aclose)],
+            primary=exc,
+        )
+        raise
+
+
+async def _tunnel_url_async(sandbox: object, port: int) -> str:
+    try:
+        tunnels = await sandbox.tunnels.aio()
+    except Exception as exc:
+        raise SandboxUnavailableError(
+            f"could not retrieve Modal tunnel for port {port}"
+        ) from exc
+    tunnel = tunnels.get(port) if isinstance(tunnels, dict) else None
+    value = None if tunnel is None else getattr(tunnel, "url", None)
+    if not value:
+        raise SandboxUnavailableError(f"Modal tunnel for port {port} is not available")
+    return str(value).rstrip("/")
+
+
+def _metadata_from_sandbox_tags(
+    sandbox: object,
+    *,
+    app_name: str,
+    tags: Mapping[str, str],
+) -> SandboxRef:
+    safe_tags = {str(key): str(value) for key, value in tags.items()}
+    return SandboxRef(
+        sandbox_id=str(getattr(sandbox, "object_id", "unknown")),
+        app_name=app_name,
+        name=getattr(sandbox, "name", None),
+        run_id=safe_tags.get("computer-use.run_id"),
+        owner=safe_tags.get("computer-use.owner"),
+        created_at=_created_at_from_tags(safe_tags),
+        config_hash=safe_tags.get("computer-use.config_hash"),
+        status="started",
+        tags=safe_tags,
+        artifacts_dir=safe_tags.get(
+            "computer-use.artifacts_dir",
+            "/home/desktop/artifacts",
+        ),
+    )
+
+
+async def _set_modal_object_tags_async(target: object, tags: dict[str, str]) -> None:
+    existing = await _read_modal_object_tags_async(target) or {}
+    set_tags = getattr(target, "set_tags", None)
+    set_tags_aio = getattr(set_tags, "aio", None)
+    if callable(set_tags_aio):
+        await set_tags_aio({**existing, **tags})
+
+
+async def _allocate_modal_sandbox_async(awaitable: Awaitable[object]) -> object:
+    task = asyncio.ensure_future(awaitable)
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            sandbox = await asyncio.shield(task)
+        except asyncio.CancelledError as cancelled:
+            if task.cancelled():
+                raise
+            cancellation = cancellation or cancelled
+            continue
+        except BaseException as allocation_exc:
+            if cancellation is not None:
+                cancellation.add_note(
+                    "Modal allocation also failed after cancellation "
+                    f"({type(allocation_exc).__name__})"
+                )
+                raise cancellation from allocation_exc
+            raise
+        if cancellation is None:
+            return sandbox
+        await _cleanup_failed_created_sandbox_async(
+            sandbox,
+            client=None,
+            primary=cancellation,
+        )
+        raise cancellation
+
+
+async def _close_async_computer_context(
+    computer: AsyncComputerSandbox,
+    *,
+    primary: BaseException | None,
+) -> None:
+    async with computer._lifecycle_lock:
+        sandbox = computer._sandbox
+        if sandbox is None or computer._lifecycle_mode == "detached":
+            return
+        operations: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+        if computer._lifecycle_mode == "owned":
+            operations.append(
+                (
+                    "sandbox.terminate.aio",
+                    _modal_aio_operation(sandbox, "terminate", wait=True),
+                )
+            )
+        operations.append(
+            ("sandbox.detach.aio", _modal_aio_operation(sandbox, "detach"))
+        )
+        operations.append(("client.aclose", computer.client.aclose))
+        errors, cancellation = await _collect_async_cleanup(operations)
+        if not any(name == "sandbox.detach.aio" for name, _error in errors):
+            computer._sandbox = None
+            computer._lifecycle_mode = "detached"
+        if primary is not None:
+            for operation_name, cleanup_exc in errors:
+                _note_cleanup_failure(primary, operation_name, cleanup_exc)
+            if cancellation is not None:
+                primary.add_note("resource cleanup also observed cancellation")
+            return
+        if errors:
+            operation_name, cleanup_error = errors[0]
+            for additional_name, additional_error in errors[1:]:
+                _note_cleanup_failure(cleanup_error, additional_name, additional_error)
+            cleanup_error.add_note(f"resource cleanup operation: {operation_name}")
+            if cancellation is not None:
+                cleanup_error.add_note("resource cleanup also observed cancellation")
+            raise cleanup_error
+        if cancellation is not None:
+            raise cancellation
+
+
+async def _detach_async_computer(computer: AsyncComputerSandbox) -> None:
+    async with computer._lifecycle_lock:
+        sandbox = computer._sandbox
+        if sandbox is None or computer._lifecycle_mode == "detached":
+            await computer.client.aclose()
+            return
+        errors, cancellation = await _collect_async_cleanup(
+            [("sandbox.detach.aio", _modal_aio_operation(sandbox, "detach"))]
+        )
+        if errors:
+            primary = errors[0][1]
+            await _finish_async_cleanup(
+                [("client.aclose", computer.client.aclose)],
+                primary=primary,
+            )
+            raise primary
+
+        computer._sandbox = None
+        computer._lifecycle_mode = "detached"
+        close_errors, close_cancellation = await _collect_async_cleanup(
+            [("client.aclose", computer.client.aclose)]
+        )
+        if close_errors:
+            primary = close_errors[0][1]
+            for operation_name, cleanup_exc in close_errors[1:]:
+                _note_cleanup_failure(primary, operation_name, cleanup_exc)
+            if cancellation is not None or close_cancellation is not None:
+                primary.add_note("resource cleanup also observed cancellation")
+            raise primary
+        if cancellation is not None:
+            raise cancellation
+        if close_cancellation is not None:
+            raise close_cancellation
+
+
+async def _cleanup_failed_created_sandbox_async(
+    sandbox: object,
+    *,
+    client: AsyncDaemonClient | None,
+    primary: BaseException,
+) -> None:
+    operations: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+    if client is not None:
+        operations.append(("client.aclose", client.aclose))
+    operations.extend(
+        [
+            (
+                "sandbox.terminate.aio",
+                _modal_aio_operation(sandbox, "terminate", wait=True),
+            ),
+            ("sandbox.detach.aio", _modal_aio_operation(sandbox, "detach")),
+        ]
+    )
+    await _finish_async_cleanup(operations, primary=primary)
+
+
+async def _cleanup_failed_attached_sandbox_async(
+    sandbox: object,
+    *,
+    client: AsyncDaemonClient | None,
+    primary: BaseException,
+) -> None:
+    operations: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+    if client is not None:
+        operations.append(("client.aclose", client.aclose))
+    operations.append(
+        ("sandbox.detach.aio", _modal_aio_operation(sandbox, "detach"))
+    )
+    await _finish_async_cleanup(operations, primary=primary)
+
+
+async def _cleanup_rejected_async_sandboxes(
+    sandboxes: Sequence[object],
+    *,
+    primary: BaseException,
+) -> None:
+    await _finish_async_cleanup(
+        [
+            (
+                "sandbox.detach.aio",
+                _modal_aio_operation(sandbox, "detach"),
+            )
+            for sandbox in sandboxes
+        ],
+        primary=primary,
+    )
+
+
+async def _call_modal_aio(
+    target: object,
+    operation_name: str,
+    **kwargs: object,
+) -> object:
+    operation = getattr(target, operation_name, None)
+    operation_aio = getattr(operation, "aio", None)
+    if not callable(operation_aio):
+        raise SandboxUnavailableError(
+            f"Modal Sandbox.{operation_name}.aio is unavailable"
+        )
+    return await operation_aio(**kwargs)
+
+
+def _modal_aio_operation(
+    target: object,
+    operation_name: str,
+    **kwargs: object,
+) -> Callable[[], Awaitable[object]]:
+    async def operation() -> object:
+        return await _call_modal_aio(target, operation_name, **kwargs)
+
+    return operation
+
+
+async def _collect_async_cleanup(
+    operations: Sequence[tuple[str, Callable[[], Awaitable[object]]]],
+) -> tuple[list[tuple[str, BaseException]], asyncio.CancelledError | None]:
+    async def cleanup() -> list[tuple[str, BaseException]]:
+        errors: list[tuple[str, BaseException]] = []
+        for operation_name, operation in operations:
+            try:
+                await operation()
+            except BaseException as cleanup_exc:
+                errors.append((operation_name, cleanup_exc))
+        return errors
+
+    task = asyncio.create_task(cleanup())
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            return await asyncio.shield(task), cancellation
+        except asyncio.CancelledError as cancelled:
+            if task.cancelled():
+                raise
+            cancellation = cancellation or cancelled
+
+
+async def _finish_async_cleanup(
+    operations: Sequence[tuple[str, Callable[[], Awaitable[object]]]],
+    *,
+    primary: BaseException | None,
+) -> None:
+    errors, cancellation = await _collect_async_cleanup(operations)
+    if primary is not None:
+        for operation_name, cleanup_exc in errors:
+            _note_cleanup_failure(primary, operation_name, cleanup_exc)
+        if cancellation is not None:
+            primary.add_note("resource cleanup also observed cancellation")
+        return
+    if errors:
+        operation_name, cleanup_error = errors[0]
+        for additional_name, additional_error in errors[1:]:
+            _note_cleanup_failure(cleanup_error, additional_name, additional_error)
+        cleanup_error.add_note(f"resource cleanup operation: {operation_name}")
+        if cancellation is not None:
+            cleanup_error.add_note("resource cleanup also observed cancellation")
+        raise cleanup_error
+    if cancellation is not None:
+        raise cancellation
 
 
 def _required_loopback_bearer(computer: ComputerSandbox) -> str:
@@ -2175,147 +3261,6 @@ def create_modal_benchmark_computer(
             timing.mark("authenticated_daemon_ready")
         return computer
     except BaseException:
-        if client is not None:
-            client.close()
-        _terminate_failed_sandbox(sandbox)
-        raise
-
-
-def create_modal_v2_tunnel_computer(
-    *,
-    config: ComputerConfig,
-    app_name: str = "modal-computer-use",
-    name: str | None = None,
-    image: object | None = None,
-    tags: dict[str, str] | None = None,
-    app_tags: dict[str, str] | None = None,
-    wait: bool = True,
-    timing: SessionStartupTiming | None = None,
-    modal_runtime: object | None = None,
-    client_factory: Callable[..., DaemonClient] = DaemonClient,
-) -> ComputerSandbox:
-    """Create the benchmark-only V2 encrypted-tunnel target.
-
-    V2 does not support Connect Tokens in Modal 1.5.2. This path exposes only the
-    encrypted daemon port and authenticates every daemon request with an
-    application bearer token. It is intentionally separate from the default
-    ComputerSandbox.create lifecycle.
-    """
-    timing = timing or SessionStartupTiming()
-    timing.mark("request_received")
-    timing.unsupported("scheduled", "Modal V2 does not expose a supported scheduling timestamp")
-    timing.unsupported(
-        "daemon_started",
-        "the daemon process does not yet emit an attested startup timestamp",
-    )
-    timing.unsupported(
-        "connect_token_ready",
-        "Modal V2 does not support Sandbox Connect Tokens in Modal 1.5.2",
-    )
-    if config.ingress != "tunnel":
-        raise ConfigConflictError("the V2 benchmark path requires encrypted tunnel ingress")
-    if config.image.source != "named":
-        raise ConfigConflictError("the V2 benchmark path requires an exact named image")
-    if config.storage.persist_artifacts:
-        raise ConfigConflictError("the V2 benchmark path does not mount artifact storage")
-    if modal_runtime is None:
-        try:
-            import modal as imported_modal_runtime
-        except ImportError as exc:
-            raise ModalNotInstalledError(
-                "Modal V2 benchmark execution requires the modal extra"
-            ) from exc
-        modal_runtime = imported_modal_runtime
-    runtime: Any = modal_runtime
-    if not config.run_id:
-        config.run_id = new_run_id()
-    browser_kind = config.browser.kind if config.browser else None
-    if image is None:
-        image = named_image(
-            revision=config.image.revision or "",
-            profile=config.resources.profile,
-            browser=browser_kind,
-            environment_name=config.image.environment_name,
-        )
-    app_lookup_kwargs: dict[str, object] = {"create_if_missing": True}
-    if config.runtime.modal_environment is not None:
-        app_lookup_kwargs["environment_name"] = config.runtime.modal_environment
-    app = runtime.App.lookup(app_name, **app_lookup_kwargs)
-    if app_tags:
-        _set_modal_object_tags(app, app_tags)
-    tunnel_auth = {"COMPUTER_USE_TUNNEL_TOKEN": _secrets.token_urlsafe(32)}
-    env = _daemon_environment(config, vnc_mode="off", artifact_volume_mounted=False)
-    env.update(tunnel_auth)
-    sandbox_tags = {
-        **(tags or {}),
-        **default_tags(config, app_id=_modal_app_id(app)),
-    }
-    sandbox_tags["computer-use.image_identity"] = selected_image_identity(
-        source=config.image.source,
-        revision=config.image.revision,
-        profile=config.resources.profile,
-        browser=browser_kind,
-    )
-    sandbox_tags["computer-use.modal_backend"] = "v2"
-    _validate_sandbox_tags(sandbox_tags)
-    create_kwargs: dict[str, Any] = {
-        "app": app,
-        "image": image,
-        "cpu": config.resources.cpu,
-        "memory": config.resources.memory_mib,
-        "encrypted_ports": [8080],
-        "timeout": config.runtime.timeout_seconds,
-        "idle_timeout": config.runtime.idle_timeout_seconds,
-        "env": env,
-        "block_network": config.network.block_all,
-        "outbound_cidr_allowlist": config.network.outbound_cidr_allowlist,
-        "outbound_domain_allowlist": config.network.outbound_domain_allowlist,
-        "inbound_cidr_allowlist": config.network.inbound_cidr_allowlist,
-        "name": name,
-        "tags": sandbox_tags,
-    }
-    if config.runtime.modal_region:
-        create_kwargs["region"] = config.runtime.modal_region
-    readiness_probe = _readiness_probe(runtime)
-    if readiness_probe is not None:
-        create_kwargs["readiness_probe"] = readiness_probe
-    create = runtime.Sandbox._experimental_create
-    timing.mark("sandbox_create_started")
-    sandbox = create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
-    timing.mark("sandbox_registered")
-    client: DaemonClient | None = None
-    try:
-        if wait and hasattr(sandbox, "wait_until_ready"):
-            sandbox.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-            timing.mark("tcp_ready")
-        base_url = _tunnel_url(sandbox, 8080)
-        timing.mark("encrypted_tunnel_ready")
-        client = client_factory(
-            base_url=base_url,
-            token=_daemon_bearer_from_auth(tunnel_auth),
-            http2=False,
-        )
-        metadata = SandboxRef(
-            sandbox_id=getattr(sandbox, "object_id", "unknown"),
-            app_name=app_name,
-            name=name,
-            run_id=config.run_id,
-            owner=sandbox_tags.get("computer-use.owner"),
-            created_at=_created_at_from_tags(sandbox_tags),
-            config_hash=compute_config_hash(config),
-            status="started",
-            tags=sandbox_tags,
-            vnc_url=None,
-            artifacts_dir=config.storage.artifacts_dir,
-        )
-        computer = ComputerSandbox(client, sandbox=sandbox, metadata=metadata)
-        computer._daemon_bearer = _daemon_bearer_from_auth(tunnel_auth)
-        computer._requested_modal_region = config.runtime.modal_region
-        if wait:
-            computer.wait_until_ready(timeout=config.runtime.readiness_timeout_seconds)
-            timing.mark("authenticated_tunnel_ready")
-        return computer
-    except Exception:
         if client is not None:
             client.close()
         _terminate_failed_sandbox(sandbox)
@@ -2631,6 +3576,51 @@ def _terminate_failed_sandbox(sandbox: object) -> None:
             terminate(wait=True)
 
 
+def _note_cleanup_failure(primary: BaseException, operation: str, exc: BaseException) -> None:
+    primary.add_note(f"resource cleanup also failed: {operation} ({type(exc).__name__})")
+
+
+def _cleanup_failed_created_sandbox(
+    sandbox: object,
+    *,
+    client: DaemonClient | None,
+    primary: BaseException,
+) -> None:
+    operations: list[tuple[str, Callable[[], object]]] = []
+    if client is not None:
+        operations.append(("client.close", client.close))
+    terminate = getattr(sandbox, "terminate", None)
+    if callable(terminate):
+        operations.append(("sandbox.terminate", lambda: terminate(wait=True)))
+    detach = getattr(sandbox, "detach", None)
+    if callable(detach):
+        operations.append(("sandbox.detach", detach))
+    for operation_name, operation in operations:
+        try:
+            operation()
+        except BaseException as cleanup_exc:
+            _note_cleanup_failure(primary, operation_name, cleanup_exc)
+
+
+def _cleanup_failed_attached_sandbox(
+    sandbox: object,
+    *,
+    client: DaemonClient | None,
+    primary: BaseException,
+) -> None:
+    if client is not None:
+        try:
+            client.close()
+        except BaseException as cleanup_exc:
+            _note_cleanup_failure(primary, "client.close", cleanup_exc)
+    detach = getattr(sandbox, "detach", None)
+    if callable(detach):
+        try:
+            detach()
+        except BaseException as cleanup_exc:
+            _note_cleanup_failure(primary, "sandbox.detach", cleanup_exc)
+
+
 def _validate_sandbox_tags(tags: dict[str, str]) -> None:
     if len(tags) > 10:
         raise ConfigConflictError(
@@ -2892,6 +3882,53 @@ def _session_handoff_policy(
         daemon_http_version=config.network.daemon_http_version,
         vnc_mode=vnc_mode or normalize_vnc_mode(config.expose_vnc),
         config_hash=config_hash,
+    )
+
+
+def _session_handle_from_state(
+    *,
+    sandbox: object | None,
+    metadata: SandboxRef | None,
+    policy: _SessionHandoffPolicy | None,
+) -> ComputerSessionHandle:
+    if sandbox is None or metadata is None or policy is None:
+        raise SandboxUnavailableError(
+            "session handles require an SDK-owned Modal desktop created by create() "
+            "or compatibly reused by attach_or_create()"
+        )
+    if metadata.sandbox_id == "unknown" or not metadata.sandbox_id.strip():
+        raise SandboxUnavailableError("session handle sandbox identity is unavailable")
+    if not policy.app_name.strip():
+        raise SandboxUnavailableError("session handle app identity is unavailable")
+    if metadata.app_name != policy.app_name or metadata.config_hash != policy.config_hash:
+        raise SessionTargetMismatchError
+    if metadata.tags.get("computer-use") != "true" and APP_ID_TAG not in metadata.tags:
+        raise SandboxUnavailableError("session handle target is not identified as SDK-owned")
+    if metadata.tags.get("computer-use.config_hash") != policy.config_hash:
+        raise SessionTargetMismatchError
+    if policy.modal_environment is None or not policy.modal_environment.strip():
+        raise SessionCompatibilityError
+    if policy.modal_region is None or not policy.modal_region.strip():
+        raise SessionCompatibilityError
+    if (
+        policy.session_id is None
+        or metadata.tags.get("computer-use.session_id") != policy.session_id
+    ):
+        raise SessionTargetMismatchError
+    if policy.ingress not in {"attested-tunnel", "connect"}:
+        raise SessionCompatibilityError
+    if policy.vnc_mode == "control":
+        raise SessionCompatibilityError
+    return ComputerSessionHandle(
+        sandbox_id=metadata.sandbox_id,
+        session_id=policy.session_id,
+        app_name=policy.app_name,
+        modal_environment=policy.modal_environment,
+        requested_modal_region=policy.modal_region,
+        ingress=policy.ingress,
+        daemon_http_version=policy.daemon_http_version,
+        vnc_mode=policy.vnc_mode,
+        config_hash=policy.config_hash,
     )
 
 

@@ -1,6 +1,7 @@
 # Modal Deployment
 
-`ComputerSandbox.create()` lazily imports Modal, builds or accepts a Modal `Image`, and starts the daemon inside the sandbox:
+`ComputerSandbox.create()` and `AsyncComputerSandbox.create()` lazily import Modal, build or accept
+a Modal `Image`, and start the daemon inside the Sandbox:
 
 ```bash
 python -m modal_computer_use.daemon
@@ -20,6 +21,25 @@ a supported scheduling timestamp. The SDK reports scheduling and daemon process 
 observation stream with `timing=...`, and call `first_valid_frame(..., timing=...)` to extend the
 same timeline through browser readiness, baseline consumption, and a decoded frame with the
 configured geometry.
+
+## Native async provisioning
+
+`AsyncComputerSandbox.create()` and `AsyncComputerSandbox.attach()` are lazy async context
+managers. They begin Modal work on entry and yield only after both the Sandbox and daemon are
+ready. They use Modal's native `.aio` operations for app lookup, Sandbox creation or resolution,
+readiness, Connect tokens, tunnels, detachment, and termination. They do not call
+`asyncio.to_thread()`.
+
+The sync and async paths share the same copied configuration, image selection, tags, daemon
+authorization, ingress policy, security-owned arguments, and validation. Only the Modal and daemon
+I/O adapter differs. Native async provisioning keeps an application's event loop responsive and
+makes cancellation cleanup deterministic; it does not make Sandbox allocation or desktop startup
+intrinsically faster.
+
+Created contexts own their Sandbox and terminate it on exit. Attached contexts never terminate the
+remote owner. An explicit `await computer.detach()` transfers a created target to caller-managed
+ownership. If creation fails or is cancelled after allocation, cleanup closes connections,
+terminates the target, and detaches the local handle before the original error escapes.
 
 ## Sandbox configuration
 
@@ -73,6 +93,19 @@ Readers already running with the same Volume still need `Volume.reload()` or
 `Sandbox.reload_volumes()` before they can observe committed changes. The SDK exposes
 `computer.reload_volumes(timeout=55)`, which uses Modal 1.5.2 blocking reload behavior.
 
+[`examples/volume_artifacts.py`](../examples/volume_artifacts.py) is the complete opt-in Volume v2
+workflow. It requires an explicit existing Volume name, or `--create-volume` to create that named
+Volume, and creating its Sandbox can incur Modal charges:
+
+```bash
+uv run python examples/volume_artifacts.py --volume-name computer-use-artifacts
+uv run python examples/volume_artifacts.py --volume-name computer-use-artifacts --create-volume
+```
+
+The example writes to a fresh run-scoped path, requires verified persistent sync, and terminates the
+Sandbox it owns. It deliberately retains the caller-selected Volume and persisted artifact; manage
+or delete that Volume separately when its data is no longer needed.
+
 Browser profiles are explicit. Use `ResourceConfig(profile="browser")` plus
 `BrowserConfig(kind="firefox", prewarm=True)` when Firefox startup dominates the measured workload;
 use `kind="chromium"` for Chromium. Use `profile="browser-gpu"` only with an explicit `gpu` value.
@@ -95,6 +128,17 @@ Use `ComputerSandbox.attach()` for known handles:
 - `sandbox_id` attaches directly with `modal.Sandbox.from_id`.
 - `name` attaches with `modal.Sandbox.from_name` inside the selected app.
 - `run_id` lists sandboxes tagged with `computer-use.run_id`.
+- `base_url` connects directly to an existing daemon and does not resolve a Modal Sandbox.
+
+`AsyncComputerSandbox.attach()` accepts the three Modal selectors: `sandbox_id`, `name`, or
+`run_id`. It has no direct-URL form; async direct connections use `AsyncDaemonClient`.
+
+Pass exactly one selector. A `token` belongs only to the direct `base_url` path; Modal-backed
+attachments obtain their own daemon authorization.
+
+The executable [`attach_existing_sandbox.py`](../examples/attach_existing_sandbox.py) example waits
+for readiness and only detaches. It never terminates the existing Sandbox because attaching does not
+transfer lifecycle ownership.
 
 Run ID matches must be exact. If more than one running sandbox has the same run ID, the SDK raises
 `SandboxAmbiguousError` and the caller should attach by sandbox ID or name. Missing run ID matches
@@ -103,6 +147,11 @@ raise `SandboxUnavailableError`.
 `ComputerSandbox.attach_or_create()` accepts `reuse="by_run_id"`, `reuse="by_name"`, or
 `reuse="never"`. The old boolean form is still accepted: `True` means `"by_run_id"` and `False`
 means `"never"`. Reuse policy is intentionally not part of `ComputerConfig`.
+
+Reuse falls back to creation only when the requested app, run ID, or name is genuinely absent.
+Authentication failures, service errors, and ambiguous matches remain errors; they never allocate
+a second Sandbox. The SDK copies the supplied configuration before applying a run ID or generating
+one, so creation and reuse do not rewrite the caller's model.
 
 Existing sandboxes are checked against the requested config when their
 `computer-use.config_hash` tag is available. A mismatch raises `ConfigConflictError` by default
@@ -113,6 +162,17 @@ Attached metadata is limited to operational fields such as sandbox ID, app name,
 name, run ID, owner, creation time, config hash, tags, and artifact directory. Connect tokens are
 never stored there.
 
+Lifecycle ownership follows the construction path. Exiting a context returned by `create()`
+terminates and detaches its owned Modal Sandbox. Exiting a context returned by `attach()` or a
+reuse branch only detaches and closes the daemon connection. A direct local or `base_url` context
+only closes its daemon connection. Calling `detach()` on a created computer transfers cleanup
+ownership to the caller, so a later context exit does not terminate that Sandbox. Explicit
+`terminate()` remains available when the caller intentionally wants to stop an attached target.
+
+If creation fails after Modal allocates a Sandbox, the SDK closes any daemon client, terminates the
+Sandbox, and detaches its local Modal handle while preserving the original exception. Failed
+attachment closes and detaches local handles but never terminates the existing target.
+
 Region placement only applies when a sandbox is created. `attach()` and the reuse branch of
 `attach_or_create()` cannot move an existing sandbox to a different Modal region. If a latency
 profile requires a specific region, create a new sandbox with
@@ -121,8 +181,10 @@ reject an incompatible reused sandbox.
 
 ### Hand a desktop to a Modal Function
 
-For a stateful model loop, create the desktop in an owner process, call `session_handle()`, and pass
-that value through normal Modal Function arguments. The complete executable pattern is
+Provision the desktop once in its owner process, call `session_handle()`, and pass that value
+through normal Modal Function arguments. The deployed Function enters `borrow_async()` once around
+the complete repeated screenshot, model, and action trajectory. It does not provision or borrow
+once per action. The complete executable pattern is
 [`examples/modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py). It
 keeps the native user-owned `@app.function` surface. Deploy that App once, then look up the deployed
 Function with `modal.Function.from_name(...)` and choose either `.remote(handle, task, run_id)` or

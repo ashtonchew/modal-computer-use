@@ -88,6 +88,17 @@ class SandboxRegistry:
             return None
         return self.require_one(matches)
 
+    def find_sandbox_by_run_id(self, run_id: str) -> object | None:
+        try:
+            matches = self.list_sandboxes(tags={"computer-use.run_id": run_id})
+        except SandboxUnavailableError as exc:
+            if _is_modal_not_found_error(exc.__cause__):
+                return None
+            raise
+        if len(matches) == 0:
+            return None
+        return self.require_one_sandbox(matches, description=f"run_id={run_id}")
+
     def require_sandbox_by_run_id(self, run_id: str) -> object:
         matches = self.list_sandboxes(tags={"computer-use.run_id": run_id})
         return self.require_one_sandbox(matches, description=f"run_id={run_id}")
@@ -98,7 +109,11 @@ class SandboxRegistry:
             sandbox = modal.Sandbox.from_id(sandbox_id)
         except Exception as exc:
             raise SandboxUnavailableError(f"no matching sandbox_id={sandbox_id} found") from exc
-        self.require_app_owned(sandbox, description=f"sandbox_id={sandbox_id}")
+        try:
+            self.require_app_owned(sandbox, description=f"sandbox_id={sandbox_id}")
+        except BaseException as exc:
+            _detach_after_failed_validation(sandbox, primary=exc)
+            raise
         return sandbox
 
     def require_app_owned(self, sandbox: object, *, description: str) -> None:
@@ -169,9 +184,12 @@ class SandboxRegistry:
         if not matches:
             raise SandboxUnavailableError(f"no matching {description} found")
         if len(matches) > 1:
-            raise SandboxAmbiguousError(
+            error = SandboxAmbiguousError(
                 f"multiple matching {description}s found; attach by sandbox_id or name"
             )
+            for sandbox in matches:
+                _detach_after_failed_validation(sandbox, primary=error)
+            raise error
         return matches[0]
 
 
@@ -182,6 +200,26 @@ def _safe_tags(sandbox: object) -> dict[str, str]:
     if not isinstance(tags, dict):
         return {}
     return {str(key): str(value) for key, value in tags.items()}
+
+
+def _detach_after_failed_validation(sandbox: object, *, primary: BaseException) -> None:
+    detach = getattr(sandbox, "detach", None)
+    if not callable(detach):
+        return
+    try:
+        detach()
+    except BaseException as cleanup_exc:
+        primary.add_note(
+            f"resource cleanup also failed: sandbox.detach ({type(cleanup_exc).__name__})"
+        )
+
+
+def _is_modal_not_found_error(exc: BaseException | None) -> bool:
+    try:
+        from modal.exception import NotFoundError
+    except ImportError:
+        return False
+    return isinstance(exc, NotFoundError)
 
 
 def _parse_created_at(value: str | None) -> datetime | None:

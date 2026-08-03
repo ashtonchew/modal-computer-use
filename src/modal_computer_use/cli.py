@@ -134,7 +134,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run only the four-click batched versus sequential A/B cases",
     )
-    action_batch_parser.add_argument("--json", action="store_true", default=True)
 
     report_parser = benchmark_subparsers.add_parser("report")
     report_mode = report_parser.add_mutually_exclusive_group(required=True)
@@ -155,7 +154,6 @@ def main(argv: list[str] | None = None) -> int:
     report_parser.add_argument("--image-variant", dest="image_profile")
     report_parser.add_argument("--iterations", type=_positive_int, default=5)
     report_parser.add_argument("--output", type=Path)
-    report_parser.add_argument("--json", action="store_true", default=True)
 
     sdk_parser = benchmark_subparsers.add_parser("sdk")
     sdk_mode = sdk_parser.add_mutually_exclusive_group()
@@ -276,7 +274,6 @@ def main(argv: list[str] | None = None) -> int:
         "--modal-billing-environment",
         help="scope Modal billing reconciliation to this Environment; defaults to Workspace",
     )
-    sdk_parser.add_argument("--json", action="store_true", default=True)
 
     compare_parser = benchmark_subparsers.add_parser("compare")
     compare_mode = compare_parser.add_mutually_exclusive_group()
@@ -396,7 +393,6 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="load provider benchmark credentials from a dotenv file; existing env vars win",
     )
-    compare_parser.add_argument("--json", action="store_true", default=True)
 
     ingress_ab_parser = benchmark_subparsers.add_parser("modal-ingress-ab")
     ingress_ab_parser.add_argument("--app-name", default="modal-computer-use")
@@ -433,7 +429,6 @@ def main(argv: list[str] | None = None) -> int:
     ingress_ab_parser.add_argument("--image-variant", dest="image_profile")
     ingress_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
     ingress_ab_parser.add_argument("--output", type=Path)
-    ingress_ab_parser.add_argument("--json", action="store_true", default=True)
 
     region_ab_parser = benchmark_subparsers.add_parser("modal-region-ab")
     region_ab_parser.set_defaults(modal_region=None)
@@ -492,7 +487,6 @@ def main(argv: list[str] | None = None) -> int:
     region_ab_parser.add_argument("--image-variant", dest="image_profile")
     region_ab_parser.add_argument("--iterations", type=_positive_int, default=5)
     region_ab_parser.add_argument("--output", type=Path)
-    region_ab_parser.add_argument("--json", action="store_true", default=True)
 
     region_summary_parser = benchmark_subparsers.add_parser("modal-region-summary")
     region_summary_parser.add_argument("path", type=Path)
@@ -609,7 +603,6 @@ def main(argv: list[str] | None = None) -> int:
     colocated_parser.add_argument("--image-variant", dest="image_profile")
     colocated_parser.add_argument("--iterations", type=_positive_int, default=5)
     colocated_parser.add_argument("--output", type=Path)
-    colocated_parser.add_argument("--json", action="store_true", default=True)
 
     optimized_provider_parser = benchmark_subparsers.add_parser("modal-optimized-provider")
     optimized_provider_parser.add_argument("--modal-region", required=True)

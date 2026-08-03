@@ -1028,8 +1028,9 @@ def test_modal_subprocess_runner_ab_1cpu_2026_07_31_is_pinned_and_secret_safe() 
     assert "no across-day replication" in limitations
     assert "not a clean shape ablation" in limitations
     assert "232.73 ms total sample" in limitations
-    assert "docs/drafts/modal-optimized-low-latency.md" in limitations
+    assert "publication branch" in limitations
     assert "does not supersede" in limitations
+    assert "docs/drafts/" not in limitations
 
     serialized = artifact_path.read_text().lower()
     for forbidden in (

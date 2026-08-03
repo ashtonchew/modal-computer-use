@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import io
 import json
 import subprocess
@@ -10,6 +11,7 @@ import tomllib
 import zipfile
 from email.message import Message
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -49,6 +51,16 @@ def test_project_uses_current_license_and_url_metadata() -> None:
     assert (ROOT / metadata["project"]["license-files"][0]).is_file()
 
 
+def test_dependency_metadata_uses_inline_pillow_typing_and_keeps_direct_h2() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+
+    assert "h2>=4.1" in project["dependencies"]
+    assert all(
+        requirement.lower() != "types-pillow"
+        for requirement in project["optional-dependencies"]["dev"]
+    )
+
+
 def test_project_version_matches_runtime_and_openapi() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     openapi = json.loads((ROOT / "docs" / "openapi.json").read_text(encoding="utf-8"))
@@ -58,6 +70,40 @@ def test_project_version_matches_runtime_and_openapi() -> None:
 
 def test_typed_package_marker_is_present_in_source() -> None:
     assert (ROOT / "src" / "modal_computer_use" / "py.typed").is_file()
+
+
+def test_root_exported_functions_have_complete_resolvable_annotations() -> None:
+    for name in modal_computer_use.__all__:
+        value = getattr(modal_computer_use, name)
+        if not inspect.isfunction(value):
+            continue
+        signature = inspect.signature(value)
+        assert signature.return_annotation is not inspect.Signature.empty, name
+        missing = [
+            parameter.name
+            for parameter in signature.parameters.values()
+            if parameter.annotation is inspect.Signature.empty
+        ]
+        assert not missing, f"{name} has unannotated parameters: {missing}"
+        get_type_hints(value)
+
+
+def test_public_computer_sandbox_class_type_hints_resolve() -> None:
+    public_classes = (
+        modal_computer_use.ComputerSandboxManager,
+        modal_computer_use.ComputerSandbox,
+    )
+    for cls in public_classes:
+        for name, descriptor in vars(cls).items():
+            if name.startswith("_"):
+                continue
+            value = (
+                descriptor.__func__
+                if isinstance(descriptor, classmethod | staticmethod)
+                else descriptor
+            )
+            if inspect.isfunction(value):
+                get_type_hints(value)
 
 
 def _core_metadata_bytes(*, version: str | None = None, duplicate_url: bool = False) -> bytes:
@@ -139,13 +185,22 @@ def test_strict_downstream_mypy_accepts_root_imports(tmp_path: Path) -> None:
     consumer.write_text(
         """from typing import assert_type
 
-from modal_computer_use import ComputerConfig, Point, RuntimeConfig, __version__
+from modal_computer_use import (
+    AsyncDaemonClient,
+    ComputerConfig,
+    Point,
+    RuntimeConfig,
+    __version__,
+)
 
 config = ComputerConfig()
 assert_type(config, ComputerConfig)
 assert_type(config.runtime, RuntimeConfig)
 assert_type(Point(x=1, y=2).x, int)
 assert_type(__version__, str)
+
+async def use_async_client(client: AsyncDaemonClient) -> None:
+    assert_type(await client.mouse.position(), Point)
 """,
         encoding="utf-8",
     )

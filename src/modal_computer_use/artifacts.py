@@ -4,7 +4,6 @@ import hashlib
 import json
 import mimetypes
 import os
-import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -176,47 +175,6 @@ class ArtifactStore:
             retention_class=retention_class,
             known_size_bytes=len(data),
             known_sha256=hashlib.sha256(data).hexdigest(),
-        )
-        if content_type:
-            info.content_type = content_type
-        if append_manifest:
-            self.append_manifest(info)
-        return info
-
-    def write_file(
-        self,
-        path: str,
-        source: str | Path,
-        *,
-        content_type: str | None = None,
-        created_by_call_id: str | None = None,
-        retention_class: str = "ephemeral",
-        append_manifest: bool = True,
-    ) -> ArtifactInfo:
-        relative = normalize_artifact_path(path)
-        target = self.resolve(relative)
-        source_path = Path(source)
-        self._enforce_write_budget(target, source_path.stat().st_size)
-        parent = target.parent.resolve()
-        root = self.root.resolve()
-        if os.path.commonpath([str(root), str(parent)]) != str(root):
-            raise ArtifactPathError("artifact parent escapes root")
-        parent.mkdir(parents=True, exist_ok=True)
-        self._reject_symlink_components(relative)
-        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as handle:
-            temp_path = Path(handle.name)
-        try:
-            shutil.copyfile(source_path, temp_path)
-            self._reject_symlink_components(relative)
-            temp_path.replace(target)
-        except Exception:
-            temp_path.unlink(missing_ok=True)
-            raise
-        info = self._info(
-            target,
-            public_path=relative,
-            created_by_call_id=created_by_call_id,
-            retention_class=retention_class,
         )
         if content_type:
             info.content_type = content_type

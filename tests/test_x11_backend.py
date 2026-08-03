@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 
 from modal_computer_use.artifacts import ArtifactStore
+from modal_computer_use.daemon.desktop import browser as browser_module
 from modal_computer_use.daemon.desktop import process_runner as process_runner_module
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop import x11 as x11_module
@@ -72,6 +73,10 @@ class RecordingX11Backend(X11DesktopBackend):
                 return None
 
         return Process()
+
+
+def test_browser_gpu_mode_remains_exported() -> None:
+    assert "BrowserGpuMode" in browser_module.__all__
 
 
 class FakeXTestPointer:

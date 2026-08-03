@@ -75,9 +75,13 @@ class AsyncHotSessionClient:
 
     def __init__(self, transport: AsyncHotSessionTransport) -> None:
         self.transport = transport
+        self._closed = False
 
     async def aclose(self) -> None:
+        if self._closed:
+            return
         await self.transport.aclose()
+        self._closed = True
 
     async def __aenter__(self) -> AsyncHotSessionClient:
         return self

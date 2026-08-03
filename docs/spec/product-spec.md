@@ -1,16 +1,17 @@
 # `modal-computer-use` canonical product specification
 
-- **Status:** active specification for the repository's `1.1.0` source state
+- **Status:** active specification for the repository's prepared, unreleased `1.1.0` source state
 - **Prepared:** 2026-07-30
 - **Revision:** v8, canonical contract and maturity truth-up for the `1.1.0` source state
-- **Base implementation audited:** `2cd38f2` (security baseline); final release identity `v1.1.0`
+- **Base implementation audited:** `2cd38f2` (security baseline); planned release identity `v1.1.0`
 - **Repository:** `ashtonchew/modal-computer-use`
 - **Python package:** `modal_computer_use`
 
 The v8 patch also updates the locked Modal SDK from 1.5.2 to 1.5.3 and scopes every daemon Connect
 Token to port 8080.
 
-v8 supersedes v7. It records the system that exists after the native-input, observation,
+Revision v8 supersedes all earlier product-specification revisions. It records the system that
+exists after the native-input, observation,
 performance, Modal 1.5.2, session-handoff, durable-receipt, and application-run-gateway work. It
 also separates implemented product contracts from experimental observation semantics, benchmark-only
 paths, and application-owned orchestration examples.
@@ -29,8 +30,8 @@ The source-of-truth order is:
 3. Maintained guides under [`docs/`](../README.md) define operational procedures and detailed
    semantics.
 4. This specification defines architecture, ownership, maturity, and cross-surface invariants.
-5. Files under [`research/`](../../research/README.md), benchmark reports, and archived
-   specifications are evidence or history, not product contracts.
+5. Files under [`research/`](../../research/README.md) and benchmark reports are evidence or
+   history, not product contracts. Earlier specification revisions remain available in Git history.
 
 If this document conflicts with a checked-in schema or pinning test, the executable source wins and
 the specification must be corrected. `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe requirements
@@ -39,14 +40,15 @@ for future changes. Present-tense statements describe the baseline above.
 v8 does not make benchmark helpers, experimental Modal APIs, example control planes, or provider
 model loops part of the stable core API.
 
-## 1. v7 to v8 delta
+## 1. Revision v8 baseline changes
 
-v7 documented the hardened daemon and SDK shortly after their initial implementation. The
-repository has advanced by 371 commits from the v7 landing (`3a30e69`) to the v8 baseline.
+The immediately preceding revision documented the hardened daemon and SDK shortly after their
+initial implementation. The repository advanced by 371 commits from that revision's landing
+(`3a30e69`) to the v8 baseline. Earlier specification revisions are available only in Git history.
 
 | Area | v8 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. `v1.1.0` is published only when its GitHub Release exists. |
+| Source version | The package, daemon, and OpenAPI report `1.1.0`; Python 3.12+ and `uv` are the maintained development baseline. The prepared source is unreleased: no `v1.1.0` tag or matching GitHub Release exists. |
 | Modal SDK | The compatible line remains `modal~=1.5.2`; v8 updates the lock from 1.5.2 to the latest audited 1.5.x patch, 1.5.3. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -62,8 +64,8 @@ repository has advanced by 371 commits from the v7 landing (`3a30e69`) to the v8
 | Application orchestration | A bounded application-owned run-gateway example documents admission, idempotency, deadlines, reconciliation, cancellation, and operator recovery. It is not a permissive production service. |
 | Evidence | Provider comparisons and Modal optimization experiments use sanitized, provenance-bound artifacts and explicit eligibility states. Benchmark claims do not redefine the SDK contract. |
 
-The historical v7 commit-by-commit hardening record remains in
-[`docs/archive/spec/modal_computer_use_spec_v7.md`](../archive/spec/modal_computer_use_spec_v7.md).
+Earlier specification revisions remain available in Git history and are not current product
+contracts.
 
 ## 2. Product definition
 
@@ -148,7 +150,8 @@ application / provider loop / run gateway
  Xvfb + window manager + native X11 / compatibility tools
 ```
 
-`ComputerSandbox` and `DaemonClient` expose typed namespaces. The daemon validates requests,
+`ComputerSandbox` and `AsyncDaemonClient` expose typed namespaces. `DaemonClient` remains the
+low-level synchronous HTTP facade used by `ComputerSandbox`. The daemon validates requests,
 enforces budgets, serializes input, supervises processes, and records artifacts and traces.
 
 The default desktop stack is Xvfb plus XFCE, with Openbox available as a lighter option. noVNC and
@@ -175,11 +178,11 @@ have begun.
 
 | Classification | Surfaces |
 | --- | --- |
-| Stable product contract | Public SDK namespaces; local and Modal Sandbox lifecycle; daemon HTTP primitives; action batches; binary screenshots; native/compatibility input; artifacts; traces; budgets; provider adapters; manager create/attach/reuse/cleanup; sync and async clients; hot-session protocol v1; observation-stream transport; versioned Modal Function handoff; borrowed trajectory fencing and receipt resolution. |
+| Stable product contract | Public SDK namespaces; synchronous and native-async Modal Sandbox lifecycle; daemon HTTP primitives; action batches; binary screenshots; native/compatibility input; artifacts; traces; budgets; provider adapters; manager create/attach/reuse/cleanup; sync and async clients; hot-session protocol v1; observation-stream transport; versioned Modal Function handoff; borrowed trajectory fencing and receipt resolution. |
 | Alpha / experimental | `_experimental_act_until_visual_change()` and first-visual-change semantics. It composes stable action and observation primitives but does not promise semantic readiness. |
 | Benchmark-only | Modal V2 candidate creation, optimized-frontier paths, transport-floor probes, provider harness internals, and unpublished/raw result handling. |
 | Application-owned example | Provider model loops, session broker, co-located runner/broker, Modal Function trajectory body, and run gateway. Callers must supply identity, authorization, durable storage, policy, and operational ownership. |
-| Historical | Specifications v5-v7 and archived/rejected benchmark reports. |
+| Historical | Earlier specification revisions in Git history and archived/rejected benchmark reports. |
 
 A future change MUST state its maturity. Experimental or benchmark-only code cannot become stable
 through naming, documentation links, or successful benchmark results alone.
@@ -188,7 +191,7 @@ through naming, documentation links, or successful benchmark results alone.
 
 ### 5.1 Construction and lifecycle
 
-The primary entry point is `ComputerSandbox`.
+The synchronous entry point is `ComputerSandbox`.
 
 ```python
 from modal_computer_use import ComputerConfig, ComputerSandbox
@@ -213,8 +216,37 @@ Supported construction paths are:
 - `ComputerSandbox.attach_or_create(...)` for policy-bound reuse.
 
 `run_id` is the canonical Sandbox-lifetime identifier. `request_id` is a deprecated input alias.
-The creator owns termination. `detach()` closes the local Modal connection without claiming the
-remote Sandbox was terminated.
+The creator owns termination. Exiting a created context terminates and detaches its Modal Sandbox.
+Exiting an attached or reused context only detaches and closes its daemon connection. Local and
+direct-URL contexts close connections only. `detach()` transfers a created Sandbox to
+caller-managed ownership without claiming the remote Sandbox was terminated. A failed creation
+cleans up any allocated Sandbox; a failed attachment never terminates the existing target.
+
+`attach()` accepts exactly one of sandbox ID, name, run ID, or direct daemon URL. Direct tokens are
+valid only with a direct URL. `attach_or_create()` creates after a lookup only when Modal reports
+that the target is absent; ambiguous matches and operational failures never trigger allocation.
+Construction copies caller configuration before generating or overriding a run ID.
+
+`AsyncComputerSandbox` is the stable native-async Modal lifecycle surface:
+
+```python
+from modal_computer_use import AsyncComputerSandbox, ComputerConfig
+
+async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+    await computer.mouse.click(320, 240)
+```
+
+`create()` and `attach()` return lazy, one-shot async context managers. They perform no Modal work
+until entry and yield only after the Sandbox and daemon are ready. Async attach accepts exactly one
+of sandbox ID, name, or run ID. Direct URLs use `AsyncDaemonClient`; the first async lifecycle
+contract does not include `attach_or_create()` or `wait=False`.
+
+Async creation and attachment use Modal-native `.aio` operations without worker-thread bridges.
+They share the synchronous path's copied configuration, image choice, tags, authorization,
+networking, and security-owned creation plan. Exiting a created context terminates and detaches its
+owned target. Exiting an attached context detaches without termination. Explicit async detachment
+transfers ownership. Failed or cancelled creation completes cleanup for any allocated resource
+before the primary error escapes. Importing the core package does not require Modal.
 
 ### 5.2 Namespaces
 
@@ -240,7 +272,11 @@ The stable namespaces are:
 | `session` | metadata and refresh |
 | `debug` | sanitized debug URLs and optional noVNC access |
 
-`DaemonClient` and `AsyncDaemonClient` provide synchronous and native-async HTTP façades.
+`DaemonClient` and `AsyncDaemonClient` provide synchronous and native-async interfaces to an
+existing daemon. `AsyncDaemonClient` owns its pooled HTTP connection and the WebSocket connections
+it opens. Closing it closes those connections only; it does not stop the daemon or terminate a
+Modal Sandbox. `AsyncComputerSandbox` composes the same async namespaces with Modal lifecycle
+ownership. `AsyncBorrowedComputer` remains a separate lease-restricted trajectory interface.
 `ComputerSandbox.hot_session()` provides a persistent action/screenshot channel.
 `ComputerSandbox.observation_stream()` provides a correlated observation stream.
 
@@ -459,8 +495,8 @@ manifests, Volume synchronization, or application recovery.
 
 ### 9.1 Handle contract
 
-`ComputerSandbox.session_handle()` returns a frozen, versioned `ComputerSessionHandle` for an
-SDK-owned desktop created with:
+`ComputerSandbox.session_handle()` and `AsyncComputerSandbox.session_handle()` return a frozen,
+versioned `ComputerSessionHandle` for an SDK-owned desktop created with:
 
 - an explicit requested Modal region;
 - `attested-tunnel` or `connect` ingress;
@@ -470,8 +506,10 @@ The handle contains routing and policy identity, not bearer credentials. It omit
 tokens, noVNC URLs, task text, screenshots, and artifacts. Sandbox identity is necessarily present
 in serialized form and remains sensitive.
 
-Inside a deployed Modal Function, `borrow_async()` is canonical for async code and `borrow()` is
-available for synchronous code. Borrow entry:
+Provisioning happens once in the owner. Inside a deployed Modal Function, `borrow_async()` is
+canonical for async code and `borrow()` is available for synchronous code. One borrow surrounds
+the complete repeated trajectory; it never provisions the target and is not entered once per
+action. Borrow entry:
 
 1. verifies the deployed-Function environment and exact requested region declaration;
 2. resolves the live Sandbox through the Function's Modal identity;
@@ -685,8 +723,8 @@ Primary references:
 
 ## 17. Versioning and compatibility
 
-- Package, daemon, and checked-in OpenAPI versions are `1.1.0`. The version is published only when
-  the matching GitHub Release exists.
+- Package, daemon, and checked-in OpenAPI versions are `1.1.0`. That source version remains
+  unreleased until the matching tag and GitHub Release exist.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
   core.
@@ -762,7 +800,8 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is versioned `1.1.0`; remaining work is not the v7 roadmap.
+The repository source is prepared as version `1.1.0` but has not been tagged or published; remaining
+work is not inherited from an earlier revision's roadmap.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

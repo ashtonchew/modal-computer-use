@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib import import_module
+from importlib.util import find_spec
+
+import pytest
 
 
 def test_core_import_does_not_import_providers() -> None:
@@ -11,6 +15,75 @@ def test_core_import_does_not_import_providers() -> None:
 
     assert "openai" not in sys.modules
     assert "anthropic" not in sys.modules
+
+
+def test_root_package_exports_are_unique_and_importable() -> None:
+    import modal_computer_use
+
+    assert len(modal_computer_use.__all__) == len(set(modal_computer_use.__all__))
+    assert "ComputerSandboxManager" in modal_computer_use.__all__
+    for name in modal_computer_use.__all__:
+        assert hasattr(modal_computer_use, name), name
+
+
+@pytest.mark.parametrize(
+    ("module_name", "attribute"),
+    [
+        ("modal_computer_use", "SandboxManager"),
+        ("modal_computer_use.manager", "SandboxManager"),
+        ("modal_computer_use.sandbox", "modal_workspace_billing_report"),
+        ("modal_computer_use.daemon.desktop.xtest", "XTestPointerController"),
+        ("modal_computer_use.image", "browser_image"),
+        ("modal_computer_use.actions", "transform_point"),
+        ("modal_computer_use.state", "sandbox_ref_from_values"),
+        ("modal_computer_use.errors", "ProcessExecutionError"),
+        ("modal_computer_use.errors", "ErrorInfo"),
+        ("modal_computer_use.daemon.desktop.browser", "BrowserKind"),
+    ],
+)
+def test_retired_compatibility_attributes_stay_absent(
+    module_name: str,
+    attribute: str,
+) -> None:
+    module = import_module(module_name)
+
+    assert not hasattr(module, attribute)
+    if hasattr(module, "__all__"):
+        assert attribute not in module.__all__
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "modal_computer_use.transports.local",
+        "modal_computer_use.adapters.anthropic.schemas",
+        "modal_computer_use.daemon.desktop.processes",
+        "modal_computer_use.daemon.trace",
+    ],
+)
+def test_retired_compatibility_modules_stay_absent(module_name: str) -> None:
+    assert find_spec(module_name) is None
+
+
+def test_http_transport_package_export_uses_canonical_implementation() -> None:
+    from modal_computer_use.transports import HTTPTransport
+    from modal_computer_use.transports.http import HTTPTransport as CanonicalHTTPTransport
+
+    assert HTTPTransport is CanonicalHTTPTransport
+
+
+@pytest.mark.parametrize(
+    ("module_name", "attribute"),
+    [
+        ("modal_computer_use.tracing", "TraceWriter"),
+        ("modal_computer_use.daemon.supervisor", "Supervisor"),
+    ],
+)
+def test_canonical_internal_imports_remain_available(
+    module_name: str,
+    attribute: str,
+) -> None:
+    assert hasattr(import_module(module_name), attribute)
 
 
 def test_cli_import_does_not_require_optional_provider_packages() -> None:
@@ -63,6 +136,35 @@ handle = ComputerSessionHandle(
 )
 assert handle.schema_version == 2
 assert handle.handoff_protocol == "computer-use.session-handoff.v2"
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_async_daemon_client_composition_does_not_require_modal() -> None:
+    code = """
+import asyncio
+import importlib.abc
+import sys
+
+class Blocker(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path, target=None):
+        if fullname.split('.', 1)[0] == "modal":
+            raise ImportError(f"blocked optional dependency: {fullname}")
+        return None
+
+sys.meta_path.insert(0, Blocker())
+from modal_computer_use import AsyncDaemonClient
+
+async def main():
+    client = AsyncDaemonClient.local(token="dev")
+    assert client.mouse is client.mouse
+    await client.aclose()
+
+asyncio.run(main())
 """
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-c", code], capture_output=True, text=True

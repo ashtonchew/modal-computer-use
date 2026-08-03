@@ -1,5 +1,11 @@
 # Computer-use landscape
 
+> **Status:** Non-normative research
+> **Research cutoff:** Product interfaces reviewed through 2026-07-23; benchmark evidence refreshed
+> through 2026-07-26.
+> **Authority:** This file does not define product behavior. Use the
+> [canonical product specification](../docs/spec/product-spec.md) for the current contract.
+
 This research note compares selected computer-use products that are relevant to this project. The
 product and interface research is current as of 2026-07-23. The linked benchmark evidence was
 refreshed on 2026-07-26; that refresh did not revalidate every product and interface entry.

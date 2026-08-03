@@ -78,6 +78,7 @@ from .models import (
 from .observations import ActionObservationResult, AsyncObservationClient, ObservationClient
 from .registry import SandboxRegistry
 from .sandbox import (
+    AsyncComputerSandbox,
     ComputerSandbox,
     ModalDaemonCommandResult,
     ModalDaemonEndpoint,
@@ -102,6 +103,7 @@ __all__ = [
     "ArtifactInfo",
     "ArtifactSyncResult",
     "AsyncBorrowedComputer",
+    "AsyncComputerSandbox",
     "AsyncDaemonClient",
     "AsyncHotSessionClient",
     "AsyncObservationClient",

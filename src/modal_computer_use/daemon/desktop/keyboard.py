@@ -101,8 +101,6 @@ class NativeKeyboardSession(Protocol):
 
     def resolve_keycode(self, name: str) -> int: ...
 
-    def keycode_to_keysym(self, keycode: int, group: int, level: int) -> int: ...
-
     def keyboard_mapping(
         self,
         group: int,

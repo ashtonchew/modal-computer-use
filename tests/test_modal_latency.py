@@ -582,6 +582,7 @@ class BoundarySandboxObject:
         self._tags = tags
         self.fail_tcp = False
         self.terminate_wait_calls: list[bool] = []
+        self.detach_calls = 0
 
     def wait_until_ready(self, *, timeout: int) -> None:
         if self.fail_tcp:
@@ -596,6 +597,9 @@ class BoundarySandboxObject:
 
     def terminate(self, *, wait: bool = False) -> None:
         self.terminate_wait_calls.append(wait)
+
+    def detach(self) -> None:
+        self.detach_calls += 1
 
     def get_tags(self) -> dict[str, str]:
         return dict(self._tags)
@@ -658,7 +662,6 @@ def test_create_records_supported_and_unsupported_startup_stages(monkeypatch) ->
         )
     )
     assert computer.startup_timing is timing
-    assert computer._readiness_failure_cleanup == "none"
     daemon_bearer = BoundarySandbox.create_calls[0]["env"][
         "COMPUTER_USE_TUNNEL_TOKEN"
     ]
@@ -673,6 +676,7 @@ def test_create_cleans_up_tcp_and_final_tunnel_readiness_failures(monkeypatch) -
         ComputerSandbox.create(config=ComputerConfig(), image=object())
     assert BoundarySandbox.created is not None
     assert BoundarySandbox.created.terminate_wait_calls == [True]
+    assert BoundarySandbox.created.detach_calls == 1
 
     monkeypatch.setitem(__import__("sys").modules, "modal", boundary_modal())
     calls = 0
@@ -696,6 +700,7 @@ def test_create_cleans_up_tcp_and_final_tunnel_readiness_failures(monkeypatch) -
         ComputerSandbox.create(config=ComputerConfig(), image=object())
     assert BoundarySandbox.created is not None
     assert BoundarySandbox.created.terminate_wait_calls == [True]
+    assert BoundarySandbox.created.detach_calls == 1
 
 
 def test_create_validates_modal_tag_budget_before_allocation(monkeypatch) -> None:
