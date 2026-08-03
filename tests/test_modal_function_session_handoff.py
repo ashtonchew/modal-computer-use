@@ -774,14 +774,27 @@ def test_attach_or_create_reuse_aligns_ingress_and_http_policy(monkeypatch) -> N
         network={"daemon_http_version": "2"},
     )
     config_hash = compute_config_hash(config)
-    computer, _target, _client = _borrowed_computer(config_hash=config_hash)
+    computer, target, _client = _borrowed_computer(config_hash=config_hash)
     calls: list[dict[str, object]] = []
 
-    def attach(**kwargs: object) -> ComputerSandbox:
+    def attach_resolved(
+        cls: type[ComputerSandbox],
+        sandbox: object,
+        **kwargs: object,
+    ) -> ComputerSandbox:
+        assert sandbox is target
         calls.append(kwargs)
         return computer
 
-    monkeypatch.setattr(ComputerSandbox, "attach", attach)
+    monkeypatch.setattr(
+        "modal_computer_use.registry.SandboxRegistry.find_sandbox_by_run_id",
+        lambda self, run_id: target,
+    )
+    monkeypatch.setattr(
+        ComputerSandbox,
+        "_attach_resolved_sandbox",
+        classmethod(attach_resolved),
+    )
     reused = ComputerSandbox.attach_or_create(
         config=config,
         app_name="desktop-app",

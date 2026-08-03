@@ -7,6 +7,11 @@ yet. The changes below remain unreleased.
 
 - Added a typed native-async interface for existing daemons, including cached namespaces,
   readiness, persistent action and observation connections, and connection-only cleanup.
+- Defined ownership-aware Sandbox cleanup for created, attached, reused, local, and explicitly
+  detached clients; failed creation now reclaims allocated resources without letting cleanup mask
+  the original error.
+- Made attachment selectors exact and limited reuse fallback to genuine Modal not-found results.
+  Creation and reuse now copy caller configuration before generating or overriding a run ID.
 - Moved the canonical product specification to the stable `docs/spec/product-spec.md` path and
   removed superseded specification revisions and branch-owned article working files from `main`.
 - Hardened daemon authentication to fail closed, made unauthenticated local mode explicit, blocked
