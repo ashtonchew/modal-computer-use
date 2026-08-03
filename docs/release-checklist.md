@@ -5,8 +5,8 @@ clean checkout of the exact commit that will be tagged.
 
 ## Core verification
 
-Run the same dependency, schema, lint, type, test, and benchmark-smoke commands as the default CI
-job:
+Run the release verification commands below. They match the default CI checks, including the frozen
+dependency sync. The sync cannot change the lock file.
 
 ```bash
 uv sync --extra dev --extra modal --frozen
@@ -29,7 +29,15 @@ uv run pytest tests/benchmarks/test_report_cli.py tests/benchmarks/test_action_b
 
 ## Distribution verification
 
-Build and inspect both distributions:
+After the source and protected Modal checks pass, create the annotated tag. Check out its commit in
+a clean checkout, and validate the release candidate:
+
+```bash
+uv run python scripts/check_release_candidate.py --tag v1.1.0
+```
+
+Build the wheel and source distribution once from that checkout. Do not rebuild after you upload
+them to TestPyPI.
 
 ```bash
 test ! -e dist/release
@@ -37,13 +45,18 @@ mkdir -p dist/release
 uv build --out-dir dist/release
 uvx --from 'twine>=6.2.0' twine check dist/release/*
 uv run python scripts/check_distribution_metadata.py dist/release/*
-(cd dist/release && shasum -a 256 *.whl *.tar.gz > SHA256SUMS)
-(cd dist/release && shasum -a 256 -c SHA256SUMS)
+uv run python scripts/check_release_bundle.py prepare \
+  --distributions dist/release \
+  --checksums dist/SHA256SUMS
+uv run python scripts/check_release_bundle.py verify \
+  --distributions dist/release \
+  --checksums dist/SHA256SUMS
 ```
 
-The metadata checker verifies the wheel and source distribution, including the MIT license
-expression, included license file, project URLs, and package metadata. `twine check` additionally
-validates the rendered long description.
+The metadata checker verifies the wheel metadata and the curated source distribution file set. The
+source distribution contains only the package source and required project files. The bundle check
+requires one wheel and one source distribution, and it records their SHA-256 values. `twine check`
+also validates the rendered long description.
 
 Install both artifacts in clean Python 3.12 environments:
 
@@ -79,11 +92,11 @@ Run the same fail-on-match boundary scans as CI:
 uv run python scripts/check_repository_hygiene.py
 uv export --frozen --all-extras --no-hashes --no-emit-project \
   --output-file /tmp/modal-computer-use-audit-requirements.txt
-uvx --python 3.12 --from pip-audit pip-audit \
+uvx --python 3.12 --from 'pip-audit==2.10.1' pip-audit \
   --requirement /tmp/modal-computer-use-audit-requirements.txt \
   --no-deps --disable-pip
-uvx --from bandit bandit -q -lll -r src
-uvx semgrep scan --config p/security-audit --error src
+uvx --from 'bandit==1.9.4' bandit -q -lll -r src
+uvx --from 'semgrep==1.172.0' semgrep scan --config p/security-audit --error src
 ```
 
 Run the focused security regressions before the full suite:
@@ -155,27 +168,70 @@ run. The named Image canary is skipped when the variable is absent.
 
 ## Publication prerequisites
 
-Before creating a tag or uploading artifacts, confirm that:
+Before you change repository visibility or upload artifacts, confirm that:
 
+- Every branch and tag that will become public has been listed. Scan the complete reachable history
+  of each intended public ref for credentials, secret-bearing URLs, and private files. After any
+  rewrite, repeat the scan from a fresh clone before you change repository visibility.
 - `pyproject.toml`, `src/modal_computer_use/_version.py`, and `docs/openapi.json` contain the same
   version.
 - `CHANGELOG.md` has a dated entry for that version and no release change remains only under
   `Unreleased`.
 - The release tag points to the exact verified source commit and uses the repository's version-tag
   convention. `v1.1.0` uses an annotated unsigned tag.
-- The wheel and source distribution were built from that clean tagged commit. `SHA256SUMS` verifies
-  both files.
+- The wheel and source distribution were built once from that clean tagged commit. `SHA256SUMS`
+  verifies both files.
 - The checked-in OpenAPI schema has no unexplained regeneration diff.
 - The README, documentation, changelog, issue tracker, and security-policy project URLs resolve to
   their intended public pages.
 - Protected Modal verification passed for changes that affect Modal creation, ingress, images,
   Volumes, snapshots, noVNC, attach/reuse, or cleanup.
-- PyPI Trusted Publishing is configured for this repository and release environment. Publish the
-  verified wheel and source distribution from the tagged commit, then confirm both files and the
-  expected version are available on PyPI.
-- Immutable GitHub Releases are enabled. Create the release as a draft, attach the wheel, source
-  distribution, and `SHA256SUMS`, then publish them together and verify the tag, assets, immutable
-  state, and release attestation.
+- TestPyPI and PyPI publishing are configured for this repository and release environment.
+- Immutable GitHub Releases are enabled.
 
-Do not call a version published until PyPI exposes the wheel and source distribution and the
-immutable GitHub Release contains the matching tag, both distributions, and `SHA256SUMS`.
+## Publication
+
+Publish one build in this order:
+
+1. Upload the wheel and source distribution from `dist/release` to TestPyPI.
+2. Verify that TestPyPI exposes only those two files, with the recorded SHA-256 values and publisher
+   provenance:
+
+   ```bash
+   uv run python scripts/verify_python_index_release.py \
+     --index-url https://test.pypi.org \
+     --project modal-computer-use \
+     --version 1.1.0 \
+     --distributions dist/release
+   ```
+
+   The distribution checks have already installed these exact bytes in clean Python 3.12
+   environments. Record approval for the production upload.
+3. Upload the same approved files from `dist/release` to PyPI. Do not rebuild them. Confirm that
+   PyPI exposes the same files, hashes, provenance, and version:
+
+   ```bash
+   uv run python scripts/verify_python_index_release.py \
+     --index-url https://pypi.org \
+     --project modal-computer-use \
+     --version 1.1.0 \
+     --distributions dist/release
+   ```
+
+   Verify the documented user installation outside the checkout:
+
+   ```bash
+   install_root="$(mktemp -d)"
+   cd "$install_root"
+   uv init --bare --python 3.12
+   uv add "modal-computer-use[modal]"
+   uv run python -c "import modal_computer_use"
+   uv run computer-use --help
+   ```
+
+4. Create the GitHub Release as a draft for the verified tag. Attach the same wheel, source
+   distribution, and `dist/SHA256SUMS`. Publish the release, and verify its tag, assets, immutable
+   state, and release attestation.
+
+Do not call a version published until PyPI exposes both approved distribution files and the
+immutable GitHub Release contains the matching tag, both files, and `SHA256SUMS`.

@@ -17,8 +17,14 @@ permissions:
 
 jobs:
   core:
-    name: Core checks
+    name: Core checks (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,13 +37,13 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install "${{ matrix.python-version }}"
 
       - name: Install scan tools
         run: command -v rg || (sudo apt-get update && sudo apt-get install -y ripgrep)
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra modal
+        run: uv sync --extra dev --extra modal --frozen
 
       - name: Check OpenAPI schema freshness
         run: uv run python scripts/export_openapi.py --check
@@ -92,92 +98,43 @@ jobs:
       - name: Inspect distribution metadata
         run: uv run python scripts/check_distribution_metadata.py dist/release/*
 
-      - name: Validate wheel install
+      - name: Validate installed distributions
+        run: uv run python scripts/smoke_distribution_install.py --distributions dist/release
+
+  security:
+    name: Dependency and security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Export locked dependencies
         run: |
-          uv venv /tmp/mcu-wheel-smoke --python 3.12
-          uv pip install --python /tmp/mcu-wheel-smoke/bin/python dist/release/*.whl
-          cd /tmp
-          /tmp/mcu-wheel-smoke/bin/python - <<'PY'
-          from importlib.metadata import version
-          from pathlib import Path
+          uv export --frozen --all-extras --no-hashes --no-emit-project \
+            --output-file /tmp/modal-computer-use-audit-requirements.txt
 
-          import modal_computer_use
-          from modal_computer_use.daemon.app import create_app
-          from modal_computer_use.daemon.settings import DaemonSettings
-
-          app = create_app(
-              DaemonSettings(
-                  backend="mock",
-                  artifacts_dir=Path("/tmp/mcu-wheel-smoke-artifacts"),
-                  recordings_dir=Path("/tmp/mcu-wheel-smoke-recordings"),
-                  local_token="dev",
-              )
-          )
-          assert version("modal-computer-use") == modal_computer_use.__version__
-          assert app.title == "modal-computer-use daemon"
-          assert app.version == modal_computer_use.__version__
-          PY
-          /tmp/mcu-wheel-smoke/bin/python - <<'PY'
-          from importlib.metadata import entry_points
-
-          scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
-          assert scripts["computer-use"] == "modal_computer_use.cli:main"
-          assert scripts["computer-use-daemon"] == "modal_computer_use.daemon.__main__:main"
-          PY
-          /tmp/mcu-wheel-smoke/bin/computer-use --help >/tmp/mcu-computer-use-help.txt
-          /tmp/mcu-wheel-smoke/bin/computer-use trace --help >/tmp/mcu-trace-help.txt
-          /tmp/mcu-wheel-smoke/bin/computer-use benchmark action-batch --mock-local --iterations 1 >/tmp/mcu-benchmark.json
-
-      - name: Validate installed daemon entry point
+      - name: Audit dependencies
         run: |
-          COMPUTER_USE_BACKEND=mock \
-          COMPUTER_USE_LOCAL_TOKEN=dev \
-          COMPUTER_USE_REQUIRE_CONNECT_USER=false \
-          COMPUTER_USE_ARTIFACTS_DIR=/tmp/mcu-daemon-artifacts \
-          COMPUTER_USE_RECORDINGS_DIR=/tmp/mcu-daemon-recordings \
-          COMPUTER_USE_TRACE_DIR=/tmp/mcu-daemon-traces \
-          /tmp/mcu-wheel-smoke/bin/computer-use-daemon >/tmp/mcu-daemon.log 2>&1 &
-          pid=$!
-          trap 'kill $pid || true' EXIT
-          /tmp/mcu-wheel-smoke/bin/python - <<'PY'
-          import time
+          uvx --python 3.12 --from 'pip-audit==2.10.1' pip-audit \
+            --requirement /tmp/modal-computer-use-audit-requirements.txt \
+            --no-deps --disable-pip
 
-          import httpx
+      - name: Scan Python source
+        run: uvx --from 'bandit==1.9.4' bandit -q -lll -r src
 
-          headers = {"Authorization": "Bearer dev"}
-          for _ in range(60):
-              try:
-                  assert httpx.get("http://127.0.0.1:8080/healthz", timeout=1).status_code == 200
-                  assert httpx.get("http://127.0.0.1:8080/readyz", timeout=1).status_code == 200
-                  assert httpx.get(
-                      "http://127.0.0.1:8080/v1/version",
-                      headers=headers,
-                      timeout=1,
-                  ).status_code == 200
-                  assert httpx.get(
-                      "http://127.0.0.1:8080/v1/capabilities",
-                      headers=headers,
-                      timeout=1,
-                  ).status_code == 200
-                  break
-              except Exception:
-                  time.sleep(0.25)
-          else:
-              raise RuntimeError("installed daemon did not become ready")
-          PY
-
-      - name: Validate sdist install
-        run: |
-          uv venv /tmp/mcu-sdist-smoke --python 3.12
-          uv pip install --python /tmp/mcu-sdist-smoke/bin/python dist/release/*.tar.gz
-          cd /tmp
-          /tmp/mcu-sdist-smoke/bin/python - <<'PY'
-          from importlib.metadata import version
-
-          import modal_computer_use
-
-          assert version("modal-computer-use") == modal_computer_use.__version__
-          PY
+      - name: Scan security rules
+        run: uvx --from 'semgrep==1.172.0' semgrep scan --config p/security-audit --error src
 
   modal-smoke:
     name: Protected Modal smoke
@@ -203,7 +160,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra modal
+        run: uv sync --extra dev --extra modal --frozen
 
       - name: Validate Modal secrets
         env:
