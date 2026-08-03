@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tomllib
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -267,7 +268,7 @@ def test_modal_manager_attach_reuse_cleanup_smoke() -> None:
         finally:
             attached_by_run_id.detach()
 
-        reused = manager.attach_or_create(config=config, wait=True)
+        reused = manager.attach_or_create(name=name, config=config, wait=True)
         try:
             assert reused.metadata() is not None
             assert reused.metadata().sandbox_id == metadata.sandbox_id
@@ -277,7 +278,7 @@ def test_modal_manager_attach_reuse_cleanup_smoke() -> None:
         mismatch = ComputerConfig(run_id=run_id)
         mismatch.desktop.resolution = (1280, 720)
         with pytest.raises(ConfigConflictError):
-            manager.attach_or_create(config=mismatch, wait=False)
+            manager.attach_or_create(name=name, config=mismatch, wait=False)
 
         dry_run = manager.cleanup_expired(
             ttl_seconds=1,
@@ -300,6 +301,65 @@ def test_modal_manager_attach_reuse_cleanup_smoke() -> None:
             if not cleaned_up:
                 computer.terminate()
             computer.detach()
+
+
+@pytest.mark.modal
+@pytest.mark.asyncio
+async def test_modal_named_attach_or_create_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+
+    import modal
+
+    from modal_computer_use import AsyncComputerSandbox, ComputerConfig
+    from modal_computer_use.config import RuntimeConfig
+
+    suffix = uuid.uuid4().hex[:10]
+    name = f"mcu-v1-named-{suffix}"
+    run_id = f"mcu-v1-named-{suffix}"
+    owner = f"mcu-v1-owner-{suffix}"
+    config = ComputerConfig(
+        run_id=run_id,
+        runtime=RuntimeConfig(
+            timeout_seconds=300,
+            idle_timeout_seconds=120,
+            readiness_timeout_seconds=180,
+        ),
+    )
+    create_options = {
+        "name": name,
+        "config": config,
+        "owner": owner,
+        "tags": {"computer-use.smoke": "named-attach-or-create"},
+    }
+    sandbox_id: str | None = None
+    terminated = False
+
+    try:
+        async with AsyncComputerSandbox.attach_or_create(**create_options) as created:
+            metadata = created.metadata()
+            sandbox_id = metadata.sandbox_id
+            assert metadata.name == name
+            assert metadata.run_id == run_id
+            assert metadata.owner == owner
+            await created.detach()
+
+        async with AsyncComputerSandbox.attach_or_create(**create_options) as reused:
+            assert reused.metadata().sandbox_id == sandbox_id
+
+        assert sandbox_id is not None
+        async with AsyncComputerSandbox.attach(sandbox_id=sandbox_id) as attached:
+            assert attached.metadata().sandbox_id == sandbox_id
+            await attached.terminate(wait=True)
+            terminated = True
+    finally:
+        if sandbox_id is not None and not terminated:
+            with suppress(Exception):
+                leftover = await modal.Sandbox.from_id.aio(sandbox_id)
+                with suppress(Exception):
+                    await leftover.terminate.aio(wait=True)
+                with suppress(Exception):
+                    await leftover.detach.aio()
 
 
 @pytest.mark.modal
