@@ -539,6 +539,25 @@ cover full reporting intervals, omit unused tag keys, and include account adjust
 artifact. When several surfaces share one Sandbox, report one shared resource estimate unless a
 fair allocation is known.
 
+## Read the latency evidence
+
+The following artifacts form a dated evidence set. Each artifact has a specific scope. A later run
+does not replace an earlier run.
+
+| Question | Tracked evidence | Boundary |
+| --- | --- | --- |
+| Does one request reduce four-click overhead? | [`modal-action-batching-ab-replication-2026-08-02.json`](../benchmark-data/modal-action-batching-ab-replication-2026-08-02.json) | The replication retains 30 samples per arm. It does not restore the missing July 29 arrays. |
+| Does subprocess runner ownership affect latency? | [`modal-subprocess-runner-ab-samples-2026-07-30.json`](../benchmark-data/modal-subprocess-runner-ab-samples-2026-07-30.json) | The artifact retains 30 samples for each of three dated arms. |
+| How was the six-cent figure calculated? | [`modal-optimized-provider-cost-estimate-2026-07-30.json`](../benchmark-data/modal-optimized-provider-cost-estimate-2026-07-30.json) | The value uses recorded wall time and July 29 list rates. It is not an invoice. |
+| What produced the historical native-X11 result? | [`modal-native-x11-historical-source-2026-07-23.json`](../benchmark-data/modal-native-x11-historical-source-2026-07-23.json) | The source and aggregates are retained. The original three samples per arm are not retained. |
+| Does a clean run reproduce the native-X11 direction? | [`modal-native-x11-backend-ab-replication-2026-08-02.json`](../benchmark-data/modal-native-x11-backend-ab-replication-2026-08-02.json) | The replication retains 30 samples per arm. It is not a reconstruction of the July 23 arrays. |
+| What explains the large historical `xdotool` result? | [`modal-native-x11-runner-matrix-2026-08-02.json`](../benchmark-data/modal-native-x11-runner-matrix-2026-08-02.json) | The matrix tests 12 cells in three blocks. It supports a runner effect without superseding either dated result. |
+| Did the matrix Sandboxes terminate? | [`modal-native-x11-sandbox-termination-reconciliation-2026-08-03.json`](../benchmark-data/modal-native-x11-sandbox-termination-reconciliation-2026-08-03.json) | Modal result metadata reports all 12 Sandboxes finished with code 137. Audit and billing records are not reconciled. |
+
+The runner matrix is the primary entry point for the runner-effect claim. Its dependency digests
+bind the historical source, clean replication, subprocess control, and bounded interpretation. The
+termination record is a separate provider reconciliation. It does not validate the latency samples.
+
 ## Find methodology and evidence
 
 - [Performance](performance.md) explains stable latency mechanisms.

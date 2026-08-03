@@ -1,0 +1,184 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-action-batching-ab",
+  "status": "replication",
+  "replicated_on": "2026-08-02",
+  "scope": "Clean 30-sample replication of one ordered four-click batch versus four sequential click requests",
+  "provenance": {
+    "source_sha": "968f542163b07de38f5d35c03801314c07c99293",
+    "harness_state": "clean",
+    "git_worktree_clean": true,
+    "raw_artifact": "benchmark-results/article-evidence-replications-2026-08-02/modal-action-batching-ab.json",
+    "raw_artifact_sha256": "c5bc8a4b85b8344b75347c9a9cda83ec1770d70651fdaca3d15a2349232d4b69",
+    "raw_artifact_tracked": false,
+    "samples_tracked": true
+  },
+  "configuration": {
+    "modal_region": "us-west-2",
+    "caller_topology": "single Modal Function and target with matching observed placement",
+    "modal_ingress": "connect",
+    "daemon_http_version": "1.1",
+    "iterations": 30,
+    "warmup_iterations": 1,
+    "placement": {
+      "requested_region": "us-west-2",
+      "runner": {
+        "cloud": "CLOUD_PROVIDER_AWS",
+        "region": "us-west-2"
+      },
+      "target": {
+        "cloud": "CLOUD_PROVIDER_AWS",
+        "region": "us-west-2"
+      }
+    }
+  },
+  "historical_context": {
+    "source_artifact": "benchmark-data/modal-action-batching-ab-2026-07-29.json",
+    "source_artifact_sha256": "e20ca9b32376b63e7d939dbfdd40374ccd274208821e713ce0a421ff17c02db1",
+    "historical_raw_artifact_sha256": "4d90aee6e271d0ccb3857de736238cd05320f61d10a09cc729d1696f2b4bb497",
+    "historical_samples_available": false,
+    "supersedes_historical_result": false,
+    "historical_p50_ms": {
+      "batch_4_clicks": 11.542820500000772,
+      "separate_4_clicks": 26.837644000000438
+    },
+    "historical_speedup": 2.325050796726731
+  },
+  "cases": {
+    "batch_4_clicks": {
+      "semantics": "one ordered action batch, validated before execution, stop on first error",
+      "samples_ms": [
+        11.749209000001315,
+        9.237873000000008,
+        11.007233000000838,
+        9.362634999998676,
+        9.628461000000144,
+        9.990400000001287,
+        9.880436999999631,
+        11.03089300000093,
+        9.80189499999895,
+        10.527592000000752,
+        10.467630000000838,
+        10.687585999999527,
+        8.928535000000792,
+        11.635466999999622,
+        8.425303000000994,
+        10.305937000000043,
+        10.49125099999948,
+        7.926932000000164,
+        9.693162999999672,
+        8.354061000000357,
+        10.610174000001749,
+        8.783951999999928,
+        15.903934999998981,
+        12.558937999999742,
+        8.077274999999773,
+        7.207134999999809,
+        32.00490400000078,
+        11.480874000000085,
+        10.369018000000452,
+        15.123468000000528
+      ],
+      "summary_ms": {
+        "high_outlier_count": 3,
+        "high_outlier_indices": [
+          22,
+          26,
+          29
+        ],
+        "high_outlier_ratio": 0.1,
+        "high_outlier_threshold": 14.950840183304274,
+        "jitter_ms": 5.215247349999428,
+        "mad": 1.0372235000009056,
+        "max": 32.00490400000078,
+        "mean": 11.041738866666861,
+        "mean_p50_delta_ms": 0.7042613666666142,
+        "mean_p50_delta_ratio": 0.0681270035815408,
+        "mean_without_high_outliers": 9.934068851852057,
+        "min": 7.207134999999809,
+        "p50": 10.337477500000247,
+        "p95": 15.552724849999676,
+        "trimmed_mean": 10.208688208333575
+      }
+    },
+    "separate_4_clicks": {
+      "semantics": "four sequential requests in fixed order, stop on first error",
+      "samples_ms": [
+        18.88701400000059,
+        21.467233000000974,
+        19.671431000000794,
+        20.167452999999114,
+        19.01998599999999,
+        25.87093400000029,
+        19.1484200000005,
+        21.179027000000517,
+        21.07104399999926,
+        19.607501000001193,
+        21.01911299999948,
+        35.80396200000102,
+        23.065949999999447,
+        37.11498300000038,
+        38.57889600000064,
+        27.858719999999337,
+        30.61561399999846,
+        21.433751999998307,
+        22.67600099999889,
+        19.586909999999236,
+        21.550734999999932,
+        22.060327000000157,
+        24.85145099999997,
+        18.637587999998928,
+        18.83740300000092,
+        18.974116000000762,
+        19.93644800000105,
+        20.429239000000265,
+        18.98316599999994,
+        18.285540999999128
+      ],
+      "summary_ms": {
+        "high_outlier_count": 4,
+        "high_outlier_indices": [
+          11,
+          13,
+          14,
+          16
+        ],
+        "high_outlier_ratio": 0.13333333333333333,
+        "high_outlier_threshold": 29.757273466997027,
+        "jitter_ms": 15.479945050001298,
+        "mad": 1.9587649999994738,
+        "max": 38.57889600000064,
+        "mean": 22.879665266666652,
+        "mean_p50_delta_ms": 1.8345867666672824,
+        "mean_p50_delta_ratio": 0.08717414699438338,
+        "mean_without_high_outliers": 20.93371165384611,
+        "min": 18.285540999999128,
+        "p50": 21.04507849999937,
+        "p95": 36.52502355000067,
+        "trimmed_mean": 21.630482708333272
+      }
+    }
+  },
+  "comparison": {
+    "batch_faster": true,
+    "batch_p50_ms": 10.337477500000247,
+    "delta_ms": 10.707600999999123,
+    "metric": "p50",
+    "separate_p50_ms": 21.04507849999937,
+    "speedup": 2.03580404407157,
+    "status": "measured"
+  },
+  "verification": {
+    "eligibility": "publishable",
+    "failures": 0,
+    "replacement_samples": 0,
+    "placement_verified": true,
+    "target_cleanup_succeeded": true,
+    "final_cleanup_succeeded": true,
+    "remaining_sandboxes": 0
+  },
+  "limitations": [
+    "This is a later replication at a different source revision; it does not restore or supersede the missing 2026-07-29 sample arrays.",
+    "One run on one date in one requested region is evidence of repeatability, not an across-day distribution."
+  ]
+}

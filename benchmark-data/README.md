@@ -16,8 +16,8 @@ This directory contains tracked benchmark references that have been sanitized an
   causal speedup.
 - Subprocess-runner A/B evidence has no generator. It is assembled by hand from the ignored raw arms,
   binds each arm by SHA-256, and is guarded by pinning assertions in
-  `tests/benchmarks/test_provider_artifacts.py`. Its arms compare to each other only; do not restate
-  them against a run with a different runner path, requested resources, or command payload.
+  `tests/benchmarks/test_subprocess_runner_evidence.py`. Its arms compare to each other only. Do not
+  restate them against a run with a different runner path, requested resources, or command payload.
 - The 2026-07-31 one-core rerun is the single exception to the rule above, and it is a narrow one.
   It carries the 2026-07-30 figures under `comparison_baseline`, bound to that artifact by SHA-256
   so they cannot drift, and it carries them only so both runs can be read side by side. The pair
