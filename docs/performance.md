@@ -2,6 +2,10 @@
 
 Most latency in a computer-use loop comes from network round trips and screenshot encoding. This page lists the knobs that matter.
 
+Native async provisioning improves event-loop behavior and cancellation cleanup. It does not make
+Sandbox allocation or desktop startup intrinsically faster. Warm trajectory measurements begin
+after provisioning, credential creation, readiness, and borrow entry.
+
 ## Receipt durability cost
 
 Each leased mutation crosses one target-local SQLite WAL commit with `synchronous=FULL` before the

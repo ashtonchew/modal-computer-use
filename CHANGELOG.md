@@ -7,6 +7,9 @@ yet. The changes below remain unreleased.
 
 - Added a typed native-async interface for existing daemons, including cached namespaces,
   readiness, persistent action and observation connections, and connection-only cleanup.
+- Added native-async Modal creation and attachment through lazy `AsyncComputerSandbox` contexts.
+  Created contexts own termination, attached contexts detach only, and cancelled partial creation
+  reclaims allocated resources with Modal-native `.aio` operations.
 - Defined ownership-aware Sandbox cleanup for created, attached, reused, local, and explicitly
   detached clients; failed creation now reclaims allocated resources without letting cleanup mask
   the original error.

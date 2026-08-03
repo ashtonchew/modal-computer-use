@@ -14,7 +14,7 @@ specifications preserve design history.
 
 ## Use the SDK
 
-- [API](api.md): Python SDK and daemon behavior.
+- [API](api.md): synchronous and native-async Python surfaces, ownership, and daemon behavior.
 - [OpenAPI schema](openapi.json): generated HTTP request and response schemas.
 - [Artifacts](artifacts.md): artifact paths, persistence, and synchronization.
 - [Trace and replay](trace-replay.md): capture, validate, and replay action traces.
