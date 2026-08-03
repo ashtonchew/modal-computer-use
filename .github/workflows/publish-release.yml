@@ -1,0 +1,269 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and validate release bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra modal --frozen
+
+      - name: Validate release candidate
+        run: >-
+          uv run python scripts/check_release_candidate.py
+          --tag "$GITHUB_REF_NAME"
+          --commit "$GITHUB_SHA"
+          --main-ref refs/remotes/origin/main
+
+      - name: Build package once
+        run: |
+          test ! -e dist
+          mkdir -p dist/release
+          uv build --out-dir dist/release
+
+      - name: Validate package metadata
+        run: uvx --from 'twine>=6.2.0' twine check dist/release/*
+
+      - name: Inspect distribution metadata
+        run: uv run python scripts/check_distribution_metadata.py dist/release/*
+
+      - name: Smoke-test distribution installs
+        run: uv run python scripts/smoke_distribution_install.py --distributions dist/release
+
+      - name: Prepare release bundle
+        run: |
+          uv run python scripts/check_release_bundle.py prepare \
+            --distributions dist/release \
+            --checksums dist/SHA256SUMS
+          uv run python scripts/check_release_bundle.py verify \
+            --distributions dist/release \
+            --checksums dist/SHA256SUMS
+
+      - name: Store release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-release-distributions
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-testpypi:
+    name: Publish release bundle to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/modal-computer-use
+    permissions:
+      id-token: write
+    steps:
+      - name: Retrieve release bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: python-release-distributions
+          path: dist
+
+      - name: Verify release bundle checksums
+        working-directory: dist/release
+        run: sha256sum --check ../SHA256SUMS
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: dist/release
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  verify-testpypi:
+    name: Verify TestPyPI release bytes
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Retrieve release bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: python-release-distributions
+          path: dist
+
+      - name: Verify TestPyPI files and provenance
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python3 scripts/verify_python_index_release.py \
+            --index-url https://test.pypi.org \
+            --project modal-computer-use \
+            --version "$version" \
+            --distributions dist/release
+
+  publish-pypi:
+    name: Publish release bundle to PyPI
+    needs: verify-testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/modal-computer-use
+    permissions:
+      id-token: write
+    steps:
+      - name: Retrieve release bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: python-release-distributions
+          path: dist
+
+      - name: Verify release bundle checksums
+        working-directory: dist/release
+        run: sha256sum --check ../SHA256SUMS
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: dist/release
+
+  verify-pypi:
+    name: Verify PyPI release bytes
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Retrieve release bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: python-release-distributions
+          path: dist
+
+      - name: Verify PyPI files and provenance
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python3 scripts/verify_python_index_release.py \
+            --index-url https://pypi.org \
+            --project modal-computer-use \
+            --version "$version" \
+            --distributions dist/release
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Verify clean PyPI installation
+        run: |
+          install_root="$(mktemp -d)"
+          cd "$install_root"
+          uv init --bare --python 3.12
+          uv add "modal-computer-use[modal]"
+          export EXPECTED_VERSION="${GITHUB_REF_NAME#v}"
+          uv run python - <<'PY'
+          import os
+          from importlib.metadata import entry_points, version
+
+          import modal_computer_use
+
+          assert (
+              version("modal-computer-use")
+              == modal_computer_use.__version__
+              == os.environ["EXPECTED_VERSION"]
+          )
+          scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
+          assert scripts["computer-use"] == "modal_computer_use.cli:main"
+          assert scripts["computer-use-daemon"] == "modal_computer_use.daemon.__main__:main"
+          PY
+          uv run computer-use --help
+
+  github-release:
+    name: Publish immutable GitHub Release
+    needs: verify-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Retrieve release bundle
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: python-release-distributions
+          path: dist
+
+      - name: Verify release bundle checksums
+        working-directory: dist/release
+        run: sha256sum --check ../SHA256SUMS
+
+      - name: Create or resume draft release
+        run: |
+          if release_state="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null)"
+          then
+            if [ "$release_state" != "true" ]; then
+              echo "::error::release $GITHUB_REF_NAME is already published"
+              exit 1
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --notes-from-tag
+          fi
+
+      - name: Attach and publish release assets
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/release/*.whl \
+            dist/release/*.tar.gz \
+            dist/SHA256SUMS \
+            --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Verify immutable release and assets
+        run: |
+          gh release verify "$GITHUB_REF_NAME"
+          gh release verify-asset "$GITHUB_REF_NAME" dist/release/*.whl
+          gh release verify-asset "$GITHUB_REF_NAME" dist/release/*.tar.gz
+          gh release verify-asset "$GITHUB_REF_NAME" dist/SHA256SUMS
