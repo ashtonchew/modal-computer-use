@@ -466,6 +466,40 @@
     }
   },
   "benchmark": "modal-native-x11-runner-matrix",
+  "canonical_evidence": {
+    "claim": "The controlled current-source evidence supports an approximately 45 ms per-launch shared-runner contribution to the xdotool compatibility path while leaving the historical 146.33 ms and clean 32.78 ms results as separate dated measurements.",
+    "dependencies": [
+      {
+        "path": "benchmark-data/modal-native-x11-historical-source-2026-07-23.json",
+        "role": "historical source and aggregate provenance",
+        "sha256": "d835365928accf665645934a6258de09e23c50a0faa2ade461d52d9b95cd6aea"
+      },
+      {
+        "path": "benchmark-data/modal-native-x11-backend-ab-replication-2026-08-02.json",
+        "role": "clean isolated-runner replication with tracked samples",
+        "sha256": "3f0b17de687c4b52d6ee8208c97b23fcbe9008b126259b64701eac0f127b697f"
+      },
+      {
+        "path": "benchmark-data/modal-subprocess-runner-ab-1cpu-2026-07-31.json",
+        "role": "independent subprocess-runner mechanism control",
+        "sha256": "8b85b6a8ab81eab06c60dcb30b40aeb8fda474605557c22833b2af907a602af2"
+      },
+      {
+        "path": "research/native-x11-latency-discrepancy-2026-08-02.md",
+        "role": "bounded interpretation and primary-source citations",
+        "sha256": "a063ed55366b012523edaa9a41cd3528e28011f84774ea7269417e0110837171"
+      }
+    ],
+    "entry_point": "benchmark-data/modal-native-x11-runner-matrix-2026-08-02.json",
+    "fresh_clone_capabilities": {
+      "controlled_matrix_recomputable_from_tracked_samples": true,
+      "historical_aggregate_exactly_quotable": true,
+      "historical_raw_samples_recomputable": false,
+      "linked_dependencies_digest_verified": true
+    },
+    "role": "canonical_singleton",
+    "supersedes_dated_measurements": false
+  },
   "cells": [
     {
       "block": 1,

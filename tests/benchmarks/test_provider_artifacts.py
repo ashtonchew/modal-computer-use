@@ -1296,6 +1296,41 @@ def test_native_x11_runner_matrix_recomputes_samples_effects_and_preregistered_g
         ),
     }
 
+    canonical = artifact["canonical_evidence"]
+    assert canonical["role"] == "canonical_singleton"
+    assert canonical["entry_point"] == (
+        "benchmark-data/modal-native-x11-runner-matrix-2026-08-02.json"
+    )
+    assert canonical["fresh_clone_capabilities"] == {
+        "controlled_matrix_recomputable_from_tracked_samples": True,
+        "historical_aggregate_exactly_quotable": True,
+        "historical_raw_samples_recomputable": False,
+        "linked_dependencies_digest_verified": True,
+    }
+    assert canonical["supersedes_dated_measurements"] is False
+    dependency_roles = {
+        dependency["role"]: dependency["path"]
+        for dependency in canonical["dependencies"]
+    }
+    assert dependency_roles == {
+        "historical source and aggregate provenance": (
+            "benchmark-data/modal-native-x11-historical-source-2026-07-23.json"
+        ),
+        "clean isolated-runner replication with tracked samples": (
+            "benchmark-data/modal-native-x11-backend-ab-replication-2026-08-02.json"
+        ),
+        "independent subprocess-runner mechanism control": (
+            "benchmark-data/modal-subprocess-runner-ab-1cpu-2026-07-31.json"
+        ),
+        "bounded interpretation and primary-source citations": (
+            "research/native-x11-latency-discrepancy-2026-08-02.md"
+        ),
+    }
+    for dependency in canonical["dependencies"]:
+        dependency_path = REPO_ROOT / dependency["path"]
+        assert hashlib.sha256(dependency_path.read_bytes()).hexdigest() == dependency["sha256"]
+    assert canonical["claim"].endswith("separate dated measurements.")
+
     assert artifact["status"] == "diagnostic_matrix"
     assert artifact["provenance"]["source"] == {
         "git_branch": "chore/blog-public-prep",
