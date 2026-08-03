@@ -150,7 +150,8 @@ application / provider loop / run gateway
  Xvfb + window manager + native X11 / compatibility tools
 ```
 
-`ComputerSandbox` and `DaemonClient` expose typed namespaces. The daemon validates requests,
+`ComputerSandbox` and `AsyncDaemonClient` expose typed namespaces. `DaemonClient` remains the
+low-level synchronous HTTP facade used by `ComputerSandbox`. The daemon validates requests,
 enforces budgets, serializes input, supervises processes, and records artifacts and traces.
 
 The default desktop stack is Xvfb plus XFCE, with Openbox available as a lighter option. noVNC and
@@ -242,7 +243,10 @@ The stable namespaces are:
 | `session` | metadata and refresh |
 | `debug` | sanitized debug URLs and optional noVNC access |
 
-`DaemonClient` and `AsyncDaemonClient` provide synchronous and native-async HTTP façades.
+`DaemonClient` and `AsyncDaemonClient` provide synchronous and native-async interfaces to an
+existing daemon. `AsyncDaemonClient` owns its pooled HTTP connection and the WebSocket connections
+it opens. Closing it closes those connections only; it does not stop the daemon or terminate a
+Modal Sandbox. `AsyncBorrowedComputer` remains a separate lease-restricted trajectory interface.
 `ComputerSandbox.hot_session()` provides a persistent action/screenshot channel.
 `ComputerSandbox.observation_stream()` provides a correlated observation stream.
 

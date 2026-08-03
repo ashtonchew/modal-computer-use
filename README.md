@@ -62,6 +62,28 @@ finally:
 The command prints `1024 768` followed by the screenshot's SHA-256 digest. Press Ctrl-C in the
 daemon terminal when finished.
 
+For an async application, connect to that same daemon with the native async interface:
+
+```python
+import asyncio
+
+from modal_computer_use import AsyncDaemonClient
+
+
+async def main() -> None:
+    async with AsyncDaemonClient.local(token="dev") as computer:
+        await computer.wait_until_ready()
+        await computer.mouse.move(100, 120)
+        screenshot = await computer.screenshots.full(show_cursor=True)
+        print(screenshot.width, screenshot.height, screenshot.sha256)
+
+
+asyncio.run(main())
+```
+
+Closing `AsyncDaemonClient` closes its connections only. The terminal that started the daemon
+retains lifecycle ownership.
+
 The daemon refuses to start without token or Connect authentication. For a local process that
 intentionally has no token, set `COMPUTER_USE_ALLOW_UNAUTHENTICATED_LOOPBACK=true`; that mode may
 bind only to loopback.
@@ -101,8 +123,8 @@ explains browser profiles, network policy, attach and reuse, Volumes, warm capac
 
 ## Capabilities
 
-- Typed SDK namespaces for lifecycle, input, display, screenshots, recordings, browser and app
-  control, processes, commands, artifacts, and debugging.
+- Typed synchronous and native-async SDK namespaces for lifecycle, input, display, screenshots,
+  recordings, browser and app control, processes, commands, artifacts, and debugging.
 - Ordered action batches that stop on the first failure by default or continue when requested.
 - Local mock and X11 backends that use the same daemon API as Modal deployments.
 - OpenAI, Anthropic, and generic adapters that normalize actions without calling provider APIs or

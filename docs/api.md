@@ -4,6 +4,7 @@ The SDK is a thin Python client over the daemon's HTTP API. Start with:
 
 ```python
 from modal_computer_use import (
+    AsyncDaemonClient,
     ComputerConfig,
     ComputerSandbox,
     ComputerSessionHandle,
@@ -11,7 +12,29 @@ from modal_computer_use import (
 )
 ```
 
-Namespaces on `ComputerSandbox`:
+`AsyncDaemonClient` provides the same typed namespaces for a daemon that is already running:
+
+```python
+import asyncio
+
+from modal_computer_use import AsyncDaemonClient
+
+
+async def main() -> None:
+    async with AsyncDaemonClient.local(token="dev") as computer:
+        await computer.wait_until_ready()
+        await computer.mouse.move(100, 120)
+        await computer.screenshots.full(show_cursor=True)
+
+
+asyncio.run(main())
+```
+
+The client owns its pooled HTTP connection and any WebSocket connections opened through
+`hot_session()` or `observation_stream()`. Exiting it closes those connections only. It does not
+stop the daemon or terminate a Modal Sandbox. Lifecycle operations remain explicit.
+
+Namespaces on `ComputerSandbox` and `AsyncDaemonClient`:
 
 - `computer.mouse`: `click`, `move`, `drag`, `scroll`, `down`, `up`, `position`
 - `computer.keyboard`: `type`, `press`, `hotkey`, `hold`, `supported_keys`
