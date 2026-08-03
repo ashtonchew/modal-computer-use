@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import inspect
 import json
 from pathlib import Path
 
+import evidence_assertions as evidence
 import pytest
 
 from modal_computer_use import cli
@@ -32,8 +34,7 @@ class _Client:
         return {
             "ok": True,
             "results": [
-                {"ok": True, "output": {"input_backend": "xtest"}}
-                for _ in json["actions"]
+                {"ok": True, "output": {"input_backend": "xtest"}} for _ in json["actions"]
             ],
             "timing": {"daemon_ms": 1.0},
         }
@@ -194,27 +195,25 @@ def test_artifact_validator_rejects_unsafe_key_suffixes_and_urls() -> None:
             "measurement policy",
         ),
         (
-            lambda payload: payload["run"]["benchmark"]["cases"][
-                "batch_4_clicks"
-            ]["actions"].reverse(),
+            lambda payload: payload["run"]["benchmark"]["cases"]["batch_4_clicks"][
+                "actions"
+            ].reverse(),
             "success contract",
         ),
         (
-            lambda payload: payload["run"]["benchmark"]["cases"][
-                "batch_4_clicks"
-            ].__setitem__("input_backends", ["xdotool"]),
+            lambda payload: payload["run"]["benchmark"]["cases"]["batch_4_clicks"].__setitem__(
+                "input_backends", ["xdotool"]
+            ),
             "success contract",
         ),
         (
-            lambda payload: payload["run"]["benchmark"]["cases"][
-                "separate_4_clicks"
-            ]["summary_ms"].__setitem__("p50", 3.0),
+            lambda payload: payload["run"]["benchmark"]["cases"]["separate_4_clicks"][
+                "summary_ms"
+            ].__setitem__("p50", 3.0),
             "p50 does not match",
         ),
         (
-            lambda payload: payload["run"]["benchmark"]["comparison"].__setitem__(
-                "speedup", 99.0
-            ),
+            lambda payload: payload["run"]["benchmark"]["comparison"].__setitem__("speedup", 99.0),
             "comparison speedup",
         ),
         (
@@ -311,8 +310,7 @@ def _successful_runner_result(*, iterations: int) -> dict:
                     "sdk_call_count": 1,
                     "transport_request_count": 1,
                     "batching_semantics": (
-                        "one ordered action batch, validated before execution, "
-                        "stop on first error"
+                        "one ordered action batch, validated before execution, stop on first error"
                     ),
                 },
                 "separate_4_clicks": {
@@ -356,3 +354,48 @@ def _publishable_artifact() -> dict:
         "final_cleanup": {"cleanup_succeeded": True, "remaining_sandboxes": 0},
         "failures": [],
     }
+
+
+def test_batching_replication_is_recomputable_and_non_superseding() -> None:
+    path, artifact = evidence.load_benchmark_artifact(
+        "modal-action-batching-ab-replication-2026-08-02.json"
+    )
+    historical_path = evidence.REPO_ROOT / artifact["historical_context"]["source_artifact"]
+
+    assert artifact["status"] == "replication"
+    assert artifact["provenance"]["harness_state"] == "clean"
+    assert artifact["historical_context"]["historical_samples_available"] is False
+    assert artifact["historical_context"]["supersedes_historical_result"] is False
+    assert (
+        hashlib.sha256(historical_path.read_bytes()).hexdigest()
+        == artifact["historical_context"]["source_artifact_sha256"]
+    )
+
+    for case in ("batch_4_clicks", "separate_4_clicks"):
+        measured = artifact["cases"][case]
+        evidence.assert_recomputed_summary(measured["samples_ms"], measured["summary_ms"])
+
+    comparison = artifact["comparison"]
+    batch_p50 = artifact["cases"]["batch_4_clicks"]["summary_ms"]["p50"]
+    separate_p50 = artifact["cases"]["separate_4_clicks"]["summary_ms"]["p50"]
+    assert comparison["batch_p50_ms"] == batch_p50
+    assert comparison["separate_p50_ms"] == separate_p50
+    assert comparison["speedup"] == separate_p50 / batch_p50
+    assert comparison["delta_ms"] == separate_p50 - batch_p50
+    assert artifact["verification"] == {
+        "eligibility": "publishable",
+        "failures": 0,
+        "replacement_samples": 0,
+        "placement_verified": True,
+        "target_cleanup_succeeded": True,
+        "final_cleanup_succeeded": True,
+        "remaining_sandboxes": 0,
+    }
+
+    raw_path = evidence.REPO_ROOT / artifact["provenance"]["raw_artifact"]
+    if raw_path.exists():
+        assert (
+            hashlib.sha256(raw_path.read_bytes()).hexdigest()
+            == artifact["provenance"]["raw_artifact_sha256"]
+        )
+    evidence.assert_artifact_secret_safe(path)
