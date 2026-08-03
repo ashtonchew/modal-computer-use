@@ -18,14 +18,14 @@ the same case.
 
 ## Results
 
-| Case | Modal optimized p50 / p95 | Modal default p50 / p95 / ratio | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
+| Case | Modal optimized p50 / p95 | Daytona default p50 / p95 / ratio | E2B default p50 / p95 / ratio | Modal simple p50 / p95 / ratio | Tzafon default p50 / p95 / ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Full screenshot, provider-native format | 37.25 / 48.76 ms | 115.80 / 132.91 ms / 3.11x | 563.57 / 603.79 ms / 15.13x | 198.78 / 223.20 ms / 5.34x | 154.25 / 192.53 ms / 4.14x |
-| One click on the screen | 9.85 / 16.85 ms | 214.09 / 218.19 ms / 21.73x | 386.40 / 394.19 ms / 39.22x | 209.86 / 213.42 ms / 21.30x | 130.27 / 170.55 ms / 13.22x |
-| Four ordered clicks | 12.52 / 22.07 ms | 230.10 / 235.09 ms / 18.37x | 1,546.74 / 1,577.44 ms / 123.50x | 860.68 / 897.95 ms / 68.72x | 458.03 / 499.49 ms / 36.57x |
-| Type 100 characters | 15.76 / 28.15 ms | 259.67 / 270.18 ms / 16.48x | 805.55 / 812.84 ms / 51.11x | 4,083.30 / 4,156.65 ms / 259.08x | 85.16 / 101.65 ms / 5.40x |
-| Type 1,000 characters | 53.35 / 79.69 ms | 263.95 / 269.71 ms / 4.95x | 5,528.38 / 5,554.88 ms / 103.63x | 40,914.66 / 41,374.28 ms / 766.95x | 185.03 / 188.37 ms / 3.47x |
-| Non-login shell command | 11.69 / 14.12 ms | 72.64 / 158.22 ms / 6.21x | 285.33 / 294.57 ms / 24.40x | 55.90 / 69.27 ms / 4.78x | 31.73 / 33.35 ms / 2.71x |
+| Full screenshot, provider-native format | 37.25 / 48.76 ms | 563.57 / 603.79 ms / 15.13x | 198.78 / 223.20 ms / 5.34x | 115.80 / 132.91 ms / 3.11x | 154.25 / 192.53 ms / 4.14x |
+| One click on the screen | 9.85 / 16.85 ms | 386.40 / 394.19 ms / 39.22x | 209.86 / 213.42 ms / 21.30x | 214.09 / 218.19 ms / 21.73x | 130.27 / 170.55 ms / 13.22x |
+| Four ordered clicks | 12.52 / 22.07 ms | 1,546.74 / 1,577.44 ms / 123.50x | 860.68 / 897.95 ms / 68.72x | 230.10 / 235.09 ms / 18.37x | 458.03 / 499.49 ms / 36.57x |
+| Type 100 characters | 15.76 / 28.15 ms | 805.55 / 812.84 ms / 51.11x | 4,083.30 / 4,156.65 ms / 259.08x | 259.67 / 270.18 ms / 16.48x | 85.16 / 101.65 ms / 5.40x |
+| Type 1,000 characters | 53.35 / 79.69 ms | 5,528.38 / 5,554.88 ms / 103.63x | 40,914.66 / 41,374.28 ms / 766.95x | 263.95 / 269.71 ms / 4.95x | 185.03 / 188.37 ms / 3.47x |
+| Non-login shell command | 11.69 / 14.12 ms | 285.33 / 294.57 ms / 24.40x | 55.90 / 69.27 ms / 4.78x | 72.64 / 158.22 ms / 6.21x | 31.73 / 33.35 ms / 2.71x |
 
 The ratios compare complete measured paths. Configuration, caller placement, screenshot format, and
 request shape vary across columns.
@@ -35,9 +35,9 @@ request shape vary across columns.
 | Path | Caller and configuration |
 | --- | --- |
 | Modal optimized | One Modal Function and its targets requested `us-west-2`. The Function and target each requested 1 CPU and 2 GiB. The path used attested-tunnel ingress, HTTP/1.1, XTest input, zero input pacing, and an isolated asyncio subprocess backend. |
-| Modal default | An external caller used the public SDK, standard resources, default input pacing, and the attested-tunnel daemon path. |
 | Daytona default | An external caller used Daytona SDK 0.175.0 and its provider-default computer-use path. |
 | E2B default | An external caller used E2B Desktop SDK 2.3.1 and its provider-default computer-use path. |
+| Modal simple | An external caller used the public SDK, standard resources, default input pacing, and the attested-tunnel daemon path. |
 | Tzafon default | An external caller used Tzafon SDK 2.44.1 and its provider-default computer-use path. |
 
 The optimized artifact records an observed cloud and region match for every target. A shared region
@@ -47,7 +47,7 @@ request controls Modal scheduling. Host and availability-zone placement remain u
 
 - Full screenshots use each provider's public native format. Tzafon returned 1280x720 JPEG. The
   other paths returned 1024x768 PNG.
-- Modal optimized, Modal default, and Tzafon sent four ordered clicks in one request. Daytona sent
+- Modal optimized, Modal simple, and Tzafon sent four ordered clicks in one request. Daytona sent
   four SDK requests. E2B sent four SDK requests through eight transport calls.
 - Modal optimized typed through XTest keystrokes with zero delay. The default paths used their
   recorded public SDK behavior.

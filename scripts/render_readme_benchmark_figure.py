@@ -32,10 +32,10 @@ CASE_SPECS = (
 )
 COLUMN_SPECS = (
     ("modal-optimized", "Modal optimized"),
-    ("modal-daemon", "Modal default"),
-    ("daytona", "Daytona default"),
-    ("e2b", "E2B default"),
-    ("tzafon", "Tzafon default"),
+    ("daytona", "Daytona"),
+    ("e2b", "E2B"),
+    ("modal-daemon", "Modal simple"),
+    ("tzafon", "Tzafon"),
 )
 
 
@@ -187,11 +187,11 @@ def render_svg(rows: tuple[BenchmarkRow, ...]) -> str:
             '      .head, .task, .num, .num-highlight, .caption { font-family: '
             '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }'
         ),
-        "      .head { fill: #F1F4EF; font-size: 14px; font-weight: 600; }",
-        "      .task { fill: #F1F4EF; font-size: 15px; font-weight: 500; }",
-        "      .num { fill: #E8EDE6; font-size: 16px; font-weight: 400; }",
-        "      .num-highlight { fill: #F1F4EF; font-size: 16px; font-weight: 700; }",
-        "      .caption { fill: #B9C2B8; font-size: 12px; }",
+        "      .head { fill: #F1F4EF; font-size: 18px; font-weight: 600; }",
+        "      .task { fill: #F1F4EF; font-size: 18px; font-weight: 500; }",
+        "      .num { fill: #E8EDE6; font-size: 19px; font-weight: 400; }",
+        "      .num-highlight { fill: #F1F4EF; font-size: 19px; font-weight: 700; }",
+        "      .caption { fill: #B9C2B8; font-size: 15px; }",
         "    </style>",
         "  </defs>",
         f'  <rect class="bg" width="{width}" height="{height}"/>',

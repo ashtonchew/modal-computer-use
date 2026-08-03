@@ -8,11 +8,11 @@
       .highlight { fill: #233528; stroke: #91B89A; stroke-width: 2; }
       .rule { stroke: #4E584F; stroke-width: 1.2; }
       .head, .task, .num, .num-highlight, .caption { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
-      .head { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
-      .task { fill: #F1F4EF; font-size: 15px; font-weight: 500; }
-      .num { fill: #E8EDE6; font-size: 16px; font-weight: 400; }
-      .num-highlight { fill: #F1F4EF; font-size: 16px; font-weight: 700; }
-      .caption { fill: #B9C2B8; font-size: 12px; }
+      .head { fill: #F1F4EF; font-size: 18px; font-weight: 600; }
+      .task { fill: #F1F4EF; font-size: 18px; font-weight: 500; }
+      .num { fill: #E8EDE6; font-size: 19px; font-weight: 400; }
+      .num-highlight { fill: #F1F4EF; font-size: 19px; font-weight: 700; }
+      .caption { fill: #B9C2B8; font-size: 15px; }
     </style>
   </defs>
   <rect class="bg" width="1152" height="560"/>
@@ -34,45 +34,45 @@
   <line class="rule" x1="1120" y1="32" x2="1120" y2="496"/>
   <text class="head" x="48" y="66">Task</text>
   <text class="head" x="346" y="66" text-anchor="middle">Modal optimized</text>
-  <text class="head" x="518" y="66" text-anchor="middle">Modal default</text>
-  <text class="head" x="690" y="66" text-anchor="middle">Daytona default</text>
-  <text class="head" x="862" y="66" text-anchor="middle">E2B default</text>
-  <text class="head" x="1034" y="66" text-anchor="middle">Tzafon default</text>
+  <text class="head" x="518" y="66" text-anchor="middle">Daytona</text>
+  <text class="head" x="690" y="66" text-anchor="middle">E2B</text>
+  <text class="head" x="862" y="66" text-anchor="middle">Modal simple</text>
+  <text class="head" x="1034" y="66" text-anchor="middle">Tzafon</text>
   <text class="task" x="48" y="129">Full screenshot</text>
   <text class="num-highlight" x="346" y="129" text-anchor="middle">37.3 ms</text>
-  <text class="num" x="518" y="129" text-anchor="middle">115.8 ms</text>
-  <text class="num" x="690" y="129" text-anchor="middle">563.6 ms</text>
-  <text class="num" x="862" y="129" text-anchor="middle">198.8 ms</text>
+  <text class="num" x="518" y="129" text-anchor="middle">563.6 ms</text>
+  <text class="num" x="690" y="129" text-anchor="middle">198.8 ms</text>
+  <text class="num" x="862" y="129" text-anchor="middle">115.8 ms</text>
   <text class="num" x="1034" y="129" text-anchor="middle">154.2 ms</text>
   <text class="task" x="48" y="197">One click</text>
   <text class="num-highlight" x="346" y="197" text-anchor="middle">9.9 ms</text>
-  <text class="num" x="518" y="197" text-anchor="middle">214.1 ms</text>
-  <text class="num" x="690" y="197" text-anchor="middle">386.4 ms</text>
-  <text class="num" x="862" y="197" text-anchor="middle">209.9 ms</text>
+  <text class="num" x="518" y="197" text-anchor="middle">386.4 ms</text>
+  <text class="num" x="690" y="197" text-anchor="middle">209.9 ms</text>
+  <text class="num" x="862" y="197" text-anchor="middle">214.1 ms</text>
   <text class="num" x="1034" y="197" text-anchor="middle">130.3 ms</text>
   <text class="task" x="48" y="265">Four ordered clicks</text>
   <text class="num-highlight" x="346" y="265" text-anchor="middle">12.5 ms</text>
-  <text class="num" x="518" y="265" text-anchor="middle">230.1 ms</text>
-  <text class="num" x="690" y="265" text-anchor="middle">1,546.7 ms</text>
-  <text class="num" x="862" y="265" text-anchor="middle">860.7 ms</text>
+  <text class="num" x="518" y="265" text-anchor="middle">1,546.7 ms</text>
+  <text class="num" x="690" y="265" text-anchor="middle">860.7 ms</text>
+  <text class="num" x="862" y="265" text-anchor="middle">230.1 ms</text>
   <text class="num" x="1034" y="265" text-anchor="middle">458.0 ms</text>
   <text class="task" x="48" y="333">Type 100 characters</text>
   <text class="num-highlight" x="346" y="333" text-anchor="middle">15.8 ms</text>
-  <text class="num" x="518" y="333" text-anchor="middle">259.7 ms</text>
-  <text class="num" x="690" y="333" text-anchor="middle">805.6 ms</text>
-  <text class="num" x="862" y="333" text-anchor="middle">4,083.3 ms</text>
+  <text class="num" x="518" y="333" text-anchor="middle">805.6 ms</text>
+  <text class="num" x="690" y="333" text-anchor="middle">4,083.3 ms</text>
+  <text class="num" x="862" y="333" text-anchor="middle">259.7 ms</text>
   <text class="num" x="1034" y="333" text-anchor="middle">85.2 ms</text>
   <text class="task" x="48" y="401">Type 1,000 characters</text>
   <text class="num-highlight" x="346" y="401" text-anchor="middle">53.3 ms</text>
-  <text class="num" x="518" y="401" text-anchor="middle">264.0 ms</text>
-  <text class="num" x="690" y="401" text-anchor="middle">5,528.4 ms</text>
-  <text class="num" x="862" y="401" text-anchor="middle">40,914.7 ms</text>
+  <text class="num" x="518" y="401" text-anchor="middle">5,528.4 ms</text>
+  <text class="num" x="690" y="401" text-anchor="middle">40,914.7 ms</text>
+  <text class="num" x="862" y="401" text-anchor="middle">264.0 ms</text>
   <text class="num" x="1034" y="401" text-anchor="middle">185.0 ms</text>
   <text class="task" x="48" y="469">Shell command</text>
   <text class="num-highlight" x="346" y="469" text-anchor="middle">11.7 ms</text>
-  <text class="num" x="518" y="469" text-anchor="middle">72.6 ms</text>
-  <text class="num" x="690" y="469" text-anchor="middle">285.3 ms</text>
-  <text class="num" x="862" y="469" text-anchor="middle">55.9 ms</text>
+  <text class="num" x="518" y="469" text-anchor="middle">285.3 ms</text>
+  <text class="num" x="690" y="469" text-anchor="middle">55.9 ms</text>
+  <text class="num" x="862" y="469" text-anchor="middle">72.6 ms</text>
   <text class="num" x="1034" y="469" text-anchor="middle">31.7 ms</text>
   <text class="caption" x="32" y="536">Warm-operation p50 in milliseconds. Lower is better.</text>
 </svg>

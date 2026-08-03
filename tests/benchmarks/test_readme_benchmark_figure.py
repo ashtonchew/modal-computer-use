@@ -26,10 +26,10 @@ CASE_SPECS = (
 )
 COLUMN_SPECS = (
     ("modal-optimized", "Modal optimized"),
-    ("modal-daemon", "Modal default"),
-    ("daytona", "Daytona default"),
-    ("e2b", "E2B default"),
-    ("tzafon", "Tzafon default"),
+    ("daytona", "Daytona"),
+    ("e2b", "E2B"),
+    ("modal-daemon", "Modal simple"),
+    ("tzafon", "Tzafon"),
 )
 
 
@@ -109,6 +109,7 @@ def test_readme_benchmark_figure_is_accessible_and_data_bound() -> None:
     assert classes.count("num-highlight") == 6
     assert classes.count("num") == 24
     assert classes.count("caption") == 1
+    assert text_values[:6] == ["Task", *(label for _key, label in COLUMN_SPECS)]
 
     for _key, label in (*COLUMN_SPECS, *CASE_SPECS):
         assert label in text_values
@@ -121,9 +122,23 @@ def test_readme_benchmark_figure_is_accessible_and_data_bound() -> None:
     assert re.search(r"\b\d+(?:\.\d+)?x\b", rendered_text) is None
 
 
+def test_readme_benchmark_figure_keeps_readable_type() -> None:
+    svg = ASSET.read_text(encoding="utf-8")
+    assert ".head { fill: #F1F4EF; font-size: 18px;" in svg
+    assert ".task { fill: #F1F4EF; font-size: 18px;" in svg
+    assert ".num { fill: #E8EDE6; font-size: 19px;" in svg
+    assert ".num-highlight { fill: #F1F4EF; font-size: 19px;" in svg
+    assert ".caption { fill: #B9C2B8; font-size: 15px;" in svg
+
+
 def test_warm_path_report_matches_samples() -> None:
     report = REPORT.read_text(encoding="utf-8")
     normalized_report = re.sub(r"\s+", " ", report)
+    assert (
+        "| Case | Modal optimized p50 / p95 | Daytona default p50 / p95 / ratio | "
+        "E2B default p50 / p95 / ratio | Modal simple p50 / p95 / ratio | "
+        "Tzafon default p50 / p95 / ratio |"
+    ) in report
     values = _all_values()
     for case_key, _label in CASE_SPECS:
         modal_p50, modal_p95 = values[("modal-optimized", case_key)]
