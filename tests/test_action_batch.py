@@ -1233,6 +1233,14 @@ def test_action_batch_observe_change_cursor_visible_uses_pixel_polling(
 ) -> None:
     watcher_instances: list[object] = []
 
+    class ControlledClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            current = self.now
+            self.now += 0.001
+            return current
+
     class UnexpectedXDamageWatcher:
         failure = None
 
@@ -1250,6 +1258,7 @@ def test_action_batch_observe_change_cursor_visible_uses_pixel_polling(
             pass
 
     app.state.backend.display = ":99"
+    monkeypatch.setattr(action_routes, "perf_counter", ControlledClock())
     monkeypatch.setattr(action_routes, "XDamageWatcher", UnexpectedXDamageWatcher)
 
     response = test_client.post(
