@@ -418,3 +418,46 @@ def test_modal_subprocess_runner_ab_1cpu_2026_07_31_is_pinned_and_secret_safe() 
     for identifier in sorted(harvested):
         assert identifier not in published, identifier
 
+
+def test_subprocess_sample_companion_restores_exact_recomputation() -> None:
+    path, samples = evidence.load_benchmark_artifact(
+        "modal-subprocess-runner-ab-samples-2026-07-30.json"
+    )
+    summary_path = evidence.REPO_ROOT / samples["provenance"]["summary_artifact"]
+    summary = json.loads(summary_path.read_text())
+
+    assert samples["status"] == "recovered_supporting_evidence"
+    assert samples["provenance"]["samples_tracked"] is True
+    assert (
+        hashlib.sha256(summary_path.read_bytes()).hexdigest()
+        == samples["provenance"]["summary_artifact_sha256"]
+    )
+
+    for backend, arm in samples["arms"].items():
+        summary_arm = summary["subprocess_runner_ab"][backend]
+        for label, samples_key in (
+            ("total", "samples_ms"),
+            ("daemon", "daemon_samples_ms"),
+            ("caller_transport_overhead", "overhead_samples_ms"),
+        ):
+            values = arm[samples_key]
+            assert len(values) == samples["measurement"]["iterations_per_arm"]
+            assert summary_arm[label] == {
+                "p50": float(statistics.median(values)),
+                "p95": _percentile(sorted(values), 95),
+            }
+
+        raw_path = evidence.REPO_ROOT / arm["raw_artifact"]
+        if raw_path.exists():
+            assert hashlib.sha256(raw_path.read_bytes()).hexdigest() == arm["raw_artifact_sha256"]
+            raw_case = json.loads(raw_path.read_text())["runs"]["modal_colocated_runner"][
+                "surfaces"
+            ]["daemon-http"]["cases"][samples["measurement"]["case"]]
+            for samples_key in (
+                "samples_ms",
+                "daemon_samples_ms",
+                "overhead_samples_ms",
+            ):
+                assert arm[samples_key] == raw_case[samples_key]
+
+    evidence.assert_artifact_secret_safe(path)
