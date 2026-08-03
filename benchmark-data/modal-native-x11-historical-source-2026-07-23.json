@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "benchmark": "modal-native-x11-backend-ab",
+  "status": "historical_source_manifest",
+  "scope": "Exact source and session provenance for the archived dirty-worktree three-sample XTest versus xdotool diagnostic",
+  "archive_ref": {
+    "name": "archive/native-x11-input-2026-07-23",
+    "kind": "annotated_tag",
+    "tag_object": "d07551628ff5ef3f05af67eba9175c297fd649fc",
+    "target": "5ada640b090d5716c5bc31f7aeeb0fd2c05b6a66",
+    "tagged_at": "2026-08-02T18:55:45-07:00",
+    "message": "Archive native X11 input benchmark source"
+  },
+  "source_snapshot": {
+    "object_type": "commit",
+    "stash_commit": "5ada640b090d5716c5bc31f7aeeb0fd2c05b6a66",
+    "tree": "d0d968a080b5aabfa3d0a754c2674ee807259548",
+    "subject": "On feat/colocated-region-inheritance: native-x11-input-wip",
+    "authored_at": "2026-07-23T17:25:28-07:00",
+    "committed_at": "2026-07-23T17:25:28-07:00",
+    "branch_at_capture": "feat/colocated-region-inheritance",
+    "base": {
+      "commit": "d7790daf2a81655610f1988b23cc6f5caddf7a16",
+      "tree": "85343ec7fc0fa35ed182c444a37b41eacbdb992a",
+      "authored_at": "2026-07-23T17:22:15-07:00",
+      "committed_at": "2026-07-23T17:22:15-07:00",
+      "subject": "fix(benchmarks): price narrow us-west-2 runs"
+    },
+    "parents": [
+      {
+        "role": "base",
+        "commit": "d7790daf2a81655610f1988b23cc6f5caddf7a16",
+        "tree": "85343ec7fc0fa35ed182c444a37b41eacbdb992a"
+      },
+      {
+        "role": "index",
+        "commit": "48c59d01496669a7640e513f1c8c67f661723abf",
+        "tree": "85343ec7fc0fa35ed182c444a37b41eacbdb992a",
+        "authored_at": "2026-07-23T17:25:28-07:00",
+        "committed_at": "2026-07-23T17:25:28-07:00"
+      },
+      {
+        "role": "untracked",
+        "commit": "ee54578b98fc482c200b0774348d198deaa47fd5",
+        "tree": "cf9a6a89aecb9b367cf445c9822f9c446cf575c0",
+        "authored_at": "2026-07-23T17:25:28-07:00",
+        "committed_at": "2026-07-23T17:25:28-07:00"
+      }
+    ],
+    "tracked_modified_path_count": 23,
+    "untracked_paths": [
+      "tests/test_native_x11_input.py",
+      "tests/test_x11_keyboard.py",
+      "tests/test_x11_windows.py"
+    ],
+    "harness_reported_revision": "d7790daf2a81655610f1988b23cc6f5caddf7a16",
+    "harness_reported_worktree_clean": false,
+    "captured_after_final_comparison_at": "2026-07-24T00:25:28.891Z"
+  },
+  "source_session": {
+    "session_id": "019f913b-8e85-77a0-9268-7e9533462e2f",
+    "started_at": "2026-07-23T23:07:07.282Z",
+    "locator": ".codex/sessions/2026/07/23/rollout-2026-07-23T16-07-07-019f913b-8e85-77a0-9268-7e9533462e2f.jsonl",
+    "sha256": "450b642f4ae2638f2ada049dbfa42667d84d33101a0e34e2ba3c49075272f13f",
+    "byte_count": 20445755,
+    "line_count": 10340,
+    "events": {
+      "xtest_command_submitted_at": "2026-07-24T00:23:56.017Z",
+      "xtest_report_generated_at": "2026-07-24T00:24:13.913381+00:00",
+      "xtest_command_completed_at": "2026-07-24T00:24:14.956Z",
+      "xdotool_command_submitted_at": "2026-07-24T00:24:21.112Z",
+      "xdotool_report_generated_at": "2026-07-24T00:24:51.771082+00:00",
+      "xdotool_command_completed_at": "2026-07-24T00:24:52.593Z",
+      "comparison_recorded_at": "2026-07-24T00:25:00.759Z",
+      "source_stash_recorded_at": "2026-07-24T00:25:28.891Z"
+    }
+  },
+  "measurement": {
+    "iterations_per_arm": 3,
+    "warmup_iterations": 1,
+    "metric": "arithmetic mean",
+    "commands": {
+      "xtest": "uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http --input-backend xtest --iterations 3 --output /private/tmp/native-x11-input-xtest.json --json",
+      "xdotool": "uv run computer-use benchmark sdk --create-modal-sandbox --surfaces daemon-http --input-backend xdotool --iterations 3 --output /private/tmp/native-x11-input-xdotool.json --json"
+    },
+    "configuration": {
+      "surface": "daemon-http",
+      "modal_ingress": "attested-tunnel",
+      "daemon_http_version": "1.1",
+      "caller_path": "external-caller",
+      "region": "provider-default",
+      "image_identity": "inline:standard",
+      "input_rate_limit_per_sec": 0,
+      "typing_method": "keystrokes",
+      "typing_delay_ms": 0
+    },
+    "session_reported_results": {
+      "precision": "milliseconds rounded to three decimals and speedups rounded to two decimals by the recorded comparison command",
+      "move_click": {
+        "xtest_daemon_mean_ms": 1.146,
+        "xdotool_daemon_mean_ms": 146.328,
+        "speedup": 127.74,
+        "xtest_end_to_end_mean_ms": 90.915,
+        "xdotool_end_to_end_mean_ms": 229.771
+      },
+      "move_click_sequence": {
+        "xtest_daemon_mean_ms": 4.8,
+        "xdotool_daemon_mean_ms": 443.986,
+        "speedup": 92.49,
+        "xtest_end_to_end_mean_ms": 77.555,
+        "xdotool_end_to_end_mean_ms": 522.944
+      },
+      "type_100_chars": {
+        "xtest_daemon_mean_ms": 20.608,
+        "xdotool_daemon_mean_ms": 119.768,
+        "speedup": 5.81,
+        "xtest_end_to_end_mean_ms": 92.462,
+        "xdotool_end_to_end_mean_ms": 198.156
+      },
+      "type_1000_chars": {
+        "xtest_daemon_mean_ms": 201.341,
+        "xdotool_daemon_mean_ms": 607.348,
+        "speedup": 3.02,
+        "xtest_end_to_end_mean_ms": 273.365,
+        "xdotool_end_to_end_mean_ms": 686.353
+      }
+    }
+  },
+  "historical_report": {
+    "path": "docs/archive/benchmarks/benchmark-results-2026-07-23-native-x11-input.md",
+    "git_blob": "f88b0d9404c27ffd68685dc67565bc58fedb4ca7",
+    "sha256": "3b28f18c4cf24f57deb57055c0628412432d9faae751926b36a25e096eff776f",
+    "claim_origin_commit": "3fee2c52611114c1a6598dc61889b6cff52e3ea5",
+    "claim_origin_path": "docs/benchmark-results-2026-07-23-native-x11-input.md",
+    "claim_origin_blob": "fa63b8046a5058f98653d722f531626a4a6d5406",
+    "claim_origin_sha256": "f6e9e6e6df2edd33a2fb55458c9a36d1d03b5ec605d053c112ae371dd79f761e",
+    "published_results": {
+      "move_click": [1.15, 146.33, 127.7, 90.92, 229.77],
+      "move_click_sequence": [4.8, 443.99, 92.5, 77.56, 522.94],
+      "type_100_chars": [20.61, 119.77, 5.8, 92.46, 198.16],
+      "type_1000_chars": [201.34, 607.35, 3.0, 273.37, 686.35]
+    },
+    "published_result_columns": [
+      "xtest_daemon_mean_ms",
+      "xdotool_daemon_mean_ms",
+      "speedup",
+      "xtest_end_to_end_mean_ms",
+      "xdotool_end_to_end_mean_ms"
+    ]
+  },
+  "raw_samples": {
+    "tracked": false,
+    "available": false,
+    "digests_available": false,
+    "arrays_reconstructable": false,
+    "historical_paths": [
+      "/private/tmp/native-x11-input-xtest.json",
+      "/private/tmp/native-x11-input-xdotool.json"
+    ]
+  },
+  "semantics": {
+    "supports_exact_historical_source_reconstruction": true,
+    "supports_exact_historical_aggregate_quotation": true,
+    "supports_independent_historical_sample_recomputation": false,
+    "restores_historical_sample_arrays": false,
+    "supersedes_historical_result": false,
+    "superseded_by_later_replication": false,
+    "later_replication": "benchmark-data/modal-native-x11-backend-ab-replication-2026-08-02.json"
+  },
+  "limitations": [
+    "The archive tag preserves the exact post-run source snapshot, not the external temporary raw reports.",
+    "The source session preserves rounded aggregate output but not the three raw sample arrays or raw artifact digests.",
+    "The clean 2026-08-02 replication confirms direction under a different run and does not replace or supersede this historical diagnostic."
+  ]
+}
