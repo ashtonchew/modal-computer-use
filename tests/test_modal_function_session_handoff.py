@@ -38,7 +38,7 @@ from modal_computer_use.errors import (
     SessionTargetMismatchError,
 )
 from modal_computer_use.sandbox import _session_policy_id_prefix
-from modal_computer_use.state import compute_config_hash
+from modal_computer_use.state import APP_ID_TAG, compute_config_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -775,6 +775,8 @@ def test_attach_or_create_reuse_aligns_ingress_and_http_policy(monkeypatch) -> N
     )
     config_hash = compute_config_hash(config)
     computer, target, _client = _borrowed_computer(config_hash=config_hash)
+    target._tags["computer-use.run_id"] = "run-reuse"
+    target._tags[APP_ID_TAG] = "ap-desktop-app"
     calls: list[dict[str, object]] = []
 
     def attach_resolved(
@@ -786,9 +788,11 @@ def test_attach_or_create_reuse_aligns_ingress_and_http_policy(monkeypatch) -> N
         calls.append(kwargs)
         return computer
 
+    runtime = SimpleNamespace(App=_ModalApp, Sandbox=_ModalSandboxType, Probe=None)
+    monkeypatch.setitem(sys.modules, "modal", runtime)
     monkeypatch.setattr(
-        "modal_computer_use.registry.SandboxRegistry.find_sandbox_by_run_id",
-        lambda self, run_id: target,
+        "modal_computer_use.sandbox._sandbox_from_name",
+        lambda *_args, **_kwargs: target,
     )
     monkeypatch.setattr(
         ComputerSandbox,
@@ -796,6 +800,7 @@ def test_attach_or_create_reuse_aligns_ingress_and_http_policy(monkeypatch) -> N
         classmethod(attach_resolved),
     )
     reused = ComputerSandbox.attach_or_create(
+        name="desktop-reuse",
         config=config,
         app_name="desktop-app",
         wait=False,

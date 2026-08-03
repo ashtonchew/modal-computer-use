@@ -24,11 +24,11 @@ configured geometry.
 
 ## Native async provisioning
 
-`AsyncComputerSandbox.create()` and `AsyncComputerSandbox.attach()` are lazy async context
-managers. They begin Modal work on entry and yield only after both the Sandbox and daemon are
-ready. They use Modal's native `.aio` operations for app lookup, Sandbox creation or resolution,
-readiness, Connect tokens, tunnels, detachment, and termination. They do not call
-`asyncio.to_thread()`.
+`AsyncComputerSandbox.create()`, `AsyncComputerSandbox.attach()`, and
+`AsyncComputerSandbox.attach_or_create()` are lazy async context managers. They begin Modal work
+on entry and yield only after both the Sandbox and daemon are ready. They use Modal's native `.aio`
+operations for app lookup, Sandbox creation or resolution, readiness, Connect tokens, tunnels,
+detachment, and termination. They do not call `asyncio.to_thread()`.
 
 The sync and async paths share the same copied configuration, image selection, tags, daemon
 authorization, ingress policy, security-owned arguments, and validation. Only the Modal and daemon
@@ -144,27 +144,34 @@ Run ID matches must be exact. If more than one running sandbox has the same run 
 `SandboxAmbiguousError` and the caller should attach by sandbox ID or name. Missing run ID matches
 raise `SandboxUnavailableError`.
 
-`ComputerSandbox.attach_or_create()` accepts `reuse="by_run_id"`, `reuse="by_name"`, or
-`reuse="never"`. The old boolean form is still accepted: `True` means `"by_run_id"` and `False`
-means `"never"`. Reuse policy is intentionally not part of `ComputerConfig`.
+`ComputerSandbox.attach_or_create(name=...)` and
+`AsyncComputerSandbox.attach_or_create(name=...)` acquire one live named Sandbox in the selected
+App and Modal environment. The name is required and is the allocation key. The returned Sandbox
+ID identifies the exact instance. `run_id` is correlation metadata and is never used as an
+allocation lock.
 
-Reuse falls back to creation only when the requested app, run ID, or name is genuinely absent.
-Authentication failures, service errors, and ambiguous matches remain errors; they never allocate
-a second Sandbox. The SDK copies the supplied configuration before applying a run ID or generating
-one, so creation and reuse do not rewrite the caller's model.
+The SDK resolves the name before creating. Only Modal `NotFoundError` permits creation. If another
+caller wins the named creation race, Modal returns `AlreadyExistsError`; the SDK performs a bounded
+lookup of the winner instead of allocating by tag. Authentication, service, quota, and other
+errors propagate without another allocation attempt.
 
-Existing sandboxes are checked against the requested config when their
-`computer-use.config_hash` tag is available. A mismatch raises `ConfigConflictError` by default
-so incompatible desktop/runtime settings are not silently reused. Use
-`on_config_mismatch="reuse"` only for an intentional attach to the existing configuration.
+An existing target must have the expected app and config-hash tags. When the caller omits a run
+ID, the SDK adopts the target's tagged run ID before checking the configuration hash. An explicit
+run-ID conflict, missing run ID, missing hash, or hash mismatch raises `ConfigConflictError`. Use
+explicit `attach(name=...)` when intentionally connecting to a legacy or incompatible target.
+
+Creation arguments such as the image, VNC mode, tags, secrets, volumes, owner, and extra Modal
+Sandbox options are validated before acquisition but applied only when this call creates the
+target. They neither mutate an existing target nor become compatibility checks. Named acquisition
+uses the default tag profile so every created target carries its required identity tags.
 
 Attached metadata is limited to operational fields such as sandbox ID, app name, sandbox
 name, run ID, owner, creation time, config hash, tags, and artifact directory. Connect tokens are
 never stored there.
 
 Lifecycle ownership follows the construction path. Exiting a context returned by `create()`
-terminates and detaches its owned Modal Sandbox. Exiting a context returned by `attach()` or a
-reuse branch only detaches and closes the daemon connection. A direct local or `base_url` context
+terminates and detaches its owned Modal Sandbox. Exiting a context returned by `attach()` or an
+existing-target branch only detaches and closes the daemon connection. A direct local or `base_url` context
 only closes its daemon connection. Calling `detach()` on a created computer transfers cleanup
 ownership to the caller, so a later context exit does not terminate that Sandbox. Explicit
 `terminate()` remains available when the caller intentionally wants to stop an attached target.
@@ -173,11 +180,9 @@ If creation fails after Modal allocates a Sandbox, the SDK closes any daemon cli
 Sandbox, and detaches its local Modal handle while preserving the original exception. Failed
 attachment closes and detaches local handles but never terminates the existing target.
 
-Region placement only applies when a sandbox is created. `attach()` and the reuse branch of
-`attach_or_create()` cannot move an existing sandbox to a different Modal region. If a latency
-profile requires a specific region, create a new sandbox with
-`ComputerConfig(runtime={"modal_region": "us-west"})` or use the default config mismatch behavior to
-reject an incompatible reused sandbox.
+Region placement only applies when a Sandbox is created. `attach()` and the existing-target branch
+of `attach_or_create()` cannot move it to another Modal region. If a workload needs a different
+region or external creation resources, use a new name and the required configuration.
 
 ### Hand a desktop to a Modal Function
 
@@ -298,7 +303,7 @@ terminated after the workload. See the
 Use `run_modal_daemon_command_with_fallback()` for this topology when the application has an
 external fallback runner. The helper creates a fresh Connect Token and runs the workload in the
 target's requested Modal region. For a target created by
-`ComputerSandbox.create()`, or reused through `attach_or_create()` with a matching config hash, the
+`ComputerSandbox.create()`, or acquired through `attach_or_create()` with a matching config hash, the
 helper inherits `runtime.modal_region`; callers should specify the placement once in
 `ComputerConfig`. A conflicting explicit runner region raises `ConfigConflictError` and prevents
 the request. A target attached by ID, name, URL, or a deliberately mismatched
