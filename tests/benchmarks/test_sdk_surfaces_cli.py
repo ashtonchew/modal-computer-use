@@ -57,6 +57,27 @@ def test_benchmark_sdk_help_reports_isolated_asyncio_default(capsys) -> None:
     assert "defaults to isolated-asyncio" in captured.out
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "action-batch",
+        "report",
+        "sdk",
+        "compare",
+        "modal-ingress-ab",
+        "modal-region-ab",
+        "modal-colocated-client",
+    ],
+)
+def test_benchmark_help_omits_retired_json_flag(command, capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["benchmark", command, "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "--json" not in captured.out
+
+
 def test_daemon_ingress_metadata_identifies_modal_tunnel() -> None:
     ingress = benchmark_daemon_surface._daemon_ingress_metadata(
         mode="http",

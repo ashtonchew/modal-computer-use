@@ -12,23 +12,26 @@ loops stay in application code or examples.
 
 This is an independent project using Modal.
 
-## Install from source
+## Install unreleased source
 
-Use Python 3.12 or later and `uv`. The package is not on PyPI. Install it from GitHub:
+Use Python 3.12 or later and `uv`. The package is not on PyPI, and `v1.1.0` has not yet been tagged
+or published as a GitHub Release. To evaluate the current unreleased source from `main`:
 
 ```bash
-uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.1.0"
+uv add "modal-computer-use @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
 ```
 
 Add the Modal extra when the application will create Modal Sandboxes:
 
 ```bash
-uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@v1.1.0"
+uv add "modal-computer-use[modal] @ git+https://github.com/ashtonchew/modal-computer-use.git@main"
 ```
 
 The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later. Contributors should
 instead follow the [local development guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/local-development.md).
-The install commands pin the `v1.1.0` GitHub Release. The project is not published to PyPI.
+The `main` ref is mutable; downstream evaluations should replace it with a reviewed full commit SHA
+for reproducibility. Release-tag installation guidance will be added only after the matching GitHub
+Release exists.
 
 ## Run locally
 

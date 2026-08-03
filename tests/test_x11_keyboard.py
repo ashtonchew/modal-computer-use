@@ -135,11 +135,6 @@ class FakeX11InputSession:
     def resolve_keycode(self, name: str) -> int:
         return self.keysym_to_keycode(self.resolve_keysym(name))
 
-    def keycode_to_keysym(self, keycode: int, group: int, level: int) -> int:
-        assert group == self.group
-        levels = self._levels.get(keycode, ())
-        return levels[level] if level < len(levels) else 0
-
     def keyboard_mapping(
         self,
         group: int,
@@ -151,12 +146,6 @@ class FakeX11InputSession:
         return tuple(
             (keycode, tuple(keysyms[:levels])) for keycode, keysyms in sorted(self._levels.items())
         )
-
-    def keyboard_group(self) -> int:
-        return self.group
-
-    def modifier_state(self) -> int:
-        return self.modifiers
 
     def keyboard_state(self) -> X11KeyboardState:
         self.keyboard_state_queries += 1

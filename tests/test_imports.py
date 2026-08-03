@@ -57,6 +57,8 @@ def test_retired_compatibility_attributes_stay_absent(
     [
         "modal_computer_use.transports.local",
         "modal_computer_use.adapters.anthropic.schemas",
+        "modal_computer_use.daemon.desktop.processes",
+        "modal_computer_use.daemon.trace",
     ],
 )
 def test_retired_compatibility_modules_stay_absent(module_name: str) -> None:
@@ -68,6 +70,20 @@ def test_http_transport_package_export_uses_canonical_implementation() -> None:
     from modal_computer_use.transports.http import HTTPTransport as CanonicalHTTPTransport
 
     assert HTTPTransport is CanonicalHTTPTransport
+
+
+@pytest.mark.parametrize(
+    ("module_name", "attribute"),
+    [
+        ("modal_computer_use.tracing", "TraceWriter"),
+        ("modal_computer_use.daemon.supervisor", "Supervisor"),
+    ],
+)
+def test_canonical_internal_imports_remain_available(
+    module_name: str,
+    attribute: str,
+) -> None:
+    assert hasattr(import_module(module_name), attribute)
 
 
 def test_cli_import_does_not_require_optional_provider_packages() -> None:
