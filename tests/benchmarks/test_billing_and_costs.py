@@ -202,6 +202,11 @@ def test_six_cent_estimate_recomputes_but_is_not_billing_evidence() -> None:
 
     assert estimate["status"] == "estimate"
     assert estimate["billing_reconciled"] is False
+    assert set(estimate["provenance"]) == {
+        "measurement_artifact",
+        "measurement_artifact_sha256",
+        "source_sha",
+    }
     assert (
         hashlib.sha256(measurement_path.read_bytes()).hexdigest()
         == estimate["provenance"]["measurement_artifact_sha256"]

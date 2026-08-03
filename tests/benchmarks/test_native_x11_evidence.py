@@ -103,8 +103,9 @@ def test_native_x11_runner_matrix_recomputes_samples_effects_and_preregistered_g
         ),
     }
 
-    claim = artifact["canonical_evidence"]
-    assert claim["role"] == "canonical_singleton"
+    assert "canonical_evidence" not in artifact
+    claim = artifact["runner_effect_claim"]
+    assert claim["role"] == "primary_evidence_entry_point"
     assert claim["entry_point"] == ("benchmark-data/modal-native-x11-runner-matrix-2026-08-02.json")
     assert claim["fresh_clone_capabilities"] == {
         "controlled_matrix_recomputable_from_tracked_samples": True,
@@ -429,17 +430,18 @@ def test_native_x11_historical_source_manifest_binds_provenance_and_claims() -> 
         "f6e9e6e6df2edd33a2fb55458c9a36d1d03b5ec605d053c112ae371dd79f761e"
     )
 
-    session = manifest["source_session"]
-    assert session["session_id"] == "019f913b-8e85-77a0-9268-7e9533462e2f"
+    assert "source_session" not in manifest
+    timeline = manifest["recorded_run_timeline"]
     assert (
-        session["events"]["comparison_recorded_at"] < session["events"]["source_stash_recorded_at"]
+        timeline["events"]["comparison_recorded_at"]
+        < timeline["events"]["source_stash_recorded_at"]
     )
-    local_session_path = Path.home() / session["locator"]
-    if local_session_path.exists():
-        session_bytes = local_session_path.read_bytes()
-        assert hashlib.sha256(session_bytes).hexdigest() == session["sha256"]
-        assert len(session_bytes) == session["byte_count"]
-        assert len(session_bytes.splitlines()) == session["line_count"]
+    assert timeline["raw_record"] == {
+        "tracked": False,
+        "sha256": "450b642f4ae2638f2ada049dbfa42667d84d33101a0e34e2ba3c49075272f13f",
+        "byte_count": 20445755,
+        "line_count": 10340,
+    }
 
     commands = manifest["measurement"]["commands"]
     assert "--input-backend xtest --iterations 3" in commands["xtest"]
@@ -448,9 +450,9 @@ def test_native_x11_historical_source_manifest_binds_provenance_and_claims() -> 
     assert commands["xdotool"].endswith("native-x11-input-xdotool.json --json")
 
     columns = report["published_result_columns"]
-    session_results = manifest["measurement"]["session_reported_results"]
+    recorded_results = manifest["measurement"]["recorded_comparison_results"]
     for case, published_row in report["published_results"].items():
-        recorded = session_results[case]
+        recorded = recorded_results[case]
         expected_row = [
             round(recorded[columns[0]], 2),
             round(recorded[columns[1]], 2),

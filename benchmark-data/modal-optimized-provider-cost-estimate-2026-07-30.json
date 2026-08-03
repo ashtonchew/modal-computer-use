@@ -8,9 +8,7 @@
   "provenance": {
     "measurement_artifact": "benchmark-data/modal-optimized-provider-2026-07-30.json",
     "measurement_artifact_sha256": "a2bc1c9755848ebe25b4949872821150b7f8a26686fdfd75d571c31d226bbb24",
-    "source_sha": "a49767175fb99f9c06ca042a0703eb31d43ffa2d",
-    "pricing_research": "research/modal-computer-use-provider-cost-comparison-2026-07-29.md",
-    "pricing_research_sha256": "365fd5d6413b0486d776634e8beac89673aa3178be6c15ef268fa593bc0c78ed"
+    "source_sha": "a49767175fb99f9c06ca042a0703eb31d43ffa2d"
   },
   "inputs": {
     "run_wall_clock_ms": 520874.78650012054,

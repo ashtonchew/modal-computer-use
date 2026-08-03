@@ -7,9 +7,9 @@ Research date: 2026-08-02.
 The historical `146.33 ms -> 1.15 ms` result is a recoverable, dated same-run diagnostic, not an
 untraceable number: commit
 [`5ada640b`](https://github.com/ashtonchew/modal-computer-use/commit/5ada640b090d5716c5bc31f7aeeb0fd2c05b6a66)
-preserves the dirty worktree used for the final run. The operator-session record places the final
+preserves the dirty worktree used for the final run. The recorded run timeline places the final
 XTest command at 2026-07-23 17:23:56 PDT, the matching `xdotool` command at 17:24:21, comparison at
-17:25:00, and the WIP snapshot at 17:25:28. **Repository/session inference:** absent an intervening
+17:25:00, and the WIP snapshot at 17:25:28. **Repository inference:** absent an intervening
 source edit in that sequence, `5ada640b` is the exact recoverable run source. The two `/private/tmp`
 reports and their three-element arrays were not committed, so a fresh clone still cannot recompute
 the historical aggregates.
@@ -129,7 +129,7 @@ ownership as a universal or complete explanation across historical environments.
 - **Tracked measurement fact:** the replication means, ratio, all 4,060 triplet means, matrix cell
   means, paired contrasts, and per-launch estimates recalculate from tracked arrays.
 - **Recoverable historical provenance:** `5ada640b` preserves the source; the dated report and
-  session sequence preserve aggregate results and timing; the raw three-sample arrays remain absent.
+  recorded timeline preserve aggregate results and timing; the raw three-sample arrays remain absent.
 - **Externally documented mechanism:** XTest event semantics and Xlib synchronization support the
   persistent-session/process-lifecycle explanation.
 - **Controlled repository result:** on the matrix source and environment, isolated subprocess
@@ -139,5 +139,3 @@ ownership as a universal or complete explanation across historical environments.
 - **Not established:** the 113.55 ms difference between historical and replicated `xdotool` means
   cannot be exactly apportioned among loop ownership, run variance, cloud scheduling, image/package
   drift, topology, or other changed conditions; the matrix does not supersede either dated run.
-
-No article source was edited for this research note.
