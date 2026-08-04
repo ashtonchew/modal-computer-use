@@ -268,8 +268,8 @@ must improve that score by at least 10%, win at least two cases, and stay within
 case. The zero-byte floor does not select ingress. Keep authorization latency separate from recurring
 samples, and run one bounded confirmation if the first result does not identify a winner.
 
-The optimized provider workflow uses `modal-optimized-provider` for lifecycle and warm-operation
-rows. From the clean evidence-harness commit, publish its revision-addressed Images into
+Use `modal-optimized-provider` for the optimized provider evidence. From the clean evidence-harness
+commit, publish its revision-addressed Images into
 the active Modal environment used by the run, as described in
 [Modal deployment](modal-deployment.md), then run:
 

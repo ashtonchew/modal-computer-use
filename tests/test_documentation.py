@@ -216,11 +216,10 @@ def test_release_docs_identify_v1_1_release() -> None:
 
 def test_optimized_provider_docs_name_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
-    section = source[
-        source.index("The optimized provider workflow uses") : source.index(
-            "## Run the provider-default comparison"
-        )
-    ]
+    start = source.index(
+        "Use `modal-optimized-provider` for the optimized provider evidence"
+    )
+    section = source[start : source.index("## Run the provider-default comparison")]
 
     assert "uv run computer-use benchmark modal-optimized-provider" in section
 

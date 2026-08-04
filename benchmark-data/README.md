@@ -32,7 +32,7 @@ This directory contains tracked benchmark references that have been sanitized an
 
 ## Provider evidence
 
-The current warm-operation presentation uses:
+The current provider evidence is:
 
 - [`provider-compare-coordinate-command-2026-07-30.json`](provider-compare-coordinate-command-2026-07-30.json),
   the sanitized provider-default input;
