@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/ashtonchew/modal-computer-use/security/advisories/new
     about: Report a vulnerability in private.
   - name: Usage documentation
-    url: https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md
+    url: https://modal-computer-use.mintlify.app
     about: Read the guides before you open an issue.

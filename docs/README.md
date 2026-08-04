@@ -1,7 +1,10 @@
 # Documentation
 
-Use this page to find the maintained guide for a task. Dated benchmark reports record evidence, and
-specifications preserve design history.
+Use the [public documentation](https://modal-computer-use.mintlify.app) for installation, tasks,
+integrations, operations, benchmark summaries, and API reference.
+
+This directory owns engineering contracts, benchmark evidence, development procedures, release
+procedures, and concise pointers for public guides.
 
 ## Start and operate
 

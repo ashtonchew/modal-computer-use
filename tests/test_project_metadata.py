@@ -45,9 +45,7 @@ def test_project_uses_current_license_and_url_metadata() -> None:
     assert metadata["project"]["license-files"] == ["LICENSE"]
     assert metadata["project"]["urls"] == {
         "Homepage": "https://github.com/ashtonchew/modal-computer-use",
-        "Documentation": (
-            "https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md"
-        ),
+        "Documentation": "https://modal-computer-use.mintlify.app",
         "Repository": "https://github.com/ashtonchew/modal-computer-use",
         "Issues": "https://github.com/ashtonchew/modal-computer-use/issues",
         "Changelog": (

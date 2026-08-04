@@ -81,8 +81,8 @@ batch = computer.actions.run(
 
 `batch.screenshot` contains the trailing observation when the batch succeeds.
 
-See the [API guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/api.md) for
-namespace semantics and the generated
+See the [API reference](https://modal-computer-use.mintlify.app/reference/overview) for namespace
+semantics and the generated
 [OpenAPI schema](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openapi.json) for
 HTTP request and response shapes.
 
@@ -108,8 +108,8 @@ The figure shows July 2026 p50 latency for six computer-use cases, based on 30 s
 per cell. Lower is better. Note that warm-operation latency starts after the desktop and client
 connection are ready.
 
-The [detailed report](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)
-gives p95 results and explains how each path was configured and measured.
+The [benchmark results](https://modal-computer-use.mintlify.app/benchmarks/current-results) give p95
+values and explain how each path was configured and measured.
 
 ## Examples
 
@@ -127,11 +127,10 @@ gives p95 results and explains how each path was configured and measured.
 
 | Guide | What it covers |
 | --- | --- |
-| [Documentation map](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md) | Every maintained guide, grouped by task. |
-| [Modal deployment](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-deployment.md) | Sandbox lifecycle, readiness, Function handoff, warm capacity, and cleanup. |
-| [Modal optimization](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/modal-optimization.md) | Production guidance for caller placement, connection reuse, async orchestration, and per-turn work. |
-| [Performance](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/performance.md) and [benchmarking](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmarking.md) | Latency mechanisms, tuning evidence, benchmark commands, and publication rules. |
-| [OpenAI adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openai-adapter.md) and [Anthropic adapter](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/anthropic-adapter.md) | Provider action and screenshot translation for application-owned model loops. |
+| [Public documentation](https://modal-computer-use.mintlify.app) | Installation, tasks, integrations, operations, benchmarks, and API reference. |
+| [Quickstart](https://modal-computer-use.mintlify.app/start/quickstart) | Create a browser desktop and save a screenshot. |
+| [Benchmarks](https://modal-computer-use.mintlify.app/benchmarks/overview) | Current results, evidence limits, and reproducibility. |
+| [API reference](https://modal-computer-use.mintlify.app/reference/overview) | Entry points, configuration, namespaces, errors, models, and OpenAPI. |
 | [Contributing](https://github.com/ashtonchew/modal-computer-use/blob/main/CONTRIBUTING.md) | Development setup, required checks, and pull request expectations. |
 
 ## Local development
@@ -147,5 +146,5 @@ artifacts. Do not expose it without authentication.
 
 See the [security policy](https://github.com/ashtonchew/modal-computer-use/blob/main/SECURITY.md) for
 reporting vulnerabilities and the
-[runtime security guide](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/security.md)
+[runtime security guide](https://modal-computer-use.mintlify.app/operate/security)
 for deployment guidance.
