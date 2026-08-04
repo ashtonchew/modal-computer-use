@@ -30,7 +30,7 @@ This directory contains tracked benchmark references that have been sanitized an
   `configuration.observed`. Two draws are recorded, one pinned and one replication, and they are
   never averaged.
 
-## Provider evidence
+## Provider benchmark evidence
 
 The current provider evidence is:
 
