@@ -29,7 +29,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/ashtonchew/modal-computer-use"
-Documentation = "https://github.com/ashtonchew/modal-computer-use/blob/main/docs/README.md"
+Documentation = "https://modal-computer-use.mintlify.app"
 Repository = "https://github.com/ashtonchew/modal-computer-use"
 Issues = "https://github.com/ashtonchew/modal-computer-use/issues"
 Changelog = "https://github.com/ashtonchew/modal-computer-use/blob/main/CHANGELOG.md"
