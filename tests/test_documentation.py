@@ -217,6 +217,33 @@ def test_public_documentation_urls_use_the_hosted_site() -> None:
     assert f"url: {public_url}" in issue_config
 
 
+def test_public_documentation_links_use_expected_routes() -> None:
+    site = "https://modal-computer-use.mintlify.app"
+    expected_routes = {
+        ROOT / "README.md": {
+            site,
+            f"{site}/start/quickstart",
+            f"{site}/benchmarks/overview",
+            f"{site}/benchmarks/current-results",
+            f"{site}/reference/overview",
+            f"{site}/operate/security",
+        },
+        DOC_MAP: {site},
+        DOCS / "anthropic-adapter.md": {f"{site}/integrate/anthropic"},
+        DOCS / "artifacts.md": {f"{site}/build/artifacts-storage"},
+        DOCS / "modal-deployment.md": {f"{site}/operate/deploy"},
+        DOCS / "modal-optimization.md": {f"{site}/operate/performance"},
+        DOCS / "openai-adapter.md": {f"{site}/integrate/openai"},
+        DOCS / "troubleshooting.md": {f"{site}/operate/troubleshooting"},
+    }
+
+    for path, expected in expected_routes.items():
+        hosted_links = {
+            target for target in _link_targets(path) if target.startswith(site)
+        }
+        assert hosted_links == expected, path.relative_to(ROOT)
+
+
 def test_release_docs_identify_v1_1_release() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = CHANGELOG.read_text(encoding="utf-8")
