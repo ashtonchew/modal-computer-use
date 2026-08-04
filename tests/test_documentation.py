@@ -214,23 +214,23 @@ def test_release_docs_identify_v1_1_release() -> None:
     assert "release identity `v1.1.0`" in specification
 
 
-def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
+def test_optimized_provider_docs_name_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
-    section = source[
-        source.index("The combined provider report uses") : source.index(
-            "## Run the provider-default comparison"
-        )
-    ]
+    start = source.index(
+        "Use `modal-optimized-provider` for the optimized provider evidence"
+    )
+    section = source[start : source.index("## Run the provider-default comparison")]
 
     assert "uv run computer-use benchmark modal-optimized-provider" in section
 
 
-def test_external_provider_benchmarks_are_current_but_benchmark_only() -> None:
+def test_external_provider_benchmarks_are_benchmark_only() -> None:
     source = CONTEXT.read_text(encoding="utf-8")
 
     assert "may live in this repository" in source
-    assert "`benchmark compare` and `benchmark provider-results` are maintained" in source
-    assert "not public SDK compatibility contracts" in source
+    assert "`benchmark compare` is a maintained benchmark-only workflow" in source
+    assert "`benchmark provider-results`\n  remains available to verify archived" in source
+    assert "Neither is a public SDK compatibility\n  contract" in source
     assert "branch-only `benchmark compare`" not in source
     assert "lives outside the SDK release path" not in source
 

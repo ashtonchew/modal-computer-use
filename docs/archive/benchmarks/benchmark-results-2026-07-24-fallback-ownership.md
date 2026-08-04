@@ -4,9 +4,9 @@
 > **Date or revision:** 2026-07-24; source `5f880c509a13605aca5df5f91fa8a5e56160d03b`
 > **Question:** Did the fallback-ownership change preserve correctness and contemporaneous Modal
 > performance?
-> **Disposition:** The report records implementation validation for the merged change. Use the
-> [2026-07-26 provider report](../../benchmark-results-2026-07-26-provider-results.md) for current
-> provider evidence.
+> **Disposition:** The report records implementation validation for the merged change. The later
+> [2026-07-26 provider report](benchmark-results-2026-07-26-provider-results.md) retains the
+> contemporaneous provider evidence.
 
 This report validates the fallback-ownership cleanup through code revision
 `5f880c509a13605aca5df5f91fa8a5e56160d03b` against latest-main revision

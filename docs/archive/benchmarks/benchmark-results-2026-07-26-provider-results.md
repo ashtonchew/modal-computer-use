@@ -1,5 +1,11 @@
 # Provider benchmark results, 2026-07-26
 
+> **Archive category:** Historical
+> **Date or revision:** 2026-07-26; evidence harness `6b6a814f460c0d509ef2ebe797edb3b582573b63`
+> **Question:** How did the provider-default, Modal-optimized, and Modal visual-change paths compare?
+> **Disposition:** The [2026-07-30 warm-operation report](../../benchmark-results-2026-07-30-warm-paths.md)
+> is the current provider comparison. This report retains the earlier lifecycle and visual-change evidence.
+
 **Evidence status:** eligible
 
 ## Read this before comparing results
@@ -86,9 +92,9 @@ Evidence harness SHA: `6b6a814f460c0d509ef2ebe797edb3b582573b63`. Report source 
 
 Tracked inputs:
 
-- [Provider defaults](../benchmark-data/provider-compare-coordinate-command-2026-07-26.json)
-- [Modal optimized](../benchmark-data/modal-optimized-provider-2026-07-26.json)
-- [Modal observation](../benchmark-data/modal-observation-2026-07-26.json)
-- [Combined result](../benchmark-data/provider-results-2026-07-26.json)
+- [Provider defaults](../../../benchmark-data/provider-compare-coordinate-command-2026-07-26.json)
+- [Modal optimized](../../../benchmark-data/modal-optimized-provider-2026-07-26.json)
+- [Modal observation](../../../benchmark-data/modal-observation-2026-07-26.json)
+- [Combined result](../../../benchmark-data/provider-results-2026-07-26.json)
 
 The combined result binds the exact bytes of all three tracked inputs by SHA-256. Its p50 and p95 values are recomputed from the numeric samples in those inputs.

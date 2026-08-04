@@ -604,6 +604,6 @@ printed nor recorded.
 
 Use [Performance](performance.md) for placement, ingress, image, browser, and warm-capacity decision
 guidance. Use [Benchmarking](benchmarking.md) for reproducible commands, credentials, costs,
-cleanup, and reporting rules. The [current provider comparison](benchmark-results-2026-07-26-provider-results.md)
+cleanup, and reporting rules. The [current provider comparison](benchmark-results-2026-07-30-warm-paths.md)
 records dated evidence and its measurement boundaries; do not treat those results as deployment
 defaults for a different caller or workload.

@@ -63,5 +63,5 @@ run above these desktop primitives when a task needs DOM or accessibility data. 
 do not replace the full desktop surface for native applications or visual-only interfaces.
 
 The repository contains measured Modal, Daytona, E2B, and Tzafon comparisons in the
-[current provider report](../docs/benchmark-results-2026-07-26-provider-results.md). Read its
+[current provider report](../docs/benchmark-results-2026-07-30-warm-paths.md). Read its
 measurement boundaries before making performance claims.
