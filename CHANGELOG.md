@@ -2,8 +2,7 @@
 
 ## Unreleased
 
-The source tree is prepared as version 1.1.0, but no `v1.1.0` tag or matching GitHub Release exists
-yet. The changes below remain unreleased.
+## 1.1.0 - 2026-08-03
 
 - Added a typed native-async interface for existing daemons, including cached namespaces,
   readiness, persistent action and observation connections, and connection-only cleanup.
@@ -42,8 +41,7 @@ yet. The changes below remain unreleased.
 
 The v1.1 daemon requires a v1.1 SDK for the default attested-tunnel flow. Upgrade SDK and daemon
 together. The v1.0.0 tag was a private source milestone, not a GitHub Release or PyPI distribution.
-Version 1.1.0 is intended to be the first public GitHub Release and PyPI distribution, but it is not
-published yet.
+Version 1.1.0 is the first public GitHub Release and PyPI distribution.
 
 ## 1.0.0 - 2026-07-31
 

@@ -8,6 +8,8 @@ specifications preserve design history.
 - [Local development](local-development.md): install the development environment and run a local
   daemon.
 - [Modal deployment](modal-deployment.md): create, attach, recover, and clean up Modal Sandboxes.
+- [Modal optimization](modal-optimization.md): place the caller, reuse a trajectory connection,
+  reduce round trips, and measure workload-specific tradeoffs.
 - [Configuration](configuration.md): daemon settings, defaults, and environment variables.
 - [Troubleshooting](troubleshooting.md): diagnose readiness, X11, adapter, artifact, and deployment
   failures.
@@ -35,8 +37,8 @@ specifications preserve design history.
 ## Benchmark
 
 - [Benchmarking](benchmarking.md): run benchmarks and interpret, retain, or publish their output.
-- [Current provider results](benchmark-results-2026-07-26-provider-results.md): eligible
-  provider-default, Modal-optimized, and Modal-only experimental evidence.
+- [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md): eligible p50,
+  p95, configuration, and provenance for the README comparison.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
   diagnostic, and historical reports and protocols.
 

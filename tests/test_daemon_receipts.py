@@ -885,8 +885,9 @@ def test_batch_indeterminate_metadata_stops_and_quarantines(tmp_path) -> None:
 def test_terminal_commit_failure_immediately_quarantines_all_mutations(
     tmp_path, monkeypatch
 ) -> None:
+    clock = _FakeClock()
     app = _app(tmp_path)
-    app.state.lease_coordinator.ttl_seconds = 0.2
+    app.state.lease_coordinator = LeaseCoordinator(clock=clock, ttl_seconds=1)
     with TestClient(
         app,
         headers={"Authorization": "Bearer dev"},
@@ -910,7 +911,7 @@ def test_terminal_commit_failure_immediately_quarantines_all_mutations(
             headers=_operation_headers(lease, 1),
         )
         recovery = client.get("/v1/recovery/status", headers=lease)
-        time.sleep(0.25)
+        clock.advance(1)
         after_expiry = client.post(
             "/v1/leases/acquire",
             json={"run_id": "run-after-terminal-failure"},

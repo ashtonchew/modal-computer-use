@@ -16,6 +16,27 @@ from modal_computer_use.benchmarks.provider_results import (
 
 EVIDENCE_HARNESS_SHA = "6b6a814f460c0d509ef2ebe797edb3b582573b63"
 REPORT_SOURCE_SHA = "f5ba70404b4762e126e6b993f43e04ebc97b8a1e"
+ARCHIVE_NOTICE = "\n".join(
+    (
+        "> **Archive category:** Historical",
+        (
+            "> **Date or revision:** 2026-07-26; evidence harness "
+            "`6b6a814f460c0d509ef2ebe797edb3b582573b63`"
+        ),
+        (
+            "> **Question:** How did the provider-default, Modal-optimized, and Modal "
+            "visual-change paths compare?"
+        ),
+        (
+            "> **Disposition:** The [2026-07-30 warm-operation report]"
+            "(../../benchmark-results-2026-07-30-warm-paths.md)"
+        ),
+        (
+            "> is the current provider comparison. This report retains the earlier lifecycle "
+            "and visual-change evidence."
+        ),
+    )
+)
 
 
 def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
@@ -23,7 +44,9 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
     optimized_path = Path("benchmark-data/modal-optimized-provider-2026-07-26.json")
     observation_path = Path("benchmark-data/modal-observation-2026-07-26.json")
     combined_path = Path("benchmark-data/provider-results-2026-07-26.json")
-    report_path = Path("docs/benchmark-results-2026-07-26-provider-results.md")
+    report_path = Path(
+        "docs/archive/benchmarks/benchmark-results-2026-07-26-provider-results.md"
+    )
     provider_bytes = provider_path.read_bytes()
     optimized_bytes = optimized_path.read_bytes()
     observation_bytes = observation_path.read_bytes()
@@ -63,7 +86,15 @@ def test_tracked_provider_results_match_renderer_and_source_digest() -> None:
 
     rendered = render_provider_results_markdown(combined)
     report = report_path.read_text(encoding="utf-8")
-    assert report == rendered
+    expected_report = rendered.replace(
+        "**Evidence status:** eligible",
+        f"{ARCHIVE_NOTICE}\n\n**Evidence status:** eligible",
+        1,
+    ).replace(
+        "](../benchmark-data/",
+        "](../../../benchmark-data/",
+    )
+    assert report == expected_report
     assert report.count("## Provider-default comparison") == 1
     assert report.count("| Case | Modal optimized p50 / p95 |") == 1
     assert "not as an apples-to-apples provider ranking" in report

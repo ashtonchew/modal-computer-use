@@ -268,8 +268,8 @@ must improve that score by at least 10%, win at least two cases, and stay within
 case. The zero-byte floor does not select ingress. Keep authorization latency separate from recurring
 samples, and run one bounded confirmation if the first result does not identify a winner.
 
-The combined provider report uses `modal-optimized-provider` for the optimized lifecycle and warm
-operation rows. From the clean evidence-harness commit, publish its revision-addressed Images into
+Use `modal-optimized-provider` for the optimized provider evidence. From the clean evidence-harness
+commit, publish its revision-addressed Images into
 the active Modal environment used by the run, as described in
 [Modal deployment](modal-deployment.md), then run:
 
@@ -279,12 +279,14 @@ evidence_harness_sha="$(git rev-parse HEAD)"
 uv run computer-use benchmark modal-optimized-provider \
   --modal-region us-west-2 \
   --image-revision "$evidence_harness_sha" \
-  --modal-cpu 4 \
-  --modal-memory-mib 8192 \
+  --modal-cpu 1 \
+  --modal-memory-mib 2048 \
+  --runner-cpu 1 \
+  --runner-memory-mib 2048 \
   --browser chromium \
   --iterations 30 \
   --warmup-iterations 1 \
-  --output benchmark-results/modal-optimized-provider-2026-07-26.json
+  --output benchmark-results/modal-optimized-provider.json
 ```
 
 This command runs one warmup and 30 fresh create-to-validated-screenshot samples, then uses a
@@ -333,7 +335,7 @@ uv run computer-use benchmark compare \
   --providers modal-daemon,daytona,e2b,tzafon \
   --iterations 30 \
   --env-file .env \
-  --output benchmark-results/candidates/provider-compare-coordinate-command-2026-07-26.json
+  --output benchmark-results/candidates/provider-compare-coordinate-command.json
 ```
 
 Provider-default means the documented public SDK path and its default provider configuration.
@@ -375,7 +377,7 @@ Use these maintained workflows for new evidence:
 | --- | --- |
 | Optimized lifecycle and warm operations | `computer-use benchmark modal-optimized-provider`; [`modal-optimized-provider-2026-07-30.json`](../benchmark-data/modal-optimized-provider-2026-07-30.json) |
 | Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
-| Combined provider report | `computer-use benchmark provider-results` over the validated tracked inputs |
+| Current provider presentation | [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md) |
 | Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |
 | Placement comparison | `computer-use benchmark modal-region-ab`, then `modal-region-summary` |
 | Modal V2 candidate or optimized-frontier experiments | Use [`run_modal_v2_candidate_benchmark.py`](../scripts/run_modal_v2_candidate_benchmark.py) or [`run_modal_optimized_frontier_benchmark.py`](../scripts/run_modal_optimized_frontier_benchmark.py) with the archived gated methodology linked below |
@@ -400,10 +402,14 @@ Before publishing an artifact:
    screenshots, command output, and raw failure content.
 6. Regenerate with the validator's check mode when available so review detects drift.
 
-The combined provider report has stricter gates. Run all three measurements from the same clean,
-committed evidence-harness revision. The `modal-optimized-provider` command above produces its
-optimized input.
-Produce the single-case observation input with:
+## Verify the archived July 26 combined report
+
+The archived combined report required all three measurements to share one clean, committed
+evidence-harness revision. Its dated commands remain below as provenance, not as the current
+provider workflow. The tracked artifacts are verified by
+`tests/benchmarks/test_provider_results_artifact.py`.
+
+The single-case observation input was produced with:
 
 ```bash
 uv run computer-use benchmark modal-colocated-client \
@@ -423,7 +429,7 @@ uv run computer-use benchmark modal-colocated-client \
   --output benchmark-results/modal-observation-2026-07-26.json
 ```
 
-Sanitize the raw provider-default artifact before combining it. `current_reference` requires the
+The raw provider-default artifact was sanitized before combining it. `current_reference` requires the
 declared harness commit to equal `HEAD` and the tracked worktree to be clean:
 
 ```bash
@@ -438,7 +444,7 @@ uv run python scripts/sanitize_provider_benchmark.py \
   --scope "provider-default SDK paths, one warmup and 30 measured iterations"
 ```
 
-Convert the two raw Modal artifacts into strictly allowlisted tracked inputs. This preserves the
+The two raw Modal artifacts were converted into strictly allowlisted tracked inputs. This preserves the
 numeric samples and required attestations while excluding endpoints, resource identifiers, tokens,
 screenshots, command output, and raw failure content:
 
@@ -451,7 +457,7 @@ uv run python scripts/sanitize_modal_provider_inputs.py \
   --evidence-harness-sha "$evidence_harness_sha"
 ```
 
-Generate the combined artifact. The generator verifies the exact provider list,
+The combined artifact generator verifies the exact provider list,
 sample counts, runner-only topology, selected observation case, configuration, recorded failure
 outcomes, evidence-harness revision, report-source revision, and absence of external comparison
 fields. Generation requires the report-source revision to equal `HEAD`; later clean descendants can
@@ -471,14 +477,14 @@ uv run python scripts/sanitize_provider_results.py \
 
 uv run computer-use benchmark provider-results \
   benchmark-data/provider-results-2026-07-26.json \
-  --format markdown \
-  --output docs/benchmark-results-2026-07-26-provider-results.md
+  --format markdown
 ```
 
-After generation, rerun all three sanitizer commands with `--check` to verify that the tracked
+The original workflow reran all three sanitizer commands with `--check` to verify that the tracked
 artifacts match their inputs. Keep the two raw Modal runner artifacts ignored. The tracked
 allowlisted inputs bind their SHA-256 digests, and the combined artifact binds the exact bytes of
-all three tracked inputs.
+all three tracked inputs. The archived document adds its disposition notice and archive-relative
+links around this rendered body.
 
 ## Report statistics
 
@@ -561,7 +567,7 @@ termination record is a separate provider reconciliation. It does not validate t
 ## Find methodology and evidence
 
 - [Performance](performance.md) explains stable latency mechanisms.
-- [Current provider results](benchmark-results-2026-07-26-provider-results.md) state their evidence
+- [Current provider results](benchmark-results-2026-07-30-warm-paths.md) state their evidence
   status, measurement boundaries, and provenance.
 - The archive retains the [Modal V2 candidate methodology](archive/benchmarks/modal-v2-candidate-benchmark.md)
   and [optimized-frontier methodology](archive/benchmarks/modal-optimized-frontier-benchmark.md)

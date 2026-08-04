@@ -30,36 +30,31 @@ This directory contains tracked benchmark references that have been sanitized an
   `configuration.observed`. Two draws are recorded, one pinned and one replication, and they are
   never averaged.
 
-## Combined provider report inputs
+## Provider benchmark evidence
 
 The current provider evidence is:
 
-- [`provider-compare-coordinate-command-2026-07-26.json`](provider-compare-coordinate-command-2026-07-26.json),
+- [`provider-compare-coordinate-command-2026-07-30.json`](provider-compare-coordinate-command-2026-07-30.json),
   the sanitized provider-default input;
-- [`modal-optimized-provider-2026-07-26.json`](modal-optimized-provider-2026-07-26.json), the
-  allowlisted Modal optimized input with exact numeric samples;
-- [`modal-observation-2026-07-26.json`](modal-observation-2026-07-26.json), the allowlisted Modal
-  observation input with exact numeric samples;
-- [`provider-results-2026-07-26.json`](provider-results-2026-07-26.json), the combined report
-  artifact.
+- [`modal-optimized-provider-2026-07-30.json`](modal-optimized-provider-2026-07-30.json), the
+  allowlisted Modal optimized input with exact numeric samples.
 
-For a new run, use this file flow:
+The separate [`modal-observation-2026-07-30.json`](modal-observation-2026-07-30.json) retains the
+current action-to-frame observation evidence. See the
+[warm-operation report](../docs/benchmark-results-2026-07-30-warm-paths.md) and
+[benchmarking guide](../docs/benchmarking.md) for current interpretation and workflow guidance.
 
-| Role | Path | Tracking |
-| --- | --- | --- |
-| Raw provider-default run | `benchmark-results/candidates/provider-default.json` | Ignored |
-| Sanitized provider-default run | `benchmark-data/provider-default.json` | Tracked |
-| Raw Modal optimized provider run | `benchmark-results/modal-optimized.json` | Ignored |
-| Sanitized Modal optimized run | `benchmark-data/modal-optimized.json` | Tracked |
-| Raw Modal observation runner-only run | `benchmark-results/modal-observation.json` | Ignored |
-| Sanitized Modal observation run | `benchmark-data/modal-observation.json` | Tracked |
-| Combined provider results | `benchmark-data/provider-results.json` | Tracked |
+### Archived July 26 combined report
 
-Generate `provider-default.json` with `scripts/sanitize_provider_benchmark.py`. Generate both
-allowlisted Modal inputs with `scripts/sanitize_modal_provider_inputs.py`, then generate
-`provider-results.json` with `scripts/sanitize_provider_results.py`. The combined artifact binds all
-three tracked inputs by SHA-256 and records the evidence-harness and report-source revisions. See
-[`docs/benchmarking.md`](../docs/benchmarking.md) for the commands and reporting policy.
+The archived combined report remains bound to these immutable inputs:
+
+- [`provider-compare-coordinate-command-2026-07-26.json`](provider-compare-coordinate-command-2026-07-26.json);
+- [`modal-optimized-provider-2026-07-26.json`](modal-optimized-provider-2026-07-26.json);
+- [`modal-observation-2026-07-26.json`](modal-observation-2026-07-26.json);
+- [`provider-results-2026-07-26.json`](provider-results-2026-07-26.json).
+
+The combined renderer, validator, and artifact-pinning test remain to verify this evidence set.
+They are not the current provider publication workflow.
 
 Older tracked artifacts keep their original paths because reports, validators, and provenance
 records refer to them. Location does not indicate status. See the corresponding report's archive

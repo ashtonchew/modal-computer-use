@@ -202,34 +202,35 @@ def test_onboarding_docs_use_canonical_install_and_setup_guidance() -> None:
         assert "uv run modal token new" not in source, path.relative_to(ROOT)
 
 
-def test_prepared_source_does_not_claim_an_unpublished_v1_1_release() -> None:
+def test_release_docs_identify_v1_1_release() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = CHANGELOG.read_text(encoding="utf-8")
     specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
     assert "git@v1.1.0" not in readme
-    assert "## 1.1.0 -" not in changelog
-    assert "no `v1.1.0` tag or matching GitHub Release exists" in changelog
-    assert "prepared, unreleased `1.1.0` source state" in specification
+    assert "## Unreleased\n\n## 1.1.0 - 2026-08-03" in changelog
+    assert "active specification for the `1.1.0` release" in specification
+    assert "**Released:** 2026-08-03" in specification
+    assert "release identity `v1.1.0`" in specification
 
 
-def test_combined_provider_report_docs_name_optimized_lifecycle_command() -> None:
+def test_optimized_provider_docs_name_lifecycle_command() -> None:
     source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
-    section = source[
-        source.index("The combined provider report uses") : source.index(
-            "## Run the provider-default comparison"
-        )
-    ]
+    start = source.index(
+        "Use `modal-optimized-provider` for the optimized provider evidence"
+    )
+    section = source[start : source.index("## Run the provider-default comparison")]
 
     assert "uv run computer-use benchmark modal-optimized-provider" in section
 
 
-def test_external_provider_benchmarks_are_current_but_benchmark_only() -> None:
+def test_external_provider_benchmarks_are_benchmark_only() -> None:
     source = CONTEXT.read_text(encoding="utf-8")
 
     assert "may live in this repository" in source
-    assert "`benchmark compare` and `benchmark provider-results` are maintained" in source
-    assert "not public SDK compatibility contracts" in source
+    assert "`benchmark compare` is a maintained benchmark-only workflow" in source
+    assert "`benchmark provider-results`\n  remains available to verify archived" in source
+    assert "Neither is a public SDK compatibility\n  contract" in source
     assert "branch-only `benchmark compare`" not in source
     assert "lives outside the SDK release path" not in source
 

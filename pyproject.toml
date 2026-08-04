@@ -54,6 +54,15 @@ dev = [
 computer-use = "modal_computer_use.cli:main"
 computer-use-daemon = "modal_computer_use.daemon.__main__:main"
 
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "LICENSE",
+  "README.md",
+  "CHANGELOG.md",
+  "pyproject.toml",
+  "src/modal_computer_use",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/modal_computer_use"]
 

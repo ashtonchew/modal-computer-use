@@ -488,6 +488,7 @@ def test_idle_expiration_seals_run_interrupted_and_releases_ownership(tmp_path) 
 
 
 def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
+    clock = _Clock()
     app = create_app(
         DaemonSettings(
             backend="mock",
@@ -498,16 +499,18 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
         )
     )
     app.state.lease_coordinator = LeaseCoordinator(
-        ttl_seconds=0.03,
-        heartbeat_interval_seconds=0.01,
+        clock=clock,
+        ttl_seconds=1,
+        heartbeat_interval_seconds=0.25,
     )
     app.state.supervisor.running = True
     original_move = app.state.backend.mouse_move
     admitted = asyncio.Event()
+    finish_mutation = asyncio.Event()
 
     async def slow_move(x: int, y: int):
         admitted.set()
-        await asyncio.sleep(0.09)
+        await finish_mutation.wait()
         return await original_move(x, y)
 
     app.state.backend.mouse_move = slow_move
@@ -522,6 +525,7 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
             acquired = await client.post(
                 "/v1/leases/acquire", json={"run_id": "long-operation"}
             )
+            original_expiry = clock.now + app.state.lease_coordinator.ttl_seconds
             lease_headers = {
                 **_lease_headers(acquired),
                 OPERATION_SEQUENCE_HEADER: "0",
@@ -533,42 +537,27 @@ def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:
                     headers=lease_headers,
                 )
             )
-            stop_renewal = asyncio.Event()
-
-            async def renew_while_running() -> None:
-                while not stop_renewal.is_set():
-                    heartbeat = await client.post(
-                        "/v1/leases/heartbeat", headers=lease_headers
-                    )
-                    assert heartbeat.status_code == 200
-                    await asyncio.sleep(0.008)
-
-            renewal = asyncio.create_task(renew_while_running())
-            admission = asyncio.create_task(admitted.wait())
-            done, _pending = await asyncio.wait(
-                {admission, mutation},
-                timeout=1.0,
-                return_when=asyncio.FIRST_COMPLETED,
+            await asyncio.wait_for(
+                admitted.wait(),
+                timeout=1,
             )
-            if mutation in done and not admitted.is_set():
-                early = await mutation
-                pytest.fail(
-                    "mutation failed before backend admission: "
-                    f"status={early.status_code} code={early.json().get('code')}"
-                )
-            assert admission in done, "mutation did not reach backend admission within 1s"
-            try:
-                result = await mutation
-                status = await client.get("/v1/leases/status")
-                receipt = await client.post(
-                    "/v1/receipts/status",
-                    json={"run_id": "long-operation", "sequence": 0},
-                    headers=lease_headers,
-                )
-            finally:
-                stop_renewal.set()
-                await renewal
+            clock.advance(0.75)
+            heartbeat = await asyncio.wait_for(
+                client.post("/v1/leases/heartbeat", headers=lease_headers),
+                timeout=1,
+            )
+            clock.advance(0.5)
+            assert clock.now > original_expiry
+            finish_mutation.set()
+            result = await mutation
+            status = await client.get("/v1/leases/status")
+            receipt = await client.post(
+                "/v1/receipts/status",
+                json={"run_id": "long-operation", "sequence": 0},
+                headers=lease_headers,
+            )
 
+        assert heartbeat.status_code == 200
         assert result.status_code == 200
         assert status.json()["state"] == "active"
         assert status.json()["run_state"] == "active"
