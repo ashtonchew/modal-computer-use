@@ -1,4 +1,7 @@
-# modal-computer-use
+<div align="center">
+  <img src="https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/modal-computer-use-logo.png" width="160" alt="Modal Computer Use logo">
+  <h1>modal-computer-use</h1>
+</div>
 
 `modal-computer-use` turns a Modal Sandbox into a remotely controllable Linux desktop through a
 typed, provider-neutral Python SDK and an in-Sandbox daemon.

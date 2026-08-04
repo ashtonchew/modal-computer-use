@@ -22,6 +22,10 @@ HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(?P<heading>.*?)(?:\s+#+\s*)?$")
 EXTERNAL_SCHEMES = {"data", "ftp", "http", "https", "mailto", "tel"}
 REPOSITORY_WEB_PREFIX = "/ashtonchew/modal-computer-use/"
 REPOSITORY_BLOB_PREFIX = f"{REPOSITORY_WEB_PREFIX}blob/main/"
+RAW_REPOSITORY_ASSET_RE = re.compile(
+    r"https://raw\.githubusercontent\.com/ashtonchew/modal-computer-use/main/"
+    r"(?P<path>docs/assets/[^\"\s)>]+)"
+)
 ARCHIVE_CATEGORY_RE = re.compile(
     r"^>\s+\*\*Archive category:\*\*\s+"
     r"(?:Superseded|Rejected|Incomplete|Diagnostic|Historical)\b",
@@ -180,6 +184,22 @@ def test_root_readme_repository_links_are_absolute_https() -> None:
         "README.md is package metadata; repository-document links must use absolute HTTPS: "
         + ", ".join(failures)
     )
+
+
+def test_root_readme_logo_resolves_to_a_tracked_asset() -> None:
+    source = (ROOT / "README.md").read_text(encoding="utf-8")
+    logo_url = (
+        "https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/"
+        "docs/assets/modal-computer-use-logo.png"
+    )
+
+    assert logo_url in source
+    asset_paths = {
+        (ROOT / unquote(match.group("path"))).resolve()
+        for match in RAW_REPOSITORY_ASSET_RE.finditer(source)
+    }
+    assert asset_paths
+    assert all(_is_within_repository(path) and path.is_file() for path in asset_paths)
 
 
 def test_onboarding_docs_use_canonical_install_and_setup_guidance() -> None:
