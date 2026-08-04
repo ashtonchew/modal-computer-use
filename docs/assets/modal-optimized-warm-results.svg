@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="624" viewBox="0 0 1152 624" role="img" aria-labelledby="title desc">
+  <title id="title">Warm p50 latency across four providers and five paths</title>
+  <desc id="desc">A results table where the highlighted Modal optimized column is fastest on every task, including 9.9 ms for one click and 53.4 ms to type 1,000 characters against 40,915 ms on E2B, a 767x ratio.</desc>
+  <defs>
+    <style>
+      .bg { fill: #101411; }
+      .hl { fill: #233528; stroke: #91B89A; stroke-width: 2; }
+      .rule { stroke: #4E584F; stroke-width: 1.2; }
+      .rule-hl { stroke: #5B7F66; stroke-width: 1.2; }
+      .head, .task, .num, .num-hero, .ratio, .caption { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .head { fill: #F1F4EF; font-size: 15px; font-weight: 600; }
+      .task { fill: #F1F4EF; font-size: 15px; font-weight: 500; }
+      .num { fill: #E8EDE6; font-size: 17px; font-weight: 400; }
+      .num-hero { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
+      .ratio { fill: #B9C2B8; font-size: 12.5px; font-weight: 500; }
+      .caption { fill: #B9C2B8; font-size: 12px; }
+    </style>
+  </defs>
+  <rect class="bg" width="1152" height="624"/>
+
+  <line class="rule" x1="32" y1="40" x2="1120" y2="40"/>
+  <line class="rule" x1="32" y1="96" x2="1120" y2="96"/>
+  <line class="rule" x1="32" y1="172" x2="1120" y2="172"/>
+  <line class="rule" x1="32" y1="248" x2="1120" y2="248"/>
+  <line class="rule" x1="32" y1="324" x2="1120" y2="324"/>
+  <line class="rule" x1="32" y1="400" x2="1120" y2="400"/>
+  <line class="rule" x1="32" y1="476" x2="1120" y2="476"/>
+  <line class="rule" x1="32" y1="552" x2="1120" y2="552"/>
+  <line class="rule" x1="32" y1="40" x2="32" y2="552"/>
+  <line class="rule" x1="604" y1="40" x2="604" y2="552"/>
+  <line class="rule" x1="776" y1="40" x2="776" y2="552"/>
+  <line class="rule" x1="948" y1="40" x2="948" y2="552"/>
+  <line class="rule" x1="1120" y1="40" x2="1120" y2="552"/>
+
+  <rect class="hl" x="260" y="40" width="172" height="512" rx="8"/>
+  <line class="rule-hl" x1="262" y1="96" x2="430" y2="96"/>
+  <line class="rule-hl" x1="262" y1="172" x2="430" y2="172"/>
+  <line class="rule-hl" x1="262" y1="248" x2="430" y2="248"/>
+  <line class="rule-hl" x1="262" y1="324" x2="430" y2="324"/>
+  <line class="rule-hl" x1="262" y1="400" x2="430" y2="400"/>
+  <line class="rule-hl" x1="262" y1="476" x2="430" y2="476"/>
+
+  <text class="head" x="48" y="73">Task</text>
+  <text class="head" x="346" y="73" text-anchor="middle">Modal optimized</text>
+  <text class="head" x="518" y="73" text-anchor="middle">Daytona</text>
+  <text class="head" x="690" y="73" text-anchor="middle">E2B</text>
+  <text class="head" x="862" y="73" text-anchor="middle">Modal simple</text>
+  <text class="head" x="1034" y="73" text-anchor="middle">Tzafon</text>
+
+  <text class="task" x="48" y="130">Full screenshot</text>
+  <text class="num-hero" x="346" y="130" text-anchor="middle">37.3 ms</text>
+  <text class="num" x="518" y="130" text-anchor="middle">564 ms</text>
+  <text class="ratio" x="518" y="153" text-anchor="middle">15.1x</text>
+  <text class="num" x="690" y="130" text-anchor="middle">199 ms</text>
+  <text class="ratio" x="690" y="153" text-anchor="middle">5.3x</text>
+  <text class="num" x="862" y="130" text-anchor="middle">116 ms</text>
+  <text class="ratio" x="862" y="153" text-anchor="middle">3.1x</text>
+  <text class="num" x="1034" y="130" text-anchor="middle">154 ms</text>
+  <text class="ratio" x="1034" y="153" text-anchor="middle">4.1x</text>
+
+  <text class="task" x="48" y="206">One click</text>
+  <text class="num-hero" x="346" y="206" text-anchor="middle">9.9 ms</text>
+  <text class="num" x="518" y="206" text-anchor="middle">386 ms</text>
+  <text class="ratio" x="518" y="229" text-anchor="middle">39.2x</text>
+  <text class="num" x="690" y="206" text-anchor="middle">210 ms</text>
+  <text class="ratio" x="690" y="229" text-anchor="middle">21.3x</text>
+  <text class="num" x="862" y="206" text-anchor="middle">214 ms</text>
+  <text class="ratio" x="862" y="229" text-anchor="middle">21.7x</text>
+  <text class="num" x="1034" y="206" text-anchor="middle">130 ms</text>
+  <text class="ratio" x="1034" y="229" text-anchor="middle">13.2x</text>
+
+  <text class="task" x="48" y="282">Four ordered clicks</text>
+  <text class="num-hero" x="346" y="282" text-anchor="middle">12.5 ms</text>
+  <text class="num" x="518" y="282" text-anchor="middle">1,547 ms</text>
+  <text class="ratio" x="518" y="305" text-anchor="middle">124x</text>
+  <text class="num" x="690" y="282" text-anchor="middle">861 ms</text>
+  <text class="ratio" x="690" y="305" text-anchor="middle">68.7x</text>
+  <text class="num" x="862" y="282" text-anchor="middle">230 ms</text>
+  <text class="ratio" x="862" y="305" text-anchor="middle">18.4x</text>
+  <text class="num" x="1034" y="282" text-anchor="middle">458 ms</text>
+  <text class="ratio" x="1034" y="305" text-anchor="middle">36.6x</text>
+
+  <text class="task" x="48" y="358">Type 100 characters</text>
+  <text class="num-hero" x="346" y="358" text-anchor="middle">15.8 ms</text>
+  <text class="num" x="518" y="358" text-anchor="middle">806 ms</text>
+  <text class="ratio" x="518" y="381" text-anchor="middle">51.1x</text>
+  <text class="num" x="690" y="358" text-anchor="middle">4,083 ms</text>
+  <text class="ratio" x="690" y="381" text-anchor="middle">259x</text>
+  <text class="num" x="862" y="358" text-anchor="middle">260 ms</text>
+  <text class="ratio" x="862" y="381" text-anchor="middle">16.5x</text>
+  <text class="num" x="1034" y="358" text-anchor="middle">85.2 ms</text>
+  <text class="ratio" x="1034" y="381" text-anchor="middle">5.4x</text>
+
+  <text class="task" x="48" y="434">Type 1,000 characters</text>
+  <text class="num-hero" x="346" y="434" text-anchor="middle">53.4 ms</text>
+  <text class="num" x="518" y="434" text-anchor="middle">5,528 ms</text>
+  <text class="ratio" x="518" y="457" text-anchor="middle">104x</text>
+  <text class="num" x="690" y="434" text-anchor="middle">40,915 ms</text>
+  <text class="ratio" x="690" y="457" text-anchor="middle">767x</text>
+  <text class="num" x="862" y="434" text-anchor="middle">264 ms</text>
+  <text class="ratio" x="862" y="457" text-anchor="middle">5.0x</text>
+  <text class="num" x="1034" y="434" text-anchor="middle">185 ms</text>
+  <text class="ratio" x="1034" y="457" text-anchor="middle">3.5x</text>
+
+  <text class="task" x="48" y="510">Shell command</text>
+  <text class="num-hero" x="346" y="510" text-anchor="middle">11.7 ms</text>
+  <text class="num" x="518" y="510" text-anchor="middle">285 ms</text>
+  <text class="ratio" x="518" y="533" text-anchor="middle">24.4x</text>
+  <text class="num" x="690" y="510" text-anchor="middle">55.9 ms</text>
+  <text class="ratio" x="690" y="533" text-anchor="middle">4.8x</text>
+  <text class="num" x="862" y="510" text-anchor="middle">72.6 ms</text>
+  <text class="ratio" x="862" y="533" text-anchor="middle">6.2x</text>
+  <text class="num" x="1034" y="510" text-anchor="middle">31.7 ms</text>
+  <text class="ratio" x="1034" y="533" text-anchor="middle">2.7x</text>
+
+  <text class="caption" x="32" y="596">Warm latency, p50, in milliseconds. Ratios compare each column with Modal optimized. Lower is better.</text>
+</svg>

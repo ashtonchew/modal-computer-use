@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1344" height="512" viewBox="0 0 1344 512" role="img" aria-labelledby="title desc">
+  <title id="title">Subprocess lifecycle ownership before and after event-loop isolation</title>
+  <desc id="desc">Before isolation, the Uvicorn request loop owns child startup, standard input and output pipes, waiting, and cleanup. After isolation, Uvicorn performs bounded admission and hands the command to a private SelectorEventLoop on a daemon thread. The operating-system child remains separate in both paths.</desc>
+  <defs>
+    <style>
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.3; }
+      .changed { fill: #1C231D; stroke: #91B89A; stroke-width: 1.5; }
+      .owner-before { fill: #1C231D; stroke: #657066; stroke-width: 1.3; }
+      .owner-after { fill: #233528; stroke: #91B89A; stroke-width: 1.5; }
+      .lifecycle-before { fill: none; stroke: #8A948B; stroke-width: 1.1; stroke-dasharray: 1 4; stroke-linecap: round; }
+      .lifecycle-after { fill: none; stroke: #91B89A; stroke-width: 1.1; stroke-dasharray: 1 4; stroke-linecap: round; }
+      .primary { fill: #233528; stroke: #91B89A; stroke-width: 1.5; }
+      .row, .row-opt, .label, .small, .step, .metric, .arrow-label, .arrow-label-opt { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .row { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
+      .row-opt { fill: #AACCB0; font-size: 17px; font-weight: 700; }
+      .label { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 12px; }
+      .step { fill: #B9C2B8; font-size: 12px; font-weight: 500; }
+      .metric { fill: #F1F4EF; font-size: 18px; font-weight: 700; }
+      .arrow-label { fill: #B9C2B8; font-size: 12px; font-weight: 500; }
+      .arrow-label-opt { fill: #AACCB0; font-size: 12px; font-weight: 500; }
+      .path { fill: none; stroke: #8A948B; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+      .path-opt { fill: none; stroke: #91B89A; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .path-step { fill: none; stroke-width: 1.3; stroke-linecap: round; }
+    </style>
+    <marker id="arrow-neutral" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#8A948B"/></marker>
+    <marker id="arrow-sage" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
+  </defs>
+  <rect class="bg" width="1344" height="512"/>
+
+  <text class="row" x="32" y="36">Before: lifecycle on the request loop</text>
+  <rect class="box" x="32" y="72" width="144" height="136" rx="8"/>
+  <text class="label" x="104" y="132" text-anchor="middle">Command</text>
+  <text class="label" x="104" y="153" text-anchor="middle">request</text>
+
+  <rect class="owner-before" x="224" y="56" width="608" height="168" rx="8"/>
+  <text class="label" x="336" y="123" text-anchor="middle">Uvicorn request loop</text>
+  <text class="small" x="336" y="153" text-anchor="middle">Owns HTTP + child lifecycle</text>
+  <rect class="lifecycle-before" x="456" y="72" width="352" height="136" rx="5"/>
+  <text class="step" x="632" y="100" text-anchor="middle">Start child</text>
+  <line class="path-step" x1="632" y1="108" x2="632" y2="124" stroke="#8A948B" marker-end="url(#arrow-neutral)"/>
+  <text class="step" x="632" y="145" text-anchor="middle">Feed stdin + drain pipes</text>
+  <line class="path-step" x1="632" y1="153" x2="632" y2="169" stroke="#8A948B" marker-end="url(#arrow-neutral)"/>
+  <text class="step" x="632" y="192" text-anchor="middle">Wait + cleanup</text>
+
+  <rect class="box" x="928" y="72" width="144" height="136" rx="8"/>
+  <text class="label" x="1000" y="132" text-anchor="middle">OS child</text>
+  <text class="label" x="1000" y="153" text-anchor="middle">process</text>
+  <rect class="box" x="1168" y="72" width="144" height="136" rx="8"/>
+  <text class="metric" x="1240" y="133" text-anchor="middle">220 ms p95</text>
+  <text class="small" x="1240" y="163" text-anchor="middle">55 ms median</text>
+
+  <line class="path" x1="176" y1="140" x2="224" y2="140" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="200" y="115" text-anchor="middle">Run</text>
+  <line class="path" x1="832" y1="140" x2="928" y2="140" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="880" y="115" text-anchor="middle">Manage child</text>
+  <line class="path" x1="1072" y1="140" x2="1168" y2="140" marker-end="url(#arrow-neutral)"/>
+  <text class="arrow-label" x="1120" y="115" text-anchor="middle">Return</text>
+
+  <text class="row-opt" x="32" y="276">After: lifecycle on a private loop</text>
+  <rect class="box" x="32" y="312" width="144" height="136" rx="8"/>
+  <text class="label" x="104" y="372" text-anchor="middle">Command</text>
+  <text class="label" x="104" y="393" text-anchor="middle">request</text>
+
+  <rect class="changed" x="224" y="312" width="144" height="136" rx="8"/>
+  <text class="label" x="296" y="352" text-anchor="middle">Uvicorn</text>
+  <text class="label" x="296" y="373" text-anchor="middle">request loop</text>
+  <text class="small" x="296" y="402" text-anchor="middle">Bounded admission</text>
+  <text class="small" x="296" y="422" text-anchor="middle">Await result</text>
+
+  <rect class="owner-after" x="512" y="288" width="320" height="184" rx="8"/>
+  <text class="label" x="672" y="314" text-anchor="middle">Private subprocess loop</text>
+  <text class="small" x="672" y="336" text-anchor="middle">SelectorEventLoop on daemon thread</text>
+  <rect class="lifecycle-after" x="528" y="348" width="288" height="108" rx="5"/>
+  <text class="step" x="672" y="371" text-anchor="middle">Start child</text>
+  <line class="path-step" x1="672" y1="379" x2="672" y2="392" stroke="#91B89A" marker-end="url(#arrow-sage)"/>
+  <text class="step" x="672" y="411" text-anchor="middle">Feed stdin + drain pipes</text>
+  <line class="path-step" x1="672" y1="419" x2="672" y2="432" stroke="#91B89A" marker-end="url(#arrow-sage)"/>
+  <text class="step" x="672" y="449" text-anchor="middle">Wait + cleanup</text>
+
+  <rect class="box" x="928" y="312" width="144" height="136" rx="8"/>
+  <text class="label" x="1000" y="372" text-anchor="middle">OS child</text>
+  <text class="label" x="1000" y="393" text-anchor="middle">process</text>
+  <rect class="primary" x="1168" y="312" width="144" height="136" rx="8"/>
+  <text class="metric" x="1240" y="373" text-anchor="middle">8.7 ms p95</text>
+  <text class="small" x="1240" y="403" text-anchor="middle">7.6 ms median</text>
+
+  <line class="path-opt" x1="176" y1="380" x2="224" y2="380" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="200" y="355" text-anchor="middle">Run</text>
+  <line class="path-opt" x1="368" y1="380" x2="512" y2="380" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="440" y="355" text-anchor="middle">Thread-safe handoff</text>
+  <line class="path-opt" x1="832" y1="380" x2="928" y2="380" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="880" y="355" text-anchor="middle">Manage child</text>
+  <line class="path-opt" x1="1072" y1="380" x2="1168" y2="380" marker-end="url(#arrow-sage)"/>
+  <text class="arrow-label-opt" x="1120" y="355" text-anchor="middle">Return</text>
+</svg>

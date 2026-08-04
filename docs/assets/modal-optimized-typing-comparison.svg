@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="248" viewBox="0 0 1152 248" role="img" aria-labelledby="title desc">
+  <title id="title">Typing 1,000 characters across three providers</title>
+  <desc id="desc">On a true linear scale, typing 1,000 characters takes 41 seconds on E2B and 5.5 seconds on Daytona, while the optimized Modal setup takes 0.05 seconds and its bar is a barely visible green sliver.</desc>
+  <defs>
+    <style>
+      .bg { fill: #101411; }
+      .bar { fill: #566058; }
+      .bar-hero { fill: #91B89A; }
+      .name, .val, .val-hero, .caption { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .name { fill: #F1F4EF; font-size: 18px; font-weight: 600; }
+      .val { fill: #E8EDE6; font-size: 17px; font-weight: 400; }
+      .val-hero { fill: #F1F4EF; font-size: 17px; font-weight: 700; }
+      .caption { fill: #B9C2B8; font-size: 12px; }
+    </style>
+  </defs>
+  <rect class="bg" width="1152" height="248"/>
+
+  <text class="name" x="32" y="63">E2B</text>
+  <rect class="bar" x="260" y="40" width="820" height="36" rx="4"/>
+  <text class="val" x="1092" y="64">41 s</text>
+
+  <text class="name" x="32" y="113">Daytona</text>
+  <rect class="bar" x="260" y="90" width="110" height="36" rx="4"/>
+  <text class="val" x="382" y="114">5.5 s</text>
+
+  <text class="name" x="32" y="163">Modal (optimized)</text>
+  <rect class="bar-hero" x="260" y="140" width="2" height="36" rx="1"/>
+  <text class="val-hero" x="274" y="164">0.05 s</text>
+
+  <text class="caption" x="32" y="220">Type 1,000 characters. Lower is better.</text>
+</svg>

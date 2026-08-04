@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="448" viewBox="0 0 1152 448" role="img" aria-labelledby="title desc">
+  <title id="title">Provision once, then borrow one connection for the trajectory</title>
+  <desc id="desc">An async owner creates a ready desktop and passes a compact session handle to a Modal Function. The Function borrows one connection around the repeated screen, model, action, and desktop loop.</desc>
+  <defs>
+    <style>
+      .bg { fill: #101411; }
+      .box { fill: #1C231D; stroke: #657066; stroke-width: 1.4; }
+      .setup { fill: #233528; stroke: #91B89A; stroke-width: 1.4; }
+      .label, .small, .arrow-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+      .label { fill: #F1F4EF; font-size: 14px; font-weight: 600; }
+      .small { fill: #B9C2B8; font-size: 12px; }
+      .arrow-label { fill: #B9C2B8; font-size: 12px; font-weight: 500; }
+      .path { fill: none; stroke: #91B89A; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#91B89A"/></marker>
+  </defs>
+  <rect class="bg" width="1152" height="448"/>
+
+  <rect class="setup" x="32" y="32" width="240" height="80" rx="8"/>
+  <text class="label" x="152" y="61" text-anchor="middle">Async owner</text>
+  <text class="small" x="152" y="85" text-anchor="middle">create() waits until ready</text>
+  <line class="path" x1="272" y1="72" x2="352" y2="72" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="312" y="54" text-anchor="middle">Create</text>
+
+  <rect class="setup" x="352" y="32" width="240" height="80" rx="8"/>
+  <text class="label" x="472" y="61" text-anchor="middle">session_handle()</text>
+  <text class="small" x="472" y="85" text-anchor="middle">Identity and reconnect policy</text>
+  <line class="path" x1="592" y1="72" x2="672" y2="72" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="632" y="54" text-anchor="middle">Pass</text>
+
+  <rect class="setup" x="672" y="32" width="448" height="80" rx="8"/>
+  <text class="label" x="896" y="61" text-anchor="middle">Modal Function</text>
+  <text class="small" x="896" y="85" text-anchor="middle">borrow_async() once for the whole trajectory</text>
+  <path class="path" d="M896 112 V176" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="916" y="146">Start repeated path</text>
+
+  <rect class="box" x="32" y="176" width="208" height="96" rx="8"/>
+  <text class="label" x="136" y="229" text-anchor="middle">Current screen</text>
+  <rect class="box" x="320" y="176" width="208" height="96" rx="8"/>
+  <text class="label" x="424" y="229" text-anchor="middle">Model</text>
+  <rect class="box" x="608" y="176" width="208" height="96" rx="8"/>
+  <text class="label" x="712" y="229" text-anchor="middle">Action request</text>
+  <rect class="box" x="896" y="176" width="224" height="96" rx="8"/>
+  <text class="label" x="1008" y="217" text-anchor="middle">Daemon and</text>
+  <text class="label" x="1008" y="238" text-anchor="middle">desktop</text>
+
+  <line class="path" x1="240" y1="224" x2="320" y2="224" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="280" y="202" text-anchor="middle">Screenshot</text>
+  <line class="path" x1="528" y1="224" x2="608" y2="224" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="568" y="202" text-anchor="middle">Choose</text>
+  <line class="path" x1="816" y1="224" x2="896" y2="224" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="856" y="202" text-anchor="middle">Execute</text>
+  <path class="path" d="M1008 272 V384 H136 V272" marker-end="url(#arrow)"/>
+  <text class="arrow-label" x="572" y="368" text-anchor="middle">Reuse the same connection, lease, and daemon state</text>
+</svg>

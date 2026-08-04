@@ -53,4 +53,6 @@ tracked artifact eligibility, and the [archive policy](archive/README.md) define
 - [Code of conduct](../CODE_OF_CONDUCT.md): follow the community behavior and reporting policy.
 - [Release checklist](release-checklist.md): verification, packaging, protected smoke tests, and
   release review.
+- [Drafts](drafts/README.md): write, preview, and export long-form articles built on tracked
+  benchmark evidence.
 - The repository [README](../README.md) is the short project introduction and first-run path.

@@ -43,6 +43,7 @@ bench-e2b = ["e2b-desktop==2.4.2"]
 bench-tzafon = ["tzafon==2.44.1"]
 bench-providers = ["daytona==0.175.0", "e2b-desktop==2.4.2", "tzafon==2.44.1"]
 dev = [
+  "markdown-it-py==4.2.0",
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "ruff>=0.6",
