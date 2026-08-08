@@ -49,11 +49,8 @@ class _Screenshots:
     async def full(self, **_kwargs: object) -> Screenshot:
         return _screenshot(binary=True)
 
-
-class _Client:
-    async def post_json(self, _path: str, *, json: dict[str, Any]) -> dict[str, Any]:
-        assert json["storage"] == "inline"
-        return _screenshot(binary=False).model_dump(mode="json")
+    async def _full_json_inline_compat(self, **_kwargs: object) -> Screenshot:
+        return _screenshot(binary=False)
 
 
 class _Actions:
@@ -77,7 +74,6 @@ class _Actions:
 
 
 class _Computer:
-    client = _Client()
     screenshots = _Screenshots()
     actions = _Actions()
 

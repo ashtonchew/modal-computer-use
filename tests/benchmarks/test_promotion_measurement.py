@@ -52,11 +52,17 @@ class _RecordingScreenshots:
     def __init__(self, order: list[str]) -> None:
         self.order = order
         self.full_calls: list[dict[str, Any]] = []
+        self.json_compat_calls: list[dict[str, Any]] = []
 
     async def full(self, **kwargs: Any) -> Screenshot:
         self.order.append(CANDIDATE_ARM)
         self.full_calls.append(kwargs)
         return _screenshot(binary=True)
+
+    async def _full_json_inline_compat(self, **kwargs: Any) -> Screenshot:
+        self.order.append(PRIOR_PUBLIC_ARM)
+        self.json_compat_calls.append(kwargs)
+        return _screenshot(binary=False)
 
 
 class _RecordingClient:
@@ -170,9 +176,10 @@ async def test_measurement_follows_interleaved_schedule_in_one_borrow() -> None:
 
     assert len(computer.screenshots.full_calls) == 31
     assert all(call["storage"] == "inline" for call in computer.screenshots.full_calls)
-    assert len(computer.client.post_calls) == 31
-    assert all(path == "/v1/screenshots/full" for path, _payload in computer.client.post_calls)
-    assert all(call[1]["storage"] == "inline" for call in computer.client.post_calls)
+    assert len(computer.screenshots.json_compat_calls) == 31
+    assert all(
+        "storage" not in call for call in computer.screenshots.json_compat_calls
+    )
 
     for arm, artifact in artifacts.items():
         validate_promotion_artifact(artifact, expected_arm=arm)
@@ -211,11 +218,10 @@ async def test_measurement_stops_after_first_possible_dispatch_failure() -> None
 async def test_measurement_reports_a_fixed_screenshot_failure_category() -> None:
     computer = _RecordingComputer()
 
-    async def fail_screenshot(_path: str, *, json: dict[str, Any]) -> dict[str, Any]:
-        del json
+    async def fail_screenshot(**_kwargs: Any) -> Screenshot:
         raise RuntimeError("secret response detail")
 
-    computer.client.post_json = fail_screenshot
+    computer.screenshots._full_json_inline_compat = fail_screenshot
 
     @asynccontextmanager
     async def borrow() -> Any:
@@ -242,8 +248,7 @@ async def test_measurement_reports_a_fixed_screenshot_failure_category() -> None
 async def test_measurement_retains_only_safe_http_status_from_daemon_failure() -> None:
     computer = _RecordingComputer()
 
-    async def fail_screenshot(_path: str, *, json: dict[str, Any]) -> dict[str, Any]:
-        del json
+    async def fail_screenshot(**_kwargs: Any) -> Screenshot:
         raise DaemonHTTPError(
             "secret daemon response",
             status_code=500,
@@ -251,7 +256,7 @@ async def test_measurement_retains_only_safe_http_status_from_daemon_failure() -
             details={"secret": "never retain"},
         )
 
-    computer.client.post_json = fail_screenshot
+    computer.screenshots._full_json_inline_compat = fail_screenshot
 
     @asynccontextmanager
     async def borrow() -> Any:
@@ -290,11 +295,10 @@ async def test_adapters_reject_the_wrong_screenshot_representation() -> None:
     with pytest.raises(ValueError, match="byte-backed"):
         await CandidateDefaultAdapter().screenshot(computer)
 
-    async def wrong_prior(_path: str, *, json: dict[str, Any]) -> dict[str, Any]:
-        del json
-        return _screenshot(binary=True).model_dump(mode="json")
+    async def wrong_prior(**_kwargs: Any) -> Screenshot:
+        return _screenshot(binary=True)
 
-    computer.client.post_json = wrong_prior
+    computer.screenshots._full_json_inline_compat = wrong_prior
     with pytest.raises(ValueError, match="JSON/base64-backed"):
         await PriorPublicCompatibilityAdapter().screenshot(computer)
 

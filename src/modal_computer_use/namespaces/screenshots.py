@@ -357,6 +357,28 @@ class ScreenshotsNamespace(Namespace):
 
 
 class AsyncScreenshotsNamespace(AsyncNamespace):
+    async def _full_json_inline_compat(
+        self,
+        *,
+        format: Literal["png", "jpeg", "webp"] = "png",
+        quality: int = 90,
+        scale: float = 1.0,
+        show_cursor: bool = False,
+        processing: Literal["daemon", "client", "auto"] = "auto",
+    ) -> Screenshot:
+        """Reproduce the pre-cutover JSON-inline path for internal comparisons."""
+        payload = _screenshot_payload(
+            format=format,
+            quality=quality,
+            scale=scale,
+            show_cursor=show_cursor,
+            processing=processing,
+            storage="inline",
+        )
+        return Screenshot.model_validate(
+            await self._client.post_json("/v1/screenshots/full", json=payload)
+        )
+
     async def full(
         self,
         format: Literal["png", "jpeg", "webp"] = "png",

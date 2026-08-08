@@ -46,7 +46,6 @@ class _PromotionMeasurementFailure(RuntimeError):
 
 
 class _PromotionComputer(Protocol):
-    client: Any
     screenshots: Any
     actions: Any
 
@@ -83,11 +82,9 @@ class PriorPublicCompatibilityAdapter:
     http2 = False
 
     async def screenshot(self, computer: _PromotionComputer) -> Screenshot:
-        payload = await computer.client.post_json(
-            "/v1/screenshots/full",
-            json=dict(_SCREENSHOT_PAYLOAD),
-        )
-        screenshot = Screenshot.model_validate(payload)
+        request = dict(_SCREENSHOT_PAYLOAD)
+        request.pop("storage")
+        screenshot = await computer.screenshots._full_json_inline_compat(**request)
         if screenshot.data_base64 is None or screenshot.bytes is not None:
             raise ValueError("prior screenshot was not JSON/base64-backed")
         return screenshot

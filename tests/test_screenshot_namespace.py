@@ -102,12 +102,11 @@ class _StructuredScreenshotClient:
                 "mutation": _mutation,
             }
         )
-        return {
+        response = {
             "format": "png",
             "width": 1024,
             "height": 768,
             "size_bytes": 11,
-            "artifact_uri": "artifact://screenshots/example.png",
             "sha256": (
                 "2c8648d103e3dd7ad87660da0f126a1443b6d21ac1bd3ec000c5e24e2373a90c"
             ),
@@ -119,6 +118,11 @@ class _StructuredScreenshotClient:
                 "image_height": 768,
             },
         }
+        if json["storage"] == "inline":
+            response["data_base64"] = "aW1hZ2UtYnl0ZXM="
+        else:
+            response["artifact_uri"] = "artifact://screenshots/example.png"
+        return response
 
     def post_bytes_with_headers(self, *args, **kwargs):
         raise AssertionError("non-inline screenshots must use the structured route")
@@ -190,6 +194,32 @@ async def test_async_full_inline_returns_semantic_screenshot_from_one_binary_req
     assert len(client.calls) == 1
     assert client.calls[0]["method"] == "post_bytes_with_headers"
     assert client.calls[0]["path"] == "/v1/screenshots/full/raw"
+
+
+@pytest.mark.asyncio
+async def test_async_internal_json_compat_uses_structured_inline_route() -> None:
+    client = _AsyncStructuredScreenshotClient()
+    namespace = AsyncScreenshotsNamespace(client)  # type: ignore[arg-type]
+
+    screenshot = await namespace._full_json_inline_compat(processing="daemon")
+
+    assert screenshot.data_base64 == "aW1hZ2UtYnl0ZXM="
+    assert screenshot.bytes is None
+    assert client.calls == [
+        {
+            "method": "post_json",
+            "path": "/v1/screenshots/full",
+            "json": {
+                "format": "png",
+                "quality": 90,
+                "scale": 1.0,
+                "show_cursor": False,
+                "processing": "daemon",
+                "storage": "inline",
+            },
+            "mutation": False,
+        }
+    ]
 
 
 @pytest.mark.parametrize("storage", ["artifact", "auto"])
