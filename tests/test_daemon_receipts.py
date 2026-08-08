@@ -1807,7 +1807,7 @@ def test_startup_recovers_in_progress_and_completed_receipt_survives_restart(tmp
 
 def test_release_and_expiry_seal_zero_operation_runs_and_require_new_run(tmp_path) -> None:
     app = _app(tmp_path)
-    app.state.lease_coordinator.ttl_seconds = 0.02
+    app.state.lease_coordinator.ttl_seconds = 0.2
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         _, lease = _acquire(client, "run-zero")
         busy = client.post("/v1/leases/acquire", json={"run_id": "run-zero"})
@@ -1824,7 +1824,7 @@ def test_release_and_expiry_seal_zero_operation_runs_and_require_new_run(tmp_pat
             json={"x": 3, "y": 4},
             headers=_operation_headers(new_lease, 0),
         )
-        time.sleep(0.04)
+        time.sleep(0.25)
         assert client.get("/v1/leases/status").json()["state"] == "expired"
         expired_same = client.post("/v1/leases/acquire", json={"run_id": "run-new"})
         after_expiry, after_expiry_lease = _acquire(client, "run-after-expiry")

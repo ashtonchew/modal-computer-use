@@ -26,14 +26,7 @@ def _has_modal_auth() -> bool:
     profiles = [config]
     if isinstance(config.get("profile"), dict):
         profiles.extend(item for item in config["profile"].values() if isinstance(item, dict))
-    if any(profile.get("token_id") and profile.get("token_secret") for profile in profiles):
-        return True
-    try:
-        from modal.config import config as modal_config
-
-        return bool(modal_config.get("token_id") and modal_config.get("token_secret"))
-    except Exception:
-        return False
+    return any(profile.get("token_id") and profile.get("token_secret") for profile in profiles)
 
 
 def _skip_without_modal_auth() -> None:

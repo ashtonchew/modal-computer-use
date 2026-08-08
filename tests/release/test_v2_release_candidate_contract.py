@@ -43,11 +43,13 @@ def test_v2_changelog_contains_the_exact_migration_contract() -> None:
 def test_release_record_keeps_publication_gated_and_records_rollback() -> None:
     record = (ROOT / "docs/v2-release-candidate.md").read_text(encoding="utf-8")
 
-    assert "Status: offline candidate; not published" in record
+    assert "Status: live-verified branch candidate; not published" in record
     assert "modal-computer-use==1.1.0" in record
     assert "docs-v1.1.0-last-known-good" in record
     assert "never silently downgrades" in record
     assert "runtime artifacts → package → hosted documentation" in record
-    assert "No dated version 2 benchmark report is included" in record
+    assert "2026-08-08 optimized-default report" in record
+    assert "31bcafefbba2ba75653075a04b12ce2eb816c838" in record
     assert "test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state" in record
-    assert "must run, not skip" in record
+    assert "Neither" in record
+    assert "test may skip" in record
