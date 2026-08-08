@@ -14,6 +14,55 @@ from modal_computer_use.models import Region, Screenshot, ScreenshotOptions
 
 router = APIRouter(prefix="/v1/screenshots")
 
+_RAW_SCREENSHOT_RESPONSE = {
+    "content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}},
+    "headers": {
+        "x-computer-use-width": {
+            "required": True,
+            "schema": {"type": "integer", "minimum": 1},
+        },
+        "x-computer-use-height": {
+            "required": True,
+            "schema": {"type": "integer", "minimum": 1},
+        },
+        "x-computer-use-size-bytes": {
+            "required": True,
+            "schema": {"type": "integer", "minimum": 0},
+        },
+        "x-computer-use-sha256": {
+            "required": True,
+            "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        },
+        "x-computer-use-captured-at": {
+            "required": True,
+            "schema": {"type": "string", "format": "date-time"},
+        },
+        "x-computer-use-coordinate-space": {
+            "description": "JSON-encoded coordinate-space metadata.",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        "x-computer-use-cursor-visible": {
+            "required": True,
+            "schema": {"type": "boolean"},
+        },
+        "x-computer-use-cursor-position": {
+            "description": "JSON-encoded cursor point, or null when it was not captured.",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        "x-computer-use-timing-ms": {
+            "description": "JSON-encoded daemon timing metadata.",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        "x-computer-use-capture-backend": {
+            "required": True,
+            "schema": {"type": "string"},
+        },
+    },
+}
+
 
 def scaled_dimension(value: int, scale: float) -> int:
     return max(1, round(value * scale))
@@ -44,6 +93,11 @@ def enforce_screenshot_options_pixels(
 
 
 def _screenshot_headers(shot) -> dict[str, str]:
+    cursor_position = (
+        shot.cursor_position.model_dump(mode="json")
+        if shot.cursor_position is not None
+        else None
+    )
     return {
         "x-computer-use-width": str(shot.width),
         "x-computer-use-height": str(shot.height),
@@ -53,6 +107,11 @@ def _screenshot_headers(shot) -> dict[str, str]:
         "x-computer-use-coordinate-space": shot.coordinate_space.model_dump_json(),
         "x-computer-use-timing-ms": json.dumps(shot.timings_ms, separators=(",", ":")),
         "x-computer-use-capture-backend": shot.capture_backend or "unknown",
+        "x-computer-use-cursor-visible": str(shot.cursor_visible).lower(),
+        "x-computer-use-cursor-position": json.dumps(
+            cursor_position,
+            separators=(",", ":"),
+        ),
     }
 
 
@@ -91,7 +150,7 @@ async def full(payload: ScreenshotRequest, request: Request) -> Screenshot:
 
 @router.post(
     "/full/raw",
-    responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
+    responses={200: _RAW_SCREENSHOT_RESPONSE},
 )
 async def full_raw(payload: ScreenshotRequest, request: Request) -> Response:
     options = _raw_screenshot_options(payload)
@@ -103,7 +162,11 @@ async def full_raw(payload: ScreenshotRequest, request: Request) -> Response:
     )
 
     async def operation():
-        return await request.app.state.backend.screenshot_bytes(options, prefer_native_png=True)
+        return await request.app.state.backend.screenshot_bytes(
+            options,
+            include_cursor_position=True,
+            prefer_native_png=True,
+        )
 
     shot = await run_screenshot_capture(request, operation)
     return Response(
@@ -141,7 +204,7 @@ async def region(payload: ScreenshotRequest, request: Request) -> Screenshot:
 
 @router.post(
     "/region/raw",
-    responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
+    responses={200: _RAW_SCREENSHOT_RESPONSE},
 )
 async def region_raw(payload: ScreenshotRequest, request: Request) -> Response:
     if payload.region is None:
@@ -202,7 +265,7 @@ async def zoom(payload: ZoomScreenshotRequest, request: Request) -> Screenshot:
 
 @router.post(
     "/zoom/raw",
-    responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
+    responses={200: _RAW_SCREENSHOT_RESPONSE},
 )
 async def zoom_raw(payload: ZoomScreenshotRequest, request: Request) -> Response:
     if payload.storage != "inline":

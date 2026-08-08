@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Response
 from modal_computer_use.daemon.routes.execution import run_input_action
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
+    ready_input_lock,
     validate_collection_size,
     validate_keys,
     validate_optional_point,
@@ -176,7 +177,8 @@ async def up(payload: MouseButtonRequest, request: Request, response: Response) 
 @router.get("/position")
 async def position(request: Request, response: Response) -> Point:
     await ensure_desktop_ready(request)
-    backend = request.app.state.backend
-    point = await backend.mouse_position()
-    _report_input_backend(response, backend.input_backend)
+    async with ready_input_lock(request):
+        backend = request.app.state.backend
+        point = await backend.mouse_position()
+        _report_input_backend(response, backend.input_backend)
     return point

@@ -39,7 +39,7 @@ async def version(request: Request, response: Response) -> VersionInfo:
     return VersionInfo(
         daemon_version=__version__,
         sdk_min_version="1.1.0",
-        sdk_max_version="1.x",
+        sdk_max_version="2.x",
         image_profile=request.app.state.settings.image_profile,
         modal_computer_use_package=__version__,
     )
@@ -69,6 +69,7 @@ async def capabilities(request: Request, response: Response) -> Capabilities:
             "processes",
             "session",
             "debug",
+            "screenshot-binary-metadata-v1",
             "trajectory-leases-v1",
             "trajectory-operation-receipts-v1",
         ],

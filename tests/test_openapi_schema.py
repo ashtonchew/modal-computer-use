@@ -35,3 +35,21 @@ def test_process_restart_openapi_documents_unknown_process() -> None:
 
     responses = schema["paths"]["/v1/processes/{name}/restart"]["post"]["responses"]
     assert responses["404"]["description"] == "Unknown process"
+
+
+def test_raw_full_screenshot_openapi_documents_binary_metadata() -> None:
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "docs" / "openapi.json").read_text(encoding="utf-8"))
+
+    response = schema["paths"]["/v1/screenshots/full/raw"]["post"]["responses"]["200"]
+    assert set(response["content"]) >= {"image/png", "image/jpeg", "image/webp"}
+    assert set(response["headers"]) >= {
+        "x-computer-use-width",
+        "x-computer-use-height",
+        "x-computer-use-size-bytes",
+        "x-computer-use-sha256",
+        "x-computer-use-captured-at",
+        "x-computer-use-coordinate-space",
+        "x-computer-use-cursor-visible",
+        "x-computer-use-cursor-position",
+    }

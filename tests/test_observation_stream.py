@@ -1716,6 +1716,8 @@ def test_observation_stream_can_skip_full_frame_fallback_after_unchanged_dirty_r
     assert second["frame_poll_skipped_reason"] == "dirty_region_confirmation_unchanged"
     assert second["frame_poll_deadline_reason"] is None
     assert second["frame_poll_budget_ms"] is None
+    assert second["change_detected"] is False
+    assert second["change_timeout_reached"] is False
     assert second["change_stage_timing_ms"]["frame_poll_ms"] == 0
     assert second["change_stage_timing_ms"]["frame_poll_capture_ms"] == 0
 
@@ -2797,6 +2799,38 @@ def test_observation_client_experimental_visual_change_returns_same_contract() -
     ]
     assert transport.change_payload["continue_on_error"] is True
     assert transport.change_payload["change_detection"] == "auto_region"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            {"unchanged": False, "change_detected": True, "change_timeout_reached": False},
+            (True, False, False),
+        ),
+        (
+            {"unchanged": True, "change_detected": False, "change_timeout_reached": False},
+            (False, False, True),
+        ),
+        (
+            {"unchanged": True, "change_detected": False, "change_timeout_reached": True},
+            (False, True, True),
+        ),
+    ],
+)
+def test_experimental_visual_change_result_keeps_outcomes_distinct(
+    metadata: dict[str, bool],
+    expected: tuple[bool, bool, bool],
+) -> None:
+    result = ActionObservationResult(
+        frame=ObservationFrame(payload=None, metadata=metadata),
+    )
+
+    assert (
+        result.change_detected,
+        result.change_timeout_reached,
+        result.frame.unchanged,
+    ) == expected
 
 
 def test_observation_client_act_and_observe_delegates_once(monkeypatch) -> None:

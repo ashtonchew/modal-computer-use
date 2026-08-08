@@ -1,22 +1,29 @@
-"""Canonical Anthropic Messages API computer-use loop.
+"""Run an Anthropic computer-use loop in a placed Modal Function.
 
 Install the provider extras with ``uv sync --extra modal --extra anthropic``
-and set ``ANTHROPIC_API_KEY`` before running this example. The loop keeps the
-provider-owned hosted computer tool and adds an application-owned batch tool
-for predictable action sequences.
+and create the ``anthropic-api-key`` Modal Secret before you deploy this file.
+The async owner creates one desktop. It sends a versioned handle to a Function
+in the same exact region. That Function borrows the desktop once for the full
+model loop. Provider calls stay in this application-owned example.
+
+The constants below are application choices, not SDK defaults. Review the
+region, environment, resources, image, browser, timeouts, and capacity before
+you deploy. Warm capacity is off.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
+import uuid
 from time import monotonic
 from typing import Any
 
 from modal_computer_use import (
+    AsyncComputerSandbox,
     BrowserConfig,
     ComputerConfig,
-    ComputerSandbox,
+    ComputerSessionHandle,
     ResourceConfig,
 )
 from modal_computer_use.adapters.anthropic import (
@@ -41,6 +48,30 @@ DEFAULT_MAX_TRAJECTORY_ACTIONS = 200
 DEFAULT_MAX_BATCH_ACTIONS = 50
 DEFAULT_MAX_ELAPSED_SECONDS = 300.0
 DEFAULT_MAX_ACTION_TIMEOUT_MS = 30_000
+APP_NAME = "anthropic-computer-use"
+MODAL_ENVIRONMENT = "main"
+MODAL_REGION = "us-west-2"  # Replace with one measured exact Modal region selector.
+ANTHROPIC_CREDENTIAL_REFERENCE = "anthropic-api-key"
+FUNCTION_CPU = 1.0
+FUNCTION_MEMORY_MIB = 2048
+FUNCTION_PYTHON_VERSION = "3.12"
+FUNCTION_PACKAGE_SPEC = "modal-computer-use[modal,anthropic]"
+FUNCTION_TIMEOUT_SECONDS = 900
+FUNCTION_RETRIES = 0
+FUNCTION_MIN_CONTAINERS = 0
+FUNCTION_MAX_CONTAINERS = 4
+SANDBOX_CPU = 1.0
+SANDBOX_MEMORY_MIB = 2048
+SANDBOX_RESOURCE_PROFILE = "browser"
+SANDBOX_IMAGE_SOURCE = "inline"
+SANDBOX_BROWSER_KIND = "chromium"
+SANDBOX_BROWSER_PREWARM = True
+SANDBOX_BROWSER_GPU_MODE = "off"
+SANDBOX_RESOLUTION = (1280, 800)
+SANDBOX_TIMEOUT_SECONDS = 900
+SANDBOX_IDLE_TIMEOUT_SECONDS = None
+SANDBOX_READINESS_TIMEOUT_SECONDS = 120
+SANDBOX_WARM_POOL_CAPACITY = 0
 
 _REVIEWED_BATCH_TOOL_VERSIONS = frozenset(
     {
@@ -71,7 +102,11 @@ _ENHANCED_ACTIONS = (
 )
 
 
-def run_anthropic_computer_loop(
+class _AnthropicMutationOutcomeUnknownError(RuntimeError):
+    """Stop the loop when a desktop mutation might already have been dispatched."""
+
+
+async def run_anthropic_computer_loop(
     *,
     client: Any,
     computer: Any,
@@ -125,7 +160,7 @@ def run_anthropic_computer_loop(
     trajectory_action_count = 0
     for turn in range(max_turns):
         _check_deadline(started_at, max_elapsed_seconds)
-        response = client.beta.messages.create(
+        response = await client.beta.messages.create(
             model=model,
             max_tokens=4096,
             betas=[version.beta_header],
@@ -167,7 +202,7 @@ def run_anthropic_computer_loop(
                         actions = []
                         batch_result = _batch_preflight_failure(actions, failed_index=0)
                     else:
-                        batch_result = _execute_computer_batch(
+                        batch_result = await _execute_computer_batch(
                             adapter=adapter,
                             actions=actions,
                             max_batch_actions=max_batch_actions,
@@ -187,15 +222,35 @@ def run_anthropic_computer_loop(
                         max_elapsed_seconds=max_elapsed_seconds,
                         max_action_timeout_ms=max_action_timeout_ms,
                     )
-                    action_result = adapter.apply(action)
+                    normalized_action = parse_action(adapter.normalize(action))
+                    try:
+                        action_result = await computer.actions.apply(
+                            normalized_action,
+                            source="anthropic-adapter",
+                        )
+                    except Exception as exc:
+                        raise _AnthropicMutationOutcomeUnknownError(
+                            f"Anthropic computer action failed: {type(exc).__name__}"
+                        ) from None
+                    screenshot = None
+                    if action_result.ok and action.get("action") != "cursor_position":
+                        try:
+                            screenshot = await computer.screenshots.full()
+                        except Exception as exc:
+                            raise _AnthropicMutationOutcomeUnknownError(
+                                "Anthropic computer screenshot failed: "
+                                f"{type(exc).__name__}"
+                            ) from None
                     tool_result = _hosted_computer_tool_result(
-                        computer=computer,
                         tool_use_id=tool_use.id,
                         action=action,
                         action_result=action_result,
+                        screenshot=screenshot,
                     )
                 else:
                     raise ValueError("unsupported Anthropic client tool")
+            except _AnthropicMutationOutcomeUnknownError:
+                raise
             except Exception as exc:
                 tool_result = anthropic_tool_result(
                     tool_use_id=tool_use.id,
@@ -352,7 +407,7 @@ def _computer_batch_tool_definition(
     }
 
 
-def _execute_computer_batch(
+async def _execute_computer_batch(
     *,
     adapter: AnthropicAdapter,
     actions: list[Any],
@@ -384,14 +439,32 @@ def _execute_computer_batch(
             max_action_timeout_ms=max_action_timeout_ms,
             expanded_action_count=expanded_action_count,
         )
-        return adapter.apply_many(
-            provider_actions,
-            continue_on_error=False,
-            screenshot_after=True,
-            max_action_timeout_ms=remaining_batch_timeout_ms,
-        )
+        normalized_actions = [
+            parse_action(adapter.normalize(action)) for action in provider_actions
+        ]
     except Exception:
         return _batch_preflight_failure(actions, failed_index=0)
+    try:
+        batch_result = await adapter.computer.actions.run(
+            normalized_actions,
+            continue_on_error=False,
+            screenshot_after=False,
+            source="anthropic-adapter",
+            max_action_timeout_ms=remaining_batch_timeout_ms,
+        )
+    except Exception as exc:
+        raise _AnthropicMutationOutcomeUnknownError(
+            f"Anthropic computer action batch failed: {type(exc).__name__}"
+        ) from None
+    if not batch_result.ok:
+        return batch_result
+    try:
+        screenshot = await adapter.computer.screenshots.full()
+    except Exception as exc:
+        raise _AnthropicMutationOutcomeUnknownError(
+            f"Anthropic computer batch screenshot failed: {type(exc).__name__}"
+        ) from None
+    return batch_result.model_copy(update={"screenshot": screenshot})
 
 
 def _computer_batch_tool_result(
@@ -556,10 +629,10 @@ def _remaining_request_timeout_seconds(
 
 def _hosted_computer_tool_result(
     *,
-    computer: Any,
     tool_use_id: str,
     action: dict[str, Any],
     action_result: ActionResult,
+    screenshot: Screenshot | None,
 ) -> dict[str, Any]:
     if not action_result.ok:
         return anthropic_tool_result(
@@ -573,10 +646,11 @@ def _hosted_computer_tool_result(
             tool_use_id=tool_use_id,
             result=ActionResult(ok=True, message=f"X={x},Y={y}"),
         )
-    if action.get("action") in {"screenshot", "zoom"}:
-        screenshot = Screenshot.model_validate(action_result.output)
-    else:
-        screenshot = computer.screenshots.full()
+    if screenshot is None:
+        return anthropic_tool_result(
+            tool_use_id=tool_use_id,
+            result=ActionResult(ok=False, message="computer screenshot failed"),
+        )
     return anthropic_tool_result(tool_use_id=tool_use_id, result=screenshot)
 
 
@@ -697,31 +771,162 @@ def _check_deadline(started_at: float, max_elapsed_seconds: float) -> None:
         raise RuntimeError(f"Anthropic computer loop exceeded {max_elapsed_seconds:g} seconds")
 
 
-def main() -> None:
-    from anthropic import Anthropic
-
-    width, height = 1280, 800
-    model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
-    config = ComputerConfig(
-        desktop={"resolution": (width, height)},
-        resources=ResourceConfig(profile="browser"),
-        browser=BrowserConfig(kind="chromium", prewarm=True),
-    )
-    with ComputerSandbox.create(config=config, wait=True) as computer:
-        computer.ensure_browser_ready(config)
-        response = run_anthropic_computer_loop(
-            client=Anthropic(),
+async def run_anthropic_trajectory_body(
+    handle: ComputerSessionHandle,
+    task: str,
+    *,
+    run_id: str,
+    client: Any,
+    function_region: str = MODAL_REGION,
+    model: str = DEFAULT_MODEL,
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> Any:
+    """Borrow one desktop once, then run the complete application model loop."""
+    async with handle.borrow_async(run_id=run_id, function_region=function_region) as computer:
+        return await run_anthropic_computer_loop(
+            client=client,
             computer=computer,
+            task=task,
             model=model,
-            display_width_px=width,
-            display_height_px=height,
+            display_width_px=SANDBOX_RESOLUTION[0],
+            display_height_px=SANDBOX_RESOLUTION[1],
+            max_turns=max_turns,
+        )
+
+
+def sandbox_configuration() -> ComputerConfig:
+    """Build the explicit Sandbox configuration for this example."""
+    return ComputerConfig(
+        ingress="attested-tunnel",
+        desktop={"resolution": SANDBOX_RESOLUTION},
+        runtime={
+            "modal_environment": MODAL_ENVIRONMENT,
+            "modal_region": MODAL_REGION,
+            "timeout_seconds": SANDBOX_TIMEOUT_SECONDS,
+            "idle_timeout_seconds": SANDBOX_IDLE_TIMEOUT_SECONDS,
+            "readiness_timeout_seconds": SANDBOX_READINESS_TIMEOUT_SECONDS,
+        },
+        resources=ResourceConfig(
+            profile=SANDBOX_RESOURCE_PROFILE,
+            cpu=SANDBOX_CPU,
+            memory_mib=SANDBOX_MEMORY_MIB,
+        ),
+        image={"source": SANDBOX_IMAGE_SOURCE},
+        browser=BrowserConfig(
+            kind=SANDBOX_BROWSER_KIND,
+            prewarm=SANDBOX_BROWSER_PREWARM,
+            gpu_mode=SANDBOX_BROWSER_GPU_MODE,
+        ),
+    )
+
+
+def resolved_trajectory_configuration() -> dict[str, Any]:
+    """Return the requested placement and cost choices without secrets."""
+    resolved = sandbox_configuration().resolved_cost_and_placement()
+    resolved["function"] = {
+        "cpu": FUNCTION_CPU,
+        "memory_mib": FUNCTION_MEMORY_MIB,
+        "image": {
+            "base": "debian_slim",
+            "python_version": FUNCTION_PYTHON_VERSION,
+            "package": FUNCTION_PACKAGE_SPEC,
+        },
+        "timeout_seconds": FUNCTION_TIMEOUT_SECONDS,
+        "retries": FUNCTION_RETRIES,
+        "min_containers": FUNCTION_MIN_CONTAINERS,
+        "max_containers": FUNCTION_MAX_CONTAINERS,
+    }
+    resolved["warm_capacity"] = {
+        "function_min_containers": FUNCTION_MIN_CONTAINERS,
+        "sandbox_pool_capacity": SANDBOX_WARM_POOL_CAPACITY,
+    }
+    return resolved
+
+
+def _response_text(response: Any) -> str:
+    text = "\n".join(
+        str(block.text)
+        for block in response.content
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+    )
+    return text or "Anthropic trajectory ended without text output"
+
+
+try:
+    import modal
+except ImportError:
+    modal = None
+    app = None
+    run_anthropic_trajectory = None
+else:
+    app = modal.App(APP_NAME)
+    function_image = modal.Image.debian_slim(
+        python_version=FUNCTION_PYTHON_VERSION
+    ).pip_install(FUNCTION_PACKAGE_SPEC)
+
+    @app.function(
+        image=function_image,
+        region=MODAL_REGION,
+        cpu=FUNCTION_CPU,
+        memory=FUNCTION_MEMORY_MIB,
+        timeout=FUNCTION_TIMEOUT_SECONDS,
+        retries=FUNCTION_RETRIES,
+        min_containers=FUNCTION_MIN_CONTAINERS,
+        max_containers=FUNCTION_MAX_CONTAINERS,
+        secrets=[
+            modal.Secret.from_name(
+                ANTHROPIC_CREDENTIAL_REFERENCE,
+                required_keys=["ANTHROPIC_API_KEY"],
+            )
+        ],
+    )
+    async def run_anthropic_trajectory(
+        handle: ComputerSessionHandle,
+        task: str,
+        model: str,
+        run_id: str,
+    ) -> str:
+        from anthropic import AsyncAnthropic
+
+        response = await run_anthropic_trajectory_body(
+            handle,
+            task,
+            model=model,
+            run_id=run_id,
+            client=AsyncAnthropic(),
+        )
+        return _response_text(response)
+
+
+async def run_example(*, task: str, model: str = DEFAULT_MODEL) -> str:
+    """Create one desktop and pass its versioned handle to the placed Function."""
+    if modal is None or app is None or run_anthropic_trajectory is None:
+        raise ImportError("Modal is required to run this example")
+    deployed = modal.Function.from_name(
+        APP_NAME,
+        "run_anthropic_trajectory",
+        environment_name=MODAL_ENVIRONMENT,
+    )
+    async with AsyncComputerSandbox.create(
+        config=sandbox_configuration(),
+        app_name=APP_NAME,
+    ) as owner:
+        handle = owner.session_handle()
+        run_id = f"anthropic_trajectory_{uuid.uuid4().hex}"
+        return await deployed.remote.aio(handle, task, model, run_id)
+
+
+def main() -> None:
+    output_text = asyncio.run(
+        run_example(
             task=(
                 "Open https://example.com in the browser. Verify that the page title is "
                 "'Example Domain', then report the title and stop. Do not sign in, "
                 "submit forms, or change data."
-            ),
+            )
         )
-        print(response.content)
+    )
+    print(output_text)
 
 
 if __name__ == "__main__":

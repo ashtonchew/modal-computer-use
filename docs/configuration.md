@@ -18,6 +18,48 @@ The process environment therefore overrides daemon defaults. There is no daemon 
 Treat bearer tokens, VNC passwords, browser startup URLs, daemon URLs, and noVNC URLs as secrets.
 Do not commit them, put them in shared shell history, or include them in logs.
 
+The SDK has one primary placed trajectory. It does not provide `optimized=True`, a performance
+profile, or a hidden variable that switches between two defaults. Placement and every cost-bearing
+choice remain explicit. Warm capacity is off unless the application sets a positive Function
+minimum or configures a Sandbox warm pool.
+
+## Inspect cost and placement choices
+
+Set the Sandbox environment, exact region, CPU, memory, image, browser, and timeouts in
+`ComputerConfig`. No SDK default selects a region, CPU, or memory value. Measure a region for your
+workload and choose resources for its capacity and cost.
+
+```python
+from modal_computer_use import ComputerConfig
+
+config = ComputerConfig(
+    runtime={
+        "modal_environment": "main",
+        "modal_region": "us-west-2",
+        "timeout_seconds": 900,
+        "idle_timeout_seconds": None,
+        "readiness_timeout_seconds": 120,
+    },
+    resources={"profile": "browser", "cpu": 1.0, "memory_mib": 2048},
+    image={"source": "inline"},
+    browser={"kind": "chromium", "prewarm": False, "gpu_mode": "off"},
+)
+
+print(config.resolved_cost_and_placement())
+```
+
+`resolved_cost_and_placement()` returns only placement and cost choices. It does not include
+browser URLs, launch arguments, or profile paths. It also omits typed text, clipboard text,
+screenshot bytes, artifact bytes, daemon URLs, and bearer tokens because those values do not
+belong in this configuration report. Configuration validation errors hide rejected input values.
+
+This report covers the Sandbox. A placed Modal Function has separate cost controls. Set and inspect
+Function CPU, memory, image, retries, timeout, and container limits in the application that defines
+the Function. The executable
+[`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example keeps
+the Function and Sandbox choices together and uses the same exact region for both. Its
+`us-west-2` value is an application example, not an SDK default.
+
 ## Public SDK configuration
 
 All models reject unknown keys. Nested models can be supplied as model instances or dictionaries.
@@ -56,9 +98,10 @@ that `budgets.max_idle_seconds` is a separate daemon-side budget described below
 | `image.revision` | unset | For `source="named"`, required and exactly 40 lowercase hexadecimal Git characters. Invalid for inline images. |
 | `image.environment_name` | unset | Optional non-empty Modal environment for named-image and app lookup. Invalid for inline images. |
 
-Named images do not support `resources.profile="custom"`, require XFCE, and require an explicit
-`browser.kind` plus `browser.prewarm=true` for the `browser` and `browser-gpu` profiles. Passing an
-explicit `image=` to `ComputerSandbox.create` bypasses the `image.source` selection step.
+Named images do not support `resources.profile="custom"` and require XFCE. The `browser` and
+`browser-gpu` profiles also require an explicit `browser.kind`. `browser.prewarm` remains an
+explicit application choice and may be `false`. Passing an explicit `image=` to
+`ComputerSandbox.create` bypasses the `image.source` selection step.
 
 `resources.cpu` and `resources.memory_mib` are requests, not caps. Modal charges whichever is
 higher, the request or the actual usage, so a request above real usage costs the difference

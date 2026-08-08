@@ -44,13 +44,21 @@ async def run(payload: CommandRunRequest, request: Request) -> ActionResult:
             )
             if secret
         )
-        return ActionResult(
+        sanitized_result = ActionResult(
             ok=result.ok,
             message=_sanitize_command_text(result.message, known_secrets)
             if result.message is not None
             else None,
             elapsed_ms=result.elapsed_ms,
             output=_sanitize_command_output(result.output, known_secrets),
+        )
+        if sanitized_result.ok:
+            return sanitized_result
+        return sanitized_result.model_copy(
+            update={
+                "message": "command failed",
+                "output": _command_failure_metadata(sanitized_result.output),
+            }
         )
 
     result = await run_input_action(
@@ -80,3 +88,12 @@ def _sanitize_command_output(value: Any, known_secrets: tuple[str, ...]) -> Any:
     if isinstance(value, list):
         return [_sanitize_command_output(item, known_secrets) for item in value]
     return value
+
+
+def _command_failure_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    returncode = value.get("returncode")
+    if not isinstance(returncode, int) or isinstance(returncode, bool):
+        return {}
+    return {"returncode": returncode}

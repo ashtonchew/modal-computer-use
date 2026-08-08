@@ -2916,6 +2916,7 @@
           "bytes": {
             "anyOf": [
               {
+                "contentEncoding": "base64",
                 "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
@@ -3932,7 +3933,7 @@
   },
   "info": {
     "title": "modal-computer-use daemon",
-    "version": "1.1.0"
+    "version": "2.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -4062,6 +4063,7 @@
     },
     "/v1/actions/run/observe-change/raw-screenshot": {
       "post": {
+        "description": "Runs one ordered action batch. Then it returns the first frame whose full-resolution pixels differ from the pre-action baseline. XDamage can wake the verifier, and pixel polling remains the fallback. This result does not establish application readiness, visual stability, or task completion.",
         "operationId": "run_observe_change_raw_screenshot_v1_actions_run_observe_change_raw_screenshot_post",
         "parameters": [
           {
@@ -4114,7 +4116,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Run Observe Change Raw Screenshot"
+        "summary": "Experimental: run actions and observe the first visual change"
       }
     },
     "/v1/actions/run/raw-screenshot": {
@@ -5822,7 +5824,77 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -5899,7 +5971,77 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -5976,7 +6118,77 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {

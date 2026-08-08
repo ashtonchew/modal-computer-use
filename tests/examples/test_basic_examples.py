@@ -171,7 +171,8 @@ def test_async_modal_owner_uses_one_owned_context(monkeypatch, capsys) -> None:
         example,
         "AsyncComputerSandbox",
         SimpleNamespace(
-            create=lambda **kwargs: events.append(("create", kwargs)) or FakeContext()
+            create_unplaced=lambda **kwargs: events.append(("create", kwargs))
+            or FakeContext()
         ),
     )
 

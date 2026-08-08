@@ -33,7 +33,7 @@ After the source and protected Modal checks pass, create the annotated tag. Chec
 a clean checkout, and validate the release candidate:
 
 ```bash
-uv run python scripts/check_release_candidate.py --tag v1.1.0
+uv run python scripts/check_release_candidate.py --tag v2.0.0
 ```
 
 Build the wheel and source distribution once from that checkout. Do not rebuild after you upload
@@ -120,7 +120,7 @@ Confirm that:
   tests.
 - noVNC is off by default, and logs and examples do not expose tokens, noVNC URLs, typed or
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
-- Immediately after the repository becomes public and before publishing `v1.1.0`, GitHub private
+- Immediately after the repository becomes public and before publishing `v2.0.0`, GitHub private
   vulnerability reporting is enabled. Verify the API and signed-out form without submitting a
   fake report.
 
@@ -178,7 +178,7 @@ Before you change repository visibility or upload artifacts, confirm that:
 - `CHANGELOG.md` has a dated entry for that version and no release change remains only under
   `Unreleased`.
 - The release tag points to the exact verified source commit and uses the repository's version-tag
-  convention. `v1.1.0` uses an annotated unsigned tag.
+  convention. `v2.0.0` uses an annotated unsigned tag.
 - The wheel and source distribution were built once from that clean tagged commit. `SHA256SUMS`
   verifies both files.
 - The checked-in OpenAPI schema has no unexplained regeneration diff.
@@ -201,7 +201,7 @@ Publish one build in this order:
    uv run python scripts/verify_python_index_release.py \
      --index-url https://test.pypi.org \
      --project modal-computer-use \
-     --version 1.1.0 \
+     --version 2.0.0 \
      --distributions dist/release
    ```
 
@@ -214,7 +214,7 @@ Publish one build in this order:
    uv run python scripts/verify_python_index_release.py \
      --index-url https://pypi.org \
      --project modal-computer-use \
-     --version 1.1.0 \
+     --version 2.0.0 \
      --distributions dist/release
    ```
 

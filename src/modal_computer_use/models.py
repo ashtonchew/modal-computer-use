@@ -120,6 +120,12 @@ class ScreenshotOptions(StrictBaseModel):
 
 
 class Screenshot(StrictBaseModel):
+    model_config = ConfigDict(
+        hide_input_in_errors=True,
+        ser_json_bytes="base64",
+        val_json_bytes="base64",
+    )
+
     format: ImageFormat
     width: int = Field(gt=0)
     height: int = Field(gt=0)

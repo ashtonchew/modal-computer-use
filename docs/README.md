@@ -20,6 +20,8 @@ procedures, and concise pointers for public guides.
 ## Use the SDK
 
 - [API](api.md): synchronous and native-async Python surfaces, ownership, and daemon behavior.
+- [Version 2 migration](migration-v2.md): hard-cutover changes, exact replacements, screenshot
+  payload migration, and rollback.
 - [OpenAPI schema](openapi.json): generated HTTP request and response schemas.
 - [Artifacts](artifacts.md): artifact paths, persistence, and synchronization.
 - [Trace and replay](trace-replay.md): capture, validate, and replay action traces.
@@ -56,6 +58,12 @@ tracked artifact eligibility, and the [archive policy](archive/README.md) define
 - [Code of conduct](../CODE_OF_CONDUCT.md): follow the community behavior and reporting policy.
 - [Release checklist](release-checklist.md): verification, packaging, protected smoke tests, and
   release review.
+- [Version 2 release candidate](v2-release-candidate.md): release identity, package and runtime
+  order, gates, and selected rollback.
+- [Hosted documentation release system](hosted-documentation-release.md): source ownership,
+  previews, production publication, version navigation, and rollback.
 - [Drafts](drafts/README.md): write, preview, and export long-form articles built on tracked
   benchmark evidence.
 - The repository [README](../README.md) is the short project introduction and first-run path.
+- The [examples index](../examples/README.md) identifies the complete primary trajectory and the
+  low-level compatibility examples.

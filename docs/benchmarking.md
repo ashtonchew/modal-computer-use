@@ -4,6 +4,80 @@ This page defines the repository's general benchmark procedure and reporting pol
 contain measured results. Experiment-specific methodology pages add any stricter gates for their
 experiment.
 
+## Promote the version 2 default
+
+Do not promote the default from unit tests or the historical cross-provider table. Use a
+preregistered, interleaved comparison between the prior public path and the candidate default. Hold
+the caller topology, target, exact region, resources, image, ingress, HTTP version, input backend,
+screenshot format, action payload, warmup, and connection reuse constant.
+
+The article-parity gate accepts only one application-owned Modal Function, attested-tunnel ingress,
+HTTP/1.1, native XTest input, and one pooled async client. It rejects external callers, Connect-only
+ingress, HTTP/2, xdotool, per-request clients, WebSocket control, and fused action-plus-screenshot
+measurements. Test those alternatives in separate experiments.
+
+Use enough alternating samples to estimate p50 and p95 without replacing failures. Retain sanitized
+raw observations. Record every failure and the terminal cleanup result. Reject the run when
+requested and observed placement or any fixed configuration differs between arms.
+
+Report these phases separately:
+
+- cold allocation and desktop startup;
+- application-owned Function dispatch;
+- `borrow_async()` entry, protocol preflight, authentication, and lease acquisition;
+- repeated warm operation time;
+- lease release and owner cleanup.
+
+The warm screenshot case must call the public `screenshots.full()` method and confirm that it uses
+the raw binary response over the reused pooled client. The action case must preserve the model's
+ordered array as one batch. Do not substitute a fused action-plus-screenshot route, WebSocket,
+HTTP/2, a positive warm-capacity setting, or a different release image.
+
+Call `measure_interleaved_promotion()` inside the explicitly placed application Function. Pass a
+callback that creates `handle.borrow_async(...)`; the runner enters it once and follows the exact
+preregistered arm order. The candidate Adapter calls public
+`screenshots.full(storage="inline")` and requires a byte-backed `Screenshot`. The prior Adapter
+uses the retained inline JSON/base64 route through the same pooled async client. Both Adapters send
+the ordered action array through one `actions.run(...)` call. The runner stops after the first
+operation failure and never replaces or replays a sample.
+
+The runner does not create Modal resources and cannot infer allocation or Function-dispatch time.
+The owner and placed Function must measure `cold_start_ms`, `startup_ms`, and `dispatch_ms`, then
+pass those values with the fixed, observed configuration. The returned two artifacts still need
+the offline gate below. Running the helper does not authorize or perform publication.
+
+The article's 37.25 ms screenshot result used the raw endpoint, persistent capture, and its recorded
+same-region topology. Its opening 47 ms screenshot-plus-click value is arithmetic over separate warm
+medians. It is not a fused turn and is not promised by version 2 until the same-topology candidate
+passes the promotion gate. Publish a new dated report after that gate; do not edit historical
+reports or artifacts.
+
+The offline gate reads two sanitized JSON artifacts. It validates the evidence before it compares
+latency, and it never starts a Modal Function or Sandbox:
+
+```bash
+uv run computer-use benchmark promotion-gate \
+  --prior-public benchmark-results/candidates/prior-public.json \
+  --candidate benchmark-results/candidates/candidate-default.json \
+  --output benchmark-results/candidates/promotion-decision.json
+```
+
+Each artifact records one arm of `optimized-default-promotion`. The `configuration` object records
+the caller topology, target identity, requested and observed exact placement, resources, image,
+ingress, HTTP version, input backend, screenshot request, action-payload digest, warm-up count,
+and connection reuse. The `observations` array retains sanitized raw rows with separate
+`cold_start_ms`, `startup_ms`, `dispatch_ms`, `borrow_ms`, and `warm_operation_ms` timings, frame
+validation, attribution, and cleanup. Every timing is present, non-null, and nonnegative. Every
+measured trajectory records `borrow_count: 1`; observed input and screenshot transport attribution
+must match the explicit configuration. `warm_capacity` is required and its
+`function_min_containers` and `sandbox_pool_capacity` values are both zero for article parity. A
+run needs at least 30 complete measured samples per arm.
+The schedule is deterministic and interleaves both arms for each pair. Replacement samples,
+retries, configuration drift, placement mismatch, invalid frames, missing attribution, and failed
+cleanup reject promotion. The result reports paired bootstrap 95% confidence intervals. The
+candidate fails the warm-operation gate only when the lower confidence bound exceeds both 5% and
+0.25 ms. The July 30 artifacts remain historical evidence and are not rewritten by this command.
+
 ## Choose a command
 
 Run a credential-free release report against the in-process mock daemon:

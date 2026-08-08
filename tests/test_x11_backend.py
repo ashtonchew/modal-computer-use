@@ -43,6 +43,7 @@ class RecordingX11Backend(X11DesktopBackend):
         self.commands: list[tuple[str, ...]] = []
         self.capture_output_options: list[bool] = []
         self.spawned: list[tuple[str, ...]] = []
+        self.clipboard_owner_texts: list[str] = []
 
     async def _run(
         self,
@@ -71,6 +72,29 @@ class RecordingX11Backend(X11DesktopBackend):
 
             def poll(self):
                 return None
+
+        return Process()
+
+    async def _spawn_clipboard_owner(self, text: str):
+        self.clipboard = text
+        self.clipboard_owner_texts.append(text)
+
+        class Process:
+            alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self):
+                self.alive = False
+
+            def wait(self, timeout=None):
+                del timeout
+                self.alive = False
+                return 0
+
+            def kill(self):
+                self.alive = False
 
         return Process()
 
@@ -455,13 +479,7 @@ def test_x11_keyboard_type_restores_clipboard_after_clipboard_paste() -> None:
     result = anyio.run(backend.keyboard_type, "x" * 81)
 
     assert result.ok is True
-    clipboard_writes = [
-        index
-        for index, command in enumerate(backend.commands)
-        if command == ("xclip", "-selection", "clipboard")
-    ]
-    assert clipboard_writes
-    assert all(backend.capture_output_options[index] is False for index in clipboard_writes)
+    assert backend.clipboard_owner_texts
     assert ("xdotool", "key", "ctrl+v") in backend.commands
     assert backend.clipboard == "previous clipboard"
 
@@ -478,6 +496,7 @@ def test_x11_clipboard_set_propagates_process_failure() -> None:
 
     controller = X11ClipboardController(
         run=fail,
+        spawn_owner=fail,
         get_state=get_state,
         set_state=set_state,
         clear_state=lambda: set_state(""),
@@ -504,40 +523,22 @@ def test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state() -> 
     display_number = xvfb.stdout.readline().strip()
     assert display_number.isdigit()
     display = f":{display_number}"
-    runner = AsyncioProcessRunner()
-    state = {"value": ""}
-
-    async def run(*args: str, **kwargs):
-        return await runner.run(*args, env={"DISPLAY": display}, **kwargs)
-
-    async def get_state() -> str:
-        return state["value"]
-
-    async def set_state(text: str) -> ActionResult:
-        state["value"] = text
-        return ActionResult(ok=True, output={"length": len(text)})
-
-    controller = X11ClipboardController(
-        run=run,
-        get_state=get_state,
-        set_state=set_state,
-        clear_state=lambda: set_state(""),
-    )
+    backend = X11DesktopBackend(display=display, process_runner=AsyncioProcessRunner())
     previous = "previous clipboard"
     long_text = "0123456789" * 10
 
     async def exercise() -> None:
-        await controller.set(previous)
-        assert await controller.get() == previous
-        await controller.set(long_text)
-        assert await controller.get() == long_text
-        await controller.set(previous)
-        assert await controller.get() == previous
+        await backend.clipboard_set(previous)
+        assert await backend.clipboard_get() == previous
+        await backend.clipboard_set(long_text)
+        assert await backend.clipboard_get() == long_text
+        await backend.clipboard_set(previous)
+        assert await backend.clipboard_get() == previous
 
     try:
         anyio.run(exercise)
     finally:
-        runner.close()
+        backend.close()
         xvfb.terminate()
         xvfb.wait(timeout=5)
 

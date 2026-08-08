@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modal-computer-use"
-version = "1.1.0"
+version = "2.0.0"
 description = "Daemon-first Modal-native computer-use primitives for Linux desktops"
 readme = "README.md"
 requires-python = ">=3.12"

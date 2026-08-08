@@ -47,13 +47,14 @@ ROOT = Path(__file__).resolve().parents[1]
 def _modal_function_environment(monkeypatch) -> None:
     monkeypatch.setenv("MODAL_ENVIRONMENT", "prod")
     monkeypatch.setenv("MODAL_IS_REMOTE", "1")
+    monkeypatch.setenv("MODAL_REGION", "us-west-2")
 
 
 def _session_id(
     *,
     app_name: str = "desktop-app",
     modal_environment: str = "prod",
-    requested_modal_region: str = "us-west",
+    requested_modal_region: str = "us-west-2",
     ingress: str = "connect",
     daemon_http_version: str = "1.1",
     vnc_mode: str = "off",
@@ -174,7 +175,7 @@ def _handle(**updates: object) -> ComputerSessionHandle:
         "sandbox_id": "sb-owned",
         "app_name": "desktop-app",
         "modal_environment": "prod",
-        "requested_modal_region": "us-west",
+        "requested_modal_region": "us-west-2",
         "ingress": "connect",
         "daemon_http_version": "1.1",
         "vnc_mode": "off",
@@ -233,7 +234,7 @@ def test_create_produces_safe_versioned_session_handle(monkeypatch) -> None:
     config = ComputerConfig(
         run_id="run-123",
         ingress="connect",
-        runtime={"modal_environment": "prod", "modal_region": "us-west"},
+        runtime={"modal_environment": "prod", "modal_region": "us-west-2"},
         network={"daemon_http_version": "2"},
     )
 
@@ -251,7 +252,7 @@ def test_create_produces_safe_versioned_session_handle(monkeypatch) -> None:
     assert len(handle.session_id) == 32
     assert handle.app_name == "desktop-app"
     assert handle.modal_environment == "prod"
-    assert handle.requested_modal_region == "us-west"
+    assert handle.requested_modal_region == "us-west-2"
     assert handle.ingress == "connect"
     assert handle.daemon_http_version == "2"
     assert handle.vnc_mode == "off"
@@ -269,7 +270,7 @@ def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monke
         config=ComputerConfig(
             run_id="run-no-environment",
             ingress="connect",
-            runtime={"modal_region": "us-west"},
+            runtime={"modal_region": "us-west-2"},
         ),
         image=object(),
         wait=False,
@@ -295,7 +296,7 @@ def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monke
         config=ComputerConfig(
             run_id="run-tunnel",
             ingress="tunnel",
-            runtime={"modal_environment": "prod", "modal_region": "us-west"},
+            runtime={"modal_environment": "prod", "modal_region": "us-west-2"},
         ),
         image=object(),
         wait=False,
@@ -308,7 +309,7 @@ def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monke
             run_id="run-control-vnc",
             ingress="connect",
             expose_vnc="control",
-            runtime={"modal_environment": "prod", "modal_region": "us-west"},
+            runtime={"modal_environment": "prod", "modal_region": "us-west-2"},
         ),
         image=object(),
         wait=False,
@@ -320,7 +321,7 @@ def test_session_handle_rejects_local_unsupported_and_insufficient_targets(monke
         config=ComputerConfig(
             run_id="run-warm",
             ingress="connect",
-            runtime={"modal_environment": "prod", "modal_region": "us-west"},
+            runtime={"modal_environment": "prod", "modal_region": "us-west-2"},
         ),
         image=object(),
         tag_profile="warm_pool",
@@ -411,7 +412,7 @@ def test_borrow_is_lazy_and_rejects_region_before_attach(monkeypatch) -> None:
         return _borrow_result(raw_computer)
 
     monkeypatch.setattr("modal_computer_use.sandbox._borrow_modal_function_session", attach)
-    context = _handle().borrow(run_id="run-123", function_region="us-west")
+    context = _handle().borrow(run_id="run-123", function_region="us-west-2")
     assert calls == []
 
     with context as computer:
@@ -423,7 +424,7 @@ def test_borrow_is_lazy_and_rejects_region_before_attach(monkeypatch) -> None:
     calls.clear()
     with (
         pytest.raises(SessionPlacementMismatchError),
-        _handle().borrow(run_id="run-123", function_region="us-east"),
+        _handle().borrow(run_id="run-123", function_region="us-east-1"),
     ):
         raise AssertionError("unreachable")
     assert calls == []
@@ -439,7 +440,7 @@ def test_borrow_validates_run_id_before_attach(monkeypatch) -> None:
 
     monkeypatch.setattr("modal_computer_use.sandbox._borrow_modal_function_session", attach)
     with pytest.raises(ValueError, match="run_id"), _handle().borrow(
-        run_id=" ", function_region="us-west"
+        run_id=" ", function_region="us-west-2"
     ):
         raise AssertionError("unreachable")
     assert calls == 0
@@ -456,7 +457,7 @@ def test_borrow_rejects_non_remote_runtime_before_attach(monkeypatch) -> None:
     monkeypatch.delenv("MODAL_IS_REMOTE")
     monkeypatch.setattr("modal_computer_use.sandbox._borrow_modal_function_session", attach)
     with pytest.raises(SessionEnvironmentMismatchError), _handle().borrow(
-        run_id="run-123", function_region="us-west"
+        run_id="run-123", function_region="us-west-2"
     ):
         raise AssertionError("unreachable")
     assert calls == 0
@@ -481,7 +482,7 @@ def test_borrow_rejects_missing_or_mismatched_modal_environment_before_attach(
         monkeypatch.setenv("MODAL_ENVIRONMENT", function_environment)
 
     with pytest.raises(SessionEnvironmentMismatchError), _handle().borrow(
-        run_id="run-123", function_region="us-west"
+        run_id="run-123", function_region="us-west-2"
     ):
         raise AssertionError("unreachable")
     assert calls == 0
@@ -494,7 +495,7 @@ def test_borrowed_computer_exposes_only_daemon_capabilities(monkeypatch) -> None
         lambda _handle, **_kwargs: _borrow_result(computer),
     )
 
-    with _handle().borrow(run_id="run-123", function_region="us-west") as borrowed:
+    with _handle().borrow(run_id="run-123", function_region="us-west-2") as borrowed:
         for capability in (
             "actions",
             "apps",
@@ -537,20 +538,25 @@ def test_borrowed_computer_exposes_only_daemon_capabilities(monkeypatch) -> None
             assert not hasattr(borrowed, forbidden)
 
 
-def _inline_png_payload() -> dict[str, object]:
-    return {
-        "format": "png",
-        "width": 1,
-        "height": 1,
-        "size_bytes": 1,
-        "data_base64": "AA==",
-        "artifact_uri": None,
-        "coordinate_space": {
-            "desktop_width": 1,
-            "desktop_height": 1,
-            "image_width": 1,
-            "image_height": 1,
-        },
+def _inline_png_binary_response() -> tuple[bytes, dict[str, str]]:
+    return b"\x00", {
+        "content-type": "image/png",
+        "x-computer-use-width": "1",
+        "x-computer-use-height": "1",
+        "x-computer-use-size-bytes": "1",
+        "x-computer-use-sha256": (
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+        ),
+        "x-computer-use-captured-at": "2026-08-08T12:30:00+00:00",
+        "x-computer-use-coordinate-space": (
+            '{"desktop_width":1,"desktop_height":1,"image_width":1,'
+            '"image_height":1,"scale_x":1.0,"scale_y":1.0,'
+            '"source_region":null}'
+        ),
+        "x-computer-use-cursor-visible": "false",
+        "x-computer-use-cursor-position": '{"x":0,"y":0}',
+        "x-computer-use-timing-ms": "{}",
+        "x-computer-use-capture-backend": "mss",
     }
 
 
@@ -559,9 +565,11 @@ def test_sync_lost_result_observation_has_fixed_inline_full_png_semantics() -> N
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object]]] = []
 
-        def post_json(self, path: str, **kwargs: object) -> dict[str, object]:
+        def post_bytes_with_headers(
+            self, path: str, **kwargs: object
+        ) -> tuple[bytes, dict[str, str]]:
             self.calls.append((path, kwargs))
-            return _inline_png_payload()
+            return _inline_png_binary_response()
 
     client = Client()
     coordinator = _Coordinator()
@@ -579,7 +587,7 @@ def test_sync_lost_result_observation_has_fixed_inline_full_png_semantics() -> N
     assert frame.artifact_uri is None
     assert client.calls == [
         (
-            "/v1/screenshots/full",
+            "/v1/screenshots/full/raw",
             {
                 "json": {
                     "format": "png",
@@ -589,7 +597,6 @@ def test_sync_lost_result_observation_has_fixed_inline_full_png_semantics() -> N
                     "processing": "daemon",
                     "storage": "inline",
                 },
-                "_mutation": False,
             },
         )
     ]
@@ -601,9 +608,11 @@ async def test_async_lost_result_observation_has_fixed_inline_full_png_semantics
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object]]] = []
 
-        async def post_json(self, path: str, **kwargs: object) -> dict[str, object]:
+        async def post_bytes_with_headers(
+            self, path: str, **kwargs: object
+        ) -> tuple[bytes, dict[str, str]]:
             self.calls.append((path, kwargs))
-            return _inline_png_payload()
+            return _inline_png_binary_response()
 
     class Coordinator:
         async def observe_after_result_loss(self, request):
@@ -624,7 +633,7 @@ async def test_async_lost_result_observation_has_fixed_inline_full_png_semantics
     assert frame.artifact_uri is None
     assert client.calls == [
         (
-            "/v1/screenshots/full",
+            "/v1/screenshots/full/raw",
             {
                 "json": {
                     "format": "png",
@@ -634,7 +643,6 @@ async def test_async_lost_result_observation_has_fixed_inline_full_png_semantics
                     "processing": "daemon",
                     "storage": "inline",
                 },
-                "_mutation": False,
             },
         )
     ]
@@ -664,7 +672,7 @@ def test_failed_sync_lost_result_observation_still_releases_and_detaches(
 
     with (
         pytest.raises(ConnectionError, match="private endpoint"),
-        _handle().borrow(run_id="run-123", function_region="us-west") as retained,
+        _handle().borrow(run_id="run-123", function_region="us-west-2") as retained,
     ):
         retained.observe_after_result_loss()
 
@@ -720,7 +728,7 @@ async def test_failed_async_lost_result_observation_still_releases_and_detaches(
     with pytest.raises(ConnectionError, match="private endpoint"):
         async with _handle().borrow_async(
             run_id="async-run",
-            function_region="us-west",
+            function_region="us-west-2",
         ) as retained:
             await retained.observe_after_result_loss()
 
@@ -737,7 +745,7 @@ def test_borrow_context_rejects_second_entry_without_replacing_live_client(monke
         return _borrow_result(computer)
 
     monkeypatch.setattr("modal_computer_use.sandbox._borrow_modal_function_session", attach)
-    context = _handle().borrow(run_id="run-123", function_region="us-west")
+    context = _handle().borrow(run_id="run-123", function_region="us-west-2")
     assert isinstance(context.__enter__(), BorrowedComputer)
     with pytest.raises(RuntimeError, match="only be entered once"):
         context.__enter__()
@@ -757,7 +765,7 @@ def test_sync_borrowed_facade_cannot_resurrect_connections_after_exit(monkeypatc
         lambda _handle, **_kwargs: (borrowed, target, client, coordinator),
     )
 
-    with _handle().borrow(run_id="run-123", function_region="us-west") as retained:
+    with _handle().borrow(run_id="run-123", function_region="us-west-2") as retained:
         pass
 
     with pytest.raises(SessionLeaseLostError):
@@ -770,7 +778,7 @@ def test_attach_or_create_reuse_aligns_ingress_and_http_policy(monkeypatch) -> N
     config = ComputerConfig(
         run_id="run-reuse",
         ingress="connect",
-        runtime={"modal_environment": "prod", "modal_region": "us-west"},
+        runtime={"modal_environment": "prod", "modal_region": "us-west-2"},
         network={"daemon_http_version": "2"},
     )
     config_hash = compute_config_hash(config)
@@ -825,7 +833,7 @@ def test_borrow_live_config_mismatch_cleans_up_without_termination(monkeypatch) 
 
     with (
         pytest.raises(SessionTargetMismatchError),
-        _handle().borrow(run_id="run-123", function_region="us-west"),
+        _handle().borrow(run_id="run-123", function_region="us-west-2"),
     ):
         raise AssertionError("unreachable")
 
@@ -847,7 +855,7 @@ def test_borrow_rejects_target_that_lost_sdk_ownership_marker(monkeypatch) -> No
 
     with (
         pytest.raises(SessionTargetMismatchError),
-        _handle().borrow(run_id="run-123", function_region="us-west"),
+        _handle().borrow(run_id="run-123", function_region="us-west-2"),
     ):
         raise AssertionError("unreachable")
 
@@ -869,7 +877,7 @@ def test_borrow_rejects_target_with_a_different_session_id(monkeypatch) -> None:
 
     with (
         pytest.raises(SessionTargetMismatchError),
-        _handle().borrow(run_id="run-123", function_region="us-west"),
+        _handle().borrow(run_id="run-123", function_region="us-west-2"),
     ):
         raise AssertionError("unreachable")
 
@@ -878,12 +886,29 @@ def test_borrow_rejects_target_with_a_different_session_id(monkeypatch) -> None:
     assert target.terminate_calls == 0
 
 
+def test_borrow_reports_unverifiable_target_tags_before_credentials(monkeypatch) -> None:
+    target = _OwnedSandbox(config_hash="a" * 16)
+    target.get_tags = lambda: None  # type: ignore[method-assign,return-value]
+    _ModalSandboxType.from_id_result = target
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
+
+    with (
+        pytest.raises(SessionCompatibilityError) as raised,
+        _handle().borrow(run_id="run-123", function_region="us-west-2"),
+    ):
+        raise AssertionError("unreachable")
+
+    assert type(raised.value).__name__ == "SessionPlacementUnverifiableError"
+    assert target.credential_calls == 0
+    assert target.detach_calls == 1
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("app_name", "other-app"),
         ("modal_environment", "staging"),
-        ("requested_modal_region", "us-east"),
+        ("requested_modal_region", "us-east-1"),
         ("ingress", "attested-tunnel"),
         ("daemon_http_version", "2"),
         ("vnc_mode", "view_only"),
@@ -900,7 +925,9 @@ def test_borrow_rejects_each_policy_field_tamper_before_credentials(
     monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
     if field == "modal_environment":
         monkeypatch.setenv("MODAL_ENVIRONMENT", value)
-    function_region = value if field == "requested_modal_region" else "us-west"
+    if field == "requested_modal_region":
+        monkeypatch.setenv("MODAL_REGION", value)
+    function_region = value if field == "requested_modal_region" else "us-west-2"
     handle = _handle(**{field: value, "session_id": _session_id()})
 
     with pytest.raises(SessionTargetMismatchError), handle.borrow(
@@ -922,11 +949,14 @@ def test_sync_tag_lookup_failure_detaches_before_credential_issuance(monkeypatch
     _ModalSandboxType.from_id_result = target
     monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
 
-    with pytest.raises(ConnectionError, match="tag lookup failed"), _handle().borrow(
-        run_id="run-123", function_region="us-west"
+    with (
+        pytest.raises(SessionCompatibilityError) as raised,
+        _handle().borrow(run_id="run-123", function_region="us-west-2"),
     ):
         raise AssertionError("unreachable")
 
+    assert type(raised.value).__name__ == "SessionPlacementUnverifiableError"
+    assert "tag lookup failed" not in str(raised.value)
     assert target.credential_calls == 0
     assert target.detach_calls == 1
 
@@ -945,11 +975,11 @@ def test_borrow_deterministically_detaches_without_terminating(
     if raises:
         with (
             pytest.raises(RuntimeError, match="user workload failed"),
-            _handle().borrow(run_id="run-123", function_region="us-west"),
+            _handle().borrow(run_id="run-123", function_region="us-west-2"),
         ):
             raise RuntimeError("user workload failed")
     else:
-        with _handle().borrow(run_id="run-123", function_region="us-west") as borrowed:
+        with _handle().borrow(run_id="run-123", function_region="us-west-2") as borrowed:
             assert isinstance(borrowed, BorrowedComputer)
 
     assert target.detach_calls == 1
@@ -974,7 +1004,7 @@ def test_borrow_does_not_retry_or_fallback_on_attach_failures(
 
     monkeypatch.setattr("modal_computer_use.sandbox._borrow_modal_function_session", fail)
     with pytest.raises(type(failure)), _handle().borrow(
-        run_id="run-123", function_region="us-west"
+        run_id="run-123", function_region="us-west-2"
     ):
         raise AssertionError("unreachable")
     assert calls == 1
@@ -1068,6 +1098,20 @@ class _AsyncBorrowTransport:
             )
         if path == "/readyz":
             return httpx.Response(200, json={"ready": True}, request=request)
+        if path == "/v1/version":
+            return httpx.Response(200, json={"api_version": "v1"}, request=request)
+        if path == "/v1/capabilities":
+            return httpx.Response(
+                200,
+                json={
+                    "primitives": [
+                        "screenshot-binary-metadata-v1",
+                        "trajectory-leases-v1",
+                        "trajectory-operation-receipts-v1",
+                    ]
+                },
+                request=request,
+            )
         return httpx.Response(200, json={"ok": True}, request=request)
 
     async def aclose(self) -> None:
@@ -1101,6 +1145,187 @@ class _SyncBorrowTransport:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _CapabilityBorrowTransport(_SyncBorrowTransport):
+    def __init__(self, primitives: object) -> None:
+        super().__init__()
+        self.primitives = primitives
+        self.base_url = "https://private.invalid"
+
+    def request(self, method: str, path: str, **kwargs: object) -> httpx.Response:
+        self.calls.append(path)
+        request = httpx.Request(method, f"https://daemon.invalid{path}")
+        if path == "/readyz":
+            return httpx.Response(200, json={"ready": True}, request=request)
+        if path == "/v1/version":
+            return httpx.Response(200, json={"api_version": "v1"}, request=request)
+        if path == "/v1/capabilities":
+            return httpx.Response(
+                200,
+                json={"primitives": self.primitives},
+                request=request,
+            )
+        if path == "/v1/leases/acquire":
+            return httpx.Response(
+                200,
+                json={
+                    "lease_id": "lease-test",
+                    "daemon_epoch": "epoch-test",
+                    "fence": 1,
+                    "ttl_seconds": 30.0,
+                    "heartbeat_interval_seconds": 60.0,
+                },
+                headers={"x-computer-use-lease-token": "lease-token"},
+                request=request,
+            )
+        if path == "/v1/leases/release":
+            return httpx.Response(200, json={"state": "released"}, request=request)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+
+def test_borrow_rejects_missing_required_daemon_capability_before_lease(
+    monkeypatch,
+) -> None:
+    target = _OwnedSandbox(config_hash="a" * 16)
+    _ModalSandboxType.from_id_result = target
+    transport = _CapabilityBorrowTransport(
+        ["trajectory-leases-v1", "trajectory-operation-receipts-v1"]
+    )
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        lambda *_args, **_kwargs: transport,
+    )
+
+    with (
+        pytest.raises(SessionCompatibilityError) as raised,
+        _handle().borrow(run_id="sync-run", function_region="us-west-2"),
+    ):
+        raise AssertionError("unreachable")
+
+    assert type(raised.value).__name__ == "SessionDaemonProtocolError"
+    assert transport.calls == ["/readyz", "/v1/version", "/v1/capabilities"]
+    assert target.detach_calls == 1
+
+
+def test_borrow_rejects_unsupported_daemon_api_before_lease(
+    monkeypatch,
+) -> None:
+    target = _OwnedSandbox(config_hash="a" * 16)
+    _ModalSandboxType.from_id_result = target
+
+    class UnsupportedApiTransport(_CapabilityBorrowTransport):
+        def request(self, method: str, path: str, **kwargs: object) -> httpx.Response:
+            if path == "/v1/version":
+                self.calls.append(path)
+                request = httpx.Request(method, f"https://daemon.invalid{path}")
+                return httpx.Response(200, json={"api_version": "v2"}, request=request)
+            return super().request(method, path, **kwargs)
+
+    transport = UnsupportedApiTransport(
+        [
+            "screenshot-binary-metadata-v1",
+            "trajectory-leases-v1",
+            "trajectory-operation-receipts-v1",
+        ]
+    )
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        lambda *_args, **_kwargs: transport,
+    )
+
+    with (
+        pytest.raises(SessionCompatibilityError) as raised,
+        _handle().borrow(run_id="sync-run", function_region="us-west-2"),
+    ):
+        raise AssertionError("unreachable")
+
+    assert type(raised.value).__name__ == "SessionDaemonProtocolError"
+    assert transport.calls == ["/readyz", "/v1/version", "/v1/capabilities"]
+    assert target.detach_calls == 1
+
+
+def test_borrow_redacts_unverifiable_daemon_capabilities(monkeypatch) -> None:
+    target = _OwnedSandbox(config_hash="a" * 16)
+    _ModalSandboxType.from_id_result = target
+
+    class UnverifiableCapabilitiesTransport(_CapabilityBorrowTransport):
+        def request(self, method: str, path: str, **kwargs: object) -> httpx.Response:
+            if path == "/v1/capabilities":
+                self.calls.append(path)
+                raise ConnectionError(
+                    "https://credential-value.invalid/private capabilities unavailable"
+                )
+            return super().request(method, path, **kwargs)
+
+    transport = UnverifiableCapabilitiesTransport([])
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        lambda *_args, **_kwargs: transport,
+    )
+
+    with (
+        pytest.raises(SessionCompatibilityError) as raised,
+        _handle().borrow(run_id="sync-run", function_region="us-west-2"),
+    ):
+        raise AssertionError("unreachable")
+
+    assert type(raised.value).__name__ == "SessionDaemonProtocolError"
+    assert "credential-value" not in str(raised.value)
+    assert "private" not in str(raised.value)
+    assert transport.calls == ["/readyz", "/v1/version", "/v1/capabilities"]
+    assert target.detach_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_async_borrow_rejects_malformed_daemon_capabilities_before_lease(
+    monkeypatch,
+) -> None:
+    target = _AsyncTarget()
+
+    async def from_id(_sandbox_id: str) -> _AsyncTarget:
+        return target
+
+    class MalformedCapabilitiesTransport(_AsyncBorrowTransport):
+        async def request(
+            self, method: str, path: str, **kwargs: object
+        ) -> httpx.Response:
+            if path == "/v1/capabilities":
+                self.calls.append(path)
+                request = httpx.Request(method, f"https://daemon.invalid{path}")
+                return httpx.Response(
+                    200,
+                    json={"primitives": {"token": "credential-value"}},
+                    request=request,
+                )
+            return await super().request(method, path, **kwargs)
+
+    transport = MalformedCapabilitiesTransport()
+    monkeypatch.setitem(
+        sys.modules,
+        "modal",
+        SimpleNamespace(Sandbox=SimpleNamespace(from_id=_AioCall(from_id))),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.AsyncHTTPTransport",
+        lambda *_args, **_kwargs: transport,
+    )
+
+    with pytest.raises(SessionCompatibilityError) as raised:
+        async with _handle().borrow_async(
+            run_id="async-run",
+            function_region="us-west-2",
+        ):
+            raise AssertionError("unreachable")
+
+    assert type(raised.value).__name__ == "SessionDaemonProtocolError"
+    assert "credential-value" not in str(raised.value)
+    assert transport.calls == ["/readyz", "/v1/version", "/v1/capabilities"]
+    assert transport.closed
+    assert target.calls[-1] == "detach.aio"
 
 
 @pytest.mark.asyncio
@@ -1137,7 +1362,7 @@ async def test_async_borrow_uses_only_modal_aio_and_cleans_up(monkeypatch) -> No
     monkeypatch.setattr("modal_computer_use.sandbox.HTTPTransport", heartbeat)
 
     async with _handle().borrow_async(
-        run_id="async-run", function_region="us-west"
+        run_id="async-run", function_region="us-west-2"
     ) as borrowed:
         assert repr(borrowed) == "AsyncBorrowedComputer()"
 
@@ -1211,12 +1436,13 @@ async def test_async_user_exception_remains_primary_when_cleanup_fails(
 
     with pytest.raises(RuntimeError, match="user workload failed") as raised:
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise RuntimeError("user workload failed")
 
     assert raised.value.__notes__ == [
-        "borrowed session cleanup also failed: cleanup (SessionLeaseLostError)"
+        "borrowed session cleanup also failed: lease_coordinator.aclose "
+        "(SessionLeaseLostError)"
     ]
     assert "private" not in " ".join(raised.value.__notes__)
     assert calls == [
@@ -1244,7 +1470,7 @@ async def test_async_target_mismatch_precedes_credential_issuance(monkeypatch) -
 
     with pytest.raises(SessionTargetMismatchError):
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise AssertionError("unreachable")
 
@@ -1270,12 +1496,14 @@ async def test_async_tag_lookup_failure_detaches_before_credential_issuance(monk
         SimpleNamespace(Sandbox=SimpleNamespace(from_id=_AioCall(from_id))),
     )
 
-    with pytest.raises(ConnectionError, match="tag lookup failed"):
+    with pytest.raises(SessionCompatibilityError) as raised:
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise AssertionError("unreachable")
 
+    assert type(raised.value).__name__ == "SessionPlacementUnverifiableError"
+    assert "tag lookup failed" not in str(raised.value)
     assert target.calls == ["from_id.aio", "get_tags.aio", "detach.aio"]
 
 
@@ -1308,7 +1536,7 @@ async def test_async_tag_lookup_cancellation_finishes_detach(monkeypatch) -> Non
 
     async def enter() -> None:
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise AssertionError("unreachable")
 
@@ -1322,7 +1550,7 @@ async def test_async_tag_lookup_cancellation_finishes_detach(monkeypatch) -> Non
     assert "create_connect_token.aio" not in target.calls
 
 
-def test_sync_partial_entry_releases_closes_and_detaches(monkeypatch) -> None:
+def test_sync_readiness_failure_closes_and_detaches_before_lease(monkeypatch) -> None:
     target = _OwnedSandbox(config_hash="a" * 16)
     target._tags.update(
         {
@@ -1348,18 +1576,19 @@ def test_sync_partial_entry_releases_closes_and_detaches(monkeypatch) -> None:
 
     with (
         pytest.raises(TimeoutError),
-        _handle().borrow(run_id="sync-run", function_region="us-west"),
+        _handle().borrow(run_id="sync-run", function_region="us-west-2"),
     ):
         raise AssertionError("unreachable")
 
-    assert transport.calls.count("/v1/leases/release") == 1
+    assert transport.calls.count("/v1/leases/acquire") == 0
+    assert transport.calls.count("/v1/leases/release") == 0
     assert transport.closed
     assert target.detach_calls == 1
     assert target.terminate_calls == 0
 
 
 @pytest.mark.asyncio
-async def test_async_partial_entry_releases_closes_and_detaches(monkeypatch) -> None:
+async def test_async_readiness_failure_closes_and_detaches_before_lease(monkeypatch) -> None:
     target = _AsyncTarget()
 
     async def from_id(_sandbox_id: str) -> _AsyncTarget:
@@ -1385,11 +1614,12 @@ async def test_async_partial_entry_releases_closes_and_detaches(monkeypatch) -> 
 
     with pytest.raises(TimeoutError):
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise AssertionError("unreachable")
 
-    assert transport.calls.count("/v1/leases/release") == 1
+    assert transport.calls.count("/v1/leases/acquire") == 0
+    assert transport.calls.count("/v1/leases/release") == 0
     assert transport.closed
     assert target.calls[-1] == "detach.aio"
     assert "terminate" not in target.calls
@@ -1431,7 +1661,7 @@ async def test_async_acquire_failure_closes_both_transports_and_detaches(
 
     with pytest.raises(ConnectionError, match="acquire failed"):
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise AssertionError("unreachable")
 
@@ -1441,34 +1671,20 @@ async def test_async_acquire_failure_closes_both_transports_and_detaches(
 
 
 @pytest.mark.asyncio
-async def test_async_post_acquire_cancellation_cannot_interrupt_failed_entry_cleanup(
+async def test_async_preflight_cancellation_closes_and_detaches_without_a_lease(
     monkeypatch,
 ) -> None:
     target = _AsyncTarget()
     readiness_started = asyncio.Event()
-    release_started = asyncio.Event()
-    allow_release = asyncio.Event()
 
     async def from_id(_sandbox_id: str) -> _AsyncTarget:
         return target
-
-    class BlockingReleaseTransport(_AsyncBorrowTransport):
-        async def request(
-            self, method: str, path: str, **kwargs: object
-        ) -> httpx.Response:
-            if path == "/v1/leases/release":
-                self.calls.append(path)
-                release_started.set()
-                await allow_release.wait()
-                request = httpx.Request(method, f"https://daemon.invalid{path}")
-                return httpx.Response(200, json={"ok": True}, request=request)
-            return await super().request(method, path, **kwargs)
 
     async def blocked_readiness(*_args: object, **_kwargs: object) -> None:
         readiness_started.set()
         await asyncio.Event().wait()
 
-    transport = BlockingReleaseTransport()
+    transport = _AsyncBorrowTransport()
     monkeypatch.setitem(
         sys.modules,
         "modal",
@@ -1485,21 +1701,18 @@ async def test_async_post_acquire_cancellation_cannot_interrupt_failed_entry_cle
 
     async def enter() -> None:
         async with _handle().borrow_async(
-            run_id="async-run", function_region="us-west"
+            run_id="async-run", function_region="us-west-2"
         ):
             raise AssertionError("unreachable")
 
     task = asyncio.create_task(enter())
     await readiness_started.wait()
     task.cancel()
-    await release_started.wait()
-    task.cancel()
-    await asyncio.sleep(0)
-    assert not task.done()
-    allow_release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    assert "/v1/leases/acquire" not in transport.calls
+    assert "/v1/leases/release" not in transport.calls
     assert transport.closed
     assert target.calls[-1] == "detach.aio"
     assert "terminate" not in target.calls
@@ -1592,7 +1805,7 @@ async def test_async_cancellation_after_acquisition_safely_closes_run_and_target
         async def borrow_until_cancelled() -> None:
             async with _handle().borrow_async(
                 run_id="cancelled-run",
-                function_region="us-west",
+                function_region="us-west-2",
             ):
                 entered.set()
                 await asyncio.Event().wait()
@@ -1660,7 +1873,7 @@ async def test_async_borrowed_facade_cannot_resurrect_connections_after_exit(mon
     )
 
     async with _handle().borrow_async(
-        run_id="async-run", function_region="us-west"
+        run_id="async-run", function_region="us-west-2"
     ) as retained:
         pass
     calls_after_exit = list(transport.calls)
@@ -1680,8 +1893,12 @@ def test_public_session_errors_redact_caller_supplied_identity_and_content() -> 
     error_names = (
         "SessionBorrowError",
         "SessionCompatibilityError",
+        "SessionDaemonProtocolError",
         "SessionEnvironmentMismatchError",
+        "SessionPlacementMalformedError",
+        "SessionPlacementMissingError",
         "SessionPlacementMismatchError",
+        "SessionPlacementUnverifiableError",
         "SessionTargetMismatchError",
         "SessionBusyError",
         "SessionLeaseLostError",
@@ -1743,6 +1960,8 @@ def test_deployed_handoff_smoke_source_is_bounded_and_returns_only_safe_aggregat
     assert "min_containers=0" in source
     assert "max_containers=1" in source
     assert "FUNCTION_TIMEOUT_SECONDS = 300" in source
+    assert '"MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west-2"' in source
+    assert "the handoff smoke requires one exact Modal region" in source
     assert "timeout=FUNCTION_TIMEOUT_SECONDS" in source
     assert "restrict_modal_access=False" in source
     assert source.count("handle.borrow_async(") == 1

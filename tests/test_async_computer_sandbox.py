@@ -7,22 +7,35 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
+from unittest.mock import patch
 
+import httpx
 import pytest
 
 from modal_computer_use import (
+    ActionBatchResult,
     AsyncComputerSandbox,
     AsyncDaemonClient,
     ComputerConfig,
+    ComputerSessionHandle,
+    Screenshot,
     SessionStartupTiming,
 )
+from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.errors import (
     ConfigConflictError,
     SandboxAmbiguousError,
     SandboxUnavailableError,
+    SessionCompatibilityError,
+    SessionEnvironmentMismatchError,
+    SessionPlacementMalformedError,
+    SessionPlacementMissingError,
+    SessionPlacementUnverifiableError,
 )
 from modal_computer_use.state import APP_ID_TAG, compute_config_hash
+from modal_computer_use.transports import AsyncHTTPTransport
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -244,7 +257,116 @@ def _install_runtime(monkeypatch: pytest.MonkeyPatch) -> _FakeModalRuntime:
 
 
 def _connect_config() -> ComputerConfig:
-    return ComputerConfig(run_id="run-async", ingress="connect", expose_vnc="off")
+    return ComputerConfig(
+        run_id="run-async",
+        ingress="connect",
+        expose_vnc="off",
+        runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "expected_error"),
+    [
+        (
+            ComputerConfig(runtime={"modal_region": "us-west-2"}),
+            SessionEnvironmentMismatchError,
+        ),
+        (
+            ComputerConfig(runtime={"modal_environment": "test"}),
+            SessionPlacementMissingError,
+        ),
+        (
+            ComputerConfig(
+                runtime={"modal_environment": "test", "modal_region": "not a region"}
+            ),
+            SessionPlacementMalformedError,
+        ),
+        (
+            ComputerConfig(
+                runtime={"modal_environment": "test", "modal_region": "us-west"}
+            ),
+            SessionPlacementUnverifiableError,
+        ),
+    ],
+)
+async def test_primary_async_owner_rejects_unplaced_configuration_before_modal_work(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ComputerConfig,
+    expected_error: type[Exception],
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    with pytest.raises(expected_error):
+        async with AsyncComputerSandbox.create(config=config, image=object()):
+            raise AssertionError("unreachable")
+
+    assert runtime.calls == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_unplaced_async_owner_retains_low_level_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    async def ready(_client: AsyncDaemonClient, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+
+    async with AsyncComputerSandbox.create_unplaced(
+        config=ComputerConfig(run_id="low-level", ingress="connect"),
+        image=object(),
+    ):
+        pass
+
+    assert "Sandbox.create.aio" in runtime.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "create_kwargs"),
+    [
+        (
+            ComputerConfig(
+                ingress="tunnel",
+                runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+            ),
+            {},
+        ),
+        (
+            ComputerConfig(
+                expose_vnc="control",
+                runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+            ),
+            {},
+        ),
+        (
+            ComputerConfig(
+                runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+            ),
+            {"tag_profile": "warm_pool"},
+        ),
+    ],
+)
+async def test_primary_async_owner_rejects_non_handoff_modes_before_modal_work(
+    monkeypatch: pytest.MonkeyPatch,
+    config: ComputerConfig,
+    create_kwargs: dict[str, object],
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    with pytest.raises(SessionCompatibilityError):
+        async with AsyncComputerSandbox.create(
+            config=config,
+            image=object(),
+            **create_kwargs,
+        ):
+            raise AssertionError("unreachable")
+
+    assert runtime.calls == []
 
 
 def _match_named_target(
@@ -685,6 +807,45 @@ async def test_create_is_lazy_native_async_ready_on_entry_and_owns_cleanup(
 
 
 @pytest.mark.asyncio
+async def test_owned_async_context_closes_children_before_terminating_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+    events: list[str] = []
+
+    async def ready(_client: AsyncDaemonClient, **_kwargs: object) -> None:
+        return None
+
+    async def close(_client: AsyncDaemonClient) -> None:
+        events.append("client.aclose")
+
+    async def terminate(*, wait: bool = False) -> object:
+        assert wait is True
+        events.append("sandbox.terminate.aio")
+        return None
+
+    async def detach() -> object:
+        events.append("sandbox.detach.aio")
+        return None
+
+    runtime.created.terminate = _AioCall(
+        "sandbox.terminate", terminate, runtime.calls
+    )
+    runtime.created.detach = _AioCall("sandbox.detach", detach, runtime.calls)
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+    monkeypatch.setattr(AsyncDaemonClient, "aclose", close)
+
+    async with AsyncComputerSandbox.create(config=_connect_config(), image=object()):
+        pass
+
+    assert events == [
+        "client.aclose",
+        "sandbox.terminate.aio",
+        "sandbox.detach.aio",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_attach_is_lazy_ready_on_entry_and_never_terminates_remote_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -708,6 +869,38 @@ async def test_attach_is_lazy_ready_on_entry_and_never_terminates_remote_owner(
     assert runtime.by_id.terminate_calls == []
     assert runtime.by_id.detach_calls == 1
     _assert_modal_calls_are_native(runtime.calls)
+
+
+@pytest.mark.asyncio
+async def test_attached_async_context_closes_children_before_detaching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+    runtime.listed = [runtime.by_id]
+    events: list[str] = []
+
+    async def ready(_client: AsyncDaemonClient, **_kwargs: object) -> None:
+        return None
+
+    async def close(_client: AsyncDaemonClient) -> None:
+        events.append("client.aclose")
+
+    async def detach() -> object:
+        events.append("sandbox.detach.aio")
+        return None
+
+    runtime.by_id.detach = _AioCall("sandbox.detach", detach, runtime.calls)
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+    monkeypatch.setattr(AsyncDaemonClient, "aclose", close)
+
+    async with AsyncComputerSandbox.attach(
+        sandbox_id="sb-by-id",
+        ingress="connect",
+    ):
+        pass
+
+    assert events == ["client.aclose", "sandbox.detach.aio"]
+    assert runtime.by_id.terminate_calls == []
 
 
 @pytest.mark.asyncio
@@ -795,7 +988,7 @@ async def test_created_async_computer_exposes_an_eligible_session_handle(
         run_id="run-session",
         ingress="connect",
         expose_vnc="off",
-        runtime={"modal_environment": "production", "modal_region": "us-west"},
+        runtime={"modal_environment": "production", "modal_region": "us-west-2"},
     )
 
     async def ready(_client: AsyncDaemonClient, **_kwargs: object) -> None:
@@ -811,7 +1004,7 @@ async def test_created_async_computer_exposes_an_eligible_session_handle(
         assert handle.session_id == metadata.tags["computer-use.session_id"]
         assert handle.app_name == "modal-computer-use"
         assert handle.modal_environment == "production"
-        assert handle.requested_modal_region == "us-west"
+        assert handle.requested_modal_region == "us-west-2"
         assert handle.ingress == "connect"
         assert handle.vnc_mode == "off"
         assert handle.config_hash == metadata.config_hash
@@ -1356,3 +1549,544 @@ assert not inspect.isawaitable(context)
     )
 
     assert result.returncode == 0, result.stderr
+
+
+# The existing owner, versioned handle, and borrow Interfaces are the contract.
+# The test composes them directly so a new public trajectory facade is not required.
+class _RecordingDaemonTransport(httpx.AsyncBaseTransport):
+    def __init__(self, app: object, requests: list[tuple[str, str]]) -> None:
+        self._transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+        self._requests = requests
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self._requests.append((request.method, request.url.path))
+        return await self._transport.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
+class _AttestedBootstrapTransport:
+    """Record one attestation exchange without standing in for warm ingress."""
+
+    timeout = 30.0
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        token: str | None,
+        requests: list[tuple[str, str | None]],
+        authorized_tokens: list[str],
+    ) -> None:
+        self.base_url = base_url
+        self.token = token
+        self._requests = requests
+        self._authorized_tokens = authorized_tokens
+        self.closed = False
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> httpx.Response:
+        self._requests.append((path, self.token))
+        request = httpx.Request(method, f"https://bootstrap.invalid{path}")
+        if path == "/readyz":
+            return httpx.Response(200, json={"ready": True}, request=request)
+        if path == "/v1/session/tunnel-authorize":
+            token = f"attested-token-{len(self._authorized_tokens) + 1}"
+            self._authorized_tokens.append(token)
+            return httpx.Response(200, json={"token": token}, request=request)
+        raise AssertionError(f"unexpected bootstrap request: {path}")
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _AuthenticatedIngressTransport(httpx.AsyncBaseTransport):
+    """Observe requests at the public HTTP transport boundary."""
+
+    def __init__(
+        self,
+        app: object,
+        *,
+        client_session: str,
+        requests: list[tuple[str, str, str | None]],
+    ) -> None:
+        self._transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+        self._client_session = client_session
+        self._requests = requests
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self._requests.append(
+            (
+                self._client_session,
+                request.url.path,
+                request.headers.get("authorization"),
+            )
+        )
+        return await self._transport.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
+class _TrajectoryHeartbeatTransport:
+    timeout = 1.0
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def request(self, _method: str, path: str, **_kwargs: object) -> httpx.Response:
+        raise AssertionError(f"trajectory completed before a heartbeat was due: {path}")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _PlacedTrajectoryFunction:
+    def __init__(self, *, region: str, environment: str) -> None:
+        self.region = region
+        self.environment = environment
+        self.received_handles: list[ComputerSessionHandle] = []
+
+    async def invoke(
+        self,
+        handle: ComputerSessionHandle,
+        body: Callable[[ComputerSessionHandle, str], Awaitable[object]],
+    ) -> object:
+        received = ComputerSessionHandle.model_validate_json(handle.model_dump_json())
+        self.received_handles.append(received)
+        with patch.dict(
+            "os.environ",
+            {
+                "MODAL_IS_REMOTE": "1",
+                "MODAL_ENVIRONMENT": self.environment,
+                "MODAL_REGION": self.region,
+            },
+        ):
+            return await body(received, self.region)
+
+
+def _install_public_trajectory_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> tuple[_FakeModalRuntime, object, list[tuple[str, str]], list[_TrajectoryHeartbeatTransport]]:
+    runtime = _install_runtime(monkeypatch)
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            require_connect_user=False,
+            allow_unauthenticated_loopback=True,
+        )
+    )
+    requests: list[tuple[str, str]] = []
+    heartbeat_transports: list[_TrajectoryHeartbeatTransport] = []
+
+    def async_transport(
+        base_url: str,
+        *,
+        token: str | None = None,
+        timeout: float = 30.0,
+        http2: bool = False,
+        **_kwargs: object,
+    ) -> AsyncHTTPTransport:
+        client = httpx.AsyncClient(
+            transport=_RecordingDaemonTransport(app, requests),
+            base_url="http://127.0.0.1",
+        )
+        return AsyncHTTPTransport(
+            base_url,
+            token=token,
+            timeout=timeout,
+            http2=http2,
+            client=client,
+        )
+
+    def heartbeat_transport(*_args: object, **_kwargs: object) -> _TrajectoryHeartbeatTransport:
+        transport = _TrajectoryHeartbeatTransport()
+        heartbeat_transports.append(transport)
+        return transport
+
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.AsyncHTTPTransport",
+        async_transport,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.client.AsyncHTTPTransport",
+        async_transport,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        heartbeat_transport,
+    )
+    return runtime, app, requests, heartbeat_transports
+
+
+def _prepare_created_owner_for_handoff(runtime: _FakeModalRuntime) -> None:
+    created_tags = runtime.create_kwargs[-1]["tags"]
+    assert isinstance(created_tags, dict)
+    runtime.created.tags = dict(created_tags)
+    runtime.by_id = runtime.created
+
+
+def _trajectory_operations(requests: list[tuple[str, str]]) -> list[str]:
+    operations: list[str] = []
+    for _method, path in requests:
+        if path.startswith("/v1/screenshots/full"):
+            operations.append("observe")
+        elif path == "/v1/actions/run":
+            operations.append("act")
+    return operations
+
+
+@pytest.mark.asyncio
+async def test_attested_trajectory_reuses_one_pooled_client_and_authentication_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            require_connect_user=False,
+            allow_unauthenticated_loopback=True,
+        )
+    )
+    bootstrap_requests: list[tuple[str, str | None]] = []
+    authorized_tokens: list[str] = []
+    ingress_requests: list[tuple[str, str, str | None]] = []
+    pooled_client_sessions: list[tuple[str | None, str]] = []
+    heartbeat_transports: list[_TrajectoryHeartbeatTransport] = []
+
+    def async_transport(
+        base_url: str,
+        *,
+        token: str | None = None,
+        timeout: float = 30.0,
+        http2: bool = False,
+        **_kwargs: object,
+    ) -> AsyncHTTPTransport | _AttestedBootstrapTransport:
+        if token not in authorized_tokens:
+            return _AttestedBootstrapTransport(
+                base_url=base_url,
+                token=token,
+                requests=bootstrap_requests,
+                authorized_tokens=authorized_tokens,
+            )
+        client_session = f"pooled-client-{len(pooled_client_sessions) + 1}"
+        pooled_client_sessions.append((token, client_session))
+        client = httpx.AsyncClient(
+            transport=_AuthenticatedIngressTransport(
+                app,
+                client_session=client_session,
+                requests=ingress_requests,
+            ),
+            base_url="http://127.0.0.1",
+        )
+        return AsyncHTTPTransport(
+            base_url,
+            token=token,
+            timeout=timeout,
+            http2=http2,
+            client=client,
+        )
+
+    def heartbeat_transport(
+        *_args: object,
+        **_kwargs: object,
+    ) -> _TrajectoryHeartbeatTransport:
+        transport = _TrajectoryHeartbeatTransport()
+        heartbeat_transports.append(transport)
+        return transport
+
+    monkeypatch.setattr(
+        "modal_computer_use.client.AsyncHTTPTransport",
+        async_transport,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.AsyncHTTPTransport",
+        async_transport,
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        heartbeat_transport,
+    )
+    placed_function = _PlacedTrajectoryFunction(region="us-west-2", environment="test")
+
+    async def trajectory(
+        handle: ComputerSessionHandle,
+        function_region: str,
+    ) -> tuple[Screenshot, ActionBatchResult, Screenshot]:
+        async with handle.borrow_async(
+            run_id="trajectory-run",
+            function_region=function_region,
+        ) as computer:
+            first = await computer.screenshots.full()
+            batch = await computer.actions.run(
+                [
+                    {"type": "wait", "duration_ms": 0},
+                    {"type": "wait", "duration_ms": 1},
+                ]
+            )
+            second = await computer.screenshots.full()
+            return first, batch, second
+
+    async with (
+        app.router.lifespan_context(app),
+        AsyncComputerSandbox.create(
+            config=ComputerConfig(
+                run_id="owner-run",
+                ingress="attested-tunnel",
+                expose_vnc="off",
+                runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+            ),
+            image=object(),
+        ) as owner,
+    ):
+        _prepare_created_owner_for_handoff(runtime)
+        assert [path for path, _token in bootstrap_requests].count(
+            "/v1/session/tunnel-authorize"
+        ) == 1
+        first, batch, second = cast(
+            tuple[Screenshot, ActionBatchResult, Screenshot],
+            await placed_function.invoke(
+                owner.session_handle(),
+                trajectory,
+            ),
+        )
+
+    assert first.bytes is not None
+    assert second.bytes is not None
+    assert batch.ok is True
+    assert len(batch.results) == 2
+    assert [path for path, _token in bootstrap_requests].count(
+        "/v1/session/tunnel-authorize"
+    ) == 2
+    assert authorized_tokens == ["attested-token-1", "attested-token-2"]
+
+    trajectory_sessions = [
+        session
+        for token, session in pooled_client_sessions
+        if token == "attested-token-2"  # noqa: S105 - synthetic authorization state.
+    ]
+    assert len(trajectory_sessions) == 1
+    trajectory_session = trajectory_sessions[0]
+    trajectory_requests = [
+        (path, authorization)
+        for session, path, authorization in ingress_requests
+        if session == trajectory_session
+    ]
+    assert [path for path, _authorization in trajectory_requests] == [
+        "/readyz",
+        "/v1/version",
+        "/v1/capabilities",
+        "/v1/leases/acquire",
+        "/v1/screenshots/full/raw",
+        "/v1/actions/run",
+        "/v1/screenshots/full/raw",
+        "/v1/leases/release",
+    ]
+    assert {
+        authorization for _path, authorization in trajectory_requests
+    } == {"Bearer attested-token-2"}
+    assert len(heartbeat_transports) == 1
+    assert heartbeat_transports[0].closed
+
+
+@pytest.mark.asyncio
+async def test_public_trajectory_observes_then_reaches_its_first_mutation_inside_one_borrow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime, app, requests, heartbeat_transports = _install_public_trajectory_contract(
+        monkeypatch,
+        tmp_path,
+    )
+    placed_function = _PlacedTrajectoryFunction(region="us-west-2", environment="test")
+
+    async def trajectory(handle: ComputerSessionHandle, function_region: str) -> object:
+        async with handle.borrow_async(
+            run_id="trajectory-run",
+            function_region=function_region,
+        ) as computer:
+            await computer.screenshots.full()
+            await computer.screenshots.full()
+            return await computer.actions.run([{"type": "wait", "duration_ms": 0}])
+
+    async with (
+        app.router.lifespan_context(app),  # type: ignore[attr-defined]
+        AsyncComputerSandbox.create(
+            config=ComputerConfig(
+                run_id="owner-run",
+                ingress="connect",
+                expose_vnc="off",
+                runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+            ),
+            image=object(),
+        ) as owner,
+    ):
+        _prepare_created_owner_for_handoff(runtime)
+        result = await placed_function.invoke(owner.session_handle(), trajectory)
+
+    assert result.ok is True  # type: ignore[attr-defined]
+    assert len(placed_function.received_handles) == 1
+    received_handle = placed_function.received_handles[0]
+    assert received_handle.schema_version == 2
+    assert received_handle.handoff_protocol == "computer-use.session-handoff.v2"
+    assert received_handle.requested_modal_region == placed_function.region
+    assert runtime.calls.count("Sandbox.create.aio") == 1
+    assert [path for _method, path in requests].count("/v1/leases/acquire") == 1
+    assert [path for _method, path in requests].count("/v1/leases/release") == 1
+    assert _trajectory_operations(requests) == ["observe", "observe", "act"]
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 2
+    assert len(heartbeat_transports) == 1
+    assert heartbeat_transports[0].closed
+
+
+@pytest.mark.asyncio
+async def test_public_trajectory_failure_releases_the_borrow_before_owner_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime, app, requests, heartbeat_transports = _install_public_trajectory_contract(
+        monkeypatch,
+        tmp_path,
+    )
+    placed_function = _PlacedTrajectoryFunction(region="us-west-2", environment="test")
+    trajectory_failure = RuntimeError("application trajectory failed")
+
+    async def trajectory(handle: ComputerSessionHandle, function_region: str) -> object:
+        async with handle.borrow_async(
+            run_id="trajectory-run",
+            function_region=function_region,
+        ) as computer:
+            await computer.screenshots.full()
+            raise trajectory_failure
+
+    with pytest.raises(RuntimeError, match="application trajectory failed") as raised:
+        async with app.router.lifespan_context(app):  # type: ignore[attr-defined]
+            async with AsyncComputerSandbox.create(
+                config=ComputerConfig(
+                    run_id="owner-run",
+                    ingress="connect",
+                    expose_vnc="off",
+                    runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+                ),
+                image=object(),
+            ) as owner:
+                _prepare_created_owner_for_handoff(runtime)
+                await placed_function.invoke(owner.session_handle(), trajectory)
+
+    assert raised.value is trajectory_failure
+    assert [path for _method, path in requests].count("/v1/leases/acquire") == 1
+    assert [path for _method, path in requests].count("/v1/leases/release") == 1
+    assert _trajectory_operations(requests) == ["observe"]
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 2
+    assert len(heartbeat_transports) == 1
+    assert heartbeat_transports[0].closed
+
+
+@pytest.mark.asyncio
+async def test_public_trajectory_timeout_releases_the_borrow_before_owner_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime, app, requests, heartbeat_transports = _install_public_trajectory_contract(
+        monkeypatch,
+        tmp_path,
+    )
+    placed_function = _PlacedTrajectoryFunction(region="us-west-2", environment="test")
+
+    async def trajectory(handle: ComputerSessionHandle, function_region: str) -> object:
+        async with handle.borrow_async(
+            run_id="trajectory-run",
+            function_region=function_region,
+        ) as computer:
+            await computer.screenshots.full()
+            async with asyncio.timeout(0):
+                await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    with pytest.raises(TimeoutError):
+        async with app.router.lifespan_context(app):  # type: ignore[attr-defined]
+            async with AsyncComputerSandbox.create(
+                config=ComputerConfig(
+                    run_id="owner-run",
+                    ingress="connect",
+                    expose_vnc="off",
+                    runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+                ),
+                image=object(),
+            ) as owner:
+                _prepare_created_owner_for_handoff(runtime)
+                await placed_function.invoke(owner.session_handle(), trajectory)
+
+    assert [path for _method, path in requests].count("/v1/leases/acquire") == 1
+    assert [path for _method, path in requests].count("/v1/leases/release") == 1
+    assert _trajectory_operations(requests) == ["observe"]
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 2
+    assert len(heartbeat_transports) == 1
+    assert heartbeat_transports[0].closed
+
+
+@pytest.mark.asyncio
+async def test_public_trajectory_cancellation_releases_the_borrow_before_owner_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime, app, requests, heartbeat_transports = _install_public_trajectory_contract(
+        monkeypatch,
+        tmp_path,
+    )
+    placed_function = _PlacedTrajectoryFunction(region="us-west-2", environment="test")
+    borrow_entered = asyncio.Event()
+
+    async def trajectory(handle: ComputerSessionHandle, function_region: str) -> object:
+        async with handle.borrow_async(
+            run_id="trajectory-run",
+            function_region=function_region,
+        ) as computer:
+            await computer.screenshots.full()
+            borrow_entered.set()
+            await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def run_trajectory() -> object:
+        async with AsyncComputerSandbox.create(
+            config=ComputerConfig(
+                run_id="owner-run",
+                ingress="connect",
+                expose_vnc="off",
+                runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+            ),
+            image=object(),
+        ) as owner:
+            _prepare_created_owner_for_handoff(runtime)
+            return await placed_function.invoke(owner.session_handle(), trajectory)
+
+    async with app.router.lifespan_context(app):  # type: ignore[attr-defined]
+        trajectory_task = asyncio.create_task(run_trajectory())
+        await borrow_entered.wait()
+        trajectory_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await trajectory_task
+
+    assert [path for _method, path in requests].count("/v1/leases/acquire") == 1
+    assert [path for _method, path in requests].count("/v1/leases/release") == 1
+    assert _trajectory_operations(requests) == ["observe"]
+    assert runtime.created.terminate_calls == [True]
+    assert runtime.created.detach_calls == 2
+    assert len(heartbeat_transports) == 1
+    assert heartbeat_transports[0].closed

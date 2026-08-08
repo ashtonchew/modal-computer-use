@@ -125,6 +125,44 @@ class RecordingComputer:
         self.screenshots = RecordingScreenshots()
 
 
+class AsyncRecordingScreenshots(RecordingScreenshots):
+    async def full(self) -> Screenshot:
+        return super().full()
+
+
+class AsyncRecordingActions(RecordingActions):
+    async def run(
+        self,
+        actions: list[Any],
+        *,
+        continue_on_error: bool = False,
+        screenshot_after: bool = False,
+        source: str = "sdk",
+        max_action_timeout_ms: int | None = None,
+    ) -> ActionBatchResult:
+        return super().run(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_after=screenshot_after,
+            source=source,
+            max_action_timeout_ms=max_action_timeout_ms,
+        )
+
+
+class AsyncRecordingComputer:
+    def __init__(
+        self,
+        *,
+        apply_results: list[ActionResult] | None = None,
+        batch_results: list[ActionBatchResult] | None = None,
+    ) -> None:
+        self.actions = AsyncRecordingActions(
+            apply_results=apply_results,
+            batch_results=batch_results,
+        )
+        self.screenshots = AsyncRecordingScreenshots()
+
+
 class QueuedProviderResponses:
     def __init__(self, responses: list[Any]) -> None:
         self.responses = deque(responses)
@@ -133,3 +171,8 @@ class QueuedProviderResponses:
     def create(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         return self.responses.popleft()
+
+
+class AsyncQueuedProviderResponses(QueuedProviderResponses):
+    async def create(self, **kwargs: Any) -> Any:
+        return super().create(**kwargs)

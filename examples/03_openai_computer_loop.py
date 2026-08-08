@@ -1,20 +1,28 @@
-"""Canonical OpenAI Responses API computer-use loop.
+"""Run an OpenAI computer-use loop in a placed Modal Function.
 
 Install the runtime extras with ``uv sync --extra modal --extra openai`` and
-set ``OPENAI_API_KEY`` before running this example. Provider calls stay in
-this user-owned example; core modules remain provider-neutral.
+create the ``openai-api-key`` Modal Secret before you deploy this file. The
+async owner creates one desktop. It sends a versioned handle to a Function in
+the same exact region. That Function borrows the desktop once for the full
+model loop. Provider calls stay in this application-owned example.
+
+The constants below are application choices, not SDK defaults. Review the
+region, environment, resources, image, browser, timeouts, and capacity before
+you deploy. Warm capacity is off.
 """
 
 from __future__ import annotations
 
-import os
+import asyncio
+import uuid
 from time import monotonic
 from typing import Any
 
 from modal_computer_use import (
+    AsyncComputerSandbox,
     BrowserConfig,
     ComputerConfig,
-    ComputerSandbox,
+    ComputerSessionHandle,
     ResourceConfig,
 )
 from modal_computer_use.adapters.openai import (
@@ -22,7 +30,7 @@ from modal_computer_use.adapters.openai import (
     openai_computer_call_output,
 )
 from modal_computer_use.errors import ActionValidationError, UnsupportedActionError
-from modal_computer_use.models import ComputerAction, Screenshot, parse_action
+from modal_computer_use.models import ComputerAction, parse_action
 
 DEFAULT_MODEL = "gpt-5.6"
 DEFAULT_MAX_TURNS = 40
@@ -32,13 +40,37 @@ DEFAULT_MAX_ELAPSED_SECONDS = 300.0
 DEFAULT_MAX_ACTION_TIMEOUT_MS = 30_000
 DEFAULT_MAX_BATCH_DURATION_MS = 30_000
 COMPUTER_TOOL = {"type": "computer"}
+APP_NAME = "openai-computer-use"
+MODAL_ENVIRONMENT = "main"
+MODAL_REGION = "us-west-2"  # Replace with one measured exact Modal region selector.
+OPENAI_CREDENTIAL_REFERENCE = "openai-api-key"
+FUNCTION_CPU = 1.0
+FUNCTION_MEMORY_MIB = 2048
+FUNCTION_PYTHON_VERSION = "3.12"
+FUNCTION_PACKAGE_SPEC = "modal-computer-use[modal,openai]"
+FUNCTION_TIMEOUT_SECONDS = 900
+FUNCTION_RETRIES = 0
+FUNCTION_MIN_CONTAINERS = 0
+FUNCTION_MAX_CONTAINERS = 4
+SANDBOX_CPU = 1.0
+SANDBOX_MEMORY_MIB = 2048
+SANDBOX_RESOURCE_PROFILE = "browser"
+SANDBOX_IMAGE_SOURCE = "inline"
+SANDBOX_BROWSER_KIND = "chromium"
+SANDBOX_BROWSER_PREWARM = True
+SANDBOX_BROWSER_GPU_MODE = "off"
+SANDBOX_RESOLUTION = (1440, 900)
+SANDBOX_TIMEOUT_SECONDS = 900
+SANDBOX_IDLE_TIMEOUT_SECONDS = None
+SANDBOX_READINESS_TIMEOUT_SECONDS = 120
+SANDBOX_WARM_POOL_CAPACITY = 0
 
 
 class _OpenAILimitError(RuntimeError):
     pass
 
 
-def run_openai_computer_loop(
+async def run_openai_computer_loop(
     *,
     client: Any,
     computer: Any,
@@ -82,7 +114,7 @@ def run_openai_computer_loop(
         }
         if previous_response_id is not None:
             request["previous_response_id"] = previous_response_id
-        response = client.responses.create(**request)
+        response = await client.responses.create(**request)
         _check_deadline(started_at, max_elapsed_seconds)
         calls = [item for item in response.output if getattr(item, "type", None) == "computer_call"]
         if not calls:
@@ -90,7 +122,7 @@ def run_openai_computer_loop(
         if turn == max_turns - 1:
             raise RuntimeError(f"OpenAI computer loop exceeded {max_turns} turns")
 
-        preflighted_calls: list[tuple[Any, list[dict[str, Any]], int, int]] = []
+        preflighted_calls: list[tuple[Any, list[ComputerAction], int]] = []
         response_action_count = 0
         try:
             for call in calls:
@@ -107,9 +139,7 @@ def run_openai_computer_loop(
                     )
                 _preflight_policy(normalized_actions, before_action)
                 response_action_count += expanded_action_count
-                preflighted_calls.append(
-                    (call, actions, len(normalized_actions), expanded_action_count)
-                )
+                preflighted_calls.append((call, normalized_actions, expanded_action_count))
             if trajectory_action_count + response_action_count > max_trajectory_actions:
                 raise _OpenAILimitError(
                     f"OpenAI computer loop exceeded {max_trajectory_actions} trajectory actions"
@@ -121,7 +151,7 @@ def run_openai_computer_loop(
 
         trajectory_action_count += response_action_count
         outputs: list[dict[str, Any]] = []
-        for call, actions, normalized_action_count, expanded_action_count in preflighted_calls:
+        for call, normalized_actions, expanded_action_count in preflighted_calls:
             remaining_batch_timeout_ms = _remaining_batch_timeout_ms(
                 started_at=started_at,
                 max_elapsed_seconds=max_elapsed_seconds,
@@ -135,32 +165,29 @@ def run_openai_computer_loop(
             if allocated_action_timeout_ms < 1:
                 _raise_deadline(max_elapsed_seconds)
             bounded_actions = [
-                {**action, "timeout_ms": allocated_action_timeout_ms} for action in actions
+                action.model_copy(update={"timeout_ms": allocated_action_timeout_ms})
+                for action in normalized_actions
             ]
             try:
-                batch_result = adapter.apply_many(
+                batch_result = await computer.actions.run(
                     bounded_actions,
                     continue_on_error=False,
-                    screenshot_after=True,
+                    screenshot_after=False,
+                    source="openai-adapter",
                     max_action_timeout_ms=allocated_action_timeout_ms,
                 )
             except Exception as exc:
                 raise RuntimeError(
                     f"OpenAI computer action batch failed: {type(exc).__name__}"
                 ) from None
-            native_screenshot = _native_final_screenshot(
-                batch_result,
-                actions=actions,
-                normalized_action_count=normalized_action_count,
-            )
-            if native_screenshot is not None:
-                post_batch_screenshot = native_screenshot
-            else:
-                if not batch_result.ok:
-                    raise RuntimeError(_sanitized_batch_failure(batch_result))
-                post_batch_screenshot = batch_result.screenshot
-                if post_batch_screenshot is None:
-                    raise RuntimeError("OpenAI computer action batch returned no screenshot")
+            if not batch_result.ok:
+                raise RuntimeError(_sanitized_batch_failure(batch_result))
+            try:
+                post_batch_screenshot = await computer.screenshots.full()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"OpenAI computer screenshot failed: {type(exc).__name__}"
+                ) from None
             _check_deadline(started_at, max_elapsed_seconds)
             outputs.append(
                 openai_computer_call_output(
@@ -265,26 +292,6 @@ def _preflight_policy_tree(action: ComputerAction, before_action: Any) -> None:
             _preflight_policy_tree(parse_action(nested_action), before_action)
 
 
-def _native_final_screenshot(
-    batch_result: Any,
-    *,
-    actions: list[dict[str, Any]],
-    normalized_action_count: int,
-) -> Screenshot | None:
-    final_action = actions[-1]
-    if (final_action.get("type") or final_action.get("action")) != "screenshot":
-        return None
-    if len(batch_result.results) < normalized_action_count:
-        return None
-    action_results = batch_result.results[:normalized_action_count]
-    if not all(item.ok for item in action_results):
-        return None
-    try:
-        return Screenshot.model_validate(action_results[-1].output)
-    except Exception:
-        return None
-
-
 def _sanitized_batch_failure(batch_result: Any) -> str:
     failed = next((item for item in batch_result.results if not item.ok), None)
     if failed is None:
@@ -323,28 +330,150 @@ def _remaining_request_timeout_seconds(
     return remaining
 
 
-def main() -> None:
-    from openai import OpenAI
-
-    model = os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
-    config = ComputerConfig(
-        desktop={"resolution": (1440, 900)},
-        resources=ResourceConfig(profile="browser"),
-        browser=BrowserConfig(kind="chromium", prewarm=True),
+def sandbox_configuration() -> ComputerConfig:
+    """Build the explicit Sandbox configuration for this example."""
+    return ComputerConfig(
+        ingress="attested-tunnel",
+        desktop={"resolution": SANDBOX_RESOLUTION},
+        runtime={
+            "modal_environment": MODAL_ENVIRONMENT,
+            "modal_region": MODAL_REGION,
+            "timeout_seconds": SANDBOX_TIMEOUT_SECONDS,
+            "idle_timeout_seconds": SANDBOX_IDLE_TIMEOUT_SECONDS,
+            "readiness_timeout_seconds": SANDBOX_READINESS_TIMEOUT_SECONDS,
+        },
+        resources=ResourceConfig(
+            profile=SANDBOX_RESOURCE_PROFILE,
+            cpu=SANDBOX_CPU,
+            memory_mib=SANDBOX_MEMORY_MIB,
+        ),
+        image={"source": SANDBOX_IMAGE_SOURCE},
+        browser=BrowserConfig(
+            kind=SANDBOX_BROWSER_KIND,
+            prewarm=SANDBOX_BROWSER_PREWARM,
+            gpu_mode=SANDBOX_BROWSER_GPU_MODE,
+        ),
     )
-    with ComputerSandbox.create(config=config, wait=True) as computer:
-        computer.ensure_browser_ready(config)
-        response = run_openai_computer_loop(
-            client=OpenAI(),
+
+
+def resolved_trajectory_configuration() -> dict[str, Any]:
+    """Return the cost and placement choices that this example will request."""
+    resolved = sandbox_configuration().resolved_cost_and_placement()
+    resolved["function"] = {
+        "cpu": FUNCTION_CPU,
+        "memory_mib": FUNCTION_MEMORY_MIB,
+        "image": {
+            "base": "debian_slim",
+            "python_version": FUNCTION_PYTHON_VERSION,
+            "package": FUNCTION_PACKAGE_SPEC,
+        },
+        "timeout_seconds": FUNCTION_TIMEOUT_SECONDS,
+        "retries": FUNCTION_RETRIES,
+        "min_containers": FUNCTION_MIN_CONTAINERS,
+        "max_containers": FUNCTION_MAX_CONTAINERS,
+    }
+    resolved["warm_capacity"] = {
+        "function_min_containers": FUNCTION_MIN_CONTAINERS,
+        "sandbox_pool_capacity": SANDBOX_WARM_POOL_CAPACITY,
+    }
+    return resolved
+
+
+async def run_openai_trajectory_body(
+    handle: ComputerSessionHandle,
+    task: str,
+    *,
+    run_id: str,
+    client: Any,
+    function_region: str = MODAL_REGION,
+    model: str = DEFAULT_MODEL,
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> Any:
+    """Borrow one desktop once, then run the complete application model loop."""
+    async with handle.borrow_async(run_id=run_id, function_region=function_region) as computer:
+        return await run_openai_computer_loop(
+            client=client,
             computer=computer,
+            task=task,
             model=model,
+            max_turns=max_turns,
+        )
+
+
+try:
+    import modal
+except ImportError:
+    modal = None
+    app = None
+    run_openai_trajectory = None
+else:
+    app = modal.App(APP_NAME)
+    function_image = modal.Image.debian_slim(
+        python_version=FUNCTION_PYTHON_VERSION
+    ).pip_install(FUNCTION_PACKAGE_SPEC)
+
+    @app.function(
+        image=function_image,
+        region=MODAL_REGION,
+        cpu=FUNCTION_CPU,
+        memory=FUNCTION_MEMORY_MIB,
+        timeout=FUNCTION_TIMEOUT_SECONDS,
+        retries=FUNCTION_RETRIES,
+        min_containers=FUNCTION_MIN_CONTAINERS,
+        max_containers=FUNCTION_MAX_CONTAINERS,
+        secrets=[
+            modal.Secret.from_name(
+                OPENAI_CREDENTIAL_REFERENCE,
+                required_keys=["OPENAI_API_KEY"],
+            )
+        ],
+    )
+    async def run_openai_trajectory(
+        handle: ComputerSessionHandle,
+        task: str,
+        model: str,
+        run_id: str,
+    ) -> str:
+        from openai import AsyncOpenAI
+
+        async with AsyncOpenAI() as client:
+            response = await run_openai_trajectory_body(
+                handle,
+                task,
+                model=model,
+                run_id=run_id,
+                client=client,
+            )
+        return response.output_text
+
+
+async def run_example(*, task: str, model: str = DEFAULT_MODEL) -> str:
+    """Create one desktop and pass its handle to the placed Function."""
+    if modal is None or app is None or run_openai_trajectory is None:
+        raise ImportError("Modal is required to run this example")
+    deployed = modal.Function.from_name(
+        APP_NAME,
+        "run_openai_trajectory",
+        environment_name=MODAL_ENVIRONMENT,
+    )
+    config = sandbox_configuration()
+    async with AsyncComputerSandbox.create(config=config, app_name=APP_NAME) as owner:
+        handle = owner.session_handle()
+        run_id = f"openai_trajectory_{uuid.uuid4().hex}"
+        return await deployed.remote.aio(handle, task, model, run_id)
+
+
+def main() -> None:
+    output_text = asyncio.run(
+        run_example(
             task=(
                 "Open https://example.com in the browser. Verify that the page title is "
                 "'Example Domain', then report the title and stop. Use the computer tool "
                 "for UI interaction. Do not sign in, submit forms, or change data."
-            ),
+            )
         )
-        print(response.output_text)
+    )
+    print(output_text)
 
 
 if __name__ == "__main__":

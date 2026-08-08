@@ -8,6 +8,7 @@ identifiers, call identifiers, prompts, or typed content.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import modal
@@ -19,7 +20,9 @@ APP_NAME = os.environ.get(
     "MODAL_COMPUTER_USE_HANDOFF_APP_NAME",
     "modal-computer-use-handoff-smoke-local",
 )
-FUNCTION_REGION = os.environ.get("MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west")
+FUNCTION_REGION = os.environ.get("MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west-2")
+if re.fullmatch(r"[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*", FUNCTION_REGION) is None:
+    raise ValueError("the handoff smoke requires one exact Modal region")
 FUNCTION_TIMEOUT_SECONDS = 300
 BORROW_READINESS_TIMEOUT_SECONDS = 180
 SAFE_RESULT_FIELDS = frozenset(

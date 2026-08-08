@@ -37,6 +37,20 @@ Set the Function's `region` placement request to the handle's exact `requested_m
 selector is a scheduling policy, not evidence of a common host or availability zone, and the
 handoff does not depend on loopback or private networking.
 
+The primary handoff example declares these choices in one file:
+
+- Modal environment and one exact region for the Function and Sandbox.
+- Separate CPU and memory requests for the Function and Sandbox.
+- A Sandbox image recipe and browser choice.
+- A Function image and Python version.
+- Sandbox lifetime, idle, and readiness timeouts.
+- Function timeout, retries, minimum containers, and maximum containers.
+
+The example values are application choices. They are not SDK defaults. Review
+`resolved_trajectory_configuration()` before deployment to inspect the requested placement,
+resources, images, timeouts, retries, container caps, and warm-capacity state. The report excludes
+secret-bearing fields.
+
 Choose Function capacity as an explicit latency/cost tradeoff:
 
 - `min_containers=0` scales the Function to zero and can add cold-start latency.
@@ -46,6 +60,18 @@ Choose Function capacity as an explicit latency/cost tradeoff:
   through one per-borrow sequence coordinator.
 - Use `retries=0` to avoid configured retries; Modal may still reschedule a crashed Function
   container, so the complete trajectory is not exactly-once.
+
+### Optional warm capacity
+
+Warm capacity is optional spend. It is not article parity. The primary example sets
+`min_containers=0` and does not create or fill a Sandbox warm pool. The Function can therefore
+scale to zero, and the owner creates the Sandbox only when the trajectory starts.
+
+Set a positive Function `min_containers` only when you accept idle Function cost. Configure a
+Sandbox warm pool through `ComputerSandboxManager` and `WarmPoolPolicy` only when you also accept
+idle Sandbox cost and its separate claim and cleanup contract. Do not credit either choice for the
+article's warm operation results. Browser `prewarm` starts the selected browser during Sandbox
+startup; it is not a pool-capacity control and does not keep a terminated Sandbox alive.
 
 Cancellation stops the Function invocation, not the target desktop and not prior GUI effects. The
 borrower detaches on normal return or Python exception and the creator terminates only after remote
@@ -131,34 +157,47 @@ measure the intended adapter.
 
 ## Screenshot hot paths
 
-Use the raw binary screenshot routes for latency-sensitive observation loops:
+The primary borrowed trajectory calls `screenshots.full()`. Inline full screenshots use the raw
+binary HTTP route over the borrow's pooled client and return a byte-backed typed `Screenshot`:
 
 ```bash
 POST /v1/screenshots/full/raw
+```
+
+Cursor-hidden capture uses a persistent MSS/XShm session and in-memory encoding when available.
+Cursor-visible requests and failed display connections retain bounded fallback behavior. JSON and
+base64 routes remain available for low-level REST compatibility.
+
+The following surfaces are optional capabilities, not article parity and not the SDK default:
+
+```bash
 POST /v1/actions/run/raw-screenshot
+GET /v1/session/hot
 ```
 
 The fused action route measures an immediate action-to-frame surface: it executes the requested
 actions and returns the post-action screenshot in one HTTP request. That avoids the extra network
 round trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`, but it does not
-define a canonical model loop or prove application readiness.
+define the canonical model loop or prove application readiness. The article's opening 47 ms value
+is arithmetic over separate raw-screenshot and click medians. It is not a fused turn and is not a
+promise for the new default.
 
-For tighter interactive loops, use the hot-session WebSocket:
+The hot-session WebSocket is a separate advanced control surface:
 
 ```text
 GET /v1/session/hot
 ```
 
-The hot session keeps one authenticated daemon connection open and accepts ordered JSON control
+It keeps one authenticated daemon connection open and accepts ordered JSON control
 frames for `run_actions`, `run_raw_screenshot`, and `screenshot_raw`. Raw observations are returned
 as a JSON metadata frame followed by one binary image frame. This is the SDK's lowest-overhead
 control path because it avoids opening a fresh request for every primitive while reusing the same
 daemon batch and screenshot execution code as the REST routes.
 
-Use the hot session when the caller owns a tight loop and can keep a connection open. Keep the REST
-routes for broad compatibility, simple one-shot calls, idempotency-key workflows, and environments
-where WebSocket egress is unavailable. On Modal, WebSockets are RFC 6455 and are not WebSockets over
-HTTP/2, so the hot-session win comes from persistent session reuse rather than HTTP/2 multiplexing.
+Use it only when the application accepts its separate correctness and compatibility contract. Keep
+the REST routes for broad compatibility, one-shot calls, idempotency-key workflows, and
+environments where WebSocket egress is unavailable. On Modal, WebSockets are RFC 6455 and are not
+WebSockets over HTTP/2. Do not credit WebSocket or HTTP/2 behavior to the article result.
 
 For continuous observation, use the observation stream instead of polling screenshots:
 
@@ -824,22 +863,25 @@ the selected ingress but creates the daemon port through Modal `h2_ports`, start
 Hypercorn, and uses an `httpx` HTTP/2 client. HTTP/1.1 remains the SDK default because it is the
 lowest-dependency compatibility path and matches non-h2 local daemon clients. Use the HTTP/2 mode
 when benchmarking or operating a hot primitive loop that benefits from request multiplexing and
-lower connection overhead.
+lower connection overhead. HTTP/2 is an optional low-level experiment, not article parity.
 
-Modal region placement is an explicit latency knob for created sandboxes. Use
-`ComputerConfig(runtime={"modal_region": "us-west"})` or benchmark `--modal-region us-west` when
-the caller/model location is known. Leave it unset when availability/cold-start flexibility matters
-more than predictable low latency. Region placement only affects new sandboxes; attach/reuse cannot
-relocate an existing sandbox.
+The primary placed trajectory requires one exact requested region for both the application Function
+and the Sandbox, for example `us-west-2`. A missing or broad region fails before lease acquisition
+or desktop mutation. An unset or broad selector remains available only to explicit low-level SDK
+and diagnostic benchmark flows; it does not establish the article-backed default topology. Region
+placement affects only new Sandboxes. Attach and reuse cannot relocate an existing Sandbox.
 
 Region policy:
 
 | Situation | Policy | Why |
 | --- | --- | --- |
-| General SDK usage | Leave `runtime.modal_region=None` | Preserves Modal's default placement and availability behavior. |
-| Production agent/model loop | Pin the fastest measured region near the caller/model loop | The hot path is caller-to-sandbox receive latency, not end-user geography. |
-| Published latency claim | Run `modal-region-ab` from the actual caller environment | Region results are operational measurements and should include caller context. |
+| Primary placed trajectory | Set the same exact measured region on the Function and `runtime.modal_region` | The handoff fails closed unless requested and observed placement match. |
+| Explicit low-level or diagnostic use | An unset or broad selector is allowed | This keeps legacy placement flexibility but is not the optimized default. |
+| Published latency claim | Run `modal-region-ab` from the actual caller environment and record exact requested and observed placement | Region results are operational measurements and must include caller context. |
 | Reused sandbox | Do not expect relocation | Region only applies when creating a new Modal sandbox. |
+
+The historical table below retains the broad region labels recorded by its earlier benchmark. Do
+not copy those labels into a version 2 placed-trajectory configuration.
 
 On May 26, 2026, a 30x `daemon-transport-floor` matrix from the development environment showed
 region dominated ingress and HTTP-version differences for the 0B receive floor:
@@ -1477,25 +1519,27 @@ variance plus per-request tunnel and payload costs, not as Connect-token exchang
 
 ## Screenshot storage modes
 
-`screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode:
+`screenshots.full(...)` and `screenshots.region(...)` accept a `storage` mode. `inline` is the
+default. `artifact` writes the image to daemon-owned storage and returns its artifact reference.
+`auto` lets the daemon choose between the inline and artifact representations.
 
-- `inline` returns base64 in the HTTP response. Fast for small screenshots; expensive once the image is over a few hundred kilobytes.
-- `artifact` writes to disk and returns a `Screenshot` with `artifact_uri`. Cheaper to ship around, slower first hit.
-- `auto` (default) picks based on size.
+The version 2 default optimization applies to full inline screenshots. `screenshots.full()` sends
+one request to `/v1/screenshots/full/raw` over the pooled client, validates the response metadata,
+and returns a byte-backed semantic `Screenshot`. It avoids JSON/base64 transfer without making
+callers use a bytes-only Interface. `screenshots.region()` and artifact/auto storage keep their
+structured route contracts.
 
-For agent loops that call screenshot every few actions, `auto` is usually the right answer.
+Use `screenshots.full()` in the primary placed trajectory. Choose `artifact` or `auto` only when
+the application's storage and transfer policy requires them.
 
-For low-latency model turns, prefer `actions.run_and_screenshot_bytes(...)` or
-`POST /v1/actions/run/raw-screenshot`. This keeps action execution and observation capture in a
-single daemon request while returning the screenshot as binary image bytes. The legacy
-`actions.run(..., screenshot_after=True)` path remains useful when callers need a structured JSON
-`Screenshot` object, but it pays base64 response overhead.
+Fused action-plus-screenshot requests are separate advanced primitives. They are not part of the
+article-parity default and are not credited for the 37.25 ms screenshot or the arithmetic 47 ms
+screenshot-plus-click figure. They need their own correctness and same-topology benchmark evidence
+before a future default change.
 
-When the caller needs to wait for the next paint instead of capturing immediately, use
-`actions.run_and_observe_change_screenshot_bytes(...)`. It returns binary image bytes plus parsed
-`change_result` and `change_timing_ms` metadata. The default `change_signal="auto"` is fastest on
-X11 images with DAMAGE support; set `change_signal="poll"` when the caller needs source-hash
-verification instead of event-driven paint detection.
+First-visual-change requests are also separate and experimental. They can return binary image
+bytes plus change metadata, but a changed pixel does not prove application readiness. XDamage is a
+wake hint followed by full-resolution pixel verification; polling remains the fallback.
 
 For cursor-hidden screenshots, the daemon first uses one in-process MSS session. After an open or
 grab failure, it resets and reopens the session once. If the retry fails, the daemon uses `scrot`

@@ -114,6 +114,30 @@ class SessionPlacementMismatchError(SessionCompatibilityError):
     message = "the Function placement does not match the session policy"
 
 
+class SessionPlacementMissingError(SessionCompatibilityError):
+    """Raised when required Function placement metadata is absent."""
+
+    message = "required Function placement metadata is missing"
+
+
+class SessionPlacementMalformedError(SessionCompatibilityError):
+    """Raised when Function placement metadata cannot identify a region."""
+
+    message = "Function placement metadata is malformed"
+
+
+class SessionPlacementUnverifiableError(SessionCompatibilityError):
+    """Raised when Function or target placement cannot be verified."""
+
+    message = "Function or target placement could not be verified"
+
+
+class SessionDaemonProtocolError(SessionCompatibilityError):
+    """Raised when the daemon lacks the required trajectory protocol."""
+
+    message = "the daemon does not support the required trajectory protocol"
+
+
 class SessionTargetMismatchError(SessionBorrowError):
     """Raised when the live target does not match the session handle."""
 

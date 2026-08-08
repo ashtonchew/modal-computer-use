@@ -8,6 +8,7 @@
 Use this feature to issue an action batch once and receive the first correlated frame that differs
 from the pre-action baseline. The signal can reduce unnecessary fixed delays when the first visual
 response is useful. It does not tell you when the application is ready for the next interaction.
+The primary SDK trajectory does not enable this feature by default.
 
 ```mermaid
 flowchart LR
@@ -41,6 +42,11 @@ For each call, the feature:
 - Measures `ActionObservationResult.elapsed_ms` from immediately before the action-observe request
   is sent until the correlated frame is received.
 - Preserves explicit `wait` actions and caller-supplied timing.
+- Limits observation work with `change_timeout_ms`. Capture and pixel verification must finish by
+  the deadline to report a detected change. Response encoding can finish after the deadline.
+- Limits an ordinary capture or Xlib error to the current request. The daemon can accept a later
+  request. Do not repeat the action automatically because it may have run before observation
+  failed.
 
 The feature does not confirm:
 
@@ -88,6 +94,12 @@ actions in the batch.
 | Timeout | The change deadline expired and the method returned a correlated frame. | Inspect the action metadata and frame. Do not treat the timeout as action failure. |
 | Action failure | `action_result` reports that the batch failed. | Handle the action failure separately from the visual-change outcome. |
 
+The metadata keeps the three visual outcomes distinct:
+
+- Changed: `change_detected=true` and `change_timeout_reached=false`.
+- Unchanged before the deadline: `change_detected=false` and `change_timeout_reached=false`.
+- Timeout: `change_detected=false` and `change_timeout_reached=true`.
+
 Use `require_valid_frame(require_change=True)` to validate a changed frame for measurement. It
 checks correlation, action success, change and timeout metadata, geometry, format, and frame
 reconstruction. It does not check whether the application is ready.
@@ -115,7 +127,9 @@ actions. They do not decide when an application is settled.
 - Regional detection can miss an effect outside the selected region.
 - XDamage is a wake-up hint, not semantic proof. Captured pixels and hashes determine whether a
   change occurred. If an XDamage event has no changed pixels, the daemon waits again until the
-  change deadline.
+  change deadline. With `change_signal="auto"`, the daemon uses pixel polling when XDamage is
+  unavailable. It also uses the remaining polling path when an XDamage-assisted observation is
+  inconclusive.
 - A cursor-visible request includes the rendered cursor in the verified returned frame. Cursor
   motion can therefore cause a detected change. Cursor-visible requests use pixel polling because
   cursor-only movement does not reliably produce an XDamage event.

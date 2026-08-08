@@ -1,6 +1,13 @@
 # Architecture
 
-The design splits orchestration from execution. Orchestration (creating sandboxes, picking images, applying tags, attaching to existing runs) is Modal-native. Primitive execution (clicks, keystrokes, screenshots, recordings, artifact reads) is daemon-native. Provider model loops live outside the core package, in adapters and user code.
+The design splits orchestration from execution. Modal-native orchestration creates Sandboxes,
+selects images, applies tags, and attaches to existing runs. The daemon executes clicks,
+keystrokes, screenshots, recordings, and artifact reads. Provider model loops live outside the core
+package in application code. Adapters only translate provider action and screenshot shapes.
+
+The primary composition is async owner → versioned session handle → application-owned Modal
+Function → one trajectory borrow → pooled daemon client → owner cleanup. The Function and Sandbox
+use the same exact requested region. Missing or unverifiable placement fails before mutation.
 
 ## Layers
 

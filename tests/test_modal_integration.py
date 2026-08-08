@@ -184,6 +184,7 @@ def test_modal_deployed_function_session_handoff_smoke() -> None:
         assert target_placement["cloud"]
         assert isinstance(target_placement["region"], str)
         assert target_placement["region"]
+        assert target_placement["region"] == function_region
 
         handle = ComputerSessionHandle.model_validate_json(
             computer.session_handle().model_dump_json()
@@ -204,8 +205,10 @@ def test_modal_deployed_function_session_handoff_smoke() -> None:
         assert isinstance(result["height"], int) and result["height"] > 0
         assert isinstance(result["function_cloud"], str)
         assert result["function_cloud"]
+        assert result["function_cloud"] == target_placement["cloud"]
         assert isinstance(result["function_region"], str)
         assert result["function_region"]
+        assert result["function_region"] == target_placement["region"]
 
         lease_status = computer.client.get_json("/v1/leases/status")
         assert lease_status.get("state") == "released"

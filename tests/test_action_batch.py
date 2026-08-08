@@ -42,7 +42,7 @@ def test_daemon_action_exports_have_complete_resolvable_annotations() -> None:
         get_type_hints(value)
 
 
-def test_action_batch_stop_on_error(test_client) -> None:
+def test_action_batch_validates_the_whole_array_before_mutation(test_client, app) -> None:
     response = test_client.post(
         "/v1/actions/run",
         json={
@@ -54,6 +54,7 @@ def test_action_batch_stop_on_error(test_client) -> None:
         },
     )
     assert response.status_code == 422
+    assert app.state.backend.cursor == Point(x=0, y=0)
 
 
 def test_action_batch_attributes_keyboard_input_backend(test_client) -> None:
@@ -64,6 +65,30 @@ def test_action_batch_attributes_keyboard_input_backend(test_client) -> None:
 
     assert result["ok"] is True
     assert result["results"][0]["output"]["input_backend"] == "mock"
+
+
+def test_action_batch_executes_actions_in_request_order(test_client, app) -> None:
+    calls: list[tuple[int, int]] = []
+    original_move = app.state.backend.mouse_move
+
+    async def record_move(x: int, y: int) -> Point:
+        calls.append((x, y))
+        return await original_move(x, y)
+
+    app.state.backend.mouse_move = record_move
+
+    result = test_client.post(
+        "/v1/actions/run",
+        json={
+            "actions": [
+                {"type": "move", "x": 1, "y": 2},
+                {"type": "move", "x": 3, "y": 4},
+            ]
+        },
+    ).json()
+
+    assert result["ok"] is True
+    assert calls == [(1, 2), (3, 4)]
 
 
 @pytest.mark.parametrize(
@@ -530,6 +555,15 @@ def test_action_batch_observe_change_auto_without_display_reports_poll_fallback(
     assert change_result["change_signal_reason"] == "backend has no X11 display"
 
 
+def test_action_batch_observe_change_route_is_marked_experimental(test_client) -> None:
+    operation = test_client.app.openapi()["paths"][
+        "/v1/actions/run/observe-change/raw-screenshot"
+    ]["post"]
+
+    assert operation["summary"].startswith("Experimental:")
+    assert "does not establish application readiness" in operation["description"]
+
+
 def test_action_batch_observe_change_explicit_xdamage_preserves_unavailable_result(
     test_client,
     app,
@@ -634,6 +668,45 @@ def test_action_batch_observe_change_xdamage_does_not_report_unchanged_pixels(
     assert change_result["detected"] is False
     assert change_result["timeout_reached"] is True
     assert change_result["source_sha256"] == unchanged.sha256
+
+
+def test_action_batch_observe_change_capture_error_is_limited_to_one_request(
+    test_client,
+    app,
+) -> None:
+    before = _raw_screenshot_bytes("white")
+    after = _raw_screenshot_bytes("black")
+    capture_attempts = 0
+
+    async def screenshot_raw_pixels(*_args, **_kwargs):
+        nonlocal capture_attempts
+        capture_attempts += 1
+        if capture_attempts == 1:
+            raise RuntimeError("transient Xlib capture race")
+        return after
+
+    app.state.backend.screenshot_raw_pixels = screenshot_raw_pixels
+    payload = {
+        "actions": [{"type": "move", "x": 10, "y": 20}],
+        "previous_source_sha256": before.sha256,
+        "change_timeout_ms": 25,
+        "poll_interval_ms": 1,
+        "change_signal": "poll",
+    }
+
+    with pytest.raises(RuntimeError, match="transient Xlib capture race"):
+        test_client.post(
+            "/v1/actions/run/observe-change/raw-screenshot",
+            json=payload,
+        )
+    succeeded = test_client.post(
+        "/v1/actions/run/observe-change/raw-screenshot",
+        json=payload,
+    )
+
+    assert succeeded.status_code == 200
+    assert _change_result(succeeded)["detected"] is True
+    assert capture_attempts == 2
 
 
 @pytest.mark.parametrize(
