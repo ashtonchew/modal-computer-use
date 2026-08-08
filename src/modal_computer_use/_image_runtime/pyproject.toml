@@ -1,0 +1,22 @@
+[project]
+name = "modal-computer-use-image-runtime"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "anyio>=4",
+  "fastapi>=0.141.1",
+  "h2>=4.1",
+  "httpx[http2]>=0.27",
+  "hypercorn>=0.17",
+  "mss>=10.0",
+  "pydantic>=2.13.4",
+  "python-dotenv>=1.0",
+  "uvicorn[standard]>=0.30",
+  "websockets>=13.0",
+  "pillow>=12.3.0",
+  "starlette>=1.0.1",
+  "xxhash>=3.6",
+]
+
+[tool.uv]
+required-version = "==0.12.3"

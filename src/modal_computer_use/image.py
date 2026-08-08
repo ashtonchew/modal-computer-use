@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Literal
 
 from .errors import ModalNotInstalledError
@@ -32,7 +33,24 @@ DESKTOP_APT_PACKAGES = [
 
 BROWSER_APT_PACKAGES = ["firefox-esr", "chromium"]
 NAMED_IMAGE_PREFIX = "modal-computer-use"
+IMAGE_UV_VERSION = "0.12.3"
 NamedImageVariant = Literal["standard", "firefox", "chromium"]
+
+
+def _image_runtime_context() -> Path:
+    """Return the packaged uv project used to install Modal Image dependencies."""
+    context = Path(__file__).with_name("_image_runtime").resolve()
+    missing = [
+        name
+        for name in ("pyproject.toml", "uv.lock")
+        if not (context / name).is_file() or (context / name).is_symlink()
+    ]
+    if missing:
+        missing_files = ", ".join(missing)
+        raise FileNotFoundError(
+            f"Modal Image uv context is incomplete at {context}: missing {missing_files}"
+        )
+    return context
 
 
 def _modal() -> object:
@@ -53,6 +71,7 @@ def default_image(
     window_manager: Literal["xfce", "openbox"] = "xfce",
     browser_prewarm: bool = False,
 ) -> object:
+    context = _image_runtime_context()
     modal = _modal()
     packages = list(DESKTOP_APT_PACKAGES)
     if profile in ("browser", "browser-gpu") or browser:
@@ -60,7 +79,11 @@ def default_image(
     image = (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install(*packages)
-        .pip_install_from_pyproject("pyproject.toml")
+        .uv_sync(
+            uv_project_dir=str(context),
+            frozen=True,
+            uv_version=IMAGE_UV_VERSION,
+        )
         .env(
             {
                 "COMPUTER_USE_WINDOW_MANAGER": window_manager,
@@ -134,6 +157,7 @@ def publish_named_images(
     ]
     if not pending:
         return identities
+    _image_runtime_context()
     modal = _modal()
     app = modal.App.lookup(
         app_name,
@@ -191,6 +215,7 @@ def _named_image_recipe(
     variant: NamedImageVariant,
     window_manager: Literal["xfce", "openbox"],
 ) -> object:
+    context = _image_runtime_context()
     modal = _modal()
     packages = list(DESKTOP_APT_PACKAGES)
     browser: Literal["firefox", "chromium"] | None = None
@@ -204,7 +229,11 @@ def _named_image_recipe(
     return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install(*packages)
-        .pip_install_from_pyproject("pyproject.toml")
+        .uv_sync(
+            uv_project_dir=str(context),
+            frozen=True,
+            uv_version=IMAGE_UV_VERSION,
+        )
         .env(
             {
                 "COMPUTER_USE_WINDOW_MANAGER": window_manager,

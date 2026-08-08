@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +13,7 @@ from modal_computer_use.benchmarks.provenance import benchmark_provenance
 from modal_computer_use.config import ComputerConfig, ImageConfig, NetworkConfig
 from modal_computer_use.image import (
     DESKTOP_APT_PACKAGES,
+    IMAGE_UV_VERSION,
     _named_image_recipe,
     _published_named_image_identities,
     default_image,
@@ -36,6 +39,8 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
         def __init__(self) -> None:
             self.packages: tuple[str, ...] = ()
             self.environment: dict[str, str] = {}
+            self.uv_sync_options: tuple[str, bool, str] | None = None
+            self.calls: list[tuple[str, object]] = []
 
         @classmethod
         def debian_slim(cls, *, python_version: str) -> FakeImage:
@@ -44,16 +49,27 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
 
         def apt_install(self, *packages: str) -> FakeImage:
             self.packages = packages
+            self.calls.append(("apt_install", packages))
             return self
 
-        def pip_install_from_pyproject(self, _path: str) -> FakeImage:
+        def uv_sync(
+            self,
+            uv_project_dir: str,
+            *,
+            frozen: bool,
+            uv_version: str,
+        ) -> FakeImage:
+            self.uv_sync_options = (uv_project_dir, frozen, uv_version)
+            self.calls.append(("uv_sync", self.uv_sync_options))
             return self
 
         def env(self, environment: dict[str, str]) -> FakeImage:
             self.environment = environment
+            self.calls.append(("env", environment))
             return self
 
-        def add_local_python_source(self, _package: str) -> FakeImage:
+        def add_local_python_source(self, package: str, *, copy: bool = False) -> FakeImage:
+            self.calls.append(("add_local_python_source", (package, copy)))
             return self
 
     monkeypatch.setattr(
@@ -70,6 +86,55 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
     assert isinstance(image, FakeImage)
     assert "firefox-esr" in image.packages
     assert image.environment["COMPUTER_USE_BROWSER_PREWARM"] == "true"
+    assert image.uv_sync_options is not None
+    context, frozen, uv_version = image.uv_sync_options
+    assert Path(context).is_absolute()
+    assert Path(context).name == "_image_runtime"
+    assert (Path(context) / "pyproject.toml").is_file()
+    assert (Path(context) / "uv.lock").is_file()
+    assert frozen is True
+    assert uv_version == IMAGE_UV_VERSION == "0.12.3"
+    assert [name for name, _value in image.calls] == [
+        "apt_install",
+        "uv_sync",
+        "env",
+        "add_local_python_source",
+    ]
+    assert image.calls[-1] == ("add_local_python_source", ("modal_computer_use", False))
+
+
+def test_image_uv_version_matches_the_packaged_runtime_project() -> None:
+    runtime_project = tomllib.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "modal_computer_use"
+            / "_image_runtime"
+            / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert runtime_project["tool"]["uv"]["required-version"] == f"=={IMAGE_UV_VERSION}"
+
+
+def test_default_image_validates_uv_context_before_loading_modal(
+    monkeypatch, tmp_path: Path
+) -> None:
+    runtime_context = tmp_path / "_image_runtime"
+    runtime_context.mkdir()
+    (runtime_context / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    lock_target = tmp_path / "uv.lock"
+    lock_target.write_text("version = 1\n", encoding="utf-8")
+    (runtime_context / "uv.lock").symlink_to(lock_target)
+
+    monkeypatch.setattr("modal_computer_use.image.__file__", str(tmp_path / "image.py"))
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: (_ for _ in ()).throw(AssertionError("Modal loaded before context validation")),
+    )
+
+    with pytest.raises(FileNotFoundError, match=r"Modal Image uv context.*uv\.lock"):
+        default_image()
 
 
 def test_network_config_uses_current_modal_names_and_legacy_aliases() -> None:
@@ -292,6 +357,26 @@ def test_publish_named_images_keeps_complete_existing_revision(monkeypatch) -> N
     assert set(result.values()) == identities
 
 
+def test_publish_named_images_validates_uv_context_before_loading_modal(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "modal_computer_use.image._published_named_image_identities",
+        lambda *, environment_name: set(),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.image._image_runtime_context",
+        lambda: (_ for _ in ()).throw(
+            FileNotFoundError("Modal Image uv context is incomplete")
+        ),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: (_ for _ in ()).throw(AssertionError("Modal loaded before context validation")),
+    )
+
+    with pytest.raises(FileNotFoundError, match="Modal Image uv context"):
+        publish_named_images(revision=REVISION)
+
+
 def test_publish_named_images_resumes_missing_variants_without_overwrite(monkeypatch) -> None:
     published: list[str] = []
     existing = f"modal-computer-use-standard:{REVISION}"
@@ -336,8 +421,14 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
             calls.append(("apt_install", packages))
             return self
 
-        def pip_install_from_pyproject(self, path: str) -> FakeRecipe:
-            calls.append(("pip_install_from_pyproject", path))
+        def uv_sync(
+            self,
+            uv_project_dir: str,
+            *,
+            frozen: bool,
+            uv_version: str,
+        ) -> FakeRecipe:
+            calls.append(("uv_sync", (uv_project_dir, frozen, uv_version)))
             return self
 
         def env(self, values: dict[str, str]) -> FakeRecipe:
@@ -357,6 +448,19 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
     )
 
     assert _named_image_recipe(variant="standard", window_manager="xfce") is recipe
+    uv_sync_calls = [value for name, value in calls if name == "uv_sync"]
+    assert len(uv_sync_calls) == 1
+    context, frozen, uv_version = uv_sync_calls[0]
+    assert Path(context).is_absolute()
+    assert Path(context).name == "_image_runtime"
+    assert frozen is True
+    assert uv_version == IMAGE_UV_VERSION == "0.12.3"
+    assert [name for name, _value in calls] == [
+        "apt_install",
+        "uv_sync",
+        "env",
+        "add_local_python_source",
+    ]
     assert ("add_local_python_source", ("modal_computer_use", True)) in calls
 
 
