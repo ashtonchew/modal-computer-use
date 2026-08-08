@@ -585,25 +585,16 @@ def publish_image_release(spec: ImageReleaseSpec) -> ImageReleaseRecord:
 
 def resolve_release_image(record: ImageReleaseRecord) -> object:
     """Verify a release reference in its Environment, then resolve its exact object ID."""
-    modal = _modal()
-    try:
-        named_image = modal.Image.from_name(
-            record.image_reference,
-            environment_name=record.environment_name,
-        ).hydrate()
-    except Exception as exc:
-        not_found_type = getattr(
-            getattr(modal, "exception", None), "NotFoundError", None
+    assignments = _published_named_image_assignments(
+        environment_name=record.environment_name
+    )
+    assigned_object_id = assignments.get(record.image_reference)
+    if assigned_object_id is None:
+        raise ImageReleaseNotFoundError(
+            f"managed Image release {record.image_reference} was not found in "
+            f"Environment {record.environment_name}"
         )
-        if isinstance(not_found_type, type) and isinstance(exc, not_found_type):
-            raise ImageReleaseNotFoundError(
-                f"managed Image release {record.image_reference} was not found in "
-                f"Environment {record.environment_name}"
-            ) from exc
-        raise ImageReleaseIdentityMismatchError(
-            "the managed Image reference could not be resolved in its recorded Environment"
-        ) from exc
-    if getattr(named_image, "object_id", None) != record.modal_image_object_id:
+    if assigned_object_id != record.modal_image_object_id:
         raise ImageReleaseIdentityMismatchError(
             "the managed Image reference does not identify the recorded Modal object ID"
         )

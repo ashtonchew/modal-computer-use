@@ -503,42 +503,45 @@ def test_resolve_release_image_verifies_name_then_uses_exact_object_id(
 
     calls: list[str] = []
     expected = object()
-    named = SimpleNamespace(
-        object_id="im-release-object",
-        hydrate=lambda: named,
-    )
     fake_modal = SimpleNamespace(
         Image=SimpleNamespace(
             from_id=lambda object_id: calls.append(f"id:{object_id}") or expected,
-            from_name=lambda name, environment_name: calls.append(
-                f"name:{name}:{environment_name}"
-            )
-            or named,
         )
     )
     monkeypatch.setattr(image_module, "_modal", lambda: fake_modal)
+    monkeypatch.setattr(
+        image_module,
+        "_published_named_image_assignments",
+        lambda *, environment_name: calls.append(f"inventory:{environment_name}")
+        or {
+            f"modal-computer-use-standard:{REVISION}": "im-release-object",
+        },
+    )
 
     assert resolve_release_image(_release_record()) is expected
     assert calls == [
-        f"name:modal-computer-use-standard:{REVISION}:prod",
+        "inventory:prod",
         "id:im-release-object",
     ]
 
 
-def test_resolve_release_image_rejects_a_mismatched_hydrated_id(
+def test_resolve_release_image_rejects_a_mismatched_named_assignment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import modal_computer_use.image as image_module
 
-    named = SimpleNamespace(object_id="im-other-object")
-    named.hydrate = lambda: named
-    fake_modal = SimpleNamespace(
-        Image=SimpleNamespace(
-            from_name=lambda name, environment_name: named,
-            from_id=lambda object_id: pytest.fail("must reject before exact lookup"),
-        )
+    monkeypatch.setattr(
+        image_module,
+        "_published_named_image_assignments",
+        lambda *, environment_name: {
+            f"modal-computer-use-standard:{REVISION}": "im-other-object",
+        },
     )
-    monkeypatch.setattr(image_module, "_modal", lambda: fake_modal)
+    monkeypatch.setattr(
+        image_module,
+        "_resolve_release_image_object_id",
+        lambda object_id: pytest.fail("must reject before exact lookup"),
+    )
 
     with pytest.raises(ImageReleaseIdentityMismatchError, match="object ID"):
         resolve_release_image(_release_record())
@@ -549,18 +552,11 @@ def test_resolve_release_image_maps_modal_not_found_to_stable_error(
 ) -> None:
     import modal_computer_use.image as image_module
 
-    class FakeNotFoundError(Exception):
-        pass
-
-    fake_modal = SimpleNamespace(
-        exception=SimpleNamespace(NotFoundError=FakeNotFoundError),
-        Image=SimpleNamespace(
-            from_name=lambda name, environment_name: (_ for _ in ()).throw(
-                FakeNotFoundError("provider detail")
-            )
-        ),
+    monkeypatch.setattr(
+        image_module,
+        "_published_named_image_assignments",
+        lambda *, environment_name: {},
     )
-    monkeypatch.setattr(image_module, "_modal", lambda: fake_modal)
 
     with pytest.raises(
         ImageReleaseNotFoundError,
