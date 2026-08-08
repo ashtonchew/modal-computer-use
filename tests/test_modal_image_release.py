@@ -315,6 +315,29 @@ def test_publish_image_release_keeps_recoverable_record_when_final_replace_fails
     assert spec.manifest_path.with_name(f".{spec.manifest_path.name}.pending").is_file()
 
 
+def test_publish_image_release_removes_temporary_manifest_after_write_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import modal_computer_use.image as image_module
+
+    events: list[str] = []
+    spec = _spec(tmp_path)
+    _install_release_fakes(monkeypatch, events=events)
+    monkeypatch.setattr(
+        image_module.os,
+        "replace",
+        lambda source, target: (_ for _ in ()).throw(OSError("no")),
+    )
+
+    with pytest.raises(ImageReleaseManifestError, match="could not write"):
+        publish_image_release(spec)
+
+    assert not spec.manifest_path.exists()
+    assert not spec.manifest_path.with_name(f".{spec.manifest_path.name}.pending").exists()
+    assert list(tmp_path.glob(".*.tmp")) == []
+    assert not any(item.startswith("publish:") for item in events)
+
+
 def test_publish_image_release_fails_before_publish_when_canary_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

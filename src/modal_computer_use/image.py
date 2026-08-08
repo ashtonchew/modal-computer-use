@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -672,10 +673,10 @@ def _write_image_release_record(record: ImageReleaseRecord, path: Path) -> None:
         os.replace(temporary_path, path)
         temporary_path = None
     except OSError as exc:
-        raise ImageReleaseManifestError("could not write the release manifest") from exc
-    finally:
         if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+            with suppress(OSError):
+                temporary_path.unlink(missing_ok=True)
+        raise ImageReleaseManifestError("could not write the release manifest") from exc
 
 
 def _pending_image_release_path(path: Path) -> Path:
