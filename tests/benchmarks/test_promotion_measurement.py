@@ -18,6 +18,7 @@ from modal_computer_use.benchmarks.promotion_measurement import (
     PriorPublicCompatibilityAdapter,
     measure_interleaved_promotion,
 )
+from modal_computer_use.errors import DaemonHTTPError
 from modal_computer_use.models import (
     ActionBatchResult,
     ActionItemResult,
@@ -235,6 +236,47 @@ async def test_measurement_reports_a_fixed_screenshot_failure_category() -> None
         {"phase": "warmup", "sample_index": None, "error_category": "screenshot"}
     ]
     assert "secret response detail" not in str(artifacts)
+
+
+@pytest.mark.asyncio
+async def test_measurement_retains_only_safe_http_status_from_daemon_failure() -> None:
+    computer = _RecordingComputer()
+
+    async def fail_screenshot(_path: str, *, json: dict[str, Any]) -> dict[str, Any]:
+        del json
+        raise DaemonHTTPError(
+            "secret daemon response",
+            status_code=500,
+            code="secret_internal_code",
+            details={"secret": "never retain"},
+        )
+
+    computer.client.post_json = fail_screenshot
+
+    @asynccontextmanager
+    async def borrow() -> Any:
+        yield computer
+
+    artifacts = await measure_interleaved_promotion(
+        borrow,
+        actions=[{"type": "move", "x": 1, "y": 1}],
+        configuration=_base_configuration(),
+        sample_count=30,
+        warmup_iterations=1,
+        schedule_seed=42,
+        lifecycle_timings={"cold_start_ms": 1.0, "startup_ms": 1.0, "dispatch_ms": 1.0},
+    )
+
+    failures = [failure for artifact in artifacts.values() for failure in artifact["failures"]]
+    assert failures == [
+        {
+            "phase": "warmup",
+            "sample_index": None,
+            "error_category": "screenshot",
+            "http_status": 500,
+        }
+    ]
+    assert "secret" not in str(failures)
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Any, Protocol
 
+from ..errors import DaemonHTTPError
 from ..models import ActionBatchResult, Screenshot
 from .promotion_gate import (
     CANDIDATE_ARM,
@@ -428,11 +429,29 @@ def _observed_daemon_ms(result: Any, fallback: float) -> float:
 
 
 def _failure_record(*, phase: str, sample_index: int | None, exc: Exception) -> dict[str, Any]:
-    return {
+    record: dict[str, Any] = {
         "phase": phase,
         "sample_index": sample_index,
         "error_category": _error_category(exc),
     }
+    status = _daemon_http_status(exc)
+    if status is not None:
+        record["http_status"] = status
+    return record
+
+
+def _daemon_http_status(exc: Exception) -> int | None:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, DaemonHTTPError):
+            status = current.status_code
+            if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+                return status
+            return None
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _error_category(exc: Exception) -> str:

@@ -576,7 +576,14 @@ def _validate_cleanup(value: Any, name: str) -> None:
 def _validate_failure(value: Any) -> None:
     if not isinstance(value, Mapping):
         raise PromotionGateError("failures must contain objects")
-    allowed = {"phase", "sample_index", "error_category", "status", "elapsed_ms"}
+    allowed = {
+        "phase",
+        "sample_index",
+        "error_category",
+        "status",
+        "elapsed_ms",
+        "http_status",
+    }
     if set(value) - allowed:
         raise PromotionGateError(
             "failure records may not contain messages or secret-bearing fields"
@@ -600,6 +607,13 @@ def _validate_failure(value: Any) -> None:
         value["elapsed_ms"]
     ):
         raise PromotionGateError("failure elapsed_ms is invalid")
+    http_status = value.get("http_status")
+    if http_status is not None and (
+        isinstance(http_status, bool)
+        or not isinstance(http_status, int)
+        or not 100 <= http_status <= 599
+    ):
+        raise PromotionGateError("failure http_status is invalid")
 
 
 def _validate_safe_payload(value: Any, *, key: str | None = None) -> None:
@@ -771,6 +785,11 @@ def _safe_failure_report(*payloads: Mapping[str, Any]) -> list[dict[str, Any]]:
                         **(
                             {"elapsed_ms": item["elapsed_ms"]}
                             if item.get("elapsed_ms") is not None
+                            else {}
+                        ),
+                        **(
+                            {"http_status": item["http_status"]}
+                            if item.get("http_status") is not None
                             else {}
                         ),
                     }
