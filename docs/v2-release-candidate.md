@@ -1,6 +1,6 @@
 # Version 2 release candidate
 
-Status: offline candidate; not published.
+Status: live-verified branch candidate; not published.
 
 This record binds the package, daemon, protocol, documentation, benchmark, and rollback contracts
 for version 2.0.0. It does not authorize a live Modal run, artifact publication, package
@@ -39,9 +39,11 @@ placement fails before lease acquisition or desktop mutation.
 Historical reports and artifacts are immutable. They remain evidence for the configurations that
 produced them.
 
-No dated version 2 benchmark report is included in this candidate. Publish one only after the
-preregistered, interleaved, same-topology promotion gate passes. The article's opening 47 ms figure
-is arithmetic over separate warm screenshot and click medians. It is not a measured fused turn.
+The [2026-08-08 optimized-default report](benchmark-results-2026-08-08-optimized-default.md)
+records an eligible preregistered, interleaved, same-topology promotion result from runtime source
+commit `31bcafefbba2ba75653075a04b12ce2eb816c838`. Its two arms each retained 30 successful samples,
+and cleanup recorded no survivors. The article's opening 47 ms figure remains arithmetic over
+separate warm screenshot and click medians. It is not a measured fused turn.
 
 Unit tests and the historical cross-provider table do not promote the new default. A release must
 record cold startup separately from dispatch, borrow, and repeated warm operations.
@@ -99,12 +101,16 @@ main revision. Live or billable gates require separate authorization.
 - Build one wheel and one source distribution, then install and probe both outside the checkout.
 - Verify `/healthz`, `/readyz`, `/v1/version`, and `/v1/capabilities` from the installed daemon.
 - In the release Image, run
-  `test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state`. It must run, not skip,
-  so the candidate proves real Xvfb and xclip selection ownership, replacement, and cleanup.
+  `test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state`. Also run the protected
+  `test_modal_release_image_x11_clipboard_ownership_smoke` against a real Modal Sandbox. Neither
+  test may skip. Together they prove real Xvfb and xclip selection ownership, replacement, and
+  cleanup. The protected smoke passed on 2026-08-08.
 - Verify that the release bundle contains the exact approved bytes and checksums.
-- Run the protected placed-trajectory smoke only with explicit authorization.
-- Run `scripts/run_optimized_default_promotion.py` from the exact release commit with explicit
-  authorization. Retain its two sanitized artifacts and promotion decision.
+- Run the protected placed-trajectory smoke only with explicit authorization. It passed on
+  2026-08-08 with exact `us-west-2` placement.
+- Run `scripts/run_optimized_default_promotion.py` from the exact runtime commit with explicit
+  authorization. It passed on 2026-08-08 for runtime commit `31bcafefbba2ba75653075a04b12ce2eb816c838`.
+  The retained evidence commit changes documentation and benchmark files only.
 - Record whether the approved configuration requires runtime artifacts. If it does, record their
   exact revisions before publication.
 - Confirm that the hosted documentation preview and rollback version selector pass before its

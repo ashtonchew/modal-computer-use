@@ -473,6 +473,7 @@ Use these maintained workflows for new evidence:
 | Optimized lifecycle and warm operations | `computer-use benchmark modal-optimized-provider`; [`modal-optimized-provider-2026-07-30.json`](../benchmark-data/modal-optimized-provider-2026-07-30.json) |
 | Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
 | Current provider presentation | [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md) |
+| Optimized SDK default promotion | [`run_optimized_default_promotion.py`](../scripts/run_optimized_default_promotion.py); [eligible 2026-08-08 result](benchmark-results-2026-08-08-optimized-default.md) |
 | Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |
 | Placement comparison | `computer-use benchmark modal-region-ab`, then `modal-region-summary` |
 | Modal V2 candidate or optimized-frontier experiments | Use [`run_modal_v2_candidate_benchmark.py`](../scripts/run_modal_v2_candidate_benchmark.py) or [`run_modal_optimized_frontier_benchmark.py`](../scripts/run_modal_optimized_frontier_benchmark.py) with the archived gated methodology linked below |
@@ -664,6 +665,9 @@ termination record is a separate provider reconciliation. It does not validate t
 - [Performance](performance.md) explains stable latency mechanisms.
 - [Current provider results](benchmark-results-2026-07-30-warm-paths.md) state their evidence
   status, measurement boundaries, and provenance.
+- [Optimized-default promotion results](benchmark-results-2026-08-08-optimized-default.md) report
+  the same-topology SDK cutover gate and distinguish the measured operation from the historical
+  47 ms arithmetic figure.
 - The archive retains the [Modal V2 candidate methodology](archive/benchmarks/modal-v2-candidate-benchmark.md)
   and [optimized-frontier methodology](archive/benchmarks/modal-optimized-frontier-benchmark.md)
   with their gated experiment results.

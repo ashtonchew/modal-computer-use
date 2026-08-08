@@ -1,0 +1,141 @@
+{
+  "configuration": {
+    "action_payload_sha256": "f5a34ead52aa165a7061f1ad1a5d7cbe0c33e6cd7684702ebda7785031ef84c9",
+    "caller_topology": "one-application-owned-modal-function",
+    "connection_reuse": "one-pooled-async-client",
+    "http_version": "1.1",
+    "image_identity": "inline-source-31bcafefbba2ba75653075a04b12ce2eb816c838",
+    "ingress": "attested-tunnel",
+    "input_backend": "xtest",
+    "observed_placement": {
+      "function": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      },
+      "target": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      }
+    },
+    "requested_placement": {
+      "cloud": "aws",
+      "region": "us-west-2"
+    },
+    "resources": {
+      "function": {
+        "cpu": 1.0,
+        "memory_mib": 2048
+      },
+      "sandbox": {
+        "cpu": 1.0,
+        "memory_mib": 2048
+      }
+    },
+    "screenshot": {
+      "format": "png",
+      "processing": "daemon",
+      "show_cursor": false,
+      "storage": "inline",
+      "transport": "json-base64"
+    },
+    "target_identity": "config-bc973a9babb66441",
+    "warm_capacity": {
+      "function_min_containers": 0,
+      "sandbox_pool_capacity": 0
+    },
+    "warmup_iterations": 1
+  },
+  "decision": "promote",
+  "eligible": true,
+  "failures": [],
+  "gate_metric": "warm_operation_ms",
+  "metrics": {
+    "borrow_ms": {
+      "bootstrap_95_ci_ms": [
+        0.0,
+        0.0
+      ],
+      "bootstrap_95_ci_relative_percent": [
+        0.0,
+        0.0
+      ],
+      "candidate_p50_ms": 1165.0410020000002,
+      "candidate_p95_ms": 1165.0410020000002,
+      "paired_delta_p50_ms": 0.0,
+      "paired_delta_relative_percent": 0.0,
+      "prior_p50_ms": 1165.0410020000002,
+      "prior_p95_ms": 1165.0410020000002
+    },
+    "cold_start_ms": {
+      "bootstrap_95_ci_ms": [
+        0.0,
+        0.0
+      ],
+      "bootstrap_95_ci_relative_percent": [
+        0.0,
+        0.0
+      ],
+      "candidate_p50_ms": 1141.0977080013254,
+      "candidate_p95_ms": 1141.0977080013254,
+      "paired_delta_p50_ms": 0.0,
+      "paired_delta_relative_percent": 0.0,
+      "prior_p50_ms": 1141.0977080013254,
+      "prior_p95_ms": 1141.0977080013254
+    },
+    "dispatch_ms": {
+      "bootstrap_95_ci_ms": [
+        0.0,
+        0.0
+      ],
+      "bootstrap_95_ci_relative_percent": [
+        0.0,
+        0.0
+      ],
+      "candidate_p50_ms": 5084.187291999115,
+      "candidate_p95_ms": 5084.187291999115,
+      "paired_delta_p50_ms": 0.0,
+      "paired_delta_relative_percent": 0.0,
+      "prior_p50_ms": 5084.187291999115,
+      "prior_p95_ms": 5084.187291999115
+    },
+    "startup_ms": {
+      "bootstrap_95_ci_ms": [
+        0.0,
+        0.0
+      ],
+      "bootstrap_95_ci_relative_percent": [
+        0.0,
+        0.0
+      ],
+      "candidate_p50_ms": 9815.598959001363,
+      "candidate_p95_ms": 9815.598959001363,
+      "paired_delta_p50_ms": 0.0,
+      "paired_delta_relative_percent": 0.0,
+      "prior_p50_ms": 9815.598959001363,
+      "prior_p95_ms": 9815.598959001363
+    },
+    "warm_operation_ms": {
+      "bootstrap_95_ci_ms": [
+        -81.20061699999947,
+        -72.02673850000042
+      ],
+      "bootstrap_95_ci_relative_percent": [
+        -62.34472758226713,
+        -43.01414648747986
+      ],
+      "candidate_p50_ms": 81.10824199999999,
+      "candidate_p95_ms": 739.1708884499994,
+      "paired_delta_p50_ms": -77.3858749999996,
+      "paired_delta_relative_percent": -44.92397530807639,
+      "prior_p50_ms": 147.2659699999985,
+      "prior_p95_ms": 763.4708294499992
+    }
+  },
+  "minimum_samples_per_arm": 30,
+  "paired_samples": 30,
+  "reasons": [],
+  "thresholds": {
+    "absolute_regression_ms": 0.25,
+    "relative_regression_percent": 5.0
+  }
+}

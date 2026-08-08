@@ -44,6 +44,16 @@ current action-to-frame observation evidence. See the
 [warm-operation report](../docs/benchmark-results-2026-07-30-warm-paths.md) and
 [benchmarking guide](../docs/benchmarking.md) for current interpretation and workflow guidance.
 
+The optimized SDK default promotion uses three separately validated files:
+
+- [`optimized-default-prior-public-2026-08-08.json`](optimized-default-prior-public-2026-08-08.json);
+- [`optimized-default-candidate-2026-08-08.json`](optimized-default-candidate-2026-08-08.json);
+- [`optimized-default-promotion-decision-2026-08-08.json`](optimized-default-promotion-decision-2026-08-08.json).
+
+See the [optimized-default report](../docs/benchmark-results-2026-08-08-optimized-default.md) for
+the controlled configuration, interpretation, and the distinction from the historical 47 ms
+arithmetic figure.
+
 ### Archived July 26 combined report
 
 The archived combined report remains bound to these immutable inputs:

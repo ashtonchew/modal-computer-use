@@ -44,6 +44,9 @@ procedures, and concise pointers for public guides.
 - [Benchmarking](benchmarking.md): run benchmarks and interpret, retain, or publish their output.
 - [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md): eligible p50,
   p95, configuration, and provenance for the README comparison.
+- [Optimized-default promotion results, 2026-08-08](benchmark-results-2026-08-08-optimized-default.md):
+  eligible same-topology evidence for the SDK cutover and the precise meaning of the historical
+  47 ms arithmetic figure.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
   diagnostic, and historical reports and protocols.
 

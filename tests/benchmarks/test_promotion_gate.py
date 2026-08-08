@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,8 @@ from modal_computer_use.benchmarks.promotion_gate import (
     sanitize_promotion_artifact,
     validate_promotion_artifact,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _configuration() -> dict[str, object]:
@@ -369,3 +372,29 @@ def test_promotion_gate_cli_compares_files_without_provider_calls(tmp_path, caps
     assert json.loads(output_path.read_text(encoding="utf-8")) == result
     assert "https://" not in rendered
     assert "Bearer" not in rendered
+
+
+def test_tracked_optimized_default_evidence_reproduces_promotion_decision() -> None:
+    evidence = ROOT / "benchmark-data"
+    prior = json.loads(
+        (evidence / "optimized-default-prior-public-2026-08-08.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    candidate = json.loads(
+        (evidence / "optimized-default-candidate-2026-08-08.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    recorded = json.loads(
+        (evidence / "optimized-default-promotion-decision-2026-08-08.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    validate_promotion_artifact(prior, expected_arm=PRIOR_PUBLIC_ARM)
+    validate_promotion_artifact(candidate, expected_arm=CANDIDATE_ARM)
+    assert compare_promotion_artifacts(prior, candidate) == recorded
+    assert recorded["decision"] == "promote"
+    assert recorded["paired_samples"] == 30
+    assert "31bcafefbba2ba75653075a04b12ce2eb816c838" in json.dumps(prior)
