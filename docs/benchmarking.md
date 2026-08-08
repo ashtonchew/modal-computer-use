@@ -128,11 +128,15 @@ if the runner-plus-target ceiling exceeds the $20 budget.
 
 Publish one verified standard Managed Image Release from the clean benchmark commit:
 
+Confirm that `uv --version` reports `0.12.3` first. The publisher verifies the same executable
+through `UV_EXECUTABLE` before it contacts Modal. Set that variable to the exact `uv 0.12.3`
+binary when the first `uv` on `PATH` is a different version.
+
 ```bash
 source_sha="$(git rev-parse HEAD)"
 result_root="benchmark-results/image-lifecycle/$source_sha"
 
-uv run python scripts/publish_modal_image_release.py \
+UV_EXECUTABLE="$(command -v uv)" uv run python scripts/publish_modal_image_release.py \
   --logical-release 2.0.0 \
   --variant standard \
   --environment main \
