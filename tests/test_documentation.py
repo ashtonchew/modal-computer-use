@@ -546,6 +546,16 @@ def test_benchmarking_uses_the_public_interleaved_measurement_seam() -> None:
         assert contract in source
 
 
+def test_benchmarking_documents_the_executable_live_promotion_runner() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+
+    assert "scripts/run_optimized_default_promotion.py" in source
+    assert "--sample-count 30" in source
+    assert "one async owner" in source
+    assert "enters one borrow" in source
+    assert "zero warm capacity" in source
+
+
 def test_performance_requires_exact_placement_for_the_primary_trajectory() -> None:
     source = " ".join((DOCS / "performance.md").read_text(encoding="utf-8").split())
 

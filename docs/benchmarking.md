@@ -78,6 +78,27 @@ cleanup reject promotion. The result reports paired bootstrap 95% confidence int
 candidate fails the warm-operation gate only when the lower confidence bound exceeds both 5% and
 0.25 ms. The July 30 artifacts remain historical evidence and are not rewritten by this command.
 
+The repository provides one application-owned live runner for this complete sequence. Run it from
+the exact clean commit that you want to promote:
+
+```bash
+source_sha="$(git rev-parse HEAD)"
+MODAL_COMPUTER_USE_PROMOTION_ENVIRONMENT=main \
+MODAL_COMPUTER_USE_PROMOTION_CLOUD=aws \
+MODAL_COMPUTER_USE_PROMOTION_REGION=us-west-2 \
+uv run modal run --env main scripts/run_optimized_default_promotion.py \
+  --source-sha "$source_sha" \
+  --sample-count 30 \
+  --warmup-iterations 1 \
+  --output-dir benchmark-results/candidates/optimized-default-live
+```
+
+The runner creates one async owner, observes the Sandbox placement, measures one placed Function
+dispatch, enters one borrow for the interleaved trajectory, writes both sanitized artifacts, runs
+the offline gate, and cleans up the owner and Function App. Its Function and Sandbox each request
+1 CPU and 2048 MiB, use zero warm capacity, and permit no retries. Change these explicit source
+constants only in a new preregistered experiment.
+
 ## Choose a command
 
 Run a credential-free release report against the in-process mock daemon:

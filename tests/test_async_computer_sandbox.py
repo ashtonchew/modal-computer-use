@@ -326,6 +326,36 @@ async def test_explicit_unplaced_async_owner_retains_low_level_creation(
 
 
 @pytest.mark.asyncio
+async def test_async_owner_reports_observed_runtime_placement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _install_runtime(monkeypatch)
+
+    async def ready(_client: AsyncDaemonClient, **_kwargs: object) -> None:
+        return None
+
+    async def placement(_sandbox: object) -> dict[str, str]:
+        return {"cloud": "aws", "region": "us-west-2"}
+
+    monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement_async",
+        placement,
+    )
+
+    async with AsyncComputerSandbox.create(
+        config=_connect_config(),
+        image=object(),
+    ) as computer:
+        assert await computer.runtime_placement() == {
+            "cloud": "aws",
+            "region": "us-west-2",
+        }
+
+    assert "Sandbox.create.aio" in runtime.calls
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("config", "create_kwargs"),
     [

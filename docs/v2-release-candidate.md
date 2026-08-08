@@ -103,7 +103,8 @@ main revision. Live or billable gates require separate authorization.
   so the candidate proves real Xvfb and xclip selection ownership, replacement, and cleanup.
 - Verify that the release bundle contains the exact approved bytes and checksums.
 - Run the protected placed-trajectory smoke only with explicit authorization.
-- Run the promotion benchmark only with explicit authorization.
+- Run `scripts/run_optimized_default_promotion.py` from the exact release commit with explicit
+  authorization. Retain its two sanitized artifacts and promotion decision.
 - Record whether the approved configuration requires runtime artifacts. If it does, record their
   exact revisions before publication.
 - Confirm that the hosted documentation preview and rollback version selector pass before its

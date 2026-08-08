@@ -2685,6 +2685,13 @@ class AsyncComputerSandbox:
             policy=self._session_handoff_policy,
         )
 
+    async def runtime_placement(self) -> dict[str, str | None]:
+        """Return the cloud and region observed inside the Modal Sandbox."""
+        sandbox = self._sandbox
+        if sandbox is None:
+            raise SandboxUnavailableError("the Modal Sandbox handle has been detached")
+        return await _sandbox_runtime_placement_async(sandbox)
+
     async def terminate(self, *, wait: bool = False) -> None:
         async with self._lifecycle_lock:
             sandbox = self._sandbox
