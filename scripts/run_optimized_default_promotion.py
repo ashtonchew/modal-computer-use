@@ -64,6 +64,12 @@ SANDBOX_WARM_POOL_CAPACITY = 0
 ACTION_BATCH = ({"type": "move", "x": 32, "y": 32},)
 _EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _SOURCE_SHA = re.compile(r"^[0-9a-f]{40}$")
+_OBSERVED_CLOUD_LABELS = {
+    "CLOUD_PROVIDER_AWS": "aws",
+    "CLOUD_PROVIDER_AZURE": "azure",
+    "CLOUD_PROVIDER_GCP": "gcp",
+    "CLOUD_PROVIDER_OCI": "oci",
+}
 
 
 @dataclass(frozen=True)
@@ -278,7 +284,12 @@ def _exact_placement(
     expected_cloud: str,
     expected_region: str,
 ) -> dict[str, str]:
-    cloud = value.get("cloud")
+    raw_cloud = value.get("cloud")
+    cloud = (
+        _OBSERVED_CLOUD_LABELS.get(raw_cloud, raw_cloud)
+        if isinstance(raw_cloud, str)
+        else raw_cloud
+    )
     region = value.get("region")
     if cloud != expected_cloud or region != expected_region:
         raise ValueError(f"{name} placement does not match the requested placement")
@@ -310,9 +321,15 @@ def _write_new_json(path: Path, payload: Mapping[str, Any]) -> None:
 def _function_placement() -> dict[str, str]:
     cloud = os.environ.get("MODAL_CLOUD_PROVIDER")
     region = os.environ.get("MODAL_REGION")
-    if cloud != CLOUD or region != REGION:
-        raise RuntimeError("Function placement does not match the requested placement")
-    return {"cloud": cloud, "region": region}
+    try:
+        return _exact_placement(
+            {"cloud": cloud, "region": region},
+            name="Function",
+            expected_cloud=CLOUD,
+            expected_region=REGION,
+        )
+    except ValueError as exc:
+        raise RuntimeError("Function placement does not match the requested placement") from exc
 
 
 app = modal.App(APP_NAME)

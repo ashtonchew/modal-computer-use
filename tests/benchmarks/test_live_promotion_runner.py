@@ -34,6 +34,17 @@ def _load_runner() -> Any:
     return module
 
 
+def test_live_runner_normalizes_modal_observed_cloud_labels() -> None:
+    runner = _load_runner()
+
+    assert runner._exact_placement(
+        {"cloud": "CLOUD_PROVIDER_AWS", "region": "us-west-2"},
+        name="target",
+        expected_cloud="aws",
+        expected_region="us-west-2",
+    ) == {"cloud": "aws", "region": "us-west-2"}
+
+
 class _Screenshots:
     async def full(self, **_kwargs: object) -> Screenshot:
         return _screenshot(binary=True)
