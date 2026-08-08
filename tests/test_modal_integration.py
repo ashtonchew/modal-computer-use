@@ -672,6 +672,49 @@ def test_modal_named_image_smoke() -> None:
 
 
 @pytest.mark.modal
+def test_modal_managed_image_release_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_v1_smoke()
+    manifest_path = os.getenv("MODAL_COMPUTER_USE_IMAGE_RELEASE_MANIFEST")
+    if not manifest_path:
+        pytest.skip(
+            "Set MODAL_COMPUTER_USE_IMAGE_RELEASE_MANIFEST to test an exact release Image"
+        )
+
+    import json
+    from pathlib import Path
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use.config import BrowserConfig, ResourceConfig, RuntimeConfig
+    from modal_computer_use.image import ImageReleaseRecord, resolve_release_image
+
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    record = ImageReleaseRecord.from_dict(payload)
+    browser = None
+    profile = "standard"
+    if record.image_variant in ("firefox", "chromium"):
+        browser = BrowserConfig(kind=record.image_variant, prewarm=True)
+        profile = "browser"
+    config = ComputerConfig(
+        run_id=f"mcu-image-release-{uuid.uuid4().hex[:10]}",
+        runtime=RuntimeConfig(modal_environment=record.environment_name),
+        resources=ResourceConfig(profile=profile),
+        browser=browser,
+    )
+    computer = ComputerSandbox.create(
+        config=config,
+        image=resolve_release_image(record),
+        tags={"computer-use.smoke": "managed-image-release"},
+    )
+    try:
+        assert computer.status().ready is True
+        assert computer.first_valid_frame(config)
+    finally:
+        computer.terminate()
+        computer.detach()
+
+
+@pytest.mark.modal
 def test_modal_action_rate_limit_live_smoke() -> None:
     _skip_without_modal_auth()
     _skip_without_v1_smoke()

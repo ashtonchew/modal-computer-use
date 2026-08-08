@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-from .errors import ModalNotInstalledError
+from .errors import (
+    ImageReleaseCanaryError,
+    ImageReleaseConflictError,
+    ImageReleaseIdentityMismatchError,
+    ImageReleaseLockError,
+    ImageReleaseManifestError,
+    ImageReleaseNotFoundError,
+    ModalNotInstalledError,
+)
 
 DESKTOP_APT_PACKAGES = [
     "xvfb",
@@ -35,6 +51,291 @@ BROWSER_APT_PACKAGES = ["firefox-esr", "chromium"]
 NAMED_IMAGE_PREFIX = "modal-computer-use"
 IMAGE_UV_VERSION = "0.12.3"
 NamedImageVariant = Literal["standard", "firefox", "chromium"]
+
+
+@dataclass(frozen=True, slots=True)
+class _ImageVariantDefinition:
+    profile: Literal["standard", "browser"]
+    browser: Literal["firefox", "chromium"] | None
+    browser_apt_package: str | None
+
+
+_IMAGE_VARIANTS: dict[NamedImageVariant, _ImageVariantDefinition] = {
+    "standard": _ImageVariantDefinition(
+        profile="standard", browser=None, browser_apt_package=None
+    ),
+    "firefox": _ImageVariantDefinition(
+        profile="browser", browser="firefox", browser_apt_package="firefox-esr"
+    ),
+    "chromium": _ImageVariantDefinition(
+        profile="browser", browser="chromium", browser_apt_package="chromium"
+    ),
+}
+_REQUIRED_IMAGE_CANARY_CHECKS = (
+    "healthz",
+    "readyz",
+    "version",
+    "capabilities",
+    "image_object_id",
+    "browser",
+    "screenshot",
+    "cleanup",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ImageReleaseSpec:
+    """Inputs for one revision-addressed managed Image release."""
+
+    source_revision: str
+    logical_release: str
+    image_variant: NamedImageVariant
+    environment_name: str
+    manifest_path: Path
+    expected_image_builder_version: str
+    app_name: str = "modal-computer-use-image-builds"
+    canary_timeout_seconds: int = 180
+
+    def __post_init__(self) -> None:
+        _require_full_revision(self.source_revision)
+        if not self.logical_release.strip():
+            raise ValueError("logical_release must be non-empty")
+        if self.image_variant not in _IMAGE_VARIANTS:
+            raise ValueError("image_variant must be standard, firefox, or chromium")
+        if not self.environment_name.strip():
+            raise ValueError("environment_name must be non-empty")
+        if not self.expected_image_builder_version.strip():
+            raise ValueError("expected_image_builder_version must be non-empty")
+        if not self.app_name.strip():
+            raise ValueError("app_name must be non-empty")
+        if self.canary_timeout_seconds < 1 or self.canary_timeout_seconds > 900:
+            raise ValueError("canary_timeout_seconds must be between 1 and 900")
+        object.__setattr__(self, "manifest_path", Path(self.manifest_path))
+
+    @property
+    def image_name(self) -> str:
+        return f"{NAMED_IMAGE_PREFIX}-{self.image_variant}"
+
+    @property
+    def image_tag(self) -> str:
+        return self.source_revision
+
+    @property
+    def image_reference(self) -> str:
+        return f"{self.image_name}:{self.image_tag}"
+
+
+@dataclass(frozen=True, slots=True)
+class ImageCanaryRecord:
+    """Safe evidence from a successful managed Image canary."""
+
+    status: Literal["passed"]
+    checks: tuple[str, ...]
+    checked_at: str
+
+    def __post_init__(self) -> None:
+        if self.status != "passed":
+            raise ValueError("canary status must be passed")
+        if self.checks != _REQUIRED_IMAGE_CANARY_CHECKS:
+            raise ValueError("canary checks do not match the managed Image release contract")
+        _require_utc_timestamp(self.checked_at, field_name="canary.checked_at")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "checks": list(self.checks),
+            "checked_at": self.checked_at,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> ImageCanaryRecord:
+        _require_exact_fields(
+            payload,
+            expected={"status", "checks", "checked_at"},
+            context="canary",
+        )
+        status = _require_text_field(payload, "status")
+        if status != "passed":
+            raise ValueError("canary status must be passed")
+        raw_checks = payload["checks"]
+        if not isinstance(raw_checks, list) or not all(
+            isinstance(item, str) for item in raw_checks
+        ):
+            raise ValueError("canary checks must be a list of strings")
+        return cls(
+            status="passed",
+            checks=tuple(raw_checks),
+            checked_at=_require_text_field(payload, "checked_at"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ImageReleaseRecord:
+    """Versioned evidence for one published managed Modal Image."""
+
+    schema_version: int
+    logical_release: str
+    source_revision: str
+    image_variant: NamedImageVariant
+    image_name: str
+    image_tag: str
+    image_reference: str
+    workspace_name: str
+    environment_name: str
+    modal_image_object_id: str
+    pyproject_sha256: str
+    uv_lock_sha256: str
+    image_builder_version: str
+    uv_version: str
+    modal_sdk_version: str
+    build_app_name: str
+    canary: ImageCanaryRecord
+    published_at: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("schema_version must be 1")
+        _require_full_revision(self.source_revision)
+        if self.image_variant not in _IMAGE_VARIANTS:
+            raise ValueError("image_variant must be standard, firefox, or chromium")
+        expected_name = f"{NAMED_IMAGE_PREFIX}-{self.image_variant}"
+        if self.image_name != expected_name:
+            raise ValueError("image_name does not match image_variant")
+        if self.image_tag != self.source_revision:
+            raise ValueError("image_tag does not match source_revision")
+        if self.image_reference != f"{self.image_name}:{self.image_tag}":
+            raise ValueError("image_reference does not match image_name and image_tag")
+        for field_name in (
+            "logical_release",
+            "workspace_name",
+            "environment_name",
+            "image_builder_version",
+            "uv_version",
+            "modal_sdk_version",
+            "build_app_name",
+        ):
+            if not cast(str, getattr(self, field_name)).strip():
+                raise ValueError(f"{field_name} must be non-empty")
+        if not self.modal_image_object_id.startswith("im-"):
+            raise ValueError("modal_image_object_id must be a Modal Image object ID")
+        _require_sha256(self.pyproject_sha256, field_name="pyproject_sha256")
+        _require_sha256(self.uv_lock_sha256, field_name="uv_lock_sha256")
+        if not isinstance(self.canary, ImageCanaryRecord):
+            raise ValueError("canary must be an ImageCanaryRecord")
+        _require_utc_timestamp(self.published_at, field_name="published_at")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "logical_release": self.logical_release,
+            "source_revision": self.source_revision,
+            "image_variant": self.image_variant,
+            "image_name": self.image_name,
+            "image_tag": self.image_tag,
+            "image_reference": self.image_reference,
+            "workspace_name": self.workspace_name,
+            "environment_name": self.environment_name,
+            "modal_image_object_id": self.modal_image_object_id,
+            "pyproject_sha256": self.pyproject_sha256,
+            "uv_lock_sha256": self.uv_lock_sha256,
+            "image_builder_version": self.image_builder_version,
+            "uv_version": self.uv_version,
+            "modal_sdk_version": self.modal_sdk_version,
+            "build_app_name": self.build_app_name,
+            "canary": self.canary.to_dict(),
+            "published_at": self.published_at,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> ImageReleaseRecord:
+        fields = {
+            "schema_version",
+            "logical_release",
+            "source_revision",
+            "image_variant",
+            "image_name",
+            "image_tag",
+            "image_reference",
+            "workspace_name",
+            "environment_name",
+            "modal_image_object_id",
+            "pyproject_sha256",
+            "uv_lock_sha256",
+            "image_builder_version",
+            "uv_version",
+            "modal_sdk_version",
+            "build_app_name",
+            "canary",
+            "published_at",
+        }
+        _require_exact_fields(payload, expected=fields, context="release manifest")
+        schema_version = payload["schema_version"]
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+            raise ValueError("schema_version must be an integer")
+        raw_variant = _require_text_field(payload, "image_variant")
+        if raw_variant not in _IMAGE_VARIANTS:
+            raise ValueError("image_variant must be standard, firefox, or chromium")
+        raw_canary = payload["canary"]
+        if not isinstance(raw_canary, Mapping):
+            raise ValueError("canary must be an object")
+        return cls(
+            schema_version=schema_version,
+            logical_release=_require_text_field(payload, "logical_release"),
+            source_revision=_require_text_field(payload, "source_revision"),
+            image_variant=raw_variant,
+            image_name=_require_text_field(payload, "image_name"),
+            image_tag=_require_text_field(payload, "image_tag"),
+            image_reference=_require_text_field(payload, "image_reference"),
+            workspace_name=_require_text_field(payload, "workspace_name"),
+            environment_name=_require_text_field(payload, "environment_name"),
+            modal_image_object_id=_require_text_field(payload, "modal_image_object_id"),
+            pyproject_sha256=_require_text_field(payload, "pyproject_sha256"),
+            uv_lock_sha256=_require_text_field(payload, "uv_lock_sha256"),
+            image_builder_version=_require_text_field(payload, "image_builder_version"),
+            uv_version=_require_text_field(payload, "uv_version"),
+            modal_sdk_version=_require_text_field(payload, "modal_sdk_version"),
+            build_app_name=_require_text_field(payload, "build_app_name"),
+            canary=ImageCanaryRecord.from_dict(raw_canary),
+            published_at=_require_text_field(payload, "published_at"),
+        )
+
+
+def _require_exact_fields(
+    payload: Mapping[str, object],
+    *,
+    expected: set[str],
+    context: str,
+) -> None:
+    actual = set(payload)
+    unexpected = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    if unexpected:
+        raise ValueError(f"{context} contains unexpected fields: {', '.join(unexpected)}")
+    if missing:
+        raise ValueError(f"{context} is missing fields: {', '.join(missing)}")
+
+
+def _require_text_field(payload: Mapping[str, object], name: str) -> str:
+    value = payload[name]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_sha256(value: str, *, field_name: str) -> None:
+    if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError(f"{field_name} must be a full lower-case SHA-256 value")
+
+
+def _require_utc_timestamp(value: str, *, field_name: str) -> None:
+    if not value.endswith("Z"):
+        raise ValueError(f"{field_name} must be an ISO 8601 UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(f"{value[:-1]}+00:00")
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be an ISO 8601 UTC timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise ValueError(f"{field_name} must be an ISO 8601 UTC timestamp")
 
 
 def _image_runtime_context() -> Path:
@@ -171,7 +472,354 @@ def publish_named_images(
     return identities
 
 
+def publish_image_release(spec: ImageReleaseSpec) -> ImageReleaseRecord:
+    """Build, verify, publish, and record one immutable managed Image release."""
+    assignments = _published_named_image_assignments(
+        environment_name=spec.environment_name
+    )
+    existing_record = _read_image_release_record_if_present(spec.manifest_path)
+    pending_path = _pending_image_release_path(spec.manifest_path)
+    pending_record = _read_image_release_record_if_present(pending_path)
+    assigned_object_id = assignments.get(spec.image_reference)
+    if existing_record is not None:
+        _require_record_matches_spec(existing_record, spec)
+        if assigned_object_id != existing_record.modal_image_object_id:
+            raise ImageReleaseConflictError(
+                "the release manifest and named Image reference do not identify the same object"
+        )
+        return existing_record
+    if pending_record is not None:
+        _require_record_matches_spec(pending_record, spec)
+        if assigned_object_id is None:
+            pending_image = _resolve_release_image_object_id(
+                pending_record.modal_image_object_id
+            )
+            pending_image.publish(
+                pending_record.image_reference,
+                environment_name=pending_record.environment_name,
+            )
+            resumed_assignments = _published_named_image_assignments(
+                environment_name=spec.environment_name
+            )
+            assigned_object_id = resumed_assignments.get(spec.image_reference)
+        if assigned_object_id != pending_record.modal_image_object_id:
+            raise ImageReleaseConflictError(
+                "the pending release manifest and named Image reference do not identify "
+                "the same object"
+            )
+        completed_record = _with_publication_time(pending_record)
+        _write_image_release_record(completed_record, pending_path)
+        _promote_pending_image_release(pending_path, spec.manifest_path)
+        return completed_record
+    if assigned_object_id is not None:
+        raise ImageReleaseConflictError(
+            f"managed Image reference {spec.image_reference} already exists without its "
+            "release manifest"
+        )
+
+    context = _image_runtime_context()
+    _verify_image_runtime_lock(context)
+    workspace_name, builder_version, modal_sdk_version = _modal_release_context(
+        environment_name=spec.environment_name
+    )
+    if builder_version != spec.expected_image_builder_version:
+        raise ImageReleaseConflictError(
+            "the effective Modal Image Builder Version does not match the release specification"
+        )
+
+    modal = _modal()
+    app = modal.App.lookup(
+        spec.app_name,
+        create_if_missing=True,
+        environment_name=spec.environment_name,
+    )
+    with modal.enable_output():
+        recipe = _named_image_recipe(variant=spec.image_variant, window_manager="xfce")
+        built_image = recipe.build(app)
+    object_id = getattr(built_image, "object_id", None)
+    if not isinstance(object_id, str) or not object_id.startswith("im-"):
+        raise ImageReleaseIdentityMismatchError(
+            "the built Modal Image did not provide a valid object ID"
+        )
+    exact_image = _resolve_release_image_object_id(object_id)
+    canary = _run_image_release_canary(exact_image, spec)
+    record = ImageReleaseRecord(
+        schema_version=1,
+        logical_release=spec.logical_release,
+        source_revision=spec.source_revision,
+        image_variant=spec.image_variant,
+        image_name=spec.image_name,
+        image_tag=spec.image_tag,
+        image_reference=spec.image_reference,
+        workspace_name=workspace_name,
+        environment_name=spec.environment_name,
+        modal_image_object_id=object_id,
+        pyproject_sha256=_sha256_file(context / "pyproject.toml"),
+        uv_lock_sha256=_sha256_file(context / "uv.lock"),
+        image_builder_version=builder_version,
+        uv_version=IMAGE_UV_VERSION,
+        modal_sdk_version=modal_sdk_version,
+        build_app_name=spec.app_name,
+        canary=canary,
+        published_at=_utc_now(),
+    )
+    _write_image_release_record(record, pending_path)
+    built_image.publish(spec.image_reference, environment_name=spec.environment_name)
+
+    post_publish = _published_named_image_assignments(
+        environment_name=spec.environment_name
+    )
+    if post_publish.get(spec.image_reference) != object_id:
+        raise ImageReleaseIdentityMismatchError(
+            "the published Image reference does not resolve to the built Modal object ID"
+        )
+    completed_record = _with_publication_time(record)
+    _write_image_release_record(completed_record, pending_path)
+    _promote_pending_image_release(pending_path, spec.manifest_path)
+    return completed_record
+
+
+def resolve_release_image(record: ImageReleaseRecord) -> object:
+    """Verify a release reference in its Environment, then resolve its exact object ID."""
+    modal = _modal()
+    try:
+        named_image = modal.Image.from_name(
+            record.image_reference,
+            environment_name=record.environment_name,
+        ).hydrate()
+    except Exception as exc:
+        not_found_type = getattr(
+            getattr(modal, "exception", None), "NotFoundError", None
+        )
+        if isinstance(not_found_type, type) and isinstance(exc, not_found_type):
+            raise ImageReleaseNotFoundError(
+                f"managed Image release {record.image_reference} was not found in "
+                f"Environment {record.environment_name}"
+            ) from exc
+        raise ImageReleaseIdentityMismatchError(
+            "the managed Image reference could not be resolved in its recorded Environment"
+        ) from exc
+    if getattr(named_image, "object_id", None) != record.modal_image_object_id:
+        raise ImageReleaseIdentityMismatchError(
+            "the managed Image reference does not identify the recorded Modal object ID"
+        )
+    return _resolve_release_image_object_id(record.modal_image_object_id)
+
+
+def _resolve_release_image_object_id(object_id: str) -> object:
+    """Resolve one exact Modal Image object ID and verify the hydrated identity."""
+    if not isinstance(object_id, str) or not object_id.startswith("im-"):
+        raise ImageReleaseIdentityMismatchError("Modal Image object ID is invalid")
+    image = _modal().Image.from_id(object_id)
+    resolved_id = getattr(image, "object_id", object_id)
+    if resolved_id != object_id:
+        raise ImageReleaseIdentityMismatchError(
+            "the resolved Modal Image object ID does not match the release record"
+        )
+    return image
+
+
+def _require_record_matches_spec(
+    record: ImageReleaseRecord, spec: ImageReleaseSpec
+) -> None:
+    if (
+        record.logical_release != spec.logical_release
+        or record.source_revision != spec.source_revision
+        or record.image_variant != spec.image_variant
+        or record.image_reference != spec.image_reference
+        or record.environment_name != spec.environment_name
+        or record.image_builder_version != spec.expected_image_builder_version
+        or record.build_app_name != spec.app_name
+    ):
+        raise ImageReleaseConflictError(
+            "the existing release manifest does not match the requested release"
+        )
+
+
+def _read_image_release_record_if_present(path: Path) -> ImageReleaseRecord | None:
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ImageReleaseManifestError("the release manifest path is not a regular file")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("manifest root must be an object")
+        return ImageReleaseRecord.from_dict(payload)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ImageReleaseManifestError("could not read the release manifest") from exc
+
+
+def _write_image_release_record(record: ImageReleaseRecord, path: Path) -> None:
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ImageReleaseManifestError("the release manifest path is not a regular file")
+    serialized = json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n"
+    temporary_path: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    except OSError as exc:
+        raise ImageReleaseManifestError("could not write the release manifest") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _pending_image_release_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.pending")
+
+
+def _promote_pending_image_release(pending_path: Path, manifest_path: Path) -> None:
+    if not pending_path.is_file() or pending_path.is_symlink():
+        raise ImageReleaseManifestError("the pending release manifest is not a regular file")
+    if manifest_path.is_symlink() or (
+        manifest_path.exists() and not manifest_path.is_file()
+    ):
+        raise ImageReleaseManifestError("the release manifest path is not a regular file")
+    try:
+        os.replace(pending_path, manifest_path)
+    except OSError as exc:
+        raise ImageReleaseManifestError("could not write the release manifest") from exc
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _with_publication_time(record: ImageReleaseRecord) -> ImageReleaseRecord:
+    payload = record.to_dict()
+    payload["published_at"] = _utc_now()
+    return ImageReleaseRecord.from_dict(payload)
+
+
+def _verify_image_runtime_lock(context: Path) -> None:
+    uv = os.getenv("UV_EXECUTABLE") or shutil.which("uv")
+    if not uv:
+        raise ImageReleaseLockError(
+            f"uv {IMAGE_UV_VERSION} is required to verify the managed Image lock"
+        )
+    try:
+        version = subprocess.run(  # noqa: S603 - explicit or PATH-resolved uv executable.
+            [uv, "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        if version != f"uv {IMAGE_UV_VERSION}":
+            raise ImageReleaseLockError(
+                f"managed Image releases require uv {IMAGE_UV_VERSION}; found {version}"
+            )
+        subprocess.run(  # noqa: S603 - explicit or PATH-resolved uv executable.
+            [uv, "lock", "--check", "--project", str(context)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except ImageReleaseLockError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ImageReleaseLockError(
+            "the managed Image dependency lock is stale or could not be verified"
+        ) from exc
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _modal_release_context(*, environment_name: str) -> tuple[str, str, str]:
+    """Read the active Workspace and effective builder version from Modal."""
+    del environment_name
+    modal = _modal()
+    workspace = modal.Workspace.from_context().hydrate()
+    workspace_name = getattr(workspace, "name", None)
+    settings = workspace.settings.list()
+    builder_version = getattr(settings, "image_builder_version", None)
+    if not isinstance(workspace_name, str) or not workspace_name.strip():
+        raise ImageReleaseConflictError("Modal did not provide an active Workspace name")
+    if not isinstance(builder_version, str) or not builder_version.strip():
+        raise ImageReleaseConflictError(
+            "Modal did not provide the effective Image Builder Version"
+        )
+    try:
+        modal_sdk_version = importlib.metadata.version("modal")
+    except importlib.metadata.PackageNotFoundError as exc:
+        raise ModalNotInstalledError("could not determine the installed Modal SDK version") from exc
+    return workspace_name, builder_version, modal_sdk_version
+
+
+def _run_image_release_canary(
+    image: object, spec: ImageReleaseSpec
+) -> ImageCanaryRecord:
+    """Create an exact-image Sandbox and verify the release boundary."""
+    try:
+        from .config import BrowserConfig, ComputerConfig, ResourceConfig, RuntimeConfig
+        from .sandbox import ComputerSandbox
+
+        variant = _IMAGE_VARIANTS[spec.image_variant]
+        browser = (
+            BrowserConfig(kind=variant.browser, prewarm=True)
+            if variant.browser is not None
+            else None
+        )
+        config = ComputerConfig(
+            run_id=f"managed-image-canary-{spec.source_revision[:12]}-{spec.image_variant}",
+            runtime=RuntimeConfig(
+                readiness_timeout_seconds=spec.canary_timeout_seconds,
+                modal_environment=spec.environment_name,
+            ),
+            resources=ResourceConfig(profile=variant.profile),
+            browser=browser,
+        )
+        with ComputerSandbox.create(
+            config=config,
+            app_name=spec.app_name,
+            image=image,
+            tags={"computer-use.image-release-canary": "true"},
+        ) as computer:
+            computer.client.get_json("/healthz")
+            computer.client.get_json("/readyz")
+            computer.client.get_json("/v1/version")
+            computer.client.get_json("/v1/capabilities")
+            if computer.modal_image_object_id() != image.object_id:
+                raise ImageReleaseIdentityMismatchError(
+                    "the canary Sandbox does not use the built Modal Image object ID"
+                )
+            computer.ensure_browser_ready(config)
+            computer.first_valid_frame(config)
+    except Exception as exc:
+        raise ImageReleaseCanaryError(
+            "the managed Image release canary did not complete successfully"
+        ) from exc
+    return ImageCanaryRecord(
+        status="passed",
+        checks=_REQUIRED_IMAGE_CANARY_CHECKS,
+        checked_at=_utc_now(),
+    )
+
+
 def _published_named_image_identities(*, environment_name: str | None) -> set[str]:
+    return set(_published_named_image_assignments(environment_name=environment_name))
+
+
+def _published_named_image_assignments(
+    *, environment_name: str | None
+) -> dict[str, str]:
     command = [
         sys.executable,
         "-m",
@@ -203,11 +851,21 @@ def _published_named_image_identities(*, environment_name: str | None) -> set[st
         raise RuntimeError("Modal named Image list returned invalid JSON") from exc
     if not isinstance(payload, list):
         raise RuntimeError("Modal named Image list returned an invalid result")
-    return {
-        str(item["tag"])
-        for item in payload
-        if isinstance(item, dict) and isinstance(item.get("tag"), str)
-    }
+    assignments: dict[str, str] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        image_id = item.get("image_id")
+        if not isinstance(tag, str):
+            continue
+        if not isinstance(image_id, str) or not image_id.startswith("im-"):
+            raise RuntimeError("Modal named Image list omitted an Image object ID")
+        previous = assignments.get(tag)
+        if previous is not None and previous != image_id:
+            raise RuntimeError("Modal named Image list returned conflicting object IDs")
+        assignments[tag] = image_id
+    return assignments
 
 
 def _named_image_recipe(
@@ -218,14 +876,9 @@ def _named_image_recipe(
     context = _image_runtime_context()
     modal = _modal()
     packages = list(DESKTOP_APT_PACKAGES)
-    browser: Literal["firefox", "chromium"] | None = None
-    if variant == "firefox":
-        packages.append("firefox-esr")
-        browser = "firefox"
-    elif variant == "chromium":
-        packages.append("chromium")
-        browser = "chromium"
-    profile = "standard" if variant == "standard" else "browser"
+    definition = _IMAGE_VARIANTS[variant]
+    if definition.browser_apt_package is not None:
+        packages.append(definition.browser_apt_package)
     return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install(*packages)
@@ -237,9 +890,11 @@ def _named_image_recipe(
         .env(
             {
                 "COMPUTER_USE_WINDOW_MANAGER": window_manager,
-                "COMPUTER_USE_IMAGE_PROFILE": profile,
-                "COMPUTER_USE_BROWSER_PREWARM": str(browser is not None).lower(),
-                "COMPUTER_USE_BROWSER": browser or "",
+                "COMPUTER_USE_IMAGE_PROFILE": definition.profile,
+                "COMPUTER_USE_BROWSER_PREWARM": str(
+                    definition.browser is not None
+                ).lower(),
+                "COMPUTER_USE_BROWSER": definition.browser or "",
             }
         )
         .add_local_python_source("modal_computer_use", copy=True)

@@ -156,8 +156,8 @@ The GitHub Actions workflow exposes the same run through `workflow_dispatch` wit
 `MODAL_TOKEN_SECRET`; the job fails if either is missing. Use a restricted Modal service user, not
 a personal token.
 
-To include the named Image canary, publish the standard, Firefox, and Chromium Images from the
-clean release commit:
+The legacy command below publishes all three revision-tagged Images. It does not create an exact
+object-ID release manifest:
 
 ```bash
 uv run python scripts/publish_modal_images.py --environment prod
@@ -165,6 +165,31 @@ uv run python scripts/publish_modal_images.py --environment prod
 
 Set `MODAL_COMPUTER_USE_NAMED_IMAGE_REVISION` to the full Git revision before the protected test
 run. The named Image canary is skipped when the variable is absent.
+
+For a managed release, publish each variant from the clean release commit. This command builds one
+Image, runs its protected Sandbox canary, publishes its write-once Git revision tag, and writes a
+release manifest:
+
+```bash
+uv run python scripts/publish_modal_image_release.py \
+  --logical-release 2.0.0 \
+  --variant standard \
+  --environment prod \
+  --image-builder-version 2025.06 \
+  --manifest dist/image-releases/modal-computer-use-standard.json
+```
+
+Repeat the command for `firefox` and `chromium`. Use a different manifest path for each variant.
+The command fails before publication if the effective Modal Image Builder Version differs from the
+requested value or if the canary fails. It does not fall back to an inline Image.
+
+The manifest records the Modal Image reference and the exact Modal object ID. The object ID is not
+an OCI digest. Runtime code can call `resolve_release_image(record)` to select that exact object.
+Users who keep the default `image.source="inline"` do not need these managed release manifests.
+Set `MODAL_COMPUTER_USE_IMAGE_RELEASE_MANIFEST` to one manifest path to run the protected exact-ID
+smoke test. The test is skipped when the variable is absent.
+Keep each verified manifest with the release artifacts. Do not rebuild an Image or rewrite a
+revision tag after package publication.
 
 ## Publication prerequisites
 

@@ -2326,6 +2326,22 @@ class ComputerSandbox:
             timing.mark("first_valid_frame")
         return payload
 
+    def modal_image_object_id(self) -> str:
+        """Return the exact Modal Image object ID used by this Sandbox."""
+        sandbox = _require_modal_backing(self, path="modal_image_object_id")
+        process = sandbox.exec(
+            "python",
+            "-c",
+            "import os; print(os.environ.get('MODAL_IMAGE_ID', ''))",
+            timeout=10,
+        )
+        object_id = _read_modal_process_stream(getattr(process, "stdout", "")).strip()
+        if not object_id.startswith("im-"):
+            raise SandboxUnavailableError(
+                "Modal runtime did not return a valid Image object ID"
+            )
+        return object_id
+
     def __enter__(self) -> ComputerSandbox:
         return self
 

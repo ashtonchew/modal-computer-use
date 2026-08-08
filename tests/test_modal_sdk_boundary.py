@@ -371,6 +371,20 @@ def test_computer_sandbox_context_manager_releases_owned_modal_sandbox() -> None
     assert client.close_calls == 1
 
 
+def test_computer_sandbox_reports_exact_modal_image_object_id() -> None:
+    sandbox = FakeSandboxObject()
+
+    def image_id_exec(*args: str, **kwargs: object) -> object:
+        sandbox.exec_calls.append({"args": args, **kwargs})
+        return SimpleNamespace(stdout=SimpleNamespace(read=lambda: "im-release-object\n"))
+
+    sandbox.exec = image_id_exec  # type: ignore[method-assign]
+    computer = ComputerSandbox(SimpleNamespace(), sandbox=sandbox)
+
+    assert computer.modal_image_object_id() == "im-release-object"
+    assert sandbox.exec_calls[0]["timeout"] == 10
+
+
 def test_attached_context_detaches_without_terminating_remote_sandbox() -> None:
     sandbox = FakeSandboxObject()
 
