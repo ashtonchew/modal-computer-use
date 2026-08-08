@@ -182,6 +182,16 @@ def test_root_readme_repository_links_are_absolute_https() -> None:
     )
 
 
+def test_root_readme_logo_resolves_to_a_tracked_asset() -> None:
+    source = (ROOT / "README.md").read_text(encoding="utf-8")
+    logo_path = Path("docs/assets/modal-computer-use-logo.png")
+
+    assert f'src="./{logo_path.as_posix()}"' in source
+    resolved_logo_path = (ROOT / logo_path).resolve()
+    assert _is_within_repository(resolved_logo_path)
+    assert resolved_logo_path.is_file()
+
+
 def test_onboarding_docs_use_canonical_install_and_setup_guidance() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
