@@ -36,6 +36,14 @@ _SCREENSHOT_PAYLOAD: dict[str, Any] = {
 _ACTION_SOURCE = "promotion-benchmark"
 
 
+class _PromotionMeasurementFailure(RuntimeError):
+    """Carry one fixed, secret-free failure category across the measurement seam."""
+
+    def __init__(self, category: str) -> None:
+        super().__init__("promotion operation failed")
+        self.category = category
+
+
 class _PromotionComputer(Protocol):
     client: Any
     screenshots: Any
@@ -215,17 +223,27 @@ async def _run_operation(
     computer: _PromotionComputer,
     actions: list[dict[str, Any]],
 ) -> tuple[Screenshot, Any]:
-    screenshot = await adapter.screenshot(computer)
-    if not screenshot.as_bytes():
-        raise ValueError("screenshot frame is empty")
-    result = await computer.actions.run(
-        actions,
-        continue_on_error=False,
-        screenshot_after=False,
-        source=_ACTION_SOURCE,
-    )
+    try:
+        screenshot = await adapter.screenshot(computer)
+    except Exception as exc:
+        raise _PromotionMeasurementFailure("screenshot") from exc
+    try:
+        frame = screenshot.as_bytes()
+    except Exception as exc:
+        raise _PromotionMeasurementFailure("frame") from exc
+    if not frame:
+        raise _PromotionMeasurementFailure("frame")
+    try:
+        result = await computer.actions.run(
+            actions,
+            continue_on_error=False,
+            screenshot_after=False,
+            source=_ACTION_SOURCE,
+        )
+    except Exception as exc:
+        raise _PromotionMeasurementFailure("action") from exc
     if not _action_succeeded(result):
-        raise RuntimeError("ordered action batch failed")
+        raise _PromotionMeasurementFailure("action")
     return screenshot, result
 
 
@@ -249,7 +267,7 @@ async def _measure_sample(
         warm_operation_ms = max(0.0, (clock() - started) * 1000.0)
         observed_backend = _observed_input_backend(action_result)
         if observed_backend != configuration["input_backend"]:
-            raise ValueError("observed input backend did not match configuration")
+            raise _PromotionMeasurementFailure("attribution")
         daemon_ms = _observed_daemon_ms(action_result, warm_operation_ms)
         status = "ok"
     except Exception as exc:
@@ -418,6 +436,8 @@ def _failure_record(*, phase: str, sample_index: int | None, exc: Exception) -> 
 
 
 def _error_category(exc: Exception) -> str:
+    if isinstance(exc, _PromotionMeasurementFailure):
+        return exc.category
     if isinstance(exc, TimeoutError):
         return "timeout"
     if isinstance(exc, (ConnectionError, OSError)):

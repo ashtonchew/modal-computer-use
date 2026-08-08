@@ -83,10 +83,14 @@ _SAFE_FAILURE_PHASES = {
     "warmup",
 }
 _SAFE_ERROR_CATEGORIES = {
+    "action",
+    "attribution",
     "cancellation",
     "cleanup",
+    "frame",
     "operation",
     "protocol",
+    "screenshot",
     "timeout",
     "transport",
     "unknown",

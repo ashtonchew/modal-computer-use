@@ -207,6 +207,37 @@ async def test_measurement_stops_after_first_possible_dispatch_failure() -> None
 
 
 @pytest.mark.asyncio
+async def test_measurement_reports_a_fixed_screenshot_failure_category() -> None:
+    computer = _RecordingComputer()
+
+    async def fail_screenshot(_path: str, *, json: dict[str, Any]) -> dict[str, Any]:
+        del json
+        raise RuntimeError("secret response detail")
+
+    computer.client.post_json = fail_screenshot
+
+    @asynccontextmanager
+    async def borrow() -> Any:
+        yield computer
+
+    artifacts = await measure_interleaved_promotion(
+        borrow,
+        actions=[{"type": "move", "x": 1, "y": 1}],
+        configuration=_base_configuration(),
+        sample_count=30,
+        warmup_iterations=1,
+        schedule_seed=42,
+        lifecycle_timings={"cold_start_ms": 1.0, "startup_ms": 1.0, "dispatch_ms": 1.0},
+    )
+
+    failures = [failure for artifact in artifacts.values() for failure in artifact["failures"]]
+    assert failures == [
+        {"phase": "warmup", "sample_index": None, "error_category": "screenshot"}
+    ]
+    assert "secret response detail" not in str(artifacts)
+
+
+@pytest.mark.asyncio
 async def test_adapters_reject_the_wrong_screenshot_representation() -> None:
     computer = _RecordingComputer()
 
