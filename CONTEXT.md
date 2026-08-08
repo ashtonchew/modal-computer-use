@@ -20,6 +20,14 @@ _Avoid_: Adapter benchmark, SDK benchmark
 An opt-in raw Modal `Sandbox.exec` benchmark baseline used to compare daemon overhead against direct command execution inside the same Modal Sandbox.
 _Avoid_: modal-exec, provider, primitive API
 
+**Managed Image Release**:
+A prebuilt and verified Modal Image that is selected from exact release evidence.
+_Avoid_: inline image, image cache, OCI digest
+
+**Image Lifecycle Benchmark**:
+A credential-gated Benchmark Surface that compares defined Image selection policies from Sandbox creation through the first valid frame and cleanup.
+_Avoid_: Image build benchmark, Adapter Benchmark, External Provider Benchmark
+
 ## Relationships
 
 - An **Adapter Benchmark** may run in the SDK repository because adapters are provider-shape translators, not provider API clients.
@@ -28,6 +36,8 @@ _Avoid_: modal-exec, provider, primitive API
   benchmark-only workflow. Its provider dependencies stay outside core, and it is not a stable SDK
   product API.
 - A **Sandbox Exec Surface** is a Modal-native benchmark baseline, not the SDK's preferred primitive API.
+- A **Managed Image Release** belongs to one Modal Workspace and Environment. It is not a public Image shared by every SDK user.
+- An **Image Lifecycle Benchmark** measures Sandbox lifecycle behavior. It records Image build duration separately because build-cache state is not part of a paired Sandbox lifecycle.
 - The public SDK benchmark command is named `benchmark sdk`; documentation may describe the measured entries as **Benchmark Surfaces**.
 - `benchmark compare` is a maintained benchmark-only workflow. `benchmark provider-results`
   remains available to verify archived combined evidence. Neither is a public SDK compatibility
