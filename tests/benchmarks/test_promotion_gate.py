@@ -315,6 +315,23 @@ def test_sanitizer_keeps_raw_numeric_observations_and_rejects_secret_values() ->
         sanitize_promotion_artifact(secret_payload)
 
 
+def test_sanitizer_retains_partial_failed_attempt_without_promoting_it() -> None:
+    payload = _artifact(PRIOR_PUBLIC_ARM)
+    payload["status"] = "failed"
+    payload["observations"] = payload["observations"][:1]
+    payload["observations"][0]["status"] = "failed"
+    payload["failures"] = [
+        {"phase": "measure", "sample_index": 0, "error_category": "validation"}
+    ]
+
+    sanitized = sanitize_promotion_artifact(payload)
+
+    assert sanitized["status"] == "failed"
+    assert len(sanitized["observations"]) == 1
+    result = compare_promotion_artifacts(sanitized, _artifact(CANDIDATE_ARM))
+    assert result["decision"] == "reject"
+
+
 def test_validator_requires_exact_placement_and_explicit_configuration() -> None:
     payload = _artifact(PRIOR_PUBLIC_ARM)
     payload["configuration"]["requested_placement"]["region"] = "us-west"

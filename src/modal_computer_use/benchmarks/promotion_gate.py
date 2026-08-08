@@ -186,8 +186,11 @@ def validate_promotion_artifact(
         seed=preregistration.get("schedule_seed", 20260808),
     )
     observations = _observations(payload)
-    if len(observations) != samples_per_arm:
+    status = payload.get("status")
+    if status == "complete" and len(observations) != samples_per_arm:
         raise PromotionGateError("observations do not match the preregistered sample count")
+    if len(observations) > samples_per_arm:
+        raise PromotionGateError("observations exceed the preregistered sample count")
     seen: set[int] = set()
     for observation in observations:
         _validate_observation(
@@ -196,7 +199,7 @@ def validate_promotion_artifact(
             seen=seen,
             configuration=configuration,
         )
-    if seen != set(range(samples_per_arm)):
+    if status == "complete" and seen != set(range(samples_per_arm)):
         raise PromotionGateError("observations must contain every measured sample index once")
 
     failures = payload.get("failures", [])
@@ -211,7 +214,7 @@ def validate_promotion_artifact(
     ):
         if value != 0:
             raise PromotionGateError(f"{key} must be zero; replacement or replay is not allowed")
-    if payload.get("status") == "complete":
+    if status == "complete":
         if failures or any(observation.get("status") != "ok" for observation in observations):
             raise PromotionGateError("complete promotion artifact contains failed observations")
         if payload["cleanup"].get("succeeded") is not True:
