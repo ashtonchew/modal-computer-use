@@ -21,6 +21,7 @@ from modal_computer_use.benchmarks.promotion_measurement import (
 from modal_computer_use.errors import DaemonHTTPError
 from modal_computer_use.models import (
     ActionBatchResult,
+    ActionBatchTiming,
     ActionItemResult,
     CoordinateSpace,
     Screenshot,
@@ -87,12 +88,13 @@ class _RecordingActions:
             raise self.failure
         return ActionBatchResult(
             ok=True,
+            timing=ActionBatchTiming(daemon_ms=0.5),
             results=[
                 ActionItemResult(
                     index=index,
                     type=str(action["type"]),
                     ok=True,
-                    output={"input_backend": "xtest", "daemon_ms": 1.0},
+                    output={"input_backend": "xtest"},
                 )
                 for index, action in enumerate(actions)
             ],
@@ -187,6 +189,10 @@ async def test_measurement_follows_interleaved_schedule_in_one_borrow() -> None:
         assert len(artifact["observations"]) == 30
         assert all(row["borrow_count"] == 1 for row in artifact["observations"])
         assert all(row["frame_valid"] is True for row in artifact["observations"])
+        assert all(
+            row["attribution"]["daemon_ms"] == 0.5
+            for row in artifact["observations"]
+        )
 
 
 @pytest.mark.asyncio

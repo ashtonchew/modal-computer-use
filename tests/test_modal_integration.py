@@ -26,7 +26,14 @@ def _has_modal_auth() -> bool:
     profiles = [config]
     if isinstance(config.get("profile"), dict):
         profiles.extend(item for item in config["profile"].values() if isinstance(item, dict))
-    return any(profile.get("token_id") and profile.get("token_secret") for profile in profiles)
+    if any(profile.get("token_id") and profile.get("token_secret") for profile in profiles):
+        return True
+    try:
+        from modal.config import config as modal_config
+
+        return bool(modal_config.get("token_id") and modal_config.get("token_secret"))
+    except Exception:
+        return False
 
 
 def _skip_without_modal_auth() -> None:
@@ -116,6 +123,13 @@ def _skip_without_handoff_smoke() -> None:
     if os.getenv("MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE") != "1":
         pytest.skip(
             "Set MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE=1 to run protected handoff smoke"
+        )
+
+
+def _skip_without_clipboard_smoke() -> None:
+    if os.getenv("MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE") != "1":
+        pytest.skip(
+            "Set MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE=1 to run the X11 clipboard smoke"
         )
 
 
@@ -223,6 +237,50 @@ def test_modal_deployed_function_session_handoff_smoke() -> None:
             if not owner_terminated:
                 computer.terminate(wait=True)
             computer.detach()
+
+
+@pytest.mark.modal
+def test_modal_release_image_x11_clipboard_ownership_smoke() -> None:
+    _skip_without_modal_auth()
+    _skip_without_clipboard_smoke()
+
+    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use.config import RuntimeConfig
+
+    exact_region = _required_handoff_setting("MODAL_COMPUTER_USE_HANDOFF_REGION")
+    modal_environment = _required_handoff_setting(
+        "MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT"
+    )
+    suffix = uuid.uuid4().hex[:10]
+    first = "first-clipboard-owner-" + ("a" * 4096)
+    replacement = "replacement-clipboard-owner-" + ("b" * 4096)
+    computer = ComputerSandbox.create(
+        config=ComputerConfig(
+            ingress="attested-tunnel",
+            expose_vnc="off",
+            runtime=RuntimeConfig(
+                modal_environment=modal_environment,
+                modal_region=exact_region,
+                timeout_seconds=300,
+                idle_timeout_seconds=120,
+                readiness_timeout_seconds=180,
+            ),
+        ),
+        name=f"mcu-clipboard-smoke-{suffix}",
+        owner=f"mcu-clipboard-smoke-owner-{suffix}",
+        tags={"computer-use.smoke": "x11-clipboard-ownership"},
+    )
+    try:
+        previous = computer.clipboard.get_text()
+        assert computer.clipboard.set_text(first).ok is True
+        assert computer.clipboard.get_text() == first
+        assert computer.clipboard.set_text(replacement).ok is True
+        assert computer.clipboard.get_text() == replacement
+        assert computer.clipboard.set_text(previous).ok is True
+        assert computer.clipboard.get_text() == previous
+    finally:
+        computer.terminate(wait=True)
+        computer.detach()
 
 
 @pytest.mark.modal

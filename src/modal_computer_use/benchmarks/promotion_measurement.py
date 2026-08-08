@@ -404,6 +404,16 @@ def _observed_input_backend(result: Any) -> str | None:
 
 
 def _observed_daemon_ms(result: Any, fallback: float) -> float:
+    if (
+        isinstance(result, ActionBatchResult)
+        and result.timing is not None
+        and result.timing.daemon_ms >= 0
+    ):
+        return result.timing.daemon_ms
+    if isinstance(result, Mapping) and isinstance(result.get("timing"), Mapping):
+        value = result["timing"].get("daemon_ms")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            return float(value)
     outputs: list[Mapping[str, Any]]
     if isinstance(result, ActionBatchResult):
         outputs = [item.output for item in result.results]
