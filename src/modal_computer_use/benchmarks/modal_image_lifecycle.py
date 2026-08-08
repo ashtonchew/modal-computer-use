@@ -75,7 +75,6 @@ class _ModalImageLifecycleArm:
             tags={
                 "benchmark": IMAGE_LIFECYCLE_BENCHMARK,
                 "benchmark_arm": trial.arm,
-                "benchmark_phase": trial.phase,
             },
             wait=True,
             timing=timing,

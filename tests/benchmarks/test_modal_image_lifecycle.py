@@ -152,7 +152,10 @@ def test_modal_image_lifecycle_runner_uses_inline_and_exact_release_adapters() -
         for call in create_calls
     )
     assert all(call["tags"]["benchmark"] == "modal-image-lifecycle" for call in create_calls)
-    assert all("benchmark_run_id" not in call["tags"] for call in create_calls)
+    assert all(
+        set(call["tags"]) == {"benchmark", "benchmark_arm"}
+        for call in create_calls
+    )
     assert all(computer.closed for computer in computers)
 
 
