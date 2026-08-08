@@ -1192,7 +1192,7 @@ requires-dist = [
     { name = "httpx2", marker = "extra == 'dev'", specifier = "==2.7.0" },
     { name = "hypercorn", specifier = ">=0.17" },
     { name = "markdown-it-py", marker = "extra == 'dev'", specifier = "==4.2.0" },
-    { name = "modal", marker = "extra == 'modal'", specifier = "~=1.5.2" },
+    { name = "modal", marker = "extra == 'modal'", specifier = "~=1.5.3" },
     { name = "mss", specifier = ">=10.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.16" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.36" },
