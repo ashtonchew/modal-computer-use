@@ -74,7 +74,6 @@ class _ModalImageLifecycleArm:
             image=self.image,
             tags={
                 "benchmark": IMAGE_LIFECYCLE_BENCHMARK,
-                "benchmark_run_id": self.spec.benchmark_run_id,
                 "benchmark_arm": trial.arm,
                 "benchmark_phase": trial.phase,
             },
