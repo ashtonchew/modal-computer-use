@@ -12,6 +12,16 @@ def test_core_checks_supported_python_versions_with_frozen_lock() -> None:
     assert "uv sync --extra dev --extra modal --frozen" in source
 
 
+def test_minimum_direct_dependencies_are_type_checked_and_tested() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "name: Minimum direct dependency checks" in source
+    assert "uv lock --resolution lowest-direct" in source
+    assert "uv sync --extra dev --extra modal --frozen" in source
+    assert "uv run --frozen mypy src" in source
+    assert "uv run --frozen pytest -q" in source
+
+
 def test_security_job_runs_pinned_audit_tools() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 

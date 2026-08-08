@@ -13,12 +13,12 @@ license-files = ["LICENSE"]
 authors = [{ name = "modal-computer-use contributors" }]
 dependencies = [
   "anyio>=4",
-  "fastapi>=0.115",
+  "fastapi>=0.141.1",
   "h2>=4.1",
   "httpx[http2]>=0.27",
   "hypercorn>=0.17",
   "mss>=10.0",
-  "pydantic>=2.7",
+  "pydantic>=2.13.4",
   "python-dotenv>=1.0",
   "uvicorn[standard]>=0.30",
   "websockets>=13.0",
@@ -43,12 +43,16 @@ bench-e2b = ["e2b-desktop==2.4.2"]
 bench-tzafon = ["tzafon==2.44.1"]
 bench-providers = ["daytona==0.175.0", "e2b-desktop==2.4.2", "tzafon==2.44.1"]
 dev = [
+  "httpx2==2.7.0",
   "markdown-it-py==4.2.0",
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "ruff>=0.6",
-  "mypy>=1.10",
+  "mypy>=1.16",
 ]
+
+[tool.uv]
+required-version = "==0.12.3"
 
 [project.scripts]
 computer-use = "modal_computer_use.cli:main"

@@ -87,3 +87,15 @@ def test_pypi_verification_uses_the_documented_clean_install_command() -> None:
     assert 'uv add "modal-computer-use[modal]"' in verify_pypi
     assert "import modal_computer_use" in verify_pypi
     assert 'scripts["computer-use-daemon"]' in verify_pypi
+
+
+def test_release_workflow_uses_current_artifact_and_publisher_actions() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1" in source
+    assert (
+        "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2"
+        in source
+    )
+    assert "# v7.0.0" not in source
+    assert "# v1.14.0" not in source
