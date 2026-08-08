@@ -94,8 +94,8 @@ def test_modal_image_lifecycle_runner_uses_inline_and_exact_release_adapters() -
     create_calls: list[dict[str, Any]] = []
     computers: list[_FakeComputer] = []
 
-    def resolve_image(record: ImageReleaseRecord) -> object:
-        assert record.modal_image_object_id == "im-managed"
+    def resolve_exact_image(object_id: str) -> object:
+        assert object_id == "im-managed"
         return exact_image
 
     def create_computer(**kwargs: Any) -> _FakeComputer:
@@ -132,7 +132,7 @@ def test_modal_image_lifecycle_runner_uses_inline_and_exact_release_adapters() -
         run_tag="image-lifecycle-test",
         runner_placement={"cloud": "aws", "region": "us-west-2"},
         create_computer=create_computer,
-        resolve_image=resolve_image,
+        resolve_exact_image=resolve_exact_image,
         clock=clock,
         generated_at=lambda: "2026-08-08T21:00:00Z",
     )

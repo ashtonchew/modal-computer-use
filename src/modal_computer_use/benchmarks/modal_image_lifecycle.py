@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..config import BrowserConfig, ComputerConfig, ResourceConfig, RuntimeConfig
-from ..image import ImageReleaseRecord, resolve_release_image
+from ..image import (
+    ImageReleaseRecord,
+    _resolve_release_image_object_id,
+    resolve_release_image,
+)
 from ..latency import SessionStartupTiming
 from ..sandbox import ComputerSandbox, run_modal_benchmark_function_with_image_once
 from .image_lifecycle import (
@@ -27,6 +31,7 @@ from .image_lifecycle import (
 
 ComputerFactory = Callable[..., ComputerSandbox]
 ImageResolver = Callable[[ImageReleaseRecord], object]
+ExactImageResolver = Callable[[str], object]
 FunctionLauncher = Callable[..., dict[str, Any]]
 
 
@@ -118,7 +123,7 @@ def run_modal_image_lifecycle_in_runner(
     run_tag: str,
     runner_placement: dict[str, str | None] | None = None,
     create_computer: ComputerFactory = ComputerSandbox.create,
-    resolve_image: ImageResolver = resolve_release_image,
+    resolve_exact_image: ExactImageResolver = _resolve_release_image_object_id,
     clock: Callable[[], float] = time.perf_counter,
     generated_at: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
@@ -134,7 +139,7 @@ def run_modal_image_lifecycle_in_runner(
         "cloud": _normalize_cloud(placement.get("cloud")),
         "region": placement.get("region") or "",
     }
-    managed_image = resolve_image(spec.release_record)
+    managed_image = resolve_exact_image(spec.release_record.modal_image_object_id)
     arms = {
         INLINE_RECIPE_ARM: _ModalImageLifecycleArm(
             name=INLINE_RECIPE_ARM,
