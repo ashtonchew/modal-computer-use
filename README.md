@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/modal-computer-use-logo.png" width="160" alt="Modal Computer Use logo">
+  <img src="./docs/assets/modal-computer-use-logo.png" width="160" alt="Modal Computer Use logo">
   <h1>modal-computer-use</h1>
 </div>
 
