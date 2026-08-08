@@ -24,6 +24,7 @@ from modal_computer_use.image import (
 from modal_computer_use.sandbox import (
     modal_billing_report,
     run_modal_benchmark_function_once,
+    run_modal_benchmark_function_with_image_once,
 )
 
 REVISION = "0123456789abcdef0123456789abcdef01234567"
@@ -256,6 +257,57 @@ def test_modal_benchmark_function_uses_importable_image_module(monkeypatch) -> N
     assert function_options["serialized"] is False
     assert function_options["include_source"] is False
     assert function_options["single_use_containers"] is True
+    assert function_options["cpu"] == 4.0
+    assert function_options["memory"] == 8192
+
+
+def test_modal_benchmark_function_with_image_uses_exact_environment(monkeypatch) -> None:
+    function_options: dict[str, object] = {}
+    run_options: dict[str, object] = {}
+
+    class FakeRemote:
+        def remote(self, config: object, *, run_tag: str) -> dict[str, bool]:
+            assert config == "config"
+            assert run_tag == "run-tag"
+            return {"ok": True}
+
+    class FakeApp:
+        def __init__(self, name: str) -> None:
+            assert name == "image-lifecycle-runner"
+
+        def function(self, **kwargs: object):
+            function_options.update(kwargs)
+            return lambda _entrypoint: FakeRemote()
+
+        def run(self, **kwargs: object):
+            run_options.update(kwargs)
+            return nullcontext()
+
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(App=FakeApp))
+
+    result = run_modal_benchmark_function_with_image_once(
+        lambda: {},
+        config="config",
+        run_tag="run-tag",
+        app_name="image-lifecycle-runner",
+        region="us-west-2",
+        environment_name="main",
+        image="exact-image",
+        cpu=1.0,
+        memory_mib=1024,
+        timeout_seconds=900,
+        cpu_limit=1.0,
+        memory_limit_mib=1024,
+    )
+
+    assert result == {"ok": True}
+    assert function_options["image"] == "exact-image"
+    assert function_options["cpu"] == (1.0, 1.0)
+    assert function_options["memory"] == (1024, 1024)
+    assert function_options["serialized"] is False
+    assert function_options["include_source"] is False
+    assert function_options["single_use_containers"] is True
+    assert run_options == {"environment_name": "main"}
 
 
 @pytest.mark.parametrize(
@@ -462,6 +514,69 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
         "add_local_python_source",
     ]
     assert ("add_local_python_source", ("modal_computer_use", True)) in calls
+
+
+def test_standard_inline_and_managed_recipes_share_runtime_layers(
+    monkeypatch,
+) -> None:
+    recipes: list[object] = []
+
+    class FakeRecipe:
+        def __init__(self) -> None:
+            self.packages: tuple[str, ...] = ()
+            self.uv: tuple[str, bool, str] | None = None
+            self.environment: dict[str, str] = {}
+            self.copy_source: bool | None = None
+
+        def apt_install(self, *packages: str) -> FakeRecipe:
+            self.packages = packages
+            return self
+
+        def uv_sync(
+            self,
+            uv_project_dir: str,
+            *,
+            frozen: bool,
+            uv_version: str,
+        ) -> FakeRecipe:
+            self.uv = (uv_project_dir, frozen, uv_version)
+            return self
+
+        def env(self, values: dict[str, str]) -> FakeRecipe:
+            self.environment = values
+            return self
+
+        def add_local_python_source(
+            self,
+            module: str,
+            *,
+            copy: bool,
+        ) -> FakeRecipe:
+            assert module == "modal_computer_use"
+            self.copy_source = copy
+            return self
+
+    def create_recipe(*, python_version: str) -> FakeRecipe:
+        assert python_version == "3.12"
+        recipe = FakeRecipe()
+        recipes.append(recipe)
+        return recipe
+
+    monkeypatch.setattr(
+        "modal_computer_use.image._modal",
+        lambda: SimpleNamespace(
+            Image=SimpleNamespace(debian_slim=create_recipe),
+        ),
+    )
+
+    inline = default_image(profile="standard")
+    managed = _named_image_recipe(variant="standard", window_manager="xfce")
+
+    assert inline.packages == managed.packages
+    assert inline.uv == managed.uv
+    assert inline.environment == managed.environment
+    assert inline.copy_source is False
+    assert managed.copy_source is True
 
 
 def test_named_image_publication_preflight_uses_modal_cli_and_fails_closed(monkeypatch) -> None:

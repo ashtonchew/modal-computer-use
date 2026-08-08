@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +19,7 @@ from modal_computer_use.image import (
     ImageCanaryRecord,
     ImageReleaseRecord,
     ImageReleaseSpec,
+    load_image_release_record,
     publish_image_release,
     resolve_release_image,
 )
@@ -115,6 +117,22 @@ def test_image_release_record_round_trips_without_losing_identity() -> None:
     assert restored == record
     assert restored.modal_image_object_id == "im-release-object"
     assert "digest" not in restored.to_dict()
+
+
+def test_load_image_release_record_uses_the_strict_manifest_contract(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "modal-image-release.v1.json"
+    path.write_text(
+        json.dumps(_release_record().to_dict()),
+        encoding="utf-8",
+    )
+
+    assert load_image_release_record(path) == _release_record()
+
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(ImageReleaseManifestError, match="could not read"):
+        load_image_release_record(path)
 
 
 def test_image_release_record_rejects_unknown_or_inconsistent_fields() -> None:

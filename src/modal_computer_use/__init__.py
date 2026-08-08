@@ -48,6 +48,7 @@ from .image import (
     ImageCanaryRecord,
     ImageReleaseRecord,
     ImageReleaseSpec,
+    load_image_release_record,
     publish_image_release,
     resolve_release_image,
 )
@@ -205,6 +206,7 @@ __all__ = [
     "__version__",
     "estimate_pool_idle_cost",
     "estimate_warm_idle_cost",
+    "load_image_release_record",
     "modal_daemon_endpoint",
     "modal_daemon_env",
     "pool_config_identity",
