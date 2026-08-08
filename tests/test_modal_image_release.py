@@ -602,7 +602,10 @@ def test_publish_image_release_uses_the_pinned_uv_for_lock_check(
 
     def run(command: list[str], **kwargs: object) -> SimpleNamespace:
         lock_commands.append(command)
-        return SimpleNamespace(stdout="uv 0.12.3\n", returncode=0)
+        return SimpleNamespace(
+            stdout="uv 0.12.3 (507230998 2026-08-07 aarch64-apple-darwin)\n",
+            returncode=0,
+        )
 
     monkeypatch.setattr(image_module.subprocess, "run", run)
 
@@ -618,3 +621,22 @@ def test_publish_image_release_uses_the_pinned_uv_for_lock_check(
             str(image_module._image_runtime_context()),
         ],
     ]
+
+
+def test_image_release_lock_check_rejects_a_different_uv_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modal_computer_use.image as image_module
+
+    monkeypatch.setenv("UV_EXECUTABLE", "/tools/uv")
+    monkeypatch.setattr(
+        image_module.subprocess,
+        "run",
+        lambda _command, **_kwargs: SimpleNamespace(
+            stdout="uv 0.12.4 (different-build)\n",
+            returncode=0,
+        ),
+    )
+
+    with pytest.raises(ImageReleaseLockError, match=r"require uv 0\.12\.3"):
+        image_module._verify_image_runtime_lock(image_module._image_runtime_context())

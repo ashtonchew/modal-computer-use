@@ -733,7 +733,8 @@ def _verify_image_runtime_lock(context: Path) -> None:
             text=True,
             timeout=10,
         ).stdout.strip()
-        if version != f"uv {IMAGE_UV_VERSION}":
+        version_parts = version.split()
+        if version_parts[:2] != ["uv", IMAGE_UV_VERSION]:
             raise ImageReleaseLockError(
                 f"managed Image releases require uv {IMAGE_UV_VERSION}; found {version}"
             )
