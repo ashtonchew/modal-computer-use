@@ -267,6 +267,10 @@ def _validate_wheel(wheel: Path, *, root: Path, python: str) -> None:
             module_path = Path(modal_computer_use.__file__).resolve()
             assert module_path.is_relative_to(Path(sys.prefix).resolve())
             assert version("modal-computer-use") == modal_computer_use.__version__
+            assert modal_computer_use.ImageReleaseRecord
+            assert modal_computer_use.ImageReleaseSpec
+            assert modal_computer_use.publish_image_release
+            assert modal_computer_use.resolve_release_image
 
             scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
             assert scripts["computer-use"] == "modal_computer_use.cli:main"
@@ -331,6 +335,10 @@ def _validate_sdist(sdist: Path, *, root: Path, python: str) -> None:
             module_path = Path(modal_computer_use.__file__).resolve()
             assert module_path.is_relative_to(Path(sys.prefix).resolve())
             assert version("modal-computer-use") == modal_computer_use.__version__
+            assert modal_computer_use.ImageReleaseRecord
+            assert modal_computer_use.ImageReleaseSpec
+            assert modal_computer_use.publish_image_release
+            assert modal_computer_use.resolve_release_image
             """
         ),
         cwd=probe,
