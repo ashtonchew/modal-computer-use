@@ -20,7 +20,8 @@ Follow the [code of conduct](CODE_OF_CONDUCT.md) in all project spaces.
 
 ## Set up the project
 
-Use Python 3.12 or later. Install `uv` before you continue.
+Use Python 3.12 or later. Install `uv` 0.12.3 before you continue. The project pins this version so
+local and CI dependency operations use the same resolver.
 
 Clone your fork. Create a branch from the latest `main` branch.
 

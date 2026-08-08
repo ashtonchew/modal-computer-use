@@ -1,5 +1,8 @@
 # Local Development
 
+Use Python 3.12 or later and `uv` 0.12.3. The project rejects other `uv` versions to keep dependency
+resolution consistent with CI.
+
 Run the daemon locally with the mock backend:
 
 ```bash

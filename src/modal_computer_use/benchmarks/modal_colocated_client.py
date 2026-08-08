@@ -619,7 +619,7 @@ def _paired_observation_case_summary(case: dict[str, Any]) -> dict[str, Any] | N
 
 
 def _paired_observation_arm_summary(arm: dict[str, Any]) -> dict[str, Any]:
-    summary = {
+    summary: dict[str, Any] = {
         key: arm.get(key)
         for key in (
             "label",
