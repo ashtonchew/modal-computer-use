@@ -13,6 +13,7 @@ from modal_computer_use import (
     ComputerConfig,
     ComputerSandbox,
     ComputerSessionHandle,
+    ComputerStepResult,
     DaemonClient,
 )
 ```
@@ -24,11 +25,13 @@ Choose the surface by who owns the desktop:
 | Connect to a daemon that already exists | `AsyncDaemonClient` | Connections only |
 | Create or attach to a Modal desktop from async Python | `AsyncComputerSandbox` | Created desktops are owned; attached desktops are not |
 | Run one repeated trajectory in a deployed Modal Function | `ComputerSessionHandle.borrow_async()` | One lease and connection; the original owner keeps the Sandbox |
+| Send one ordered action array and receive its immediate frame | `computer.step()` on a borrowed computer | Uses the active trajectory lease |
 
 For the primary path, create the desktop with `AsyncComputerSandbox.create()`, call
 `owner.session_handle()`, and pass that handle to the placed Function. Enter one `borrow_async()`
 context around the complete screenshot, model, and action loop. Do not borrow once per turn.
-Keep one ordered action batch as one `actions.run([...])` HTTP request.
+Send each ordered model action array through `computer.step([...])`. It uses one HTTP request for
+the action batch and its immediate post-action frame.
 
 `AsyncDaemonClient` connects to a daemon that is already running. `AsyncComputerSandbox` performs
 Modal provisioning and attachment without blocking the event loop. `borrow_async()` reconnects to
@@ -37,8 +40,12 @@ an already-provisioned desktop for one complete deployed-Function trajectory.
 `screenshots.full()` returns a typed `Screenshot`. Inline full screenshots use the binary HTTP
 response and populate `Screenshot.bytes`; call `as_bytes()` or `to_base64()` when an integration
 needs a different representation. The borrowed `AsyncDaemonClient` and its pooled async HTTP client
-remain open for the complete trajectory. Ordered model actions should remain one
-`actions.run([...])` batch.
+remain open for the complete trajectory.
+
+`computer.step()` is available on `BorrowedComputer` and `AsyncBorrowedComputer`. It returns a
+`ComputerStepResult` with `actions`, `screenshot`, and `timing` fields. The `actions` field is the
+normal `ActionBatchResult`. The `screenshot` field is a byte-backed `Screenshot` captured
+immediately after the action phase. This immediate post-action frame is not application readiness.
 
 ## Low-level compatibility
 
@@ -186,10 +193,11 @@ async def trajectory(handle: ComputerSessionHandle, task: str, run_id: str) -> N
     async with handle.borrow_async(
         run_id=run_id, function_region=FUNCTION_REGION
     ) as computer:
+        screenshot = await computer.screenshots.full()
         for _ in range(3):
-            screenshot = await computer.screenshots.full()
             action = await application_model_call(task, screenshot)
-            await computer.actions.run([action])
+            result = await computer.step([action], continue_on_error=False)
+            screenshot = result.screenshot
 ```
 
 Constructing the context does not contact Modal or create credentials. Entering it requires an

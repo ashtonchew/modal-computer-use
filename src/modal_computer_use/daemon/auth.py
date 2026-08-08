@@ -193,5 +193,5 @@ def _is_trusted_connect_proxy_request(request: Request, *, trust_private: bool =
 
 
 def _no_store(response: Response) -> Response:
-    response.headers["cache-control"] = "no-store"
+    response.headers.setdefault("cache-control", "no-store")
     return response

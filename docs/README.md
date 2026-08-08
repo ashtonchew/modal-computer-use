@@ -20,8 +20,8 @@ procedures, and concise pointers for public guides.
 ## Use the SDK
 
 - [API](api.md): synchronous and native-async Python surfaces, ownership, and daemon behavior.
-- [Version 2 migration](migration-v2.md): hard-cutover changes, exact replacements, screenshot
-  payload migration, and rollback.
+- [Version 2 migration](migration-v2.md): hard-cutover changes, `computer.step()` replacements,
+  screenshot payload migration, and rollback.
 - [OpenAPI schema](openapi.json): generated HTTP request and response schemas.
 - [Artifacts](artifacts.md): artifact paths, persistence, and synchronization.
 - [Trace and replay](trace-replay.md): capture, validate, and replay action traces.

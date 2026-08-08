@@ -87,6 +87,15 @@ class ActionBatchContext:
         )
         self.receipt_handle: ReceiptHandle | None = None
         self.receipt_finalized = False
+        # The step route uses this private phase marker to distinguish a
+        # cancellation before any event was emitted from an ambiguous input
+        # dispatch and from a known-terminal observation failure.  Legacy
+        # action routes leave it unused.
+        self.step_mode = False
+        self.mutation_phase = "pre_dispatch"
+        self.step_action_ms: float | None = None
+        self.step_screenshot_ms: float | None = None
+        self.step_total_ms: float | None = None
 
 
 async def _ensure_desktop_ready(context: ActionBatchContext, *, force: bool = False) -> None:
@@ -143,12 +152,33 @@ async def run_with_screenshot_bytes(
     )
 
 
+async def run_step(
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
+    """Run one leased action-to-observation step.
+
+    The step route deliberately shares the action executor with the legacy
+    action routes.  ``step_mode`` only changes the terminal receipt and
+    observation semantics; it does not create a second action loop.
+    """
+    context.step_mode = True
+    return await _run(
+        payload,
+        context,
+        idempotency_key=None,
+        raw_screenshot_after=True,
+        step_mode=True,
+    )
+
+
 async def _run(
     payload: ActionBatchRequest,
     context: ActionBatchContext,
     *,
     idempotency_key: str | None,
     raw_screenshot_after: bool,
+    step_mode: bool = False,
 ) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
     try:
         return await _run_impl(
@@ -156,11 +186,21 @@ async def _run(
             context,
             idempotency_key=idempotency_key,
             raw_screenshot_after=raw_screenshot_after,
+            step_mode=step_mode,
         )
     except BaseException as exc:
         if context.receipt_handle is not None and not context.receipt_finalized:
-            await finish_mutation_receipt(context.state, context.receipt_handle, exc)
-            context.receipt_finalized = True
+            if context.step_mode and context.mutation_phase in {"known_terminal", "observing"}:
+                await _finish_step_observation_failure(context, exc)
+            elif context.step_mode and context.mutation_phase == "pre_dispatch":
+                context.receipt_finalized = True
+                await context.state.receipt_journal.abandon(
+                    context.receipt_handle,
+                    classification="not_started",
+                )
+            else:
+                await finish_mutation_receipt(context.state, context.receipt_handle, exc)
+                context.receipt_finalized = True
         raise
 
 
@@ -170,6 +210,7 @@ async def _run_impl(
     *,
     idempotency_key: str | None,
     raw_screenshot_after: bool,
+    step_mode: bool = False,
 ) -> tuple[ActionBatchResult, CapturedScreenshot | None]:
     action_nodes, action_count, preflight_errors = _preflight_action_tree(
         payload.actions,
@@ -212,7 +253,7 @@ async def _run_impl(
                     context.state,
                     credentials=context.lease_credentials,
                     sequence=context.operation_sequence,
-                    operation_kind="actions.run",
+                    operation_kind="computer.step" if step_mode else "actions.run",
                     semantic_data={
                         "request": payload.model_dump(
                             mode="json", exclude={"idempotency_key"}
@@ -232,6 +273,14 @@ async def _run_impl(
     await _ensure_desktop_ready(context)
     call_id = payload.call_id or f"call_{uuid.uuid4().hex[:12]}"
     validation_errors = _validate_batch_request(payload, context, action_nodes=action_nodes)
+    if step_mode:
+        validation_errors.extend(
+            _validate_step_screenshot_pixel_budget(
+                payload,
+                context,
+                action_nodes,
+            )
+        )
     if validation_errors:
         raise DaemonError(
             "action validation failed",
@@ -257,7 +306,7 @@ async def _run_impl(
             context.state,
             credentials=context.lease_credentials,
             sequence=context.operation_sequence,
-            operation_kind="actions.run",
+            operation_kind="computer.step" if step_mode else "actions.run",
             semantic_data={
                 "request": payload.model_dump(mode="json", exclude={"idempotency_key"}),
                 "raw_screenshot_after": raw_screenshot_after,
@@ -265,6 +314,7 @@ async def _run_impl(
         )
         require_new_receipt(handle)
         context.receipt_handle = handle
+        context.mutation_phase = "pre_dispatch"
         cache = context.state.idempotency_cache
         cached = (
             None
@@ -338,6 +388,8 @@ async def _run_impl(
                         break
                     continue
             try:
+                if step_mode and _action_can_emit(action):
+                    context.mutation_phase = "dispatching"
                 with context.state.tracer.span(
                     "daemon.action",
                     {
@@ -369,6 +421,8 @@ async def _run_impl(
                     output=_with_input_backend(output or {}, action, context),
                 )
                 results.append(item)
+                if step_mode and _action_can_emit(action) and _action_mutation_is_known(item):
+                    context.mutation_phase = "known_terminal"
                 if item.ok:
                     context.budget_policy.touch_activity()
                 context.traces.append_action(payload, action, item, call_id=call_id, sequence=index)
@@ -409,6 +463,8 @@ async def _run_impl(
                     output=timeout_output,
                 )
                 results.append(item)
+                if step_mode and _action_can_emit(action) and _action_mutation_is_known(item):
+                    context.mutation_phase = "known_terminal"
                 batch_timed_out = timeout_scope == "batch"
                 context.traces.append_action(payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
@@ -452,6 +508,8 @@ async def _run_impl(
                     output=output,
                 )
                 results.append(item)
+                if step_mode and _action_can_emit(action) and _action_mutation_is_known(item):
+                    context.mutation_phase = "known_terminal"
                 context.traces.append_action(payload, action, item, call_id=call_id, sequence=index)
                 logger.info(
                     "action failed",
@@ -478,20 +536,63 @@ async def _run_impl(
                 if not payload.continue_on_error:
                     action_phase_failed = True
                     break
-        action_phase_allows_screenshot = (
-            payload.continue_on_error and handle is None
-        ) or not action_phase_failed
+        if step_mode:
+            context.step_action_ms = (time.perf_counter() - batch_start) * 1000
+        # A step is an action-to-observation transaction.  A known terminal
+        # action error remains data and still receives the immediate frame;
+        # only an outcome that may have dispatched partially can suppress the
+        # observation.  Legacy action routes retain their existing behavior.
+        if step_mode:
+            uncertain_item = next(
+                (item for item in results if _action_item_is_uncertain(item)),
+                None,
+            )
+            if handle is not None:
+                if uncertain_item is not None:
+                    uncertain_code = uncertain_item.error_code or "action_failed"
+                    step_receipt_error: BaseException
+                    if uncertain_code == "timeout":
+                        step_receipt_error = TimeoutError("action batch timed out")
+                    else:
+                        step_receipt_error = DaemonError(
+                            "action dispatch outcome is uncertain",
+                            code=uncertain_code,
+                            details=uncertain_item.output,
+                        )
+                    context.receipt_finalized = True
+                    await finish_mutation_receipt(context.state, handle, step_receipt_error)
+                    # ``finish_mutation_receipt`` raises the recovery-required
+                    # error for an uncertain dispatch.  Keep this guard for
+                    # alternate journal implementations so no frame can ever
+                    # follow an ambiguous mutation.
+                    raise _step_observation_unavailable()
+                else:
+                    # Keep the receipt open while the immediate observation
+                    # is captured.  The outer error path completes it after a
+                    # bounded cleanup if observation fails.
+                    context.mutation_phase = "observing"
+            action_phase_allows_screenshot = True
+        else:
+            uncertain_item = None
+            action_phase_allows_screenshot = (
+                payload.continue_on_error and handle is None
+            ) or not action_phase_failed
+        if step_mode and (batch_timed_out or screenshot_after_blocked):
+            raise _step_observation_unavailable()
         if (
             payload.screenshot_after
             and action_phase_allows_screenshot
             and not batch_timed_out
             and not screenshot_after_blocked
         ):
+            screenshot_started = time.perf_counter()
             options = payload.screenshot_options or ScreenshotOptions()
             start = time.perf_counter()
             timeout_ms = _effective_screenshot_after_timeout_ms(payload, context)
             remaining_batch_seconds = _remaining_seconds(batch_deadline)
             if remaining_batch_seconds <= 0:
+                if step_mode:
+                    raise _step_observation_unavailable()
                 item = _screenshot_after_timeout_result(
                     index=len(results),
                     elapsed_ms=0,
@@ -518,6 +619,7 @@ async def _run_impl(
                         screenshot_bytes = await asyncio.wait_for(
                             context.state.backend.screenshot_bytes(
                                 options,
+                                include_cursor_position=step_mode,
                                 prefer_native_png=True,
                             ),
                             timeout=timeout_seconds,
@@ -540,7 +642,10 @@ async def _run_impl(
                         None,
                         call_id=call_id,
                     )
+                    context.step_screenshot_ms = (time.perf_counter() - screenshot_started) * 1000
                 except TimeoutError:
+                    if step_mode:
+                        raise _step_observation_unavailable() from None
                     elapsed_ms = (time.perf_counter() - start) * 1000
                     cleanup = await _release_all_cleanup(context)
                     effective_timeout_ms = (
@@ -557,6 +662,8 @@ async def _run_impl(
                     results.append(item)
                     context.traces.append_screenshot_after(payload, None, item, call_id=call_id)
                 except Exception as exc:
+                    if step_mode:
+                        raise _step_observation_unavailable() from exc
                     elapsed_ms = (time.perf_counter() - start) * 1000
                     cleanup = await _release_all_cleanup(context)
                     error_code = _exception_code(exc)
@@ -585,6 +692,8 @@ async def _run_impl(
             screenshot=screenshot,
             timing=ActionBatchTiming(daemon_ms=(time.perf_counter() - batch_start) * 1000),
         )
+        if step_mode:
+            context.step_total_ms = result.timing.daemon_ms if result.timing is not None else None
         if result.ok:
             mark_desktop_ready(context.state)
         cache_enabled = context.state.settings.idempotency_cache_max_entries > 0
@@ -595,7 +704,11 @@ async def _run_impl(
                 "result": result.model_dump(mode="json"),
             }
             _prune_idempotency_cache(context)
-        if handle is not None:
+        if handle is not None and step_mode and not context.receipt_finalized:
+            context.mutation_phase = "terminal"
+            context.receipt_finalized = True
+            await context.state.receipt_journal.complete(handle)
+        elif handle is not None and not context.receipt_finalized:
             uncertain_item = next(
                 (
                     item
@@ -635,13 +748,81 @@ async def _run_impl(
 
 
 def _action_item_is_uncertain(item: ActionItemResult) -> bool:
-    if item.type == "screenshot_after":
+    if item.type in {"screenshot_after", "screenshot", "zoom", "cursor_position", "wait"}:
+        return False
+    if (
+        item.output.get("retry_safe") is True
+        and item.output.get("emission_state") == "not_started"
+    ):
         return False
     code = item.error_code
     return bool(
         code in {"timeout", "input_may_be_partial", "action_failed"}
         or item.output.get("indeterminate") is True
         or (isinstance(code, str) and code.endswith("_indeterminate"))
+    )
+
+
+def _action_can_emit(action: Any) -> bool:
+    """Return whether an action can dispatch native input to the desktop."""
+    return _is_input_backend_action(action)
+
+
+def _action_mutation_is_known(item: ActionItemResult) -> bool:
+    if (
+        item.output.get("retry_safe") is True
+        and item.output.get("emission_state") == "not_started"
+    ):
+        return False
+    return not _action_item_is_uncertain(item)
+
+
+def _step_observation_unavailable() -> DaemonError:
+    return DaemonError(
+        "step observation is unavailable; the completed mutation must not be replayed",
+        status_code=409,
+        code="operation_result_unavailable",
+        details={"phase": "observation"},
+    )
+
+
+async def _finish_step_observation_failure(
+    context: ActionBatchContext,
+    _original: BaseException,
+) -> None:
+    """Close a known-terminal step after an observation failure.
+
+    Input cleanup is shielded from caller cancellation.  A cleanup failure is
+    itself indeterminate and therefore quarantines the run; otherwise the
+    completed mutation is durably closed and the original observation error
+    is allowed to propagate as result-unavailable.
+    """
+    assert context.receipt_handle is not None
+    cleanup_task = asyncio.create_task(_release_all_cleanup(context))
+    while True:
+        try:
+            cleanup = await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            if not cleanup_task.done():
+                continue
+            cleanup = cleanup_task.result()
+        break
+    if cleanup is not None:
+        context.receipt_finalized = True
+        await finish_mutation_receipt(
+            context.state,
+            context.receipt_handle,
+            DaemonError(
+                "input cleanup failed after step observation failure",
+                code="input_cleanup_failed",
+                details={"phase": "cleanup"},
+            ),
+        )
+        return
+    context.receipt_finalized = True
+    await context.state.receipt_journal.complete(
+        context.receipt_handle,
+        classification="completed_observation_unavailable",
     )
 
 
@@ -806,6 +987,52 @@ def _validate_screenshot_pixel_budget(
                 label="screenshot_after",
             )
         )
+    return errors
+
+
+def _validate_step_screenshot_pixel_budget(
+    payload: ActionBatchRequest,
+    context: ActionBatchContext,
+    action_nodes: list[tuple[str, Any]],
+) -> list[str]:
+    """Bound all inline image segments before a step can dispatch input."""
+    total_pixels = 0
+    labels: list[str] = []
+    errors: list[str] = []
+    for action_path, action in action_nodes:
+        if isinstance(action, ScreenshotAction):
+            options = action.options or ScreenshotOptions()
+            if options.storage != "inline":
+                errors.append(f"{action_path} screenshot storage must be inline for a step")
+                continue
+            pixels = max(1, round(context.state.backend.width * options.scale)) * max(
+                1, round(context.state.backend.height * options.scale)
+            )
+        elif isinstance(action, ZoomAction):
+            if action.options is not None and action.options.storage != "inline":
+                errors.append(f"{action_path} screenshot storage must be inline for a step")
+                continue
+            pixels = max(1, round(action.region.width * action.scale)) * max(
+                1, round(action.region.height * action.scale)
+            )
+        else:
+            continue
+        total_pixels += pixels
+        labels.append(action_path)
+    if payload.screenshot_after:
+        options = payload.screenshot_options or ScreenshotOptions()
+        total_pixels += max(1, round(context.state.backend.width * options.scale)) * max(
+            1, round(context.state.backend.height * options.scale)
+        )
+        labels.append("screenshot_after")
+    max_pixels = context.state.settings.screenshot_max_pixels
+    if total_pixels <= max_pixels:
+        return errors
+    errors.append(
+        "step screenshot aggregate output "
+        f"{total_pixels} pixels exceeds max screenshot pixels {max_pixels} "
+        f"across {len(labels)} captures"
+    )
     return errors
 
 
@@ -1135,7 +1362,13 @@ def _batch_timeout_result(
         elapsed_ms=elapsed_ms,
         error_code="timeout",
         error=f"batch timed out after {batch_timeout_ms} ms",
-        output={"code": "timeout", "timeout_ms": batch_timeout_ms, "scope": "batch"},
+        output={
+            "code": "timeout",
+            "timeout_ms": batch_timeout_ms,
+            "scope": "batch",
+            "retry_safe": True,
+            "emission_state": "not_started",
+        },
     )
 
 

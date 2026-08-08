@@ -18,7 +18,6 @@ from modal_computer_use.models import (
     ActionBatchResult,
     ActionDecision,
     ActionItemResult,
-    Screenshot,
 )
 
 
@@ -76,33 +75,25 @@ async def test_placed_trajectory_borrows_once_and_keeps_each_model_array_in_one_
             self.calls.append(kwargs)
             return next(self.items)
 
-    class Actions:
-        async def run(self, actions: list[Any], **kwargs: Any) -> ActionBatchResult:
+    class Computer:
+        async def step(self, actions: list[Any], **kwargs: Any) -> Any:
             assert handle.active
-            events.append("actions")
+            events.append("step")
             batches.append(actions)
             assert kwargs["continue_on_error"] is False
-            assert kwargs["source"] == "openai-adapter"
-            assert kwargs.get("screenshot_after", False) is False
-            return ActionBatchResult(
-                ok=True,
-                results=[
-                    ActionItemResult(index=index, type=action.type, ok=True)
-                    for index, action in enumerate(actions)
-                ],
+            assert kwargs["call_id"] == "call_1"
+            return SimpleNamespace(
+                actions=ActionBatchResult(
+                    ok=True,
+                    results=[
+                        ActionItemResult(index=index, type=action.type, ok=True)
+                        for index, action in enumerate(actions)
+                    ],
+                ),
+                screenshot=tiny_screenshot(),
             )
 
-    class Screenshots:
-        async def full(self) -> Any:
-            assert handle.active
-            events.append("screenshot")
-            original = tiny_screenshot()
-            return Screenshot.model_validate(
-                original.model_dump(exclude={"data_base64", "artifact_uri"})
-                | {"bytes": original.as_bytes()}
-            )
-
-    computer = SimpleNamespace(actions=Actions(), screenshots=Screenshots())
+    computer = Computer()
 
     class Handle:
         def __init__(self) -> None:
@@ -142,8 +133,7 @@ async def test_placed_trajectory_borrows_once_and_keeps_each_model_array_in_one_
     assert events == [
         "borrow-enter",
         "model",
-        "actions",
-        "screenshot",
+        "step",
         "model",
         "borrow-exit",
     ]
@@ -175,18 +165,16 @@ async def test_openai_call_executes_one_ordered_batch() -> None:
     )
 
     assert response.output_text == "done"
-    assert [[action.type for action in batch] for batch in computer.actions.batches] == [
-        ["move", "click"]
-    ]
-    assert computer.actions.batch_kwargs == [
+    assert [[action.type for action in batch] for batch in computer.steps] == [["move", "click"]]
+    assert computer.step_kwargs == [
         {
             "continue_on_error": False,
-            "screenshot_after": False,
-            "source": "openai-adapter",
+            "call_id": "call_1",
+            "screenshot_options": None,
             "max_action_timeout_ms": 10_000,
         }
     ]
-    assert computer.screenshots.full_calls == 1
+    assert computer.screenshots.full_calls == 0
     assert queued.calls[1]["previous_response_id"] == "resp_1"
     assert queued.calls[1]["input"][0]["call_id"] == "call_1"
     assert queued.calls[1]["input"][0]["output"]["detail"] == "original"
@@ -212,7 +200,7 @@ async def test_openai_outputs_match_all_calls_in_response_order() -> None:
         max_turns=2,
     )
 
-    assert len(computer.actions.batches) == 2
+    assert len(computer.steps) == 2
     assert [item["call_id"] for item in queued.calls[1]["input"]] == [
         "call_2",
         "call_1",
@@ -240,7 +228,7 @@ async def test_openai_preflights_later_invalid_call_before_dispatch() -> None:
         )
 
     assert "do-not-leak" not in str(exc.value)
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -268,7 +256,7 @@ async def test_openai_preflights_later_invalid_action_in_same_call_before_dispat
         )
 
     assert "do-not-leak" not in str(exc.value)
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -291,7 +279,7 @@ async def test_openai_preflights_response_wide_trajectory_budget() -> None:
             max_trajectory_actions=1,
         )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -322,7 +310,7 @@ async def test_openai_preflights_later_policy_denial_before_dispatch() -> None:
         )
 
     assert "private policy reason" not in str(exc.value)
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -356,7 +344,7 @@ async def test_openai_expanded_batch_bound_counts_modifier_action_trees() -> Non
             max_batch_actions=5,
         )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -378,7 +366,7 @@ async def test_openai_trajectory_bound_counts_expanded_provider_actions() -> Non
             max_trajectory_actions=1,
         )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -402,8 +390,8 @@ async def test_openai_allocates_batch_deadline_across_expanded_actions_and_frame
         max_elapsed_seconds=1.0,
     )
 
-    assert computer.actions.batch_kwargs[0]["max_action_timeout_ms"] == 333
-    assert [action.timeout_ms for action in computer.actions.batches[0]] == [333, 333]
+    assert computer.step_kwargs[0]["max_action_timeout_ms"] == 333
+    assert [action.timeout_ms for action in computer.steps[0]] == [333, 333]
 
 
 @pytest.mark.asyncio
@@ -428,7 +416,7 @@ async def test_openai_caps_deadline_allocation_by_daemon_batch_duration() -> Non
         max_batch_duration_ms=900,
     )
 
-    assert computer.actions.batch_kwargs[0]["max_action_timeout_ms"] == 450
+    assert computer.step_kwargs[0]["max_action_timeout_ms"] == 450
 
 
 @pytest.mark.asyncio
@@ -509,7 +497,7 @@ async def test_openai_dispatch_exception_is_sanitized() -> None:
     async def fail_batch(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("private daemon token")
 
-    computer.actions.run = fail_batch
+    computer.step = fail_batch
     client, _ = _client(_response("resp_1", ("call_1", [{"type": "click", "x": 10, "y": 20}])))
 
     with pytest.raises(RuntimeError, match="batch failed: RuntimeError") as exc:
@@ -536,7 +524,7 @@ async def test_openai_final_allowed_turn_stops_before_dispatch() -> None:
             max_turns=1,
         )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -651,7 +639,8 @@ def test_openai_example_makes_placement_cost_and_transport_choices_explicit() ->
     assert "min_containers=FUNCTION_MIN_CONTAINERS" in source
     assert "retries=FUNCTION_RETRIES" in source
     assert "async with handle.borrow_async" in source
-    assert "await computer.screenshots.full()" in source
+    assert "await computer.step(" in source
+    assert "await computer.screenshots.full()" not in source
     assert "full_bytes(" not in source
     assert "optimized=" not in source
 

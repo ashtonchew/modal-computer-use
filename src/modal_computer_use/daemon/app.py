@@ -63,6 +63,7 @@ from .routes import (
     recovery,
     screenshots,
     session,
+    steps,
     windows,
 )
 
@@ -344,6 +345,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         display.router,
         windows.router,
         actions.router,
+        steps.router,
         artifacts.router,
         browser.router,
         apps.router,
@@ -372,7 +374,11 @@ def _validation_errors_without_inputs(exc: RequestValidationError) -> list[dict[
 
 
 def _is_action_payload_validation_error(request: Request, exc: RequestValidationError) -> bool:
-    if request.scope.get("path") not in {"/v1/actions/run", "/v1/actions/validate"}:
+    if request.scope.get("path") not in {
+        "/v1/actions/run",
+        "/v1/actions/validate",
+        "/v1/steps",
+    }:
         return False
     for item in exc.errors():
         loc = item.get("loc", ())

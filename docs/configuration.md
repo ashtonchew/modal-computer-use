@@ -23,6 +23,10 @@ profile, or a hidden variable that switches between two defaults. Placement and 
 choice remain explicit. Warm capacity is off unless the application sets a positive Function
 minimum or configures a Sandbox warm pool.
 
+`computer.step()` has no global enable flag. It is the primary action-to-frame Interface on a
+borrowed computer. Its `continue_on_error`, `screenshot_options`, and action timeout values are
+explicit per call. Region, resources, and warm capacity remain separate application choices.
+
 ## Inspect cost and placement choices
 
 Set the Sandbox environment, exact region, CPU, memory, image, browser, and timeouts in

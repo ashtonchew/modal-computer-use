@@ -2,10 +2,12 @@
 
 Keep the OpenAI client and model loop in the application-owned, explicitly placed Modal Function.
 Pass a versioned session handle into that Function and enter one `borrow_async()` context around the
-complete loop. Each turn should call the semantic `screenshots.full()` method. The returned
-byte-backed `Screenshot` converts to provider base64 only at the adapter boundary.
+complete loop. Send each response-wide preflighted action array through `computer.step()`. Use the
+returned byte-backed `ComputerStepResult.screenshot` as the next provider observation and convert
+it to provider base64 only at the adapter boundary.
 
-Preserve each ordered model action array as one `actions.run([...])` batch. Do not replay the batch
+Preserve each ordered model action array as one step. Preflight all calls in one OpenAI response
+before the first step. Preserve call IDs and response order. Do not replay the step
 after dispatch may have started. The core package does not import OpenAI and does not own prompts,
 model calls, or confirmation policy.
 

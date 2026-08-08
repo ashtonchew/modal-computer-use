@@ -422,8 +422,7 @@ def test_readme_primary_path_is_one_placed_borrowed_trajectory() -> None:
         "@app.function",
         "region=REGION",
         "async with handle.borrow_async",
-        "await computer.screenshots.full",
-        "await computer.actions.run",
+        "await computer.step",
         "uv run modal run --env main quickstart.py",
     ):
         assert contract in quickstart
@@ -431,6 +430,7 @@ def test_readme_primary_path_is_one_placed_borrowed_trajectory() -> None:
     assert quickstart.count("handle.borrow_async(") == 1
     assert re.search(r"(?<!Async)ComputerSandbox\.create", quickstart) is None
     assert "full_bytes(" not in quickstart
+    assert "await computer.actions.run" not in quickstart
     assert "external caller" not in quickstart.lower()
 
     code_blocks = [
@@ -458,6 +458,8 @@ def test_local_guides_define_the_optimized_default_and_low_level_compatibility()
         "pooled async HTTP client",
         "byte-backed `Screenshot`",
         "one ordered action batch",
+        "`computer.step()`",
+        "immediate post-action frame",
         "Low-level compatibility",
     ):
         assert contract in source
@@ -477,6 +479,8 @@ def test_v2_migration_guide_covers_each_cutover_contract() -> None:
         "`AsyncComputerSandbox.create_unplaced()`",
         "`owner.session_handle()`",
         "`handle.borrow_async()`",
+        "`computer.step()`",
+        "`ComputerStepResult`",
         "`screenshots.full()`",
         "`Screenshot.bytes`",
         "`Screenshot.to_base64()`",
@@ -523,7 +527,7 @@ def test_default_path_docs_preserve_cost_and_measurement_boundaries() -> None:
         "warm operation",
         "47 ms",
         "arithmetic",
-        "not a fused turn",
+        "not a measured fused turn",
         "trailing-screenshot option is a retained low-level capability",
         "not application readiness",
     ):
@@ -554,6 +558,29 @@ def test_benchmarking_documents_the_executable_live_promotion_runner() -> None:
     assert "one async owner" in source
     assert "enters one borrow" in source
     assert "zero warm capacity" in source
+
+
+def test_benchmarking_has_a_distinct_computer_step_promotion_gate() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+    step = " ".join(
+        _section(source, "## Promote Computer Step", "## Choose a command").split()
+    )
+
+    assert "scripts/run_step_promotion.py" in step
+    assert "at least 100 complete paired samples" in step
+    assert "actions.run(...)` followed by `screenshots.full(...)" in step
+    assert "computer.step(...)" in step
+    assert "deterministic causality check" in step
+    assert "daemon capture timestamp after its baseline" in step
+    assert "without comparing clocks across" in step
+    assert "Do not wait for a browser paint" in step
+    assert "does not claim per-sample MSS/XShm attribution" in step
+    assert "paired bootstrap 95% confidence interval" in step
+    assert "candidate p95" in step
+    assert "47.10 ms" in step
+    assert "not a measured fused turn" in step
+    assert "non-gating engineering goal and distance metric" in step
+    assert "a mutation-free placement probe and one measurement invocation" in step
 
 
 def test_performance_requires_exact_placement_for_the_primary_trajectory() -> None:
@@ -589,8 +616,20 @@ def test_examples_index_promotes_only_the_complete_trajectory() -> None:
     assert "modal_function_session_handoff.py" in primary
     assert "one borrow" in primary.lower()
     assert "pooled async HTTP" in primary
+    assert "computer.step" in primary
     assert "full_bytes(" not in primary
     assert "external caller" not in primary.lower()
+
+
+def test_hosted_docs_handoff_cuts_provider_loops_over_to_computer_step() -> None:
+    source = (DOCS / "hosted-documentation-handoff.json").read_text(encoding="utf-8")
+
+    assert "computer.step()" in source
+    assert "computer-step-envelope-v1" in source
+    assert "immediate post-action frame" in source
+    assert "application-owned readiness" in source
+    assert "47.10 ms" in source
+    assert "not a measured fused turn" in source
 
 
 def test_api_trajectory_example_uses_one_exact_requested_region() -> None:
@@ -605,6 +644,7 @@ def test_api_trajectory_example_uses_one_exact_requested_region() -> None:
     assert "Replace this with one exact region measured for your workload." in section
     assert 'FUNCTION_REGION = "us-west"' not in section
     assert section.count("handle.borrow_async(") == 1
+    assert "await computer.step(" in section
     code_blocks = [match.group("source") for match in PYTHON_FENCE_RE.finditer(section)]
     assert len(code_blocks) == 1
     compile(code_blocks[0], "docs/api.md optimized trajectory", "exec")

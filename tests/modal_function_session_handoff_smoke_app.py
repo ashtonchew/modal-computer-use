@@ -13,7 +13,7 @@ from pathlib import Path
 
 import modal
 
-from modal_computer_use import ComputerSessionHandle
+from modal_computer_use import ComputerSessionHandle, ScreenshotOptions
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = os.environ.get(
@@ -60,22 +60,25 @@ async def run_handoff_smoke_body(
     handle: ComputerSessionHandle,
     run_id: str,
 ) -> dict[str, object]:
-    """Borrow once, observe once, and apply one harmless sequenced action."""
+    """Borrow once and run one harmless action-to-observation step."""
     function_cloud, function_region = _required_function_placement()
     async with handle.borrow_async(
         run_id=run_id,
         function_region=FUNCTION_REGION,
         readiness_timeout=BORROW_READINESS_TIMEOUT_SECONDS,
     ) as computer:
-        screenshot = await computer.screenshots.full(
-            format="png",
-            processing="daemon",
-            storage="inline",
-        )
-        action = await computer.actions.run(
+        step = await computer.step(
             [{"type": "wait", "duration_ms": 50}],
             continue_on_error=False,
+            screenshot_options=ScreenshotOptions(
+                format="png",
+                processing="daemon",
+                storage="inline",
+                show_cursor=False,
+            ),
         )
+        screenshot = step.screenshot
+        action = step.actions
 
     screenshot_succeeded = (
         screenshot.width > 0

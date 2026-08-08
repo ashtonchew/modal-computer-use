@@ -76,6 +76,16 @@ The release workflow also imports the installed wheel outside the checkout, inst
 daemon, verifies both console-script entry points, starts the installed daemon, and probes
 `/healthz`, `/readyz`, `/v1/version`, and `/v1/capabilities`.
 
+The installed wheel and source distribution must also expose sync and async `computer.step()` on
+borrowed computers. The daemon must report `computer-step-envelope-v1`. A clean-distribution smoke
+must verify one successful ordered step, one byte-backed immediate screenshot, and no fallback to
+separate action and screenshot requests.
+
+Before promotion, run `scripts/run_step_promotion.py` from the exact clean release commit with
+explicit authorization. Retain its new sanitized prior-arm, candidate-arm, and decision artifacts.
+Publish a new dated Computer Step report only after the gate passes. The historical optimized-
+default result and 47.10 ms arithmetic do not satisfy this release gate.
+
 Normal pull requests and main builds validate the mock report, wheel, and source distribution
 without uploading them. GitHub keeps new Actions logs for 14 days. Published distributions live on
 PyPI and the immutable GitHub Release. Historical private-era logs and artifacts are deleted

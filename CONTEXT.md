@@ -20,6 +20,27 @@ _Avoid_: Adapter benchmark, SDK benchmark
 An opt-in raw Modal `Sandbox.exec` benchmark baseline used to compare daemon overhead against direct command execution inside the same Modal Sandbox.
 _Avoid_: modal-exec, provider, primitive API
 
+**Computer Step**:
+One borrowed action-to-frame operation. It validates and executes one ordered action array and
+returns its `ActionBatchResult`, one immediate post-action `Screenshot`, and timing metadata in one
+versioned response.
+_Avoid_: ready frame, fused readiness, screenshot shortcut
+
+**Immediate Frame**:
+The screenshot captured directly after the Computer Step action phase. It records what the desktop
+showed at capture time. It does not prove that an application is ready.
+_Avoid_: ready frame, settled frame
+
+**Changed Frame**:
+An experimental observation that full-resolution pixel verification found a difference from a
+reference frame. It does not prove semantic readiness.
+_Avoid_: ready frame
+
+**Application Readiness**:
+A condition defined and checked by the caller, such as the presence of a specific control or state.
+The SDK does not infer it from an Immediate Frame or Changed Frame.
+_Avoid_: first visual change
+
 ## Relationships
 
 - An **Adapter Benchmark** may run in the SDK repository because adapters are provider-shape translators, not provider API clients.
@@ -28,6 +49,8 @@ _Avoid_: modal-exec, provider, primitive API
   benchmark-only workflow. Its provider dependencies stay outside core, and it is not a stable SDK
   product API.
 - A **Sandbox Exec Surface** is a Modal-native benchmark baseline, not the SDK's preferred primitive API.
+- A **Computer Step** returns one **Immediate Frame**. A **Changed Frame** and **Application
+  Readiness** use separate contracts.
 - The public SDK benchmark command is named `benchmark sdk`; documentation may describe the measured entries as **Benchmark Surfaces**.
 - `benchmark compare` is a maintained benchmark-only workflow. `benchmark provider-results`
   remains available to verify archived combined evidence. Neither is a public SDK compatibility

@@ -9,6 +9,11 @@ The primary composition is async owner → versioned session handle → applicat
 Function → one trajectory borrow → pooled daemon client → owner cleanup. The Function and Sandbox
 use the same exact requested region. Missing or unverifiable placement fails before mutation.
 
+The borrowed computer exposes one deep model-loop Interface: `computer.step()`. The step module
+owns the action-to-immediate-frame contract, envelope encoding and decoding, and result validation.
+It reuses action-batch execution and screenshot capture behind internal seams. Provider examples
+consume the semantic result; they do not know the wire format.
+
 ## Layers
 
 ### SDK layer
@@ -21,9 +26,17 @@ changes at the adapter boundary. `ComputerSessionHandle.borrow_async()` is a sep
 trajectory surface for a desktop provisioned earlier. The SDK does not import `openai` or
 `anthropic`.
 
+`BorrowedComputer.step()` and `AsyncBorrowedComputer.step()` share one semantic result and envelope
+codec. The lease coordinator treats response decoding as part of the mutation. A malformed or lost
+response cannot advance the operation sequence or authorize replay.
+
 ### Daemon layer
 
 `computer-use-daemon` is an HTTP server that runs inside the sandbox on port `8080`. It supervises desktop processes, validates incoming actions, executes desktop-affecting primitives under an input lock, writes artifacts, and appends trace entries. In Modal mode, the daemon is reached through Sandbox Connect Tokens. See [security.md](security.md) for auth details.
+
+`POST /v1/steps` is the canonical borrowed action-to-frame route. It requires
+`computer-step-envelope-v1`. Existing action-only, screenshot, JSON/base64, and REST routes remain
+available for explicit low-level and compatibility use.
 
 ### Desktop stack
 

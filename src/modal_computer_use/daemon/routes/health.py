@@ -72,6 +72,7 @@ async def capabilities(request: Request, response: Response) -> Capabilities:
             "screenshot-binary-metadata-v1",
             "trajectory-leases-v1",
             "trajectory-operation-receipts-v1",
+            "computer-step-envelope-v1",
         ],
         screenshot_formats=["png", "jpeg", "webp"],
         action_types=[

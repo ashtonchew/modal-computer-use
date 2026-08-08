@@ -28,20 +28,20 @@ example = _load_example()
 class FakeComputer:
     def __init__(self) -> None:
         self.screenshot_calls = 0
-        self.action_calls: list[list[dict[str, object]]] = []
+        self.step_calls: list[list[dict[str, object]]] = []
         self.reobservation_calls = 0
         self.result_loss: OperationResultUnavailableError | None = None
         self.screenshots = SimpleNamespace(full=self.full)
-        self.actions = SimpleNamespace(run=self.run)
 
     async def full(self, **_kwargs: object) -> object:
         self.screenshot_calls += 1
         return object()
 
-    async def run(self, actions: list[dict[str, object]]) -> None:
-        self.action_calls.append(actions)
+    async def step(self, actions: list[dict[str, object]], **_kwargs: object) -> object:
+        self.step_calls.append(actions)
         if self.result_loss is not None:
             raise self.result_loss
+        return SimpleNamespace(screenshot=object())
 
     async def observe_after_result_loss(self) -> object:
         self.reobservation_calls += 1
@@ -65,18 +65,18 @@ class FakeHandle:
         self.borrow_environments.append(os.environ.get("MODAL_ENVIRONMENT"))
         self.active = True
         original_full = self.computer.full
-        original_run = self.computer.run
+        original_step = self.computer.step
 
         async def full(**kwargs: object) -> object:
             self.active_during_operations.append(self.active)
             return await original_full(**kwargs)
 
-        async def run(actions: list[dict[str, object]]) -> None:
+        async def step(actions: list[dict[str, object]], **kwargs: object) -> object:
             self.active_during_operations.append(self.active)
-            await original_run(actions)
+            return await original_step(actions, **kwargs)
 
         self.computer.screenshots.full = full
-        self.computer.actions.run = run
+        self.computer.step = step
         try:
             yield self.computer
         finally:
@@ -102,9 +102,9 @@ async def test_one_function_body_borrows_once_across_the_complete_repeated_loop(
     assert result == {"status": "succeeded"}
     assert handle.borrow_calls == [("run-123", "us-west")]
     assert handle.borrow_environments == ["main"]
-    assert computer.screenshot_calls == 3
-    assert len(computer.action_calls) == 3
-    assert handle.active_during_operations == [True] * 6
+    assert computer.screenshot_calls == 1
+    assert len(computer.step_calls) == 3
+    assert handle.active_during_operations == [True] * 4
     assert handle.active is False
 
 
@@ -131,7 +131,7 @@ async def test_function_body_reobserves_once_and_returns_only_safe_status_on_res
     assert result == {"status": "indeterminate"}
     assert "private-frame" not in repr(result)
     assert computer.reobservation_calls == 1
-    assert len(computer.action_calls) == 1
+    assert len(computer.step_calls) == 1
     assert handle.active is False
 
 
@@ -189,6 +189,7 @@ def test_example_declares_placement_resources_and_native_async_invocation() -> N
     assert "async with handle.borrow_async" in source
     assert "async def choose_action_with_model" in source
     assert "action = await choose_action_with_model" in source
+    assert "await computer.step(" in source
     assert "optimized=" not in source
     assert "PERFORMANCE_PROFILE" not in source
 

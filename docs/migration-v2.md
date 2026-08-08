@@ -19,11 +19,16 @@ low-level compatibility work that does not need a session handoff.
 | Region may be absent or broad, and a mismatched caller can continue over ingress. | Primary `AsyncComputerSandbox.create()` requires an explicit environment and exact region such as `us-west-2` before allocation; the Function, observed Function runtime, and Sandbox must then match that region. | Select an exact region for both resources and make environment, CPU, memory, image, timeout, retries, scaling limits, and capacity inspectable. Use `create_unplaced()` only for an intentional low-level path without handoff. |
 | Async creation may use tunnel ingress, control VNC, or warm-pool tagging even though those modes cannot produce the default handoff. | Primary `AsyncComputerSandbox.create()` rejects these modes before Modal work. | Use `create_unplaced()` for an intentional low-level owner, or select attested-tunnel/connect ingress, off/view-only VNC, and default ownership tags. |
 | `screenshots.full(storage="inline")` returns a JSON/base64-backed `Screenshot`. | The same semantic method uses the raw binary response and returns `Screenshot(bytes=...)`. | Prefer `as_bytes()` or `to_base64()` instead of reading `data_base64` directly. JSON serialization of `bytes` uses Base64URL. |
-| Provider examples may send model actions one at a time. | One ordered model `actions[]` becomes one `actions.run(...)` HTTP batch. | Preserve model order, choose continuation explicitly, and never replay automatically after possible dispatch. |
+| A provider loop calls `actions.run(...)` and then `screenshots.full()` after each model action array. | The borrowed `computer.step(...)` Interface sends the ordered array and returns one `ComputerStepResult` with `actions`, `screenshot`, and `timing`. | Replace the two calls with one step. Use its immediate post-action `screenshot` for the next model turn. Do not treat the frame as application readiness or replay a step after a possible dispatch. |
+| Provider examples may send model actions one at a time. | One ordered model `actions[]` becomes one `computer.step(...)` request. | Preserve model order, choose continuation explicitly, use the returned immediate screenshot, and never replay automatically after possible dispatch. |
 | Cleanup commonly relies on the outer owner context only. | The borrowed client and lease close first; the owner then detaches or terminates according to ownership. | Keep the owner alive until the placed Function reaches a terminal result, including cancellation cleanup. |
 | The main quickstart presents direct namespace calls as the performance path. | The placed owner-to-handle-to-Function trajectory is the primary documented path. | Use the low-level primitive SDK only when local, direct REST, idempotency, debugging, or compatibility behavior is intentional. |
 
 ## Screenshot compatibility
+
+`computer.step()` requires the versioned `computer-step-envelope-v1` capability. Borrow preflight
+fails before mutation when the daemon does not support it. The SDK does not silently fall back to
+the old two-request path.
 
 The public `screenshots.full()` method keeps its typed return. Only the inline transport and payload
 representation change. A v2 byte-backed `Screenshot` supports:

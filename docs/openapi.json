@@ -3296,6 +3296,62 @@
         "title": "ScrollAction",
         "type": "object"
       },
+      "StepRequest": {
+        "additionalProperties": false,
+        "description": "The deliberately small public request for one computer step.\n\nA step always captures its trailing observation.  Transport, idempotency,\nand provider-loop controls are intentionally not part of this boundary.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ComputerAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "continue_on_error": {
+            "default": false,
+            "title": "Continue On Error",
+            "type": "boolean"
+          },
+          "max_action_timeout_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Action Timeout Ms"
+          },
+          "screenshot_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScreenshotOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "title": "StepRequest",
+        "type": "object"
+      },
       "TextRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6258,6 +6314,41 @@
           }
         },
         "summary": "Tunnel Authorize"
+      }
+    },
+    "/v1/steps": {
+      "post": {
+        "description": "Execute one leased action batch and return its immediate observation.",
+        "operationId": "step_v1_steps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.modal-computer-use.step;v=1": {}
+            },
+            "description": "Ordered actions and the immediate trailing screenshot."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Step"
       }
     },
     "/v1/version": {

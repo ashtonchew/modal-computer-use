@@ -4,14 +4,16 @@ This page defines the repository's general benchmark procedure and reporting pol
 contain measured results. Experiment-specific methodology pages add any stricter gates for their
 experiment.
 
-## Promote the version 2 default
+## Preserve the historical article-parity promotion gate
 
-Do not promote the default from unit tests or the historical cross-provider table. Use a
+This section documents the existing screenshot-path experiment. Do not use it as evidence for
+Computer Step. Do not promote the screenshot default from unit tests or the historical
+cross-provider table. Use a
 preregistered, interleaved comparison between the prior public path and the candidate default. Hold
 the caller topology, target, exact region, resources, image, ingress, HTTP version, input backend,
 screenshot format, action payload, warmup, and connection reuse constant.
 
-The article-parity gate accepts only one application-owned Modal Function, attested-tunnel ingress,
+The historical article-parity gate accepts only one application-owned Modal Function, attested-tunnel ingress,
 HTTP/1.1, native XTest input, and one pooled async client. It rejects external callers, Connect-only
 ingress, HTTP/2, xdotool, per-request clients, WebSocket control, and fused action-plus-screenshot
 measurements. Test those alternatives in separate experiments.
@@ -28,7 +30,7 @@ Report these phases separately:
 - repeated warm operation time;
 - lease release and owner cleanup.
 
-The warm screenshot case must call the public `screenshots.full()` method and confirm that it uses
+The existing optimized-default screenshot experiment must call the public `screenshots.full()` method and confirm that it uses
 the raw binary response over the reused pooled client. The action case must preserve the model's
 ordered array as one batch. Do not substitute a fused action-plus-screenshot route, WebSocket,
 HTTP/2, a positive warm-capacity setting, or a different release image.
@@ -47,10 +49,10 @@ pass those values with the fixed, observed configuration. The returned two artif
 the offline gate below. Running the helper does not authorize or perform publication.
 
 The article's 37.25 ms screenshot result used the raw endpoint, persistent capture, and its recorded
-same-region topology. Its opening 47 ms screenshot-plus-click value is arithmetic over separate warm
-medians. It is not a fused turn and is not promised by version 2 until the same-topology candidate
-passes the promotion gate. Publish a new dated report after that gate; do not edit historical
-reports or artifacts.
+same-region topology. Its opening 47.10 ms screenshot-plus-click value is arithmetic over separate
+warm medians. It is not a measured fused turn and is not a latency promise for `computer.step()`.
+Publish a new dated step report only after a same-topology step candidate passes its promotion gate.
+Do not edit historical reports or artifacts.
 
 The offline gate reads two sanitized JSON artifacts. It validates the evidence before it compares
 latency, and it never starts a Modal Function or Sandbox:
@@ -98,6 +100,75 @@ dispatch, enters one borrow for the interleaved trajectory, writes both sanitize
 the offline gate, and cleans up the owner and Function App. Its Function and Sandbox each request
 1 CPU and 2048 MiB, use zero warm capacity, and permit no retries. Change these explicit source
 constants only in a new preregistered experiment.
+
+## Promote Computer Step
+
+Use a separate gate for the canonical action-to-observation Interface. Run
+`scripts/run_step_promotion.py` only after an operator authorizes the live, billable run. The
+runner compares these arms inside the same placed Function and the same borrowed trajectory:
+
+- the prior public arm calls `actions.run(...)` followed by `screenshots.full(...)`;
+- the candidate arm calls `computer.step(...)` once;
+- both arms send the same ordered action array and the same explicit screenshot options: PNG,
+  quality 90, scale 1, cursor hidden, daemon processing, and inline storage;
+- each preparation resets the pointer and captures one untimed baseline through the same daemon;
+  both arms pay this preparation equally, and the measured click uses one preregistered coordinate;
+- each returned screenshot must report that coordinate and a daemon capture timestamp after its
+  baseline. This is the deterministic causality check for the immediate frame without comparing
+  clocks across the Function and Sandbox.
+
+The runner uses one async owner, one versioned handle, one exact requested region, one
+`borrow_async()` context, and one pooled async HTTP client. It makes two calls to the same placed
+Function definition: a mutation-free placement probe and one measurement invocation. The recorded
+`dispatch_ms` is the probe round trip; it is a lifecycle diagnostic, not a promotion metric. The
+measurement invocation owns the whole interleaved trajectory and enters the borrow once. The runner
+keeps caller topology, target, requested and observed placement, resources, image, ingress,
+HTTP/1.1, XTest, screenshot format, action payload, warm-up, connection reuse, and zero warm
+capacity fixed. It stops after the first failure. It does not retry, replay, or replace a sample.
+
+The preregistration requires at least 100 complete paired samples per arm. Each sanitized raw
+observation records cold start, startup, dispatch, borrow, action-to-frame, action phase,
+screenshot phase, daemon total, and transport-and-decode timings. Candidate phase timings must
+come from the daemon; missing values reject the run. The gate requires the paired bootstrap 95%
+confidence interval for the candidate-minus-prior median to remain below zero. The candidate p95
+must not exceed the prior p95. Any configuration mismatch, missing freshness proof, failed
+cleanup, unknown artifact field, or non-allowlisted failure category rejects promotion.
+
+Only `action_to_frame_ms` is a promotion metric. The prior arm's action and screenshot phase values
+are caller-observed request durations. The candidate's phase values are daemon-reported parts of
+one Step request. They are arm-specific diagnostics and must not be compared as equivalent phases.
+The prior arm records daemon total and transport-and-decode as null because its semantic screenshot
+does not expose a comparable daemon capture duration. Candidate values must be present and finite.
+
+Do not wait for a browser paint or another visual change in this promotion gate. That would change
+the stable immediate-observation contract and favor the prior arm's extra network round trip. Run
+click-to-first-visual-change as a separate, non-promoting experiment. It remains experimental and
+does not establish application readiness.
+
+The current `Screenshot` result does not expose the capture backend. This gate therefore does not
+claim per-sample MSS/XShm attribution. Daemon backend contract tests must establish persistent
+capture selection separately. Add capture-backend attribution to this gate only after the Step
+envelope exposes it consistently for both arms.
+
+Run the exact clean commit that you want to promote:
+
+```bash
+source_sha="$(git rev-parse HEAD)"
+MODAL_COMPUTER_USE_STEP_PROMOTION_ENVIRONMENT=main \
+MODAL_COMPUTER_USE_STEP_PROMOTION_CLOUD=aws \
+MODAL_COMPUTER_USE_STEP_PROMOTION_REGION=us-west-2 \
+uv run modal run --env main scripts/run_step_promotion.py \
+  --source-sha "$source_sha" \
+  --sample-count 100 \
+  --warmup-iterations 2 \
+  --output-dir benchmark-results/candidates/computer-step-live
+```
+
+Keep the generated artifacts private until they pass secret review and the offline gate. Publish a
+new dated report; never rewrite a historical report or artifact. The article's 47.10 ms value is
+arithmetic over separate warm screenshot and click medians. It is not a measured fused turn, does
+not establish Computer Step latency, and is not a release promise. Treat 47.10 ms only as a
+non-gating engineering goal and distance metric for a newly measured Step result.
 
 ## Choose a command
 

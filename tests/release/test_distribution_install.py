@@ -108,6 +108,7 @@ def test_distribution_daemon_probe_covers_optimized_protocol_seam() -> None:
         "/v1/leases/acquire",
         "/v1/screenshots/full/raw",
         "/v1/actions/run",
+        "/v1/steps",
         "/v1/receipts/status",
         "/v1/leases/release",
     ):
@@ -121,8 +122,20 @@ def test_distribution_daemon_probe_covers_optimized_protocol_seam() -> None:
         "x-computer-use-sha256",
         "x-computer-use-size-bytes",
         "x-computer-use-capture-backend",
+        "x-computer-use-step-protocol",
     ):
         assert header in probe
+    assert "computer-step-envelope-v1" in probe
+    assert "decode_step_envelope" in probe
+    assert "ComputerStepResult" in probe
+    assert "result.actions.ok" in probe
+    assert "result.screenshot.as_bytes()" in probe
+    assert "result.timing.action_ms" in probe
+    source = (ROOT / "scripts" / "smoke_distribution_install.py").read_text(
+        encoding="utf-8"
+    )
+    assert source.count("assert callable(BorrowedComputer.step)") == 2
+    assert source.count("assert callable(AsyncBorrowedComputer.step)") == 2
 
     # The clean distribution check must never echo response bodies or secrets.
     assert "print(" not in probe

@@ -205,6 +205,7 @@ async def run_anthropic_computer_loop(
                         batch_result = await _execute_computer_batch(
                             adapter=adapter,
                             actions=actions,
+                            call_id=tool_use.id,
                             max_batch_actions=max_batch_actions,
                             started_at=started_at,
                             max_elapsed_seconds=max_elapsed_seconds,
@@ -223,24 +224,33 @@ async def run_anthropic_computer_loop(
                         max_action_timeout_ms=max_action_timeout_ms,
                     )
                     normalized_action = parse_action(adapter.normalize(action))
-                    try:
-                        action_result = await computer.actions.apply(
-                            normalized_action,
-                            source="anthropic-adapter",
-                        )
-                    except Exception as exc:
-                        raise _AnthropicMutationOutcomeUnknownError(
-                            f"Anthropic computer action failed: {type(exc).__name__}"
-                        ) from None
-                    screenshot = None
-                    if action_result.ok and action.get("action") != "cursor_position":
+                    if action.get("action") == "cursor_position":
                         try:
-                            screenshot = await computer.screenshots.full()
+                            action_result = await computer.actions.apply(
+                                normalized_action,
+                                source="anthropic-adapter",
+                            )
                         except Exception as exc:
                             raise _AnthropicMutationOutcomeUnknownError(
-                                "Anthropic computer screenshot failed: "
-                                f"{type(exc).__name__}"
+                                f"Anthropic computer action failed: {type(exc).__name__}"
                             ) from None
+                        screenshot = None
+                    else:
+                        try:
+                            step_result = await computer.step(
+                                [normalized_action],
+                                continue_on_error=False,
+                                call_id=tool_use.id,
+                                max_action_timeout_ms=normalized_action.timeout_ms,
+                            )
+                        except Exception as exc:
+                            raise _AnthropicMutationOutcomeUnknownError(
+                                f"Anthropic computer action failed: {type(exc).__name__}"
+                            ) from None
+                        action_result = _hosted_action_result(step_result.actions)
+                        screenshot = step_result.screenshot
+                        if action.get("action") in {"screenshot", "zoom"}:
+                            screenshot = _screenshot_from_output(action_result.output) or screenshot
                     tool_result = _hosted_computer_tool_result(
                         tool_use_id=tool_use.id,
                         action=action,
@@ -411,6 +421,7 @@ async def _execute_computer_batch(
     *,
     adapter: AnthropicAdapter,
     actions: list[Any],
+    call_id: str,
     max_batch_actions: int,
     started_at: float,
     max_elapsed_seconds: float,
@@ -445,26 +456,29 @@ async def _execute_computer_batch(
     except Exception:
         return _batch_preflight_failure(actions, failed_index=0)
     try:
-        batch_result = await adapter.computer.actions.run(
+        step_result = await adapter.computer.step(
             normalized_actions,
             continue_on_error=False,
-            screenshot_after=False,
-            source="anthropic-adapter",
+            call_id=call_id,
             max_action_timeout_ms=remaining_batch_timeout_ms,
         )
     except Exception as exc:
         raise _AnthropicMutationOutcomeUnknownError(
             f"Anthropic computer action batch failed: {type(exc).__name__}"
         ) from None
-    if not batch_result.ok:
-        return batch_result
-    try:
-        screenshot = await adapter.computer.screenshots.full()
-    except Exception as exc:
-        raise _AnthropicMutationOutcomeUnknownError(
-            f"Anthropic computer batch screenshot failed: {type(exc).__name__}"
-        ) from None
-    return batch_result.model_copy(update={"screenshot": screenshot})
+    return step_result.actions.model_copy(update={"screenshot": step_result.screenshot})
+
+
+def _hosted_action_result(batch_result: ActionBatchResult) -> ActionResult:
+    if not batch_result.results:
+        return ActionResult(ok=False, message="computer action failed")
+    item = batch_result.results[0]
+    return ActionResult(
+        ok=item.ok,
+        message=item.error,
+        elapsed_ms=item.elapsed_ms,
+        output=item.output,
+    )
 
 
 def _computer_batch_tool_result(

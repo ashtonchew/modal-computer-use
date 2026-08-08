@@ -15,6 +15,10 @@ Use one `borrow_async()` context for the complete trajectory. Do not reuse a bor
 sealed run ID. Check daemon health, readiness, version, capabilities, and the live session policy.
 The SDK closes any partially created client when borrow entry fails.
 
+If the error names `computer-step-envelope-v1`, the installed daemon cannot support the primary
+`computer.step()` Interface. Install a compatible runtime artifact. Do not work around the error by
+issuing separate action and screenshot requests in the optimized path.
+
 If a mutation may have reached the daemon but its response was lost, do not repeat it. Use the
 reported receipt outcome. A read-only observation can show a later visible state, but it cannot
 prove that an invisible action succeeded or that the application is ready.
@@ -41,8 +45,9 @@ Warm capacity is off in the primary example. Enabling positive Function minimums
 pool can reduce some cold waits but creates explicit idle cost. It does not change the repeated warm
 operation contract.
 
-The article's 47 ms value is arithmetic over separate warm raw-screenshot and click medians. It is
-not a fused turn and is not a latency promise for a different topology or configuration.
+The article's 47.10 ms value is arithmetic over separate 37.25 ms warm raw-screenshot and 9.85 ms
+click medians. It is not a measured fused turn and is not a latency promise for `computer.step()` or
+a different topology.
 
 ## A changed frame arrives too early
 

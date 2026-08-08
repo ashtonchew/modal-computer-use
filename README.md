@@ -48,14 +48,14 @@ function_image = modal.Image.debian_slim(python_version="3.12").pip_install(
 )
 async def trajectory(handle: ComputerSessionHandle, run_id: str) -> tuple[int, int]:
     async with handle.borrow_async(run_id=run_id, function_region=REGION) as computer:
-        screenshot = await computer.screenshots.full()
-        await computer.actions.run(
+        result = await computer.step(
             [
                 {"type": "move", "x": 320, "y": 240},
                 {"type": "click", "x": 320, "y": 240},
-            ]
+            ],
+            continue_on_error=False,
         )
-        return screenshot.width, screenshot.height
+        return result.screenshot.width, result.screenshot.height
 
 
 @app.local_entrypoint()
@@ -80,15 +80,17 @@ uv run modal run --env main quickstart.py
 
 This is the optimized default topology. The async owner creates one desktop and produces a
 versioned handle. The application-owned Modal Function enters one borrow for the whole trajectory.
-That borrow reuses one pooled async HTTP client for the byte-backed screenshot and ordered action
-batch. The Function releases the lease before the owner terminates the Sandbox. Warm capacity is
+That borrow reuses one pooled async HTTP client. `computer.step()` sends the ordered action batch
+and returns its immediate, byte-backed post-action screenshot in one request. The Function releases
+the lease before the owner terminates the Sandbox. Warm capacity is
 off because `min_containers=0`; enable paid idle capacity only after you measure the tradeoff.
 
 ## Core API
 
 `AsyncComputerSandbox` plus `ComputerSessionHandle.borrow_async()` is the primary Modal trajectory
 Interface. Keep the provider model loop in your application-owned Modal Function. Use one borrow
-around the repeated screenshot, model, and action loop.
+around the repeated model loop. Use `computer.step()` for each ordered action array and its
+immediate post-action frame.
 
 The synchronous SDK, direct daemon clients, attach flows, REST routes, and idempotency tools remain
 available as low-level compatibility surfaces. Use them for local control, direct-daemon work,
@@ -98,6 +100,7 @@ article-backed placed topology by themselves.
 | Task | Representative API |
 | --- | --- |
 | Own and hand off | `AsyncComputerSandbox.create()`, `owner.session_handle()`, `handle.borrow_async()` |
+| Act and observe | `computer.step()` |
 | Create or attach at the low level | `ComputerSandbox.create()`, `ComputerSandbox.attach()`, `AsyncComputerSandbox.attach()` |
 | Acquire by name | `ComputerSandbox.attach_or_create(name=...)`, `AsyncComputerSandbox.attach_or_create(name=...)` |
 | Input | `computer.mouse.move()`, `computer.keyboard.type()`, `computer.clipboard.get_text()` |
@@ -109,8 +112,9 @@ article-backed placed topology by themselves.
 
 Action batches validate the full request before execution. They stop on the first error by default,
 can opt into `continue_on_error`, and can capture a trailing screenshot in the same request.
-The trailing-screenshot option is a retained low-level capability. It is not part of the
-article-parity default and is not credited for the article's latency result.
+The trailing-screenshot option is a retained low-level capability. The borrowed `computer.step()`
+Interface is the default model-loop path. It returns `ComputerStepResult.actions`,
+`ComputerStepResult.screenshot`, and timing metadata.
 
 Inside an active `ComputerSandbox`:
 
@@ -155,8 +159,9 @@ commands, and reads or writes files through `computer.artifacts`.
 
 The figure shows July 2026 p50 latency for six computer-use cases, based on 30 successful samples
 per cell. Lower is better. Warm-operation latency starts after the desktop and client connection
-are ready. The article's opening 47 ms figure is arithmetic over separate raw-screenshot and click
-medians. It is not a measured fused turn and is not a promise for the new default.
+are ready. The article's opening 47.10 ms figure is arithmetic over separate 37.25 ms raw-screenshot
+and 9.85 ms click medians. It is not a measured fused turn and is not a latency promise for
+`computer.step()`.
 
 The [benchmark results](https://modal-computer-use.mintlify.app/benchmarks/current-results) give p95
 values and explain how each path was configured and measured.

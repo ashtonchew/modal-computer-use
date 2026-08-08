@@ -14,6 +14,11 @@ Placement, handle protocol, live policy, readiness, and capability checks fail b
 trajectory can mutate the desktop. The SDK does not silently fall back to an external caller or a
 different transport. After possible dispatch, it does not replay a mutation automatically.
 
+`computer.step()` returns action data and screenshot bytes in one versioned envelope. Treat the
+whole response as secret-bearing. Do not log the envelope, decoded screenshot, typed text,
+clipboard text, daemon URL, bearer token, or receipt data. If response decoding fails after possible
+dispatch, use receipt recovery and do not replay the step.
+
 Keep daemon URLs, bearer tokens, noVNC URLs, session handles, typed text, clipboard text, screenshot
 bytes, and artifact bytes out of logs and error text. Do not include them in resolved configuration
 reports or benchmark artifacts. A byte-backed `Screenshot` is still secret-bearing screen content.
