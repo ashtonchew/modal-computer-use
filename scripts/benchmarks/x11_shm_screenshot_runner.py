@@ -800,13 +800,7 @@ async def _run_region_parity_probe(
                         "width": int(trace.get("x-computer-use-width", -1)),
                         "height": int(trace.get("x-computer-use-height", -1)),
                         "cursor_visible": trace.get("x-computer-use-cursor-visible") == "true",
-                        "cursor_position_valid": (
-                            isinstance(cursor_position, Mapping)
-                            and isinstance(cursor_position.get("x"), int)
-                            and isinstance(cursor_position.get("y"), int)
-                            and 0 <= cursor_position["x"] < WIDTH
-                            and 0 <= cursor_position["y"] < HEIGHT
-                        ),
+                        "cursor_position_is_null": cursor_position is None,
                         "coordinate_space": coordinate_space,
                         "capture_backend": backend,
                     }

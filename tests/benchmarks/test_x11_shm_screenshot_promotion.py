@@ -253,8 +253,21 @@ def _artifact() -> dict:
                             "width": 1,
                             "height": 1,
                             "cursor_visible": False,
-                            "cursor_position_valid": True,
-                            "coordinate_space": {"image_width": 1, "image_height": 1},
+                            "cursor_position_is_null": True,
+                            "coordinate_space": {
+                                "desktop_width": 1024,
+                                "desktop_height": 768,
+                                "image_width": 1,
+                                "image_height": 1,
+                                "scale_x": 1.0,
+                                "scale_y": 1.0,
+                                "source_region": {
+                                    "x": index,
+                                    "y": index,
+                                    "width": 1,
+                                    "height": 1,
+                                },
+                            },
                             "capture_backend": arm,
                         }
                         for index in range(4)

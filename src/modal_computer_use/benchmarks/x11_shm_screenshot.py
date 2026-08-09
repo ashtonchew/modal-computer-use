@@ -499,14 +499,23 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
         for row in rows:
             item = _mapping(row, f"region_parity.arms.{arm}")
             region = _mapping(item.get("region"), "region_parity.region")
+            coordinate_space = _mapping(
+                item.get("coordinate_space"), "region_parity.coordinate_space"
+            )
             if (
                 item.get("capture_backend") != arm
                 or item.get("width") != region.get("width")
                 or item.get("height") != region.get("height")
                 or item.get("cursor_visible") is not False
-                or item.get("cursor_position_valid") is not True
+                or item.get("cursor_position_is_null") is not True
                 or _FULL_SHA256.fullmatch(str(item.get("pixels_sha256", ""))) is None
-                or not isinstance(item.get("coordinate_space"), Mapping)
+                or coordinate_space.get("desktop_width") != 1024
+                or coordinate_space.get("desktop_height") != 768
+                or coordinate_space.get("image_width") != region.get("width")
+                or coordinate_space.get("image_height") != region.get("height")
+                or coordinate_space.get("scale_x") != 1.0
+                or coordinate_space.get("scale_y") != 1.0
+                or coordinate_space.get("source_region") != region
             ):
                 raise ValueError("regional screenshot parity case is invalid")
     terminal_cleanup = _mapping(details.get("terminal_cleanup"), "terminal_cleanup")
