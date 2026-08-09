@@ -406,6 +406,22 @@ def test_gate_retains_and_rejects_readiness_regression() -> None:
     assert any("readiness" in reason for reason in artifact["promotion"]["reasons"])
 
 
+def test_gate_retains_and_rejects_concurrency_regression() -> None:
+    artifact = _artifact()
+    artifact["operational_gates"]["concurrency_matrix"] = False
+    artifact["operational_details"]["concurrency"]["passed"] = False
+    artifact["operational_details"]["concurrency"]["arms"]["x11-shm"][
+        "levels"
+    ][-1]["elapsed_p95_ms"] = 2.2
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
+
+    validate_x11_shm_screenshot_artifact(artifact)
+
+    assert artifact["promotion"]["eligible"] is False
+    assert artifact["promotion"]["decision"] == "reject"
+    assert any("concurrency" in reason for reason in artifact["promotion"]["reasons"])
+
+
 def test_preregistered_thresholds_are_immutable() -> None:
     artifact = _artifact()
     artifact["preregistration"]["gates"]["minimum_daemon_saving_ms"] = 4.99

@@ -124,12 +124,19 @@ def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
     cleanup = _mapping(payload.get("cleanup"), "cleanup")
     if cleanup.get("succeeded") is not True or cleanup.get("remaining_sandboxes") != 0:
         raise ValueError("terminal screenshot benchmark cleanup must succeed")
-    _validate_operational_gates(
-        _mapping(payload.get("operational_gates"), "operational_gates")
+    operational_gates = _mapping(payload.get("operational_gates"), "operational_gates")
+    operational_details = _mapping(
+        payload.get("operational_details"), "operational_details"
     )
-    _validate_operational_details(
-        _mapping(payload.get("operational_details"), "operational_details")
-    )
+    _validate_operational_gates(operational_gates)
+    _validate_operational_details(operational_details)
+    for gate, detail in (
+        ("concurrency_matrix", "concurrency"),
+        ("readiness_parity", "readiness"),
+    ):
+        detail_payload = _mapping(operational_details.get(detail), detail)
+        if operational_gates.get(gate) is not detail_payload.get("passed"):
+            raise ValueError(f"operational gate {gate} disagrees with retained detail")
 
 
 def evaluate_x11_shm_screenshot_promotion(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -176,6 +183,8 @@ def _evaluate_validated_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
     operational_gates = _mapping(payload["operational_gates"], "operational_gates")
     if operational_gates.get("readiness_parity") is not True:
         reasons.append("fresh readiness p95 regresses by more than 5%")
+    if operational_gates.get("concurrency_matrix") is not True:
+        reasons.append("screenshot concurrency p95 regresses by more than 5%")
 
     preregistration = _mapping(payload["preregistration"], "preregistration")
     bootstrap_ci = _paired_bootstrap_median_difference(
@@ -381,7 +390,7 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
     ):
         if not isinstance(gates.get(key), bool):
             raise ValueError(f"operational gate {key} must be boolean")
-        if key != "readiness_parity" and gates.get(key) is not True:
+        if key not in {"concurrency_matrix", "readiness_parity"} and gates.get(key) is not True:
             raise ValueError(f"operational gate {key} did not pass")
     if gates.get("captures") != 10_000:
         raise ValueError("operational soak must contain 10000 captures")
@@ -403,11 +412,11 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
 def _validate_operational_details(details: Mapping[str, Any]) -> None:
     concurrency = _mapping(details.get("concurrency"), "concurrency")
     concurrency_arms = _mapping(concurrency.get("arms"), "concurrency.arms")
-    if concurrency.get("passed") is not True or set(concurrency_arms) != {
+    if not isinstance(concurrency.get("passed"), bool) or set(concurrency_arms) != {
         BASELINE_ARM,
         CANDIDATE_ARM,
     }:
-        raise ValueError("concurrency detail did not pass")
+        raise ValueError("concurrency detail is incomplete")
     for arm in (BASELINE_ARM, CANDIDATE_ARM):
         arm_detail = _mapping(concurrency_arms.get(arm), f"concurrency.arms.{arm}")
         levels = arm_detail.get("levels")
@@ -428,6 +437,7 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
     candidate_levels = _mapping(
         concurrency_arms.get(CANDIDATE_ARM), "concurrency candidate"
     )["levels"]
+    concurrency_passed = True
     for baseline, candidate in zip(baseline_levels, candidate_levels, strict=True):
         baseline_p95 = _nonnegative_number(
             baseline.get("elapsed_p95_ms"), "baseline concurrency p95"
@@ -435,8 +445,11 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
         candidate_p95 = _nonnegative_number(
             candidate.get("elapsed_p95_ms"), "candidate concurrency p95"
         )
-        if baseline_p95 <= 0 or candidate_p95 > baseline_p95 * 1.05:
-            raise ValueError("concurrency p95 exceeds the fixed 5% regression ceiling")
+        concurrency_passed = concurrency_passed and (
+            baseline_p95 > 0 and candidate_p95 <= baseline_p95 * 1.05
+        )
+    if concurrency.get("passed") is not concurrency_passed:
+        raise ValueError("concurrency gate disagrees with retained p95 values")
 
     readiness = _mapping(details.get("readiness"), "readiness")
     readiness_arms = _mapping(readiness.get("arms"), "readiness.arms")
