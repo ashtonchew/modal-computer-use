@@ -239,6 +239,14 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
     normalized_builds: list[dict[str, Any]] = []
     for arm in (BASELINE_ARM, CANDIDATE_ARM):
         build = _mapping(native_builds.get(arm), f"native_builds.{arm}")
+        if set(build) != {
+            "backend",
+            "codec",
+            "module_sha256",
+            "image_object_id",
+            "machine",
+        }:
+            raise ValueError("native build identity fields changed")
         if build.get("backend") != CANDIDATE_ARM:
             raise ValueError("native build backend marker changed")
         if build.get("codec") != "png-deflate-level1-fixed-up":
