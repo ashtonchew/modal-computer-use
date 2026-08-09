@@ -288,11 +288,31 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
         def read_text(path):
             return Path(path).read_text(encoding="utf-8").strip()
 
-        cpu_quota, cpu_period = read_text("/sys/fs/cgroup/cpu.max").split()
-        if cpu_quota == "max":
+        def first_text(paths):
+            for path in paths:
+                if Path(path).is_file():
+                    return read_text(path)
+            raise RuntimeError(f"target cgroup limit is unavailable: {paths}")
+
+        cpu_max = Path("/sys/fs/cgroup/cpu.max")
+        if cpu_max.is_file():
+            cpu_quota, cpu_period = read_text(cpu_max).split()
+        else:
+            cpu_quota = first_text((
+                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
+                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us",
+            ))
+            cpu_period = first_text((
+                "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
+                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us",
+            ))
+        if cpu_quota in {"max", "-1"}:
             raise RuntimeError("target CPU quota is unbounded")
-        memory_limit = read_text("/sys/fs/cgroup/memory.max")
-        if memory_limit == "max":
+        memory_limit = first_text((
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+        ))
+        if memory_limit in {"max", "-1"}:
             raise RuntimeError("target memory limit is unbounded")
         module_bytes = Path(native.__file__).read_bytes()
         print(json.dumps({
