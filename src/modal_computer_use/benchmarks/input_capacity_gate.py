@@ -441,6 +441,15 @@ async def _require_healthy(
         status = await computer.lifecycle.status()
     except Exception as exc:
         evidence["outcome"] = "request_failed"
+        exception_type = type(exc).__name__
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", exception_type):
+            evidence["exception_type"] = exception_type
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int) and not isinstance(status_code, bool):
+            evidence["status_code"] = status_code
+        error_code = getattr(exc, "code", None)
+        if isinstance(error_code, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", error_code):
+            evidence["error_code"] = error_code
         raise InputCapacityGateError(
             "unhealthy_daemon",
             "daemon health check failed",

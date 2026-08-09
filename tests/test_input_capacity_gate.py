@@ -75,10 +75,13 @@ class _Clock:
 
 
 class _FakeLifecycle:
-    def __init__(self, *, ready: bool = True) -> None:
+    def __init__(self, *, ready: bool = True, error: Exception | None = None) -> None:
         self.ready = ready
+        self.error = error
 
     async def status(self) -> dict[str, bool]:
+        if self.error is not None:
+            raise self.error
         return {"ready": self.ready}
 
 
@@ -273,6 +276,26 @@ async def test_measurement_rejects_unhealthy_daemon() -> None:
         "outcome": "not_ready",
         "status": "unknown",
     }
+
+
+@pytest.mark.asyncio
+async def test_health_failure_records_only_allowlisted_exception_attribution() -> None:
+    computer = _FakeComputer()
+    computer.lifecycle = _FakeLifecycle(error=RuntimeError("Bearer must never be retained"))
+
+    artifact = await run_input_capacity_measurement(
+        computer,
+        settings=_settings(batches=2),
+        configuration=_configuration(),
+        clock=_Clock(),
+    )
+
+    assert artifact["failures"][0]["evidence"] == {
+        "stage": "initial",
+        "outcome": "request_failed",
+        "exception_type": "RuntimeError",
+    }
+    assert "bearer" not in str(artifact).lower()
 
 
 @pytest.mark.asyncio
