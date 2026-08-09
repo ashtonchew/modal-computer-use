@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import inspect
@@ -58,6 +59,8 @@ async def measure_interleaved_step_promotion(
     schedule_seed: int = 20260808,
     bootstrap_seed: int = 20260808,
     bootstrap_resamples: int = 2_000,
+    operation_pacing_seconds: float = 0.0,
+    sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.perf_counter,
 ) -> dict[str, dict[str, Any]]:
     """Return sanitized paired artifacts from one borrowed trajectory."""
@@ -68,6 +71,25 @@ async def measure_interleaved_step_promotion(
         raise ValueError("warmup_iterations must be nonnegative")
     if isinstance(bootstrap_resamples, bool) or bootstrap_resamples < 100:
         raise ValueError("bootstrap_resamples must be at least 100")
+    if (
+        isinstance(operation_pacing_seconds, bool)
+        or not isinstance(operation_pacing_seconds, int | float)
+        or not math.isfinite(operation_pacing_seconds)
+        or operation_pacing_seconds < 0
+    ):
+        raise ValueError("operation_pacing_seconds must be nonnegative and finite")
+    configured_pacing_ms = configuration.get("operation_pacing_ms")
+    if (
+        isinstance(configured_pacing_ms, bool)
+        or not isinstance(configured_pacing_ms, int | float)
+        or not math.isclose(
+            float(configured_pacing_ms),
+            float(operation_pacing_seconds) * 1000.0,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        )
+    ):
+        raise ValueError("configured operation pacing does not match the measurement")
     action_payload = [dict(action) for action in actions]
     if not action_payload:
         raise ValueError("actions must contain one ordered batch")
@@ -141,6 +163,8 @@ async def measure_interleaved_step_promotion(
                     break
                 if row["phase"] == "measure":
                     observations[arm].append(observation)
+                if operation_pacing_seconds:
+                    await sleeper(float(operation_pacing_seconds))
     except Exception as exc:
         phase = "cleanup" if borrow_entered else "borrow"
         category = "cleanup" if borrow_entered else _error_category(exc)

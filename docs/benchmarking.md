@@ -116,6 +116,9 @@ runner compares these arms inside the same placed Function and the same borrowed
 - each returned screenshot must report that coordinate and a daemon capture timestamp after its
   baseline. This is the deterministic causality check for the immediate frame without comparing
   clocks across the Function and Sandbox.
+- the runner retains the product's 20-input-events-per-second limit and waits 125 ms after each
+  arm. This untimed pacing keeps the preparation move and measured click below the rolling limit
+  without disabling a safety default, retrying, or replacing samples.
 
 The runner uses one async owner, one versioned handle, one exact requested region, one
 `borrow_async()` context, and one pooled async HTTP client. It makes two calls to the same placed
@@ -124,7 +127,8 @@ Function definition: a mutation-free placement probe and one measurement invocat
 measurement invocation owns the whole interleaved trajectory and enters the borrow once. The runner
 keeps caller topology, target, requested and observed placement, resources, image, ingress,
 HTTP/1.1, XTest, screenshot format, action payload, warm-up, connection reuse, and zero warm
-capacity fixed. It stops after the first failure. It does not retry, replay, or replace a sample.
+capacity fixed. It also records the input rate limit and pacing interval. It stops after the first
+failure. It does not retry, replay, or replace a sample.
 
 The preregistration requires at least 100 complete paired samples per arm. Each sanitized raw
 observation records cold start, startup, dispatch, borrow, action-to-frame, action phase,

@@ -32,6 +32,8 @@ def _configuration(arm: str) -> dict[str, object]:
         "ingress": "attested-tunnel",
         "http_version": "1.1",
         "input_backend": "xtest",
+        "input_rate_limit_per_sec": 20,
+        "operation_pacing_ms": 125,
         "screenshot": {
             "format": "png",
             "quality": 90,

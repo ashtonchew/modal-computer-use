@@ -39,6 +39,8 @@ _CONFIGURATION_FIELDS = (
     "ingress",
     "http_version",
     "input_backend",
+    "input_rate_limit_per_sec",
+    "operation_pacing_ms",
     "screenshot",
     "action_scenario",
     "action_payload_sha256",
@@ -342,6 +344,10 @@ def _validate_configuration(configuration: Mapping[str, Any], *, arm: str) -> No
         raise StepPromotionGateError("HTTP version must be 1.1")
     if configuration["input_backend"] != "xtest":
         raise StepPromotionGateError("input backend must be xtest")
+    if configuration["input_rate_limit_per_sec"] != 20:
+        raise StepPromotionGateError("input rate limit must retain the product default")
+    if configuration["operation_pacing_ms"] != 125:
+        raise StepPromotionGateError("operation pacing must protect the input rate limit")
     screenshot = _mapping(configuration["screenshot"], "screenshot")
     _require_exact_fields(
         screenshot,

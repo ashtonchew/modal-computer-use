@@ -40,6 +40,8 @@ def _configuration() -> dict[str, object]:
         "ingress": "attested-tunnel",
         "http_version": "1.1",
         "input_backend": "xtest",
+        "input_rate_limit_per_sec": 20,
+        "operation_pacing_ms": 125,
         "screenshot": {
             "format": "png",
             "quality": 90,
@@ -74,6 +76,10 @@ class _Clock:
     def __call__(self) -> float:
         self.value += 0.001
         return self.value
+
+
+async def _no_sleep(seconds: float) -> None:
+    assert seconds == 0.125
 
 
 class _Computer:
@@ -176,6 +182,8 @@ async def test_step_measurement_uses_one_borrow_and_exact_arm_operation_order() 
         schedule_seed=42,
         bootstrap_seed=7,
         bootstrap_resamples=500,
+        operation_pacing_seconds=0.125,
+        sleeper=_no_sleep,
         clock=_Clock(),
     )
 
@@ -222,6 +230,8 @@ async def test_step_measurement_stops_after_first_freshness_failure() -> None:
         schedule_seed=42,
         bootstrap_seed=7,
         bootstrap_resamples=500,
+        operation_pacing_seconds=0.125,
+        sleeper=_no_sleep,
     )
 
     assert sum(len(artifact["observations"]) for artifact in artifacts.values()) == 1
@@ -263,6 +273,8 @@ async def test_step_measurement_rejects_missing_candidate_phase_timings() -> Non
         schedule_seed=42,
         bootstrap_seed=7,
         bootstrap_resamples=500,
+        operation_pacing_seconds=0.125,
+        sleeper=_no_sleep,
     )
 
     candidate = artifacts[CANDIDATE_ARM]
@@ -295,6 +307,8 @@ async def test_step_measurement_records_cleanup_failure_for_both_arms() -> None:
         schedule_seed=42,
         bootstrap_seed=7,
         bootstrap_resamples=500,
+        operation_pacing_seconds=0.125,
+        sleeper=_no_sleep,
     )
 
     assert all(artifact["status"] == "failed" for artifact in artifacts.values())

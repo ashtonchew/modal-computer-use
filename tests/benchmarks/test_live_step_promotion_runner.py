@@ -26,6 +26,10 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNNER_PATH = ROOT / "scripts" / "run_step_promotion.py"
 
 
+async def _no_sleep(seconds: float) -> None:
+    assert seconds == 0.125
+
+
 def _load_runner() -> Any:
     spec = importlib.util.spec_from_file_location("live_step_promotion_runner", RUNNER_PATH)
     assert spec is not None and spec.loader is not None
@@ -152,6 +156,8 @@ class _Runtime:
             schedule_seed=settings.schedule_seed,
             bootstrap_seed=settings.bootstrap_seed,
             bootstrap_resamples=settings.bootstrap_resamples,
+            operation_pacing_seconds=0.125,
+            sleeper=_no_sleep,
         )
 
 
@@ -224,6 +230,8 @@ def test_step_runner_source_uses_one_borrow_and_deterministic_frame_freshness() 
     assert "min_containers=0" in source
     assert "max_containers=1" in source
     assert "ACTION_BATCH" in source
+    assert "INPUT_RATE_LIMIT_PER_SEC = 20" in source
+    assert "OPERATION_PACING_SECONDS = 0.125" in source
     assert "computer.step(" not in source
 
 

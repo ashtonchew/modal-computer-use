@@ -62,6 +62,8 @@ SANDBOX_MEMORY_MIB = 2048
 SANDBOX_TIMEOUT_SECONDS = 900
 SANDBOX_READINESS_TIMEOUT_SECONDS = 180
 SANDBOX_WARM_POOL_CAPACITY = 0
+INPUT_RATE_LIMIT_PER_SEC = 20
+OPERATION_PACING_SECONDS = 0.125
 ACTION_BATCH = ({"type": "click", "x": 512, "y": 384, "button": "left"},)
 _EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _SOURCE_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -267,6 +269,8 @@ def _configuration(
         "ingress": "attested-tunnel",
         "http_version": "1.1",
         "input_backend": "xtest",
+        "input_rate_limit_per_sec": INPUT_RATE_LIMIT_PER_SEC,
+        "operation_pacing_ms": int(OPERATION_PACING_SECONDS * 1000),
         "screenshot": {
             "format": "png",
             "quality": 90,
@@ -462,6 +466,7 @@ async def run_step_promotion_function(
         schedule_seed=settings.schedule_seed,
         bootstrap_seed=settings.bootstrap_seed,
         bootstrap_resamples=settings.bootstrap_resamples,
+        operation_pacing_seconds=OPERATION_PACING_SECONDS,
     )
 
 
@@ -490,7 +495,10 @@ class ModalStepPromotionRuntime:
                 "memory_mib": settings.sandbox_memory_mib,
             },
             image={"source": "inline"},
-            actions={"input_backend": "xtest"},
+            actions={
+                "input_backend": "xtest",
+                "input_rate_limit_per_sec": INPUT_RATE_LIMIT_PER_SEC,
+            },
         )
         return AsyncComputerSandbox.create(
             config=config,
