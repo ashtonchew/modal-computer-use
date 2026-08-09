@@ -58,6 +58,24 @@ def test_promotion_runner_exposes_the_x_server_restart_probe() -> None:
     assert 'print(json.dumps(result, sort_keys=True))' in runner
 
 
+def test_promotion_runner_exposes_a_retained_100_pair_readiness_replication() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_readiness_replication(" in runner
+    assert 'if samples != 100:' in runner
+    assert (
+        'raise ValueError("readiness replication requires exactly 100 samples per arm")'
+        in runner
+    )
+    assert '"sample_count_per_arm": samples' in runner
+    assert 'observation["startup_total_ms"] = round(elapsed_ms, 4)' in runner
+    assert '"position": position' in runner
+    assert '"terminal_cleanup": cleanup' in runner
+    assert "def readiness_main(" in runner
+
+
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
     runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
         encoding="utf-8"
