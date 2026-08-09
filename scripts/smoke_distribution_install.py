@@ -303,6 +303,9 @@ def _validate_wheel(wheel: Path, *, root: Path, python: str) -> None:
 
             import modal_computer_use
             from modal_computer_use import AsyncBorrowedComputer, BorrowedComputer
+            from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
+                build_paired_random_schedule,
+            )
             from modal_computer_use.daemon.app import create_app
             from modal_computer_use.daemon.settings import DaemonSettings
 
@@ -315,6 +318,11 @@ def _validate_wheel(wheel: Path, *, root: Path, python: str) -> None:
             assert modal_computer_use.resolve_release_image
             assert callable(BorrowedComputer.step)
             assert callable(AsyncBorrowedComputer.step)
+            assert len(
+                build_paired_random_schedule(
+                    ("mss", "x11-shm"), sample_count=100, seed=1
+                )
+            ) == 200
 
             scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
             assert scripts["computer-use"] == "modal_computer_use.cli:main"
@@ -376,6 +384,9 @@ def _validate_sdist(sdist: Path, *, root: Path, python: str) -> None:
 
             import modal_computer_use
             from modal_computer_use import AsyncBorrowedComputer, BorrowedComputer
+            from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
+                build_paired_random_schedule,
+            )
 
             module_path = Path(modal_computer_use.__file__).resolve()
             assert module_path.is_relative_to(Path(sys.prefix).resolve())
@@ -386,6 +397,11 @@ def _validate_sdist(sdist: Path, *, root: Path, python: str) -> None:
             assert modal_computer_use.resolve_release_image
             assert callable(BorrowedComputer.step)
             assert callable(AsyncBorrowedComputer.step)
+            assert len(
+                build_paired_random_schedule(
+                    ("mss", "x11-shm"), sample_count=100, seed=1
+                )
+            ) == 200
             """
         ),
         cwd=probe,

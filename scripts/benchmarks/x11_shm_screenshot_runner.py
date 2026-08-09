@@ -22,7 +22,6 @@ import platform
 import random
 import statistics
 import subprocess
-import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -1494,8 +1493,9 @@ async def _measure(
     soak_captures: int,
     provenance: Mapping[str, str | bool],
 ) -> dict[str, Any]:
-    sys.path.insert(0, "/opt/mcu-scripts")
-    from benchmarks.full_screenshot_sdk_harness import measure_full_screenshot_arms
+    from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
+        measure_full_screenshot_arms,
+    )
 
     baseline_pixels: bytes | None = None
 

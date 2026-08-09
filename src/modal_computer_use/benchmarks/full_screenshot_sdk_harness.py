@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Promotion harness for the complete public full-screenshot request.
 
 This module is benchmark-only.  Its boundary is deliberately the literal
@@ -282,7 +281,7 @@ def _validate_sample(screenshot: Any, trace: Mapping[str, Any]) -> None:
     _timing_metrics(headers)
 
 
-def _timing_metrics(headers: Mapping[str, Any]) -> dict[str, float]:
+def _timing_metrics(headers: Mapping[str, Any]) -> dict[str, float | None]:
     timing_header = headers.get(_TIMING_HEADER)
     try:
         timings = json.loads(timing_header)
