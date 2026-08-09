@@ -24,9 +24,23 @@ def _has_modal_auth() -> bool:
     except (OSError, tomllib.TOMLDecodeError):
         return False
     profiles = [config]
+    profiles.extend(item for item in config.values() if isinstance(item, dict))
     if isinstance(config.get("profile"), dict):
         profiles.extend(item for item in config["profile"].values() if isinstance(item, dict))
     return any(profile.get("token_id") and profile.get("token_secret") for profile in profiles)
+
+
+def test_modal_auth_recognizes_named_top_level_profiles(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "modal.toml"
+    config_path.write_text(
+        '[developer]\ntoken_id = "test-id"\ntoken_secret = "test-secret"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODAL_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+
+    assert _has_modal_auth() is True
 
 
 def _skip_without_modal_auth() -> None:
