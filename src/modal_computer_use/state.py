@@ -22,14 +22,13 @@ def compute_config_hash(config: ComputerConfig) -> str:
 def compatible_config_hashes(config: ComputerConfig) -> tuple[str, ...]:
     """Return current and safe pre-capture-source hashes for named reuse.
 
-    The new ``auto`` selector preserves the prior MSS-compatible behavior when
-    the native capability is absent.  Accepting the one legacy shape keeps
-    named sessions reusable across this schema addition; explicit source
-    choices remain exact and fail closed.
+    The new default ``mss`` selector preserves the prior capture behavior.
+    Accepting the one legacy shape keeps named sessions reusable across this
+    schema addition; opt-in source choices remain exact and fail closed.
     """
 
     current = compute_config_hash(config)
-    if config.actions.screenshot_capture_source != "auto":
+    if config.actions.screenshot_capture_source != "mss":
         return (current,)
     payload = config.model_dump(mode="json", exclude={"vnc_password", "request_id"})
     actions = payload.get("actions")

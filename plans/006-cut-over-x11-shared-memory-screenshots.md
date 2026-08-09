@@ -1,6 +1,6 @@
 # Cut over X11 shared-memory screenshot capture
 
-Status: **ACTIVE — production vertical slice**.
+Status: **COMPLETE — promotion rejected; no default cutover**.
 
 Base: `feat/optimized-default-cutover` at `e61191d2d0f21316c34d19eda51c3f83f2d1742c`.
 Feature branch: `feat/native-screenshot-capture`.
@@ -17,9 +17,11 @@ Feature branch: `feat/native-screenshot-capture`.
   display restart probe, and 10,000-request daemon-local soak.
 - [x] First post-implementation two-axis adversarial review; all reported code/harness blockers fixed.
 - [x] Second independent two-axis adversarial review; all reported P1 runtime blockers fixed.
-- [ ] Exact clean-commit matched Modal run and retained promotion decision.
-- [ ] Performance/release/changelog/README cutover after the live gates pass.
-- [ ] Final rebase, full verification, push, and ready PR.
+- [x] Exact-resource matched Modal promotion attempted from the clean feature branch.
+- [x] Fixed gates applied without adjustment: readiness latency and X-server restart failed.
+- [x] Production default and canonical documentation retained MSS.
+- [ ] Default cutover, release publication, and ready PR — intentionally not performed because the
+  fixed promotion decision is reject.
 
 ## Decision
 
@@ -31,9 +33,14 @@ the PNG compression policy. The tested fixed-Up, level-1 PNG policy remains priv
 implementation. `capture_backend` continues to report the source that produced the frame, such as
 `x11-shm`, `mss`, `scrot`, or `maim`.
 
-The default selection is `auto`. It selects `x11-shm` only when the extension and the live X11
-display pass readiness. It selects MSS for unsupported or unavailable displays. An explicit
-`x11-shm` selection fails readiness instead of silently changing source.
+The production default remains `mss`. `auto` is an opt-in evaluation policy: it selects `x11-shm`
+only when the extension and live X11 display pass readiness, and selects MSS for unsupported or
+ordinarily failed displays. An explicit `x11-shm` selection fails readiness instead of silently
+changing source.
+
+The matched campaign did not satisfy the no-readiness-regression or X-server-restart gates. Those
+failures are terminal under the preregistered rule, so this slice is retained as an explicit
+capability and benchmark vehicle rather than enabled for every session.
 
 ## Contract and scope
 
@@ -115,7 +122,7 @@ Any failed gate means no default cutover. MSS remains the rollback source.
 Red:
 
 - configuration accepts `auto`, `mss`, and `x11-shm` only;
-- the default is `auto`;
+- the production default remains `mss`; `auto` and `x11-shm` are opt-in;
 - response attribution reports the source that actually produced the frame;
 - no public name contains `native`, `rust`, `fixed-up`, `adaptive`, or a compression library; and
 - explicit `x11-shm` cannot silently return MSS.
@@ -265,7 +272,7 @@ Preserve historical optimized-default and Computer Step evidence unchanged. Appe
 this order:
 
 1. architecture: define X11 shared-memory screenshot capture and its controller ownership;
-2. configuration: document `auto | mss | x11-shm`, default/fallback/explicit semantics;
+2. configuration: document `mss | auto | x11-shm`, production default and opt-in semantics;
 3. performance and benchmarking: link the validated matched result and its limits;
 4. troubleshooting/security: unsupported display, build/import, fallback, and secret-safe
    attribution;
@@ -307,16 +314,20 @@ clean wheel and sdist install/import probes
 OpenAPI and hosted-documentation checks
 ```
 
-Required live verification is Slice 6 and Slice 7 from the exact clean commit.
+Required live verification was attempted from the exact feature branch. Readiness latency exceeded
+the fixed regression allowance and X-server restart recovery failed, so Slice 6/7 rejected the
+candidate. The validator did not emit a publishable success artifact for the operationally failed
+run; no private run URL or synthetic success artifact is retained.
 
-Use small conventional commits by behavior. Push `feat/native-screenshot-capture` and open a draft
-stacked PR against the updated `feat/optimized-default-cutover` branch. Match PR #234's structure:
-`Summary`, `Context`, `Description`/`Contract`, measured result, `Test Plan`, limitations, rollback,
-and stack. Mark the PR ready only after both reviews and all authorized live gates pass.
+Use small conventional commits by behavior. A future evidence-only draft may be stacked against
+the updated `feat/optimized-default-cutover` branch and should match PR #234's structure: `Summary`,
+`Context`, `Description`/`Contract`, measured result, `Test Plan`, limitations, rollback, and stack.
+Do not mark a production/default PR ready from this rejected result.
 
 ## Rollback
 
-Rollback is one semantic change: select MSS as the default screenshot source in the runtime Image
-and configuration, retain the failed native evidence, and restore the prior revisioned Image.
+Rollback has been applied at the product-policy layer: MSS is the default screenshot source in SDK
+configuration and the daemon. The optional implementation, tests, and rejected evidence remain for
+future evaluation. No historical benchmark artifact or published package is rewritten.
 Explicit `x11-shm` remains diagnostic only if its readiness contract still works. Do not rewrite
 historical artifacts or published package files.
