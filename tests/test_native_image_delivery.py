@@ -120,6 +120,10 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "sysconfig.get_path(\"platlib\")" in joined
     assert "import _modal_computer_use_x11_shm" in joined
     assert "/opt/modal-computer-use/native/x11_shm/canary.py" in joined
+    assert any(
+        name == "add_local_python_source" and value == ("modal_computer_use", True)
+        for name, value in image.calls
+    )
 
 
 def test_native_build_helper_rejects_a_missing_packaged_source(

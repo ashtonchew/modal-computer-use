@@ -169,9 +169,9 @@ app = modal.App(APP_NAME)
 
 # Reuse the managed browser Image recipe.  It installs Chromium, starts the
 # normal Xvfb/desktop stack, and builds the packaged x11-shm extension with
-# the pinned Rust toolchain. The managed recipe already mounts the package
-# source last; benchmark scripts join that runtime mount layer so no build
-# step follows a local startup mount.
+# the pinned Rust toolchain and bakes the Python package for nested Sandbox
+# creation. Benchmark scripts are the final runtime mount, so no build step
+# follows a local startup mount.
 image = (
     default_image(
         profile="browser",
