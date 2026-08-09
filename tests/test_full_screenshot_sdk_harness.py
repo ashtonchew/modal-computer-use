@@ -158,6 +158,10 @@ class FakeClient:
                 details={
                     "error_type": "ScreenshotCaptureTimedOut",
                     "token": "must-not-appear",
+                    "errors": [
+                        "screenshot capture failed",
+                        "https://private.invalid/must-not-appear",
+                    ],
                 },
             )
         return DATA, _trace(backend=self.backend)["response_headers"]
@@ -281,4 +285,5 @@ async def test_measure_full_screenshot_annotates_daemon_failure_without_secrets(
     assert "arm=x11-shm phase=sample sample_index=0" in notes
     assert "status_code=500 code=internal_error" in notes
     assert "error_type=ScreenshotCaptureTimedOut" in notes
+    assert "readiness_errors=screenshot,unknown" in notes
     assert "must-not-appear" not in notes
