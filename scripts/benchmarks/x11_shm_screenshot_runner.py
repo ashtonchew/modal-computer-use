@@ -662,13 +662,17 @@ async def _run_x_server_timeout_probe(
     context = factory()
     computer: Any | None = None
     failure_type: str | None = None
+    failure_phase: str | None = None
+    phase = "context_enter"
     result: dict[str, Any] | None = None
     resumed = False
     try:
         computer = await context.__aenter__()
+        phase = "sandbox_handle"
         sandbox = getattr(computer, "_sandbox", None)
         if sandbox is None or not hasattr(sandbox, "exec"):
             raise RuntimeError("sandbox handle unavailable for X server timeout probe")
+        phase = "pause_xvfb"
         stop = await sandbox.exec.aio(
             "sh",
             "-c",
@@ -679,6 +683,7 @@ async def _run_x_server_timeout_probe(
         xvfb_pid = await _process_stdout_text(stop)
         if stop_exit != 0 or not xvfb_pid.isdigit():
             raise RuntimeError("Xvfb stop command failed")
+        phase = "constructor"
         constructor_probe = dedent(
             """
             import json
@@ -717,6 +722,7 @@ async def _run_x_server_timeout_probe(
             and constructor_result.get("exception_type") == "ScreenshotCaptureTimedOut"
             and float(constructor_result.get("elapsed_ms", 3_000.0)) < 2_500.0
         )
+        phase = "public_capture"
         started = time.perf_counter()
         failed_bounded = False
         public_error_type: str | None = None
@@ -739,6 +745,7 @@ async def _run_x_server_timeout_probe(
                 and public_error_detail_type == "ScreenshotCaptureTimedOut"
             )
         elapsed_ms = (time.perf_counter() - started) * 1000.0
+        phase = "resume_xvfb"
         resume = await sandbox.exec.aio(
             "sh", "-c", 'kill -CONT "$1"', "sh", xvfb_pid, timeout=10
         )
@@ -746,7 +753,9 @@ async def _run_x_server_timeout_probe(
         if resume_exit != 0:
             raise RuntimeError("Xvfb resume command failed")
         resumed = True
+        phase = "lifecycle_restart"
         restarted = await computer.lifecycle.restart()
+        phase = "capture_after_restart"
         backend_after: str | None = None
         original = computer.client.post_bytes_with_headers
 
@@ -787,6 +796,7 @@ async def _run_x_server_timeout_probe(
         }
     except Exception as exc:
         failure_type = type(exc).__name__
+        failure_phase = phase
     finally:
         if computer is not None and not resumed:
             sandbox = getattr(computer, "_sandbox", None)
@@ -805,10 +815,13 @@ async def _run_x_server_timeout_probe(
             await context.__aexit__(None, None, None)
         except Exception as exc:
             cleanup_type = type(exc).__name__
+            if failure_phase is None:
+                failure_phase = "cleanup"
     if failure_type is not None or cleanup_type is not None:
         return {
             "passed": False,
             **({"failure_type": failure_type} if failure_type else {}),
+            **({"failure_phase": failure_phase} if failure_phase else {}),
             **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
         }
     return result or {"passed": False, "failure_type": "NoResult"}
