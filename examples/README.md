@@ -8,7 +8,8 @@ complete optimized default:
 - one native async owner creates the desktop;
 - one versioned handle crosses into an application-owned, exactly placed Modal Function;
 - one borrow surrounds the repeated model trajectory;
-- one pooled async HTTP client returns typed screenshots and sends ordered action batches;
+- one pooled async HTTP client carries each `computer.step()` request;
+- each step sends one ordered action batch and returns one typed immediate post-action screenshot;
 - the borrower releases its lease before the owner cleans up.
 
 The OpenAI and Anthropic examples keep their model loops in application code and use the same

@@ -180,7 +180,10 @@ class DaemonSettings:
         default_factory=lambda: _int_env("COMPUTER_USE_MAX_KEY_COLLECTION_SIZE", 64)
     )
     input_rate_limit_per_sec: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 20)
+        default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 100)
+    )
+    input_rate_limit_burst: int = field(
+        default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_BURST", 400)
     )
     input_backend: str = field(
         default_factory=lambda: os.getenv("COMPUTER_USE_INPUT_BACKEND", "auto")
@@ -252,6 +255,18 @@ class DaemonSettings:
         _require_range("COMPUTER_USE_MAX_COMMAND_ARGUMENTS", self.max_command_arguments, 0)
         _require_range("COMPUTER_USE_MAX_DRAG_POINTS", self.max_drag_points, 0)
         _require_range("COMPUTER_USE_MAX_KEY_COLLECTION_SIZE", self.max_key_collection_size, 0)
+        _require_range(
+            "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC",
+            self.input_rate_limit_per_sec,
+            0,
+            10_000,
+        )
+        _require_range(
+            "COMPUTER_USE_INPUT_RATE_LIMIT_BURST",
+            self.input_rate_limit_burst,
+            1,
+            100_000,
+        )
 
 
 def get_settings() -> DaemonSettings:

@@ -1108,6 +1108,7 @@ class _AsyncBorrowTransport:
                         "screenshot-binary-metadata-v1",
                         "trajectory-leases-v1",
                         "trajectory-operation-receipts-v1",
+                        "computer-step-envelope-v1",
                     ]
                 },
                 request=request,
@@ -1228,6 +1229,7 @@ def test_borrow_rejects_unsupported_daemon_api_before_lease(
             "screenshot-binary-metadata-v1",
             "trajectory-leases-v1",
             "trajectory-operation-receipts-v1",
+            "computer-step-envelope-v1",
         ]
     )
     monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
@@ -1965,9 +1967,10 @@ def test_deployed_handoff_smoke_source_is_bounded_and_returns_only_safe_aggregat
     assert "timeout=FUNCTION_TIMEOUT_SECONDS" in source
     assert "restrict_modal_access=False" in source
     assert source.count("handle.borrow_async(") == 1
-    assert source.count("computer.screenshots.full(") == 1
+    assert source.count("computer.step(") == 1
+    assert "computer.screenshots.full(" not in source
+    assert "computer.actions.run(" not in source
     assert 'storage="inline"' in source
-    assert source.count("computer.actions.run(") == 1
     assert '{"type": "wait", "duration_ms": 50}' in source
 
 

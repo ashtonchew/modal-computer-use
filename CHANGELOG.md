@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced the daemon's abrupt 20-action rolling window with a daemon-local token bucket. The
+  default refills 100 normalized input-work tokens per second and permits a 400-token burst.
+  Action arrays reserve their complete recursive cost before mutation, so rate limiting cannot
+  interrupt a validated batch halfway through. Transient limits return `429` with precise
+  `retry_after_ms` and an integer `Retry-After` header.
+
 ## 2.0.0 - 2026-08-08
 
 - Made the primary SDK path an async, explicitly placed Modal trajectory: one owner creates the
@@ -14,6 +20,10 @@
   trajectory's pooled async client. The method still returns a semantic `Screenshot`; artifact and
   automatic storage continue to use the structured JSON route, and `full_bytes()` remains
   available as a low-level byte convenience.
+- Added `computer.step()` to the borrowed sync and async Interfaces. One step sends an ordered
+  action batch and returns a `ComputerStepResult` with the action result, immediate post-action
+  screenshot, and timing metadata through the `computer-step-envelope-v1` protocol capability.
+  The retained low-level action-only Interface still sends one `actions.run(...)` HTTP batch.
 - Added complete, authenticated metadata to raw screenshot responses and strict SDK validation for
   image type, dimensions, size, digest, timestamp, coordinate space, cursor state, timing, and
   capture backend. A malformed response fails once without a JSON retry.
@@ -47,9 +57,14 @@
   default.
 
 The historical 37.25 ms screenshot result used the raw binary endpoint, persistent capture, a
-reused pooled HTTP connection, and a same-region Function/Sandbox topology. The article's 47 ms
-screenshot-plus-click number is arithmetic over separate warm medians, not a fused turn. Version
-2.0.0 does not claim that exact latency until the same-topology promotion benchmark passes.
+reused pooled HTTP connection, and a same-region Function/Sandbox topology. The article's 47.10 ms
+screenshot-plus-click number is arithmetic over separate warm medians, not a measured fused turn.
+Version 2.0.0 does not promise that latency for `computer.step()`.
+
+The separate 2026-08-08 Computer Step promotion run retained 100 interleaved pairs and measured
+the fused path at 44.29 ms p50 and 52.57 ms p95. The prior two-request path measured 47.14 ms and
+58.22 ms. The paired bootstrap interval showed a 2.65–4.66 ms improvement, with no failures,
+retries, replacement samples, or cleanup survivors.
 
 Migrate the primary SDK path as follows:
 
@@ -60,7 +75,8 @@ Migrate the primary SDK path as follows:
 | Region may be absent or broad, and a mismatched caller can continue over ingress. | Primary `AsyncComputerSandbox.create()` requires an explicit environment and exact region such as `us-west-2` before allocation; the Function, observed Function runtime, and Sandbox must then match that region. | Select an exact region for both resources and make environment, CPU, memory, image, timeout, retries, scaling limits, and capacity inspectable. Use `create_unplaced()` only for an intentional low-level path without handoff. |
 | Async creation may use tunnel ingress, control VNC, or warm-pool tagging even though those modes cannot produce the default handoff. | Primary `AsyncComputerSandbox.create()` rejects these modes before Modal work. | Use `create_unplaced()` for an intentional low-level owner, or select attested-tunnel/connect ingress, off/view-only VNC, and default ownership tags. |
 | `screenshots.full(storage="inline")` returns a JSON/base64-backed `Screenshot`. | The same semantic method uses the raw binary response and returns `Screenshot(bytes=...)`. | Prefer `as_bytes()` or `to_base64()` instead of reading `data_base64` directly. JSON serialization of `bytes` uses Base64URL. |
-| Provider examples may send model actions one at a time. | One ordered model `actions[]` becomes one `actions.run(...)` HTTP batch. | Preserve model order, choose continuation explicitly, and never replay automatically after possible dispatch. |
+| A provider loop calls `actions.run(...)` and then `screenshots.full()` after each model action array. | The borrowed `computer.step(...)` Interface sends the ordered array and returns one `ComputerStepResult` with `actions`, `screenshot`, and `timing`. | Replace the two calls with one step. Use its immediate post-action `screenshot` for the next model turn. Do not treat the frame as application readiness or replay a step after a possible dispatch. |
+| Provider examples may send model actions one at a time. | One ordered model `actions[]` becomes one `computer.step(...)` request. | Preserve model order, choose continuation explicitly, use the returned immediate screenshot, and never replay automatically after possible dispatch. |
 | Cleanup commonly relies on the outer owner context only. | The borrowed client and lease close first; the owner then detaches or terminates according to ownership. | Keep the owner alive until the placed Function reaches a terminal result, including cancellation cleanup. |
 | The main quickstart presents direct namespace calls as the performance path. | The placed owner-to-handle-to-Function trajectory is the primary documented path. | Use the low-level primitive SDK only when local, direct REST, idempotency, debugging, or compatibility behavior is intentional. |
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response
 
 from modal_computer_use._version import __version__
+from modal_computer_use.daemon.input_rate_limit import INPUT_RATE_LIMIT_POLICY
 from modal_computer_use.daemon.leases import LEASE_PROTOCOL_VERSION
 from modal_computer_use.daemon.receipts import RECEIPT_PROTOCOL_VERSION
 from modal_computer_use.daemon.routes.validation import daemon_readiness
@@ -72,6 +73,7 @@ async def capabilities(request: Request, response: Response) -> Capabilities:
             "screenshot-binary-metadata-v1",
             "trajectory-leases-v1",
             "trajectory-operation-receipts-v1",
+            "computer-step-envelope-v1",
         ],
         screenshot_formats=["png", "jpeg", "webp"],
         action_types=[
@@ -103,6 +105,9 @@ async def capabilities(request: Request, response: Response) -> Capabilities:
         input_backend_configured=getattr(backend, "configured_input_backend", None),
         input_backends_supported=_sorted_strings(getattr(backend, "supported_input_backends", ())),
         input_backends_available=_sorted_strings(getattr(backend, "available_input_backends", ())),
+        input_rate_limit_policy=INPUT_RATE_LIMIT_POLICY,
+        input_rate_limit_tokens_per_sec=request.app.state.settings.input_rate_limit_per_sec,
+        input_rate_limit_burst=request.app.state.settings.input_rate_limit_burst,
     )
 
 

@@ -249,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    sdk_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     sdk_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -362,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             "when omitted, retains the public ComputerConfig default"
         ),
     )
+    compare_parser.add_argument("--input-rate-limit-burst", type=int)
     compare_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -447,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    ingress_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     ingress_ab_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -505,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    region_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     region_ab_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -621,6 +625,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    colocated_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     colocated_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -1729,6 +1734,7 @@ def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str,
         "browser": args.browser,
         "gpu": args.gpu,
         "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
+        "input_rate_limit_burst": args.input_rate_limit_burst,
         "subprocess_backend": args.subprocess_backend,
         "image_profile": args.image_profile,
     }
@@ -1775,6 +1781,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 runner_cpu=args.runner_cpu,
                 runner_memory_mib=args.runner_memory_mib,
                 input_rate_limit_per_sec=args.input_rate_limit_per_sec,
+                input_rate_limit_burst=args.input_rate_limit_burst,
                 subprocess_backend=args.subprocess_backend,
                 image_profile=args.image_profile,
                 surfaces=_modal_colocated_surfaces(args),
@@ -1929,6 +1936,8 @@ def _modal_benchmark_config(
     config.resources.memory_mib = args.modal_memory_mib
     if args.input_rate_limit_per_sec is not None:
         config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
+    if args.input_rate_limit_burst is not None:
+        config.actions.input_rate_limit_burst = args.input_rate_limit_burst
     config.actions.input_backend = args.input_backend
     config.actions.subprocess_backend = args.subprocess_backend
     if args.browser:
@@ -1962,6 +1971,8 @@ def _validate_modal_create_args(
         parser.error("--modal-memory-mib must be at least 128")
     if args.input_rate_limit_per_sec is not None and args.input_rate_limit_per_sec < 0:
         parser.error("--input-rate-limit-per-sec must be non-negative")
+    if args.input_rate_limit_burst is not None and args.input_rate_limit_burst < 1:
+        parser.error("--input-rate-limit-burst must be positive")
 
 
 def _validate_optimized_provider_resource_args(
@@ -2134,8 +2145,10 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
         if input_rate_limit is None:
             input_rate_limit = public_defaults.actions.input_rate_limit_per_sec
+        input_rate_limit_burst = public_defaults.actions.input_rate_limit_burst
     else:
         input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
+        input_rate_limit_burst = getattr(args, "input_rate_limit_burst", None)
     metadata: dict[str, Any] = {
         "modal_region": getattr(args, "modal_region", None),
         "modal_ingress": getattr(args, "modal_ingress", None),
@@ -2144,6 +2157,7 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
         "input_rate_limit_per_sec": input_rate_limit,
+        "input_rate_limit_burst": input_rate_limit_burst,
         "action_case_pacing_ms": (
             1050
             if benchmark_command == "compare"

@@ -54,6 +54,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
 | Screenshots | Inline `screenshots.full()` uses the raw binary route and reconstructs a semantic, byte-backed `Screenshot`. Persistent MSS is the preferred cursor-hidden capture path, with bounded cursor-visible and display-failure fallback. Captures report complete validated metadata. |
+| Computer Step | Borrowed sync and async computers expose `computer.step()`. It sends one ordered action array and returns `ComputerStepResult.actions`, `.screenshot`, and `.timing` through the versioned `computer-step-envelope-v1` capability. The screenshot is an immediate post-action frame, not application readiness. |
 | Transport | `attested-tunnel` is the default Modal ingress. An SDK-managed bootstrap bearer authorizes a short-lived daemon-issued bearer for the encrypted tunnel. HTTP/2 is opt-in. |
 | Sessions | Sync and native-async daemon clients, persistent hot sessions, and observation WebSocket transports are implemented. |
 | Observations | The transport and action primitives are supported. First-visual-change composition remains Alpha and explicitly experimental. |
@@ -179,7 +180,7 @@ have begun.
 
 | Classification | Surfaces |
 | --- | --- |
-| Stable product contract | Public SDK namespaces; synchronous and native-async Modal Sandbox lifecycle; daemon HTTP primitives; action batches; binary screenshots; native/compatibility input; artifacts; traces; budgets; provider adapters; manager create/attach/reuse/cleanup; sync and async clients; hot-session protocol v1; observation-stream transport; versioned Modal Function handoff; borrowed trajectory fencing and receipt resolution. |
+| Stable product contract | Public SDK namespaces; synchronous and native-async Modal Sandbox lifecycle; borrowed sync and async `computer.step()`; daemon HTTP primitives; action batches; binary screenshots; native/compatibility input; artifacts; traces; budgets; provider adapters; manager create/attach/reuse/cleanup; sync and async clients; hot-session protocol v1; observation-stream transport; versioned Modal Function handoff; borrowed trajectory fencing and receipt resolution. |
 | Alpha / experimental | `_experimental_act_until_visual_change()` and first-visual-change semantics. It composes stable action and observation primitives but does not promise semantic readiness. |
 | Benchmark-only | Modal V2 candidate creation, optimized-frontier paths, transport-floor probes, provider harness internals, and unpublished/raw result handling. |
 | Application-owned example | Provider model loops, session broker, co-located runner/broker, Modal Function trajectory body, and run gateway. Callers must supply identity, authorization, durable storage, policy, and operational ownership. |
@@ -195,12 +196,13 @@ through naming, documentation links, or successful benchmark results alone.
 The primary optimized composition is async owner → versioned handle → explicitly placed Modal
 Function → one `borrow_async()` context around the whole trajectory. The application owns the
 Function and provider model loop. The Function and Sandbox use one exact requested region. The
-Function reuses one pooled, authenticated async HTTP client for screenshots and actions.
+Function reuses one pooled, authenticated async HTTP client. Each model-produced ordered action
+array uses one `computer.step()` request and receives one immediate post-action frame.
 
 Missing, broad, mismatching, or unverifiable placement fails before lease acquisition or desktop
 mutation. Protocol preflight also fails before lease acquisition when the daemon lacks the binary
-screenshot metadata, trajectory lease, or operation receipt contract. The runtime does not fall
-back to an external caller.
+screenshot metadata, trajectory lease, operation receipt, or `computer-step-envelope-v1` contract.
+The runtime does not fall back to an external caller or to separate action and screenshot requests.
 
 `AsyncComputerSandbox.create()` is the owner Interface. `session_handle()` produces the handoff
 value. The canonical executable composition is in
@@ -274,7 +276,28 @@ detaches without termination. Explicit async detachment transfers ownership. Fai
 creation completes cleanup for any allocated resource before the primary error escapes. Importing
 the core package does not require Modal.
 
-### 5.2 Namespaces
+### 5.2 Computer Step
+
+`BorrowedComputer.step()` and `AsyncBorrowedComputer.step()` are the stable model-loop Interfaces.
+They accept one non-empty ordered action array plus explicit continuation, call identity, screenshot
+options, and timeout values. Both return `ComputerStepResult` with these fields:
+
+- `actions`: the semantic `ActionBatchResult`;
+- `screenshot`: one byte-backed immediate post-action `Screenshot`;
+- `timing`: typed step timing metadata.
+
+The complete action tree validates before mutation. The daemon holds the input lock through ordered
+execution and the trailing immediate capture. It stops on the first failure unless continuation is
+explicit. It never replays a step after dispatch may have started. Response decoding is part of the
+leased mutation; malformed or truncated envelope data enters receipt recovery.
+
+Screenshot and zoom actions are valid inside a step. Their action-item outputs remain available in
+`actions`. The final `screenshot` remains the one immediate post-action frame. A provider may
+suppress a duplicate final frame in its own output when the last action already supplies the same
+semantic image. Cursor-position queries may stay on the action-only Interface when no frame is
+needed.
+
+### 5.3 Namespaces
 
 The stable namespaces are:
 
@@ -306,7 +329,7 @@ ownership. `AsyncBorrowedComputer` remains a separate lease-restricted trajector
 `ComputerSandbox.hot_session()` provides a persistent action/screenshot channel.
 `ComputerSandbox.observation_stream()` provides a correlated observation stream.
 
-### 5.3 Configuration
+### 5.4 Configuration
 
 `ComputerConfig` is strict: unknown fields fail validation. Its public groups are `desktop`,
 `runtime`, `resources`, `image`, `network`, `storage`, `browser`, `actions`, and `budgets`.
@@ -319,6 +342,7 @@ Current defaults with architectural significance are:
 - standard resources;
 - `actions.input_backend="auto"`;
 - `actions.subprocess_backend="isolated-asyncio"`;
+- input admission refills 100 normalized input-work tokens per second with a 400-token burst;
 - daemon HTTP/1.1;
 - browser prewarm when a browser is configured;
 - ordered batches stop on the first error unless `continue_on_error` is explicit.
@@ -359,6 +383,7 @@ The public OpenAPI contract covers:
 | Recordings | `/v1/recordings/*` |
 | Display and windows | `/v1/display/*`, `/v1/windows/*` |
 | Actions | `/v1/actions/validate`, `/v1/actions/run`, binary action/screenshot variants |
+| Computer Step | `/v1/steps` |
 | Artifacts | `/v1/artifacts/*` |
 | Browser and apps | `/v1/browser/*`, `/v1/apps/*` |
 | Commands and input recovery | `/v1/commands/run`, `/v1/input/release-all` |
@@ -383,6 +408,7 @@ Action batches:
 - serialize input-emitting work under the daemon input lock;
 - stop at the first failure by default;
 - support explicit `continue_on_error`;
+- reserve the complete recursive weighted input cost before mutation;
 - enforce batch size, per-action deadline, batch deadline, screenshot-pixel, rate, and configured
   budget limits;
 - return per-item results and timing;
@@ -399,9 +425,9 @@ hold requests accept a key and optional duration only.
 Application route errors normally use a structured body with `code`, sanitized `message`, and
 `details`, plus `X-Computer-Use-Error-Code`. Auth middleware, `/readyz`, and WebSocket frames use
 purpose-specific schemas. Validation is `422`; unsafe paths are `400`; conflicts are `409`;
-oversized requests are `413`; budget/rate failures are `429`; readiness and recovery failures are
-service errors. Unhandled route exceptions return a generic `internal_error` and sanitized
-details.
+oversized requests are `413`; transient budget/rate failures are `429`; a batch that can never fit
+the configured input burst is `422 input_cost_exceeds_burst`; readiness and recovery failures are
+service errors. Unhandled route exceptions return a generic `internal_error` and sanitized details.
 
 Clients must branch on stable codes and typed exceptions, not raw exception text.
 
@@ -419,6 +445,11 @@ The `auto` input policy prefers persistent native XTest/XKB. Capability output s
 Typing supports `auto`, canonical direct `keystrokes`, clipboard-assisted input, and explicit
 legacy `xdotool`. Unsupported or active-layout-unmapped keys fail before emission. A possibly
 partial native operation is non-replayable and terminal.
+
+The `normalized-input-work-v1` policy gives extra weight to repeated clicks, long typing, large
+scrolls, drag paths, hotkeys, and nested actions. One daemon-local token bucket covers borrowed and
+direct mutation routes. Lease handoff does not reset it. Rate admission is resource protection; it
+does not replace approvals or semantic policy.
 
 Direct mouse and window responses report request-specific input or window backend headers. Raw
 screenshot routes report the request-specific capture backend. Global capability fields are
@@ -667,6 +698,14 @@ Adapters do not call provider APIs, own model loops, bypass validation, or weake
 Provider SDK dependencies are optional. The maintained provider guides and examples own current
 request/response loop details.
 
+The OpenAI example preflights every computer call in one provider response before the first step.
+It preserves provider call order and call IDs and sends each ordered action array through one step.
+
+The Anthropic example keeps cursor-position queries action-only. It sends other hosted actions and
+custom ordered batches through step. It preserves native screenshot, zoom, and nested image order.
+When the last action already supplies the semantic image, it suppresses only the duplicate final
+step frame from the provider tool result.
+
 ## 13. Manager, warm capacity, and cleanup
 
 `ComputerSandboxManager` owns orchestration behavior:
@@ -797,6 +836,8 @@ Boundary scans must confirm:
 - the frozen dependency graph passes audit;
 - Bandit and Semgrep report no material finding;
 - security regressions and the documented performance gates pass locally.
+- the minimum supported runtime sustains at least 200 representative normalized input-work
+  tokens per second before the 100/400 default is promoted.
 
 Modal smoke tests are credential-gated. The deployed-Function handoff smoke is a protected manual
 workflow and validates one bounded handoff, not benchmark performance or continuous production
@@ -836,9 +877,9 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is the `2.0.0` release candidate. Publication remains gated on the
-preregistered benchmark, protected Modal smoke, runtime artifact, package, and hosted-documentation
-release sequence.
+The repository source is the `2.0.0` release candidate. The preregistered 100-pair Computer Step
+benchmark and protected Modal handoff smoke passed on 2026-08-08. Publication remains gated on the
+release-matched runtime artifact, package, and hosted-documentation sequence.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

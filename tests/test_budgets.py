@@ -291,6 +291,7 @@ def test_clipboard_mutations_respect_input_rate_limit(tmp_path) -> None:
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             input_rate_limit_per_sec=1,
+            input_rate_limit_burst=1,
         )
     )
 

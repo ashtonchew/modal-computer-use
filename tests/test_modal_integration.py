@@ -24,9 +24,23 @@ def _has_modal_auth() -> bool:
     except (OSError, tomllib.TOMLDecodeError):
         return False
     profiles = [config]
+    profiles.extend(item for item in config.values() if isinstance(item, dict))
     if isinstance(config.get("profile"), dict):
         profiles.extend(item for item in config["profile"].values() if isinstance(item, dict))
     return any(profile.get("token_id") and profile.get("token_secret") for profile in profiles)
+
+
+def test_modal_auth_recognizes_named_top_level_profiles(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "modal.toml"
+    config_path.write_text(
+        '[developer]\ntoken_id = "test-id"\ntoken_secret = "test-secret"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODAL_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+
+    assert _has_modal_auth() is True
 
 
 def _skip_without_modal_auth() -> None:
@@ -721,28 +735,29 @@ def test_modal_action_rate_limit_live_smoke() -> None:
 
     from modal_computer_use import ComputerConfig, ComputerSandbox
     from modal_computer_use.config import ActionConfig
+    from modal_computer_use.errors import DaemonHTTPError
 
     suffix = uuid.uuid4().hex[:10]
     computer = ComputerSandbox.create(
         config=ComputerConfig(
             run_id=f"mcu-v1-rate-limit-{suffix}",
-            actions=ActionConfig(input_rate_limit_per_sec=1),
+            actions=ActionConfig(input_rate_limit_per_sec=1, input_rate_limit_burst=1),
         ),
         tags={"computer-use.smoke": "v1-rate-limit"},
     )
     try:
-        result = computer.actions.run(
-            [
-                {"type": "move", "x": 10, "y": 10},
-                {"type": "move", "x": 20, "y": 20},
-            ],
-            continue_on_error=True,
-        )
-        assert result.ok is False
-        assert [item.ok for item in result.results] == [True, False]
-        assert result.results[1].error_code == "rate_limited"
-        assert result.results[1].output["code"] == "rate_limited"
-        assert "retry_after_seconds" in result.results[1].output
+        before = computer.mouse.position()
+        with pytest.raises(DaemonHTTPError) as exc_info:
+            computer.actions.run(
+                [
+                    {"type": "move", "x": 10, "y": 10},
+                    {"type": "move", "x": 20, "y": 20},
+                ],
+                continue_on_error=True,
+            )
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.code == "input_cost_exceeds_burst"
+        assert computer.mouse.position() == before
     finally:
         computer.terminate()
         computer.detach()

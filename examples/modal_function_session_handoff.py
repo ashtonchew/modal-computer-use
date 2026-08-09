@@ -130,10 +130,11 @@ async def run_trajectory_body(
     """Hold one borrowed connection across the repeated observe/decide/act loop."""
     async with handle.borrow_async(run_id=run_id, function_region=function_region) as computer:
         try:
+            screenshot = await computer.screenshots.full(format="png", processing="daemon")
             for turn in range(max_turns):
-                screenshot = await computer.screenshots.full(format="png", processing="daemon")
                 action = await choose_action_with_model(task=task, screenshot=screenshot, turn=turn)
-                await computer.actions.run([action])
+                step_result = await computer.step([action], continue_on_error=False)
+                screenshot = step_result.screenshot
         except OperationResultUnavailableError:
             await computer.observe_after_result_loss()
             return TrajectoryOutcome(TrajectoryStatus.INDETERMINATE).as_dict()

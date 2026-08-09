@@ -54,6 +54,25 @@ See the [optimized-default report](../docs/benchmark-results-2026-08-08-optimize
 the controlled configuration, interpretation, and the distinction from the historical 47 ms
 arithmetic figure.
 
+The fused Computer Step promotion uses a separate 100-pair evidence set:
+
+- [`computer-step-prior-public-2026-08-08.json`](computer-step-prior-public-2026-08-08.json);
+- [`computer-step-candidate-2026-08-08.json`](computer-step-candidate-2026-08-08.json);
+- [`computer-step-promotion-decision-2026-08-08.json`](computer-step-promotion-decision-2026-08-08.json).
+
+See the [Computer Step report](../docs/benchmark-results-2026-08-08-computer-step.md) for its
+action-to-immediate-frame boundary and promotion result. These files do not replace or rewrite the
+historical article evidence.
+
+The weighted input-capacity promotion uses three independent same-runtime runs:
+
+- [`input-capacity-run-1-2026-08-08.json`](input-capacity-run-1-2026-08-08.json);
+- [`input-capacity-run-2-2026-08-08.json`](input-capacity-run-2-2026-08-08.json);
+- [`input-capacity-run-3-2026-08-08.json`](input-capacity-run-3-2026-08-08.json).
+
+See the [weighted input-capacity report](../docs/benchmark-results-2026-08-08-input-capacity.md) for
+the 100-token refill, 400-token burst, repeated-run result, and rejected higher candidates.
+
 ### Archived July 26 combined report
 
 The archived combined report remains bound to these immutable inputs:

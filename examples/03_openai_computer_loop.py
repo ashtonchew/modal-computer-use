@@ -169,29 +169,23 @@ async def run_openai_computer_loop(
                 for action in normalized_actions
             ]
             try:
-                batch_result = await computer.actions.run(
+                step_result = await computer.step(
                     bounded_actions,
                     continue_on_error=False,
-                    screenshot_after=False,
-                    source="openai-adapter",
+                    call_id=call.call_id,
                     max_action_timeout_ms=allocated_action_timeout_ms,
                 )
             except Exception as exc:
                 raise RuntimeError(
                     f"OpenAI computer action batch failed: {type(exc).__name__}"
                 ) from None
+            batch_result = step_result.actions
             if not batch_result.ok:
                 raise RuntimeError(_sanitized_batch_failure(batch_result))
-            try:
-                post_batch_screenshot = await computer.screenshots.full()
-            except Exception as exc:
-                raise RuntimeError(
-                    f"OpenAI computer screenshot failed: {type(exc).__name__}"
-                ) from None
             _check_deadline(started_at, max_elapsed_seconds)
             outputs.append(
                 openai_computer_call_output(
-                    post_batch_screenshot,
+                    step_result.screenshot,
                     call_id=call.call_id,
                     detail="original",
                 )

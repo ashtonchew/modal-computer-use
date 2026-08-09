@@ -2,10 +2,14 @@
 
 Keep the Anthropic client and message loop in the application-owned, explicitly placed Modal
 Function. Pass a versioned session handle into that Function and enter one `borrow_async()` context
-around the complete loop. Each turn should call the semantic `screenshots.full()` method. The
-returned byte-backed `Screenshot` converts to provider base64 only at the adapter boundary.
+around the complete loop. Send each ordered action array through `computer.step()`. Use the returned
+byte-backed screenshot as the next provider observation and convert it to provider base64 only at
+the adapter boundary.
 
-Preserve each ordered model action array as one `actions.run([...])` batch. Do not replay the batch
+Preserve each ordered model action array as one step. Keep cursor-position queries action-only.
+Screenshot and zoom actions remain valid step actions. Preserve their native image blocks and
+suppress only a duplicate final step frame when the last action already supplies that image. Keep
+nested image order. Do not replay the step
 after dispatch may have started. The core package does not import Anthropic and does not own
 messages, model calls, or confirmation policy.
 

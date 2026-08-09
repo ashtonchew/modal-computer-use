@@ -1,0 +1,69 @@
+{
+  "configuration": {
+    "action_payload_sha256": "83599900ae670680c7d84271000b03114940c492d935c26b5f0999a281958296",
+    "action_scenario": "reset-pointer-then-click-unique-coordinate-v1",
+    "caller_topology": "one-application-owned-modal-function",
+    "connection_reuse": "one-pooled-async-client",
+    "http_version": "1.1",
+    "image_identity": "inline-source-f6b9adeee54f584c345c813750758b7c7b5db744-config-adf5befbada5499a",
+    "ingress": "attested-tunnel",
+    "input_backend": "xtest",
+    "input_rate_limit_per_sec": 20,
+    "observed_placement": {
+      "function": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      },
+      "target": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      }
+    },
+    "operation_pacing_ms": 125,
+    "requested_placement": {
+      "cloud": "aws",
+      "region": "us-west-2"
+    },
+    "resources": {
+      "function": {
+        "cpu": 1.0,
+        "memory_mib": 2048
+      },
+      "sandbox": {
+        "cpu": 1.0,
+        "memory_mib": 2048
+      }
+    },
+    "screenshot": {
+      "format": "png",
+      "processing": "daemon",
+      "quality": 90,
+      "scale": 1.0,
+      "show_cursor": false,
+      "storage": "inline",
+      "transport": "raw-binary"
+    },
+    "target_identity": "cursor-metadata-causality-target-v1",
+    "warm_capacity": {
+      "function_min_containers": 0,
+      "sandbox_pool_capacity": 0
+    }
+  },
+  "decision": "promote",
+  "eligible": true,
+  "gate_metric": "action_to_frame_ms",
+  "metrics": {
+    "bootstrap_95_ci_ms": [
+      -4.656859500002497,
+      -2.6458120000008023
+    ],
+    "candidate_p50_ms": 44.29242149999624,
+    "candidate_p95_ms": 52.57011590000018,
+    "paired_median_difference_ms": -3.370779500002641,
+    "prior_p50_ms": 47.14216850000241,
+    "prior_p95_ms": 58.21702205000028
+  },
+  "minimum_samples_per_arm": 100,
+  "paired_samples": 100,
+  "reasons": []
+}

@@ -727,6 +727,7 @@ def test_action_rate_limit_stops_batch_without_executing_extra_actions(tmp_path)
             trace_actions=True,
             local_token="dev",
             input_rate_limit_per_sec=1,
+            input_rate_limit_burst=1,
         )
     )
     calls = 0
@@ -749,18 +750,11 @@ def test_action_rate_limit_stops_batch_without_executing_extra_actions(tmp_path)
             },
         )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["ok"] is False
-    assert [item["error_code"] for item in body["results"]] == [None, "rate_limited"]
-    assert body["results"][1]["output"]["rate_limit_per_sec"] == 1
-    assert calls == 1
-    assert app.state.action_count == 1
-    entries = load_trace(tmp_path / "traces" / "actions.ndjson")
-    assert entries[1].error == {
-        "code": "rate_limited",
-        "message": "action rate limit exceeded",
-    }
+    assert response.status_code == 422
+    assert response.json()["code"] == "input_cost_exceeds_burst"
+    assert calls == 0
+    assert app.state.action_count == 0
+    assert load_trace(tmp_path / "traces" / "actions.ndjson") == []
 
 
 def test_action_rate_limit_applies_to_direct_mouse_routes(tmp_path) -> None:
@@ -771,6 +765,7 @@ def test_action_rate_limit_applies_to_direct_mouse_routes(tmp_path) -> None:
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             input_rate_limit_per_sec=1,
+            input_rate_limit_burst=1,
         )
     )
 
@@ -781,7 +776,8 @@ def test_action_rate_limit_applies_to_direct_mouse_routes(tmp_path) -> None:
     assert first.status_code == 200
     assert second.status_code == 429
     assert second.json()["code"] == "rate_limited"
-    assert "token" not in str(second.json()).lower()
+    assert "bearer" not in str(second.json()).lower()
+    assert "dev" not in str(second.json()).lower()
 
 
 def test_screenshot_action_budget_failure_is_single_traced_result(tmp_path) -> None:

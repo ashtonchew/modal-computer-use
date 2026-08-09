@@ -108,6 +108,7 @@ from .sandbox import (
     run_modal_daemon_command,
     run_modal_daemon_command_with_fallback,
 )
+from .steps import ComputerStepResult, ComputerStepTiming
 
 __all__ = [
     "ActionBatchResult",
@@ -135,6 +136,8 @@ __all__ = [
     "ComputerSandboxManager",
     "ComputerSessionHandle",
     "ComputerStatus",
+    "ComputerStepResult",
+    "ComputerStepTiming",
     "ConfigConflictError",
     "CoordinateSpace",
     "DaemonClient",

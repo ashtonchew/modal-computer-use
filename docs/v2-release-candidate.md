@@ -27,7 +27,7 @@ lease. Package-major equality is not a protocol check.
 
 The exact migration table is in the version 2.0.0 section of `CHANGELOG.md` and in the version 2
 migration guide. The table covers caller placement, one trajectory borrow, binary-backed semantic
-screenshots, action batching, mutation ambiguity, cleanup order, and the explicit low-level
+screenshots, `computer.step()`, action batching, mutation ambiguity, cleanup order, and the explicit low-level
 compatibility path.
 
 No `optimized=True` flag, performance profile, or hidden environment variable selects between two
@@ -42,11 +42,20 @@ produced them.
 The [2026-08-08 optimized-default report](benchmark-results-2026-08-08-optimized-default.md)
 records an eligible preregistered, interleaved, same-topology promotion result from runtime source
 commit `31bcafefbba2ba75653075a04b12ce2eb816c838`. Its two arms each retained 30 successful samples,
-and cleanup recorded no survivors. The article's opening 47 ms figure remains arithmetic over
-separate warm screenshot and click medians. It is not a measured fused turn.
+and cleanup recorded no survivors. The article's opening 47.10 ms figure remains arithmetic over
+separate warm screenshot and click medians. It is not a measured fused turn and is not a latency
+promise for `computer.step()`. It is only a non-gating engineering goal and distance metric.
 
 Unit tests and the historical cross-provider table do not promote the new default. A release must
 record cold startup separately from dispatch, borrow, and repeated warm operations.
+
+The [2026-08-08 Computer Step report](benchmark-results-2026-08-08-computer-step.md) records the
+separate fused-operation gate from source commit
+`f6b9adeee54f584c345c813750758b7c7b5db744`. It retained 100 interleaved pairs per arm with no
+failures, retries, replacements, or cleanup survivors. `computer.step()` measured 44.29 ms p50 and
+52.57 ms p95, compared with 47.14 ms and 58.22 ms for `actions.run()` followed by
+`screenshots.full()`. The paired median improvement was 3.37 ms, with a bootstrap 95% interval of
+2.65 to 4.66 ms faster. This new result satisfies the Computer Step promotion gate.
 
 ## Publication order
 
@@ -100,6 +109,8 @@ main revision. Live or billable gates require separate authorization.
 - Run the full lint, type, test, OpenAPI, documentation, example, and import-boundary checks.
 - Build one wheel and one source distribution, then install and probe both outside the checkout.
 - Verify `/healthz`, `/readyz`, `/v1/version`, and `/v1/capabilities` from the installed daemon.
+- Verify that clean wheel and source-distribution installs expose sync and async `computer.step()`
+  and that the daemon reports `computer-step-envelope-v1`.
 - In the release Image, run
   `test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state`. Also run the protected
   `test_modal_release_image_x11_clipboard_ownership_smoke` against a real Modal Sandbox. Neither
@@ -111,6 +122,11 @@ main revision. Live or billable gates require separate authorization.
 - Run `scripts/run_optimized_default_promotion.py` from the exact runtime commit with explicit
   authorization. It passed on 2026-08-08 for runtime commit `31bcafefbba2ba75653075a04b12ce2eb816c838`.
   The retained evidence commit changes documentation and benchmark files only.
+- Run `scripts/run_step_promotion.py` from the exact release commit with explicit authorization.
+  Its fresh same-topology report must pass before `computer.step()` is promoted as the canonical
+  provider-loop path. Do not substitute the historical 47.10 ms arithmetic or the screenshot-only
+  promotion report for this evidence. Retain the new sanitized prior-arm, candidate-arm, and
+  decision artifacts and publish a new dated Computer Step report.
 - Record whether the approved configuration requires runtime artifacts. If it does, record their
   exact revisions before publication.
 - Confirm that the hosted documentation preview and rollback version selector pass before its

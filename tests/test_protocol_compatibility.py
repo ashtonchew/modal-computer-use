@@ -34,6 +34,7 @@ def test_default_trajectory_accepts_protocol_behavior_independent_of_package_ver
         "screenshot-binary-metadata-v1",
         "trajectory-leases-v1",
         "trajectory-operation-receipts-v1",
+        "computer-step-envelope-v1",
     ]
     if additional_primitive is not None:
         primitives.append(additional_primitive)

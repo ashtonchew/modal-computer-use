@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from modal_computer_use.errors import AuthenticationError, DaemonHTTPError
+from modal_computer_use.errors import AuthenticationError, DaemonHTTPError, FrameValidationError
 from modal_computer_use.observability import get_tracer
 
 from .metadata import MetadataHeaders, resolve_metadata_headers
@@ -89,6 +89,57 @@ class HTTPTransport:
         self._raise_for_status(response)
         return response
 
+    def request_bounded(
+        self,
+        method: str,
+        path: str,
+        *,
+        max_bytes: int,
+        json: Any | None = None,
+        params: Mapping[str, Any] | None = None,
+        content: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> httpx.Response:
+        """Read one response under a fixed bound before exposing its body."""
+
+        if isinstance(max_bytes, bool) or max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        request_headers = self._request_headers(headers)
+        with (
+            self._tracer.span(
+                "sdk.request",
+                {"http.method": method, "http.route": _route_path(path)},
+            ) as span,
+            self._client.stream(
+                method,
+                path,
+                json=json,
+                params=params,
+                content=content,
+                headers=request_headers,
+            ) as streamed,
+        ):
+            self.last_http_version = streamed.http_version
+            span.set_attribute("http.status_code", streamed.status_code)
+            _validate_declared_length(streamed.headers, max_bytes=max_bytes)
+            body = bytearray()
+            for chunk in streamed.iter_raw():
+                if len(body) + len(chunk) > max_bytes:
+                    raise FrameValidationError("daemon response exceeded its size limit")
+                body.extend(chunk)
+            response = httpx.Response(
+                streamed.status_code,
+                headers=streamed.headers,
+                content=bytes(body),
+                request=streamed.request,
+                extensions=streamed.extensions,
+            )
+            error_code = _error_code(response)
+            if error_code:
+                span.set_attribute("error.code", error_code)
+        self._raise_for_status(response)
+        return response
+
     def stream_download(self, path: str, target: str | Path) -> Path:
         output = Path(target)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +194,7 @@ class HTTPTransport:
                 details=payload.get("details")
                 if isinstance(payload.get("details"), dict)
                 else None,
+                retry_after_seconds=_retry_after_seconds(response),
             )
 
 
@@ -236,6 +288,55 @@ class AsyncHTTPTransport:
         await self._raise_for_status(response)
         return response
 
+    async def request_bounded(
+        self,
+        method: str,
+        path: str,
+        *,
+        max_bytes: int,
+        json: Any | None = None,
+        params: Mapping[str, Any] | None = None,
+        content: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> httpx.Response:
+        """Read one async response under a fixed bound before exposing it."""
+
+        if isinstance(max_bytes, bool) or max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        request_headers = self._request_headers(headers)
+        with self._tracer.span(
+            "sdk.request",
+            {"http.method": method, "http.route": _route_path(path)},
+        ) as span:
+            async with self._client.stream(
+                method,
+                path,
+                json=json,
+                params=params,
+                content=content,
+                headers=request_headers,
+            ) as streamed:
+                self.last_http_version = streamed.http_version
+                span.set_attribute("http.status_code", streamed.status_code)
+                _validate_declared_length(streamed.headers, max_bytes=max_bytes)
+                body = bytearray()
+                async for chunk in streamed.aiter_raw():
+                    if len(body) + len(chunk) > max_bytes:
+                        raise FrameValidationError("daemon response exceeded its size limit")
+                    body.extend(chunk)
+                response = httpx.Response(
+                    streamed.status_code,
+                    headers=streamed.headers,
+                    content=bytes(body),
+                    request=streamed.request,
+                    extensions=streamed.extensions,
+                )
+                error_code = _error_code(response)
+                if error_code:
+                    span.set_attribute("error.code", error_code)
+        await self._raise_for_status(response)
+        return response
+
     async def stream_download(self, path: str, target: str | Path) -> Path:
         import anyio
 
@@ -286,4 +387,25 @@ class AsyncHTTPTransport:
             status_code=response.status_code,
             code=payload.get("code"),
             details=payload.get("details") if isinstance(payload.get("details"), dict) else None,
+            retry_after_seconds=_retry_after_seconds(response),
         )
+
+
+def _retry_after_seconds(response: httpx.Response) -> int | None:
+    value = response.headers.get("Retry-After")
+    if value is None or not value.isascii() or not value.isdigit():
+        return None
+    parsed = int(value)
+    return parsed if 0 <= parsed <= 2_147_483_647 else None
+
+
+def _validate_declared_length(headers: Mapping[str, str], *, max_bytes: int) -> None:
+    declared = headers.get("content-length")
+    if declared is None:
+        return
+    try:
+        length = int(declared)
+    except ValueError as exc:
+        raise FrameValidationError("daemon response has an invalid size") from exc
+    if length < 0 or length > max_bytes:
+        raise FrameValidationError("daemon response exceeded its size limit")
