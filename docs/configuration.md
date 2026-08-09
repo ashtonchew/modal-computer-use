@@ -178,12 +178,12 @@ The `normalized-input-work-v1` policy uses these costs:
 | Hold key with nested actions | `1 + sum(nested action costs)` |
 | Wait, screenshot, zoom, cursor query | `0` |
 
-These are normalized admission units, not native X11 event counts. The daemon uses one bucket across
-leases and direct routes. It does not reset the bucket when ownership changes.
-The 100/400 values are portable defaults for the minimum tested 1 CPU, 2,048 MiB Sandbox. Input
-capacity also depends on browser load, action mix, X11, capture work, and CPU scheduling. The SDK
-does not infer a hidden limit from CPU or memory. For a faster setup, run the same-runtime capacity
-gate, then set both fields explicitly.
+These token costs estimate input work for admission. Native X11 event counts can differ. The daemon
+uses one bucket across leases and direct routes. It keeps the same bucket when ownership changes.
+The 100/400 values are the portable baseline for the minimum tested 1 CPU, 2,048 MiB Sandbox.
+Browser load, action mix, X11 and capture work, and CPU scheduling also affect input capacity. CPU
+and memory provide too little information to select a reliable rate. Run the same-runtime capacity
+gate before setting both fields to higher values.
 With the default burst, one `type` action can contain about 12,768 characters before its normalized
 cost exceeds capacity. Larger schema-valid input requests need an explicit larger burst or a
 different application-owned request shape.

@@ -157,10 +157,9 @@ workload. The
 application-owned Function samples only processes with the target Sandbox's cgroup membership; it
 does not expose privileged command execution through the borrowed-computer Interface.
 
-The measurement configures a 2,000-token refill and 4,000-token burst so the candidate limiter does
-not become the test bottleneck. The release gate requires at least 200 representative normalized
-input-work tokens per second. This proves capacity headroom for the lower 100-token product default;
-it does not redefine that default.
+The measurement configures a 2,000-token refill and 4,000-token burst to keep the limiter outside
+the capacity result. The release gate requires at least 200 representative normalized input-work
+tokens per second. The product continues to use the lower 100-token default.
 
 ```bash
 modal run --env main scripts/run_input_capacity_gate.py \

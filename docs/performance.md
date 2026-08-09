@@ -181,12 +181,13 @@ median. It therefore should not shape a normal serialized provider loop. The buc
 the available simple native-input throughput estimate, so it still protects the daemon from
 sustained saturation.
 
-This number is an evidence-backed product default, not an external standard. A same-runtime mixed
-input capacity gate must sustain at least 200 weighted tokens per second before release. Keep
-batch size, action and batch timeouts, total trajectory budgets, payload bounds, and one-in-flight
-Step serialization. The rate limit complements those controls; it does not replace them.
-Faster setups can use explicit higher values after the same-runtime capacity gate passes. The SDK
-does not derive the rate from CPU or memory alone.
+Repository measurements support this product default. External standards leave the numeric value
+to capacity testing. A same-runtime mixed input capacity gate must sustain at least 200 weighted
+tokens per second before release. Keep batch size, action and batch timeouts, total trajectory
+budgets, payload bounds, and one-in-flight Step serialization. The rate limit works alongside those
+controls.
+Run the same-runtime capacity gate before setting higher values for a faster setup. CPU and memory
+provide too little information to select the rate automatically.
 
 The following surfaces remain optional or low-level compatibility capabilities:
 
