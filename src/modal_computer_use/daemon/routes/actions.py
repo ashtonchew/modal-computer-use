@@ -125,6 +125,13 @@ async def run_raw_screenshot(
 
 @router.post(
     "/run/observe-change/raw-screenshot",
+    summary="Experimental: run actions and observe the first visual change",
+    description=(
+        "Runs one ordered action batch. Then it returns the first frame whose full-resolution "
+        "pixels differ from the pre-action baseline. XDamage can wake the verifier, and pixel "
+        "polling remains the fallback. This result does not establish application readiness, "
+        "visual stability, or task completion."
+    ),
     responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
 )
 async def run_observe_change_raw_screenshot(

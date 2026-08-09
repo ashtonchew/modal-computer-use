@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import math
 import time
-from collections import deque
 from typing import Any, Literal
 
 from modal_computer_use.daemon.errors import DaemonError
@@ -108,14 +108,22 @@ class BudgetPolicy:
             raise _budget_error("artifact byte budget exceeded", projected_state)
 
     def reserve_action(self) -> None:
-        error = self.action_reservation_error()
+        self.reserve_action_with_cost(token_cost=1)
+
+    def reserve_action_with_cost(self, *, token_cost: int) -> None:
+        error = self.action_reservation_error(token_cost=token_cost)
         if error is not None:
             raise error
         self._state.action_count += 1
-        self._record_action_rate()
+        self._reserve_input_tokens(token_cost)
         self.touch_activity()
 
-    def action_reservation_error(self, *, count: int = 1) -> DaemonError | None:
+    def action_reservation_error(
+        self,
+        *,
+        count: int = 1,
+        token_cost: int = 0,
+    ) -> DaemonError | None:
         settings = self._state.settings
         idle_error = self.idle_reservation_error()
         if idle_error is not None:
@@ -125,23 +133,55 @@ class BudgetPolicy:
             and self._state.action_count + count > settings.max_actions
         ):
             return _budget_error("action budget exceeded", self.snapshot())
-        rate_limit = settings.input_rate_limit_per_sec
-        if rate_limit > 0:
-            now = time.monotonic()
-            window = self._state.action_rate_window
-            _prune_action_rate_window(window, now=now)
-            if len(window) + count > rate_limit:
-                return DaemonError(
-                    "action rate limit exceeded",
-                    status_code=429,
-                    code="rate_limited",
-                    details={
-                        "rate_limit_per_sec": rate_limit,
-                        "retry_after_seconds": 1,
-                        "budgets": self.snapshot(),
-                    },
-                )
+        if token_cost:
+            return self.input_token_reservation_error(token_cost=token_cost)
         return None
+
+    def input_token_reservation_error(self, *, token_cost: int) -> DaemonError | None:
+        settings = self._state.settings
+        if settings.input_rate_limit_per_sec <= 0 or token_cost <= 0:
+            return None
+        if token_cost > settings.input_rate_limit_burst:
+            return DaemonError(
+                "input cost exceeds configured burst capacity",
+                status_code=422,
+                code="input_cost_exceeds_burst",
+                details={
+                    "required_tokens": token_cost,
+                    "bucket_capacity": settings.input_rate_limit_burst,
+                    "retry_safe": True,
+                    "emission_state": "not_started",
+                },
+            )
+        wait = self._state.input_token_bucket.reservation_error(token_cost)
+        if wait is None:
+            return None
+        retry_after_seconds = max(1, math.ceil(wait.retry_after_ms / 1_000))
+        return DaemonError(
+            "input rate limit exceeded",
+            status_code=429,
+            code="rate_limited",
+            details={
+                "required_tokens": token_cost,
+                "available_tokens": round(wait.available_tokens, 3),
+                "refill_tokens_per_second": settings.input_rate_limit_per_sec,
+                "bucket_capacity": settings.input_rate_limit_burst,
+                "retry_after_ms": wait.retry_after_ms,
+                "retry_safe": True,
+                "emission_state": "not_started",
+                "budgets": self.snapshot(),
+            },
+            headers={"Retry-After": str(retry_after_seconds)},
+        )
+
+    def reserve_input_tokens(self, *, token_cost: int) -> None:
+        error = self.input_token_reservation_error(token_cost=token_cost)
+        if error is not None:
+            raise error
+        self._reserve_input_tokens(token_cost)
+
+    def refund_input_tokens(self, *, token_cost: int) -> None:
+        self._state.input_token_bucket.refund(token_cost)
 
     def screenshot_reservation_error(self, *, count: int = 1) -> DaemonError | None:
         settings = self._state.settings
@@ -171,14 +211,10 @@ class BudgetPolicy:
         self._state.screenshot_count += 1
         self.touch_activity()
 
-    def _record_action_rate(self) -> None:
-        rate_limit = self._state.settings.input_rate_limit_per_sec
-        if rate_limit <= 0:
-            return
-        now = time.monotonic()
-        window = self._state.action_rate_window
-        _prune_action_rate_window(window, now=now)
-        window.append(now)
+    def _reserve_input_tokens(self, token_cost: int) -> None:
+        wait = self._state.input_token_bucket.reserve(token_cost)
+        if wait is not None:  # The caller must reserve under the input lock.
+            raise RuntimeError("input token reservation changed while locked")
 
 
 def _budget_error(message: str, state: dict[str, int | float | None]) -> DaemonError:
@@ -188,7 +224,3 @@ def _budget_error(message: str, state: dict[str, int | float | None]) -> DaemonE
         code="budget_exceeded",
         details={"budgets": state},
     )
-
-def _prune_action_rate_window(window: deque[float], *, now: float) -> None:
-    while window and now - window[0] >= 1:
-        window.popleft()

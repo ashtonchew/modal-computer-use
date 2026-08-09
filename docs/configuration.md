@@ -18,6 +18,52 @@ The process environment therefore overrides daemon defaults. There is no daemon 
 Treat bearer tokens, VNC passwords, browser startup URLs, daemon URLs, and noVNC URLs as secrets.
 Do not commit them, put them in shared shell history, or include them in logs.
 
+The SDK has one primary placed trajectory. It does not provide `optimized=True`, a performance
+profile, or a hidden variable that switches between two defaults. Placement and every cost-bearing
+choice remain explicit. Warm capacity is off unless the application sets a positive Function
+minimum or configures a Sandbox warm pool.
+
+`computer.step()` has no global enable flag. It is the primary action-to-frame Interface on a
+borrowed computer. Its `continue_on_error`, `screenshot_options`, and action timeout values are
+explicit per call. Region, resources, and warm capacity remain separate application choices.
+
+## Inspect cost and placement choices
+
+Set the Sandbox environment, exact region, CPU, memory, image, browser, and timeouts in
+`ComputerConfig`. No SDK default selects a region, CPU, or memory value. Measure a region for your
+workload and choose resources for its capacity and cost.
+
+```python
+from modal_computer_use import ComputerConfig
+
+config = ComputerConfig(
+    runtime={
+        "modal_environment": "main",
+        "modal_region": "us-west-2",
+        "timeout_seconds": 900,
+        "idle_timeout_seconds": None,
+        "readiness_timeout_seconds": 120,
+    },
+    resources={"profile": "browser", "cpu": 1.0, "memory_mib": 2048},
+    image={"source": "inline"},
+    browser={"kind": "chromium", "prewarm": False, "gpu_mode": "off"},
+)
+
+print(config.resolved_cost_and_placement())
+```
+
+`resolved_cost_and_placement()` returns only placement and cost choices. It does not include
+browser URLs, launch arguments, or profile paths. It also omits typed text, clipboard text,
+screenshot bytes, artifact bytes, daemon URLs, and bearer tokens because those values do not
+belong in this configuration report. Configuration validation errors hide rejected input values.
+
+This report covers the Sandbox. A placed Modal Function has separate cost controls. Set and inspect
+Function CPU, memory, image, retries, timeout, and container limits in the application that defines
+the Function. The executable
+[`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example keeps
+the Function and Sandbox choices together and uses the same exact region for both. Its
+`us-west-2` value is an application example, not an SDK default.
+
 ## Public SDK configuration
 
 All models reject unknown keys. Nested models can be supplied as model instances or dictionaries.
@@ -56,9 +102,10 @@ that `budgets.max_idle_seconds` is a separate daemon-side budget described below
 | `image.revision` | unset | For `source="named"`, required and exactly 40 lowercase hexadecimal Git characters. Invalid for inline images. |
 | `image.environment_name` | unset | Optional non-empty Modal environment for named-image and app lookup. Invalid for inline images. |
 
-Named images do not support `resources.profile="custom"`, require XFCE, and require an explicit
-`browser.kind` plus `browser.prewarm=true` for the `browser` and `browser-gpu` profiles. Passing an
-explicit `image=` to `ComputerSandbox.create` bypasses the `image.source` selection step.
+Named images do not support `resources.profile="custom"` and require XFCE. The `browser` and
+`browser-gpu` profiles also require an explicit `browser.kind`. `browser.prewarm` remains an
+explicit application choice and may be `false`. Passing an explicit `image=` to
+`ComputerSandbox.create` bypasses the `image.source` selection step.
 
 `resources.cpu` and `resources.memory_mib` are requests, not caps. Modal charges whichever is
 higher, the request or the actual usage, so a request above real usage costs the difference
@@ -112,9 +159,34 @@ Modal Function acting as the client, carries its own request and is not covered 
 | `actions.max_batch_duration_ms` | `30000` | Integer `1..600000`; maps to `COMPUTER_USE_MAX_BATCH_DURATION_MS`, the wall-clock cap for one batch. |
 | `actions.default_action_timeout_ms` | `5000` | Integer `1..300000`; maps to `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS`. |
 | `actions.max_action_timeout_ms` | `300000` | Integer `1..600000`; maps to `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS`. It must be at least `default_action_timeout_ms`. |
-| `actions.input_rate_limit_per_sec` | `20` | Integer `0..10000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC`. Zero disables the rolling one-second limit. |
+| `actions.input_rate_limit_per_sec` | `100` | Integer `0..10000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC`. This is the token-bucket refill rate in normalized input-work tokens per second. Zero disables input rate limiting. |
+| `actions.input_rate_limit_burst` | `400` | Integer `1..100000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_BURST`. This is the maximum cost that one atomic batch can reserve. |
 | `actions.input_backend` | `"auto"` | `"auto"`, `"xtest"`, or `"xdotool"`; maps to `COMPUTER_USE_INPUT_BACKEND`. |
 | `actions.subprocess_backend` | `"isolated-asyncio"` | `"asyncio"`, `"threaded"`, or `"isolated-asyncio"`; maps to `COMPUTER_USE_SUBPROCESS_BACKEND`. This selects subprocess-backed command and compatibility execution, not native XTest input. |
+
+The `normalized-input-work-v1` policy uses these costs:
+
+| Input action | Tokens |
+| --- | ---: |
+| Move, mouse down/up, keypress, release all | `1` |
+| Click, double click, triple click | Click count |
+| Hotkey | `max(1, ceil(keys / 4))` |
+| Type | `1 + ceil(characters / 32)` |
+| Scroll | `1 + ceil(amount / 32)` |
+| Coordinate drag | `1` |
+| Path drag | `1 + ceil(path points / 32)` |
+| Hold key with nested actions | `1 + sum(nested action costs)` |
+| Wait, screenshot, zoom, cursor query | `0` |
+
+These token costs estimate input work for admission. Native X11 event counts can differ. The daemon
+uses one bucket across leases and direct routes. It keeps the same bucket when ownership changes.
+The 100/400 values are the portable baseline for the minimum tested 1 CPU, 2,048 MiB Sandbox.
+Browser load, action mix, X11 and capture work, and CPU scheduling also affect input capacity. CPU
+and memory provide too little information to select a reliable rate. Run the same-runtime capacity
+gate before setting both fields to higher values.
+With the default burst, one `type` action can contain about 12,768 characters before its normalized
+cost exceeds capacity. Larger schema-valid input requests need an explicit larger burst or a
+different application-owned request shape.
 
 ### Daemon budgets
 
@@ -178,7 +250,8 @@ use `int()` and the documented range remains authoritative.
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | `5000` | Integer milliseconds; SDK range `1..300000`. Used when neither an action nor request supplies a timeout. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | `300000` | Integer milliseconds; SDK range `1..600000`. Rejects larger request/action timeouts. |
 | `COMPUTER_USE_POST_ACTION_DELAY_MS` | `0` | Integer milliseconds; SDK range `0..10000`. Applied after UI-mutating actions before the next action or screenshot-after. |
-| `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | `20` | Integer; SDK range `0..10000`. Values at or below zero disable rate limiting; use `0`. |
+| `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | `100` | Integer; SDK range `0..10000`. Sets the weighted-token refill rate. Zero disables input rate limiting. |
+| `COMPUTER_USE_INPUT_RATE_LIMIT_BURST` | `400` | Integer; SDK range `1..100000`. Sets the maximum weighted cost admitted at once. |
 | `COMPUTER_USE_SCREENSHOT_MAX_PIXELS` | `8294400` | Integer output-pixel ceiling for region and screenshot-after captures. This has no `ComputerConfig` field. |
 | `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` | `auto` | Supported label: `auto`, `daemon`, `client`. SDK-generated from `actions.screenshot_processing_location`; the daemon stores it but currently has no route behavior that reads it. |
 | `COMPUTER_USE_READINESS_CACHE_TTL_MS` | `1000` | Integer milliseconds for successful desktop-readiness probe caching. Values at or below zero disable caching. This has no `ComputerConfig` field. |

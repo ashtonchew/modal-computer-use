@@ -18,6 +18,7 @@ LINK_RE = re.compile(
     re.MULTILINE,
 )
 FENCE_RE = re.compile(r"^ {0,3}(?P<marker>`{3,}|~{3,})")
+PYTHON_FENCE_RE = re.compile(r"```python\n(?P<source>.*?)\n```", re.DOTALL)
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}\s+(?P<heading>.*?)(?:\s+#+\s*)?$")
 EXTERNAL_SCHEMES = {"data", "ftp", "http", "https", "mailto", "tel"}
 REPOSITORY_WEB_PREFIX = "/ashtonchew/modal-computer-use/"
@@ -41,6 +42,7 @@ def _markdown_files() -> list[Path]:
         ROOT / "SECURITY.md",
         ROOT / "CONTRIBUTING.md",
         ROOT / "CODE_OF_CONDUCT.md",
+        ROOT / "examples" / "README.md",
     ]
     return [path for path in [*roots, *sorted(DOCS.rglob("*.md"))] if path.is_file()]
 
@@ -197,7 +199,7 @@ def test_onboarding_docs_use_canonical_install_and_setup_guidance() -> None:
 
     assert "Python 3.12 or later" in readme
     assert "quickstart.py" in readme
-    assert "uv run python quickstart.py" in readme
+    assert "uv run modal run --env main quickstart.py" in readme
     assert 'uv add "modal-computer-use[modal]"' in readme
     assert "git+https://github.com/ashtonchew/modal-computer-use.git" not in readme
     assert "uv run modal setup" not in readme
@@ -254,16 +256,47 @@ def test_public_documentation_links_use_expected_routes() -> None:
         assert hosted_links == expected, path.relative_to(ROOT)
 
 
-def test_release_docs_identify_v1_1_release() -> None:
+def test_release_docs_identify_v2_release_candidate() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = CHANGELOG.read_text(encoding="utf-8")
     specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
     assert "git@v1.1.0" not in readme
-    assert "## Unreleased\n\n## 1.1.0 - 2026-08-03" in changelog
-    assert "active specification for the `1.1.0` release" in specification
-    assert "**Released:** 2026-08-03" in specification
-    assert "release identity `v1.1.0`" in specification
+    assert "## Unreleased" in changelog
+    assert "## 2.0.0 - 2026-08-08" in changelog
+    assert "active specification for the `2.0.0` release candidate" in specification
+    assert "**Previous released baseline:** `v1.1.0`" in specification
+    assert "**Release identity:** `v2.0.0`" in specification
+
+
+def test_hosted_documentation_release_record_names_control_points() -> None:
+    source = (DOCS / "hosted-documentation-release.md").read_text(encoding="utf-8")
+
+    for heading in (
+        "## System of record",
+        "## Current production baseline",
+        "## Preview a change",
+        "## Publish",
+        "## Version navigation",
+        "## Roll back",
+    ):
+        assert heading in source
+
+    assert "ashtonchew/modal-computer-use-docs" in source
+    assert "**Default and deployment branch:** `main`" in source
+    assert "**Production owner:** Ashton Chew" in source
+    assert "npm run check" in source
+    assert "navigation.versions" in source
+    assert "docs-v1.1.0-last-known-good" in source
+    assert "5d0f4e2f82ef0906d4cb4a6cc4eeafe018dceb2e" in source
+    assert "Do not force-push" in source
+
+
+def test_api_docs_distinguish_authentication_reuse_from_ingress_routing() -> None:
+    source = " ".join((DOCS / "api.md").read_text(encoding="utf-8").split())
+
+    assert "exchanges the attested token once when the borrow starts" in source
+    assert "Every request still crosses authenticated Modal ingress" in source
 
 
 def test_optimized_provider_docs_name_lifecycle_command() -> None:
@@ -372,3 +405,289 @@ def test_product_specification_has_one_stable_owner() -> None:
 
     assert active_names == {"product-spec.md"}
     assert not archived_names
+
+
+def _section(source: str, heading: str, next_heading: str) -> str:
+    start = source.index(heading)
+    end = source.index(next_heading, start)
+    return source[start:end]
+
+
+def test_readme_primary_path_is_one_placed_borrowed_trajectory() -> None:
+    source = (ROOT / "README.md").read_text(encoding="utf-8")
+    quickstart = _section(source, "## Quick start", "## Core API")
+
+    for contract in (
+        "AsyncComputerSandbox.create",
+        "session_handle()",
+        "@app.function",
+        "region=REGION",
+        "async with handle.borrow_async",
+        "await computer.step",
+        "uv run modal run --env main quickstart.py",
+    ):
+        assert contract in quickstart
+
+    assert quickstart.count("handle.borrow_async(") == 1
+    assert re.search(r"(?<!Async)ComputerSandbox\.create", quickstart) is None
+    assert "full_bytes(" not in quickstart
+    assert "await computer.actions.run" not in quickstart
+    assert "external caller" not in quickstart.lower()
+
+    code_blocks = [
+        match.group("source") for match in PYTHON_FENCE_RE.finditer(quickstart)
+    ]
+    assert len(code_blocks) == 1
+    compile(code_blocks[0], "README.md quickstart", "exec")
+
+
+def test_local_guides_define_the_optimized_default_and_low_level_compatibility() -> None:
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            DOCS / "api.md",
+            DOCS / "modal-deployment.md",
+            DOCS / "modal-optimization.md",
+        )
+    )
+
+    for contract in (
+        "async owner",
+        "versioned session handle",
+        "application-owned Modal Function",
+        "one `borrow_async()` context",
+        "pooled async HTTP client",
+        "byte-backed `Screenshot`",
+        "one ordered action batch",
+        "`computer.step()`",
+        "immediate post-action frame",
+        "Low-level compatibility",
+    ):
+        assert contract in source
+
+    assert "There is no `optimized=True`" in source
+    assert "no performance-profile toggle" in source.lower()
+
+
+def test_v2_migration_guide_covers_each_cutover_contract() -> None:
+    source = (DOCS / "migration-v2.md").read_text(encoding="utf-8")
+    normalized = " ".join(source.split())
+
+    for contract in (
+        "semantic-version major",
+        "`ComputerSandbox.create()`",
+        "`AsyncComputerSandbox.create()`",
+        "`AsyncComputerSandbox.create_unplaced()`",
+        "`owner.session_handle()`",
+        "`handle.borrow_async()`",
+        "`computer.step()`",
+        "`ComputerStepResult`",
+        "`screenshots.full()`",
+        "`Screenshot.bytes`",
+        "`Screenshot.to_base64()`",
+        "`Screenshot.data_base64`",
+        "`screenshots.full_bytes()`",
+        "JSON/base64 and REST routes remain available",
+        "does not silently fall back",
+    ):
+        assert contract in normalized
+
+    assert "| Version 1 pattern | Version 2 default | Required migration |" in source
+
+
+def test_v2_migration_table_matches_the_changelog() -> None:
+    migration = (DOCS / "migration-v2.md").read_text(encoding="utf-8")
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+
+    migration_table = _section(migration, "| Version 1 pattern", "## Screenshot compatibility")
+    changelog_table = _section(
+        changelog,
+        "| Version 1 pattern",
+        "Version 1.1 clients remain supported",
+    )
+
+    assert migration_table.strip() == changelog_table.strip()
+
+
+def test_default_path_docs_preserve_cost_and_measurement_boundaries() -> None:
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            ROOT / "README.md",
+            DOCS / "performance.md",
+            DOCS / "benchmarking.md",
+            DOCS / "troubleshooting.md",
+        )
+    )
+
+    for contract in (
+        "warm capacity is off",
+        "cold allocation",
+        "dispatch",
+        "borrow",
+        "warm operation",
+        "47 ms",
+        "arithmetic",
+        "not a measured fused turn",
+        "trailing-screenshot option is a retained low-level capability",
+        "not application readiness",
+    ):
+        assert contract.lower() in source.lower()
+
+
+def test_benchmarking_uses_the_public_interleaved_measurement_seam() -> None:
+    source = " ".join(
+        (DOCS / "benchmarking.md").read_text(encoding="utf-8").lower().split()
+    )
+
+    for contract in (
+        "measure_interleaved_promotion()",
+        'screenshots.full(storage="inline")',
+        "retained inline json/base64 route",
+        "same pooled async client",
+        "stops after the first operation failure",
+        "never replaces or replays a sample",
+    ):
+        assert contract in source
+
+
+def test_benchmarking_documents_the_executable_live_promotion_runner() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+
+    assert "scripts/run_optimized_default_promotion.py" in source
+    assert "--sample-count 30" in source
+    assert "one async owner" in source
+    assert "enters one borrow" in source
+    assert "zero warm capacity" in source
+
+
+def test_benchmarking_has_a_distinct_computer_step_promotion_gate() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+    step = " ".join(
+        _section(source, "## Promote Computer Step", "## Choose a command").split()
+    )
+
+    assert "scripts/run_step_promotion.py" in step
+    assert "at least 100 complete paired samples" in step
+    assert "actions.run(...)` followed by `screenshots.full(...)" in step
+    assert "computer.step(...)" in step
+    assert "deterministic causality check" in step
+    assert "daemon capture timestamp after its baseline" in step
+    assert "without comparing clocks across" in step
+    assert "Do not wait for a browser paint" in step
+    assert "does not claim per-sample MSS/XShm attribution" in step
+    assert "paired bootstrap 95% confidence interval" in step
+    assert "candidate p95" in step
+    assert "47.10 ms" in step
+    assert "not a measured fused turn" in step
+    assert "non-gating engineering goal and distance metric" in step
+    assert "a mutation-free placement probe and one measurement invocation" in step
+
+
+def test_benchmarking_has_an_executable_weighted_input_capacity_gate() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+    capacity = " ".join(
+        _section(source, "## Weighted input capacity gate", "## Choose a command").split()
+    )
+
+    assert "scripts/run_input_capacity_gate.py" in capacity
+    assert "100-token-per-second refill and 400-token burst" in capacity
+    assert "at least 200 representative normalized input-work tokens per second" in capacity
+    assert "2,000-token refill and 4,000-token burst" in capacity
+    assert "0.02 aggregate cgroup CPU-seconds per normalized token" in capacity
+    assert "128 MiB of RSS" in capacity
+    assert "product continues to use the lower 100-token default" in capacity
+
+
+def test_input_rate_docs_separate_the_portable_default_from_setup_capacity() -> None:
+    readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    configuration = " ".join(
+        (DOCS / "configuration.md").read_text(encoding="utf-8").split()
+    )
+    performance = " ".join(
+        (DOCS / "performance.md").read_text(encoding="utf-8").split()
+    )
+
+    assert "portable baseline for the minimum tested Sandbox" in readme
+    assert "CPU and memory provide too little information" in configuration
+    assert "capacity gate before setting both fields to higher values" in configuration
+    assert "capacity gate before setting higher values for a faster setup" in performance
+
+
+def test_performance_requires_exact_placement_for_the_primary_trajectory() -> None:
+    source = " ".join((DOCS / "performance.md").read_text(encoding="utf-8").split())
+
+    assert "primary placed trajectory requires one exact requested region" in source
+    assert "missing or broad region fails before lease acquisition" in source
+    assert "unset or broad selector remains available only to explicit low-level" in source
+    assert "General SDK usage | Leave `runtime.modal_region=None`" not in source
+
+
+def test_named_image_documentation_matches_browser_prewarm_validation() -> None:
+    source = " ".join((DOCS / "configuration.md").read_text(encoding="utf-8").split())
+
+    assert "`browser.prewarm` remains an explicit application choice and may be `false`" in source
+    assert "require an explicit `browser.kind` plus `browser.prewarm=true`" not in source
+
+
+def test_article_attributes_the_screenshot_transport_and_corrects_the_opening_math() -> None:
+    source = (DOCS / "drafts/modal-optimized-low-latency.md").read_text(encoding="utf-8")
+
+    assert "separate warm screenshot and click medians added up to 47 ms" in source
+    assert "This is not a measured fused turn" in source
+    assert "37.25 ms benchmark request also used the raw binary HTTP endpoint" in source
+    assert "persistent" in source
+    assert "encoded to PNG in memory" in source
+
+
+def test_examples_index_promotes_only_the_complete_trajectory() -> None:
+    source = (ROOT / "examples" / "README.md").read_text(encoding="utf-8")
+    primary = _section(source, "## Primary path", "## Low-level compatibility")
+
+    assert "modal_function_session_handoff.py" in primary
+    assert "one borrow" in primary.lower()
+    assert "pooled async HTTP" in primary
+    assert "computer.step" in primary
+    assert "full_bytes(" not in primary
+    assert "external caller" not in primary.lower()
+
+
+def test_hosted_docs_handoff_cuts_provider_loops_over_to_computer_step() -> None:
+    source = (DOCS / "hosted-documentation-handoff.json").read_text(encoding="utf-8")
+
+    assert "computer.step()" in source
+    assert "computer-step-envelope-v1" in source
+    assert "immediate post-action frame" in source
+    assert "application-owned readiness" in source
+    assert "47.10 ms" in source
+    assert "not a measured fused turn" in source
+
+
+def test_hosted_docs_handoff_publishes_weighted_input_capacity_evidence() -> None:
+    source = (DOCS / "hosted-documentation-handoff.json").read_text(encoding="utf-8")
+
+    assert '"route": "/benchmarks/input-capacity"' in source
+    assert "docs/benchmark-results-2026-08-08-input-capacity.md" in source
+    for index in range(1, 4):
+        assert f"benchmark-data/input-capacity-run-{index}-2026-08-08.json" in source
+    assert "100-token-per-second refill" in source
+    assert "400-token burst" in source
+    assert "scripts/run_input_capacity_gate.py" in source
+
+
+def test_api_trajectory_example_uses_one_exact_requested_region() -> None:
+    source = (DOCS / "api.md").read_text(encoding="utf-8")
+    section = _section(
+        source,
+        "Use the native-async borrow context inside an async user-owned Modal Function:",
+        "Constructing the context does not contact Modal",
+    )
+
+    assert 'FUNCTION_REGION = "us-west-2"' in section
+    assert "Replace this with one exact region measured for your workload." in section
+    assert 'FUNCTION_REGION = "us-west"' not in section
+    assert section.count("handle.borrow_async(") == 1
+    assert "await computer.step(" in section
+    code_blocks = [match.group("source") for match in PYTHON_FENCE_RE.finditer(section)]
+    assert len(code_blocks) == 1
+    compile(code_blocks[0], "docs/api.md optimized trajectory", "exec")

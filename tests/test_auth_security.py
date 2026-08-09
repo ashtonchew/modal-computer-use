@@ -570,7 +570,7 @@ def test_sanitize_payload_redacts_sensitive_numeric_values() -> None:
     assert payload["empty_token"] is None
 
 
-def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
+def test_command_run_omits_stdout_stderr_and_message_from_errors(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
 
     async def run_command(command, timeout=30.0):
@@ -594,9 +594,8 @@ def test_command_run_sanitizes_stdout_stderr_and_message(tmp_path) -> None:
 
     assert response.status_code == 400
     assert body["code"] == "command_failed"
-    assert body["message"] == "Bearer [redacted]"
-    assert body["details"]["stdout"]["redacted"] is True
-    assert body["details"]["stderr"]["redacted"] is True
+    assert body["message"] == "command failed"
+    assert body["details"] == {"returncode": 1}
     assert "message-secret" not in serialized
     assert "stdout-secret" not in serialized
     assert "stderr-secret" not in serialized

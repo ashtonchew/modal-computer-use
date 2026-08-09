@@ -1,5 +1,32 @@
 # Security
 
+## Secure the primary trajectory
+
+Treat the versioned session handle as sensitive routing identity even though it is not a bearer
+credential. Do not log, publish, or return it through an unauthenticated application endpoint. The
+application-owned Modal Function resolves fresh access when the borrow starts.
+
+With attested-tunnel ingress, `borrow_async()` exchanges authentication once and reuses that client
+state for the trajectory. Every daemon request still crosses authenticated Modal ingress. Client
+reuse does not remove ingress, authorization, or the need to protect the Function entry point.
+
+Placement, handle protocol, live policy, readiness, and capability checks fail before the default
+trajectory can mutate the desktop. The SDK does not silently fall back to an external caller or a
+different transport. After possible dispatch, it does not replay a mutation automatically.
+
+`computer.step()` returns action data and screenshot bytes in one versioned envelope. Treat the
+whole response as secret-bearing. Do not log the envelope, decoded screenshot, typed text,
+clipboard text, daemon URL, bearer token, or receipt data. If response decoding fails after possible
+dispatch, use receipt recovery and do not replay the step.
+
+Keep daemon URLs, bearer tokens, noVNC URLs, session handles, typed text, clipboard text, screenshot
+bytes, and artifact bytes out of logs and error text. Do not include them in resolved configuration
+reports or benchmark artifacts. A byte-backed `Screenshot` is still secret-bearing screen content.
+
+Owner and borrower roles are separate. The owner retains lifecycle authority and terminates the
+desktop only after remote work finishes. The borrower holds one exclusive trajectory lease,
+releases it on exit, and never terminates the owner's Sandbox.
+
 **The daemon has full desktop control.** It can click, type, read clipboard contents, launch applications, and read or write artifacts. Never expose its control routes as an unauthenticated public service. `/healthz` and `/readyz` are unauthenticated probe endpoints only; query-string tokens are still rejected there.
 
 ## Authentication
@@ -75,9 +102,12 @@ use route paths and bounded action/artifact metadata; they do not include query 
 Authorization headers, typed text, clipboard text, screenshot bytes, recording bytes, stdout, or
 stderr.
 
-The daemon enforces action budgets and a simple per-sandbox rolling action rate limit. Over-limit
-requests fail with structured `budget_exceeded` or `rate_limited` errors and do not include typed
-text, clipboard text, raw command output, tokens, screenshot bytes, or artifact bytes.
+The daemon combines action budgets with a weighted, daemon-local input token bucket. It reserves a
+complete recursive action batch before mutation. This prevents partial execution at a rate-limit
+boundary. Over-limit requests fail with structured `budget_exceeded`, `rate_limited`, or
+`input_cost_exceeds_burst` errors. Errors may report non-secret input-work token counts, but they do
+not include bearer tokens, typed text, clipboard text, raw command output, screenshot bytes, or
+artifact bytes.
 Authenticated debug routes that intentionally return command output or process log tails sanitize
 known secret-bearing substrings such as bearer tokens, noVNC URLs, and artifact URIs before sending
 the response.

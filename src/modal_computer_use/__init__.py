@@ -26,9 +26,13 @@ from .errors import (
     SessionBorrowError,
     SessionBusyError,
     SessionCompatibilityError,
+    SessionDaemonProtocolError,
     SessionEnvironmentMismatchError,
     SessionLeaseLostError,
+    SessionPlacementMalformedError,
     SessionPlacementMismatchError,
+    SessionPlacementMissingError,
+    SessionPlacementUnverifiableError,
     SessionRecoveryRequiredError,
     SessionTargetMismatchError,
 )
@@ -90,6 +94,7 @@ from .sandbox import (
     run_modal_daemon_command,
     run_modal_daemon_command_with_fallback,
 )
+from .steps import ComputerStepResult, ComputerStepTiming
 
 __all__ = [
     "ActionBatchResult",
@@ -117,6 +122,8 @@ __all__ = [
     "ComputerSandboxManager",
     "ComputerSessionHandle",
     "ComputerStatus",
+    "ComputerStepResult",
+    "ComputerStepTiming",
     "ConfigConflictError",
     "CoordinateSpace",
     "DaemonClient",
@@ -154,9 +161,13 @@ __all__ = [
     "SessionBorrowError",
     "SessionBusyError",
     "SessionCompatibilityError",
+    "SessionDaemonProtocolError",
     "SessionEnvironmentMismatchError",
     "SessionLeaseLostError",
+    "SessionPlacementMalformedError",
     "SessionPlacementMismatchError",
+    "SessionPlacementMissingError",
+    "SessionPlacementUnverifiableError",
     "SessionRecoveryAcknowledgement",
     "SessionRecoveryRequiredError",
     "SessionRecoveryStatus",

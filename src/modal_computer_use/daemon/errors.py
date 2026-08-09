@@ -18,12 +18,14 @@ class DaemonError(Exception):
         status_code: int = 400,
         code: str = "daemon_error",
         details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.code = code
         self.details = details or {}
+        self.headers = headers or {}
 
 
 def public_input_error(exc: Exception) -> DaemonError | None:

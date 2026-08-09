@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import warnings
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -12,7 +12,11 @@ ModalIngress = Literal["attested-tunnel", "connect", "tunnel"]
 
 
 class StrictBaseModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        hide_input_in_errors=True,
+        populate_by_name=True,
+    )
 
 
 class DesktopConfig(StrictBaseModel):
@@ -152,9 +156,9 @@ class BrowserConfig(StrictBaseModel):
             "browser installed but does not launch it."
         ),
     )
-    profile_dir: str | None = None
-    launch_args: list[str] = Field(default_factory=list)
-    open_url_on_start: str | None = None
+    profile_dir: str | None = Field(default=None, repr=False)
+    launch_args: list[str] = Field(default_factory=list, repr=False)
+    open_url_on_start: str | None = Field(default=None, repr=False)
     gpu_mode: Literal["auto", "off", "chromium-vulkan"] | None = None
 
     @field_validator("launch_args")
@@ -181,7 +185,18 @@ class ActionConfig(StrictBaseModel):
     max_batch_duration_ms: int = Field(default=30_000, ge=1, le=600_000)
     default_action_timeout_ms: int = Field(default=5_000, ge=1, le=300_000)
     max_action_timeout_ms: int = Field(default=300_000, ge=1, le=600_000)
-    input_rate_limit_per_sec: int = Field(default=20, ge=0, le=10_000)
+    input_rate_limit_per_sec: int = Field(
+        default=100,
+        ge=0,
+        le=10_000,
+        description="Weighted input-work tokens refilled per second; zero disables the limit.",
+    )
+    input_rate_limit_burst: int = Field(
+        default=400,
+        ge=1,
+        le=100_000,
+        description="Maximum weighted input-work tokens available for atomic admission.",
+    )
     input_backend: Literal["auto", "xtest", "xdotool"] = "auto"
     subprocess_backend: Literal["asyncio", "threaded", "isolated-asyncio"] = (
         "isolated-asyncio"
@@ -246,6 +261,37 @@ class ComputerConfig(StrictBaseModel):
             ):
                 raise ValueError("named image selection requires browser.kind")
         return self
+
+    def resolved_cost_and_placement(self) -> dict[str, Any]:
+        """Return inspectable cost and placement choices without secret-bearing fields."""
+        browser = self.browser
+        return {
+            "modal_environment": self.runtime.modal_environment,
+            "modal_region": self.runtime.modal_region,
+            "sandbox": {
+                "cpu": self.resources.cpu,
+                "memory_mib": self.resources.memory_mib,
+                "gpu": self.resources.gpu,
+                "resource_profile": self.resources.profile,
+                "timeout_seconds": self.runtime.timeout_seconds,
+                "idle_timeout_seconds": self.runtime.idle_timeout_seconds,
+                "readiness_timeout_seconds": self.runtime.readiness_timeout_seconds,
+                "image": {
+                    "source": self.image.source,
+                    "revision": self.image.revision,
+                    "environment_name": self.image.environment_name,
+                },
+                "browser": (
+                    None
+                    if browser is None
+                    else {
+                        "kind": browser.kind,
+                        "prewarm": browser.prewarm,
+                        "gpu_mode": browser.gpu_mode,
+                    }
+                ),
+            },
+        }
 
 
 def normalize_vnc_mode(value: VncMode | bool) -> VncMode:

@@ -52,11 +52,18 @@ class DaemonHTTPError(ComputerUseError):
         status_code: int | None = None,
         code: str | None = None,
         details: dict[str, Any] | None = None,
+        retry_after_seconds: int | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.details = details or {}
+        self.retry_after_seconds = retry_after_seconds
+
+    @property
+    def retry_after_ms(self) -> int | None:
+        value = self.details.get("retry_after_ms")
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 class UnsupportedActionError(ComputerUseError):
@@ -112,6 +119,30 @@ class SessionPlacementMismatchError(SessionCompatibilityError):
     """Raised when Function placement does not match the session policy."""
 
     message = "the Function placement does not match the session policy"
+
+
+class SessionPlacementMissingError(SessionCompatibilityError):
+    """Raised when required Function placement metadata is absent."""
+
+    message = "required Function placement metadata is missing"
+
+
+class SessionPlacementMalformedError(SessionCompatibilityError):
+    """Raised when Function placement metadata cannot identify a region."""
+
+    message = "Function placement metadata is malformed"
+
+
+class SessionPlacementUnverifiableError(SessionCompatibilityError):
+    """Raised when Function or target placement cannot be verified."""
+
+    message = "Function or target placement could not be verified"
+
+
+class SessionDaemonProtocolError(SessionCompatibilityError):
+    """Raised when the daemon lacks the required trajectory protocol."""
+
+    message = "the daemon does not support the required trajectory protocol"
 
 
 class SessionTargetMismatchError(SessionBorrowError):

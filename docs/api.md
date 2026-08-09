@@ -1,6 +1,10 @@
 # API
 
-The SDK is a thin Python client over the daemon's HTTP API. Start with:
+The primary Interface is an async owner, a versioned session handle, and one borrowed trajectory in
+an application-owned Modal Function. This establishes the placed, connection-reusing path by
+default. There is no `optimized=True` switch and no performance-profile toggle.
+
+Start with:
 
 ```python
 from modal_computer_use import (
@@ -9,6 +13,7 @@ from modal_computer_use import (
     ComputerConfig,
     ComputerSandbox,
     ComputerSessionHandle,
+    ComputerStepResult,
     DaemonClient,
 )
 ```
@@ -20,10 +25,35 @@ Choose the surface by who owns the desktop:
 | Connect to a daemon that already exists | `AsyncDaemonClient` | Connections only |
 | Create or attach to a Modal desktop from async Python | `AsyncComputerSandbox` | Created desktops are owned; attached desktops are not |
 | Run one repeated trajectory in a deployed Modal Function | `ComputerSessionHandle.borrow_async()` | One lease and connection; the original owner keeps the Sandbox |
+| Send one ordered action array and receive its immediate frame | `computer.step()` on a borrowed computer | Uses the active trajectory lease |
+
+For the primary path, create the desktop with `AsyncComputerSandbox.create()`, call
+`owner.session_handle()`, and pass that handle to the placed Function. Enter one `borrow_async()`
+context around the complete screenshot, model, and action loop. Do not borrow once per turn.
+Send each ordered model action array through `computer.step([...])`. It uses one HTTP request for
+the action batch and its immediate post-action frame.
 
 `AsyncDaemonClient` connects to a daemon that is already running. `AsyncComputerSandbox` performs
 Modal provisioning and attachment without blocking the event loop. `borrow_async()` reconnects to
 an already-provisioned desktop for one complete deployed-Function trajectory.
+
+`screenshots.full()` returns a typed `Screenshot`. Inline full screenshots use the binary HTTP
+response and populate `Screenshot.bytes`; call `as_bytes()` or `to_base64()` when an integration
+needs a different representation. The borrowed `AsyncDaemonClient` and its pooled async HTTP client
+remain open for the complete trajectory.
+
+`computer.step()` is available on `BorrowedComputer` and `AsyncBorrowedComputer`. It returns a
+`ComputerStepResult` with `actions`, `screenshot`, and `timing` fields. The `actions` field is the
+normal `ActionBatchResult`. The `screenshot` field is a byte-backed `Screenshot` captured
+immediately after the action phase. This immediate post-action frame is not application readiness.
+
+## Low-level compatibility
+
+`ComputerSandbox`, `DaemonClient`, `AsyncDaemonClient.local()`, direct REST routes, attach flows,
+idempotency controls, and `screenshots.full_bytes()` remain supported for local control, direct
+daemon access, debugging, and compatibility. These primitives do not create or verify the placed
+owner-to-Function topology. Missing placement or handoff prerequisites never cause an automatic
+fallback to an external caller.
 
 `AsyncDaemonClient` provides the same typed namespaces for a daemon that is already running:
 
@@ -155,17 +185,19 @@ budget.
 Use the native-async borrow context inside an async user-owned Modal Function:
 
 ```python
-FUNCTION_REGION = "us-west"
+# Replace this with one exact region measured for your workload.
+FUNCTION_REGION = "us-west-2"
 
 
 async def trajectory(handle: ComputerSessionHandle, task: str, run_id: str) -> None:
     async with handle.borrow_async(
         run_id=run_id, function_region=FUNCTION_REGION
     ) as computer:
+        screenshot = await computer.screenshots.full()
         for _ in range(3):
-            screenshot = await computer.screenshots.full()
             action = await application_model_call(task, screenshot)
-            await computer.actions.run([action])
+            result = await computer.step([action], continue_on_error=False)
+            screenshot = result.screenshot
 ```
 
 Constructing the context does not contact Modal or create credentials. Entering it requires an
@@ -187,6 +219,12 @@ of those routing or policy fields is rejected before credentials are issued with
 of Modal's 10-tag Sandbox budget.
 
 `borrow_async()` is canonical for async Modal Functions and uses Modal's native `.aio` calls.
+One borrow uses one `AsyncDaemonClient` and its pooled HTTP client for screenshots, actions, lease
+requests, and readiness checks. With `attested-tunnel`, the SDK exchanges the attested token once
+when the borrow starts. It then reuses that authentication state until the borrow ends. Every
+request still crosses authenticated Modal ingress. Authentication reuse does not remove ingress
+routing.
+
 Borrowed async application code, including model calls, must not block the event loop so the
 independent heartbeat and other desktop trajectories can progress. `borrow()` remains supported
 for synchronous callers. Entry acquires one exclusive daemon trajectory
@@ -253,6 +291,9 @@ need to know whether a Modal noVNC URL exists.
 - `input_backends_available` is the most recent readiness probe's usable set. It is empty before
   the first probe and whenever the probe has not observed a usable adapter. `xdotool` appears only
   after a bounded, display-aware command probe succeeds; finding its executable is not sufficient.
+- `input_rate_limit_policy` identifies the normalized weight contract. Version 1 reports
+  `normalized-input-work-v1`.
+- `input_rate_limit_tokens_per_sec` and `input_rate_limit_burst` report the resolved daemon values.
 
 Capability reads report cached state and do not trigger a new input probe.
 
@@ -365,7 +406,15 @@ adds `zoom`. Older versions reject newer actions instead of accepting them silen
 Native async creation, attachment, and named acquisition are lazy, one-shot context managers:
 
 ```python
-async with AsyncComputerSandbox.create(config=ComputerConfig()) as computer:
+placed = ComputerConfig(
+    runtime={"modal_environment": "main", "modal_region": "us-west-2"},
+)
+async with AsyncComputerSandbox.create(config=placed) as computer:
+    await computer.mouse.click(320, 240)
+
+async with AsyncComputerSandbox.create_unplaced(
+    config=ComputerConfig(),
+) as computer:
     await computer.mouse.click(320, 240)
 
 async with AsyncComputerSandbox.attach(sandbox_id="sb-...") as computer:
@@ -378,7 +427,13 @@ async with AsyncComputerSandbox.attach_or_create(
     await computer.screenshots.full()
 ```
 
-Modal work begins on entry, and every context is ready when it yields. Async attachment accepts
+`create()` is the primary handoff owner. On entry, it rejects a missing environment, a missing or
+broad region, malformed placement, tunnel ingress, control VNC, and warm-pool tagging before any
+Modal lookup or Sandbox allocation. Those modes cannot produce the primary handoff contract.
+`create_unplaced()` is the explicit low-level compatibility path. It can own a desktop for direct
+namespace work, but it does not promise an eligible placed handoff.
+
+Modal work begins on entry, and every accepted context is ready when it yields. Async attachment accepts
 exactly one Modal selector: `sandbox_id`, `name`, or `run_id`. Direct daemon URLs belong to
 `AsyncDaemonClient`. Async orchestration does not expose `wait=False`.
 
@@ -532,11 +587,15 @@ instead, and cursor-position queries do not consume the action budget. Successfu
 responses include timing metadata as `timing.daemon_ms`, measured inside the daemon for the
 batch request. The timing object contains only elapsed milliseconds and no command strings,
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
-`actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a
-simple per-daemon rolling one-second action limit. The limit applies to `/v1/actions/run` and
-direct desktop-affecting mutation routes, including mouse, keyboard, clipboard writes/clears,
-windows, apps, browser, and commands; failures return `rate_limited` without executing the
-over-limit action.
+`actions.input_rate_limit_per_sec` and `actions.input_rate_limit_burst` configure one daemon-local
+token bucket. The defaults are 100 normalized input-work tokens per second and a 400-token
+burst. Repeated clicks, long typing, large scrolls, drag paths, hotkeys, and nested `hold_key`
+actions cost more than a simple move or click. Screenshots, waits, zooms, and cursor queries use no
+input tokens. The daemon computes and reserves the complete recursive batch cost before mutation.
+A batch that can fit but lacks current credit returns `429 rate_limited`, `retry_after_ms`, and
+`Retry-After`. A batch whose cost exceeds the configured burst returns the non-retryable
+`422 input_cost_exceeds_burst`. Neither response executes an action or creates a Step receipt.
+Direct desktop mutation routes use the same bucket, so they cannot bypass the trajectory limit.
 `screenshot_after` is an implicit trailing screenshot operation. Its screenshot and artifact
 budgets are reserved after earlier batch actions complete, immediately before capture, so a budget
 failure is returned as a trailing `screenshot_after` result rather than rolling back already

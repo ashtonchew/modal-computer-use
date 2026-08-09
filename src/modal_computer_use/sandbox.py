@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets as _secrets
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -27,9 +28,13 @@ from .errors import (
     SandboxAmbiguousError,
     SandboxUnavailableError,
     SessionCompatibilityError,
+    SessionDaemonProtocolError,
     SessionEnvironmentMismatchError,
     SessionLeaseLostError,
+    SessionPlacementMalformedError,
     SessionPlacementMismatchError,
+    SessionPlacementMissingError,
+    SessionPlacementUnverifiableError,
     SessionTargetMismatchError,
 )
 from .hot_session import AsyncHotSessionClient, HotSessionClient
@@ -63,6 +68,7 @@ from .namespaces import (
     WindowsNamespace,
 )
 from .observations import AsyncObservationClient, ObservationClient
+from .protocol_compatibility import validate_default_trajectory_protocol
 from .state import APP_ID_TAG, compute_config_hash, default_tags, new_run_id, warm_pool_tags
 from .transports import (
     AsyncHTTPTransport,
@@ -1034,21 +1040,31 @@ class _ModalFunctionSessionBorrow:
             borrowed._invalidate()
         if sandbox is None or client is None or coordinator is None:
             return
-        cleanup_errors: list[BaseException] = []
-        for cleanup in (coordinator.close, client.close, sandbox.detach):
+        cleanup_errors: list[tuple[str, BaseException]] = []
+        for operation_name, cleanup in (
+            ("lease_coordinator.close", coordinator.close),
+            ("client.close", client.close),
+            ("sandbox.detach", sandbox.detach),
+        ):
             try:
                 cleanup()
             except BaseException as cleanup_exc:
-                cleanup_errors.append(cleanup_exc)
+                cleanup_errors.append((operation_name, cleanup_exc))
         if cleanup_errors:
-            first_cleanup_error = cleanup_errors[0]
             if isinstance(exc, BaseException):
-                exc.add_note(
-                    "borrowed session cleanup also failed: "
-                    f"cleanup ({type(first_cleanup_error).__name__})"
-                )
+                for operation_name, cleanup_error in cleanup_errors:
+                    exc.add_note(
+                        "borrowed session cleanup also failed: "
+                        f"{operation_name} ({type(cleanup_error).__name__})"
+                    )
                 return
-            raise SessionLeaseLostError() from first_cleanup_error
+            cleanup_failure = SessionLeaseLostError()
+            for operation_name, cleanup_error in cleanup_errors:
+                cleanup_failure.add_note(
+                    "borrowed session cleanup failed: "
+                    f"{operation_name} ({type(cleanup_error).__name__})"
+                )
+            raise cleanup_failure from None
 
 
 class _AsyncModalFunctionSessionBorrow:
@@ -1103,40 +1119,53 @@ class _AsyncModalFunctionSessionBorrow:
         if sandbox is None or client is None or coordinator is None:
             return
 
-        async def cleanup() -> None:
-            cleanup_errors: list[BaseException] = []
-            for operation in (
-                coordinator.aclose,
-                client.aclose,
-                sandbox.detach.aio,
+        async def cleanup() -> list[tuple[str, BaseException]]:
+            cleanup_errors: list[tuple[str, BaseException]] = []
+            for operation_name, operation in (
+                ("lease_coordinator.aclose", coordinator.aclose),
+                ("client.aclose", client.aclose),
+                ("sandbox.detach.aio", sandbox.detach.aio),
             ):
                 try:
                     await operation()
                 except BaseException as cleanup_exc:
-                    cleanup_errors.append(cleanup_exc)
-            if cleanup_errors:
-                raise SessionLeaseLostError() from cleanup_errors[0]
+                    cleanup_errors.append((operation_name, cleanup_exc))
+            return cleanup_errors
 
         task = asyncio.create_task(cleanup())
         cancellation: asyncio.CancelledError | None = None
         while True:
             try:
-                await asyncio.shield(task)
+                cleanup_errors = await asyncio.shield(task)
             except asyncio.CancelledError as cleanup_cancelled:
                 if task.cancelled():
                     raise
                 cancellation = cancellation or cleanup_cancelled
                 continue
-            except Exception as cleanup_exc:
-                if isinstance(exc, BaseException):
+            if isinstance(exc, BaseException):
+                for operation_name, cleanup_error in cleanup_errors:
                     exc.add_note(
                         "borrowed session cleanup also failed: "
-                        f"cleanup ({type(cleanup_exc).__name__})"
+                        f"{operation_name} ({type(cleanup_error).__name__})"
                     )
-                    return
-                raise
+                if cancellation is not None:
+                    exc.add_note("borrowed session cleanup also observed cancellation")
+                return
             if cancellation is not None:
+                for operation_name, cleanup_error in cleanup_errors:
+                    cancellation.add_note(
+                        "borrowed session cleanup also failed: "
+                        f"{operation_name} ({type(cleanup_error).__name__})"
+                    )
                 raise cancellation
+            if cleanup_errors:
+                cleanup_failure = SessionLeaseLostError()
+                for operation_name, cleanup_error in cleanup_errors:
+                    cleanup_failure.add_note(
+                        "borrowed session cleanup failed: "
+                        f"{operation_name} ({type(cleanup_error).__name__})"
+                    )
+                raise cleanup_failure from None
             return
 
 
@@ -1166,10 +1195,58 @@ def _validate_borrow_request(
     ):
         raise SessionEnvironmentMismatchError
     if not isinstance(function_region, str) or not function_region.strip():
-        raise ValueError("function_region must be a non-empty string")
+        raise SessionPlacementMissingError
+    if not _is_modal_region_selector(function_region):
+        raise SessionPlacementMalformedError
+    if not _is_exact_modal_region_selector(function_region):
+        raise SessionPlacementUnverifiableError
+    requested_region = handle.requested_modal_region
+    if not _is_modal_region_selector(requested_region):
+        raise SessionPlacementMalformedError
+    if not _is_exact_modal_region_selector(requested_region):
+        raise SessionPlacementUnverifiableError
     if function_region != handle.requested_modal_region:
         raise SessionPlacementMismatchError
+    observed_function_region = os.environ.get("MODAL_REGION")
+    if observed_function_region is None or not observed_function_region.strip():
+        raise SessionPlacementMissingError
+    if not _is_modal_region_selector(observed_function_region):
+        raise SessionPlacementMalformedError
+    if not _is_exact_modal_region_selector(observed_function_region):
+        raise SessionPlacementUnverifiableError
+    if observed_function_region != requested_region:
+        raise SessionPlacementMismatchError
     if handle.vnc_mode not in {"off", "view_only"}:
+        raise SessionCompatibilityError
+
+
+def _is_modal_region_selector(value: str) -> bool:
+    return re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+", value) is not None
+
+
+def _is_exact_modal_region_selector(value: str) -> bool:
+    return re.fullmatch(r"[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*", value) is not None
+
+
+def _validate_placed_owner_configuration(inputs: _SandboxCreateInputs) -> None:
+    """Reject an owner that cannot produce a verifiably placed handoff."""
+    config = inputs.config
+    environment = config.runtime.modal_environment
+    if not isinstance(environment, str) or not environment.strip():
+        raise SessionEnvironmentMismatchError
+
+    region = config.runtime.modal_region
+    if not isinstance(region, str) or not region.strip():
+        raise SessionPlacementMissingError
+    if not _is_modal_region_selector(region):
+        raise SessionPlacementMalformedError
+    if not _is_exact_modal_region_selector(region):
+        raise SessionPlacementUnverifiableError
+    if config.ingress not in {"attested-tunnel", "connect"}:
+        raise SessionCompatibilityError
+    if inputs.vnc_mode == "control":
+        raise SessionCompatibilityError
+    if inputs.tag_profile != "default":
         raise SessionCompatibilityError
 
 
@@ -2256,15 +2333,14 @@ class ComputerSandbox:
         cleanup_errors: list[tuple[str, BaseException]] = []
         operations: list[tuple[str, Callable[[], object]]]
         if self._lifecycle_mode == "owned":
-            operations = [("sandbox.terminate", lambda: self.terminate(wait=True))]
+            operations = [("client.close", self.client.close)]
+            operations.append(("sandbox.terminate", lambda: self.terminate(wait=True)))
             if self._sandbox is not None and hasattr(self._sandbox, "detach"):
                 operations.append(("sandbox.detach", self._sandbox.detach))
-            operations.append(("client.close", self.client.close))
         elif self._lifecycle_mode == "attached":
-            operations = []
+            operations = [("client.close", self.client.close)]
             if self._sandbox is not None and hasattr(self._sandbox, "detach"):
                 operations.append(("sandbox.detach", self._sandbox.detach))
-            operations.append(("client.close", self.client.close))
         elif self._lifecycle_mode == "local":
             operations = [("client.close", self.client.close)]
         else:
@@ -2407,9 +2483,11 @@ class ComputerSandbox:
 class AsyncComputerSandbox:
     """Native-async owner or attachment for one Modal computer Sandbox.
 
-    Construct instances through :meth:`create`, :meth:`attach`, or
-    :meth:`attach_or_create`. Each method returns a lazy async context manager
-    and performs no Modal work until entry.
+    The primary :meth:`create` path requires an explicit Modal environment and
+    exact region so the owner can produce a placed session handoff. Use
+    :meth:`create_unplaced` only for intentional low-level compatibility work.
+    Each constructor returns a lazy async context manager and performs no Modal
+    work until entry.
     """
 
     def __init__(
@@ -2466,7 +2544,7 @@ class AsyncComputerSandbox:
         tag_profile: Literal["default", "warm_pool"] = "default",
         **sandbox_kwargs: Any,
     ) -> AbstractAsyncContextManager[AsyncComputerSandbox]:
-        """Build a lazy context that owns a newly created Modal Sandbox."""
+        """Own a placed Sandbox that can be handed to a nearby Modal Function."""
         return _AsyncComputerSandboxContext(
             lambda: _create_async_computer_sandbox(
                 config=config,
@@ -2482,6 +2560,46 @@ class AsyncComputerSandbox:
                 readiness_timeout=None,
                 timing=timing,
                 tag_profile=tag_profile,
+                require_placed_handoff=True,
+                sandbox_kwargs=sandbox_kwargs,
+            )
+        )
+
+    @classmethod
+    def create_unplaced(
+        cls,
+        *,
+        config: ComputerConfig | None = None,
+        app_name: str = "modal-computer-use",
+        name: str | None = None,
+        image: object | None = None,
+        expose_vnc: bool | str | None = None,
+        tags: Mapping[str, str] | None = None,
+        app_tags: Mapping[str, str] | None = None,
+        secrets: Sequence[object] | None = None,
+        volumes: Mapping[str, object] | None = None,
+        owner: str | None = None,
+        timing: SessionStartupTiming | None = None,
+        tag_profile: Literal["default", "warm_pool"] = "default",
+        **sandbox_kwargs: Any,
+    ) -> AbstractAsyncContextManager[AsyncComputerSandbox]:
+        """Own a low-level Sandbox without requiring a handoff placement."""
+        return _AsyncComputerSandboxContext(
+            lambda: _create_async_computer_sandbox(
+                config=config,
+                app_name=app_name,
+                name=name,
+                image=image,
+                expose_vnc=expose_vnc,
+                tags=tags,
+                app_tags=app_tags,
+                secrets=secrets,
+                volumes=volumes,
+                owner=owner,
+                readiness_timeout=None,
+                timing=timing,
+                tag_profile=tag_profile,
+                require_placed_handoff=False,
                 sandbox_kwargs=sandbox_kwargs,
             )
         )
@@ -2567,6 +2685,13 @@ class AsyncComputerSandbox:
             policy=self._session_handoff_policy,
         )
 
+    async def runtime_placement(self) -> dict[str, str | None]:
+        """Return the cloud and region observed inside the Modal Sandbox."""
+        sandbox = self._sandbox
+        if sandbox is None:
+            raise SandboxUnavailableError("the Modal Sandbox handle has been detached")
+        return await _sandbox_runtime_placement_async(sandbox)
+
     async def terminate(self, *, wait: bool = False) -> None:
         async with self._lifecycle_lock:
             sandbox = self._sandbox
@@ -2631,6 +2756,7 @@ async def _create_async_computer_sandbox(
     readiness_timeout: float | None,
     timing: SessionStartupTiming | None,
     tag_profile: Literal["default", "warm_pool"],
+    require_placed_handoff: bool,
     sandbox_kwargs: Mapping[str, Any],
 ) -> AsyncComputerSandbox:
     startup_timing = timing or SessionStartupTiming()
@@ -2657,6 +2783,8 @@ async def _create_async_computer_sandbox(
         tag_profile=tag_profile,
         sandbox_kwargs=sandbox_kwargs,
     )
+    if require_placed_handoff:
+        _validate_placed_owner_configuration(inputs)
     timeout = (
         float(inputs.config.runtime.readiness_timeout_seconds)
         if readiness_timeout is None
@@ -2805,6 +2933,7 @@ async def _attach_or_create_async_computer_sandbox(
                     readiness_timeout=timeout,
                     timing=timing,
                     tag_profile=inputs.tag_profile,
+                    require_placed_handoff=False,
                     sandbox_kwargs=inputs.sandbox_kwargs,
                 )
             except Exception as exc:
@@ -3302,7 +3431,9 @@ async def _close_async_computer_context(
         sandbox = computer._sandbox
         if sandbox is None or computer._lifecycle_mode == "detached":
             return
-        operations: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+        operations: list[tuple[str, Callable[[], Awaitable[object]]]] = [
+            ("client.aclose", computer.client.aclose)
+        ]
         if computer._lifecycle_mode == "owned":
             operations.append(
                 (
@@ -3313,7 +3444,6 @@ async def _close_async_computer_context(
         operations.append(
             ("sandbox.detach.aio", _modal_aio_operation(sandbox, "detach"))
         )
-        operations.append(("client.aclose", computer.client.aclose))
         errors, cancellation = await _collect_async_cleanup(operations)
         if not any(name == "sandbox.detach.aio" for name, _error in errors):
             computer._sandbox = None
@@ -4127,6 +4257,7 @@ def _daemon_environment(
         "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS": str(config.actions.default_action_timeout_ms),
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),
         "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC": str(config.actions.input_rate_limit_per_sec),
+        "COMPUTER_USE_INPUT_RATE_LIMIT_BURST": str(config.actions.input_rate_limit_burst),
         "COMPUTER_USE_INPUT_BACKEND": config.actions.input_backend,
         "COMPUTER_USE_SUBPROCESS_BACKEND": config.actions.subprocess_backend,
         "COMPUTER_USE_DAEMON_HTTP_VERSION": config.network.daemon_http_version,
@@ -4419,7 +4550,12 @@ def _borrow_modal_function_session(
     transport: HTTPTransport | None = None
     coordinator: object | None = None
     try:
-        tags = _read_modal_object_tags(sandbox)
+        try:
+            tags = _read_modal_object_tags(sandbox)
+        except Exception:
+            raise SessionPlacementUnverifiableError from None
+        if tags is None:
+            raise SessionPlacementUnverifiableError
         if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
             raise SessionTargetMismatchError()
         token_info = sandbox.create_connect_token(
@@ -4438,6 +4574,9 @@ def _borrow_modal_function_session(
             token=token,
             http2=handle.daemon_http_version == "2",
         )
+        client = DaemonClient(base_url, transport=transport)
+        _wait_borrowed_ready_sync(client, readiness_timeout)
+        _verify_borrowed_daemon_protocol_sync(client)
         from .session_lease import SessionLeaseCoordinator
 
         coordinator = SessionLeaseCoordinator(transport, run_id=run_id)
@@ -4447,7 +4586,6 @@ def _borrow_modal_function_session(
             transport=transport,
             _mutation_executor=coordinator.execute,
         )
-        _wait_borrowed_ready_sync(client, readiness_timeout)
         return (
             BorrowedComputer(
                 client,
@@ -4486,7 +4624,12 @@ async def _borrow_modal_function_session_async(
     heartbeat_transport: HTTPTransport | None = None
     coordinator: object | None = None
     try:
-        tags = await _read_modal_object_tags_async(sandbox)
+        try:
+            tags = await _read_modal_object_tags_async(sandbox)
+        except Exception:
+            raise SessionPlacementUnverifiableError from None
+        if tags is None:
+            raise SessionPlacementUnverifiableError
         if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
             raise SessionTargetMismatchError()
         token_info = await sandbox.create_connect_token.aio(
@@ -4506,6 +4649,9 @@ async def _borrow_modal_function_session_async(
             timeout=_ASYNC_BORROW_REQUEST_TIMEOUT_SECONDS,
             http2=handle.daemon_http_version == "2",
         )
+        client = AsyncDaemonClient(base_url, transport=transport)
+        await _wait_borrowed_ready_async(client, readiness_timeout)
+        await _verify_borrowed_daemon_protocol_async(client)
         heartbeat_transport = HTTPTransport(
             base_url,
             token=token,
@@ -4527,7 +4673,6 @@ async def _borrow_modal_function_session_async(
             transport=transport,
             _mutation_executor=coordinator.execute,
         )
-        await _wait_borrowed_ready_async(client, readiness_timeout)
         return (
             AsyncBorrowedComputer(
                 client,
@@ -4645,6 +4790,30 @@ async def _wait_borrowed_ready_async(client: AsyncDaemonClient, timeout: float) 
         if time.monotonic() >= deadline:
             raise TimeoutError("borrowed daemon readiness timed out")
         await asyncio.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+
+
+def _verify_borrowed_daemon_protocol_sync(client: DaemonClient) -> None:
+    try:
+        version_payload = client.get_json("/v1/version")
+        capabilities_payload = client.get_json("/v1/capabilities")
+    except Exception:
+        raise SessionDaemonProtocolError from None
+    validate_default_trajectory_protocol(
+        version_payload=version_payload,
+        capabilities_payload=capabilities_payload,
+    )
+
+
+async def _verify_borrowed_daemon_protocol_async(client: AsyncDaemonClient) -> None:
+    try:
+        version_payload = await client.get_json("/v1/version")
+        capabilities_payload = await client.get_json("/v1/capabilities")
+    except Exception:
+        raise SessionDaemonProtocolError from None
+    validate_default_trajectory_protocol(
+        version_payload=version_payload,
+        capabilities_payload=capabilities_payload,
+    )
 
 
 def _detach_after_failed_borrow(sandbox: object) -> None:

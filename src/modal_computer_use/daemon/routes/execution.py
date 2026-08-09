@@ -39,14 +39,17 @@ async def run_input_action[T](
     semantic_data: Any,
     fallback_code: str = "action_failed",
     fallback_message: str = "input action failed",
+    token_cost: int = 1,
 ) -> T:
     await ensure_desktop_ready(request)
     policy = budget_policy(request)
+    # The early check is advisory for non-rate budgets. The token bucket is
+    # refilled and consumed only while the input lock is held below.
     error = policy.action_reservation_error()
     if error is not None:
         raise error
     async with ready_mutation_lock(request, semantic_data=semantic_data):
-        policy.reserve_action()
+        policy.reserve_action_with_cost(token_cost=token_cost)
         result = await operation()
         if _is_indeterminate_action_result(result):
             raise_for_failed_action_result(

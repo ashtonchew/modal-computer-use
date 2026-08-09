@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import sys
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from conftest import (
-    QueuedProviderResponses,
+    AsyncQueuedProviderResponses,
+    AsyncRecordingComputer,
     RecordingComputer,
     load_example,
     tiny_screenshot,
@@ -15,14 +19,39 @@ from conftest import (
 from modal_computer_use.models import (
     ActionBatchResult,
     ActionItemResult,
-    ActionResult,
 )
 
 
-def _client(responses: list[Any]) -> tuple[Any, QueuedProviderResponses]:
-    create = QueuedProviderResponses(responses)
+def _client(responses: list[Any]) -> tuple[Any, AsyncQueuedProviderResponses]:
+    create = AsyncQueuedProviderResponses(responses)
     client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=create.create)))
     return client, create
+
+
+class _AsyncActionsBridge:
+    def __init__(self, computer: RecordingComputer) -> None:
+        self._actions = computer.actions
+
+    async def apply(self, action: Any, **kwargs: Any) -> Any:
+        return self._actions.apply(action, **kwargs)
+
+    async def run(self, actions: list[Any], **kwargs: Any) -> Any:
+        return self._actions.run(actions, **kwargs)
+
+
+class _AsyncScreenshotsBridge:
+    def __init__(self, computer: RecordingComputer) -> None:
+        self._screenshots = computer.screenshots
+
+    async def full(self) -> Any:
+        return self._screenshots.full()
+
+
+def _async_computer(computer: RecordingComputer) -> Any:
+    async def step(actions: list[Any], **kwargs: Any) -> Any:
+        return computer.step(actions, **kwargs)
+
+    return SimpleNamespace(actions=_AsyncActionsBridge(computer), step=step)
 
 
 def _response(*tool_uses: Any) -> Any:
@@ -50,6 +79,145 @@ def _tool_use(
     )
 
 
+@pytest.mark.asyncio
+async def test_placed_anthropic_trajectory_borrows_once_for_the_full_model_loop() -> None:
+    example = load_example("anthropic_message_server.py")
+    events: list[str] = []
+    computer = AsyncRecordingComputer()
+    screenshot = tiny_screenshot().model_copy(
+        update={"bytes": b"png-bytes", "data_base64": None}
+    )
+
+    original_step = computer.step
+
+    async def step(actions: list[Any], **kwargs: Any) -> Any:
+        assert handle.active
+        events.append("step")
+        result = await original_step(actions, **kwargs)
+        return SimpleNamespace(actions=result.actions, screenshot=screenshot, timing=None)
+
+    computer.step = step
+    responses = AsyncQueuedProviderResponses(
+        [
+            _response(
+                _tool_use(
+                    "tool_batch",
+                    name="computer_batch",
+                    tool_input={
+                        "actions": [
+                            {"action": "mouse_move", "coordinate": [10, 20]},
+                            {"action": "left_click"},
+                        ]
+                    },
+                )
+            ),
+            _terminal_response(),
+        ]
+    )
+
+    async def create(**kwargs: Any) -> Any:
+        assert handle.active
+        events.append("model")
+        return await responses.create(**kwargs)
+
+    client = SimpleNamespace(
+        beta=SimpleNamespace(messages=SimpleNamespace(create=create))
+    )
+
+    class Handle:
+        def __init__(self) -> None:
+            self.active = False
+            self.borrow_calls: list[tuple[str, str]] = []
+
+        @asynccontextmanager
+        async def borrow_async(
+            self, *, run_id: str, function_region: str
+        ) -> AsyncIterator[Any]:
+            self.borrow_calls.append((run_id, function_region))
+            self.active = True
+            events.append("borrow-enter")
+            try:
+                yield computer
+            finally:
+                self.active = False
+                events.append("borrow-exit")
+
+    handle = Handle()
+    response = await example.run_anthropic_trajectory_body(
+        handle,
+        "Inspect the page",
+        run_id="run-123",
+        function_region="us-west-2",
+        client=client,
+        max_turns=2,
+    )
+
+    assert response.stop_reason == "end_turn"
+    assert handle.borrow_calls == [("run-123", "us-west-2")]
+    assert [[action.type for action in batch] for batch in computer.steps] == [["move", "click"]]
+    assert computer.step_kwargs == [
+        {
+            "continue_on_error": False,
+            "call_id": "tool_batch",
+            "screenshot_options": None,
+            "max_action_timeout_ms": 30_000,
+        }
+    ]
+    assert events == [
+        "borrow-enter",
+        "model",
+        "step",
+        "model",
+        "borrow-exit",
+    ]
+    tool_result = responses.calls[1]["messages"][2]["content"][0]
+    image = next(block for block in tool_result["content"] if block["type"] == "image")
+    assert image["source"]["data"] == screenshot.to_base64()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_stops_after_step_result_loss() -> None:
+    example = load_example("anthropic_message_server.py")
+    computer = AsyncRecordingComputer()
+
+    async def fail_step(*_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError("https://private.invalid screenshot-secret")
+
+    computer.step = fail_step
+    client, create = _client(
+        [
+            _response(
+                _tool_use(
+                    "tool_batch",
+                    name="computer_batch",
+                    tool_input={
+                        "actions": [
+                            {"action": "left_click", "coordinate": [10, 20]},
+                        ]
+                    },
+                )
+            )
+        ]
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Anthropic computer action batch failed: TimeoutError",
+    ) as raised:
+        await example.run_anthropic_computer_loop(
+            client=client,
+            computer=computer,
+            task="Inspect the page",
+            display_width_px=1280,
+            display_height_px=800,
+        )
+
+    assert len(create.calls) == 1
+    assert computer.steps == []
+    assert "private.invalid" not in str(raised.value)
+    assert "screenshot-secret" not in str(raised.value)
+
+
 def _run(
     example: Any,
     *,
@@ -57,13 +225,15 @@ def _run(
     computer: RecordingComputer,
     **kwargs: Any,
 ) -> Any:
-    return example.run_anthropic_computer_loop(
-        client=client,
-        computer=computer,
-        task="Inspect the page",
-        display_width_px=1280,
-        display_height_px=800,
-        **kwargs,
+    return asyncio.run(
+        example.run_anthropic_computer_loop(
+            client=client,
+            computer=_async_computer(computer),
+            task="Inspect the page",
+            display_width_px=1280,
+            display_height_px=800,
+            **kwargs,
+        )
     )
 
 
@@ -336,17 +506,17 @@ def test_anthropic_computer_batch_executes_one_ordered_batch() -> None:
 
     _run(example, client=client, computer=computer)
 
-    assert len(computer.actions.batches) == 1
-    assert [action.type for action in computer.actions.batches[0]] == [
+    assert len(computer.steps) == 1
+    assert [action.type for action in computer.steps[0]] == [
         "move",
         "click",
         "type",
     ]
-    assert computer.actions.batch_kwargs == [
+    assert computer.step_kwargs == [
         {
             "continue_on_error": False,
-            "screenshot_after": True,
-            "source": "anthropic-adapter",
+            "call_id": "tool_batch",
+            "screenshot_options": None,
             "max_action_timeout_ms": 30_000,
         }
     ]
@@ -387,7 +557,7 @@ def test_anthropic_computer_batch_rejects_zero_scroll_before_dispatch() -> None:
 
     _run(example, client=client, computer=computer)
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert tool_result["is_error"] is True
     assert "[computer_batch] stopped at actions[1] (0 completed, 1 skipped)" in _text_blocks(
@@ -484,7 +654,7 @@ def test_anthropic_computer_batch_reports_post_batch_screenshot_failure() -> Non
 
 
 @pytest.mark.parametrize("action_name", ["screenshot", "zoom"])
-def test_anthropic_batch_reuses_native_image_without_duplicate_output(
+def test_anthropic_batch_uses_one_semantic_post_batch_screenshot(
     action_name: str,
 ) -> None:
     example = load_example("anthropic_message_server.py")
@@ -617,13 +787,25 @@ def test_anthropic_batch_cursor_position_is_textual() -> None:
 
 
 @pytest.mark.parametrize("action_name", ["screenshot", "zoom"])
-def test_anthropic_hosted_tool_reuses_native_image(
+def test_anthropic_hosted_tool_uses_the_semantic_screenshot_interface(
     action_name: str,
 ) -> None:
     example = load_example("anthropic_message_server.py")
-    shot = tiny_screenshot()
+    shot = tiny_screenshot().model_copy(update={"data_base64": "bmF0aXZl", "bytes": None})
     computer = RecordingComputer(
-        apply_results=[ActionResult(ok=True, output=shot.model_dump(mode="json"))]
+        batch_results=[
+            ActionBatchResult(
+                ok=True,
+                results=[
+                    ActionItemResult(
+                        index=0,
+                        type=action_name,
+                        ok=True,
+                        output=shot.model_dump(mode="json"),
+                    )
+                ],
+            )
+        ]
     )
     action = (
         {"action": "screenshot"}
@@ -647,6 +829,8 @@ def test_anthropic_hosted_tool_reuses_native_image(
 
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert tool_result["content"][0]["type"] == "image"
+    assert tool_result["content"][0]["source"]["data"] == "bmF0aXZl"
+    assert computer.step_kwargs[0]["call_id"] == "tool_native"
     assert computer.screenshots.full_calls == 0
 
 
@@ -669,10 +853,8 @@ def test_anthropic_hosted_tool_results_preserve_id_order() -> None:
 
     _run(example, client=client, computer=computer)
 
-    assert [action.type for action, _source in computer.actions.applied] == [
-        "click",
-        "cursor_position",
-    ]
+    assert [[action.type for action in batch] for batch in computer.steps] == [["click"]]
+    assert [action.type for action, _source in computer.actions.applied] == ["cursor_position"]
     results = create.calls[1]["messages"][2]["content"]
     assert create.calls[1]["messages"][1] == {
         "role": "assistant",
@@ -683,7 +865,7 @@ def test_anthropic_hosted_tool_results_preserve_id_order() -> None:
         "tool_cursor",
     ]
     assert results[1]["content"] == [{"type": "text", "text": '{"message":"X=12,Y=34","ok":true}'}]
-    assert computer.actions.batches == []
+    assert len(computer.steps) == 1
 
 
 def test_anthropic_batch_counts_nested_actions_before_dispatch() -> None:
@@ -720,7 +902,7 @@ def test_anthropic_batch_counts_nested_actions_before_dispatch() -> None:
         max_batch_actions=2,
     )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert tool_result["is_error"] is True
     assert "[computer_batch] stopped at actions[0] (0 completed, 0 skipped)" in _text_blocks(
@@ -766,7 +948,7 @@ def test_anthropic_trajectory_limit_counts_nested_actions_before_dispatch() -> N
             max_trajectory_actions=2,
         )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 def test_anthropic_batch_allocates_remaining_deadline_across_actions_and_frame() -> None:
@@ -798,7 +980,7 @@ def test_anthropic_batch_allocates_remaining_deadline_across_actions_and_frame()
         max_elapsed_seconds=1.0,
     )
 
-    assert computer.actions.batch_kwargs[0]["max_action_timeout_ms"] == 333
+    assert computer.step_kwargs[0]["max_action_timeout_ms"] == 333
 
 
 def test_anthropic_request_and_terminal_response_obey_elapsed_deadline() -> None:
@@ -806,7 +988,7 @@ def test_anthropic_request_and_terminal_response_obey_elapsed_deadline() -> None
     clock = [0.0]
     calls: list[dict[str, Any]] = []
 
-    def create(**kwargs: Any) -> Any:
+    async def create(**kwargs: Any) -> Any:
         calls.append(kwargs)
         clock[0] = 1.1
         return _terminal_response()
@@ -828,10 +1010,17 @@ def test_anthropic_request_and_terminal_response_obey_elapsed_deadline() -> None
 def test_anthropic_hosted_failure_is_sanitized_and_later_result_is_returned() -> None:
     example = load_example("anthropic_message_server.py")
     computer = RecordingComputer(
-        apply_results=[
-            ActionResult(
+        batch_results=[
+            ActionBatchResult(
                 ok=False,
-                message="Bearer daemon-secret artifact://screenshots/private.png",
+                results=[
+                    ActionItemResult(
+                        index=0,
+                        type="click",
+                        ok=False,
+                        error="Bearer daemon-secret artifact://screenshots/private.png",
+                    )
+                ],
             )
         ]
     )
@@ -876,15 +1065,15 @@ def test_anthropic_rejects_invalid_limit_configuration() -> None:
     }
 
     with pytest.raises(ValueError, match="max_turns must be at least 1"):
-        example.run_anthropic_computer_loop(**common, max_turns=0)
+        asyncio.run(example.run_anthropic_computer_loop(**common, max_turns=0))
     with pytest.raises(ValueError, match="max_trajectory_actions must be at least 1"):
-        example.run_anthropic_computer_loop(**common, max_trajectory_actions=0)
+        asyncio.run(example.run_anthropic_computer_loop(**common, max_trajectory_actions=0))
     with pytest.raises(ValueError, match="max_batch_actions must be at least 1"):
-        example.run_anthropic_computer_loop(**common, max_batch_actions=0)
+        asyncio.run(example.run_anthropic_computer_loop(**common, max_batch_actions=0))
     with pytest.raises(ValueError, match="max_elapsed_seconds must be positive"):
-        example.run_anthropic_computer_loop(**common, max_elapsed_seconds=0)
+        asyncio.run(example.run_anthropic_computer_loop(**common, max_elapsed_seconds=0))
     with pytest.raises(ValueError, match="max_action_timeout_ms must be at least 1"):
-        example.run_anthropic_computer_loop(**common, max_action_timeout_ms=0)
+        asyncio.run(example.run_anthropic_computer_loop(**common, max_action_timeout_ms=0))
 
 
 def test_anthropic_stops_before_tools_on_final_allowed_turn() -> None:
@@ -911,43 +1100,134 @@ def test_anthropic_stops_before_tools_on_final_allowed_turn() -> None:
         )
 
     assert computer.actions.applied == []
+    assert computer.steps == []
 
 
-def test_anthropic_main_configures_browser_profile_and_readiness(
+@pytest.mark.asyncio
+async def test_async_owner_hands_one_versioned_handle_to_the_anthropic_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     example = load_example("anthropic_message_server.py")
-    client, _create = _client([_terminal_response()])
-    computer = RecordingComputer()
-    readiness_configs: list[Any] = []
-    computer.ensure_browser_ready = readiness_configs.append
-    created: list[dict[str, Any]] = []
+    events: list[str] = []
+    owner_create_kwargs: list[dict[str, Any]] = []
+    remote_arguments: list[tuple[Any, ...]] = []
+    handle = SimpleNamespace(schema_version=2)
 
-    class SandboxContext:
-        def __enter__(self) -> RecordingComputer:
-            return computer
+    class Owner:
+        async def __aenter__(self) -> Any:
+            events.append("owner-enter")
+            return self
 
-        def __exit__(self, *_args: Any) -> None:
-            return None
+        async def __aexit__(self, *_args: Any) -> None:
+            events.append("owner-exit")
 
-    class FakeComputerSandbox:
-        @staticmethod
-        def create(**kwargs: Any) -> SandboxContext:
-            created.append(kwargs)
-            return SandboxContext()
+        def session_handle(self) -> Any:
+            events.append("handle")
+            return handle
 
-    monkeypatch.setattr(example, "ComputerSandbox", FakeComputerSandbox)
-    monkeypatch.setitem(
-        sys.modules,
-        "anthropic",
-        SimpleNamespace(Anthropic=lambda: client),
+    class Deployed:
+        def __init__(self) -> None:
+            self.remote = SimpleNamespace(aio=self.remote_async)
+
+        async def remote_async(self, *args: Any) -> str:
+            events.append("remote")
+            remote_arguments.append(args)
+            return "done"
+
+    def create_owner(**kwargs: Any) -> Owner:
+        owner_create_kwargs.append(kwargs)
+        return Owner()
+
+    environments: list[str | None] = []
+
+    def from_name(*_args: Any, environment_name: str | None = None) -> Deployed:
+        environments.append(environment_name)
+        return Deployed()
+
+    monkeypatch.setattr(
+        example,
+        "modal",
+        SimpleNamespace(Function=SimpleNamespace(from_name=from_name)),
     )
+    monkeypatch.setattr(example, "app", object())
+    monkeypatch.setattr(example, "run_anthropic_trajectory", object())
+    monkeypatch.setattr(example.AsyncComputerSandbox, "create", create_owner)
+
+    result = await example.run_example(task="Inspect the page", model="claude-test")
+
+    assert result == "done"
+    assert environments == [example.MODAL_ENVIRONMENT]
+    assert events == ["owner-enter", "handle", "remote", "owner-exit"]
+    assert remote_arguments[0][:3] == (handle, "Inspect the page", "claude-test")
+    assert str(remote_arguments[0][3]).startswith("anthropic_trajectory_")
+    config = owner_create_kwargs[0]["config"]
+    assert config.runtime.modal_environment == example.MODAL_ENVIRONMENT
+    assert config.runtime.modal_region == example.MODAL_REGION
+    assert owner_create_kwargs[0]["app_name"] == example.APP_NAME
+
+
+def test_anthropic_example_makes_cost_and_placement_choices_explicit() -> None:
+    example = load_example("anthropic_message_server.py")
+    config = example.sandbox_configuration()
+    resolved = example.resolved_trajectory_configuration()
+    assert example.__spec__.origin is not None
+    source = Path(example.__spec__.origin).read_text()
+
+    assert config.ingress == "attested-tunnel"
+    assert config.desktop.resolution == example.SANDBOX_RESOLUTION
+    assert config.resources.profile == example.SANDBOX_RESOURCE_PROFILE
+    assert config.resources.cpu == example.SANDBOX_CPU
+    assert config.resources.memory_mib == example.SANDBOX_MEMORY_MIB
+    assert config.image.source == example.SANDBOX_IMAGE_SOURCE
+    assert config.browser.kind == example.SANDBOX_BROWSER_KIND
+    assert config.browser.prewarm is example.SANDBOX_BROWSER_PREWARM
+    assert config.browser.gpu_mode == example.SANDBOX_BROWSER_GPU_MODE
+    assert config.runtime.timeout_seconds == example.SANDBOX_TIMEOUT_SECONDS
+    assert config.runtime.idle_timeout_seconds == example.SANDBOX_IDLE_TIMEOUT_SECONDS
+    assert config.runtime.readiness_timeout_seconds == example.SANDBOX_READINESS_TIMEOUT_SECONDS
+    assert example.FUNCTION_MIN_CONTAINERS == 0
+    assert example.FUNCTION_RETRIES == 0
+    assert example.SANDBOX_WARM_POOL_CAPACITY == 0
+    assert resolved["modal_environment"] == example.MODAL_ENVIRONMENT
+    assert resolved["modal_region"] == example.MODAL_REGION
+    assert resolved["function"] == {
+        "cpu": example.FUNCTION_CPU,
+        "memory_mib": example.FUNCTION_MEMORY_MIB,
+        "image": {
+            "base": "debian_slim",
+            "python_version": example.FUNCTION_PYTHON_VERSION,
+            "package": example.FUNCTION_PACKAGE_SPEC,
+        },
+        "timeout_seconds": example.FUNCTION_TIMEOUT_SECONDS,
+        "retries": example.FUNCTION_RETRIES,
+        "min_containers": example.FUNCTION_MIN_CONTAINERS,
+        "max_containers": example.FUNCTION_MAX_CONTAINERS,
+    }
+    assert resolved["warm_capacity"] == {
+        "function_min_containers": 0,
+        "sandbox_pool_capacity": 0,
+    }
+    assert "region=MODAL_REGION" in source
+    assert "min_containers=FUNCTION_MIN_CONTAINERS" in source
+    assert "retries=FUNCTION_RETRIES" in source
+    assert "async with handle.borrow_async" in source
+    assert "await computer.step(" in source
+    assert "await computer.screenshots.full()" not in source
+    assert "full_bytes(" not in source
+    assert "optimized=" not in source
+
+
+def test_anthropic_main_prints_only_the_placed_trajectory_result(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    example = load_example("anthropic_message_server.py")
+
+    async def run_example(**_kwargs: Any) -> str:
+        return "done"
+
+    monkeypatch.setattr(example, "run_example", run_example)
 
     example.main()
 
-    assert created[0]["wait"] is True
-    config = created[0]["config"]
-    assert config.resources.profile == "browser"
-    assert config.browser.kind == "chromium"
-    assert config.browser.prewarm is True
-    assert readiness_configs == [config]
+    assert capsys.readouterr().out == "done\n"

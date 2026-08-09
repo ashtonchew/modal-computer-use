@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
 
+from modal_computer_use.daemon.input_rate_limit import (
+    drag_input_token_cost,
+    repeated_click_input_token_cost,
+    scroll_input_token_cost,
+)
 from modal_computer_use.daemon.routes.execution import run_input_action
 from modal_computer_use.daemon.routes.validation import (
     ensure_desktop_ready,
+    ready_input_lock,
     validate_collection_size,
     validate_keys,
     validate_optional_point,
@@ -64,7 +70,12 @@ async def click(payload: MouseClickRequest, request: Request, response: Response
         _report_input_backend(response, backend.input_backend)
         return point
 
-    return await run_input_action(request, operation, semantic_data=payload)
+    return await run_input_action(
+        request,
+        operation,
+        semantic_data=payload,
+        token_cost=repeated_click_input_token_cost(count=2 if payload.double else 1),
+    )
 
 
 @router.post("/drag")
@@ -106,7 +117,12 @@ async def drag(payload: MouseDragRequest, request: Request, response: Response) 
         _report_input_backend(response, backend.input_backend)
         return point
 
-    return await run_input_action(request, operation, semantic_data=payload)
+    return await run_input_action(
+        request,
+        operation,
+        semantic_data=payload,
+        token_cost=drag_input_token_cost(len(payload.path or [])),
+    )
 
 
 @router.post("/scroll")
@@ -132,6 +148,7 @@ async def scroll(
         semantic_data=payload,
         fallback_code="mouse_scroll_failed",
         fallback_message="mouse scroll failed",
+        token_cost=scroll_input_token_cost(payload.amount),
     )
 
 
@@ -176,7 +193,8 @@ async def up(payload: MouseButtonRequest, request: Request, response: Response) 
 @router.get("/position")
 async def position(request: Request, response: Response) -> Point:
     await ensure_desktop_ready(request)
-    backend = request.app.state.backend
-    point = await backend.mouse_position()
-    _report_input_backend(response, backend.input_backend)
+    async with ready_input_lock(request):
+        backend = request.app.state.backend
+        point = await backend.mouse_position()
+        _report_input_backend(response, backend.input_backend)
     return point

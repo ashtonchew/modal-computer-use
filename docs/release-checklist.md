@@ -33,7 +33,7 @@ After the source and protected Modal checks pass, create the annotated tag. Chec
 a clean checkout, and validate the release candidate:
 
 ```bash
-uv run python scripts/check_release_candidate.py --tag v1.1.0
+uv run python scripts/check_release_candidate.py --tag v2.0.0
 ```
 
 Build the wheel and source distribution once from that checkout. Do not rebuild after you upload
@@ -75,6 +75,28 @@ uv pip install --python /tmp/mcu-sdist-smoke/bin/python dist/release/*.tar.gz
 The release workflow also imports the installed wheel outside the checkout, instantiates the mock
 daemon, verifies both console-script entry points, starts the installed daemon, and probes
 `/healthz`, `/readyz`, `/v1/version`, and `/v1/capabilities`.
+
+The installed wheel and source distribution must also expose sync and async `computer.step()` on
+borrowed computers. The daemon must report `computer-step-envelope-v1`. A clean-distribution smoke
+must verify one successful ordered step, one byte-backed immediate screenshot, and no fallback to
+separate action and screenshot requests.
+
+Before promotion, run `scripts/run_step_promotion.py` from the exact clean release commit with
+explicit authorization. Retain its new sanitized prior-arm, candidate-arm, and decision artifacts.
+Publish a new dated Computer Step report only after the gate passes. The historical optimized-
+default result and 47.10 ms arithmetic do not satisfy this release gate.
+
+Before publishing the 100/400 weighted input default, run
+`scripts/run_input_capacity_gate.py` from the exact clean release commit with explicit
+authorization. The minimum supported Modal runtime must sustain at least 200 representative
+normalized input-work tokens per second. Reject promotion on lost or misordered input, X11 errors,
+input cleanup failure, unhealthy daemon state, material tail-latency regression, configuration
+mismatch, CPU use above 0.02 aggregate cgroup CPU-seconds per normalized token, RSS growth above
+128 MiB, or incomplete resource cleanup. Retain the sanitized capacity artifact and decision.
+For the 100/400 cutover, require all three dated artifacts in
+`benchmark-data/input-capacity-run-{1,2,3}-2026-08-08.json` and the matching dated report. The
+slowest run must remain above the 200-token promotion floor. A later rate change requires new dated
+evidence; do not rewrite these artifacts.
 
 Normal pull requests and main builds validate the mock report, wheel, and source distribution
 without uploading them. GitHub keeps new Actions logs for 14 days. Published distributions live on
@@ -120,7 +142,7 @@ Confirm that:
   tests.
 - noVNC is off by default, and logs and examples do not expose tokens, noVNC URLs, typed or
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
-- Immediately after the repository becomes public and before publishing `v1.1.0`, GitHub private
+- Immediately after the repository becomes public and before publishing `v2.0.0`, GitHub private
   vulnerability reporting is enabled. Verify the API and signed-out form without submitting a
   fake report.
 
@@ -178,7 +200,7 @@ Before you change repository visibility or upload artifacts, confirm that:
 - `CHANGELOG.md` has a dated entry for that version and no release change remains only under
   `Unreleased`.
 - The release tag points to the exact verified source commit and uses the repository's version-tag
-  convention. `v1.1.0` uses an annotated unsigned tag.
+  convention. `v2.0.0` uses an annotated unsigned tag.
 - The wheel and source distribution were built once from that clean tagged commit. `SHA256SUMS`
   verifies both files.
 - The checked-in OpenAPI schema has no unexplained regeneration diff.
@@ -201,7 +223,7 @@ Publish one build in this order:
    uv run python scripts/verify_python_index_release.py \
      --index-url https://test.pypi.org \
      --project modal-computer-use \
-     --version 1.1.0 \
+     --version 2.0.0 \
      --distributions dist/release
    ```
 
@@ -214,7 +236,7 @@ Publish one build in this order:
    uv run python scripts/verify_python_index_release.py \
      --index-url https://pypi.org \
      --project modal-computer-use \
-     --version 1.1.0 \
+     --version 2.0.0 \
      --distributions dist/release
    ```
 

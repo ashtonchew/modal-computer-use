@@ -8,7 +8,7 @@ Across the four providers and five paths in this benchmark, the computer-use fra
 
 [1_typing-comparison.png  ::  Typing 1,000 characters takes 41 seconds on E2B and 5.5 seconds on Daytona, and 0.05 seconds on the optimized Modal setup]
 
-Then I tried to map out the most common task: The screenshot and action loop primitive is what a CUA repeats, once a turn, until the task is complete. So, how long does a screenshot and a single click take? Daytona took 950 ms, then E2B took about 410 ms. Before I optimized anything, my simple Modal setup took about 330 ms, already faster than both. After optimizing, the same task took only 47 ms, ~7x faster than the simple Modal setup.
+Then I tried to map out the most common task: The screenshot and action loop primitive is what a CUA repeats, once a turn, until the task is complete. So, how long does a screenshot and a single click take? Daytona took 950 ms, then E2B took about 410 ms. Before I optimized anything, my simple Modal setup took about 330 ms, already faster than both. After optimizing, the separate warm screenshot and click medians added up to 47 ms, ~7x faster than the same arithmetic for the simple Modal setup. This is not a measured fused turn.
 
 Let's see this in action: Over fifty total agent turns, counting no agent reasoning and generation time at all, Daytona's 950ms is 48 whole seconds spent on nothing but processing screenshots and clicks. E2B's 410ms is 21 seconds. And with the optimized Modal setup, 47ms turns to only ~2 seconds.
 
@@ -58,7 +58,7 @@ With the route shortened, I went looking inside the screenshot handler. Every fr
 
 Every window on the desktop draws through X11, the display server that owns the pixels, and X11 was running the whole time. What restarted on every frame was everything on my side of it: a new process, a new connection to the display, a new buffer, a file on disk.
 
-So I kept the capture client open instead. The daemon opens MSS, a small Python screen-capture library, on the first screenshot that can use it and holds that session open for as long as the daemon runs. On Linux MSS uses XShm, which lets the X server hand back a frame through shared memory rather than pushing it down the display socket. A screenshot became a read out of a buffer that already existed, encoded to PNG in memory.
+So I kept the capture client open instead. The daemon opens MSS, a small Python screen-capture library, on the first screenshot that can use it and holds that session open for as long as the daemon runs. On Linux MSS uses XShm, which lets the X server hand back a frame through shared memory rather than pushing it down the display socket. A screenshot became a read out of a buffer that already existed, encoded to PNG in memory. The 37.25 ms benchmark request also used the raw binary HTTP endpoint, so the pooled client read the PNG bytes directly instead of receiving a JSON/base64 representation.
 
 However, two cases still take the old path. MSS cannot compose the X11 cursor visually, so a cursor-visible screenshot uses file capture. If the display connection breaks, the daemon reopens it once and falls back to file capture if that fails too.
 

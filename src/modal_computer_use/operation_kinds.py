@@ -3,6 +3,7 @@ from __future__ import annotations
 STABLE_OPERATION_KINDS = frozenset(
     {
         "actions.run",
+        "computer.step",
         "/v1/apps/launch",
         "/v1/apps/open-artifact",
         "/v1/artifacts/sync",

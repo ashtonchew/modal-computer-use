@@ -22,17 +22,21 @@ def test_health_version_capabilities(test_client) -> None:
     assert test_client.get("/readyz").json()["ready"] is True
     version = test_client.get("/v1/version").json()
     assert version["api_version"] == "v1"
-    assert version["daemon_version"] == "1.1.0"
+    assert version["daemon_version"] == "2.0.0"
     assert version["sdk_min_version"] == "1.1.0"
-    assert version["sdk_max_version"] == "1.x"
+    assert version["sdk_max_version"] == "2.x"
     caps = test_client.get("/v1/capabilities").json()
     assert "mouse" in caps["primitives"]
     assert caps["input_backend"] == "mock"
     assert caps["input_backend_configured"] == "mock"
     assert caps["input_backends_supported"] == ["mock"]
     assert caps["input_backends_available"] == ["mock"]
+    assert caps["input_rate_limit_policy"] == "normalized-input-work-v1"
+    assert caps["input_rate_limit_tokens_per_sec"] == 100
+    assert caps["input_rate_limit_burst"] == 400
     for primitive in ("input", "lifecycle", "processes", "session", "debug"):
         assert primitive in caps["primitives"]
+    assert "screenshot-binary-metadata-v1" in caps["primitives"]
 
 
 @pytest.mark.parametrize("backend_used", ["xtest", "xdotool"])
@@ -101,8 +105,15 @@ def test_status_and_screenshot(test_client) -> None:
     assert shot.sha256
 
 
-def test_raw_screenshot_returns_image_bytes(test_client) -> None:
-    response = test_client.post("/v1/screenshots/full/raw", json={"format": "png"})
+@pytest.mark.parametrize("show_cursor", [False, True])
+def test_raw_screenshot_returns_image_bytes_and_complete_metadata(
+    test_client,
+    show_cursor: bool,
+) -> None:
+    response = test_client.post(
+        "/v1/screenshots/full/raw",
+        json={"format": "png", "show_cursor": show_cursor},
+    )
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
@@ -112,6 +123,8 @@ def test_raw_screenshot_returns_image_bytes(test_client) -> None:
     assert response.headers["x-computer-use-size-bytes"] == str(len(response.content))
     assert response.headers["x-computer-use-sha256"]
     assert response.headers["x-computer-use-capture-backend"]
+    assert response.headers["x-computer-use-cursor-visible"] == str(show_cursor).lower()
+    assert json.loads(response.headers["x-computer-use-cursor-position"]) == {"x": 0, "y": 0}
     timing = json.loads(response.headers["x-computer-use-timing-ms"])
     assert isinstance(timing, dict)
 
@@ -237,6 +250,7 @@ def test_rate_limit_blocks_direct_release_all_before_backend_call(tmp_path) -> N
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             input_rate_limit_per_sec=1,
+            input_rate_limit_burst=1,
         )
     )
     calls = 0

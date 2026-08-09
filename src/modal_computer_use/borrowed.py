@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from .client import AsyncDaemonClient, DaemonClient
     from .hot_session import AsyncHotSessionClient, HotSessionClient
     from .latency import SessionStartupTiming
-    from .models import Screenshot
+    from .models import ComputerAction, Screenshot, ScreenshotOptions
     from .namespaces import (
         ActionsNamespace,
         AppsNamespace,
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     )
     from .observations import AsyncObservationClient, ObservationClient
     from .session_lease import AsyncSessionLeaseCoordinator, SessionLeaseCoordinator
+    from .steps import ComputerStepResult
 
 
 class BorrowedComputer:
@@ -184,6 +185,30 @@ class BorrowedComputer:
                 storage="inline",
             )
         )
+
+    def step(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        call_id: str | None = None,
+    ) -> ComputerStepResult:
+        """Run ordered actions once and return the immediate next screenshot."""
+
+        from .steps.request import build_step_payload
+
+        self.__ensure_active()
+        self.__coordinator.ensure_open()
+        payload = build_step_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+        )
+        return self.__client._post_step(payload)
 
     def observation_stream(
         self,
@@ -383,6 +408,30 @@ class AsyncBorrowedComputer:
             )
 
         return await self.__coordinator.observe_after_result_loss(observe)
+
+    async def step(
+        self,
+        actions: list[ComputerAction | dict[str, Any]],
+        *,
+        continue_on_error: bool = False,
+        screenshot_options: ScreenshotOptions | None = None,
+        max_action_timeout_ms: int | None = None,
+        call_id: str | None = None,
+    ) -> ComputerStepResult:
+        """Run ordered actions once and return the immediate next screenshot."""
+
+        from .steps.request import build_step_payload
+
+        self.__ensure_active()
+        self.__coordinator.ensure_open()
+        payload = build_step_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+        )
+        return await self.__client._post_step(payload)
 
     def observation_stream(
         self,

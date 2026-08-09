@@ -120,6 +120,12 @@ class ScreenshotOptions(StrictBaseModel):
 
 
 class Screenshot(StrictBaseModel):
+    model_config = ConfigDict(
+        hide_input_in_errors=True,
+        ser_json_bytes="base64",
+        val_json_bytes="base64",
+    )
+
     format: ImageFormat
     width: int = Field(gt=0)
     height: int = Field(gt=0)
@@ -639,6 +645,9 @@ class Capabilities(StrictBaseModel):
     input_backend_configured: str | None = None
     input_backends_supported: list[str] = Field(default_factory=list)
     input_backends_available: list[str] = Field(default_factory=list)
+    input_rate_limit_policy: str | None = None
+    input_rate_limit_tokens_per_sec: int | None = Field(default=None, ge=0)
+    input_rate_limit_burst: int | None = Field(default=None, ge=1)
 
 
 class TraceEntry(StrictBaseModel):

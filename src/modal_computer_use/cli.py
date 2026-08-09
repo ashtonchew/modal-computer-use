@@ -57,6 +57,12 @@ from .benchmarks.modal_region_ab import (
     modal_region_ab_markdown_summary,
 )
 from .benchmarks.observation_surface import CAUSAL_ACTION_OBSERVE_DIAGNOSTIC_CASES
+from .benchmarks.promotion_gate import (
+    PromotionGateError,
+    compare_promotion_artifacts,
+    load_promotion_artifact,
+    serialize_promotion_result,
+)
 from .benchmarks.provenance import benchmark_provenance
 from .benchmarks.provider_results import (
     ProviderResultsError,
@@ -122,6 +128,29 @@ def main(argv: list[str] | None = None) -> int:
         "--format", choices=["markdown", "json"], default="markdown"
     )
     provider_results_parser.add_argument("--output", type=Path)
+    promotion_gate_parser = benchmark_subparsers.add_parser(
+        "promotion-gate",
+        help="compare two sanitized default-promotion artifacts without running Modal",
+    )
+    promotion_gate_parser.add_argument(
+        "--prior-public",
+        "--baseline",
+        dest="prior_public",
+        required=True,
+        type=Path,
+        help="prior public-path JSON artifact",
+    )
+    promotion_gate_parser.add_argument(
+        "--candidate",
+        required=True,
+        type=Path,
+        help="candidate-default JSON artifact",
+    )
+    promotion_gate_parser.add_argument(
+        "--output",
+        type=Path,
+        help="optional path for the machine-readable comparison result",
+    )
     action_batch_parser = benchmark_subparsers.add_parser("action-batch")
     action_batch_mode = action_batch_parser.add_mutually_exclusive_group(required=True)
     action_batch_mode.add_argument("--base-url")
@@ -220,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    sdk_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     sdk_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -333,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             "when omitted, retains the public ComputerConfig default"
         ),
     )
+    compare_parser.add_argument("--input-rate-limit-burst", type=int)
     compare_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -418,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    ingress_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     ingress_ab_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -476,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    region_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     region_ab_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -592,6 +625,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
+    colocated_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     colocated_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -788,6 +822,8 @@ def main(argv: list[str] | None = None) -> int:
         return _benchmark_action_batch(args)
     if args.benchmark_command == "provider-results":
         return _benchmark_provider_results(args)
+    if args.benchmark_command == "promotion-gate":
+        return _benchmark_promotion_gate(args)
     if args.benchmark_command == "sdk":
         return _benchmark_sdk(args)
     if args.benchmark_command == "compare":
@@ -850,6 +886,30 @@ def _benchmark_provider_results(args: argparse.Namespace) -> int:
     except (OSError, json.JSONDecodeError, ProviderResultsError) as exc:
         raise SystemExit(str(exc)) from exc
     return 0
+
+
+def _benchmark_promotion_gate(args: argparse.Namespace) -> int:
+    """Validate and compare supplied evidence; never create a provider resource."""
+
+    try:
+        prior_public = load_promotion_artifact(args.prior_public)
+        candidate = load_promotion_artifact(args.candidate)
+        result = compare_promotion_artifacts(prior_public, candidate)
+    except PromotionGateError as exc:
+        result = {
+            "eligible": False,
+            "decision": "reject",
+            "paired_samples": 0,
+            "reasons": [str(exc)],
+            "metrics": {},
+            "failures": [],
+        }
+    output = serialize_promotion_result(result)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(output, encoding="utf-8")
+    print(output, end="")
+    return 0 if result.get("eligible") is True else 1
 
 
 def _benchmark_modal_optimized_provider(args: argparse.Namespace) -> int:
@@ -1394,6 +1454,7 @@ def _modal_first_raw_screenshot_metadata(
             headers, "x-computer-use-capture-backend"
         ),
     }
+
 def _str_header(headers: Any, name: str) -> str | None:
     value = headers.get(name) if hasattr(headers, "get") else None
     return value if isinstance(value, str) and value else None
@@ -1673,6 +1734,7 @@ def _modal_region_ab_environment_metadata(args: argparse.Namespace) -> dict[str,
         "browser": args.browser,
         "gpu": args.gpu,
         "input_rate_limit_per_sec": args.input_rate_limit_per_sec,
+        "input_rate_limit_burst": args.input_rate_limit_burst,
         "subprocess_backend": args.subprocess_backend,
         "image_profile": args.image_profile,
     }
@@ -1719,6 +1781,7 @@ def _benchmark_modal_colocated_client(args: argparse.Namespace) -> int:
                 runner_cpu=args.runner_cpu,
                 runner_memory_mib=args.runner_memory_mib,
                 input_rate_limit_per_sec=args.input_rate_limit_per_sec,
+                input_rate_limit_burst=args.input_rate_limit_burst,
                 subprocess_backend=args.subprocess_backend,
                 image_profile=args.image_profile,
                 surfaces=_modal_colocated_surfaces(args),
@@ -1873,6 +1936,8 @@ def _modal_benchmark_config(
     config.resources.memory_mib = args.modal_memory_mib
     if args.input_rate_limit_per_sec is not None:
         config.actions.input_rate_limit_per_sec = args.input_rate_limit_per_sec
+    if args.input_rate_limit_burst is not None:
+        config.actions.input_rate_limit_burst = args.input_rate_limit_burst
     config.actions.input_backend = args.input_backend
     config.actions.subprocess_backend = args.subprocess_backend
     if args.browser:
@@ -1906,6 +1971,8 @@ def _validate_modal_create_args(
         parser.error("--modal-memory-mib must be at least 128")
     if args.input_rate_limit_per_sec is not None and args.input_rate_limit_per_sec < 0:
         parser.error("--input-rate-limit-per-sec must be non-negative")
+    if args.input_rate_limit_burst is not None and args.input_rate_limit_burst < 1:
+        parser.error("--input-rate-limit-burst must be positive")
 
 
 def _validate_optimized_provider_resource_args(
@@ -2078,8 +2145,10 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
         if input_rate_limit is None:
             input_rate_limit = public_defaults.actions.input_rate_limit_per_sec
+        input_rate_limit_burst = public_defaults.actions.input_rate_limit_burst
     else:
         input_rate_limit = getattr(args, "input_rate_limit_per_sec", None)
+        input_rate_limit_burst = getattr(args, "input_rate_limit_burst", None)
     metadata: dict[str, Any] = {
         "modal_region": getattr(args, "modal_region", None),
         "modal_ingress": getattr(args, "modal_ingress", None),
@@ -2088,6 +2157,7 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "browser": browser,
         "gpu": getattr(args, "gpu", None),
         "input_rate_limit_per_sec": input_rate_limit,
+        "input_rate_limit_burst": input_rate_limit_burst,
         "action_case_pacing_ms": (
             1050
             if benchmark_command == "compare"

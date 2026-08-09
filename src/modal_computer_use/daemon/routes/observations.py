@@ -1156,6 +1156,9 @@ async def _send_changed_frame(
         _clear_stream(state)
         return
     wait_ms = _elapsed_ms(started)
+    change_timeout_reached = (
+        not (change_detected or region_detected) and perf_counter() >= deadline
+    )
     pre_emit_at = perf_counter()
     stage_timing = {
         **stage_timing_ms,
@@ -1214,7 +1217,7 @@ async def _send_changed_frame(
             "change_region_attempts": region_attempts,
             "change_region_detected": region_detected,
             "change_wait_ms": wait_ms,
-            "change_timeout_reached": not (change_detected or region_detected),
+            "change_timeout_reached": change_timeout_reached,
             **change_signal.metadata(signal_result),
             "dirty_frame_producer": dirty_producer is not None,
             "dirty_frame_producer_used": dirty_producer_used,

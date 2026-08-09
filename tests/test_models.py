@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
-from modal_computer_use import ComputerConfig, CoordinateSpace, Point, Region
+from modal_computer_use import ComputerConfig, CoordinateSpace, Point, Region, Screenshot
 from modal_computer_use.errors import ActionValidationError
 from modal_computer_use.models import (
     MouseDownAction,
@@ -92,6 +94,72 @@ def test_coordinate_space_transforms_region() -> None:
 def test_screenshot_options_validation() -> None:
     with pytest.raises(ValidationError):
         ScreenshotOptions(format="bmp")
+
+
+@pytest.mark.parametrize(
+    ("format", "image_bytes", "base64_value", "json_base64_value"),
+    [
+        ("png", b"\x89PNG\r\n\x1a\n\x00\xff", "iVBORw0KGgoA/w==", "iVBORw0KGgoA_w=="),
+        ("jpeg", b"\xff\xd8\xff\xe0\x00\x10JFIF", "/9j/4AAQSkZJRg==", "_9j_4AAQSkZJRg=="),
+        ("webp", b"RIFF\xff\x00\xfe\x80WEBP", "UklGRv8A/oBXRUJQ", "UklGRv8A_oBXRUJQ"),
+    ],
+)
+def test_byte_backed_screenshot_has_stable_helpers_and_json_round_trip(
+    format: str,
+    image_bytes: bytes,
+    base64_value: str,
+    json_base64_value: str,
+) -> None:
+    screenshot = Screenshot(
+        format=format,
+        width=2,
+        height=1,
+        size_bytes=len(image_bytes),
+        bytes=image_bytes,
+        coordinate_space=CoordinateSpace.from_dimensions(
+            desktop_width=2,
+            desktop_height=1,
+        ),
+    )
+
+    assert screenshot.bytes is image_bytes
+    assert screenshot.data_base64 is None
+    assert screenshot.as_bytes() is image_bytes
+    assert screenshot.to_base64() == base64_value
+    assert screenshot.model_dump(mode="python")["bytes"] is image_bytes
+
+    serialized = screenshot.model_dump_json()
+
+    assert json.loads(serialized)["bytes"] == json_base64_value
+    restored = Screenshot.model_validate_json(serialized)
+    assert restored == screenshot
+    assert restored.as_bytes() == image_bytes
+    assert restored.to_base64() == base64_value
+
+
+def test_byte_backed_screenshot_validation_error_does_not_expose_payload() -> None:
+    payload_canary = "SECRET_SCREENSHOT_BYTES_CANARY!"
+    serialized = json.dumps(
+        {
+            "format": "png",
+            "width": 1,
+            "height": 1,
+            "size_bytes": 1,
+            "bytes": payload_canary,
+            "coordinate_space": {
+                "desktop_width": 1,
+                "desktop_height": 1,
+                "image_width": 1,
+                "image_height": 1,
+            },
+        }
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        Screenshot.model_validate_json(serialized)
+
+    assert payload_canary not in str(exc_info.value)
+    assert payload_canary not in repr(exc_info.value)
 
 
 def test_action_union_validation() -> None:

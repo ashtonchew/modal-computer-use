@@ -84,6 +84,9 @@ class X11ScreenshotController:
         self._cursor_position = cursor_position
         self._mss = _MSSCaptureSession(display=display)
 
+    def close(self) -> None:
+        self._mss.close()
+
     async def probe(self) -> tuple[bool, str | None]:
         """Verify that the public cursor-visible screenshot path can capture."""
         if shutil.which("maim") is None:
@@ -413,6 +416,9 @@ class _MSSCaptureSession:
         import mss
 
         return mss.MSS(display=self._display, backend="xshmgetimage")
+
+    def close(self) -> None:
+        self._reset()
 
     def _reset(self) -> None:
         if self._screenshotter is not None:

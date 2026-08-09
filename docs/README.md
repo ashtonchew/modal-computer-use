@@ -20,6 +20,8 @@ procedures, and concise pointers for public guides.
 ## Use the SDK
 
 - [API](api.md): synchronous and native-async Python surfaces, ownership, and daemon behavior.
+- [Version 2 migration](migration-v2.md): hard-cutover changes, `computer.step()` replacements,
+  screenshot payload migration, and rollback.
 - [OpenAPI schema](openapi.json): generated HTTP request and response schemas.
 - [Artifacts](artifacts.md): artifact paths, persistence, and synchronization.
 - [Trace and replay](trace-replay.md): capture, validate, and replay action traces.
@@ -42,6 +44,13 @@ procedures, and concise pointers for public guides.
 - [Benchmarking](benchmarking.md): run benchmarks and interpret, retain, or publish their output.
 - [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md): eligible p50,
   p95, configuration, and provenance for the README comparison.
+- [Optimized-default promotion results, 2026-08-08](benchmark-results-2026-08-08-optimized-default.md):
+  eligible same-topology evidence for the SDK cutover and the precise meaning of the historical
+  47 ms arithmetic figure.
+- [Computer Step promotion results, 2026-08-08](benchmark-results-2026-08-08-computer-step.md):
+  100-pair same-topology evidence for the fused `computer.step()` default.
+- [Weighted input-capacity results, 2026-08-08](benchmark-results-2026-08-08-input-capacity.md):
+  three passing same-runtime gates for the 100-token refill and 400-token burst.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
   diagnostic, and historical reports and protocols.
 
@@ -56,6 +65,12 @@ tracked artifact eligibility, and the [archive policy](archive/README.md) define
 - [Code of conduct](../CODE_OF_CONDUCT.md): follow the community behavior and reporting policy.
 - [Release checklist](release-checklist.md): verification, packaging, protected smoke tests, and
   release review.
+- [Version 2 release candidate](v2-release-candidate.md): release identity, package and runtime
+  order, gates, and selected rollback.
+- [Hosted documentation release system](hosted-documentation-release.md): source ownership,
+  previews, production publication, version navigation, and rollback.
 - [Drafts](drafts/README.md): write, preview, and export long-form articles built on tracked
   benchmark evidence.
 - The repository [README](../README.md) is the short project introduction and first-run path.
+- The [examples index](../examples/README.md) identifies the complete primary trajectory and the
+  low-level compatibility examples.

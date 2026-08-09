@@ -694,6 +694,41 @@
             "title": "Input Backends Supported",
             "type": "array"
           },
+          "input_rate_limit_burst": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Rate Limit Burst"
+          },
+          "input_rate_limit_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Rate Limit Policy"
+          },
+          "input_rate_limit_tokens_per_sec": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Rate Limit Tokens Per Sec"
+          },
           "primitives": {
             "items": {
               "type": "string"
@@ -2916,6 +2951,7 @@
           "bytes": {
             "anyOf": [
               {
+                "contentEncoding": "base64",
                 "contentMediaType": "application/octet-stream",
                 "type": "string"
               },
@@ -3293,6 +3329,62 @@
           }
         },
         "title": "ScrollAction",
+        "type": "object"
+      },
+      "StepRequest": {
+        "additionalProperties": false,
+        "description": "The deliberately small public request for one computer step.\n\nA step always captures its trailing observation.  Transport, idempotency,\nand provider-loop controls are intentionally not part of this boundary.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ComputerAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "continue_on_error": {
+            "default": false,
+            "title": "Continue On Error",
+            "type": "boolean"
+          },
+          "max_action_timeout_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Action Timeout Ms"
+          },
+          "screenshot_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScreenshotOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "title": "StepRequest",
         "type": "object"
       },
       "TextRequest": {
@@ -3932,7 +4024,7 @@
   },
   "info": {
     "title": "modal-computer-use daemon",
-    "version": "1.1.0"
+    "version": "2.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -4062,6 +4154,7 @@
     },
     "/v1/actions/run/observe-change/raw-screenshot": {
       "post": {
+        "description": "Runs one ordered action batch. Then it returns the first frame whose full-resolution pixels differ from the pre-action baseline. XDamage can wake the verifier, and pixel polling remains the fallback. This result does not establish application readiness, visual stability, or task completion.",
         "operationId": "run_observe_change_raw_screenshot_v1_actions_run_observe_change_raw_screenshot_post",
         "parameters": [
           {
@@ -4114,7 +4207,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Run Observe Change Raw Screenshot"
+        "summary": "Experimental: run actions and observe the first visual change"
       }
     },
     "/v1/actions/run/raw-screenshot": {
@@ -5822,7 +5915,77 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -5899,7 +6062,77 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -5976,7 +6209,77 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -6046,6 +6349,41 @@
           }
         },
         "summary": "Tunnel Authorize"
+      }
+    },
+    "/v1/steps": {
+      "post": {
+        "description": "Execute one leased action batch and return its immediate observation.",
+        "operationId": "step_v1_steps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.modal-computer-use.step;v=1": {}
+            },
+            "description": "Ordered actions and the immediate trailing screenshot."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Step"
       }
     },
     "/v1/version": {

@@ -8,18 +8,21 @@ identifiers, call identifiers, prompts, or typed content.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import modal
 
-from modal_computer_use import ComputerSessionHandle
+from modal_computer_use import ComputerSessionHandle, ScreenshotOptions
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = os.environ.get(
     "MODAL_COMPUTER_USE_HANDOFF_APP_NAME",
     "modal-computer-use-handoff-smoke-local",
 )
-FUNCTION_REGION = os.environ.get("MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west")
+FUNCTION_REGION = os.environ.get("MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west-2")
+if re.fullmatch(r"[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*", FUNCTION_REGION) is None:
+    raise ValueError("the handoff smoke requires one exact Modal region")
 FUNCTION_TIMEOUT_SECONDS = 300
 BORROW_READINESS_TIMEOUT_SECONDS = 180
 SAFE_RESULT_FIELDS = frozenset(
@@ -57,22 +60,25 @@ async def run_handoff_smoke_body(
     handle: ComputerSessionHandle,
     run_id: str,
 ) -> dict[str, object]:
-    """Borrow once, observe once, and apply one harmless sequenced action."""
+    """Borrow once and run one harmless action-to-observation step."""
     function_cloud, function_region = _required_function_placement()
     async with handle.borrow_async(
         run_id=run_id,
         function_region=FUNCTION_REGION,
         readiness_timeout=BORROW_READINESS_TIMEOUT_SECONDS,
     ) as computer:
-        screenshot = await computer.screenshots.full(
-            format="png",
-            processing="daemon",
-            storage="inline",
-        )
-        action = await computer.actions.run(
+        step = await computer.step(
             [{"type": "wait", "duration_ms": 50}],
             continue_on_error=False,
+            screenshot_options=ScreenshotOptions(
+                format="png",
+                processing="daemon",
+                storage="inline",
+                show_cursor=False,
+            ),
         )
+        screenshot = step.screenshot
+        action = step.actions
 
     screenshot_succeeded = (
         screenshot.width > 0

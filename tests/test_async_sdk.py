@@ -228,7 +228,12 @@ async def test_async_http_transport_preserves_domain_errors() -> None:
             return httpx.Response(401, request=request)
         return httpx.Response(
             409,
-            json={"message": "conflict", "code": "state_conflict", "details": {"safe": True}},
+            headers={"Retry-After": "3"},
+            json={
+                "message": "conflict",
+                "code": "state_conflict",
+                "details": {"safe": True, "retry_after_ms": 2_500},
+            },
             request=request,
         )
 
@@ -244,7 +249,9 @@ async def test_async_http_transport_preserves_domain_errors() -> None:
 
     assert exc.value.status_code == 409
     assert exc.value.code == "state_conflict"
-    assert exc.value.details == {"safe": True}
+    assert exc.value.details == {"safe": True, "retry_after_ms": 2_500}
+    assert exc.value.retry_after_ms == 2_500
+    assert exc.value.retry_after_seconds == 3
 
 
 def test_async_namespaces_match_sync_public_methods_and_parameters() -> None:

@@ -34,7 +34,7 @@ FRESH_DISTRIBUTION_COMMANDS = (
 FROZEN_SYNC_COMMAND = "uv sync --extra dev --extra modal --frozen"
 RELEASE_BUNDLE_COMMAND = "uv run python scripts/check_release_bundle.py prepare"
 RELEASE_CANDIDATE_COMMAND = (
-    "uv run python scripts/check_release_candidate.py --tag v1.1.0"
+    "uv run python scripts/check_release_candidate.py --tag v2.0.0"
 )
 HANDOFF_TEST_SELECTOR = "-k test_modal_deployed_function_session_handoff_smoke"
 
@@ -126,6 +126,8 @@ def test_manual_handoff_workflow_targets_only_the_bounded_handoff_smoke() -> Non
     assert "tests/modal_function_session_handoff_smoke_app.py" in handoff
     assert HANDOFF_TEST_SELECTOR in handoff
     assert "MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE" in handoff
+    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west-2" in handoff
+    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west\n" not in handoff
     assert "MODAL_COMPUTER_USE_RUN_V1_SMOKE" not in handoff
     assert "MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE" not in handoff
     assert "tests/modal_function_session_handoff_smoke_app.py" not in release

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import os
@@ -602,6 +603,7 @@ class X11DesktopBackend(MockDesktopBackend):
         )
         self._clipboard = X11ClipboardController(
             run=lambda *args, **kwargs: self._run(*args, **kwargs),
+            spawn_owner=self._spawn_clipboard_owner,
             get_state=super().clipboard_get,
             set_state=super().clipboard_set,
             clear_state=super().clipboard_clear,
@@ -661,6 +663,8 @@ class X11DesktopBackend(MockDesktopBackend):
         return self._windows.backend_name
 
     def close(self) -> None:
+        self._clipboard.close()
+        self._screenshots.close()
         self._windows.close()
         self._input.close()
         self._process_runner.close()
@@ -747,6 +751,34 @@ class X11DesktopBackend(MockDesktopBackend):
             text=True,
             start_new_session=True,
         )
+
+    async def _spawn_clipboard_owner(self, text: str) -> subprocess.Popen[str]:
+        env = desktop_process_environment(display=self.display)
+        xclip = shutil.which("xclip")
+        if xclip is None:
+            raise FileNotFoundError("xclip is required for clipboard ownership")
+        process = subprocess.Popen(  # noqa: S603 - executable resolved through PATH.
+            (xclip, "-selection", "clipboard", "-silent"),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+        assert process.stdin is not None
+
+        def supply_selection() -> None:
+            try:
+                process.stdin.write(text)
+                process.stdin.close()
+            except BaseException:
+                if process.poll() is None:
+                    process.terminate()
+                raise
+
+        await asyncio.to_thread(supply_selection)
+        return process
 
     async def launch(self, command: str, args: Sequence[str] = ()) -> ActionResult:
         return await self._apps.launch(command, args)

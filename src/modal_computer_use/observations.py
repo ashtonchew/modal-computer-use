@@ -435,7 +435,12 @@ class AsyncObservationClient:
         change_region_radius: int | None = None,
         continue_on_error: bool = False,
     ) -> ActionObservationResult:
-        """Issue an action batch and await its first detected visual change."""
+        """Issue one action batch and observe its first detected visual change.
+
+        This experimental SDK interface exposes an Alpha composition. A changed
+        frame does not establish application readiness, visual stability, or
+        task completion.
+        """
         await self.start(drain_initial_frame=True)
         action_payloads = [dict(action) for action in actions]
         resolved_change_detection = _resolve_action_change_detection(
