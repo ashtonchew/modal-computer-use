@@ -71,17 +71,19 @@ Branch: `fix/x11-display-generation-recovery`, based on R1.
 Deep module seam:
 
 ```python
-backend.invalidate_display_generation()
-await backend.verify_display_generation()
+await backend.invalidate_display_generation()
+await daemon_readiness(request, force=True)
 ```
 
 The interface is semantic: it does not expose XCB handles, XIDs, MIT-SHM slots, controller lists,
-or public generation tokens. Lifecycle routes own authorization and the exclusive mutation lock;
-the X11 backend owns which clients belong to a display generation.
+or public generation tokens. The backend owns which daemon clients belong to the outgoing display
+generation. Lifecycle routes own authorization, the exclusive mutation admission, readiness
+invalidation, the full-stack `Supervisor` mutation, and the bounded forced daemon-readiness probe
+after the mutation.
 
 Requirements:
 
-- [ ] increment readiness/display epoch exactly once before process mutation;
+- [ ] invalidate the readiness/display epoch exactly once before process mutation;
 - [ ] best-effort release held input state, then clear generation-bound logical state;
 - [ ] close clipboard ownership, native and MSS screenshot sessions, EWMH/window Xlib state, and
       XTest/Xlib input state while the old X server is alive;
@@ -89,13 +91,14 @@ Requirements:
 - [ ] treat a named Xvfb restart as a complete display-stack restart, including the window manager
       and VNC dependents;
 - [ ] never reuse an old XCB connection, XID, atom cache, MIT-SHM attachment, or MSS instance;
-- [ ] after start, force backend verification and return success only after input, window manager,
-      `xdpyinfo`, hidden full PNG, and cursor-visible paths pass;
+- [ ] after start, force daemon readiness and return success only after input, window manager,
+      `xdpyinfo`, hidden full PNG, cursor-visible paths, and configured VNC dependents pass;
 - [ ] keep readiness false and return 503 on failed reconstruction;
-- [ ] reject restart with a typed busy error while an active recording or observation owns a live
-      X display unless that owner gains explicit generation-change cancellation;
-- [ ] either own and relaunch configured Chromium or reject the operation rather than claim full
-      browser recovery; and
+- [ ] reject restart with typed `display_restart_busy`/409 while an active recording, observation
+      websocket, or HTTP observe-change request owns a live X display;
+- [ ] rerun configured browser startup (`browser_open_url_on_start` or browser prewarm) after the
+      display is ready, while making no claim to restore arbitrary app processes, browser page
+      state, or application-owned state; and
 - [ ] leave hot-session sockets connected but make their post-restart operations observe the
       generation/readiness gate.
 
@@ -147,9 +150,10 @@ Tests are written red-to-green at these behavior interfaces:
 2. fresh public create-to-ready evidence retains paired stage attribution;
 3. public lifecycle start/stop/restart and named Xvfb restart use the display-generation seam;
 4. backend generation invalidation closes every daemon-owned X client even when one close fails;
-5. forced post-start verification controls the route result and readiness cache;
+5. forced post-start daemon readiness controls the route result and readiness cache;
 6. full/region/action/hot screenshot consumers preserve exact behavior after recovery; and
-7. active observation/recording/browser ownership follows the explicit busy-or-rebuild contract.
+7. active observation/recording ownership follows the typed-busy contract, while configured browser
+   startup is rerun and arbitrary app/page state is not restored.
 
 Tests do not assert private call counts except where ordering is itself the lifecycle contract.
 Native Linux invariants remain in Rust/Xvfb tests; public route and SDK behavior remains in Python
