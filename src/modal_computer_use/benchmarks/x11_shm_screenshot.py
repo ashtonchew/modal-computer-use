@@ -25,6 +25,13 @@ FIXED_GATES = {
     "maximum_payload_growth_percent": 10.0,
     "minimum_daemon_saving_ms": 5.0,
 }
+OPERATIONAL_CEILINGS = {
+    "maximum_readiness_p95_regression_percent": 5.0,
+    "maximum_concurrency_p95_regression_percent": 5.0,
+    "maximum_rss_growth_bytes": 16 * 1024 * 1024,
+    "maximum_fd_delta": 0,
+    "maximum_mapping_delta": 0,
+}
 
 _FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 _FULL_SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -92,6 +99,8 @@ def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
         raise ValueError("promotion requires at least 100 samples per arm")
     if preregistration.get("gates") != FIXED_GATES:
         raise ValueError("artifact must preserve the fixed promotion gates")
+    if preregistration.get("operational_ceilings") != OPERATIONAL_CEILINGS:
+        raise ValueError("artifact must preserve the fixed operational ceilings")
     _nonnegative_integer(preregistration.get("warmup_iterations"), "warmup_iterations")
     _positive_integer(preregistration.get("schedule_seed"), "schedule_seed")
     _positive_integer(preregistration.get("bootstrap_seed"), "bootstrap_seed")
@@ -217,6 +226,25 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
         raise ValueError("benchmark target must be x86_64 Linux")
     if not str(configuration.get("image_identity", "")).strip():
         raise ValueError("image identity is required")
+    if not str(configuration.get("image_object_id", "")).startswith("im-"):
+        raise ValueError("hydrated Modal Image object identity is required")
+    native_builds = _mapping(configuration.get("native_builds"), "native_builds")
+    if set(native_builds) != {BASELINE_ARM, CANDIDATE_ARM}:
+        raise ValueError("both arms must report the native build identity")
+    normalized_builds: list[dict[str, Any]] = []
+    for arm in (BASELINE_ARM, CANDIDATE_ARM):
+        build = _mapping(native_builds.get(arm), f"native_builds.{arm}")
+        if build.get("backend") != CANDIDATE_ARM:
+            raise ValueError("native build backend marker changed")
+        if build.get("codec") != "png-deflate-level1-fixed-up":
+            raise ValueError("native build codec marker changed")
+        if _FULL_SHA256.fullmatch(str(build.get("module_sha256", ""))) is None:
+            raise ValueError("native module digest is invalid")
+        if build.get("image_object_id") != configuration.get("image_object_id"):
+            raise ValueError("target native build does not match the Modal Image object")
+        normalized_builds.append(dict(build))
+    if normalized_builds[0] != normalized_builds[1]:
+        raise ValueError("benchmark arms used different native Image builds")
     if configuration.get("browser") != "chromium":
         raise ValueError("publishable evidence requires a real Chromium fixture")
     if configuration.get("display") != {"width": 1024, "height": 768, "depth": 24}:
@@ -239,6 +267,15 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
     resources = _mapping(configuration.get("resources"), "resources")
     if resources.get("cpu") != 1.0 or resources.get("memory_mib") != 2048:
         raise ValueError("benchmark resources must stay fixed")
+    observed_resources = _mapping(
+        configuration.get("observed_resources"), "observed_resources"
+    )
+    if set(observed_resources) != {BASELINE_ARM, CANDIDATE_ARM}:
+        raise ValueError("both arms must report observed resources")
+    for arm in (BASELINE_ARM, CANDIDATE_ARM):
+        observed = _mapping(observed_resources.get(arm), f"observed_resources.{arm}")
+        if observed.get("cpu") != 1.0 or observed.get("memory_bytes") != 2048 * 1024 * 1024:
+            raise ValueError("observed resources differ from the requested resources")
 
 
 def _validate_schedule(value: Any, *, samples: int) -> None:
@@ -284,7 +321,9 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
         "chromium_fixture",
         "failure_matrix",
         "concurrency_matrix",
+        "readiness_parity",
         "x_server_restart",
+        "bounded_x_server_failure",
         "cleanup_succeeded",
     ):
         if gates.get(key) is not True:
@@ -297,20 +336,86 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
         raise ValueError("resource counts changed during the operational soak")
     if _nonnegative_integer(gates.get("rss_growth_bytes"), "rss_growth_bytes") > 16 * 1024 * 1024:
         raise ValueError("resource RSS growth exceeds the fixed 16 MiB ceiling")
+    if (
+        _nonnegative_integer(
+            gates.get("peak_rss_growth_bytes"), "peak_rss_growth_bytes"
+        )
+        > 16 * 1024 * 1024
+    ):
+        raise ValueError("resource peak RSS growth exceeds the fixed 16 MiB ceiling")
 
 
 def _validate_operational_details(details: Mapping[str, Any]) -> None:
     concurrency = _mapping(details.get("concurrency"), "concurrency")
-    levels = concurrency.get("levels")
-    if concurrency.get("passed") is not True or not isinstance(levels, list):
+    concurrency_arms = _mapping(concurrency.get("arms"), "concurrency.arms")
+    if concurrency.get("passed") is not True or set(concurrency_arms) != {
+        BASELINE_ARM,
+        CANDIDATE_ARM,
+    }:
         raise ValueError("concurrency detail did not pass")
-    if [row.get("concurrency") for row in levels if isinstance(row, Mapping)] != [1, 2, 4, 8]:
-        raise ValueError("concurrency detail must cover levels 1, 2, 4, and 8")
-    if any(
-        not isinstance(row, Mapping) or row.get("capture_backend") != CANDIDATE_ARM
-        for row in levels
+    for arm in (BASELINE_ARM, CANDIDATE_ARM):
+        arm_detail = _mapping(concurrency_arms.get(arm), f"concurrency.arms.{arm}")
+        levels = arm_detail.get("levels")
+        if arm_detail.get("passed") is not True or not isinstance(levels, list):
+            raise ValueError("concurrency arm did not pass")
+        if [row.get("concurrency") for row in levels if isinstance(row, Mapping)] != [1, 2, 4, 8]:
+            raise ValueError("concurrency detail must cover levels 1, 2, 4, and 8")
+        if any(
+            not isinstance(row, Mapping)
+            or row.get("capture_backend") != arm
+            or row.get("trials") != 5
+            for row in levels
+        ):
+            raise ValueError("concurrency detail contains unexpected source attribution")
+    baseline_levels = _mapping(
+        concurrency_arms.get(BASELINE_ARM), "concurrency baseline"
+    )["levels"]
+    candidate_levels = _mapping(
+        concurrency_arms.get(CANDIDATE_ARM), "concurrency candidate"
+    )["levels"]
+    for baseline, candidate in zip(baseline_levels, candidate_levels, strict=True):
+        baseline_p95 = _nonnegative_number(
+            baseline.get("elapsed_p95_ms"), "baseline concurrency p95"
+        )
+        candidate_p95 = _nonnegative_number(
+            candidate.get("elapsed_p95_ms"), "candidate concurrency p95"
+        )
+        if baseline_p95 <= 0 or candidate_p95 > baseline_p95 * 1.05:
+            raise ValueError("concurrency p95 exceeds the fixed 5% regression ceiling")
+
+    readiness = _mapping(details.get("readiness"), "readiness")
+    readiness_arms = _mapping(readiness.get("arms"), "readiness.arms")
+    if readiness.get("passed") is not True or set(readiness_arms) != {
+        BASELINE_ARM,
+        CANDIDATE_ARM,
+    }:
+        raise ValueError("readiness parity did not pass")
+    for arm in (BASELINE_ARM, CANDIDATE_ARM):
+        arm_detail = _mapping(readiness_arms.get(arm), f"readiness.arms.{arm}")
+        if (
+            arm_detail.get("passed") is not True
+            or arm_detail.get("samples") != 20
+            or arm_detail.get("capture_backend") != arm
+        ):
+            raise ValueError("readiness arm detail is incomplete")
+        _nonnegative_number(arm_detail.get("startup_p95_ms"), "startup_p95_ms")
+    baseline_readiness_p95 = _nonnegative_number(
+        _mapping(readiness_arms[BASELINE_ARM], "baseline readiness").get(
+            "startup_p95_ms"
+        ),
+        "baseline readiness p95",
+    )
+    candidate_readiness_p95 = _nonnegative_number(
+        _mapping(readiness_arms[CANDIDATE_ARM], "candidate readiness").get(
+            "startup_p95_ms"
+        ),
+        "candidate readiness p95",
+    )
+    if (
+        baseline_readiness_p95 <= 0
+        or candidate_readiness_p95 > baseline_readiness_p95 * 1.05
     ):
-        raise ValueError("concurrency detail contains unexpected source attribution")
+        raise ValueError("fresh readiness p95 exceeds the fixed 5% regression ceiling")
 
     failure_matrix = _mapping(details.get("failure_matrix"), "failure_matrix")
     checks = _mapping(failure_matrix.get("checks"), "failure_matrix.checks")
@@ -327,11 +432,35 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
         or soak.get("captures") != 10_000
         or soak.get("full_captures") != 5_000
         or soak.get("region_captures") != 5_000
+        or _nonnegative_integer(
+            soak.get("peak_rss_growth_bytes"), "soak.peak_rss_growth_bytes"
+        )
+        > 16 * 1024 * 1024
     ):
         raise ValueError("daemon-local soak detail is incomplete")
     restart = _mapping(details.get("x_server_restart"), "x_server_restart")
-    if restart.get("passed") is not True or restart.get("ready_after_restart") is not True:
+    if (
+        restart.get("passed") is not True
+        or restart.get("ready_after_restart") is not True
+        or restart.get("backend_before") != CANDIDATE_ARM
+        or restart.get("backend_after") != CANDIDATE_ARM
+    ):
         raise ValueError("X server restart detail did not pass")
+    timeout = _mapping(details.get("x_server_timeout"), "x_server_timeout")
+    if (
+        timeout.get("passed") is not True
+        or timeout.get("failed_bounded") is not True
+        or timeout.get("constructor_bounded") is not True
+        or timeout.get("backend_after_restart") != CANDIDATE_ARM
+        or _nonnegative_number(timeout.get("elapsed_ms"), "x_server_timeout.elapsed_ms")
+        >= 2_500.0
+        or _nonnegative_number(
+            timeout.get("constructor_elapsed_ms"),
+            "x_server_timeout.constructor_elapsed_ms",
+        )
+        >= 2_500.0
+    ):
+        raise ValueError("bounded X server failure detail did not pass")
 
 
 def _paired_bootstrap_median_difference(

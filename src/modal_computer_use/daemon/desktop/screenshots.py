@@ -30,6 +30,7 @@ from .screenshot_capture import (
     ScreenshotCaptureFailed,
     ScreenshotCaptureResolution,
     ScreenshotCaptureSource,
+    ScreenshotCaptureTimedOut,
     ScreenshotCaptureUnavailable,
     X11SharedMemoryScreenshotSession,
     resolve_capture_source,
@@ -100,6 +101,8 @@ class X11ScreenshotController:
         )
         self._x11_shm: X11SharedMemoryScreenshotSession | None = None
         self._x11_shm_fallback = False
+        self._x11_shm_failed = False
+        self._x11_shm_timed_out = False
 
     def _ensure_x11_shm(self) -> None:
         """Open the XCB/MIT-SHM session after the supervisor starts Xvfb.
@@ -113,6 +116,15 @@ class X11ScreenshotController:
         """
         if self._x11_shm is not None:
             return
+        if self._x11_shm_failed:
+            error_type = (
+                ScreenshotCaptureTimedOut
+                if self._x11_shm_timed_out
+                else ScreenshotCaptureFailed
+            )
+            raise error_type(
+                "X11 shared-memory screenshot source is quarantined until display restart"
+            )
         selected = self._capture_resolution.selected
         if selected == "mss":
             return
@@ -122,8 +134,13 @@ class X11ScreenshotController:
                 width=self.width,
                 height=self.height,
             )
+        except ScreenshotCaptureTimedOut:
+            self._x11_shm_failed = True
+            self._x11_shm_timed_out = True
+            raise
         except ScreenshotCaptureUnavailable:
             if self._capture_resolution.requested != "auto":
+                self._x11_shm_failed = True
                 raise
             self._select_mss_fallback(
                 "X11 shared-memory screenshot session could not start"
@@ -138,6 +155,8 @@ class X11ScreenshotController:
             reason=reason,
         )
         self._x11_shm_fallback = True
+        self._x11_shm_failed = False
+        self._x11_shm_timed_out = False
 
     def _close_x11_shm(self, *, suppress: bool) -> None:
         session = self._x11_shm
@@ -151,14 +170,24 @@ class X11ScreenshotController:
                 raise
 
     def close(self) -> None:
-        self.reset_capture_session()
+        """Release capture resources without changing source selection."""
 
-    def reset_capture_session(self) -> None:
-        """Release display-bound capture state so it can be opened lazily again."""
         try:
             self._close_x11_shm(suppress=False)
         finally:
             self._mss.close()
+
+    def reset_capture_session(self) -> None:
+        """Release state and re-resolve the source for a new display generation."""
+
+        requested = self._capture_resolution.requested
+        try:
+            self.close()
+        finally:
+            self._capture_resolution = resolve_capture_source(requested)
+            self._x11_shm_fallback = False
+            self._x11_shm_failed = False
+            self._x11_shm_timed_out = False
 
     async def probe(self) -> tuple[bool, str | None]:
         """Verify that the public cursor-visible screenshot path can capture."""
@@ -185,12 +214,31 @@ class X11ScreenshotController:
                     raise ScreenshotCaptureUnavailable(
                         "X11 shared-memory screenshot probe returned invalid dimensions"
                     )
+            except ScreenshotCaptureTimedOut:
+                return False, "X11 shared-memory screenshot probe exceeded its reply deadline"
             except ScreenshotCaptureError:
                 if self._capture_resolution.requested != "auto":
                     return False, "X11 shared-memory screenshot probe failed"
                 self._select_mss_fallback(
                     "X11 shared-memory screenshot probe failed"
                 )
+        if self._capture_resolution.selected == "mss":
+            try:
+                captured = await self.capture_bytes(
+                    ScreenshotOptions(format="png", show_cursor=False),
+                    prefer_native_png=True,
+                )
+            except Exception:
+                return False, "hidden screenshot capture failed"
+            if (
+                captured.capture_backend not in {"mss", "mss-fallback"}
+                or not validate_png_dimensions(
+                    captured.data,
+                    width=self.width,
+                    height=self.height,
+                )
+            ):
+                return False, "hidden screenshot capture failed"
         try:
             # Keep the existing cursor-visible path in readiness: maim must be
             # usable for screenshot options that X11 shared memory cannot
@@ -283,8 +331,15 @@ class X11ScreenshotController:
                     width=source.width,
                     height=source.height,
                 )
+            except ScreenshotCaptureTimedOut:
+                self._close_x11_shm(suppress=True)
+                self._x11_shm_failed = True
+                self._x11_shm_timed_out = True
+                raise
             except ScreenshotCaptureFailed:
                 if self._capture_resolution.requested != "auto":
+                    self._close_x11_shm(suppress=True)
+                    self._x11_shm_failed = True
                     raise
                 self._select_mss_fallback(
                     "X11 shared-memory screenshot capture failed"
@@ -314,6 +369,8 @@ class X11ScreenshotController:
                 prefer_native_png=prefer_native_png,
                 timings_ms=timings_ms,
             )
+            if x11_shm_requested:
+                capture_backend = f"{capture_backend}-fallback"
 
         coordinate_space = CoordinateSpace.from_dimensions(
             desktop_width=self.width,

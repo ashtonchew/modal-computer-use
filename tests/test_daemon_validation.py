@@ -941,6 +941,59 @@ def test_screenshot_hot_path_reuses_successful_readiness_probe(tmp_path) -> None
     assert readiness_calls == 1
 
 
+def test_display_restart_invalidates_cached_readiness(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            readiness_cache_ttl_ms=60_000,
+        )
+    )
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    app.state.backend.ready = counted_ready
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        assert client.post("/v1/screenshots/full", json={"format": "png"}).status_code == 200
+        assert client.post("/v1/computer/restart").status_code == 200
+        assert client.post("/v1/screenshots/full", json={"format": "png"}).status_code == 200
+
+    assert readiness_calls == 2
+
+
+def test_readiness_invalidation_during_probe_does_not_publish_stale_snapshot() -> None:
+    class Backend:
+        calls = 0
+
+        async def ready(self):
+            self.calls += 1
+            if self.calls == 1:
+                started.set()
+                await release.wait()
+            return True, []
+
+    async def scenario() -> None:
+        cache = readiness.ReadinessCache(60_000)
+        backend = Backend()
+        first = asyncio.create_task(cache.backend_ready(backend))
+        await started.wait()
+        cache.invalidate()
+        release.set()
+        assert await first == (True, [])
+        assert await cache.backend_ready(backend) == (True, [])
+        assert backend.calls == 2
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    asyncio.run(scenario())
+
+
 def test_screenshot_success_refreshes_readiness_cache(tmp_path, monkeypatch) -> None:
     now = 0.0
 

@@ -146,6 +146,28 @@ def test_x11_shared_memory_adapter_rejects_wrong_png_dimensions(monkeypatch) -> 
     session.close()
 
 
+def test_x11_setup_timeout_closes_the_probe_socket(monkeypatch) -> None:
+    closed = False
+
+    class FakeSocket:
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def connect(self, _path: str) -> None:
+            raise TimeoutError("display stalled")
+
+        def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(screenshot_capture.socket, "socket", lambda *_args: FakeSocket())
+
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+        screenshot_capture._probe_x11_setup(":99")
+
+    assert closed is True
+
+
 def test_native_runtime_failure_sticks_to_mss_fallback(monkeypatch) -> None:
     constructor_calls = 0
 
@@ -201,7 +223,9 @@ def test_native_runtime_failure_sticks_to_mss_fallback(monkeypatch) -> None:
     controller.close()
 
 
-def test_explicit_native_runtime_failure_does_not_fallback(monkeypatch) -> None:
+def test_display_reset_clears_auto_fallback_and_reprobes_native(monkeypatch) -> None:
+    module: object
+
     class BrokenSession:
         def __init__(self, *_args: object) -> None:
             pass
@@ -211,6 +235,63 @@ def test_explicit_native_runtime_failure_does_not_fallback(monkeypatch) -> None:
 
         def close(self) -> None:
             pass
+
+    class HealthySession:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def capture_png(self, *_args: object) -> bytes:
+            return _png_bytes((10, 10))
+
+        def close(self) -> None:
+            pass
+
+    module = SimpleNamespace(X11SharedMemoryScreenshotSession=BrokenSession)
+    monkeypatch.setattr(screenshot_capture, "_load_module", lambda: module)
+    controller = X11ScreenshotController(
+        run=lambda *_args, **_kwargs: pytest.fail("file capture is not expected"),
+        width=10,
+        height=10,
+        display=":99",
+        cursor_position=lambda: _cursor_position(),
+        capture_source="auto",
+    )
+    monkeypatch.setattr(controller._mss, "grab", lambda _source: _fake_mss_capture(10, 10))
+
+    failed_generation = asyncio.run(
+        controller.capture_bytes(
+            ScreenshotOptions(format="png", show_cursor=False), prefer_native_png=True
+        )
+    )
+    module = SimpleNamespace(X11SharedMemoryScreenshotSession=HealthySession)
+    controller.reset_capture_session()
+    restarted_generation = asyncio.run(
+        controller.capture_bytes(
+            ScreenshotOptions(format="png", show_cursor=False), prefer_native_png=True
+        )
+    )
+
+    assert failed_generation.capture_backend == "mss-fallback"
+    assert restarted_generation.capture_backend == "x11-shm"
+    controller.close()
+
+
+def test_explicit_native_runtime_failure_does_not_fallback(monkeypatch) -> None:
+    capture_calls = 0
+    close_calls = 0
+
+    class BrokenSession:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def capture_png(self, *_args: object) -> bytes:
+            nonlocal capture_calls
+            capture_calls += 1
+            raise RuntimeError("display disconnected")
+
+        def close(self) -> None:
+            nonlocal close_calls
+            close_calls += 1
 
     monkeypatch.setattr(
         screenshot_capture,
@@ -226,12 +307,67 @@ def test_explicit_native_runtime_failure_does_not_fallback(monkeypatch) -> None:
         capture_source="x11-shm",
     )
 
-    with pytest.raises(screenshot_capture.ScreenshotCaptureFailed):
-        asyncio.run(
-            controller.capture_bytes(
-                ScreenshotOptions(format="png", show_cursor=False), prefer_native_png=True
+    for _ in range(2):
+        with pytest.raises(screenshot_capture.ScreenshotCaptureFailed):
+            asyncio.run(
+                controller.capture_bytes(
+                    ScreenshotOptions(format="png", show_cursor=False),
+                    prefer_native_png=True,
+                )
             )
-        )
+    assert capture_calls == 1
+    assert close_calls == 1
+    controller.close()
+
+
+def test_auto_native_timeout_fails_closed_until_display_reset(monkeypatch) -> None:
+    capture_calls = 0
+    close_calls = 0
+
+    class TimedOutSession:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def capture_png(self, *_args: object) -> bytes:
+            nonlocal capture_calls
+            capture_calls += 1
+            raise RuntimeError("XShm GetImage reply exceeded the 500 ms deadline")
+
+        def close(self) -> None:
+            nonlocal close_calls
+            close_calls += 1
+
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(X11SharedMemoryScreenshotSession=TimedOutSession),
+    )
+    controller = X11ScreenshotController(
+        run=lambda *_args, **_kwargs: pytest.fail("file capture is not expected"),
+        width=10,
+        height=10,
+        display=":99",
+        cursor_position=lambda: _cursor_position(),
+        capture_source="auto",
+    )
+    monkeypatch.setattr(
+        controller._mss,
+        "grab",
+        lambda _source: pytest.fail("an unresponsive display must not fall through to MSS"),
+    )
+
+    for _ in range(2):
+        with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+            asyncio.run(
+                controller.capture_bytes(
+                    ScreenshotOptions(format="png", show_cursor=False),
+                    prefer_native_png=True,
+                )
+            )
+
+    assert capture_calls == 1
+    assert close_calls == 1
+    controller.reset_capture_session()
     controller.close()
 
 
@@ -282,6 +418,45 @@ def test_native_readiness_gets_hidden_full_png_and_preserves_cursor_probe(monkey
     assert captured == [(0, 0, 10, 10)]
     assert commands and commands[0][0] == "maim"
     assert "-u" not in commands[0]
+    controller.close()
+
+
+def test_mss_readiness_probes_hidden_png_and_cursor_visible_paths(monkeypatch) -> None:
+    monkeypatch.setattr(
+        screenshots_module.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name == "maim" else None,
+    )
+    commands: list[tuple[str, ...]] = []
+
+    async def run(*args: str, **_kwargs: object):
+        commands.append(args)
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return SimpleNamespace(returncode=0)
+
+    controller = X11ScreenshotController(
+        run=run,
+        width=10,
+        height=10,
+        display=":99",
+        cursor_position=lambda: _cursor_position(),
+        capture_source="mss",
+    )
+    grabs = 0
+
+    def grab(_source):
+        nonlocal grabs
+        grabs += 1
+        return _fake_mss_capture(10, 10)
+
+    monkeypatch.setattr(controller._mss, "grab", grab)
+
+    ready, error = asyncio.run(controller.probe())
+
+    assert ready is True
+    assert error is None
+    assert grabs == 1
+    assert commands and commands[0][0] == "maim"
     controller.close()
 
 

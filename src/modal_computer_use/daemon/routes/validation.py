@@ -33,10 +33,23 @@ def mark_desktop_ready(state: Any) -> None:
         cache.mark_ready()
 
 
+def invalidate_desktop_readiness(state: Any) -> None:
+    cache = getattr(state, "readiness_cache", None)
+    if cache is not None:
+        cache.invalidate()
+
+
 async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
+    supervisor = request.app.state.supervisor
+    if not supervisor.running:
+        invalidate_desktop_readiness(request.app.state)
+        return False, ["desktop supervisor is stopped"]
+    if "xvfb" in supervisor.names:
+        xvfb_status = supervisor.status("xvfb")
+        if xvfb_status.status not in ("running", "unknown"):
+            invalidate_desktop_readiness(request.app.state)
+            return False, ["xvfb is not running"]
     ready, errors = await backend_readiness(request.app.state, force=force)
-    if not request.app.state.supervisor.running:
-        return False, ["desktop supervisor is stopped", *errors]
     return ready, errors
 
 

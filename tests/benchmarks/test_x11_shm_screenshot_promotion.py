@@ -62,6 +62,13 @@ def _artifact() -> dict:
                 "maximum_payload_growth_percent": 10.0,
                 "minimum_daemon_saving_ms": 5.0,
             },
+            "operational_ceilings": {
+                "maximum_readiness_p95_regression_percent": 5.0,
+                "maximum_concurrency_p95_regression_percent": 5.0,
+                "maximum_rss_growth_bytes": 16 * 1024 * 1024,
+                "maximum_fd_delta": 0,
+                "maximum_mapping_delta": 0,
+            },
         },
         "configuration": {
             "source_revision": "a" * 40,
@@ -72,12 +79,28 @@ def _artifact() -> dict:
             "python_version": "3.12.11",
             "target": "x86_64-unknown-linux-gnu",
             "image_identity": "modal-computer-use-a" + "1" * 39,
+            "image_object_id": "im-test-image",
+            "native_builds": {
+                arm: {
+                    "backend": "x11-shm",
+                    "codec": "png-deflate-level1-fixed-up",
+                    "module_sha256": "d" * 64,
+                    "image_object_id": "im-test-image",
+                    "cpu": 1.0,
+                    "memory_bytes": 2048 * 1024 * 1024,
+                }
+                for arm in ("mss", "x11-shm")
+            },
             "requested_placement": {"cloud": "aws", "region": "us-west-2"},
             "observed_placement": {
                 "runner": {"cloud": "aws", "region": "us-west-2"},
                 "target": {"cloud": "aws", "region": "us-west-2"},
             },
             "resources": {"cpu": 1.0, "memory_mib": 2048},
+            "observed_resources": {
+                arm: {"cpu": 1.0, "memory_bytes": 2048 * 1024 * 1024}
+                for arm in ("mss", "x11-shm")
+            },
             "browser": "chromium",
             "display": {"width": 1024, "height": 768, "depth": 24},
             "screenshot": {
@@ -117,27 +140,55 @@ def _artifact() -> dict:
             "chromium_fixture": True,
             "failure_matrix": True,
             "concurrency_matrix": True,
+            "readiness_parity": True,
             "x_server_restart": True,
+            "bounded_x_server_failure": True,
             "captures": 10_000,
             "full_captures": 5_000,
             "region_captures": 5_000,
             "fd_delta": 0,
             "mapping_delta": 0,
             "rss_growth_bytes": 0,
+            "peak_rss_growth_bytes": 0,
             "cleanup_succeeded": True,
         },
         "operational_details": {
             "concurrency": {
                 "passed": True,
-                "levels": [
-                    {
-                        "concurrency": level,
-                        "captures": level,
-                        "elapsed_ms": 1.0,
-                        "capture_backend": "x11-shm",
+                "maximum_p95_regression_percent": 5.0,
+                "arms": {
+                    arm: {
+                        "passed": True,
+                        "source": arm,
+                        "levels": [
+                            {
+                                "concurrency": level,
+                                "trials": 5,
+                                "captures_per_trial": level,
+                                "elapsed_p50_ms": 2.0 if arm == "mss" else 1.0,
+                                "elapsed_p95_ms": 2.0 if arm == "mss" else 1.0,
+                                "capture_backend": arm,
+                            }
+                            for level in (1, 2, 4, 8)
+                        ],
                     }
-                    for level in (1, 2, 4, 8)
-                ],
+                    for arm in ("mss", "x11-shm")
+                },
+            },
+            "readiness": {
+                "passed": True,
+                "maximum_p95_regression_percent": 5.0,
+                "arms": {
+                    arm: {
+                        "passed": True,
+                        "source": arm,
+                        "samples": 20,
+                        "startup_p50_ms": 100.0,
+                        "startup_p95_ms": 100.0,
+                        "capture_backend": arm,
+                    }
+                    for arm in ("mss", "x11-shm")
+                },
             },
             "failure_matrix": {
                 "passed": True,
@@ -164,8 +215,22 @@ def _artifact() -> dict:
                 "fd_delta": 0,
                 "mapping_delta": 0,
                 "rss_growth_bytes": 0,
+                "peak_rss_growth_bytes": 0,
             },
-            "x_server_restart": {"passed": True, "ready_after_restart": True},
+            "x_server_restart": {
+                "passed": True,
+                "ready_after_restart": True,
+                "backend_before": "x11-shm",
+                "backend_after": "x11-shm",
+            },
+            "x_server_timeout": {
+                "passed": True,
+                "failed_bounded": True,
+                "constructor_bounded": True,
+                "elapsed_ms": 600.0,
+                "constructor_elapsed_ms": 600.0,
+                "backend_after_restart": "x11-shm",
+            },
         },
     }
     artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
@@ -201,6 +266,12 @@ def test_publishable_artifact_passes_fixed_promotion_gates() -> None:
         (
             lambda payload: payload["operational_gates"].__setitem__("fd_delta", 1),
             "resource",
+        ),
+        (
+            lambda payload: payload["operational_details"]["readiness"]["arms"][
+                "x11-shm"
+            ].__setitem__("startup_p95_ms", 110.0),
+            "readiness",
         ),
         (
             lambda payload: payload.__setitem__("app_url", "https://modal.invalid/private"),

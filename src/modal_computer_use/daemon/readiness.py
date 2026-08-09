@@ -18,6 +18,7 @@ class ReadinessCache:
         self.ttl_seconds = max(0, ttl_ms) / 1000
         self._snapshot: ReadinessSnapshot | None = None
         self._lock = asyncio.Lock()
+        self._generation = 0
 
     async def backend_ready(self, backend: Any, *, force: bool = False) -> tuple[bool, list[str]]:
         now = time.monotonic()
@@ -33,8 +34,9 @@ class ReadinessCache:
                 if snapshot is not None and snapshot.expires_at > now:
                     return snapshot.ready, list(snapshot.errors)
 
+            generation = self._generation
             ready, errors = await backend.ready()
-            if ready and self.ttl_seconds > 0:
+            if ready and self.ttl_seconds > 0 and generation == self._generation:
                 self._snapshot = ReadinessSnapshot(
                     ready=True,
                     errors=list(errors),
@@ -52,3 +54,9 @@ class ReadinessCache:
             errors=[],
             expires_at=time.monotonic() + self.ttl_seconds,
         )
+
+    def invalidate(self) -> None:
+        """Discard readiness proven against an earlier desktop generation."""
+
+        self._generation += 1
+        self._snapshot = None

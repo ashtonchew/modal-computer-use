@@ -89,7 +89,7 @@ implementation is safe:
 | --- | --- | --- | --- |
 | Mouse and keyboard input | Persistent XTest/XKB | `xdotool` | Only before native emission starts. If native input might be partial, the request is terminal. |
 | Window operations | Native EWMH/Xlib | `wmctrl` | When the window manager does not advertise or complete the requested EWMH operation. |
-| Cursor-hidden lossless PNG capture | Persistent X11 shared memory | Persistent MSS, then `scrot`/`maim` | `auto` selects the source during readiness. An unavailable or failed X11 shared-memory source is quarantined for that daemon session before MSS runs. Explicit `x11-shm` fails instead of changing source. |
+| Cursor-hidden lossless PNG capture | Persistent X11 shared memory | Persistent MSS, then `scrot`/`maim` | `auto` selects the source during readiness. An unavailable or ordinary failed native source is quarantined for that X-server generation before MSS runs; display restart clears the quarantine and re-probes. An X-server reply timeout fails closed because MSS and file capture use the same unresponsive display. Explicit `x11-shm` always fails instead of changing source. |
 | Cursor-visible capture | `maim` | None | Invalid or unavailable cursor composition is terminal. |
 | Change notification | XDamage hint | Source-hash polling | XDamage selects when to capture. Pixels and hashes confirm the change. |
 | Same-region runner preparation | Modal Connect runner | Explicit external runner | Only when endpoint preparation is unavailable before dispatch. Authentication, permission, validation, version, and quota errors are terminal. |
