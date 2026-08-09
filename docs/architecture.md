@@ -68,6 +68,29 @@ behavior lives next to the feature that owns it:
   opening/wait behavior.
 - `daemon/desktop/display.py` owns display metadata exposed by the backend.
 
+### Display-generation lifecycle
+
+`DesktopBackend.invalidate_display_generation()` is the backend-owned seam for the outgoing X11
+generation. It releases held input where possible, clears generation-bound logical state, and
+closes the daemon's clipboard, screenshot, EWMH/Xlib, XTest/Xlib, and owned application clients
+before the old display is replaced. It attempts each cleanup operation and preserves the first
+failure; no old XCB connection, XID, atom cache, MIT-SHM attachment, MSS session, or clipboard
+owner is reused.
+
+The lifecycle routes own admission and orchestration. They reject an active recording, observation
+websocket, or HTTP observe-change request with typed `display_restart_busy`/409, invalidate
+readiness, call the `Supervisor` full-stack mutation, and then run a bounded forced
+`daemon_readiness` probe. A named Xvfb restart therefore replaces its window-manager and optional
+VNC/noVNC dependents as one display generation. The route reports success only after readiness
+passes; failed reconstruction leaves readiness invalid and the service not-ready rather than
+publishing a partial generation.
+
+Configured browser startup is rerun after the display is ready (`browser_open_url_on_start` or
+browser prewarm). This is a startup contract, not desktop-state checkpointing: arbitrary app
+processes, browser page state, and application-owned state are not restored. Hot-session sockets
+may remain connected, but their next operation must pass the normal readiness gate. Isolated
+screenshot failures do not escalate into an automatic full display restart.
+
 Native input uses one persistent display connection rather than spawning a process per event.
 With `COMPUTER_USE_INPUT_BACKEND=auto`, compatibility fallback is allowed only when the native
 adapter reports that emission did not start. A possibly partial native operation is returned as a

@@ -45,6 +45,27 @@ contains `_modal_computer_use_x11_shm`, that Xvfb is 24-bit TrueColor at the con
 and that the server advertises MIT-SHM 1.2 FD attachment. Use `mss` as the explicit rollback source;
 do not change PNG format, dimensions, cursor semantics, or SDK routes to work around readiness.
 
+## Display restart is not ready
+
+Display lifecycle operations invalidate the current generation before mutation. During the bounded
+restart transition, `/readyz` returns `503` with `display lifecycle mutation is in progress`, and
+the lifecycle route does not report a running result until forced daemon readiness passes for the
+input, window-manager, `xdpyinfo`, screenshot, and configured VNC/noVNC checks. A failed cleanup,
+supervisor mutation, or post-start probe leaves the readiness cache invalid; inspect `/readyz` and
+the next `/readyz` remains `503`/not-ready until the underlying display error is resolved. The route
+never publishes a partially rebuilt generation or reuses stale X clients.
+
+An active recording, observation websocket, or HTTP observe-change request blocks display mutation
+with `display_restart_busy` and HTTP `409`. Stop the owner or let the observation finish, then retry
+the lifecycle operation. Existing hot-session sockets may stay connected, but their next desktop
+operation must pass the readiness gate after recovery.
+
+Configured browser startup is rerun after a successful display rebuild. Arbitrary app processes,
+browser page state, and application-owned state are not restored; callers that depend on that state
+must relaunch or rehydrate it. The X11 shared-memory source remains opt-in and MSS remains the
+production default. The optional R3 promotion PR owns any default or canonical documentation
+cutover after the complete matched Modal gates pass.
+
 ## Latency is higher than expected
 
 Separate cold allocation, desktop startup, Function dispatch, borrow entry, and warm operation
