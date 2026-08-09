@@ -249,7 +249,9 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         )
         try:
             self._computer = await self._context.__aenter__()
-            self.target_placement = await self._computer.runtime_placement()
+            self.target_placement = _normalize_placement(
+                await self._computer.runtime_placement()
+            )
             self.target_identity = await _target_runtime_identity(self._computer)
             status = await self._computer.browser.status()
             prewarm_result = status.get("prewarm_result")
@@ -1293,11 +1295,28 @@ async def _run_x11_shm_soak(
     return result
 
 
-def _observed_runner_placement() -> dict[str, str | None]:
-    return {
-        "cloud": os.environ.get("MODAL_CLOUD_PROVIDER") or CLOUD,
-        "region": os.environ.get("MODAL_REGION") or REGION,
+def _normalize_placement(placement: Mapping[str, Any]) -> dict[str, str | None]:
+    cloud = placement.get("cloud")
+    cloud_names = {
+        "CLOUD_PROVIDER_AWS": "aws",
+        "CLOUD_PROVIDER_GCP": "gcp",
+        "CLOUD_PROVIDER_OCI": "oci",
     }
+    normalized_cloud = cloud_names.get(cloud, cloud) if isinstance(cloud, str) else None
+    region = placement.get("region")
+    return {
+        "cloud": normalized_cloud,
+        "region": region if isinstance(region, str) else None,
+    }
+
+
+def _observed_runner_placement() -> dict[str, str | None]:
+    return _normalize_placement(
+        {
+            "cloud": os.environ.get("MODAL_CLOUD_PROVIDER") or CLOUD,
+            "region": os.environ.get("MODAL_REGION") or REGION,
+        }
+    )
 
 
 def _observed_rust_target(
