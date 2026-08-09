@@ -287,9 +287,11 @@ def test_display_lifecycle_still_mutates_supervisor_when_generation_invalidation
     monkeypatch.setattr(app.state.supervisor, "stop", stop)
     monkeypatch.setattr(app.state.supervisor, "restart", restart)
 
-    with pytest.raises(RuntimeError, match="detach failed"):
-        test_client.post(path)
+    response = test_client.post(path)
 
+    assert response.status_code == 503
+    assert response.json()["code"] == "display_reconstruction_failed"
+    assert response.json()["details"] == {"error": "RuntimeError"}
     expected_mutation = "supervisor-stop" if path.endswith("/stop") else "supervisor-restart"
     assert events == ["display-generation-invalidated", expected_mutation]
 
@@ -316,9 +318,11 @@ def test_display_lifecycle_preserves_generation_error_when_supervisor_also_fails
     )
     monkeypatch.setattr(app.state.supervisor, "restart", restart)
 
-    with pytest.raises(RuntimeError, match="generation detach failed"):
-        test_client.post("/v1/computer/restart")
+    response = test_client.post("/v1/computer/restart")
 
+    assert response.status_code == 503
+    assert response.json()["code"] == "display_reconstruction_failed"
+    assert response.json()["details"] == {"error": "RuntimeError"}
     assert events == ["display-generation-invalidated", "supervisor-restart"]
     assert app.state.display_restart_in_progress is False
     assert app.state.display_reconstruction_failed is True
