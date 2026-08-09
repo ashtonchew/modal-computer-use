@@ -11,6 +11,12 @@ class ReadinessSnapshot:
     ready: bool
     errors: list[str]
     expires_at: float
+    backend_generation: int | None
+
+
+def _backend_generation(backend: Any) -> int | None:
+    generation = getattr(backend, "readiness_generation", None)
+    return generation if isinstance(generation, int) else None
 
 
 class ReadinessCache:
@@ -24,35 +30,52 @@ class ReadinessCache:
         now = time.monotonic()
         if not force:
             snapshot = self._snapshot
-            if snapshot is not None and snapshot.expires_at > now:
+            if (
+                snapshot is not None
+                and snapshot.expires_at > now
+                and snapshot.backend_generation == _backend_generation(backend)
+            ):
                 return snapshot.ready, list(snapshot.errors)
 
         async with self._lock:
             now = time.monotonic()
             if not force:
                 snapshot = self._snapshot
-                if snapshot is not None and snapshot.expires_at > now:
+                if (
+                    snapshot is not None
+                    and snapshot.expires_at > now
+                    and snapshot.backend_generation == _backend_generation(backend)
+                ):
                     return snapshot.ready, list(snapshot.errors)
 
             generation = self._generation
+            backend_generation = _backend_generation(backend)
             ready, errors = await backend.ready()
-            if ready and self.ttl_seconds > 0 and generation == self._generation:
+            current_backend_generation = _backend_generation(backend)
+            if (
+                ready
+                and self.ttl_seconds > 0
+                and generation == self._generation
+                and backend_generation == current_backend_generation
+            ):
                 self._snapshot = ReadinessSnapshot(
                     ready=True,
                     errors=list(errors),
                     expires_at=time.monotonic() + self.ttl_seconds,
+                    backend_generation=current_backend_generation,
                 )
             else:
                 self._snapshot = None
             return ready, list(errors)
 
-    def mark_ready(self) -> None:
+    def mark_ready(self, backend: Any) -> None:
         if self.ttl_seconds <= 0:
             return
         self._snapshot = ReadinessSnapshot(
             ready=True,
             errors=[],
             expires_at=time.monotonic() + self.ttl_seconds,
+            backend_generation=_backend_generation(backend),
         )
 
     def invalidate(self) -> None:

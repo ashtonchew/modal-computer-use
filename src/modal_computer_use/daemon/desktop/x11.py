@@ -689,6 +689,10 @@ class X11DesktopBackend(MockDesktopBackend):
         self._screenshots.reset_capture_session()
 
     @property
+    def readiness_generation(self) -> int:
+        return self._screenshots.readiness_generation
+
+    @property
     def subprocess_backend(self) -> str:
         return self._subprocess_backend
 

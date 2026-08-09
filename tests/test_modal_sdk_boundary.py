@@ -38,7 +38,11 @@ from modal_computer_use.sandbox import (
     probe_modal_candidate_placement,
     run_modal_daemon_command,
 )
-from modal_computer_use.state import APP_ID_TAG, compute_config_hash
+from modal_computer_use.state import (
+    APP_ID_TAG,
+    compatible_config_hashes,
+    compute_config_hash,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -2749,6 +2753,37 @@ def test_attach_or_create_existing_named_target_attaches_exact_id_and_preserves_
             "computer-use": "true",
             "computer-use.run_id": "run-123",
             "computer-use.config_hash": compute_config_hash(config),
+            APP_ID_TAG: "ap-modal-computer-use",
+        },
+    )
+    FakeSandbox.from_name_result = target
+
+    with ComputerSandbox.attach_or_create(
+        name="desktop-1",
+        config=config,
+        image=object(),
+        wait=False,
+    ) as computer:
+        assert computer.metadata() is not None
+        assert computer.metadata().sandbox_id == "sb-existing"
+
+    assert FakeSandbox.create_calls == []
+    assert target.terminate_wait_calls == []
+    assert target.detach_calls == 1
+
+
+def test_attach_or_create_accepts_pre_capture_source_hash_for_auto(monkeypatch) -> None:
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal())
+    config = ComputerConfig(run_id="run-123")
+    current_hash, legacy_hash = compatible_config_hashes(config)
+    assert legacy_hash != current_hash
+    target = FakeSandboxObject(
+        sandbox_id="sb-existing",
+        name="desktop-1",
+        tags={
+            "computer-use": "true",
+            "computer-use.run_id": "run-123",
+            "computer-use.config_hash": legacy_hash,
             APP_ID_TAG: "ap-modal-computer-use",
         },
     )

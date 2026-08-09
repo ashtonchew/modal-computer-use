@@ -86,6 +86,24 @@ def test_explicit_x11_shm_readiness_fails_closed_without_extension(monkeypatch) 
     controller.close()
 
 
+def test_native_extension_without_typed_timeout_contract_is_unavailable(monkeypatch) -> None:
+    module = SimpleNamespace(
+        __name__="_modal_computer_use_x11_shm",
+        X11SharedMemoryScreenshotSession=lambda *_args: pytest.fail(
+            "an incompatible extension must not open a session"
+        ),
+    )
+    monkeypatch.setattr(screenshot_capture, "_load_module", lambda: module)
+
+    with pytest.raises(
+        screenshot_capture.ScreenshotCaptureUnavailable,
+        match="incompatible",
+    ):
+        screenshot_capture.X11SharedMemoryScreenshotSession(
+            display=":99", width=10, height=10
+        )
+
+
 def test_x11_shared_memory_adapter_uses_private_extension_abi(monkeypatch) -> None:
     calls: list[tuple[object, ...]] = []
 
@@ -155,6 +173,41 @@ def test_x11_setup_timeout_closes_the_probe_socket(monkeypatch) -> None:
 
         def connect(self, _path: str) -> None:
             raise TimeoutError("display stalled")
+
+        def close(self) -> None:
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(screenshot_capture.socket, "socket", lambda *_args: FakeSocket())
+
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+        screenshot_capture._probe_x11_setup(":99")
+
+    assert closed is True
+
+
+def test_x11_setup_timeout_in_announced_body_closes_the_probe_socket(monkeypatch) -> None:
+    closed = False
+    responses: list[bytes | Exception] = [
+        b"\x01\x00\x0b\x00\x00\x00\x01\x00",
+        TimeoutError("setup body stalled"),
+    ]
+
+    class FakeSocket:
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def connect(self, _path: str) -> None:
+            pass
+
+        def sendall(self, _data: bytes) -> None:
+            pass
+
+        def recv(self, _size: int) -> bytes:
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
 
         def close(self) -> None:
             nonlocal closed
@@ -324,6 +377,9 @@ def test_auto_native_timeout_fails_closed_until_display_reset(monkeypatch) -> No
     capture_calls = 0
     close_calls = 0
 
+    class NativeTimeoutError(RuntimeError):
+        pass
+
     class TimedOutSession:
         def __init__(self, *_args: object) -> None:
             pass
@@ -331,7 +387,7 @@ def test_auto_native_timeout_fails_closed_until_display_reset(monkeypatch) -> No
         def capture_png(self, *_args: object) -> bytes:
             nonlocal capture_calls
             capture_calls += 1
-            raise RuntimeError("XShm GetImage reply exceeded the 500 ms deadline")
+            raise NativeTimeoutError("XShm GetImage reply exceeded its deadline")
 
         def close(self) -> None:
             nonlocal close_calls
@@ -340,7 +396,10 @@ def test_auto_native_timeout_fails_closed_until_display_reset(monkeypatch) -> No
     monkeypatch.setattr(
         screenshot_capture,
         "_load_module",
-        lambda: SimpleNamespace(X11SharedMemoryScreenshotSession=TimedOutSession),
+        lambda: SimpleNamespace(
+            X11SharedMemoryScreenshotSession=TimedOutSession,
+            X11ScreenshotTimeoutError=NativeTimeoutError,
+        ),
     )
     controller = X11ScreenshotController(
         run=lambda *_args, **_kwargs: pytest.fail("file capture is not expected"),
@@ -367,7 +426,17 @@ def test_auto_native_timeout_fails_closed_until_display_reset(monkeypatch) -> No
 
     assert capture_calls == 1
     assert close_calls == 1
+    assert controller.readiness_generation == 1
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+        asyncio.run(
+            controller.capture_bytes(
+                ScreenshotOptions(format="jpeg", show_cursor=True)
+            )
+        )
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+        asyncio.run(controller.capture_raw_pixels())
     controller.reset_capture_session()
+    assert controller.readiness_generation == 2
     controller.close()
 
 

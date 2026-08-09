@@ -15,6 +15,10 @@ use std::slice;
 #[cfg(target_os = "linux")]
 use std::ffi::{c_void, CString};
 #[cfg(target_os = "linux")]
+use std::fmt;
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
 use std::ptr::NonNull;
 #[cfg(target_os = "linux")]
 use std::thread;
@@ -28,6 +32,13 @@ use pyo3::prelude::*;
 #[cfg(all(target_os = "linux", feature = "extension-module"))]
 use pyo3::types::{PyBytes, PyModule};
 
+#[cfg(all(target_os = "linux", feature = "extension-module"))]
+pyo3::create_exception!(
+    _modal_computer_use_x11_shm,
+    X11ScreenshotTimeoutError,
+    PyRuntimeError
+);
+
 #[cfg(target_os = "linux")]
 use xcb::{shm, x, Connection};
 
@@ -35,6 +46,34 @@ const BACKEND_MARKER: &str = "x11-shm";
 const CODEC_MARKER: &str = "png-deflate-level1-fixed-up";
 #[cfg(target_os = "linux")]
 const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(500);
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct X11ReplyTimeout {
+    operation: String,
+}
+
+#[cfg(target_os = "linux")]
+impl fmt::Display for X11ReplyTimeout {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} exceeded the 500 ms deadline", self.operation)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl std::error::Error for X11ReplyTimeout {}
+
+#[cfg(target_os = "linux")]
+fn reply_timeout(operation: &str) -> anyhow::Error {
+    anyhow!(X11ReplyTimeout {
+        operation: operation.to_owned(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn is_reply_timeout(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<X11ReplyTimeout>())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rect {
@@ -231,9 +270,29 @@ fn poll_reply_bounded<C>(conn: &Connection, cookie: &C, operation: &str) -> Resu
 where
     C: xcb::CookieWithReplyChecked,
 {
+    let deadline = Instant::now() + X11_REPLY_TIMEOUT;
+    let remaining_ms = deadline
+        .saturating_duration_since(Instant::now())
+        .as_millis();
+    let timeout_ms = i32::try_from(remaining_ms).unwrap_or(i32::MAX).max(1);
+    let mut descriptor = libc::pollfd {
+        fd: conn.as_raw_fd(),
+        events: libc::POLLOUT,
+        revents: 0,
+    };
+    let poll_result = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
+    if poll_result == 0 {
+        return Err(reply_timeout(operation));
+    }
+    if poll_result < 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("{operation} socket poll failed"));
+    }
     conn.flush()
         .with_context(|| format!("{operation} flush failed"))?;
-    let deadline = Instant::now() + X11_REPLY_TIMEOUT;
+    if Instant::now() >= deadline {
+        return Err(reply_timeout(operation));
+    }
     loop {
         if let Some(reply) = conn.poll_for_reply(cookie) {
             return reply.with_context(|| format!("{operation} reply failed"));
@@ -241,7 +300,7 @@ where
         conn.has_error()
             .with_context(|| format!("{operation} connection failed"))?;
         if Instant::now() >= deadline {
-            bail!("{operation} exceeded the 500 ms deadline");
+            return Err(reply_timeout(operation));
         }
         thread::sleep(Duration::from_millis(1));
     }
@@ -259,6 +318,23 @@ impl X11SharedMemoryScreenshotSession {
             u16::try_from(expected_height).context("expected height is outside the X11 range")?;
         let (conn, screen_num) =
             Connection::connect(Some(display)).context("unable to connect to DISPLAY")?;
+        let send_timeout = libc::timeval {
+            tv_sec: 0,
+            tv_usec: X11_REPLY_TIMEOUT.as_micros() as libc::suseconds_t,
+        };
+        let send_timeout_result = unsafe {
+            libc::setsockopt(
+                conn.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDTIMEO,
+                std::ptr::addr_of!(send_timeout).cast(),
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+            )
+        };
+        if send_timeout_result != 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("could not bound X11 socket writes");
+        }
         if shm::get_extension_data(&conn).is_none() {
             bail!("server does not advertise MIT-SHM");
         }
@@ -536,9 +612,15 @@ impl X11SharedMemoryScreenshotSession {
     #[new]
     fn new(display: &str, expected_width: usize, expected_height: usize) -> PyResult<Self> {
         Self::connect(display, expected_width, expected_height).map_err(|error| {
-            PyRuntimeError::new_err(format!(
-                "X11 shared-memory screenshot startup failed: {error:#}"
-            ))
+            if is_reply_timeout(&error) {
+                X11ScreenshotTimeoutError::new_err(format!(
+                    "X11 shared-memory screenshot startup timed out: {error:#}"
+                ))
+            } else {
+                PyRuntimeError::new_err(format!(
+                    "X11 shared-memory screenshot startup failed: {error:#}"
+                ))
+            }
         })
     }
 
@@ -557,7 +639,13 @@ impl X11SharedMemoryScreenshotSession {
         let output = self
             .capture_png_bytes(x, y, width, height)
             .map_err(|error| {
-                PyValueError::new_err(format!("X11 shared-memory screenshot failed: {error:#}"))
+                if is_reply_timeout(&error) {
+                    X11ScreenshotTimeoutError::new_err(format!(
+                        "X11 shared-memory screenshot timed out: {error:#}"
+                    ))
+                } else {
+                    PyValueError::new_err(format!("X11 shared-memory screenshot failed: {error:#}"))
+                }
             })?;
         Ok(PyBytes::new(py, &output))
     }
@@ -577,8 +665,12 @@ impl X11SharedMemoryScreenshotSession {
 
 #[cfg(all(target_os = "linux", feature = "extension-module"))]
 #[pymodule]
-fn _modal_computer_use_x11_shm(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _modal_computer_use_x11_shm(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<X11SharedMemoryScreenshotSession>()?;
+    module.add(
+        "X11ScreenshotTimeoutError",
+        py.get_type::<X11ScreenshotTimeoutError>(),
+    )?;
     module.add("backend", BACKEND_MARKER)?;
     module.add("codec", CODEC_MARKER)?;
     Ok(())

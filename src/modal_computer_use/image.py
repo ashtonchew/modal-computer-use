@@ -401,8 +401,7 @@ def _add_x11_shared_memory_capture(image: object) -> object:
     )
     cargo_manifest = f"{_X11_SHARED_MEMORY_REMOTE_PATH}/Cargo.toml"
     cargo_output = (
-        f"{_X11_SHARED_MEMORY_REMOTE_PATH}/target/"
-        "x86_64-unknown-linux-gnu/release/"
+        f"{_X11_SHARED_MEMORY_REMOTE_PATH}/target/release/"
         f"lib{_X11_SHARED_MEMORY_EXTENSION}.so"
     )
     image = image.run_commands(
@@ -410,11 +409,9 @@ def _add_x11_shared_memory_capture(image: object) -> object:
         f"chmod 0755 /tmp/rustup-init && /tmp/rustup-init -y --profile minimal "
         f"--default-toolchain {_RUST_TOOLCHAIN}",
         "export PATH=/root/.cargo/bin:$PATH && "
-        f"rustup target add x86_64-unknown-linux-gnu --toolchain {_RUST_TOOLCHAIN}",
-        "export PATH=/root/.cargo/bin:$PATH && "
         f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=/usr/local/bin/python3 "
         "cargo build "
-        f"--locked --release --features extension-module --target x86_64-unknown-linux-gnu "
+        f"--locked --release --features extension-module "
         f"--manifest-path {cargo_manifest}",
         "/usr/local/bin/python3 -c 'import pathlib, shutil, sysconfig; "
         f"source = pathlib.Path(\"{cargo_output}\"); assert source.is_file(); "
@@ -425,7 +422,8 @@ def _add_x11_shared_memory_capture(image: object) -> object:
         f"rm -rf {_X11_SHARED_MEMORY_REMOTE_PATH}/target /root/.cargo/registry "
         "/root/.cargo/git /root/.rustup /root/.cargo/bin /tmp/rustup-init",
         f"/usr/local/bin/python3 -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "
-        "assert hasattr(m, \"X11SharedMemoryScreenshotSession\")'",
+        "assert hasattr(m, \"X11SharedMemoryScreenshotSession\"); "
+        "assert issubclass(m.X11ScreenshotTimeoutError, RuntimeError)'",
     )
     return image
 

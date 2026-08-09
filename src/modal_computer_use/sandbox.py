@@ -69,7 +69,14 @@ from .namespaces import (
 )
 from .observations import AsyncObservationClient, ObservationClient
 from .protocol_compatibility import validate_default_trajectory_protocol
-from .state import APP_ID_TAG, compute_config_hash, default_tags, new_run_id, warm_pool_tags
+from .state import (
+    APP_ID_TAG,
+    compatible_config_hashes,
+    compute_config_hash,
+    default_tags,
+    new_run_id,
+    warm_pool_tags,
+)
 from .transports import (
     AsyncHTTPTransport,
     HotSessionTransport,
@@ -1416,7 +1423,7 @@ def _validate_named_existing_sandbox(
         if resolved_config.run_id is None:
             resolved_config.run_id = tagged_run_id
         requested_hash = compute_config_hash(resolved_config)
-        if existing_hash != requested_hash:
+        if existing_hash not in compatible_config_hashes(resolved_config):
             raise ConfigConflictError(
                 "existing named Sandbox config_hash does not match the requested config",
                 requested_hash=requested_hash,
@@ -3045,7 +3052,7 @@ async def _validate_named_existing_sandbox_async(
         if resolved_config.run_id is None:
             resolved_config.run_id = tagged_run_id
         requested_hash = compute_config_hash(resolved_config)
-        if existing_hash != requested_hash:
+        if existing_hash not in compatible_config_hashes(resolved_config):
             raise ConfigConflictError(
                 "existing named Sandbox config_hash does not match the requested config",
                 requested_hash=requested_hash,

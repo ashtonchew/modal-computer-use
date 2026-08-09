@@ -222,8 +222,13 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
         raise ValueError("Rust toolchain must be pinned to rustc 1.91.0")
     if not str(configuration.get("python_version", "")).startswith("3.12."):
         raise ValueError("benchmark must use Python 3.12")
-    if configuration.get("target") != "x86_64-unknown-linux-gnu":
-        raise ValueError("benchmark target must be x86_64 Linux")
+    target = configuration.get("target")
+    target_machines = {
+        "x86_64-unknown-linux-gnu": "x86_64",
+        "aarch64-unknown-linux-gnu": "aarch64",
+    }
+    if target not in target_machines:
+        raise ValueError("benchmark target must be a supported Linux architecture")
     if not str(configuration.get("image_identity", "")).strip():
         raise ValueError("image identity is required")
     if not str(configuration.get("image_object_id", "")).startswith("im-"):
@@ -242,6 +247,8 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
             raise ValueError("native module digest is invalid")
         if build.get("image_object_id") != configuration.get("image_object_id"):
             raise ValueError("target native build does not match the Modal Image object")
+        if build.get("machine") != target_machines[target]:
+            raise ValueError("native build architecture does not match the benchmark target")
         normalized_builds.append(dict(build))
     if normalized_builds[0] != normalized_builds[1]:
         raise ValueError("benchmark arms used different native Image builds")
@@ -261,9 +268,14 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
         raise ValueError("benchmark must reuse one pooled client per arm")
     requested = _mapping(configuration.get("requested_placement"), "requested_placement")
     observed = _mapping(configuration.get("observed_placement"), "observed_placement")
-    for owner in ("runner", "target"):
-        if _mapping(observed.get(owner), f"observed_placement.{owner}") != requested:
-            raise ValueError("requested and observed placement must match")
+    if _mapping(observed.get("runner"), "observed_placement.runner") != requested:
+        raise ValueError("requested and observed runner placement must match")
+    targets = _mapping(observed.get("targets"), "observed_placement.targets")
+    if set(targets) != {BASELINE_ARM, CANDIDATE_ARM}:
+        raise ValueError("both benchmark arms must report observed placement")
+    for arm in (BASELINE_ARM, CANDIDATE_ARM):
+        if _mapping(targets.get(arm), f"observed_placement.targets.{arm}") != requested:
+            raise ValueError("requested and observed target placement must match")
     resources = _mapping(configuration.get("resources"), "resources")
     if resources.get("cpu") != 1.0 or resources.get("memory_mib") != 2048:
         raise ValueError("benchmark resources must stay fixed")
@@ -298,7 +310,11 @@ def _validate_schedule(value: Any, *, samples: int) -> None:
 
 
 def _validate_arm(arm_payload: Mapping[str, Any], *, arm: str, samples: int) -> None:
-    if arm_payload.get("requested_source") != arm or arm_payload.get("expected_backend") != arm:
+    expected_source = "auto" if arm == CANDIDATE_ARM else arm
+    if (
+        arm_payload.get("requested_source") != expected_source
+        or arm_payload.get("expected_backend") != arm
+    ):
         raise ValueError(f"{arm} source/backend contract is invalid")
     observations = _observations(arm_payload)
     if len(observations) != samples:
@@ -324,6 +340,7 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
         "readiness_parity",
         "x_server_restart",
         "bounded_x_server_failure",
+        "region_parity",
         "cleanup_succeeded",
     ):
         if gates.get(key) is not True:
@@ -450,7 +467,12 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
     if (
         timeout.get("passed") is not True
         or timeout.get("failed_bounded") is not True
+        or timeout.get("public_error_type") != "DaemonHTTPError"
+        or timeout.get("public_error_code") != "internal_error"
+        or timeout.get("public_error_detail_type") != "ScreenshotCaptureTimedOut"
+        or timeout.get("no_fallback_observed") is not True
         or timeout.get("constructor_bounded") is not True
+        or timeout.get("constructor_error_type") != "ScreenshotCaptureTimedOut"
         or timeout.get("backend_after_restart") != CANDIDATE_ARM
         or _nonnegative_number(timeout.get("elapsed_ms"), "x_server_timeout.elapsed_ms")
         >= 2_500.0
@@ -461,6 +483,40 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
         >= 2_500.0
     ):
         raise ValueError("bounded X server failure detail did not pass")
+    region_parity = _mapping(details.get("region_parity"), "region_parity")
+    region_arms = _mapping(region_parity.get("arms"), "region_parity.arms")
+    if (
+        region_parity.get("passed") is not True
+        or region_parity.get("case_count") != 4
+        or region_parity.get("decoded_pixel_and_metadata_parity") is not True
+        or set(region_arms) != {BASELINE_ARM, CANDIDATE_ARM}
+    ):
+        raise ValueError("regional screenshot parity detail did not pass")
+    for arm in (BASELINE_ARM, CANDIDATE_ARM):
+        rows = region_arms.get(arm)
+        if not isinstance(rows, list) or len(rows) != 4:
+            raise ValueError("regional screenshot parity cases are incomplete")
+        for row in rows:
+            item = _mapping(row, f"region_parity.arms.{arm}")
+            region = _mapping(item.get("region"), "region_parity.region")
+            if (
+                item.get("capture_backend") != arm
+                or item.get("width") != region.get("width")
+                or item.get("height") != region.get("height")
+                or item.get("cursor_visible") is not False
+                or item.get("cursor_position_valid") is not True
+                or _FULL_SHA256.fullmatch(str(item.get("pixels_sha256", ""))) is None
+                or not isinstance(item.get("coordinate_space"), Mapping)
+            ):
+                raise ValueError("regional screenshot parity case is invalid")
+    terminal_cleanup = _mapping(details.get("terminal_cleanup"), "terminal_cleanup")
+    if (
+        terminal_cleanup.get("succeeded") is not True
+        or terminal_cleanup.get("survivors_before_sweep") != 0
+        or terminal_cleanup.get("remaining_sandboxes") != 0
+        or terminal_cleanup.get("cleanup_error_types") != []
+    ):
+        raise ValueError("terminal Sandbox cleanup detail did not pass")
 
 
 def _paired_bootstrap_median_difference(

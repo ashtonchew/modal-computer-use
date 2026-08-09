@@ -30,7 +30,7 @@ async def backend_readiness(state: Any, *, force: bool = False) -> tuple[bool, l
 def mark_desktop_ready(state: Any) -> None:
     cache = getattr(state, "readiness_cache", None)
     if cache is not None:
-        cache.mark_ready()
+        cache.mark_ready(state.backend)
 
 
 def invalidate_desktop_readiness(state: Any) -> None:

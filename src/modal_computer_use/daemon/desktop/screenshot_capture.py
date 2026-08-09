@@ -100,6 +100,14 @@ class X11SharedMemoryScreenshotSession:
                 "X11 shared-memory screenshot extension is unavailable"
             )
         constructor = getattr(module, "X11SharedMemoryScreenshotSession", None)
+        timeout_error = getattr(module, "X11ScreenshotTimeoutError", None)
+        if getattr(module, "__name__", None) == _MODULE_NAME and not (
+            isinstance(timeout_error, type)
+            and issubclass(timeout_error, BaseException)
+        ):
+            raise ScreenshotCaptureUnavailable(
+                "X11 shared-memory screenshot extension is incompatible"
+            )
         if not callable(constructor):
             raise ScreenshotCaptureUnavailable(
                 "X11 shared-memory screenshot extension has no session constructor"
@@ -109,13 +117,14 @@ class X11SharedMemoryScreenshotSession:
         try:
             self._session = constructor(display, width, height)
         except Exception as exc:
-            if "exceeded the 500 ms deadline" in str(exc):
+            if _is_native_timeout(exc, timeout_error):
                 raise ScreenshotCaptureTimedOut(
                     "X11 shared-memory screenshot startup exceeded its reply deadline"
                 ) from exc
             raise ScreenshotCaptureUnavailable(
                 "X11 shared-memory screenshot session could not start"
             ) from exc
+        self._timeout_error = timeout_error
         self._closed = False
 
     def capture_png(self, *, x: int, y: int, width: int, height: int) -> bytes:
@@ -126,7 +135,7 @@ class X11SharedMemoryScreenshotSession:
         try:
             data = self._session.capture_png(x, y, width, height)
         except Exception as exc:
-            if "exceeded the 500 ms deadline" in str(exc):
+            if _is_native_timeout(exc, self._timeout_error):
                 raise ScreenshotCaptureTimedOut(
                     "X11 shared-memory screenshot exceeded its reply deadline"
                 ) from exc
@@ -159,6 +168,14 @@ class X11SharedMemoryScreenshotSession:
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _is_native_timeout(exc: Exception, exception_type: Any) -> bool:
+    return (
+        isinstance(exception_type, type)
+        and issubclass(exception_type, BaseException)
+        and isinstance(exc, exception_type)
+    )
 
 
 def validate_png_dimensions(data: bytes, *, width: int, height: int) -> bool:
@@ -207,12 +224,16 @@ def _probe_x11_setup(display: str) -> None:
         connection.settimeout(remaining())
         connection.sendall(struct.pack("<BBHHHHH", ord("l"), 0, 11, 0, 0, 0, 0))
         response = bytearray()
-        while len(response) < 8:
+        expected_size = 8
+        while len(response) < expected_size:
             connection.settimeout(remaining())
-            chunk = connection.recv(8 - len(response))
+            chunk = connection.recv(expected_size - len(response))
             if not chunk:
                 break
             response.extend(chunk)
+            if len(response) >= 8 and expected_size == 8:
+                setup_words = int.from_bytes(response[6:8], "little")
+                expected_size += setup_words * 4
     except TimeoutError as exc:
         raise ScreenshotCaptureTimedOut(
             "X11 shared-memory screenshot startup exceeded its reply deadline"
@@ -224,7 +245,7 @@ def _probe_x11_setup(display: str) -> None:
     finally:
         if connection is not None:
             connection.close()
-    if len(response) < 8 or response[0] != 1:
+    if len(response) != expected_size or response[0] != 1:
         raise ScreenshotCaptureUnavailable("X11 display rejected the setup handshake")
 
 
