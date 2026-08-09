@@ -367,6 +367,14 @@ async def _process_stdout_text(process: Any) -> str:
     raise RuntimeError("sandbox process stdout has an unexpected type")
 
 
+def _safe_diagnostic_label(value: object) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 80:
+        return None
+    if not all(character.isalnum() or character in "._-" for character in value):
+        return None
+    return value
+
+
 async def _completed_process_stdout_text(process: Any) -> str:
     exit_code = await process.wait.aio()
     raw = await _process_stdout_text(process)
@@ -663,6 +671,9 @@ async def _run_x_server_timeout_probe(
     computer: Any | None = None
     failure_type: str | None = None
     failure_phase: str | None = None
+    failure_status_code: int | None = None
+    failure_code: str | None = None
+    failure_detail_type: str | None = None
     phase = "context_enter"
     result: dict[str, Any] | None = None
     resumed = False
@@ -797,6 +808,12 @@ async def _run_x_server_timeout_probe(
     except Exception as exc:
         failure_type = type(exc).__name__
         failure_phase = phase
+        if isinstance(exc, DaemonHTTPError):
+            failure_status_code = exc.status_code
+            failure_code = _safe_diagnostic_label(exc.code)
+            failure_detail_type = _safe_diagnostic_label(
+                exc.details.get("type") or exc.details.get("error")
+            )
     finally:
         if computer is not None and not resumed:
             sandbox = getattr(computer, "_sandbox", None)
@@ -822,6 +839,17 @@ async def _run_x_server_timeout_probe(
             "passed": False,
             **({"failure_type": failure_type} if failure_type else {}),
             **({"failure_phase": failure_phase} if failure_phase else {}),
+            **(
+                {"failure_status_code": failure_status_code}
+                if failure_status_code is not None
+                else {}
+            ),
+            **({"failure_code": failure_code} if failure_code else {}),
+            **(
+                {"failure_detail_type": failure_detail_type}
+                if failure_detail_type
+                else {}
+            ),
             **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
         }
     return result or {"passed": False, "failure_type": "NoResult"}

@@ -41,6 +41,7 @@ def test_promotion_runner_exposes_the_bounded_x_server_probe() -> None:
     assert '_ArmContext("auto")' in runner
     assert 'print(json.dumps(result, sort_keys=True))' in runner
     assert '"failure_phase": failure_phase' in runner
+    assert '"failure_code": failure_code' in runner
 
 
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
