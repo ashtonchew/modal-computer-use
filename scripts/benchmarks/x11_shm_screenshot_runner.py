@@ -1682,6 +1682,28 @@ def run(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=600,
+    region=REGION,
+    retries=0,
+)
+def run_bounded_x_server_probe() -> dict[str, Any]:
+    """Run only the preregistered stalled-X failure probe for diagnosis."""
+
+    async def execute() -> dict[str, Any]:
+        try:
+            return await _run_x_server_timeout_probe(lambda: _ArmContext("auto"))
+        finally:
+            cleanup = await _final_sandbox_cleanup()
+            if cleanup.get("succeeded") is not True:
+                raise RuntimeError("bounded X server probe cleanup found live Sandboxes")
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
