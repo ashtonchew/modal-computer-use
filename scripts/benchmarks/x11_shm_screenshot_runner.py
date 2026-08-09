@@ -740,7 +740,7 @@ async def _run_x_server_timeout_probe(
         public_error_code: str | None = None
         public_error_detail_type: str | None = None
         try:
-            await asyncio.wait_for(computer.screenshots.full(), timeout=3.0)
+            await asyncio.wait_for(computer.screenshots.full(), timeout=10.0)
         except Exception as exc:
             public_error_type = type(exc).__name__
             public_error_code = getattr(exc, "code", None)
