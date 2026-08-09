@@ -73,6 +73,10 @@ The weighted input-capacity promotion uses three independent same-runtime runs:
 See the [weighted input-capacity report](../docs/benchmark-results-2026-08-08-input-capacity.md) for
 the 100-token refill, 400-token burst, repeated-run result, and rejected higher candidates.
 
+The earlier 30-call native-capture experiment was retired after the promotion scope moved to
+the complete managed-Chromium ``x11-shm`` screenshot path. Its bounded fixture result remains
+described in the consolidated research note and is not a production default or cutover decision.
+
 ### Archived July 26 combined report
 
 The archived combined report remains bound to these immutable inputs:

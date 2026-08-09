@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.benchmarks.full_screenshot_sdk_harness import (
+    _EXPECTED_PAYLOAD,
+    _validate_sample,
+    build_paired_random_schedule,
+    measure_full_screenshot_arms,
+)
+
+DATA = b"png-body-for-contract-test"
+SHA = hashlib.sha256(DATA).hexdigest()
+
+
+class FakeScreenshot:
+    format = "png"
+    width = 1024
+    height = 768
+    size_bytes = len(DATA)
+    sha256 = SHA
+    cursor_visible = False
+    coordinate_space = SimpleNamespace(model_dump=lambda mode=None: {})
+
+    def as_bytes(self) -> bytes:
+        return DATA
+
+
+def _trace(*, backend: str = "mss") -> dict[str, object]:
+    return {
+        "path": "/v1/screenshots/full/raw",
+        "request_json": dict(_EXPECTED_PAYLOAD),
+        "response_headers": {
+            "content-type": "image/png",
+            "x-computer-use-width": "1024",
+            "x-computer-use-height": "768",
+            "x-computer-use-size-bytes": str(len(DATA)),
+            "x-computer-use-sha256": SHA,
+            "x-computer-use-capture-backend": backend,
+            "x-computer-use-timing-ms": json.dumps(
+                {"capture_ms": 1.0, "hash_ms": 0.25, "total_ms": 1.5}
+            ),
+        },
+    }
+
+
+def test_schedule_is_reproducible_paired_and_randomized() -> None:
+    first = build_paired_random_schedule(
+        ("mss", "x11-shm"), sample_count=100, seed=20260808
+    )
+    second = build_paired_random_schedule(
+        ("mss", "x11-shm"), sample_count=100, seed=20260808
+    )
+
+    assert first == second
+    assert len(first) == 200
+    assert all(
+        {entry["arm"] for entry in first[index : index + 2]} == {"mss", "x11-shm"}
+        for index in range(0, len(first), 2)
+    )
+    assert {entry["position"] for entry in first} == {0, 1}
+    assert any(
+        first[index]["arm"] != first[index + 2]["arm"]
+        for index in range(0, len(first) - 2, 2)
+    )
+
+
+def test_validate_sample_accepts_canonical_contract() -> None:
+    _validate_sample(FakeScreenshot(), _trace())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("path", "/v1/screenshots/full"),
+        ("request_json", {"format": "jpeg"}),
+    ],
+)
+def test_validate_sample_rejects_route_or_payload(field: str, value: object) -> None:
+    trace = _trace()
+    trace[field] = value
+    with pytest.raises(AssertionError):
+        _validate_sample(FakeScreenshot(), trace)
+
+
+@pytest.mark.parametrize(
+    ("header", "value"),
+    [
+        ("content-type", "image/jpeg"),
+        ("x-computer-use-width", "800"),
+        ("x-computer-use-sha256", "0" * 64),
+        ("x-computer-use-timing-ms", '{"total_ms":-1}'),
+        ("x-computer-use-timing-ms", '{"total_ms":1}'),
+    ],
+)
+def test_validate_sample_rejects_response_contract(header: str, value: str) -> None:
+    trace = _trace()
+    headers = trace["response_headers"]
+    assert isinstance(headers, dict)
+    headers[header] = value
+    with pytest.raises(AssertionError):
+        _validate_sample(FakeScreenshot(), trace)
+
+
+class FakeClient:
+    def __init__(self, backend: str) -> None:
+        self.backend = backend
+
+    async def post_bytes_with_headers(self, path: str, *, json: dict[str, object]):
+        assert path == "/v1/screenshots/full/raw"
+        assert json == _EXPECTED_PAYLOAD
+        return DATA, _trace(backend=self.backend)["response_headers"]
+
+
+class FakeScreenshots:
+    def __init__(self, client: FakeClient) -> None:
+        self._client = client
+
+    async def full(self) -> FakeScreenshot:
+        await self._client.post_bytes_with_headers(
+            "/v1/screenshots/full/raw", json=dict(_EXPECTED_PAYLOAD)
+        )
+        return FakeScreenshot()
+
+
+class FakeComputer:
+    def __init__(self, backend: str) -> None:
+        self.client = FakeClient(backend)
+        self.screenshots = FakeScreenshots(self.client)
+
+
+class FakeContext:
+    def __init__(self, backend: str, *, fail_cleanup: bool = False) -> None:
+        self.computer = FakeComputer(backend)
+        self.fail_cleanup = fail_cleanup
+
+    async def __aenter__(self) -> FakeComputer:
+        return self.computer
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self.fail_cleanup:
+            raise RuntimeError("cleanup failed")
+
+
+@pytest.mark.asyncio
+async def test_measure_full_screenshot_records_public_and_daemon_boundaries() -> None:
+    result = await measure_full_screenshot_arms(
+        {"mss": lambda: FakeContext("mss"), "x11-shm": lambda: FakeContext("x11-shm")},
+        sample_count=100,
+        warmup_iterations=10,
+        decode_parity=lambda _data: True,
+        expected_capture_backends={"mss": "mss", "x11-shm": "x11-shm"},
+        schedule_seed=20260808,
+    )
+
+    assert result["public_call"] == "await computer.screenshots.full()"
+    assert len(result["schedule"]) == 200
+    for arm in ("mss", "x11-shm"):
+        observations = result["arms"][arm]["observations"]
+        assert len(observations) == 100
+        assert observations[0]["daemon_total_ms"] == 1.5
+        assert observations[0]["hash_ms"] == 0.25
+        assert observations[0]["payload_bytes"] == len(DATA)
+        assert observations[0]["metadata_parity"] is True
+
+
+@pytest.mark.asyncio
+async def test_measure_full_screenshot_requires_promotion_sample_and_warmup_counts() -> None:
+    with pytest.raises(ValueError, match="100"):
+        await measure_full_screenshot_arms(
+            {"mss": lambda: FakeContext("mss"), "x11-shm": lambda: FakeContext("x11-shm")},
+            sample_count=30,
+            warmup_iterations=10,
+            decode_parity=lambda _data: True,
+        )
+    with pytest.raises(ValueError, match="10 warmup"):
+        await measure_full_screenshot_arms(
+            {"mss": lambda: FakeContext("mss"), "x11-shm": lambda: FakeContext("x11-shm")},
+            sample_count=100,
+            warmup_iterations=3,
+            decode_parity=lambda _data: True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_measure_full_screenshot_requires_pixel_parity_callback() -> None:
+    with pytest.raises(ValueError, match="pixel parity"):
+        await measure_full_screenshot_arms(
+            {"mss": lambda: FakeContext("mss"), "x11-shm": lambda: FakeContext("x11-shm")},
+            sample_count=100,
+            warmup_iterations=10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_measure_full_screenshot_fails_cleanup() -> None:
+    with pytest.raises(RuntimeError, match="cleanup"):
+        await measure_full_screenshot_arms(
+            {
+                "mss": lambda: FakeContext("mss", fail_cleanup=True),
+                "x11-shm": lambda: FakeContext("x11-shm"),
+            },
+            sample_count=100,
+            warmup_iterations=10,
+            decode_parity=lambda _data: True,
+        )

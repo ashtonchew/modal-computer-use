@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Screenshot capture fixture</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "DejaVu Sans", Arial, sans-serif;
+        background: #f4f7fb;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; width: 1024px; height: 768px; color: #172033; }
+      header {
+        height: 112px;
+        padding: 28px 42px;
+        color: #fff;
+        background: #263b6e;
+      }
+      header h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: .02em; }
+      header p { margin: 0; font-size: 14px; opacity: .86; }
+      main { display: grid; grid-template-columns: 1.2fr .8fr; gap: 26px; padding: 30px 42px; }
+      section, aside { border: 1px solid #d7dfed; border-radius: 12px; background: #fff; }
+      section { padding: 24px 26px; }
+      aside { padding: 22px; background: #eaf0fb; }
+      h2 { margin: 0 0 16px; font-size: 20px; }
+      p { line-height: 1.5; }
+      .bars { display: grid; gap: 12px; margin-top: 24px; }
+      .bar { height: 14px; border-radius: 7px; background: #d7dfed; overflow: hidden; }
+      .bar span { display: block; height: 100%; background: #3e7acb; }
+      .bar:nth-child(1) span { width: 82%; }
+      .bar:nth-child(2) span { width: 64%; background: #57a773; }
+      .bar:nth-child(3) span { width: 47%; background: #d89a42; }
+      ul { margin: 0; padding-left: 20px; line-height: 2; }
+      .badge { display: inline-block; padding: 5px 10px; border-radius: 999px; color: #174d2a; background: #ccebd5; font-size: 12px; font-weight: 700; }
+    </style>
+  </head>
+  <body data-capture-fixture="x11-shm">
+    <header>
+      <h1>Desktop capture benchmark</h1>
+      <p>Deterministic Chromium content for complete lossless screenshot requests.</p>
+    </header>
+    <main>
+      <section>
+        <span class="badge">READY FOR CAPTURE</span>
+        <h2>Stable browser surface</h2>
+        <p>Every arm renders the same local document at 1024 by 768 pixels. No clock,
+          network request, animation, or external resource participates in the frame.</p>
+        <div class="bars" aria-label="static bars">
+          <div class="bar"><span></span></div>
+          <div class="bar"><span></span></div>
+          <div class="bar"><span></span></div>
+        </div>
+      </section>
+      <aside>
+        <h2>Capture contract</h2>
+        <ul>
+          <li>PNG</li>
+          <li>Lossless</li>
+          <li>Cursor hidden</li>
+          <li>Full desktop</li>
+        </ul>
+      </aside>
+    </main>
+  </body>
+</html>
