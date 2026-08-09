@@ -1,0 +1,26 @@
+[package]
+name = "modal-computer-use-x11-shm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[lib]
+name = "_modal_computer_use_x11_shm"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+anyhow = "1.0"
+libc = "0.2"
+png = "0.18.1"
+pyo3 = { version = "0.24.1", default-features = false, features = ["macros"] }
+xcb = { version = "1.7", default-features = false, features = ["dl", "shm"] }
+
+[profile.release]
+debug = true
+lto = "thin"
+codegen-units = 1

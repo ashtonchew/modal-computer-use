@@ -30,9 +30,16 @@ or inconsistent format, size, hash, geometry, coordinate space, timestamp, or cu
 request. The SDK does not silently retry through the JSON/base64 route after dispatch. Check that
 the installed daemon and client have a compatible screenshot protocol.
 
-Cursor-hidden requests normally use the persistent native capture session. Cursor-visible requests
-and failed display connections can use the bounded fallback. An ordinary Xlib failure should fail
-one request, not terminate the daemon.
+Cursor-hidden lossless PNG requests use X11 shared-memory capture in a managed Image after its
+extension and live display pass readiness. Under `auto`, an unavailable or failed source is
+quarantined for the daemon session and subsequent eligible captures report `mss-fallback` instead
+of repeatedly reopening it. Explicit `x11-shm` fails readiness. Cursor-visible, scaled, JPEG,
+WebP, and raw-RGB requests keep their existing capture paths.
+
+If `/readyz` reports an X11 shared-memory screenshot probe failure, verify that the runtime Image
+contains `_modal_computer_use_x11_shm`, that Xvfb is 24-bit TrueColor at the configured dimensions,
+and that the server advertises MIT-SHM 1.2 FD attachment. Use `mss` as the explicit rollback source;
+do not change PNG format, dimensions, cursor semantics, or SDK routes to work around readiness.
 
 ## Latency is higher than expected
 

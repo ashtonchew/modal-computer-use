@@ -51,6 +51,7 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     assert settings.post_action_delay_ms == 0
     assert settings.readiness_cache_ttl_ms == 1_000
     assert settings.subprocess_backend == "isolated-asyncio"
+    assert settings.screenshot_capture_source == "auto"
     assert settings.max_json_body_bytes == 16 * 1024 * 1024
     assert settings.max_websocket_message_bytes == 16 * 1024 * 1024
     assert settings.max_hot_session_connections == 64
@@ -91,6 +92,11 @@ def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:
         ("backend", "x-11", "COMPUTER_USE_BACKEND"),
         ("input_backend", "x-test", "COMPUTER_USE_INPUT_BACKEND"),
         ("subprocess_backend", "threads", "COMPUTER_USE_SUBPROCESS_BACKEND"),
+        (
+            "screenshot_capture_source",
+            "native-xcb-fixed-up",
+            "COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE",
+        ),
     ],
 )
 def test_daemon_settings_reject_invalid_backend_choices(
@@ -108,6 +114,7 @@ def test_daemon_settings_reject_invalid_backend_choices(
         ("COMPUTER_USE_BACKEND", "x-11"),
         ("COMPUTER_USE_INPUT_BACKEND", "x-test"),
         ("COMPUTER_USE_SUBPROCESS_BACKEND", "threads"),
+        ("COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE", "native-xcb-fixed-up"),
     ],
 )
 def test_daemon_settings_reject_invalid_backend_environment(

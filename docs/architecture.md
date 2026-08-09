@@ -56,8 +56,11 @@ behavior lives next to the feature that owns it:
   adapter, and held-button state.
 - `daemon/desktop/keyboard.py` owns XKB key mapping, native XTest input, the `xdotool`
   compatibility adapter, clipboard-paste typing fallback, and held-key state.
-- `daemon/desktop/screenshots.py` owns cursor-hidden MSS capture, the file-capture ladder, scaling,
-  encoding, coordinate-space metadata, screenshot readiness, and screenshot artifact writes.
+- `daemon/desktop/screenshots.py` owns screenshot-source selection, the persistent X11
+  shared-memory and MSS sessions, the file-capture ladder, scaling, encoding, coordinate-space
+  metadata, readiness, hashing, and screenshot artifact writes. Its private
+  `screenshot_capture.py` bridge adapts the optional X11 shared-memory extension without moving
+  route policy or fallback into the extension.
 - `daemon/desktop/clipboard.py` owns clipboard read/write/clear through `xclip`.
 - `daemon/desktop/windows.py` owns native EWMH/Xlib window operations and the `wmctrl`
   compatibility adapter.
@@ -86,7 +89,7 @@ implementation is safe:
 | --- | --- | --- | --- |
 | Mouse and keyboard input | Persistent XTest/XKB | `xdotool` | Only before native emission starts. If native input might be partial, the request is terminal. |
 | Window operations | Native EWMH/Xlib | `wmctrl` | When the window manager does not advertise or complete the requested EWMH operation. |
-| Cursor-hidden capture | MSS XShm-preferred capture | `scrot`, then `maim` | After one MSS reset and retry cannot produce a valid frame. MSS can use XGetImage when XShm is unavailable. |
+| Cursor-hidden lossless PNG capture | Persistent X11 shared memory | Persistent MSS, then `scrot`/`maim` | `auto` selects the source during readiness. An unavailable or failed X11 shared-memory source is quarantined for that daemon session before MSS runs. Explicit `x11-shm` fails instead of changing source. |
 | Cursor-visible capture | `maim` | None | Invalid or unavailable cursor composition is terminal. |
 | Change notification | XDamage hint | Source-hash polling | XDamage selects when to capture. Pixels and hashes confirm the change. |
 | Same-region runner preparation | Modal Connect runner | Explicit external runner | Only when endpoint preparation is unavailable before dispatch. Authentication, permission, validation, version, and quota errors are terminal. |

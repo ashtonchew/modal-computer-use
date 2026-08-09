@@ -158,6 +158,54 @@ def test_status_reflects_stopped_mock_lifecycle(tmp_path) -> None:
     assert {item["status"] for item in status["processes"].values()} == {"stopped"}
 
 
+@pytest.mark.parametrize("path", ["/v1/computer/stop", "/v1/computer/restart"])
+def test_display_lifecycle_resets_screenshot_capture_before_supervisor_mutation(
+    test_client, app, monkeypatch, path: str
+) -> None:
+    events: list[str] = []
+
+    def reset_screenshot_capture() -> None:
+        events.append("capture-reset")
+
+    async def stop() -> None:
+        events.append("supervisor-stop")
+
+    async def restart(name: str | None = None) -> None:
+        assert name is None
+        events.append("supervisor-restart")
+
+    monkeypatch.setattr(app.state.backend, "reset_screenshot_capture", reset_screenshot_capture)
+    monkeypatch.setattr(app.state.supervisor, "stop", stop)
+    monkeypatch.setattr(app.state.supervisor, "restart", restart)
+
+    response = test_client.post(path)
+
+    assert response.status_code == 200
+    expected_mutation = "supervisor-stop" if path.endswith("/stop") else "supervisor-restart"
+    assert events == ["capture-reset", expected_mutation]
+
+
+def test_xvfb_process_restart_resets_screenshot_capture_first(
+    test_client, app, monkeypatch
+) -> None:
+    events: list[str] = []
+
+    def reset_screenshot_capture() -> None:
+        events.append("capture-reset")
+
+    async def restart(name: str | None = None) -> None:
+        assert name == "xvfb"
+        events.append("supervisor-restart:xvfb")
+
+    monkeypatch.setattr(app.state.backend, "reset_screenshot_capture", reset_screenshot_capture)
+    monkeypatch.setattr(app.state.supervisor, "restart", restart)
+
+    response = test_client.post("/v1/processes/xvfb/restart")
+
+    assert response.status_code == 200
+    assert events == ["capture-reset", "supervisor-restart:xvfb"]
+
+
 def test_clipboard_and_release_all(test_client) -> None:
     assert test_client.put("/v1/clipboard/text", json={"text": "secret"}).json()["ok"] is True
     assert test_client.get("/v1/clipboard/text").json()["text"] == "secret"

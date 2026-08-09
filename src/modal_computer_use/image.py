@@ -35,6 +35,8 @@ DESKTOP_APT_PACKAGES = [
     "websockify",
     "xdotool",
     "libx11-6",
+    "libxcb1",
+    "libxcb-shm0",
     "libxdamage1",
     "libxtst6",
     "wmctrl",
@@ -52,6 +54,16 @@ BROWSER_APT_PACKAGES = ["firefox-esr", "chromium"]
 NAMED_IMAGE_PREFIX = "modal-computer-use"
 IMAGE_UV_VERSION = "0.12.3"
 NamedImageVariant = Literal["standard", "firefox", "chromium"]
+
+_X11_SHARED_MEMORY_BUILD_PACKAGES = (
+    "build-essential",
+    "libxcb1-dev",
+    "libxcb-shm0-dev",
+)
+_RUST_TOOLCHAIN = "1.91.0"
+_X11_SHARED_MEMORY_REMOTE_PATH = "/opt/modal-computer-use/native/x11_shm"
+_X11_SHARED_MEMORY_EXTENSION = "_modal_computer_use_x11_shm"
+_X11_SHARED_MEMORY_SOURCE_IGNORES = ("target", "target/**", "*.pyc", "__pycache__/**")
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +377,56 @@ def _image_runtime_context() -> Path:
             f"Modal Image uv context is incomplete at {context}: missing {missing_files}"
         )
     return context
+
+
+def _native_screenshot_source() -> Path:
+    """Return the packaged Cargo source without depending on the caller's CWD."""
+    return Path(__file__).resolve().parent / "_native" / "x11_shm"
+
+
+def _add_x11_shared_memory_capture(image: object) -> object:
+    """Compile and bake the managed X11 shared-memory screenshot extension."""
+    source = _native_screenshot_source()
+    if not source.is_dir():
+        raise RuntimeError(
+            "the managed image build is missing the packaged X11 shared-memory Cargo source"
+        )
+
+    image = image.apt_install(*_X11_SHARED_MEMORY_BUILD_PACKAGES)
+    image = image.add_local_dir(
+        str(source),
+        remote_path=_X11_SHARED_MEMORY_REMOTE_PATH,
+        copy=True,
+        ignore=_X11_SHARED_MEMORY_SOURCE_IGNORES,
+    )
+    cargo_manifest = f"{_X11_SHARED_MEMORY_REMOTE_PATH}/Cargo.toml"
+    cargo_output = (
+        f"{_X11_SHARED_MEMORY_REMOTE_PATH}/target/"
+        "x86_64-unknown-linux-gnu/release/"
+        f"lib{_X11_SHARED_MEMORY_EXTENSION}.so"
+    )
+    image = image.run_commands(
+        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init",
+        f"chmod 0755 /tmp/rustup-init && /tmp/rustup-init -y --profile minimal "
+        f"--default-toolchain {_RUST_TOOLCHAIN}",
+        "export PATH=/root/.cargo/bin:$PATH && "
+        f"rustup target add x86_64-unknown-linux-gnu --toolchain {_RUST_TOOLCHAIN}",
+        "export PATH=/root/.cargo/bin:$PATH && "
+        f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=/usr/local/bin/python3 "
+        "cargo build "
+        f"--locked --release --features extension-module --target x86_64-unknown-linux-gnu "
+        f"--manifest-path {cargo_manifest}",
+        "/usr/local/bin/python3 -c 'import pathlib, shutil, sysconfig; "
+        f"source = pathlib.Path(\"{cargo_output}\"); assert source.is_file(); "
+        f"destination = pathlib.Path(sysconfig.get_path(\"platlib\")) / "
+        f"\"{_X11_SHARED_MEMORY_EXTENSION}.so\"; "
+        "shutil.copy2(source, destination); destination.chmod(0o755)'",
+        f"rm -rf {_X11_SHARED_MEMORY_REMOTE_PATH}/target /root/.cargo/registry "
+        "/root/.cargo/git /root/.rustup /root/.cargo/bin /tmp/rustup-init",
+        f"/usr/local/bin/python3 -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "
+        "assert hasattr(m, \"X11SharedMemoryScreenshotSession\")'",
+    )
+    return image
 
 
 def _modal() -> object:
@@ -910,16 +972,17 @@ def _image_recipe(definition: _ImageRecipeDefinition) -> object:
             frozen=True,
             uv_version=IMAGE_UV_VERSION,
         )
-        .env(
-            {
-                "COMPUTER_USE_WINDOW_MANAGER": definition.window_manager,
-                "COMPUTER_USE_IMAGE_PROFILE": definition.profile,
-                "COMPUTER_USE_BROWSER_PREWARM": str(
-                    definition.browser_prewarm
-                ).lower(),
-                "COMPUTER_USE_BROWSER": definition.browser or "",
-            }
-        )
+    )
+    image = _add_x11_shared_memory_capture(image)
+    image = image.env(
+        {
+            "COMPUTER_USE_WINDOW_MANAGER": definition.window_manager,
+            "COMPUTER_USE_IMAGE_PROFILE": definition.profile,
+            "COMPUTER_USE_BROWSER_PREWARM": str(
+                definition.browser_prewarm
+            ).lower(),
+            "COMPUTER_USE_BROWSER": definition.browser or "",
+        }
     )
     return image.add_local_python_source(
         "modal_computer_use",

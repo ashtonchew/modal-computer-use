@@ -89,6 +89,37 @@ def test_daemon_lifespan_shuts_down_recordings(tmp_path, monkeypatch) -> None:
     assert called is True
 
 
+def test_daemon_lifespan_closes_backend_before_stopping_display(tmp_path, monkeypatch) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+        )
+    )
+    events: list[str] = []
+
+    async def start() -> None:
+        events.append("start")
+
+    async def stop() -> None:
+        events.append("stop")
+
+    def close() -> None:
+        events.append("close")
+
+    monkeypatch.setattr(app.state.supervisor, "start", start)
+    monkeypatch.setattr(app.state.supervisor, "stop", stop)
+    monkeypatch.setattr(app.state.backend, "close", close)
+
+    with TestClient(app):
+        pass
+
+    assert events[:1] == ["start"]
+    assert events.index("close") < events.index("stop")
+
+
 def test_recording_dashboard_requires_same_auth(tmp_path) -> None:
     app = create_app(
         DaemonSettings(

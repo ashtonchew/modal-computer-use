@@ -51,6 +51,7 @@ async def start(request: Request) -> LifecycleResult:
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
+        request.app.state.backend.reset_screenshot_capture()
         await request.app.state.supervisor.stop()
         return LifecycleResult(ok=True, status="stopped")
 
@@ -60,6 +61,7 @@ async def stop(request: Request) -> LifecycleResult:
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
+        request.app.state.backend.reset_screenshot_capture()
         await request.app.state.supervisor.restart()
         return LifecycleResult(ok=True, status="running")
 

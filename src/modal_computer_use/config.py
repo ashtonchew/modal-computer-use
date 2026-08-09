@@ -181,6 +181,9 @@ class ActionConfig(StrictBaseModel):
         default="auto",
         validation_alias=AliasChoices("screenshot_processing_location", "screenshot_processing"),
     )
+    # Select the daemon screenshot source. ``auto`` prefers native X11
+    # shared-memory capture and keeps MSS as the session fallback.
+    screenshot_capture_source: Literal["auto", "mss", "x11-shm"] = "auto"
     max_batch_actions: int = Field(default=50, ge=1, le=500)
     max_batch_duration_ms: int = Field(default=30_000, ge=1, le=600_000)
     default_action_timeout_ms: int = Field(default=5_000, ge=1, le=300_000)

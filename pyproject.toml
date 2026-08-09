@@ -67,8 +67,18 @@ only-include = [
   "src/modal_computer_use",
 ]
 
+[tool.hatch.build.targets.sdist.force-include]
+"src/modal_computer_use/_native/x11_shm/Cargo.toml" = "src/modal_computer_use/_native/x11_shm/Cargo.toml"
+"src/modal_computer_use/_native/x11_shm/Cargo.lock" = "src/modal_computer_use/_native/x11_shm/Cargo.lock"
+"src/modal_computer_use/_native/x11_shm/src/lib.rs" = "src/modal_computer_use/_native/x11_shm/src/lib.rs"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/modal_computer_use"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/modal_computer_use/_native/x11_shm/Cargo.toml" = "modal_computer_use/_native/x11_shm/Cargo.toml"
+"src/modal_computer_use/_native/x11_shm/Cargo.lock" = "modal_computer_use/_native/x11_shm/Cargo.lock"
+"src/modal_computer_use/_native/x11_shm/src/lib.rs" = "modal_computer_use/_native/x11_shm/src/lib.rs"
 
 [tool.ruff]
 line-length = 100

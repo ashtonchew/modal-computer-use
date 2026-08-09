@@ -1,0 +1,727 @@
+//! Persistent X11 shared-memory capture for complete lossless screenshots.
+//!
+//! This crate is intentionally a small native seam.  Modal orchestration,
+//! screenshot metadata, authentication, fallback policy, and SDK validation
+//! remain in Python.  The native side owns one reusable MIT-SHM buffer and
+//! turns an X11 root-window image into a complete PNG with the same decoded
+//! pixels as the existing screenshot route.
+
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
+use anyhow::{anyhow, bail, Context, Result};
+#[cfg(target_os = "linux")]
+use std::slice;
+
+#[cfg(target_os = "linux")]
+use std::ffi::{c_void, CString};
+#[cfg(target_os = "linux")]
+use std::ptr::NonNull;
+
+#[cfg(all(target_os = "linux", feature = "extension-module"))]
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
+#[cfg(all(target_os = "linux", feature = "extension-module"))]
+use pyo3::prelude::*;
+#[cfg(all(target_os = "linux", feature = "extension-module"))]
+use pyo3::types::{PyBytes, PyModule};
+
+#[cfg(target_os = "linux")]
+use xcb::{shm, x, Connection};
+
+const BACKEND_MARKER: &str = "x11-shm";
+const CODEC_MARKER: &str = "png-deflate-level1-fixed-up";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rect {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DisplayFormat {
+    depth: u8,
+    bits_per_pixel: u8,
+    scanline_pad: u8,
+    image_lsb_first: bool,
+    red_mask: u32,
+    green_mask: u32,
+    blue_mask: u32,
+}
+
+impl DisplayFormat {
+    fn validate_bgra(&self) -> Result<()> {
+        if !self.image_lsb_first
+            || self.bits_per_pixel != 32
+            || (self.depth != 24 && self.depth != 32)
+            || self.red_mask != 0x00ff_0000
+            || self.green_mask != 0x0000_ff00
+            || self.blue_mask != 0x0000_00ff
+        {
+            bail!("X11 root image format is not supported by shared-memory screenshot capture");
+        }
+        Ok(())
+    }
+}
+
+/// Validate a root-relative region before it is converted to X11 wire types.
+///
+/// XShmGetImage accepts signed 16-bit coordinates and unsigned 16-bit
+/// dimensions.  Keeping this check in one place prevents truncation and makes
+/// the same safety contract apply to full and regional screenshots.
+fn validate_rect(
+    root_width: u16,
+    root_height: u16,
+    x: i32,
+    y: i32,
+    width: usize,
+    height: usize,
+) -> Result<Rect> {
+    if width == 0 || height == 0 {
+        bail!("capture dimensions must be positive");
+    }
+    let x = i16::try_from(x).context("capture x is outside the X11 coordinate range")?;
+    let y = i16::try_from(y).context("capture y is outside the X11 coordinate range")?;
+    if x < 0 || y < 0 {
+        bail!("capture region coordinates must be non-negative");
+    }
+    let width = u16::try_from(width).context("capture width is outside the X11 range")?;
+    let height = u16::try_from(height).context("capture height is outside the X11 range")?;
+    let right = (x as u32)
+        .checked_add(width as u32)
+        .ok_or_else(|| anyhow!("capture x overflows"))?;
+    let bottom = (y as u32)
+        .checked_add(height as u32)
+        .ok_or_else(|| anyhow!("capture y overflows"))?;
+    if right > root_width as u32 || bottom > root_height as u32 {
+        bail!("capture region is outside the root drawable");
+    }
+    Ok(Rect {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct SharedMemorySlot {
+    ptr: NonNull<u8>,
+    len: usize,
+    shmseg: shm::Seg,
+}
+
+#[cfg(target_os = "linux")]
+impl SharedMemorySlot {
+    fn bytes(&self, len: usize) -> Result<&[u8]> {
+        if len > self.len {
+            bail!("capture buffer length exceeds the shared-memory slot");
+        }
+        // XShmGetImage is synchronous in this path: wait_for_reply has
+        // completed before the bytes are borrowed, so X is no longer writing
+        // the slot while PNG encoding reads it.
+        Ok(unsafe { slice::from_raw_parts(self.ptr.as_ptr(), len) })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for SharedMemorySlot {
+    fn drop(&mut self) {
+        // The X server owns the fd after a successful AttachFd request.  The
+        // process only owns the mapping here; unmap it exactly once.
+        unsafe {
+            let _ = libc::munmap(self.ptr.as_ptr().cast::<c_void>(), self.len);
+        }
+    }
+}
+
+#[derive(Default)]
+struct PngScratch {
+    rgb: Vec<u8>,
+}
+
+#[cfg(target_os = "linux")]
+impl PngScratch {
+    fn encode(
+        &mut self,
+        slot: &SharedMemorySlot,
+        width: u16,
+        height: u16,
+        stride: usize,
+    ) -> Result<Vec<u8>> {
+        let rgb_len = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(3))
+            .ok_or_else(|| anyhow!("RGB buffer size overflows usize"))?;
+        let frame_len = stride
+            .checked_mul(height as usize)
+            .ok_or_else(|| anyhow!("XImage buffer size overflows usize"))?;
+        let source = slot.bytes(frame_len)?;
+        if stride < (width as usize).saturating_mul(4) {
+            bail!("XImage stride is narrower than the requested row");
+        }
+        if self.rgb.len() != rgb_len {
+            self.rgb.resize(rgb_len, 0);
+        }
+        for (source_row, destination_row) in source
+            .chunks_exact(stride)
+            .zip(self.rgb.chunks_exact_mut(width as usize * 3))
+        {
+            convert_bgra_row(source_row, destination_row);
+        }
+
+        let mut output = Vec::with_capacity(rgb_len / 2);
+        let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        // `Compression::Fast` in png 0.18 selects fdeflate's ultra-fast
+        // profile, not zlib level 1.  The general route is compared against
+        // MSS's level-1 encoder, so select the explicit level here.  The
+        // fixed Up filter is deliberately stable across frames.
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
+        encoder.set_filter(png::Filter::Up);
+        let mut writer = encoder.write_header().context("PNG header write failed")?;
+        writer
+            .write_image_data(&self.rgb)
+            .context("PNG image write failed")?;
+        writer.finish().context("PNG finish failed")?;
+        Ok(output)
+    }
+}
+
+fn convert_bgra_row(source: &[u8], destination: &mut [u8]) {
+    for (source, destination) in source.chunks_exact(4).zip(destination.chunks_exact_mut(3)) {
+        destination[0] = source[2];
+        destination[1] = source[1];
+        destination[2] = source[0];
+    }
+}
+
+#[cfg(target_os = "linux")]
+/// One serialized X11/MIT-SHM capture session.
+///
+/// The Python wrapper holds the GIL and the daemon serializes screenshot
+/// operations, so one slot is sufficient.  Keeping one slot avoids a pool
+/// whose only purpose would be to permit concurrent captures that the daemon
+/// intentionally does not schedule.
+#[cfg_attr(feature = "extension-module", pyclass(unsendable))]
+pub struct X11SharedMemoryScreenshotSession {
+    conn: Connection,
+    root: x::Window,
+    root_visual: x::Visualid,
+    width: u16,
+    height: u16,
+    format: DisplayFormat,
+    slot: Option<SharedMemorySlot>,
+    slot_len: usize,
+    encoder: PngScratch,
+    closed: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl X11SharedMemoryScreenshotSession {
+    fn connect(display: &str, expected_width: usize, expected_height: usize) -> Result<Self> {
+        if expected_width == 0 || expected_height == 0 {
+            bail!("capture dimensions must be positive");
+        }
+        let expected_width =
+            u16::try_from(expected_width).context("expected width is outside the X11 range")?;
+        let expected_height =
+            u16::try_from(expected_height).context("expected height is outside the X11 range")?;
+        let (conn, screen_num) =
+            Connection::connect(Some(display)).context("unable to connect to DISPLAY")?;
+        if shm::get_extension_data(&conn).is_none() {
+            bail!("server does not advertise MIT-SHM");
+        }
+        let version = conn
+            .wait_for_reply(conn.send_request(&shm::QueryVersion {}))
+            .context("MIT-SHM QueryVersion failed")?;
+        if (version.major_version(), version.minor_version()) < (1, 2) {
+            bail!("MIT-SHM FD attach requires version >= 1.2");
+        }
+
+        let (root, root_visual, width, height, format) = {
+            let setup = conn.get_setup();
+            let screen = setup
+                .roots()
+                .nth(screen_num as usize)
+                .ok_or_else(|| anyhow!("screen index {screen_num} missing"))?;
+            let width = screen.width_in_pixels();
+            let height = screen.height_in_pixels();
+            if width != expected_width || height != expected_height {
+                bail!(
+                    "display dimensions {}x{} differ from expected {}x{}",
+                    width,
+                    height,
+                    expected_width,
+                    expected_height
+                );
+            }
+            let root_depth = screen.root_depth();
+            let root_visual = screen.root_visual();
+            let pixmap_format = setup
+                .pixmap_formats()
+                .iter()
+                .find(|format| format.depth() == root_depth)
+                .ok_or_else(|| anyhow!("root pixmap format is unavailable"))?;
+            let visual = screen
+                .allowed_depths()
+                .find(|depth| depth.depth() == root_depth)
+                .and_then(|depth| {
+                    depth
+                        .visuals()
+                        .iter()
+                        .find(|visual| visual.visual_id() == root_visual)
+                })
+                .ok_or_else(|| anyhow!("root visual is unavailable"))?;
+            let format = DisplayFormat {
+                depth: root_depth,
+                bits_per_pixel: pixmap_format.bits_per_pixel(),
+                scanline_pad: pixmap_format.scanline_pad(),
+                image_lsb_first: matches!(setup.image_byte_order(), x::ImageOrder::LsbFirst),
+                red_mask: visual.red_mask(),
+                green_mask: visual.green_mask(),
+                blue_mask: visual.blue_mask(),
+            };
+            format.validate_bgra()?;
+            (screen.root(), root_visual, width, height, format)
+        };
+        let slot_len = row_stride(width, format.bits_per_pixel, format.scanline_pad)?
+            .checked_mul(height as usize)
+            .ok_or_else(|| anyhow!("XShm segment size overflows usize"))?;
+        let slot = create_slot(&conn, slot_len)?;
+        Ok(Self {
+            conn,
+            root,
+            root_visual,
+            width,
+            height,
+            format,
+            slot: Some(slot),
+            slot_len,
+            encoder: PngScratch::default(),
+            closed: false,
+        })
+    }
+
+    fn capture_region(&mut self, rect: Rect) -> Result<Vec<u8>> {
+        let stride = row_stride(
+            rect.width,
+            self.format.bits_per_pixel,
+            self.format.scanline_pad,
+        )?;
+        let len = stride
+            .checked_mul(rect.height as usize)
+            .ok_or_else(|| anyhow!("capture region size overflows usize"))?;
+        if len > self.slot_len {
+            bail!("capture region is larger than the XShm slot");
+        }
+        let slot = self.slot.as_ref().ok_or_else(|| {
+            anyhow!("X11 shared-memory screenshot session has no shared-memory slot")
+        })?;
+        let cookie = self.conn.send_request(&shm::GetImage {
+            drawable: x::Drawable::Window(self.root),
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            plane_mask: u32::MAX,
+            format: x::ImageFormat::ZPixmap as u8,
+            shmseg: slot.shmseg,
+            offset: 0,
+        });
+        let reply = self
+            .conn
+            .wait_for_reply(cookie)
+            .context("XShm GetImage reply failed")?;
+        if reply.depth() != self.format.depth || reply.visual() != self.root_visual {
+            bail!("XShm reply visual or depth differs from the validated root");
+        }
+        let server_len = reply.size() as usize;
+        if server_len < len || server_len > slot.len {
+            bail!("XShm reply size does not match the validated slot");
+        }
+        self.encoder.encode(slot, rect.width, rect.height, stride)
+    }
+
+    fn capture_png_bytes(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+    ) -> Result<Vec<u8>> {
+        if self.closed {
+            bail!("X11 shared-memory screenshot session is closed");
+        }
+        let rect = validate_rect(self.width, self.height, x, y, width, height)?;
+        self.capture_region(rect)
+    }
+
+    fn close_inner(&mut self) -> Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+        // Mark closed before sending the request: even if the X server has
+        // gone away, Drop must not retry a detach or leak the mapping.
+        self.closed = true;
+        let slot = self.slot.take();
+        let Some(slot) = slot else {
+            return Ok(());
+        };
+        let cookie = self.conn.send_request_checked(&shm::Detach {
+            shmseg: slot.shmseg,
+        });
+        let detach_result = self
+            .conn
+            .check_request(cookie)
+            .map_err(|error| anyhow!("XShm detach failed: {error:?}"));
+        // Drop the mapping only after the checked detach has completed.  The
+        // checked request is the synchronization point that keeps X from
+        // retaining a pointer into an unmapped segment.
+        drop(slot);
+        self.conn.flush().context("XShm detach flush failed")?;
+        detach_result
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub struct X11SharedMemoryScreenshotSession;
+
+#[cfg(not(target_os = "linux"))]
+impl X11SharedMemoryScreenshotSession {
+    fn connect(_display: &str, _expected_width: usize, _expected_height: usize) -> Result<Self> {
+        bail!("FD-backed XShm capture is Linux-only")
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for X11SharedMemoryScreenshotSession {
+    fn drop(&mut self) {
+        let _ = self.close_inner();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn create_slot(conn: &Connection, len: usize) -> Result<SharedMemorySlot> {
+    if len == 0 {
+        bail!("XShm segment size must be positive");
+    }
+    let name = CString::new("modal-computer-use-x11-shm").expect("static memfd name");
+    let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error()).context("memfd_create");
+    }
+    if unsafe { libc::ftruncate(fd, len as libc::off_t) } != 0 {
+        let error = std::io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(error).context("ftruncate");
+    }
+    let mapped = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            len,
+            libc::PROT_READ,
+            libc::MAP_SHARED,
+            fd,
+            0,
+        )
+    };
+    if mapped == libc::MAP_FAILED {
+        let error = std::io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(error).context("mmap");
+    }
+    let Some(ptr) = NonNull::new(mapped.cast::<u8>()) else {
+        unsafe {
+            let _ = libc::munmap(mapped, len);
+            let _ = libc::close(fd);
+        }
+        bail!("mmap returned a null pointer");
+    };
+    let shmseg: shm::Seg = conn.generate_id();
+    let cookie = conn.send_request_checked(&shm::AttachFd {
+        shmseg,
+        shm_fd: fd,
+        read_only: false,
+    });
+    // A successful xcb AttachFd request transfers fd ownership to XCB; it
+    // closes the descriptor after sending it.  Do not close fd here.  On a
+    // protocol error XCB still owns the descriptor and will close it while
+    // processing the failed request.  We only release our mapping.
+    if let Err(error) = conn.check_request(cookie) {
+        unsafe {
+            let _ = libc::munmap(ptr.as_ptr().cast::<c_void>(), len);
+        }
+        return Err(anyhow!("XShm AttachFd failed: {error:?}"));
+    }
+    Ok(SharedMemorySlot { ptr, len, shmseg })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn row_stride(_width: u16, _bits_per_pixel: u8, _scanline_pad: u8) -> Result<usize> {
+    bail!("FD-backed XShm capture is Linux-only")
+}
+
+#[cfg(target_os = "linux")]
+fn row_stride(width: u16, bits_per_pixel: u8, scanline_pad: u8) -> Result<usize> {
+    if scanline_pad == 0 || !scanline_pad.is_multiple_of(8) {
+        bail!("invalid XImage scanline padding");
+    }
+    if bits_per_pixel == 0 {
+        bail!("invalid XImage bits per pixel");
+    }
+    let bits = (width as usize)
+        .checked_mul(bits_per_pixel as usize)
+        .ok_or_else(|| anyhow!("row bit count overflows usize"))?;
+    let pad = scanline_pad as usize;
+    Ok(bits
+        .checked_add(pad - 1)
+        .ok_or_else(|| anyhow!("padded row bit count overflows usize"))?
+        / pad
+        * pad
+        / 8)
+}
+
+#[cfg(all(target_os = "linux", feature = "extension-module"))]
+#[pymethods]
+impl X11SharedMemoryScreenshotSession {
+    #[new]
+    fn new(display: &str, expected_width: usize, expected_height: usize) -> PyResult<Self> {
+        Self::connect(display, expected_width, expected_height).map_err(|error| {
+            PyRuntimeError::new_err(format!(
+                "X11 shared-memory screenshot startup failed: {error:#}"
+            ))
+        })
+    }
+
+    /// Capture a complete or regional lossless RGB PNG.
+    #[pyo3(signature = (x=0, y=0, width=None, height=None))]
+    fn capture_png<'py>(
+        &mut self,
+        py: Python<'py>,
+        x: i32,
+        y: i32,
+        width: Option<usize>,
+        height: Option<usize>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let width = width.unwrap_or(self.width as usize);
+        let height = height.unwrap_or(self.height as usize);
+        let output = self
+            .capture_png_bytes(x, y, width, height)
+            .map_err(|error| {
+                PyValueError::new_err(format!("X11 shared-memory screenshot failed: {error:#}"))
+            })?;
+        Ok(PyBytes::new(py, &output))
+    }
+
+    fn dimensions(&self) -> (usize, usize) {
+        (self.width as usize, self.height as usize)
+    }
+
+    fn close(&mut self) -> PyResult<()> {
+        self.close_inner().map_err(|error| {
+            PyRuntimeError::new_err(format!(
+                "X11 shared-memory screenshot close failed: {error:#}"
+            ))
+        })
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "extension-module"))]
+#[pymodule]
+fn _modal_computer_use_x11_shm(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<X11SharedMemoryScreenshotSession>()?;
+    module.add("backend", BACKEND_MARKER)?;
+    module.add("codec", CODEC_MARKER)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(target_os = "linux")]
+    use std::io::Cursor;
+    #[cfg(target_os = "linux")]
+    use xcb::Xid;
+
+    #[test]
+    fn rectangle_validation_accepts_full_and_region() {
+        assert_eq!(
+            validate_rect(1024, 768, 0, 0, 1024, 768).unwrap(),
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1024,
+                height: 768,
+            }
+        );
+        assert_eq!(
+            validate_rect(1024, 768, 20, 30, 100, 200).unwrap(),
+            Rect {
+                x: 20,
+                y: 30,
+                width: 100,
+                height: 200,
+            }
+        );
+    }
+
+    #[test]
+    fn rectangle_validation_rejects_truncation_and_out_of_bounds() {
+        for (x, y, width, height) in [
+            (-1, 0, 1, 1),
+            (0, -1, 1, 1),
+            (1024, 0, 1, 1),
+            (0, 768, 1, 1),
+            (1000, 0, 25, 1),
+            (0, 750, 1, 25),
+            (0, 0, 0, 1),
+            (0, 0, 1, 0),
+        ] {
+            assert!(validate_rect(1024, 768, x, y, width, height).is_err());
+        }
+        assert!(validate_rect(1024, 768, i16::MAX as i32 + 1, 0, 1, 1).is_err());
+        assert!(validate_rect(1024, 768, 0, 0, usize::from(u16::MAX) + 1, 1).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn row_stride_matches_ximage_padding() {
+        assert_eq!(row_stride(1024, 32, 32).unwrap(), 4096);
+        assert_eq!(row_stride(3, 24, 32).unwrap(), 12);
+        assert_eq!(row_stride(3, 32, 32).unwrap(), 12);
+        assert!(row_stride(3, 32, 0).is_err());
+        assert!(row_stride(3, 32, 7).is_err());
+        assert!(row_stride(3, 0, 32).is_err());
+    }
+
+    #[test]
+    fn display_format_rejects_non_bgra_visuals() {
+        let format = DisplayFormat {
+            depth: 24,
+            bits_per_pixel: 32,
+            scanline_pad: 32,
+            image_lsb_first: true,
+            red_mask: 0x00ff_0000,
+            green_mask: 0x0000_ff00,
+            blue_mask: 0x0000_00ff,
+        };
+        assert!(format.validate_bgra().is_ok());
+        assert!(DisplayFormat {
+            image_lsb_first: false,
+            ..format
+        }
+        .validate_bgra()
+        .is_err());
+        assert!(DisplayFormat {
+            red_mask: 0x0000_00ff,
+            ..format
+        }
+        .validate_bgra()
+        .is_err());
+    }
+
+    #[test]
+    fn native_markers_keep_backend_and_codec_semantic() {
+        assert_eq!(BACKEND_MARKER, "x11-shm");
+        assert_eq!(CODEC_MARKER, "png-deflate-level1-fixed-up");
+    }
+
+    #[test]
+    fn bgra_conversion_ignores_padding_and_preserves_rgb_order() {
+        let source = [10, 20, 30, 255, 40, 50, 60, 255, 99, 98, 97, 96];
+        let mut destination = [0_u8; 6];
+        convert_bgra_row(&source, &mut destination);
+        assert_eq!(destination, [30, 20, 10, 60, 50, 40]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn png_scratch_round_trips_decoded_pixels() {
+        let pixels = [
+            10_u8, 20, 30, 255, // RGB 30, 20, 10
+            40, 50, 60, 255, // RGB 60, 50, 40
+        ];
+        let ptr = std::ptr::NonNull::new(pixels.as_ptr() as *mut u8).unwrap();
+        // The test slot only borrows a static buffer; forget its Drop mapping
+        // behavior by using ManuallyDrop so no munmap is attempted.
+        let slot = std::mem::ManuallyDrop::new(SharedMemorySlot {
+            ptr,
+            len: pixels.len(),
+            shmseg: xcb::shm::Seg::none(),
+        });
+        let mut scratch = PngScratch::default();
+        let output = scratch.encode(&slot, 2, 1, 8).unwrap();
+        let decoder = png::Decoder::new(Cursor::new(output));
+        let mut reader = decoder.read_info().unwrap();
+        let mut decoded = vec![0_u8; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut decoded).unwrap();
+        assert_eq!(info.width, 2);
+        assert_eq!(info.height, 1);
+        assert_eq!(&decoded[..info.buffer_size()], &[30, 20, 10, 60, 50, 40]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fixed_up_level_one_stays_within_mss_level_one_payload_budget() {
+        const WIDTH: u16 = 320;
+        const HEIGHT: u16 = 240;
+        let mut bgra = vec![0_u8; WIDTH as usize * HEIGHT as usize * 4];
+        for y in 0..HEIGHT as usize {
+            for x in 0..WIDTH as usize {
+                // Flat browser-like chrome/content bands with repeated cards
+                // exercise the same low-entropy vertical structure as a
+                // Chromium screenshot without depending on a live display.
+                let (red, green, blue) = if y < 48 {
+                    (28, 38, 52)
+                } else if ((x / 64) + (y / 48)) % 2 == 0 {
+                    (246, 247, 249)
+                } else {
+                    (232, 235, 239)
+                };
+                let offset = (y * WIDTH as usize + x) * 4;
+                bgra[offset..offset + 4].copy_from_slice(&[blue, green, red, 255]);
+            }
+        }
+        let mut rgb = vec![0_u8; WIDTH as usize * HEIGHT as usize * 3];
+        for (source, destination) in bgra
+            .chunks_exact(WIDTH as usize * 4)
+            .zip(rgb.chunks_exact_mut(WIDTH as usize * 3))
+        {
+            convert_bgra_row(source, destination);
+        }
+        let ptr = std::ptr::NonNull::new(bgra.as_ptr() as *mut u8).unwrap();
+        let slot = std::mem::ManuallyDrop::new(SharedMemorySlot {
+            ptr,
+            len: bgra.len(),
+            shmseg: xcb::shm::Seg::none(),
+        });
+        let mut scratch = PngScratch::default();
+        let native = scratch
+            .encode(&slot, WIDTH, HEIGHT, WIDTH as usize * 4)
+            .unwrap();
+        let mss_level_one = encode_reference_png(&rgb, WIDTH, HEIGHT, png::Filter::NoFilter);
+        assert!(
+            native.len() * 100 <= mss_level_one.len() * 110,
+            "fixed-Up payload {} exceeds MSS level-1 reference {} by more than 10%",
+            native.len(),
+            mss_level_one.len()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn encode_reference_png(rgb: &[u8], width: u16, height: u16, filter: png::Filter) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
+        encoder.set_filter(filter);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(rgb).unwrap();
+        writer.finish().unwrap();
+        output
+    }
+}
