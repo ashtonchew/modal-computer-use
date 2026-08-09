@@ -1701,7 +1701,9 @@ def run_bounded_x_server_probe() -> dict[str, Any]:
             if cleanup.get("succeeded") is not True:
                 raise RuntimeError("bounded X server probe cleanup found live Sandboxes")
 
-    return asyncio.run(execute())
+    result = asyncio.run(execute())
+    print(json.dumps(result, sort_keys=True))
+    return result
 
 
 @app.local_entrypoint()
