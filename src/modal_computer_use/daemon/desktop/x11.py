@@ -78,6 +78,10 @@ class DesktopBackend(ABC):
         """Release persistent backend resources."""
         return None
 
+    def reset_screenshot_capture(self) -> None:
+        """Release screenshot state bound to the current display server."""
+        return None
+
     @abstractmethod
     async def ready(self) -> tuple[bool, list[str]]:
         raise NotImplementedError
@@ -574,6 +578,7 @@ class X11DesktopBackend(MockDesktopBackend):
         browser_gpu_mode: str = "auto",
         input_backend: str = "auto",
         subprocess_backend: str = "isolated-asyncio",
+        capture_source: str = "auto",
         process_runner: ProcessRunner | None = None,
     ) -> None:
         super().__init__(width=width, height=height)
@@ -640,6 +645,7 @@ class X11DesktopBackend(MockDesktopBackend):
             height=height,
             display=display,
             cursor_position=self.mouse_position,
+            capture_source=capture_source,
         )
 
     @property
@@ -668,6 +674,9 @@ class X11DesktopBackend(MockDesktopBackend):
         self._windows.close()
         self._input.close()
         self._process_runner.close()
+
+    def reset_screenshot_capture(self) -> None:
+        self._screenshots.reset_capture_session()
 
     @property
     def subprocess_backend(self) -> str:
@@ -1068,6 +1077,7 @@ def choose_backend(
     browser_gpu_mode: str = "auto",
     input_backend: str = "auto",
     subprocess_backend: str = "isolated-asyncio",
+    capture_source: str = "auto",
 ) -> DesktopBackend:
     if kind == "mock":
         return MockDesktopBackend(width=width, height=height)
@@ -1082,6 +1092,7 @@ def choose_backend(
             browser_gpu_mode=browser_gpu_mode,
             input_backend=input_backend,
             subprocess_backend=subprocess_backend,
+            capture_source=capture_source,
         )
     if kind != "auto":
         raise ValueError(f"unsupported desktop backend {kind!r}; expected one of: auto, mock, x11")
@@ -1097,6 +1108,7 @@ def choose_backend(
         browser_gpu_mode=browser_gpu_mode,
         input_backend=input_backend,
         subprocess_backend=subprocess_backend,
+        capture_source=capture_source,
     )
 
 

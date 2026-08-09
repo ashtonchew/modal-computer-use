@@ -29,6 +29,8 @@ async def process_restart(name: str, request: Request) -> ProcessStatus:
         )
 
     async def operation() -> ProcessStatus:
+        if name == "xvfb":
+            request.app.state.backend.reset_screenshot_capture()
         await request.app.state.supervisor.restart(name)
         return request.app.state.supervisor.status(name)
 

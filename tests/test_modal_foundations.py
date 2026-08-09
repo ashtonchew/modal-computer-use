@@ -48,7 +48,7 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
             return cls()
 
         def apt_install(self, *packages: str) -> FakeImage:
-            self.packages = packages
+            self.packages += packages
             self.calls.append(("apt_install", packages))
             return self
 
@@ -61,6 +61,22 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
         ) -> FakeImage:
             self.uv_sync_options = (uv_project_dir, frozen, uv_version)
             self.calls.append(("uv_sync", self.uv_sync_options))
+            return self
+
+        def add_local_dir(
+            self,
+            _local_path: str,
+            *,
+            remote_path: str,
+            copy: bool,
+            ignore: tuple[str, ...],
+        ) -> FakeImage:
+            assert remote_path == "/opt/modal-computer-use/native/x11_shm"
+            assert copy is True
+            assert "target/**" in ignore
+            return self
+
+        def run_commands(self, *_commands: str) -> FakeImage:
             return self
 
         def env(self, environment: dict[str, str]) -> FakeImage:
@@ -97,6 +113,9 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
     assert [name for name, _value in image.calls] == [
         "apt_install",
         "uv_sync",
+        "apt_install",
+        "add_local_dir",
+        "run_commands",
         "env",
         "add_local_python_source",
     ]
@@ -431,6 +450,21 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
             uv_version: str,
         ) -> FakeRecipe:
             calls.append(("uv_sync", (uv_project_dir, frozen, uv_version)))
+            return self
+
+        def add_local_dir(
+            self,
+            local_path: str,
+            *,
+            remote_path: str,
+            copy: bool,
+            ignore: tuple[str, ...],
+        ) -> FakeRecipe:
+            calls.append(("add_local_dir", (local_path, remote_path, copy, ignore)))
+            return self
+
+        def run_commands(self, *commands: str) -> FakeRecipe:
+            calls.append(("run_commands", commands))
             return self
 
         def env(self, values: dict[str, str]) -> FakeRecipe:

@@ -4269,6 +4269,7 @@ def _daemon_environment(
         "COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION": (
             config.actions.screenshot_processing_location
         ),
+        "COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE": config.actions.screenshot_capture_source,
         "COMPUTER_USE_POST_ACTION_DELAY_MS": str(config.actions.post_action_delay_ms),
         "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS": str(config.actions.default_action_timeout_ms),
         "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS": str(config.actions.max_action_timeout_ms),

@@ -15,7 +15,16 @@ uv run ruff check .
 uv run mypy src
 uv run pytest -q
 uv run computer-use benchmark report --mock-local --iterations 5 --output benchmark-results/benchmark-report.json
+cd src/modal_computer_use/_native/x11_shm
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
 ```
+
+Build the universal wheel and sdist and inspect both archives. They must contain the locked
+`_native/x11_shm` Cargo source, contain no `target/` directory or shared object, and keep the wheel
+tag `py3-none-any`. The managed Modal Image—not client installation—builds and imports the Linux
+extension.
 
 The mock benchmark is a deterministic CLI and artifact smoke check. For live prerequisites,
 sampling rules, costs, cleanup, and publication procedures, follow

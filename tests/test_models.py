@@ -72,6 +72,18 @@ def test_action_subprocess_backend_defaults_and_validates() -> None:
         ComputerConfig(actions={"subprocess_backend": "process-pool"})
 
 
+def test_screenshot_capture_source_defaults_to_auto_and_validates() -> None:
+    assert ComputerConfig().actions.screenshot_capture_source == "auto"
+    assert (
+        ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})
+        .actions.screenshot_capture_source
+        == "x11-shm"
+    )
+
+    with pytest.raises(ValidationError):
+        ComputerConfig(actions={"screenshot_capture_source": "native-xcb-fixed-up"})
+
+
 def test_region_validation() -> None:
     with pytest.raises(ValidationError):
         Region(x=0, y=0, width=0, height=10)

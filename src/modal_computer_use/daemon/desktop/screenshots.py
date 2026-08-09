@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image
 
@@ -23,6 +23,17 @@ from modal_computer_use.models import (
     Screenshot,
     ScreenshotOptions,
     sha256_bytes,
+)
+
+from .screenshot_capture import (
+    ScreenshotCaptureError,
+    ScreenshotCaptureFailed,
+    ScreenshotCaptureResolution,
+    ScreenshotCaptureSource,
+    ScreenshotCaptureUnavailable,
+    X11SharedMemoryScreenshotSession,
+    resolve_capture_source,
+    validate_png_dimensions,
 )
 
 RunCommand = Callable[..., Awaitable[subprocess.CompletedProcess[str]]]
@@ -76,6 +87,7 @@ class X11ScreenshotController:
         height: int,
         display: str,
         cursor_position: Callable[[], Awaitable[Point]],
+        capture_source: str = "auto",
     ) -> None:
         self._run = run
         self.width = width
@@ -83,15 +95,106 @@ class X11ScreenshotController:
         self.display = display
         self._cursor_position = cursor_position
         self._mss = _MSSCaptureSession(display=display)
+        self._capture_resolution = resolve_capture_source(
+            cast(ScreenshotCaptureSource, capture_source)
+        )
+        self._x11_shm: X11SharedMemoryScreenshotSession | None = None
+        self._x11_shm_fallback = False
+
+    def _ensure_x11_shm(self) -> None:
+        """Open the XCB/MIT-SHM session after the supervisor starts Xvfb.
+
+        ``X11DesktopBackend`` is constructed while the ASGI app is imported,
+        before the daemon lifespan starts the display supervisor.  Opening
+        XCB in ``__init__`` therefore races a fresh Xvfb and makes an explicit
+        X11 shared-memory source kill the daemon before ``/readyz`` can report the failure.
+        Keep selection fail-closed, but defer the capability probe to the
+        first readiness/screenshot call when the display is live.
+        """
+        if self._x11_shm is not None:
+            return
+        selected = self._capture_resolution.selected
+        if selected == "mss":
+            return
+        try:
+            self._x11_shm = X11SharedMemoryScreenshotSession(
+                display=self.display,
+                width=self.width,
+                height=self.height,
+            )
+        except ScreenshotCaptureUnavailable:
+            if self._capture_resolution.requested != "auto":
+                raise
+            self._select_mss_fallback(
+                "X11 shared-memory screenshot session could not start"
+            )
+
+    def _select_mss_fallback(self, reason: str) -> None:
+        """Quarantine X11 shared memory for this controller after an auto failure."""
+        self._close_x11_shm(suppress=True)
+        self._capture_resolution = ScreenshotCaptureResolution(
+            requested=self._capture_resolution.requested,
+            selected="mss",
+            reason=reason,
+        )
+        self._x11_shm_fallback = True
+
+    def _close_x11_shm(self, *, suppress: bool) -> None:
+        session = self._x11_shm
+        self._x11_shm = None
+        if session is None:
+            return
+        try:
+            session.close()
+        except ScreenshotCaptureFailed:
+            if not suppress:
+                raise
 
     def close(self) -> None:
-        self._mss.close()
+        self.reset_capture_session()
+
+    def reset_capture_session(self) -> None:
+        """Release display-bound capture state so it can be opened lazily again."""
+        try:
+            self._close_x11_shm(suppress=False)
+        finally:
+            self._mss.close()
 
     async def probe(self) -> tuple[bool, str | None]:
         """Verify that the public cursor-visible screenshot path can capture."""
         if shutil.which("maim") is None:
             return False, "missing required tools: maim"
+        if self._capture_resolution.selected != "mss":
+            try:
+                # This is a real hidden full-frame GetImage probe.  It runs
+                # after Supervisor.start(), so the display is live even though
+                # this controller was constructed during app creation.
+                self._ensure_x11_shm()
+                captured = await self.capture_bytes(
+                    ScreenshotOptions(format="png", show_cursor=False),
+                    prefer_native_png=True,
+                )
+                if (
+                    captured.capture_backend != "x11-shm"
+                    or not validate_png_dimensions(
+                        captured.data,
+                        width=self.width,
+                        height=self.height,
+                    )
+                ):
+                    raise ScreenshotCaptureUnavailable(
+                        "X11 shared-memory screenshot probe returned invalid dimensions"
+                    )
+            except ScreenshotCaptureError:
+                if self._capture_resolution.requested != "auto":
+                    return False, "X11 shared-memory screenshot probe failed"
+                self._select_mss_fallback(
+                    "X11 shared-memory screenshot probe failed"
+                )
         try:
+            # Keep the existing cursor-visible path in readiness: maim must be
+            # usable for screenshot options that X11 shared memory cannot
+            # satisfy.
             captured = await self.capture_bytes(
                 ScreenshotOptions(format="png", show_cursor=True),
                 prefer_native_png=True,
@@ -160,12 +263,43 @@ class X11ScreenshotController:
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
         data = None
         capture_backend = None
-        if _can_use_mss_fast_path(options):
+        x11_shm_eligible = _can_use_mss_fast_path(options) and _can_preserve_native_png(
+            options
+        )
+        if x11_shm_eligible:
+            self._ensure_x11_shm()
+        x11_shm_requested = x11_shm_eligible and (
+            self._x11_shm_fallback or self._capture_resolution.selected == "x11-shm"
+        )
+        if (
+            self._x11_shm is not None
+            and x11_shm_eligible
+        ):
+            started = perf_counter()
+            try:
+                data = self._x11_shm.capture_png(
+                    x=source.x,
+                    y=source.y,
+                    width=source.width,
+                    height=source.height,
+                )
+            except ScreenshotCaptureFailed:
+                if self._capture_resolution.requested != "auto":
+                    raise
+                self._select_mss_fallback(
+                    "X11 shared-memory screenshot capture failed"
+                )
+            else:
+                timings_ms["x11_shm_capture_encode_ms"] = _elapsed_ms(started)
+                capture_backend = "x11-shm"
+                image_width, image_height = source.width, source.height
+
+        if data is None and _can_use_mss_fast_path(options):
             started = perf_counter()
             mss_capture = self._mss.grab(source)
             if mss_capture is not None:
                 timings_ms["capture_ms"] = _elapsed_ms(started)
-                capture_backend = "mss"
+                capture_backend = "mss-fallback" if x11_shm_requested else "mss"
                 data, image_width, image_height = _encode_mss_capture(
                     mss_capture,
                     options,
@@ -194,13 +328,16 @@ class X11ScreenshotController:
             timings_ms["cursor_position_ms"] = _elapsed_ms(started)
         else:
             cursor_position = None
+        started = perf_counter()
+        digest = sha256_bytes(data)
+        timings_ms["hash_ms"] = _elapsed_ms(started)
         timings_ms["total_ms"] = _elapsed_ms(started_total)
         return CapturedScreenshot(
             format=options.format,
             width=coordinate_space.image_width,
             height=coordinate_space.image_height,
             data=data,
-            sha256=sha256_bytes(data),
+            sha256=digest,
             captured_at=datetime.now(UTC),
             coordinate_space=coordinate_space,
             cursor_visible=options.show_cursor,

@@ -149,6 +149,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         browser_gpu_mode=settings.browser_gpu_mode,
         input_backend=settings.input_backend,
         subprocess_backend=settings.subprocess_backend,
+        capture_source=settings.screenshot_capture_source,
     )
     app.state.input_lock = asyncio.Lock()
     app.state.lease_lock = asyncio.Lock()
