@@ -56,6 +56,42 @@ def test_promotion_readiness_retains_sdk_startup_stages() -> None:
     assert "timing=self.startup_timing" in runner
     assert 'observation["startup_timing"] = timing.as_dict()' in runner
     assert '"startup_timings": startup_timings[arm]' in runner
+    assert 'observation["failure_phase"] = (' in runner
+    assert "_startup_failure_phase(context.startup_timing)" in runner
+    assert 'if context.enter_phase == "create_sandbox"' in runner
+    assert "else context.enter_phase" in runner
+    assert '"connection_parameters_ready": "daemon_readiness"' in runner
+    assert '"attestation_ready": "attested_tunnel_readiness"' in runner
+    assert 'observation.update(_safe_daemon_failure(exc))' in runner
+    assert 'observation["status"] = "failed"' in runner
+    assert 'observation["failure_phase"] = "cleanup"' in runner
+
+
+def test_promotion_restart_retains_safe_failure_attribution() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'phase = "context_enter"' in runner
+    assert 'phase = "capture_before_restart"' in runner
+    assert 'phase = "lifecycle_restart"' in runner
+    assert 'phase = "capture_after_restart"' in runner
+    assert '"failure_phase": phase' in runner
+    assert '{"failure_phase": "cleanup"}' in runner
+    assert "**_safe_daemon_failure(exc)" in runner
+
+
+def test_promotion_failure_attribution_never_retains_daemon_error_text() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    helper = runner.split("def _safe_daemon_failure", maxsplit=1)[1].split(
+        "\n\nasync def _completed_process_stdout_text",
+        maxsplit=1,
+    )[0]
+    assert 'details.get("type")' in helper
+    assert 'details.get("error")' not in helper
 
 
 class FakeScreenshot:
