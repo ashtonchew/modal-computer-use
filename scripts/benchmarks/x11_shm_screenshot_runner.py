@@ -551,6 +551,8 @@ async def _run_concurrency_probe(
 
 async def _run_readiness_probe(
     factories: Mapping[str, Callable[[], AbstractAsyncContextManager[Any]]],
+    *,
+    sample_count: int = READINESS_SAMPLES,
 ) -> dict[str, Any]:
     """Measure paired fresh create-to-ready samples for both capture sources."""
 
@@ -564,24 +566,27 @@ async def _run_readiness_probe(
     current_arm: str | None = None
     current_sample_index: int | None = None
     try:
-        for sample_index in range(READINESS_SAMPLES):
+        for sample_index in range(sample_count):
             current_sample_index = sample_index
             pair = ["mss", "x11-shm"]
             rng.shuffle(pair)
-            for arm in pair:
+            for position, arm in enumerate(pair):
                 current_arm = arm
                 context = factories[arm]()
                 computer: Any | None = None
                 observation: dict[str, Any] = {
                     "sample_index": sample_index,
+                    "position": position,
                     "status": "failed",
                 }
                 phase = "context_enter"
                 started = time.perf_counter()
                 try:
                     computer = await context.__aenter__()
-                    samples[arm].append((time.perf_counter() - started) * 1000.0)
+                    elapsed_ms = (time.perf_counter() - started) * 1000.0
+                    samples[arm].append(elapsed_ms)
                     observation["status"] = "ok"
+                    observation["startup_total_ms"] = round(elapsed_ms, 4)
                     phase = "public_capture"
                     backends: list[str | None] = []
                     original = computer.client.post_bytes_with_headers
@@ -639,7 +644,7 @@ async def _run_readiness_probe(
 
     arms = {
         arm: {
-            "passed": len(values) == READINESS_SAMPLES,
+            "passed": len(values) == sample_count,
             "source": arm,
             "samples": len(values),
             "startup_p50_ms": round(statistics.median(values), 4) if values else 0.0,
@@ -1877,6 +1882,64 @@ def run_x_server_restart_probe() -> dict[str, Any]:
     return result
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=7_200,
+    region=REGION,
+    retries=0,
+)
+def run_readiness_replication(
+    samples: int = 100,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run one retained, balanced readiness replication without changing promotion gates."""
+
+    if samples != 100:
+        raise ValueError("readiness replication requires exactly 100 samples per arm")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            readiness = await _run_readiness_probe(
+                {
+                    arm: (
+                        lambda arm=arm: _ArmContext(
+                            "auto" if arm == "x11-shm" else arm
+                        )
+                    )
+                    for arm in ("mss", "x11-shm")
+                },
+                sample_count=samples,
+            )
+        except BaseException as primary:
+            try:
+                cleanup = await _final_sandbox_cleanup()
+            except BaseException as cleanup_error:
+                primary.add_note(
+                    "readiness replication cleanup also failed: "
+                    f"{type(cleanup_error).__name__}"
+                )
+            raise
+
+        cleanup = await _final_sandbox_cleanup()
+        if cleanup.get("succeeded") is not True:
+            raise RuntimeError("readiness replication cleanup found live Sandboxes")
+        return {
+            "schema_version": "x11-shm-readiness-replication.v1",
+            "benchmark": "x11-shm-readiness-replication",
+            "sample_count_per_arm": samples,
+            "schedule_seed": SCHEDULE_SEED,
+            "provenance": provenance,
+            "readiness": readiness,
+            "terminal_cleanup": cleanup,
+        }
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -1891,6 +1954,25 @@ def main(
         provenance=_local_provenance(),
     )
     path = Path(output) if output else Path("benchmark-data/x11-shm-screenshot-promotion.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def readiness_main(
+    samples: int = 100,
+    output: str = "",
+) -> None:
+    result = run_readiness_replication.remote(
+        samples=samples,
+        provenance=_local_provenance(),
+    )
+    path = (
+        Path(output)
+        if output
+        else Path("benchmark-data/x11-shm-readiness-replication-100.json")
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(json.dumps(result, indent=2, sort_keys=True))
