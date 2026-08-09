@@ -173,6 +173,9 @@ def _evaluate_validated_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
         reasons.append("median PNG payload growth exceeds 10%")
     if daemon_saving < FIXED_GATES["minimum_daemon_saving_ms"]:
         reasons.append("daemon-side absolute saving is below 5 ms")
+    operational_gates = _mapping(payload["operational_gates"], "operational_gates")
+    if operational_gates.get("readiness_parity") is not True:
+        reasons.append("fresh readiness p95 regresses by more than 5%")
 
     preregistration = _mapping(payload["preregistration"], "preregistration")
     bootstrap_ci = _paired_bootstrap_median_difference(
@@ -376,7 +379,9 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
         "region_parity",
         "cleanup_succeeded",
     ):
-        if gates.get(key) is not True:
+        if not isinstance(gates.get(key), bool):
+            raise ValueError(f"operational gate {key} must be boolean")
+        if key != "readiness_parity" and gates.get(key) is not True:
             raise ValueError(f"operational gate {key} did not pass")
     if gates.get("captures") != 10_000:
         raise ValueError("operational soak must contain 10000 captures")
@@ -435,11 +440,11 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
 
     readiness = _mapping(details.get("readiness"), "readiness")
     readiness_arms = _mapping(readiness.get("arms"), "readiness.arms")
-    if readiness.get("passed") is not True or set(readiness_arms) != {
+    if not isinstance(readiness.get("passed"), bool) or set(readiness_arms) != {
         BASELINE_ARM,
         CANDIDATE_ARM,
     }:
-        raise ValueError("readiness parity did not pass")
+        raise ValueError("readiness parity detail is incomplete")
     for arm in (BASELINE_ARM, CANDIDATE_ARM):
         arm_detail = _mapping(readiness_arms.get(arm), f"readiness.arms.{arm}")
         if (
@@ -461,11 +466,12 @@ def _validate_operational_details(details: Mapping[str, Any]) -> None:
         ),
         "candidate readiness p95",
     )
-    if (
-        baseline_readiness_p95 <= 0
-        or candidate_readiness_p95 > baseline_readiness_p95 * 1.05
-    ):
-        raise ValueError("fresh readiness p95 exceeds the fixed 5% regression ceiling")
+    readiness_passed = (
+        baseline_readiness_p95 > 0
+        and candidate_readiness_p95 <= baseline_readiness_p95 * 1.05
+    )
+    if readiness.get("passed") is not readiness_passed:
+        raise ValueError("readiness gate disagrees with retained p95 values")
 
     failure_matrix = _mapping(details.get("failure_matrix"), "failure_matrix")
     checks = _mapping(failure_matrix.get("checks"), "failure_matrix.checks")
