@@ -33,7 +33,11 @@ import modal
 
 import modal_computer_use
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig
-from modal_computer_use.benchmarks.x11_shm_screenshot import FIXED_GATES
+from modal_computer_use.benchmarks.x11_shm_screenshot import (
+    FIXED_GATES,
+    evaluate_x11_shm_screenshot_promotion,
+    validate_x11_shm_screenshot_artifact,
+)
 from modal_computer_use.config import (
     ActionConfig,
     BrowserConfig,
@@ -76,7 +80,6 @@ BOOTSTRAP_SEED = 20260808
 BOOTSTRAP_RESAMPLES = 1_000
 RUST_TOOLCHAIN = "rustc 1.91.0"
 TARGET = "x86_64-unknown-linux-gnu"
-IMAGE_IDENTITY = "inline:chromium"
 CONCURRENCY_LEVELS = (1, 2, 4, 8)
 
 
@@ -112,10 +115,6 @@ def _tree_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-SOURCE_REVISION = _git_output("rev-parse", "HEAD") or "0" * 40
-WORKTREE_CLEAN = _git_output("status", "--porcelain") == ""
-
-
 def _native_source_path() -> Path:
     candidates = (
         PROJECT_ROOT / "src" / "modal_computer_use" / "_native" / "x11_shm",
@@ -128,8 +127,27 @@ def _native_source_path() -> Path:
 
 
 _NATIVE_SOURCE_PATH = _native_source_path()
-NATIVE_SOURCE_SHA256 = _tree_sha256(_NATIVE_SOURCE_PATH)
-CARGO_LOCK_SHA256 = hashlib.sha256((_NATIVE_SOURCE_PATH / "Cargo.lock").read_bytes()).hexdigest()
+
+
+def _local_provenance() -> dict[str, str | bool]:
+    """Bind the remote run to one clean local source tree before dispatch."""
+
+    revision = _git_output("rev-parse", "HEAD")
+    if revision is None or len(revision) != 40:
+        raise RuntimeError("benchmark source revision is unavailable")
+    if _git_output("status", "--porcelain") != "":
+        raise RuntimeError("promotion benchmark requires a clean worktree")
+    source_sha256 = _tree_sha256(_NATIVE_SOURCE_PATH)
+    cargo_lock_sha256 = hashlib.sha256(
+        (_NATIVE_SOURCE_PATH / "Cargo.lock").read_bytes()
+    ).hexdigest()
+    return {
+        "source_revision": revision,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": source_sha256,
+        "cargo_lock_sha256": cargo_lock_sha256,
+        "image_identity": f"inline-source-{revision}-x11-shm-{source_sha256[:16]}",
+    }
 
 
 app = modal.App(APP_NAME)
@@ -163,6 +181,7 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         self._context: AbstractAsyncContextManager[Any] | None = None
         self._computer: Any | None = None
         self.target_placement: dict[str, str | None] | None = None
+        self.fixture_verified = False
 
     async def __aenter__(self) -> Any:
         config = ComputerConfig(
@@ -211,6 +230,7 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
                 or not isinstance(status.get("prewarm_result"), Mapping)
             ):
                 raise RuntimeError("managed Chromium fixture did not become ready")
+            self.fixture_verified = True
             return self._computer
         except BaseException as exc:
             context, self._context = self._context, None
@@ -241,10 +261,27 @@ async def _run_concurrency_probe(
     try:
         computer = await context.__aenter__()
         for level in levels:
+            backends: list[str | None] = []
+            original = computer.client.post_bytes_with_headers
+
+            async def traced_request(
+                *args: Any,
+                _original: Any = original,
+                _backends: list[str | None] = backends,
+                **kwargs: Any,
+            ) -> Any:
+                data, headers = await _original(*args, **kwargs)
+                _backends.append(headers.get("x-computer-use-capture-backend"))
+                return data, headers
+
+            computer.client.post_bytes_with_headers = traced_request
             started = time.perf_counter()
-            screenshots = await asyncio.gather(
-                *(computer.screenshots.full() for _ in range(level))
-            )
+            try:
+                screenshots = await asyncio.gather(
+                    *(computer.screenshots.full() for _ in range(level))
+                )
+            finally:
+                computer.client.post_bytes_with_headers = original
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             if any(
                 shot.width != WIDTH
@@ -252,13 +289,14 @@ async def _run_concurrency_probe(
                 or shot.cursor_visible
                 or shot.format != "png"
                 for shot in screenshots
-            ):
+            ) or backends != ["x11-shm"] * level:
                 raise RuntimeError("concurrent screenshot contract mismatch")
             rows.append(
                 {
                     "concurrency": level,
                     "captures": level,
                     "elapsed_ms": round(elapsed_ms, 4),
+                    "capture_backend": "x11-shm",
                 }
             )
     except Exception as exc:
@@ -282,16 +320,59 @@ async def _run_concurrency_probe(
     return {"passed": True, "levels": rows}
 
 
-async def _run_native_failure_matrix(
+async def _run_x_server_restart_probe(
     factory: Callable[[], AbstractAsyncContextManager[Any]],
 ) -> dict[str, Any]:
-    """Run bounded native-session lifecycle failures in a disposable process.
+    """Verify the display lifecycle releases and reopens the XShm session."""
 
-    This probes the optional extension only.  It does not mutate daemon
-    defaults or inject failures into a production route.  Auto-fallback is
-    covered by the daemon unit tests; the live probe checks the native close
-    contract where the X connection and display are real.
-    """
+    context = factory()
+    computer: Any | None = None
+    result: dict[str, Any] | None = None
+    failure_type: str | None = None
+    try:
+        computer = await context.__aenter__()
+        before = await computer.screenshots.full()
+        restarted = await computer.lifecycle.restart()
+        ready = False
+        for _ in range(100):
+            status = await computer.lifecycle.status()
+            if status.ready:
+                ready = True
+                break
+            await asyncio.sleep(0.1)
+        after = await computer.screenshots.full()
+        result = {
+            "passed": (
+                restarted.ok
+                and ready
+                and before.width == after.width == WIDTH
+                and before.height == after.height == HEIGHT
+                and not before.cursor_visible
+                and not after.cursor_visible
+            ),
+            "ready_after_restart": ready,
+        }
+    except Exception as exc:
+        failure_type = type(exc).__name__
+    cleanup_type: str | None = None
+    if computer is not None:
+        try:
+            await context.__aexit__(None, None, None)
+        except Exception as exc:
+            cleanup_type = type(exc).__name__
+    if failure_type is not None or cleanup_type is not None:
+        return {
+            "passed": False,
+            **({"failure_type": failure_type} if failure_type else {}),
+            **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
+        }
+    return result or {"passed": False, "failure_type": "NoResult"}
+
+
+async def _run_x11_shm_failure_matrix(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+) -> dict[str, Any]:
+    """Exercise the real extension and controller fallback boundaries in-image."""
 
     context = factory()
     computer: Any | None = None
@@ -304,27 +385,175 @@ async def _run_native_failure_matrix(
             raise RuntimeError("sandbox handle unavailable for failure matrix")
         script = dedent(
             """
+            import asyncio
+            import base64
             import json
             import os
-            import _modal_computer_use_x11_shm as native
+            from types import SimpleNamespace
 
-            s = native.X11SharedMemoryScreenshotSession(
+            import _modal_computer_use_x11_shm as x11_shm
+            from modal_computer_use.daemon.desktop import screenshot_capture
+            from modal_computer_use.daemon.desktop.screenshots import X11ScreenshotController
+            from modal_computer_use.models import Point, ScreenshotOptions
+
+            checks = {}
+            session = x11_shm.X11SharedMemoryScreenshotSession(
                 os.environ.get("DISPLAY", ":99"), 1024, 768
             )
-            s.close()
-            s.close()
+            session.close()
+            session.close()
             closed = False
             try:
-                s.capture_png(0, 0, 1024, 768)
+                session.capture_png(0, 0, 1024, 768)
             except Exception:
                 closed = True
-            print(json.dumps({"close_idempotent": True, "closed_capture_rejected": closed}))
+            checks["close_idempotent"] = True
+            checks["closed_capture_rejected"] = closed
+
+            try:
+                x11_shm.X11SharedMemoryScreenshotSession(
+                    os.environ.get("DISPLAY", ":99"), 1, 1
+                )
+            except Exception:
+                checks["constructor_geometry_failure"] = True
+            else:
+                checks["constructor_geometry_failure"] = False
+
+            real = x11_shm.X11SharedMemoryScreenshotSession(
+                os.environ.get("DISPLAY", ":99"), 1024, 768
+            )
+            try:
+                try:
+                    real.capture_png(1024, 0, 1, 1)
+                except Exception:
+                    checks["invalid_region_rejected"] = True
+                else:
+                    checks["invalid_region_rejected"] = False
+            finally:
+                real.close()
+
+            class ConstructorFailure:
+                calls = 0
+                def __init__(self, *_args):
+                    ConstructorFailure.calls += 1
+                    raise RuntimeError("attach failed")
+
+            class CaptureFailure:
+                calls = 0
+                def __init__(self, *_args):
+                    CaptureFailure.calls += 1
+                def capture_png(self, *_args):
+                    raise RuntimeError("GetImage failed")
+                def close(self):
+                    pass
+
+            class InvalidResult:
+                calls = 0
+                def __init__(self, *_args):
+                    InvalidResult.calls += 1
+                def capture_png(self, *_args):
+                    return b"\\x89PNG\\r\\n\\x1a\\ninvalid"
+                def close(self):
+                    pass
+
+            async def cursor_position():
+                return Point(x=0, y=0)
+
+            async def unexpected_file_capture(*_args, **_kwargs):
+                raise RuntimeError("MSS fallback unexpectedly failed")
+
+            async def fallback_check(constructor):
+                screenshot_capture._module = SimpleNamespace(
+                    X11SharedMemoryScreenshotSession=constructor
+                )
+                screenshot_capture._module_checked = True
+                controller = X11ScreenshotController(
+                    run=unexpected_file_capture,
+                    width=1024,
+                    height=768,
+                    display=os.environ.get("DISPLAY", ":99"),
+                    cursor_position=cursor_position,
+                    capture_source="auto",
+                )
+                try:
+                    options = ScreenshotOptions(format="png", show_cursor=False)
+                    first = await controller.capture_bytes(
+                        options, prefer_native_png=True
+                    )
+                    second = await controller.capture_bytes(
+                        options, prefer_native_png=True
+                    )
+                    return (
+                        first.capture_backend == "mss-fallback"
+                        and second.capture_backend == "mss-fallback"
+                        and constructor.calls == 1
+                    )
+                finally:
+                    controller.close()
+
+            checks["constructor_failure_falls_back_once"] = asyncio.run(
+                fallback_check(ConstructorFailure)
+            )
+            checks["capture_failure_falls_back_once"] = asyncio.run(
+                fallback_check(CaptureFailure)
+            )
+            checks["invalid_result_falls_back_once"] = asyncio.run(
+                fallback_check(InvalidResult)
+            )
+
+            screenshot_capture._module = None
+            screenshot_capture._module_checked = True
+            checks["extension_load_failure_selects_mss"] = (
+                screenshot_capture.resolve_capture_source("auto").selected == "mss"
+            )
+
+            valid_one_pixel_png = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII="
+            )
+            class CloseFailure:
+                def __init__(self, *_args):
+                    pass
+                def capture_png(self, *_args):
+                    return valid_one_pixel_png
+                def close(self):
+                    raise RuntimeError("detach failed")
+
+            screenshot_capture._module = SimpleNamespace(
+                X11SharedMemoryScreenshotSession=CloseFailure
+            )
+            screenshot_capture._module_checked = True
+            wrapper = screenshot_capture.X11SharedMemoryScreenshotSession(
+                display=":99", width=1, height=1
+            )
+            try:
+                wrapper.close()
+            except Exception:
+                checks["close_failure_reported"] = True
+            else:
+                checks["close_failure_reported"] = False
+
+            print(json.dumps(checks))
             """
         )
         process = await sandbox.exec.aio("python", "-c", script, timeout=60)
         raw = (await process.stdout.read.aio()).decode("utf-8", errors="replace").strip()
         payload = json.loads(raw)
-        passed = payload == {"close_idempotent": True, "closed_capture_rejected": True}
+        required = {
+            "close_idempotent",
+            "closed_capture_rejected",
+            "constructor_geometry_failure",
+            "invalid_region_rejected",
+            "constructor_failure_falls_back_once",
+            "capture_failure_falls_back_once",
+            "invalid_result_falls_back_once",
+            "extension_load_failure_selects_mss",
+            "close_failure_reported",
+        }
+        passed = (
+            isinstance(payload, dict)
+            and set(payload) == required
+            and all(payload.values())
+        )
         result = {"passed": passed, "checks": payload if isinstance(payload, dict) else {}}
     except Exception as exc:
         failure_type = type(exc).__name__
@@ -349,10 +578,10 @@ async def _run_native_failure_matrix(
     return result
 
 
-async def _run_native_soak(
+async def _run_x11_shm_soak(
     factory: Callable[[], AbstractAsyncContextManager[Any]], *, captures: int
 ) -> dict[str, Any]:
-    """Capture complete PNGs in the daemon image and report bounded resources."""
+    """Run 10k daemon-local full/region requests and sample daemon resources."""
 
     if captures != 10_000:
         raise ValueError("the promotion soak is fixed at 10000 captures")
@@ -364,70 +593,138 @@ async def _run_native_soak(
         computer = await context.__aenter__()
         sandbox = getattr(computer, "_sandbox", None)
         if sandbox is None or not hasattr(sandbox, "exec"):
-            raise RuntimeError("sandbox handle unavailable for native soak")
+            raise RuntimeError("sandbox handle unavailable for X11 shared-memory soak")
         script = dedent(
             f"""
-            import gc
+            import http.client
             import json
             import os
-            import resource
-            import _modal_computer_use_x11_shm as native
+            from pathlib import Path
 
-            def counts():
-                fd = len(os.listdir("/proc/self/fd"))
-                with open("/proc/self/maps", encoding="utf-8") as maps_file:
+            def daemon_pid():
+                for entry in Path("/proc").iterdir():
+                    if not entry.name.isdigit():
+                        continue
+                    try:
+                        command = (entry / "cmdline").read_bytes()
+                    except OSError:
+                        continue
+                    if b"modal_computer_use.daemon" in command:
+                        return int(entry.name)
+                raise RuntimeError("daemon process was not found")
+
+            def status_bytes(pid, key):
+                with open(f"/proc/{{pid}}/status", encoding="utf-8") as status_file:
+                    for line in status_file:
+                        if line.startswith(key + ":"):
+                            return int(line.split()[1]) * 1024
+                raise RuntimeError(f"{{key}} missing for daemon process")
+
+            def counts(pid):
+                with open(f"/proc/{{pid}}/maps", encoding="utf-8") as maps_file:
                     mappings = sum(1 for _ in maps_file)
-                rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
-                return fd, mappings, rss
+                return {{
+                    "fd": len(os.listdir(f"/proc/{{pid}}/fd")),
+                    "mappings": mappings,
+                    "rss": status_bytes(pid, "VmRSS"),
+                    "peak_rss": status_bytes(pid, "VmHWM"),
+                }}
 
-            before = counts()
-            s = native.X11SharedMemoryScreenshotSession(
-                os.environ.get("DISPLAY", ":99"), 1024, 768
-            )
-            for _ in range({captures}):
-                data = s.capture_png(0, 0, 1024, 768)
-                assert data.startswith(b"\\x89PNG")
-                del data
-            gc.collect()
-            after = counts()
-            s.close()
+            token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
+            port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
+            headers = {{
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+            }}
+            full = json.dumps({{
+                "format": "png", "quality": 90, "scale": 1.0,
+                "show_cursor": False, "processing": "auto", "storage": "inline",
+            }})
+            region = json.dumps({{
+                "format": "png", "quality": 90, "scale": 1.0,
+                "show_cursor": False, "processing": "auto", "storage": "inline",
+                "region": {{"x": 7, "y": 9, "width": 511, "height": 383}},
+            }})
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+
+            def capture(path, body, expected_width, expected_height):
+                connection.request("POST", path, body=body, headers=headers)
+                response = connection.getresponse()
+                data = response.read()
+                if response.status != 200 or not data.startswith(b"\\x89PNG"):
+                    raise RuntimeError("daemon-local screenshot failed")
+                if response.getheader("x-computer-use-capture-backend") != "x11-shm":
+                    raise RuntimeError("daemon-local screenshot used an unexpected source")
+                if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
+                    raise RuntimeError("daemon-local screenshot width changed")
+                if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
+                    raise RuntimeError("daemon-local screenshot height changed")
+
+            capture("/v1/screenshots/full/raw", full, 1024, 768)
+            capture("/v1/screenshots/region/raw", region, 511, 383)
+            pid = daemon_pid()
+            before = counts(pid)
+            full_captures = 0
+            region_captures = 0
+            try:
+                for index in range({captures}):
+                    if index % 2:
+                        capture("/v1/screenshots/region/raw", region, 511, 383)
+                        region_captures += 1
+                    else:
+                        capture("/v1/screenshots/full/raw", full, 1024, 768)
+                        full_captures += 1
+                after = counts(pid)
+            finally:
+                connection.close()
             print(json.dumps({{
                 "captures": {captures},
-                "fd_before": before[0], "fd_after": after[0],
-                "mapping_before": before[1], "mapping_after": after[1],
-                "rss_before_bytes": before[2], "rss_after_bytes": after[2],
+                "full_captures": full_captures,
+                "region_captures": region_captures,
+                "fd_before": before["fd"], "fd_after": after["fd"],
+                "mapping_before": before["mappings"],
+                "mapping_after": after["mappings"],
+                "rss_before_bytes": before["rss"],
+                "rss_after_bytes": after["rss"],
+                "peak_rss_before_bytes": before["peak_rss"],
+                "peak_rss_after_bytes": after["peak_rss"],
             }}))
             """
         )
-        process = await sandbox.exec.aio("python", "-c", script, timeout=600)
+        process = await sandbox.exec.aio("python", "-c", script, timeout=900)
         raw = (await process.stdout.read.aio()).decode("utf-8", errors="replace").strip()
         payload = json.loads(raw)
         if not isinstance(payload, dict):
-            raise RuntimeError("native soak returned invalid output")
+            raise RuntimeError("X11 shared-memory soak returned invalid output")
         rss_growth = int(payload["rss_after_bytes"]) - int(payload["rss_before_bytes"])
+        peak_growth = int(payload["peak_rss_after_bytes"]) - int(
+            payload["peak_rss_before_bytes"]
+        )
         result = {
             "passed": (
                 int(payload["captures"]) == captures
+                and int(payload["full_captures"]) == captures // 2
+                and int(payload["region_captures"]) == captures // 2
                 and int(payload["fd_after"]) - int(payload["fd_before"]) == 0
                 and int(payload["mapping_after"]) - int(payload["mapping_before"]) == 0
                 and rss_growth <= 16 * 1024 * 1024
             ),
             "captures": captures,
+            "full_captures": int(payload["full_captures"]),
+            "region_captures": int(payload["region_captures"]),
             "fd_delta": int(payload["fd_after"]) - int(payload["fd_before"]),
             "mapping_delta": int(payload["mapping_after"]) - int(payload["mapping_before"]),
             "rss_growth_bytes": max(0, rss_growth),
+            "peak_rss_growth_bytes": max(0, peak_growth),
         }
     except Exception as exc:
         failure_type = type(exc).__name__
     cleanup_type: str | None = None
-    try:
-        if computer is not None:
-            try:
-                await context.__aexit__(None, None, None)
-            except Exception as exc:
-                cleanup_type = type(exc).__name__
-    except Exception as exc:
-        cleanup_type = type(exc).__name__
+    if computer is not None:
+        try:
+            await context.__aexit__(None, None, None)
+        except Exception as exc:
+            cleanup_type = type(exc).__name__
     if failure_type is not None or cleanup_type is not None:
         return {
             "passed": False,
@@ -456,12 +753,18 @@ def _promotion_artifact(
     concurrency: Mapping[str, Any],
     failure_matrix: Mapping[str, Any],
     soak: Mapping[str, Any],
+    restart: Mapping[str, Any],
+    chromium_fixture_verified: bool,
+    provenance: Mapping[str, str | bool],
 ) -> dict[str, Any]:
     operational = {
-        "chromium_fixture": True,
+        "chromium_fixture": chromium_fixture_verified,
         "failure_matrix": failure_matrix.get("passed") is True,
         "concurrency_matrix": concurrency.get("passed") is True,
+        "x_server_restart": restart.get("passed") is True,
         "captures": soak.get("captures", 0),
+        "full_captures": soak.get("full_captures", 0),
+        "region_captures": soak.get("region_captures", 0),
         "fd_delta": soak.get("fd_delta", -1),
         "mapping_delta": soak.get("mapping_delta", -1),
         "rss_growth_bytes": soak.get("rss_growth_bytes", 0),
@@ -481,14 +784,14 @@ def _promotion_artifact(
             "gates": dict(FIXED_GATES),
         },
         "configuration": {
-            "source_revision": SOURCE_REVISION,
-            "worktree_clean": WORKTREE_CLEAN,
-            "native_source_sha256": NATIVE_SOURCE_SHA256,
-            "cargo_lock_sha256": CARGO_LOCK_SHA256,
+            "source_revision": provenance["source_revision"],
+            "worktree_clean": provenance["worktree_clean"],
+            "x11_shm_source_sha256": provenance["x11_shm_source_sha256"],
+            "cargo_lock_sha256": provenance["cargo_lock_sha256"],
             "rust_toolchain": RUST_TOOLCHAIN,
             "python_version": platform.python_version(),
             "target": TARGET,
-            "image_identity": IMAGE_IDENTITY,
+            "image_identity": provenance["image_identity"],
             "requested_placement": {"cloud": CLOUD, "region": REGION},
             "observed_placement": {
                 "runner": _observed_runner_placement(),
@@ -530,12 +833,20 @@ def _promotion_artifact(
             "concurrency": dict(concurrency),
             "failure_matrix": dict(failure_matrix),
             "soak": dict(soak),
+            "x_server_restart": dict(restart),
         },
     }
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
+    validate_x11_shm_screenshot_artifact(artifact)
     return artifact
 
 
-async def _measure(samples: int, warmups: int, soak_captures: int) -> dict[str, Any]:
+async def _measure(
+    samples: int,
+    warmups: int,
+    soak_captures: int,
+    provenance: Mapping[str, str | bool],
+) -> dict[str, Any]:
     sys.path.insert(0, "/opt/mcu-scripts")
     from benchmarks.full_screenshot_sdk_harness import measure_full_screenshot_arms
 
@@ -572,8 +883,13 @@ async def _measure(samples: int, warmups: int, soak_captures: int) -> dict[str, 
     )
     # Operational checks are intentionally outside the timed paired sample.
     concurrency = await _run_concurrency_probe(lambda: _ArmContext("x11-shm"))
-    failure_matrix = await _run_native_failure_matrix(lambda: _ArmContext("x11-shm"))
-    soak = await _run_native_soak(lambda: _ArmContext("x11-shm"), captures=soak_captures)
+    failure_matrix = await _run_x11_shm_failure_matrix(
+        lambda: _ArmContext("x11-shm")
+    )
+    restart = await _run_x_server_restart_probe(lambda: _ArmContext("x11-shm"))
+    soak = await _run_x11_shm_soak(
+        lambda: _ArmContext("x11-shm"), captures=soak_captures
+    )
     target = contexts.get("x11-shm", contexts.get("mss"))
     target_placement = target.target_placement if target is not None else None
     return _promotion_artifact(
@@ -584,6 +900,11 @@ async def _measure(samples: int, warmups: int, soak_captures: int) -> dict[str, 
         concurrency=concurrency,
         failure_matrix=failure_matrix,
         soak=soak,
+        restart=restart,
+        chromium_fixture_verified=all(
+            context.fixture_verified for context in contexts.values()
+        ),
+        provenance=provenance,
     )
 
 
@@ -599,6 +920,7 @@ def run(
     samples: int = 100,
     warmups: int = 10,
     soak_captures: int = 10_000,
+    provenance: dict[str, str | bool] | None = None,
 ) -> dict[str, Any]:
     if samples < 100:
         raise ValueError("samples must be at least 100 per arm")
@@ -606,7 +928,9 @@ def run(
         raise ValueError("warmups must be at least 10")
     if soak_captures != 10_000:
         raise ValueError("soak_captures is fixed at 10000")
-    return asyncio.run(_measure(samples, warmups, soak_captures))
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+    return asyncio.run(_measure(samples, warmups, soak_captures, provenance))
 
 
 @app.local_entrypoint()
@@ -616,7 +940,12 @@ def main(
     soak_captures: int = 10_000,
     output: str = "",
 ) -> None:
-    result = run.remote(samples=samples, warmups=warmups, soak_captures=soak_captures)
+    result = run.remote(
+        samples=samples,
+        warmups=warmups,
+        soak_captures=soak_captures,
+        provenance=_local_provenance(),
+    )
     path = Path(output) if output else Path("benchmark-data/x11-shm-screenshot-promotion.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")

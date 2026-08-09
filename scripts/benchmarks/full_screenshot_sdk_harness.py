@@ -266,6 +266,14 @@ def _validate_sample(screenshot: Any, trace: Mapping[str, Any]) -> None:
     computed_sha = hashlib.sha256(screenshot.as_bytes()).hexdigest()
     if header_sha != computed_sha or screenshot.sha256 != computed_sha:
         raise AssertionError("full screenshot SHA-256 mismatch")
+    try:
+        cursor_position = json.loads(headers.get("x-computer-use-cursor-position"))
+        cursor_x = int(cursor_position["x"])
+        cursor_y = int(cursor_position["y"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AssertionError("full screenshot cursor position is invalid") from exc
+    if not (0 <= cursor_x < 1024 and 0 <= cursor_y < 768):
+        raise AssertionError("full screenshot cursor position is out of bounds")
     _timing_metrics(headers)
 
 
@@ -298,6 +306,7 @@ def _screenshot_metadata(screenshot: Any) -> tuple[Any, ...]:
         screenshot.width,
         screenshot.height,
         screenshot.cursor_visible,
+        (screenshot.cursor_position.x, screenshot.cursor_position.y),
         coordinate,
     )
 
@@ -314,6 +323,7 @@ def _safe_headers(headers: Mapping[str, str]) -> dict[str, str | int | float | N
         _TIMING_HEADER,
         "x-computer-use-capture-backend",
         "x-computer-use-cursor-visible",
+        "x-computer-use-cursor-position",
     )
     result: dict[str, str | int | float | None] = {}
     for name in names:

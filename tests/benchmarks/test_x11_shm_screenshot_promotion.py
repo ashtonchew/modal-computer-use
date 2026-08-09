@@ -45,7 +45,7 @@ def _artifact() -> dict:
             for index in range(100)
         ]
 
-    return {
+    artifact = {
         "schema_version": 1,
         "benchmark": "x11-shm-screenshot-promotion",
         "status": "complete",
@@ -66,7 +66,7 @@ def _artifact() -> dict:
         "configuration": {
             "source_revision": "a" * 40,
             "worktree_clean": True,
-            "native_source_sha256": "b" * 64,
+            "x11_shm_source_sha256": "b" * 64,
             "cargo_lock_sha256": "c" * 64,
             "rust_toolchain": "rustc 1.91.0",
             "python_version": "3.12.11",
@@ -117,13 +117,59 @@ def _artifact() -> dict:
             "chromium_fixture": True,
             "failure_matrix": True,
             "concurrency_matrix": True,
+            "x_server_restart": True,
             "captures": 10_000,
+            "full_captures": 5_000,
+            "region_captures": 5_000,
             "fd_delta": 0,
             "mapping_delta": 0,
             "rss_growth_bytes": 0,
             "cleanup_succeeded": True,
         },
+        "operational_details": {
+            "concurrency": {
+                "passed": True,
+                "levels": [
+                    {
+                        "concurrency": level,
+                        "captures": level,
+                        "elapsed_ms": 1.0,
+                        "capture_backend": "x11-shm",
+                    }
+                    for level in (1, 2, 4, 8)
+                ],
+            },
+            "failure_matrix": {
+                "passed": True,
+                "checks": {
+                    key: True
+                    for key in (
+                        "close_idempotent",
+                        "closed_capture_rejected",
+                        "constructor_geometry_failure",
+                        "invalid_region_rejected",
+                        "constructor_failure_falls_back_once",
+                        "capture_failure_falls_back_once",
+                        "invalid_result_falls_back_once",
+                        "extension_load_failure_selects_mss",
+                        "close_failure_reported",
+                    )
+                },
+            },
+            "soak": {
+                "passed": True,
+                "captures": 10_000,
+                "full_captures": 5_000,
+                "region_captures": 5_000,
+                "fd_delta": 0,
+                "mapping_delta": 0,
+                "rss_growth_bytes": 0,
+            },
+            "x_server_restart": {"passed": True, "ready_after_restart": True},
+        },
     }
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
+    return artifact
 
 
 def test_publishable_artifact_passes_fixed_promotion_gates() -> None:
@@ -192,4 +238,12 @@ def test_preregistered_thresholds_are_immutable() -> None:
     artifact = _artifact()
     artifact["preregistration"]["gates"]["minimum_daemon_saving_ms"] = 4.99
     with pytest.raises(ValueError, match="fixed promotion gates"):
+        validate_x11_shm_screenshot_artifact(artifact)
+
+
+def test_validator_rejects_a_stale_retained_decision() -> None:
+    artifact = _artifact()
+    artifact["promotion"]["decision"] = "reject"
+
+    with pytest.raises(ValueError, match="decision"):
         validate_x11_shm_screenshot_artifact(artifact)

@@ -24,6 +24,7 @@ class FakeScreenshot:
     size_bytes = len(DATA)
     sha256 = SHA
     cursor_visible = False
+    cursor_position = SimpleNamespace(x=17, y=23)
     coordinate_space = SimpleNamespace(model_dump=lambda mode=None: {})
 
     def as_bytes(self) -> bytes:
@@ -41,6 +42,7 @@ def _trace(*, backend: str = "mss") -> dict[str, object]:
             "x-computer-use-size-bytes": str(len(DATA)),
             "x-computer-use-sha256": SHA,
             "x-computer-use-capture-backend": backend,
+            "x-computer-use-cursor-position": '{"x":17,"y":23}',
             "x-computer-use-timing-ms": json.dumps(
                 {"capture_ms": 1.0, "hash_ms": 0.25, "total_ms": 1.5}
             ),
@@ -93,6 +95,7 @@ def test_validate_sample_rejects_route_or_payload(field: str, value: object) -> 
         ("content-type", "image/jpeg"),
         ("x-computer-use-width", "800"),
         ("x-computer-use-sha256", "0" * 64),
+        ("x-computer-use-cursor-position", '{"x":1024,"y":0}'),
         ("x-computer-use-timing-ms", '{"total_ms":-1}'),
         ("x-computer-use-timing-ms", '{"total_ms":1}'),
     ],
