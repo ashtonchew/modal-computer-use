@@ -122,7 +122,12 @@ async def mutate_display_generation(
                 if mutation_error is None:
                     mutation_error = exc
             if mutation_error is not None:
-                raise mutation_error
+                raise DaemonError(
+                    "display lifecycle reconstruction failed",
+                    status_code=503,
+                    code="display_reconstruction_failed",
+                    details={"error": type(mutation_error).__name__},
+                ) from mutation_error
             if verify_readiness:
                 await _verify_display_after_restart(request)
             state.display_reconstruction_failed = False
