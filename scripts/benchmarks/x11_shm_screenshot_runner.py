@@ -307,7 +307,7 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
         """
     )
     process = await sandbox.exec.aio("python", "-c", script, timeout=30)
-    raw = await _process_stdout_text(process)
+    raw = await _completed_process_stdout_text(process)
     payload = json.loads(raw)
     if (
         not isinstance(payload, dict)
@@ -327,6 +327,16 @@ async def _process_stdout_text(process: Any) -> str:
     if isinstance(raw, str):
         return raw.strip()
     raise RuntimeError("sandbox process stdout has an unexpected type")
+
+
+async def _completed_process_stdout_text(process: Any) -> str:
+    exit_code = await process.wait.aio()
+    raw = await _process_stdout_text(process)
+    if exit_code != 0:
+        raise RuntimeError(f"benchmark subprocess exited with status {exit_code}")
+    if not raw:
+        raise RuntimeError("benchmark subprocess returned empty stdout")
+    return raw
 
 
 async def _run_concurrency_probe(
@@ -620,7 +630,9 @@ async def _run_x_server_timeout_probe(
         constructor_process = await sandbox.exec.aio(
             "python", "-c", constructor_probe, timeout=3
         )
-        constructor_result = json.loads(await _process_stdout_text(constructor_process))
+        constructor_result = json.loads(
+            await _completed_process_stdout_text(constructor_process)
+        )
         constructor_bounded = (
             isinstance(constructor_result, dict)
             and constructor_result.get("failed") is True
@@ -1039,7 +1051,7 @@ async def _run_x11_shm_failure_matrix(
             """
         )
         process = await sandbox.exec.aio("python", "-c", script, timeout=60)
-        raw = await _process_stdout_text(process)
+        raw = await _completed_process_stdout_text(process)
         payload = json.loads(raw)
         required = {
             "close_idempotent",
@@ -1195,7 +1207,7 @@ async def _run_x11_shm_soak(
             """
         )
         process = await sandbox.exec.aio("python", "-c", script, timeout=900)
-        raw = await _process_stdout_text(process)
+        raw = await _completed_process_stdout_text(process)
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise RuntimeError("X11 shared-memory soak returned invalid output")
