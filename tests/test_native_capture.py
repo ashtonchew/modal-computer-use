@@ -95,7 +95,7 @@ def test_x11_shared_memory_adapter_uses_private_extension_abi(monkeypatch) -> No
 
         def capture_png(self, *args: object) -> bytes:
             calls.append(("capture", *args))
-            return b"\x89PNG\r\n\x1a\nfixture"
+            return _png_bytes((10, 11))
 
         def close(self) -> None:
             calls.append(("close",))
@@ -118,6 +118,32 @@ def test_x11_shared_memory_adapter_uses_private_extension_abi(monkeypatch) -> No
         ("capture", 3, 4, 10, 11),
         ("close",),
     ]
+
+
+def test_x11_shared_memory_adapter_rejects_wrong_png_dimensions(monkeypatch) -> None:
+    class FakeSession:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def capture_png(self, *_args: object) -> bytes:
+            return _png_bytes((9, 11))
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(X11SharedMemoryScreenshotSession=FakeSession),
+    )
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=1024, height=768
+    )
+
+    with pytest.raises(screenshot_capture.ScreenshotCaptureFailed, match="invalid PNG"):
+        session.capture_png(x=3, y=4, width=10, height=11)
+
+    session.close()
 
 
 def test_native_runtime_failure_sticks_to_mss_fallback(monkeypatch) -> None:

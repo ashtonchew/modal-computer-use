@@ -421,6 +421,7 @@ def _add_x11_shared_memory_capture(image: object) -> object:
         f"destination = pathlib.Path(sysconfig.get_path(\"platlib\")) / "
         f"\"{_X11_SHARED_MEMORY_EXTENSION}.so\"; "
         "shutil.copy2(source, destination); destination.chmod(0o755)'",
+        f"/usr/local/bin/python3 {_X11_SHARED_MEMORY_REMOTE_PATH}/canary.py",
         f"rm -rf {_X11_SHARED_MEMORY_REMOTE_PATH}/target /root/.cargo/registry "
         "/root/.cargo/git /root/.rustup /root/.cargo/bin /tmp/rustup-init",
         f"/usr/local/bin/python3 -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "

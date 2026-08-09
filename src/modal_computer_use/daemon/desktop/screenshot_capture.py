@@ -116,7 +116,11 @@ class X11SharedMemoryScreenshotSession:
             raise ScreenshotCaptureFailed(
                 "X11 shared-memory screenshot capture failed"
             ) from exc
-        if not isinstance(data, bytes) or not data.startswith(PNG_SIGNATURE):
+        if not isinstance(data, bytes) or not validate_png_dimensions(
+            data,
+            width=width,
+            height=height,
+        ):
             raise ScreenshotCaptureFailed(
                 "X11 shared-memory screenshot returned an invalid PNG"
             )

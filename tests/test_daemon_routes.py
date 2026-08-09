@@ -206,6 +206,34 @@ def test_xvfb_process_restart_resets_screenshot_capture_first(
     assert events == ["capture-reset", "supervisor-restart:xvfb"]
 
 
+@pytest.mark.parametrize("path", ["/v1/computer/stop", "/v1/computer/restart"])
+def test_display_lifecycle_still_mutates_supervisor_when_capture_reset_fails(
+    test_client, app, monkeypatch, path: str
+) -> None:
+    events: list[str] = []
+
+    def reset_screenshot_capture() -> None:
+        events.append("capture-reset")
+        raise RuntimeError("detach failed")
+
+    async def stop() -> None:
+        events.append("supervisor-stop")
+
+    async def restart(name: str | None = None) -> None:
+        assert name is None
+        events.append("supervisor-restart")
+
+    monkeypatch.setattr(app.state.backend, "reset_screenshot_capture", reset_screenshot_capture)
+    monkeypatch.setattr(app.state.supervisor, "stop", stop)
+    monkeypatch.setattr(app.state.supervisor, "restart", restart)
+
+    with pytest.raises(RuntimeError, match="detach failed"):
+        test_client.post(path)
+
+    expected_mutation = "supervisor-stop" if path.endswith("/stop") else "supervisor-restart"
+    assert events == ["capture-reset", expected_mutation]
+
+
 def test_clipboard_and_release_all(test_client) -> None:
     assert test_client.put("/v1/clipboard/text", json={"text": "secret"}).json()["ok"] is True
     assert test_client.get("/v1/clipboard/text").json()["text"] == "secret"
