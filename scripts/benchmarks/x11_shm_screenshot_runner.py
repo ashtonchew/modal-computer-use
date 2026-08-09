@@ -133,6 +133,7 @@ def _native_source_path() -> Path:
     candidates = (
         PROJECT_ROOT / "src" / "modal_computer_use" / "_native" / "x11_shm",
         Path(modal_computer_use.__file__).resolve().parent / "_native" / "x11_shm",
+        Path("/opt/modal-computer-use/native/x11_shm"),
     )
     for candidate in candidates:
         if candidate.is_dir() and (candidate / "Cargo.lock").is_file():
