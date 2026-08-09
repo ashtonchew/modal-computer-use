@@ -168,8 +168,9 @@ app = modal.App(APP_NAME)
 
 # Reuse the managed browser Image recipe.  It installs Chromium, starts the
 # normal Xvfb/desktop stack, and builds the packaged x11-shm extension with
-# the pinned Rust toolchain.  ``copy=True`` makes the benchmark image
-# independent of the caller's working tree after the Image is built.
+# the pinned Rust toolchain. The managed recipe already mounts the package
+# source last; benchmark scripts join that runtime mount layer so no build
+# step follows a local startup mount.
 image = (
     default_image(
         profile="browser",
@@ -177,11 +178,10 @@ image = (
         window_manager="xfce",
         browser_prewarm=True,
     )
-    .add_local_python_source("modal_computer_use", copy=True)
     .add_local_dir(
         str(PROJECT_ROOT / "scripts"),
         remote_path="/opt/mcu-scripts",
-        copy=True,
+        copy=False,
         ignore=("__pycache__", "*.pyc"),
     )
 )
