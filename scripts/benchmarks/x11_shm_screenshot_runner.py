@@ -722,7 +722,7 @@ async def _run_x_server_timeout_probe(
             """
         )
         constructor_process = await sandbox.exec.aio(
-            "python", "-c", constructor_probe, timeout=3
+            "python", "-c", constructor_probe, timeout=10
         )
         constructor_result = json.loads(
             await _completed_process_stdout_text(constructor_process)
