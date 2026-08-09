@@ -366,6 +366,22 @@ def test_gate_rejects_daemon_saving_below_five_milliseconds() -> None:
     assert any("daemon" in reason for reason in decision["reasons"])
 
 
+def test_gate_retains_and_rejects_readiness_regression() -> None:
+    artifact = _artifact()
+    artifact["operational_gates"]["readiness_parity"] = False
+    artifact["operational_details"]["readiness"]["passed"] = False
+    artifact["operational_details"]["readiness"]["arms"]["x11-shm"][
+        "startup_p95_ms"
+    ] = 110.0
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
+
+    validate_x11_shm_screenshot_artifact(artifact)
+
+    assert artifact["promotion"]["eligible"] is False
+    assert artifact["promotion"]["decision"] == "reject"
+    assert any("readiness" in reason for reason in artifact["promotion"]["reasons"])
+
+
 def test_preregistered_thresholds_are_immutable() -> None:
     artifact = _artifact()
     artifact["preregistration"]["gates"]["minimum_daemon_saving_ms"] = 4.99
