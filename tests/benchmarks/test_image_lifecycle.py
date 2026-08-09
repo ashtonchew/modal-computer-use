@@ -91,6 +91,10 @@ class _FakeTarget:
                     "status": "observed",
                     "elapsed_ms": 15.0,
                 },
+                "connect_token_ready": {
+                    "status": "observed",
+                    "elapsed_ms": 20.0,
+                },
                 "first_valid_frame": {"status": "observed", "elapsed_ms": 30.0},
             },
         )
@@ -217,6 +221,11 @@ def test_image_lifecycle_surface_runs_one_paired_interleaved_schedule() -> None:
     understated_cost["cost"]["maximum_estimate_usd"] = 0.01
     with pytest.raises(ValueError, match="maximum estimate is invalid"):
         validate_image_lifecycle_artifact(understated_cost)
+
+    unsafe = deepcopy(artifact)
+    unsafe["observations"][0]["token_value"] = True
+    with pytest.raises(ValueError, match="secret-bearing"):
+        validate_image_lifecycle_artifact(unsafe)
 
 
 def test_image_lifecycle_surface_stops_without_retry_and_redacts_failures() -> None:

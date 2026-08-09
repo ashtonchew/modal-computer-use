@@ -50,6 +50,7 @@ _FORBIDDEN_KEY_PARTS = (
     "secret",
     "token",
 )
+_SAFE_TIMING_STAGE_KEYS = frozenset({"connect_token_ready"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -733,7 +734,9 @@ def _safe_failure(
 def _validate_safe_payload(value: Any, *, key: str | None = None) -> None:
     if key is not None:
         normalized = key.lower().replace("-", "_")
-        if any(part in normalized for part in _FORBIDDEN_KEY_PARTS):
+        if normalized not in _SAFE_TIMING_STAGE_KEYS and any(
+            part in normalized for part in _FORBIDDEN_KEY_PARTS
+        ):
             raise ValueError("Image lifecycle artifact contains a secret-bearing field")
     if isinstance(value, Mapping):
         for item_key, item in value.items():
