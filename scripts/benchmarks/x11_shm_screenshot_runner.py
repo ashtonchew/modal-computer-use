@@ -246,6 +246,8 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
             image=image,
             owner=f"x11-shm-screenshot-{self.source}",
             tags={"benchmark_run": BENCHMARK_RUN_TAG},
+            cpu=(CPU, CPU),
+            memory=(MEMORY_MIB, MEMORY_MIB),
         )
         try:
             self._computer = await self._context.__aenter__()

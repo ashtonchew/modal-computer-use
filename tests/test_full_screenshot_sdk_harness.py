@@ -26,6 +26,8 @@ def test_promotion_runner_uses_the_mounted_chromium_fixture_path() -> None:
     assert "/opt/mcu-scripts/benchmarks/fixtures/x11_shm_chromium_fixture.html" in runner
     assert "/opt/modal-computer-use/native/x11_shm" in runner
     assert 'tags={"benchmark_run": BENCHMARK_RUN_TAG}' in runner
+    assert "cpu=(CPU, CPU)" in runner
+    assert "memory=(MEMORY_MIB, MEMORY_MIB)" in runner
 
 
 class FakeScreenshot:
