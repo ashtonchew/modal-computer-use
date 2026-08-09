@@ -308,6 +308,30 @@ def test_publishable_artifact_passes_fixed_promotion_gates() -> None:
     assert decision["metrics"]["daemon_total_ms"]["absolute_saving_ms"] >= 5
 
 
+def test_validator_accepts_secret_free_startup_timing_stages() -> None:
+    artifact = _artifact()
+    for arm in ("mss", "x11-shm"):
+        artifact["operational_details"]["readiness"]["arms"][arm][
+            "startup_timings"
+        ] = [
+            {
+                "sample_index": 0,
+                "status": "ok",
+                "startup_timing": {
+                    "stages": {
+                        "connection_parameters_ready": {
+                            "status": "observed",
+                            "elapsed_ms": 1.0,
+                        }
+                    }
+                },
+            }
+        ]
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
+
+    validate_x11_shm_screenshot_artifact(artifact)
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

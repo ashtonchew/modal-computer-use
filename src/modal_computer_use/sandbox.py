@@ -547,7 +547,7 @@ class _TimedSandboxInstance:
             self._sandbox, "create_connect_token"
         )
         result = create_access(*args, **kwargs)
-        self._timing.mark("connect_token_ready")
+        self._timing.mark("connection_parameters_ready")
         return result
 
 
@@ -1787,7 +1787,7 @@ class ComputerSandbox:
             else:
                 connect_base_url = _tunnel_url(sandbox, 8080)
                 connect_token = plan.daemon_bearer
-                timing.mark("connect_token_ready")
+                timing.mark("connection_parameters_ready")
             base_url, token = _client_ingress_parts(
                 sandbox,
                 ingress=config.ingress,
@@ -3321,12 +3321,12 @@ async def _async_daemon_client_for_sandbox(
         )
         base_url, token = _connect_token_parts(token_info)
         if timing is not None:
-            timing.mark("connect_token_ready")
+            timing.mark("connection_parameters_ready")
     else:
         base_url = await _tunnel_url_async(sandbox, 8080)
         token = daemon_bearer or await _sandbox_daemon_bearer_async(sandbox)
         if timing is not None:
-            timing.mark("connect_token_ready")
+            timing.mark("connection_parameters_ready")
 
     client = AsyncDaemonClient(base_url, token=token, http2=http2)
     try:

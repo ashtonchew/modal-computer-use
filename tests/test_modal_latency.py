@@ -655,7 +655,7 @@ def test_create_records_supported_and_unsupported_startup_stages(monkeypatch) ->
             "sandbox_create_started",
             "sandbox_registered",
             "tcp_ready",
-            "connect_token_ready",
+            "connection_parameters_ready",
             "connect_ready",
             "attestation_ready",
             "tunnel_ready",
