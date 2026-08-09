@@ -193,6 +193,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     )
     app.state.active_http_observe_changes = 0
     app.state.display_restart_in_progress = False
+    app.state.display_reconstruction_failed = False
     app.state.action_count = 0
     app.state.screenshot_count = 0
     app.state.last_activity_at = time.monotonic()

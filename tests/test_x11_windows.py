@@ -502,6 +502,21 @@ def test_native_adapter_lists_stacking_order_and_marks_active_window() -> None:
     assert [window.is_active for window in result] == [False, True]
 
 
+def test_native_adapter_invalidation_clears_display_generation_poison() -> None:
+    adapter = InspectableNativeAdapter()
+    adapter._atoms = {"_NET_CLIENT_LIST": 42}
+    adapter._failure = "old display failed"
+    adapter._permanently_unavailable = True
+
+    adapter.invalidate_display_generation()
+
+    assert adapter._display is None
+    assert adapter._root is None
+    assert adapter._atoms == {}
+    assert adapter.failure is None
+    assert adapter._permanently_unavailable is False
+
+
 def test_native_adapter_sends_ewmh_activation_and_verifies_once() -> None:
     adapter = InspectableNativeAdapter()
     adapter.client_lists = [[10, 20]]

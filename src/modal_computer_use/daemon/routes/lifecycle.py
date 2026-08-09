@@ -107,6 +107,7 @@ async def mutate_display_generation(
 ) -> None:
     state = request.app.state
     begin_display_restart(state)
+    state.display_reconstruction_failed = False
     try:
         try:
             invalidate_desktop_readiness(state)
@@ -124,10 +125,12 @@ async def mutate_display_generation(
                 raise mutation_error
             if verify_readiness:
                 await _verify_display_after_restart(request)
+            state.display_reconstruction_failed = False
         except BaseException:
             # A successful first probe may have populated ReadinessCache before
             # browser recovery or a final probe failed. Never leave that snapshot
             # advertising a failed display mutation as ready.
+            state.display_reconstruction_failed = True
             invalidate_desktop_readiness(state)
             raise
     finally:
