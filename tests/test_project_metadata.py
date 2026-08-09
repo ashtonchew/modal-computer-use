@@ -65,6 +65,7 @@ def test_dependency_metadata_keeps_intentional_compatibility_contracts() -> None
     assert "pydantic>=2.13.4" in project["dependencies"]
     assert "httpx2==2.7.0" in project["optional-dependencies"]["dev"]
     assert "mypy>=1.16" in project["optional-dependencies"]["dev"]
+    assert project["optional-dependencies"]["modal"] == ["modal~=1.5.3"]
     assert all(
         requirement.lower() != "types-pillow"
         for requirement in project["optional-dependencies"]["dev"]
