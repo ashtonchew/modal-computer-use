@@ -591,8 +591,8 @@ def test_benchmarking_has_an_executable_weighted_input_capacity_gate() -> None:
     )
 
     assert "scripts/run_input_capacity_gate.py" in capacity
-    assert "500-token-per-second refill and 1,000-token burst" in capacity
-    assert "at least 1,000 representative normalized input-work tokens per second" in capacity
+    assert "200-token-per-second refill and 400-token burst" in capacity
+    assert "at least 400 representative normalized input-work tokens per second" in capacity
     assert "2,000-token refill and 4,000-token burst" in capacity
     assert "95% CPU use" in capacity
     assert "64 MiB of RSS" in capacity

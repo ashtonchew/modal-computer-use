@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Replaced the daemon's abrupt 20-action rolling window with a daemon-local token bucket. The
-  default refills 500 normalized input-work tokens per second and permits a 1,000-token burst.
+  default refills 200 normalized input-work tokens per second and permits a 400-token burst.
   Action arrays reserve their complete recursive cost before mutation, so rate limiting cannot
   interrupt a validated batch halfway through. Transient limits return `429` with precise
   `retry_after_ms` and an integer `Retry-After` header.

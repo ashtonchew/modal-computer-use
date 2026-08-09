@@ -57,8 +57,8 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     assert settings.max_observation_connections == 16
     assert settings.max_tunnel_sessions == 0
     assert settings.max_action_depth == 32
-    assert settings.input_rate_limit_per_sec == 500
-    assert settings.input_rate_limit_burst == 1_000
+    assert settings.input_rate_limit_per_sec == 200
+    assert settings.input_rate_limit_burst == 400
 
 
 @pytest.mark.parametrize(

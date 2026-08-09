@@ -159,8 +159,8 @@ Modal Function acting as the client, carries its own request and is not covered 
 | `actions.max_batch_duration_ms` | `30000` | Integer `1..600000`; maps to `COMPUTER_USE_MAX_BATCH_DURATION_MS`, the wall-clock cap for one batch. |
 | `actions.default_action_timeout_ms` | `5000` | Integer `1..300000`; maps to `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS`. |
 | `actions.max_action_timeout_ms` | `300000` | Integer `1..600000`; maps to `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS`. It must be at least `default_action_timeout_ms`. |
-| `actions.input_rate_limit_per_sec` | `500` | Integer `0..10000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC`. This is the token-bucket refill rate in normalized input-work tokens per second. Zero disables input rate limiting. |
-| `actions.input_rate_limit_burst` | `1000` | Integer `1..100000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_BURST`. This is the maximum cost that one atomic batch can reserve. |
+| `actions.input_rate_limit_per_sec` | `200` | Integer `0..10000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC`. This is the token-bucket refill rate in normalized input-work tokens per second. Zero disables input rate limiting. |
+| `actions.input_rate_limit_burst` | `400` | Integer `1..100000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_BURST`. This is the maximum cost that one atomic batch can reserve. |
 | `actions.input_backend` | `"auto"` | `"auto"`, `"xtest"`, or `"xdotool"`; maps to `COMPUTER_USE_INPUT_BACKEND`. |
 | `actions.subprocess_backend` | `"isolated-asyncio"` | `"asyncio"`, `"threaded"`, or `"isolated-asyncio"`; maps to `COMPUTER_USE_SUBPROCESS_BACKEND`. This selects subprocess-backed command and compatibility execution, not native XTest input. |
 
@@ -180,7 +180,7 @@ The `normalized-input-work-v1` policy uses these costs:
 
 These are normalized admission units, not native X11 event counts. The daemon uses one bucket across
 leases and direct routes. It does not reset the bucket when ownership changes.
-With the default burst, one `type` action can contain about 31,968 characters before its normalized
+With the default burst, one `type` action can contain about 12,768 characters before its normalized
 cost exceeds capacity. Larger schema-valid input requests need an explicit larger burst or a
 different application-owned request shape.
 
@@ -246,8 +246,8 @@ use `int()` and the documented range remains authoritative.
 | `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS` | `5000` | Integer milliseconds; SDK range `1..300000`. Used when neither an action nor request supplies a timeout. |
 | `COMPUTER_USE_MAX_ACTION_TIMEOUT_MS` | `300000` | Integer milliseconds; SDK range `1..600000`. Rejects larger request/action timeouts. |
 | `COMPUTER_USE_POST_ACTION_DELAY_MS` | `0` | Integer milliseconds; SDK range `0..10000`. Applied after UI-mutating actions before the next action or screenshot-after. |
-| `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | `500` | Integer; SDK range `0..10000`. Sets the weighted-token refill rate. Zero disables input rate limiting. |
-| `COMPUTER_USE_INPUT_RATE_LIMIT_BURST` | `1000` | Integer; SDK range `1..100000`. Sets the maximum weighted cost admitted at once. |
+| `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` | `200` | Integer; SDK range `0..10000`. Sets the weighted-token refill rate. Zero disables input rate limiting. |
+| `COMPUTER_USE_INPUT_RATE_LIMIT_BURST` | `400` | Integer; SDK range `1..100000`. Sets the maximum weighted cost admitted at once. |
 | `COMPUTER_USE_SCREENSHOT_MAX_PIXELS` | `8294400` | Integer output-pixel ceiling for region and screenshot-after captures. This has no `ComputerConfig` field. |
 | `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` | `auto` | Supported label: `auto`, `daemon`, `client`. SDK-generated from `actions.screenshot_processing_location`; the daemon stores it but currently has no route behavior that reads it. |
 | `COMPUTER_USE_READINESS_CACHE_TTL_MS` | `1000` | Integer milliseconds for successful desktop-readiness probe caching. Values at or below zero disable caching. This has no `ComputerConfig` field. |

@@ -147,16 +147,18 @@ does not expose a comparable daemon capture duration. Candidate values must be p
 
 ## Weighted input capacity gate
 
-Run the capacity gate before promoting the 500-token-per-second refill and 1,000-token burst. The
+Run the capacity gate before promoting the 200-token-per-second refill and 400-token burst. The
 gate uses the minimum supported 1 CPU and 2,048 MiB Sandbox, exact placement, native XTest, one
 borrow, and one pooled client. It sends ordered mixed batches and verifies every result, XTest
 attribution, pointer sentinels, daemon health, cleanup, throughput, tail stability, CPU use, and RSS
 growth. It does not retry or replace failed work. A passing run stays at or below 95% CPU use on
-the one-CPU profile and adds no more than 64 MiB of RSS during the measured workload.
+the one-CPU profile and adds no more than 64 MiB of RSS during the measured workload. The
+application-owned Function samples the target Sandbox's cgroup counters; it does not expose
+privileged command execution through the borrowed-computer Interface.
 
 The measurement configures a 2,000-token refill and 4,000-token burst so the candidate limiter does
-not become the test bottleneck. The release gate requires at least 1,000 representative normalized
-input-work tokens per second. This proves capacity headroom for the lower 500-token product default;
+not become the test bottleneck. The release gate requires at least 400 representative normalized
+input-work tokens per second. This proves capacity headroom for the lower 200-token product default;
 it does not redefine that default.
 
 ```bash
@@ -537,7 +539,7 @@ uv run computer-use benchmark compare \
 
 Provider-default means the documented public SDK path and its default provider configuration.
 For Modal that means the `ComputerConfig` defaults: standard resources, no browser profile, a
-500-normalized-token-per-second input refill with a 1,000-token burst, `auto` typing with a 10 ms
+200-normalized-token-per-second input refill with a 400-token burst, `auto` typing with a 10 ms
 character delay, and default placement.
 For the 100- and 1000-character cases, `auto` resolves to clipboard, so the requested delay is not
 applied per character. A benchmark must record both token-bucket values and any untimed pacing.

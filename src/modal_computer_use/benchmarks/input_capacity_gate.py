@@ -23,7 +23,7 @@ from ..daemon.input_rate_limit import INPUT_RATE_LIMIT_POLICY, batch_input_token
 from ..models import parse_action
 
 CAPACITY_BENCHMARK = "normalized-input-capacity-v1"
-MINIMUM_TARGET_TOKENS_PER_SEC = 1_000.0
+MINIMUM_TARGET_TOKENS_PER_SEC = 400.0
 MINIMUM_CPU = 1.0
 MINIMUM_MEMORY_MIB = 2_048
 DEFAULT_RATE_LIMIT_PER_SEC = 2_000
@@ -36,20 +36,13 @@ DEFAULT_MAX_CPU_UTILIZATION_PERCENT = 95.0
 DEFAULT_MAX_RSS_GROWTH_BYTES = 64 * 1024 * 1024
 _EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _RESOURCE_SAMPLE_SCRIPT = """
-import glob, json, os
-ticks = os.sysconf("SC_CLK_TCK")
-page = os.sysconf("SC_PAGE_SIZE")
-cpu_ticks = 0
-rss_pages = 0
-for path in glob.glob("/proc/[0-9]*/stat"):
-    try:
-        fields = open(path, encoding="utf-8").read().split()
-        memory = open(path.removesuffix("stat") + "statm", encoding="utf-8").read().split()
-        cpu_ticks += int(fields[13]) + int(fields[14])
-        rss_pages += int(memory[1])
-    except (FileNotFoundError, PermissionError, IndexError, ValueError):
-        pass
-print(json.dumps({"cpu_seconds": cpu_ticks / ticks, "rss_bytes": rss_pages * page}))
+import json, pathlib
+cpu = {}
+for line in pathlib.Path("/sys/fs/cgroup/cpu.stat").read_text(encoding="utf-8").splitlines():
+    key, value = line.split()
+    cpu[key] = int(value)
+memory = int(pathlib.Path("/sys/fs/cgroup/memory.current").read_text(encoding="utf-8"))
+print(json.dumps({"cpu_seconds": cpu["usage_usec"] / 1_000_000, "rss_bytes": memory}))
 """.strip()
 
 _INPUT_ACTION_TYPES = {
@@ -130,14 +123,14 @@ class InputCapacitySettings:
             raise ValueError("capacity gate requires the native XTest input backend")
         if self.input_rate_limit_per_sec < MINIMUM_TARGET_TOKENS_PER_SEC:
             raise ValueError(
-                "input_rate_limit_per_sec must be at least the 1000-token promotion target"
+                "input_rate_limit_per_sec must be at least the 400-token promotion target"
             )
         if self.input_rate_limit_burst < 1:
             raise ValueError("input_rate_limit_burst must be positive")
         if isinstance(self.target_tokens_per_sec, bool) or not math.isfinite(
             self.target_tokens_per_sec
         ) or self.target_tokens_per_sec < MINIMUM_TARGET_TOKENS_PER_SEC:
-            raise ValueError("target_tokens_per_sec must be at least 1000")
+            raise ValueError("target_tokens_per_sec must be at least 400")
         if self.cpu != MINIMUM_CPU or self.memory_mib != MINIMUM_MEMORY_MIB:
             raise ValueError("capacity gate must run on the minimum 1 CPU/2048 MiB configuration")
         if self.batches < 2 or self.warmup_batches < 0 or self.cycles_per_batch < 1:
@@ -325,11 +318,7 @@ async def run_input_capacity_measurement(
         elapsed_ms=measured_elapsed_ms,
         cpu=settings.cpu,
     )
-    status = "complete"
-    if failures:
-        status = "failed"
-    elif total_throughput < settings.target_tokens_per_sec:
-        status = "failed"
+    if not failures and total_throughput < settings.target_tokens_per_sec:
         failures.append(
             {
                 "phase": "decision",
@@ -337,18 +326,17 @@ async def run_input_capacity_measurement(
                 "status": "failed",
             }
         )
-    else:
+    if not failures or all(item.get("phase") == "decision" for item in failures):
         tail_failure = _tail_regression_failure(
             observations,
             max_ratio=settings.max_tail_regression,
         )
         if tail_failure is not None:
-            status = "failed"
             failures.append(tail_failure)
         resource_failure = _resource_failure(resource_summary, settings=settings)
         if resource_failure is not None:
-            status = "failed"
             failures.append(resource_failure)
+    status = "failed" if failures else "complete"
     artifact = {
         "schema_version": 1,
         "benchmark": CAPACITY_BENCHMARK,

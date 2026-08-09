@@ -41,3 +41,11 @@ def test_capacity_runner_accepts_environment_or_authenticated_profile(
     monkeypatch.setenv("MODAL_TOKEN_ID", "present")
     monkeypatch.setenv("MODAL_TOKEN_SECRET", "present")
     runner.require_live_authorization(True, credential_probe=lambda: False)
+
+
+def test_capacity_runner_samples_the_target_cgroup_not_host_visible_processes() -> None:
+    runner = _load_runner()
+
+    assert "/sys/fs/cgroup/cpu.stat" in runner._RESOURCE_SAMPLE_SCRIPT
+    assert "/sys/fs/cgroup/memory.current" in runner._RESOURCE_SAMPLE_SCRIPT
+    assert "/proc/[0-9]" not in runner._RESOURCE_SAMPLE_SCRIPT

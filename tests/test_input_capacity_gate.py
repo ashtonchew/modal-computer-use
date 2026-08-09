@@ -183,8 +183,8 @@ async def test_workload_is_mixed_ordered_and_below_batch_limit() -> None:
 def test_settings_require_minimum_capacity_and_native_backend() -> None:
     _settings().validate(batch_cost=10)
 
-    with pytest.raises(ValueError, match="1000-token"):
-        _settings(input_rate_limit_per_sec=999).validate(batch_cost=10)
+    with pytest.raises(ValueError, match="400-token"):
+        _settings(input_rate_limit_per_sec=399).validate(batch_cost=10)
     with pytest.raises(ValueError, match="native XTest"):
         _settings(input_backend="xdotool").validate(batch_cost=10)
     with pytest.raises(ValueError, match="minimum 1 CPU"):

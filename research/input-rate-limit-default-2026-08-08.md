@@ -2,7 +2,19 @@
 
 Date: 2026-08-08
 
-## Decision
+## Live outcome
+
+The first preregistered same-runtime gate rejected the `500/1000` candidate. On the minimum
+1 CPU/2,048 MiB AWS `us-west-2` runtime, 80 ordered mixed XTest batches sustained 507.802
+normalized tokens per second. All 80 batches completed in order, cleanup succeeded, and RSS grew
+by about 3 MiB. The run did not meet the 1,000-token promotion threshold.
+
+Use the predeclared `200/400` fallback. It is ten times the former sustained limit, about 8.9 times
+the reciprocal 44.29 ms Step median, and below half of the observed mixed-workload throughput. A
+new clean-commit run must still pass the 400-token gate before release. Do not promote `500/1000`
+from this report.
+
+## Pre-measurement candidate
 
 Use this as the default promotion candidate:
 
@@ -185,8 +197,11 @@ The runner must measure actual offered and completed weighted rates. Do not infe
 
 ## Final judgment
 
-`500/1000` is high enough to stay away from normal optimized provider loops and low enough to remain a credible resource boundary. It is 25 times the current sustained number, provides 22 times headroom over the reciprocal fused median, and allows large valid batches.
+`500/1000` was the research candidate, but the live gate did not establish the required two-times
+capacity margin. It must not become the default from this evidence.
 
 `2000/4000` is not yet a better default. It has more application headroom, but current evidence does not show that the minimum runtime can process that sustained rate safely. A limiter above backend capacity only records overload after the protected resource is already saturated.
 
-Promote `500/1000` after the capacity gate. If later evidence shows at least 4,000 normalized tokens per second of stable capacity with a suitable safety margin, raise the default in a new evidence-backed change.
+Apply the predeclared `200/400` fallback. If later evidence shows materially higher sustained
+normalized throughput with a suitable safety margin, raise the default in a new evidence-backed
+change.

@@ -297,12 +297,12 @@ def test_provider_compare_created_modal_uses_public_computer_config_defaults(
     defaults = cli.ComputerConfig(run_id="compare-defaults")
     assert config.resources == defaults.resources
     assert config.browser == defaults.browser
-    assert config.actions.input_rate_limit_per_sec == 500
-    assert config.actions.input_rate_limit_burst == 1_000
+    assert config.actions.input_rate_limit_per_sec == 200
+    assert config.actions.input_rate_limit_burst == 400
     assert seen["environment"]["resource_profile"] == "standard"
     assert seen["environment"]["browser"] is None
-    assert seen["environment"]["input_rate_limit_per_sec"] == 500
-    assert seen["environment"]["input_rate_limit_burst"] == 1_000
+    assert seen["environment"]["input_rate_limit_per_sec"] == 200
+    assert seen["environment"]["input_rate_limit_burst"] == 400
     assert seen["environment"]["action_case_pacing_ms"] is None
     capsys.readouterr()
 

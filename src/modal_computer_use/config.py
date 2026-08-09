@@ -186,13 +186,13 @@ class ActionConfig(StrictBaseModel):
     default_action_timeout_ms: int = Field(default=5_000, ge=1, le=300_000)
     max_action_timeout_ms: int = Field(default=300_000, ge=1, le=600_000)
     input_rate_limit_per_sec: int = Field(
-        default=500,
+        default=200,
         ge=0,
         le=10_000,
         description="Weighted input-work tokens refilled per second; zero disables the limit.",
     )
     input_rate_limit_burst: int = Field(
-        default=1_000,
+        default=400,
         ge=1,
         le=100_000,
         description="Maximum weighted input-work tokens available for atomic admission.",

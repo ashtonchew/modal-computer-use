@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
-    sdk_parser.add_argument("--input-rate-limit-burst", type=int, default=1_000)
+    sdk_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     sdk_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -449,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
-    ingress_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=1_000)
+    ingress_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     ingress_ab_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -508,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
-    region_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=1_000)
+    region_ab_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     region_ab_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
@@ -625,7 +625,7 @@ def main(argv: list[str] | None = None) -> int:
             "defaults to 0 so primitive latency runs do not measure throttling"
         ),
     )
-    colocated_parser.add_argument("--input-rate-limit-burst", type=int, default=1_000)
+    colocated_parser.add_argument("--input-rate-limit-burst", type=int, default=400)
     colocated_parser.add_argument(
         "--input-backend",
         choices=["auto", "xtest", "xdotool"],
