@@ -53,7 +53,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 | Modal SDK | The compatible line remains `modal~=1.5.2`. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
-| Screenshots | Inline `screenshots.full()` uses the raw binary route and reconstructs a semantic, byte-backed `Screenshot`. The default `auto` source selects persistent X11 shared-memory capture for cursor-hidden lossless PNG when the managed extension and live display pass readiness. MSS remains the compatibility source for unsupported options and ordinary native failure; X-server timeouts fail closed. Captures report complete validated metadata. |
+| Screenshots | Inline `screenshots.full()` uses the raw binary route and reconstructs a semantic, byte-backed `Screenshot`. Persistent MSS remains the production default. X11 shared-memory capture is available through explicit `x11-shm` or opt-in `auto`, but was not promoted after readiness-latency and display-restart gates failed. Captures report complete validated metadata. |
 | Computer Step | Borrowed sync and async computers expose `computer.step()`. It sends one ordered action array and returns `ComputerStepResult.actions`, `.screenshot`, and `.timing` through the versioned `computer-step-envelope-v1` capability. The screenshot is an immediate post-action frame, not application readiness. |
 | Transport | `attested-tunnel` is the default Modal ingress. An SDK-managed bootstrap bearer authorizes a short-lived daemon-issued bearer for the encrypted tunnel. HTTP/2 is opt-in. |
 | Sessions | Sync and native-async daemon clients, persistent hot sessions, and observation WebSocket transports are implemented. |
@@ -167,7 +167,7 @@ Behavior belongs to the module that can prove its safety:
 | --- | --- | --- | --- |
 | Mouse and keyboard | Persistent XTest/XKB | `xdotool` | Only before native emission starts. Possible partial emission is terminal. |
 | Window control | Native EWMH/Xlib | `wmctrl` | Only when the controller can prove the native request was unavailable or not completed. |
-| Cursor-hidden lossless PNG | Persistent X11 shared memory | Persistent MSS, then `scrot`/`maim` | `auto` selects the source during readiness. Extension unavailability or ordinary native failure selects MSS for that X-server generation. An X-server timeout fails closed; display restart clears the source state and re-probes. Explicit `x11-shm` never changes source. |
+| Cursor-hidden lossless PNG | Persistent MSS | Optional X11 shared memory; then `scrot`/`maim` where allowed | `mss` is the production default. Opt-in `auto` evaluates X11 shared memory during readiness. Extension unavailability or ordinary native failure selects MSS for that X-server generation. An X-server timeout fails closed; display restart clears the source state and re-probes. Explicit `x11-shm` never changes source. |
 | Other cursor-hidden formats or scaling | Persistent MSS | `scrot`, then `maim` | The X11 shared-memory source is not eligible. After a bounded MSS reset/retry cannot return a valid frame, file capture is allowed. |
 | Cursor-visible capture | `maim` | None | Failure is terminal. |
 | Change notification | XDamage hint | Source-hash polling | Pixel capture and hashes, not the hint, confirm change. |
@@ -464,12 +464,12 @@ headers; observation and action metadata expose their own backend/timing attribu
 routes avoid base64 and unnecessary image re-encoding. Output pixel budgets are validated before
 capture.
 
-The default `auto` source prefers persistent X11 shared-memory capture for cursor-hidden,
-full-resolution lossless PNG. Persistent MSS owns JPEG, WebP, scaled, and raw-pixel compatibility
-paths and is the sticky fallback for an unavailable extension or ordinary native failure. An
-X-server reply timeout fails closed because every capture source depends on that display. A display
-restart clears source state and re-probes. Cursor-visible capture uses the file compatibility path
-because neither in-process source composes the cursor.
+The default `mss` source uses persistent MSS for cursor-hidden, full-resolution lossless PNG.
+Opt-in `auto` evaluates persistent X11 shared-memory capture; it remains unpromoted after failing
+readiness-latency and display-restart gates. Persistent MSS also owns JPEG, WebP, scaled, and
+raw-pixel compatibility paths. An X-server reply timeout fails closed because every capture source
+depends on that display. A display restart clears source state and re-probes. Cursor-visible capture
+uses the file compatibility path because neither in-process source composes the cursor.
 
 ### 7.3 Observation contract
 

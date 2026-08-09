@@ -72,8 +72,8 @@ def test_action_subprocess_backend_defaults_and_validates() -> None:
         ComputerConfig(actions={"subprocess_backend": "process-pool"})
 
 
-def test_screenshot_capture_source_defaults_to_auto_and_validates() -> None:
-    assert ComputerConfig().actions.screenshot_capture_source == "auto"
+def test_screenshot_capture_source_defaults_to_mss_and_validates() -> None:
+    assert ComputerConfig().actions.screenshot_capture_source == "mss"
     assert (
         ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})
         .actions.screenshot_capture_source

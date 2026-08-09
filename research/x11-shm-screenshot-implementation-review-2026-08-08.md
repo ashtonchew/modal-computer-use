@@ -16,7 +16,7 @@ The product feature is **X11 shared-memory screenshot capture** and its source t
 The public selector is `screenshot_capture_source = auto | mss | x11-shm`. `auto` is a policy:
 use `x11-shm` only after the extension and live display pass readiness, otherwise select MSS once
 for the current X-server generation. Display restart clears the quarantine and re-probes. Explicit
-`x11-shm` fails closed.
+`x11-shm` fails closed. The production default is `mss`; `auto` remains an opt-in evaluation mode.
 
 Rust, XCB, MIT-SHM AttachFd, fixed-Up filtering, and DEFLATE level 1 describe the current private
 implementation. They are not stable product or configuration names. Response attribution continues
@@ -112,3 +112,19 @@ No threshold changes after observing results:
 
 If any gate fails, retain the evidence, keep MSS as the selected production source, and do not
 publish faster-default documentation.
+
+## Promotion outcome
+
+The exact-resource matched Modal campaign reached the canonical public SDK path with one CPU,
+2 GiB memory, a deterministic Chromium fixture, a pooled client, and the fixed 1024x768 lossless
+PNG contract. It did not authorize a default cutover:
+
+- the candidate exceeded the allowed readiness-latency regression; and
+- the X-server restart recovery gate failed.
+
+Both are terminal under the preregistered rules. No threshold was changed and no failed sample was
+replaced. The evidence validator rejected the operationally failed run before producing a
+publishable promotion artifact, so this note retains the decision without private Modal URLs or
+an invented successful artifact. MSS remains the production default. The implemented `x11-shm`
+source is explicit opt-in evidence for a future iteration, not a claim that every session should
+use it.

@@ -30,8 +30,9 @@ or inconsistent format, size, hash, geometry, coordinate space, timestamp, or cu
 request. The SDK does not silently retry through the JSON/base64 route after dispatch. Check that
 the installed daemon and client have a compatible screenshot protocol.
 
-Cursor-hidden lossless PNG requests use X11 shared-memory capture in a managed Image after its
-extension and live display pass readiness. Under `auto`, an unavailable or failed source is
+Cursor-hidden lossless PNG requests use persistent MSS by default. X11 shared-memory capture is an
+opt-in source while its readiness-latency and display-restart promotion gates remain unresolved.
+Under `auto`, an unavailable or failed source is
 quarantined for the current X-server generation and subsequent eligible captures report
 `mss-fallback` instead of repeatedly reopening it. Restarting the display clears the quarantine
 and re-probes the source. If the X server itself misses the bounded reply deadline, the request
