@@ -75,22 +75,43 @@ function_image = (
 )
 
 
-def require_live_authorization(authorized: bool) -> None:
+def require_live_authorization(
+    authorized: bool,
+    *,
+    credential_probe: Callable[[], bool] | None = None,
+) -> None:
     """Reject accidental live or billable execution before Modal I/O."""
 
     if not authorized:
         raise PermissionError(
             "input capacity gate is live and billable; pass --authorize explicitly"
         )
-    missing = [
-        name
-        for name in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET")
-        if not os.environ.get(name)
-    ]
-    if missing:
+    has_environment_credentials = all(
+        os.environ.get(name) for name in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET")
+    )
+    if not has_environment_credentials and not (
+        credential_probe or _modal_profile_authenticated
+    )():
         raise PermissionError(
-            "input capacity gate requires explicit Modal credentials: " + ", ".join(missing)
+            "input capacity gate requires Modal credentials or an authenticated Modal profile"
         )
+
+
+def _modal_profile_authenticated() -> bool:
+    modal_cli = shutil.which("modal")
+    if modal_cli is None:
+        return False
+    try:
+        result = subprocess.run(  # noqa: S603 - resolved executable and fixed arguments.
+            [modal_cli, "token", "info"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 def verify_clean_source_revision(source_sha: str) -> None:
