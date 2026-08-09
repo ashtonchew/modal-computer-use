@@ -47,6 +47,8 @@ procedures, and concise pointers for public guides.
 - [Optimized-default promotion results, 2026-08-08](benchmark-results-2026-08-08-optimized-default.md):
   eligible same-topology evidence for the SDK cutover and the precise meaning of the historical
   47 ms arithmetic figure.
+- [Computer Step promotion results, 2026-08-08](benchmark-results-2026-08-08-computer-step.md):
+  100-pair same-topology evidence for the fused `computer.step()` default.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
   diagnostic, and historical reports and protocols.
 

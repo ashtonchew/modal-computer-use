@@ -55,6 +55,11 @@ reused pooled HTTP connection, and a same-region Function/Sandbox topology. The 
 screenshot-plus-click number is arithmetic over separate warm medians, not a measured fused turn.
 Version 2.0.0 does not promise that latency for `computer.step()`.
 
+The separate 2026-08-08 Computer Step promotion run retained 100 interleaved pairs and measured
+the fused path at 44.29 ms p50 and 52.57 ms p95. The prior two-request path measured 47.14 ms and
+58.22 ms. The paired bootstrap interval showed a 2.65–4.66 ms improvement, with no failures,
+retries, replacement samples, or cleanup survivors.
+
 Migrate the primary SDK path as follows:
 
 | Version 1 pattern | Version 2 default | Required migration |

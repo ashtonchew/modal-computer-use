@@ -49,6 +49,14 @@ promise for `computer.step()`. It is only a non-gating engineering goal and dist
 Unit tests and the historical cross-provider table do not promote the new default. A release must
 record cold startup separately from dispatch, borrow, and repeated warm operations.
 
+The [2026-08-08 Computer Step report](benchmark-results-2026-08-08-computer-step.md) records the
+separate fused-operation gate from source commit
+`f6b9adeee54f584c345c813750758b7c7b5db744`. It retained 100 interleaved pairs per arm with no
+failures, retries, replacements, or cleanup survivors. `computer.step()` measured 44.29 ms p50 and
+52.57 ms p95, compared with 47.14 ms and 58.22 ms for `actions.run()` followed by
+`screenshots.full()`. The paired median improvement was 3.37 ms, with a bootstrap 95% interval of
+2.65 to 4.66 ms faster. This new result satisfies the Computer Step promotion gate.
+
 ## Publication order
 
 Use this order: runtime artifacts → package → hosted documentation.

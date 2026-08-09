@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,8 @@ from modal_computer_use.benchmarks.step_promotion_gate import (
     compare_step_promotion_artifacts,
     validate_step_promotion_artifact,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _configuration(arm: str) -> dict[str, object]:
@@ -223,3 +227,29 @@ def test_step_gate_accepts_a_sanitized_failed_artifact() -> None:
     ]
 
     validate_step_promotion_artifact(payload)
+
+
+def test_published_computer_step_evidence_reproduces_the_promotion_decision() -> None:
+    evidence = ROOT / "benchmark-data"
+    prior = json.loads(
+        (evidence / "computer-step-prior-public-2026-08-08.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    candidate = json.loads(
+        (evidence / "computer-step-candidate-2026-08-08.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    recorded = json.loads(
+        (evidence / "computer-step-promotion-decision-2026-08-08.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    validate_step_promotion_artifact(prior, expected_arm=PRIOR_PUBLIC_ARM)
+    validate_step_promotion_artifact(candidate, expected_arm=CANDIDATE_ARM)
+    assert compare_step_promotion_artifacts(prior, candidate) == recorded
+    assert recorded["decision"] == "promote"
+    assert recorded["paired_samples"] == 100
+    assert recorded["metrics"]["candidate_p50_ms"] == pytest.approx(44.2924215)

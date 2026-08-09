@@ -163,6 +163,10 @@ are ready. The article's opening 47.10 ms figure is arithmetic over separate 37.
 and 9.85 ms click medians. It is not a measured fused turn and is not a latency promise for
 `computer.step()`.
 
+A separate preregistered same-topology benchmark measured the fused `computer.step()` path at
+44.29 ms p50 and 52.57 ms p95 across 100 paired samples. The prior two-request path measured
+47.14 ms and 58.22 ms. See the [Computer Step promotion report](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-08-08-computer-step.md).
+
 The [benchmark results](https://modal-computer-use.mintlify.app/benchmarks/current-results) give p95
 values and explain how each path was configured and measured.
 

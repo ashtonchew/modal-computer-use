@@ -868,9 +868,9 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is the `2.0.0` release candidate. Publication remains gated on the
-preregistered benchmark, protected Modal smoke, runtime artifact, package, and hosted-documentation
-release sequence.
+The repository source is the `2.0.0` release candidate. The preregistered 100-pair Computer Step
+benchmark and protected Modal handoff smoke passed on 2026-08-08. Publication remains gated on the
+release-matched runtime artifact, package, and hosted-documentation sequence.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

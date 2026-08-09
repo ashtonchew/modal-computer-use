@@ -54,6 +54,16 @@ See the [optimized-default report](../docs/benchmark-results-2026-08-08-optimize
 the controlled configuration, interpretation, and the distinction from the historical 47 ms
 arithmetic figure.
 
+The fused Computer Step promotion uses a separate 100-pair evidence set:
+
+- [`computer-step-prior-public-2026-08-08.json`](computer-step-prior-public-2026-08-08.json);
+- [`computer-step-candidate-2026-08-08.json`](computer-step-candidate-2026-08-08.json);
+- [`computer-step-promotion-decision-2026-08-08.json`](computer-step-promotion-decision-2026-08-08.json).
+
+See the [Computer Step report](../docs/benchmark-results-2026-08-08-computer-step.md) for its
+action-to-immediate-frame boundary and promotion result. These files do not replace or rewrite the
+historical article evidence.
+
 ### Archived July 26 combined report
 
 The archived combined report remains bound to these immutable inputs:
