@@ -20,6 +20,8 @@ from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Any
 
+from modal_computer_use.errors import DaemonHTTPError
+
 _EXPECTED_PAYLOAD = {
     "format": "png",
     "quality": 90,
@@ -31,6 +33,30 @@ _EXPECTED_PAYLOAD = {
 _MINIMUM_SAMPLES_PER_ARM = 100
 _MINIMUM_WARMUP_ITERATIONS = 10
 _TIMING_HEADER = "x-computer-use-timing-ms"
+
+
+def _safe_failure_label(value: object) -> str:
+    if not isinstance(value, str) or not value or len(value) > 80:
+        return "unknown"
+    if not all(character.isalnum() or character in "._-" for character in value):
+        return "unknown"
+    return value
+
+
+def _annotate_daemon_failure(
+    error: DaemonHTTPError,
+    *,
+    arm: str,
+    phase: str,
+    sample_index: int | None,
+) -> None:
+    error.add_note(
+        "screenshot benchmark daemon failure: "
+        f"arm={arm} phase={phase} sample_index={sample_index} "
+        f"status_code={error.status_code} code={_safe_failure_label(error.code)} "
+        "error_type="
+        f"{_safe_failure_label(error.details.get('error_type'))}"
+    )
 
 
 def build_paired_random_schedule(
@@ -113,8 +139,17 @@ async def measure_full_screenshot_arms(
         # Warm every session before the paired schedule.  Warmups are not
         # included in any percentile or promotion observation.
         for arm in arms:
-            for _ in range(warmup_iterations):
-                await entered[arm].screenshots.full()
+            for warmup_index in range(warmup_iterations):
+                try:
+                    await entered[arm].screenshots.full()
+                except DaemonHTTPError as error:
+                    _annotate_daemon_failure(
+                        error,
+                        arm=arm,
+                        phase="warmup",
+                        sample_index=warmup_index,
+                    )
+                    raise
 
         for item in schedule:
             arm = str(item["arm"])
@@ -143,7 +178,16 @@ async def measure_full_screenshot_arms(
             computer.client.post_bytes_with_headers = traced_request
             started = clock()
             try:
-                screenshot = await computer.screenshots.full()
+                try:
+                    screenshot = await computer.screenshots.full()
+                except DaemonHTTPError as error:
+                    _annotate_daemon_failure(
+                        error,
+                        arm=arm,
+                        phase="sample",
+                        sample_index=int(item["sample_index"]),
+                    )
+                    raise
             finally:
                 computer.client.post_bytes_with_headers = original
             complete_ms = max(0.0, (clock() - started) * 1000.0)
