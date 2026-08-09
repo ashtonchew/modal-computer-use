@@ -113,6 +113,17 @@ direct REST clients and compatibility work.
 
 Measure CPU use and transferred bytes before changing the default.
 
+The optional `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=auto` policy evaluates the managed
+X11 shared-memory source only after its extension and live display pass readiness. MSS remains the
+production default and the sticky fallback for ordinary native failures in that X-server generation;
+`x11-shm` is an explicit fail-closed choice. Display reply timeouts fail closed rather than starting
+another capture client against the same unresponsive server, and a display restart clears the
+quarantine so the source can be probed again. MSS remains the source for scaled, JPEG, WebP,
+raw-pixel, and other native-ineligible captures; cursor-visible requests use the compatibility path.
+
+Raw screenshot responses report `x11-shm`, `mss`, `mss-fallback`, `scrot`, `maim`, or `unknown` in
+their capture-backend metadata so benchmark artifacts can attribute the actual source directly.
+
 ## Batch input
 
 Send one model-produced ordered action array as one batch. The daemon validates the complete batch
