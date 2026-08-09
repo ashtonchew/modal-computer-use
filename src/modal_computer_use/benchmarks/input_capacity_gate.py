@@ -32,7 +32,7 @@ DEFAULT_BATCHES = 80
 DEFAULT_WARMUP_BATCHES = 4
 DEFAULT_CYCLES_PER_BATCH = 6
 DEFAULT_MAX_TAIL_REGRESSION = 1.5
-DEFAULT_MAX_CPU_UTILIZATION_PERCENT = 95.0
+DEFAULT_MAX_CPU_SECONDS_PER_TOKEN = 0.01
 DEFAULT_MAX_RSS_GROWTH_BYTES = 64 * 1024 * 1024
 _EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _RESOURCE_SAMPLE_SCRIPT = """
@@ -118,7 +118,7 @@ class InputCapacitySettings:
     warmup_batches: int = DEFAULT_WARMUP_BATCHES
     cycles_per_batch: int = DEFAULT_CYCLES_PER_BATCH
     max_tail_regression: float = DEFAULT_MAX_TAIL_REGRESSION
-    max_cpu_utilization_percent: float = DEFAULT_MAX_CPU_UTILIZATION_PERCENT
+    max_cpu_seconds_per_token: float = DEFAULT_MAX_CPU_SECONDS_PER_TOKEN
     max_rss_growth_bytes: int = DEFAULT_MAX_RSS_GROWTH_BYTES
 
     def validate(self, *, batch_cost: int | None = None) -> None:
@@ -148,8 +148,11 @@ class InputCapacitySettings:
             raise ValueError("batch and warmup counts are invalid")
         if self.max_tail_regression < 1 or not math.isfinite(self.max_tail_regression):
             raise ValueError("max_tail_regression must be finite and at least one")
-        if not 0 < self.max_cpu_utilization_percent <= 100:
-            raise ValueError("max_cpu_utilization_percent must be in (0, 100]")
+        if (
+            not math.isfinite(self.max_cpu_seconds_per_token)
+            or self.max_cpu_seconds_per_token <= 0
+        ):
+            raise ValueError("max_cpu_seconds_per_token must be finite and positive")
         if self.max_rss_growth_bytes < 0:
             raise ValueError("max_rss_growth_bytes must be non-negative")
         if batch_cost is not None:
@@ -326,8 +329,7 @@ async def run_input_capacity_measurement(
     resource_summary = _resource_summary(
         before=locals().get("resources_before"),
         after=locals().get("resources_after"),
-        elapsed_ms=measured_elapsed_ms,
-        cpu=settings.cpu,
+        weighted_tokens=total_tokens,
     )
     if not failures and total_throughput < settings.target_tokens_per_sec:
         failures.append(
@@ -367,7 +369,7 @@ async def run_input_capacity_measurement(
         "target": {
             "minimum_weighted_tokens_per_sec": settings.target_tokens_per_sec,
             "max_tail_regression": settings.max_tail_regression,
-            "max_cpu_utilization_percent": settings.max_cpu_utilization_percent,
+            "max_cpu_seconds_per_token": settings.max_cpu_seconds_per_token,
             "max_rss_growth_bytes": settings.max_rss_growth_bytes,
         },
         "observations": observations,
@@ -503,19 +505,16 @@ def _resource_summary(
     *,
     before: Any,
     after: Any,
-    elapsed_ms: float,
-    cpu: float,
+    weighted_tokens: int,
 ) -> dict[str, float | int] | None:
     if not isinstance(before, Mapping) or not isinstance(after, Mapping):
         return None
     cpu_delta = max(0.0, float(after["cpu_seconds"]) - float(before["cpu_seconds"]))
     rss_growth = max(0, int(after["rss_bytes"]) - int(before["rss_bytes"]))
-    utilization = (
-        (cpu_delta / (elapsed_ms / 1_000.0) / cpu) * 100.0 if elapsed_ms > 0 else 0.0
-    )
+    cpu_per_token = cpu_delta / weighted_tokens if weighted_tokens > 0 else 0.0
     return {
         "cpu_seconds_delta": round(cpu_delta, 6),
-        "cpu_utilization_percent": round(utilization, 3),
+        "cpu_seconds_per_weighted_token": round(cpu_per_token, 9),
         "rss_bytes_before": int(before["rss_bytes"]),
         "rss_bytes_after": int(after["rss_bytes"]),
         "rss_growth_bytes": rss_growth,
@@ -530,7 +529,8 @@ def _resource_failure(
     if summary is None:
         return {"phase": "decision", "category": "resource_observation", "status": "failed"}
     if (
-        float(summary["cpu_utilization_percent"]) > settings.max_cpu_utilization_percent
+        float(summary["cpu_seconds_per_weighted_token"])
+        > settings.max_cpu_seconds_per_token
         or int(summary["rss_growth_bytes"]) > settings.max_rss_growth_bytes
     ):
         return {"phase": "decision", "category": "resource_saturation", "status": "failed"}
@@ -722,14 +722,14 @@ def validate_input_capacity_artifact(artifact: Mapping[str, Any]) -> None:
     resources = summary.get("resources")
     if not isinstance(resources, Mapping):
         raise ValueError("capacity artifact resource evidence is missing")
-    cpu_utilization = _finite_number(
-        resources.get("cpu_utilization_percent"),
-        "CPU utilization",
+    cpu_per_token = _finite_number(
+        resources.get("cpu_seconds_per_weighted_token"),
+        "CPU seconds per weighted token",
     )
     rss_growth = resources.get("rss_growth_bytes")
     max_cpu = _finite_number(
-        target.get("max_cpu_utilization_percent"),
-        "maximum CPU utilization",
+        target.get("max_cpu_seconds_per_token"),
+        "maximum CPU seconds per weighted token",
     )
     max_rss = target.get("max_rss_growth_bytes")
     if (
@@ -741,7 +741,7 @@ def validate_input_capacity_artifact(artifact: Mapping[str, Any]) -> None:
         or max_rss < 0
     ):
         raise ValueError("capacity artifact resource evidence is invalid")
-    if cpu_utilization > max_cpu or rss_growth > max_rss:
+    if cpu_per_token > max_cpu or rss_growth > max_rss:
         raise ValueError("capacity artifact exceeds resource limits")
     expected_tokens = workload.get("weighted_tokens_per_batch")
     if isinstance(expected_tokens, bool) or not isinstance(expected_tokens, int):

@@ -230,7 +230,7 @@ async def test_measurement_passes_mixed_input_at_target_and_records_sanitized_ob
     assert artifact["configuration"]["connection_reuse"] == "one-pooled-async-client"
     assert artifact["summary"]["resources"] == {
         "cpu_seconds_delta": 0.004,
-        "cpu_utilization_percent": 50.0,
+        "cpu_seconds_per_weighted_token": 0.00005,
         "rss_bytes_before": 100_000_000,
         "rss_bytes_after": 100_000_000,
         "rss_growth_bytes": 0,
@@ -422,7 +422,7 @@ async def test_artifact_validator_rejects_incomplete_or_tampered_promotion_evide
         validate_input_capacity_artifact(missing_observation)
 
     saturated = deepcopy(artifact)
-    saturated["summary"]["resources"]["cpu_utilization_percent"] = 99.0
+    saturated["summary"]["resources"]["cpu_seconds_per_weighted_token"] = 0.1
     with pytest.raises(ValueError, match="resource limits"):
         validate_input_capacity_artifact(saturated)
 

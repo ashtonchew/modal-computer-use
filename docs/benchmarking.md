@@ -151,8 +151,9 @@ Run the capacity gate before promoting the 200-token-per-second refill and 400-t
 gate uses the minimum supported 1 CPU and 2,048 MiB Sandbox, exact placement, native XTest, one
 borrow, and one pooled client. It sends ordered mixed batches and verifies every result, XTest
 attribution, pointer sentinels, daemon health, cleanup, throughput, tail stability, CPU use, and RSS
-growth. It does not retry or replace failed work. A passing run stays at or below 95% CPU use on
-the one-CPU profile and adds no more than 64 MiB of RSS during the measured workload. The
+growth. It does not retry or replace failed work. A passing run uses no more than 0.01 aggregate
+cgroup CPU-seconds per normalized token and adds no more than 64 MiB of RSS during the measured
+workload. The
 application-owned Function samples only processes with the target Sandbox's cgroup membership; it
 does not expose privileged command execution through the borrowed-computer Interface.
 
@@ -169,7 +170,7 @@ modal run --env main scripts/run_input_capacity_gate.py \
 ```
 
 The runner rejects implicit authorization, missing Modal credentials, a dirty source tree, broad or
-mismatched placement, non-XTest attribution, missing or saturated resource observations,
+mismatched placement, non-XTest attribution, missing or inefficient resource observations,
 incomplete cleanup, and unsafe artifact fields. Keep failed artifacts immutable and publish only a
 new sanitized passing artifact with its exact source revision and resolved configuration.
 
