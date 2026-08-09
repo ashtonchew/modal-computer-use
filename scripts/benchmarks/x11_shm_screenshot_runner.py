@@ -49,6 +49,7 @@ from modal_computer_use.config import (
 )
 from modal_computer_use.errors import DaemonHTTPError
 from modal_computer_use.image import default_image
+from modal_computer_use.latency import SessionStartupTiming
 
 _RUNNER_PATH = Path(__file__).resolve()
 PROJECT_ROOT = _RUNNER_PATH.parents[2] if len(_RUNNER_PATH.parents) > 2 else Path("/root")
@@ -206,8 +207,10 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         self.target_placement: dict[str, str | None] | None = None
         self.target_identity: dict[str, Any] | None = None
         self.fixture_verified = False
+        self.startup_timing: SessionStartupTiming | None = None
 
     async def __aenter__(self) -> Any:
+        self.startup_timing = SessionStartupTiming()
         config = ComputerConfig(
             desktop=DesktopConfig(
                 resolution=(WIDTH, HEIGHT),
@@ -247,6 +250,7 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
             tags={"benchmark_run": BENCHMARK_RUN_TAG},
             cpu=(CPU, CPU),
             memory=(MEMORY_MIB, MEMORY_MIB),
+            timing=self.startup_timing,
         )
         try:
             self._computer = await self._context.__aenter__()
@@ -466,20 +470,32 @@ async def _run_readiness_probe(
     """Measure paired fresh create-to-ready samples for both capture sources."""
 
     samples: dict[str, list[float]] = {"mss": [], "x11-shm": []}
+    startup_timings: dict[str, list[dict[str, Any]]] = {"mss": [], "x11-shm": []}
     rng = random.Random(SCHEDULE_SEED)  # noqa: S311 - reproducible benchmark order.
     failure_type: str | None = None
     cleanup_failure_type: str | None = None
+    failure_arm: str | None = None
+    failure_sample_index: int | None = None
+    current_arm: str | None = None
+    current_sample_index: int | None = None
     try:
-        for _ in range(READINESS_SAMPLES):
+        for sample_index in range(READINESS_SAMPLES):
+            current_sample_index = sample_index
             pair = ["mss", "x11-shm"]
             rng.shuffle(pair)
             for arm in pair:
+                current_arm = arm
                 context = factories[arm]()
                 computer: Any | None = None
+                observation: dict[str, Any] = {
+                    "sample_index": sample_index,
+                    "status": "failed",
+                }
                 started = time.perf_counter()
                 try:
                     computer = await context.__aenter__()
                     samples[arm].append((time.perf_counter() - started) * 1000.0)
+                    observation["status"] = "ok"
                     backends: list[str | None] = []
                     original = computer.client.post_bytes_with_headers
 
@@ -500,15 +516,27 @@ async def _run_readiness_probe(
                         computer.client.post_bytes_with_headers = original
                     if backends != [arm]:
                         raise RuntimeError("fresh readiness used an unexpected source")
+                except Exception as exc:
+                    observation["failure_type"] = type(exc).__name__
+                    raise
                 finally:
-                    if computer is not None:
-                        try:
-                            await context.__aexit__(None, None, None)
-                        except Exception as exc:
-                            cleanup_failure_type = type(exc).__name__
-                            raise
+                    timing = getattr(context, "startup_timing", None)
+                    if isinstance(timing, SessionStartupTiming):
+                        observation["startup_timing"] = timing.as_dict()
+                    try:
+                        if computer is not None:
+                            try:
+                                await context.__aexit__(None, None, None)
+                            except Exception as exc:
+                                cleanup_failure_type = type(exc).__name__
+                                observation["cleanup_failure_type"] = type(exc).__name__
+                                raise
+                    finally:
+                        startup_timings[arm].append(observation)
     except Exception as exc:
         failure_type = type(exc).__name__
+        failure_arm = current_arm
+        failure_sample_index = current_sample_index
 
     arms = {
         arm: {
@@ -518,6 +546,7 @@ async def _run_readiness_probe(
             "startup_p50_ms": round(statistics.median(values), 4) if values else 0.0,
             "startup_p95_ms": round(_percentile(values, 0.95), 4) if values else 0.0,
             "capture_backend": arm,
+            "startup_timings": startup_timings[arm],
         }
         for arm, values in samples.items()
     }
@@ -531,6 +560,12 @@ async def _run_readiness_probe(
         "maximum_p95_regression_percent": MAX_OPERATIONAL_REGRESSION_PERCENT,
         "arms": arms,
         **({"failure_type": failure_type} if failure_type else {}),
+        **({"failure_arm": failure_arm} if failure_arm else {}),
+        **(
+            {"failure_sample_index": failure_sample_index}
+            if failure_sample_index is not None
+            else {}
+        ),
         **(
             {"cleanup_failure_type": cleanup_failure_type}
             if cleanup_failure_type

@@ -33,6 +33,7 @@ from modal_computer_use.daemon.request_limits import (
     RequestBodyLimitMiddleware,
     RequestBodyTooLarge,
 )
+from modal_computer_use.daemon.routes.validation import backend_readiness, mark_desktop_ready
 from modal_computer_use.daemon.settings import DaemonSettings, get_settings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.daemon.tunnel_sessions import TunnelSessionStore
@@ -71,43 +72,63 @@ from .routes import (
 logger = logging.getLogger("modal_computer_use.daemon.app")
 
 
+async def _startup_browser(app: FastAPI, recovery_status: dict[str, object]) -> ActionResult | None:
+    if recovery_status["recovery_required"]:
+        return ActionResult(
+            ok=False,
+            message="browser startup skipped while target recovery is required",
+            output={"code": "recovery_required"},
+        )
+
+    startup_url = app.state.settings.browser_open_url_on_start
+    try:
+        if startup_url:
+            return await app.state.backend.open_url(startup_url, wait_for_window=True)
+        if app.state.settings.browser_prewarm:
+            return await app.state.backend.prewarm_browser()
+    except Exception as exc:
+        logger.warning("browser startup failed", exc_info=True)
+        message = "browser startup url failed" if startup_url else "browser prewarm failed"
+        return ActionResult(
+            ok=False,
+            message=message,
+            output={"error": type(exc).__name__},
+        )
+    return None
+
+
+async def _startup_readiness(app: FastAPI) -> tuple[bool, list[str]]:
+    try:
+        return await backend_readiness(app.state)
+    except Exception as exc:
+        logger.warning("startup readiness probe failed", exc_info=True)
+        return False, [f"startup readiness probe failed: {type(exc).__name__}"]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     supervisor: Supervisor = app.state.supervisor
     await app.state.receipt_journal.start()
     await supervisor.start()
     app.state.browser_prewarm = None
-    startup_url = app.state.settings.browser_open_url_on_start
     recovery_status = await app.state.receipt_journal.recovery_status()
-    if recovery_status["recovery_required"]:
-        app.state.browser_prewarm = ActionResult(
-            ok=False,
-            message="browser startup skipped while target recovery is required",
-            output={"code": "recovery_required"},
+    startup_configured = bool(
+        app.state.settings.browser_open_url_on_start or app.state.settings.browser_prewarm
+    )
+    if startup_configured:
+        readiness_task = asyncio.create_task(_startup_readiness(app))
+        browser_task = asyncio.create_task(_startup_browser(app, recovery_status))
+        readiness, app.state.browser_prewarm = await asyncio.gather(
+            readiness_task,
+            browser_task,
         )
-    elif startup_url:
-        try:
-            app.state.browser_prewarm = await app.state.backend.open_url(
-                startup_url,
-                wait_for_window=True,
-            )
-        except Exception as exc:
-            logger.warning("browser startup url failed", exc_info=True)
-            app.state.browser_prewarm = ActionResult(
-                ok=False,
-                message="browser startup url failed",
-                output={"error": type(exc).__name__},
-            )
-    elif app.state.settings.browser_prewarm:
-        try:
-            app.state.browser_prewarm = await app.state.backend.prewarm_browser()
-        except Exception as exc:
-            logger.warning("browser prewarm failed", exc_info=True)
-            app.state.browser_prewarm = ActionResult(
-                ok=False,
-                message="browser prewarm failed",
-                output={"error": type(exc).__name__},
-            )
+        if readiness[0]:
+            # The cache records the backend's current readiness generation. This
+            # explicit seed keeps startup and the first /readyz request on the
+            # same generation-aware snapshot.
+            mark_desktop_ready(app.state)
+    else:
+        app.state.browser_prewarm = await _startup_browser(app, recovery_status)
     try:
         yield
     finally:

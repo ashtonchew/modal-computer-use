@@ -31,6 +31,17 @@ def test_promotion_runner_uses_the_mounted_chromium_fixture_path() -> None:
     assert "memory=(MEMORY_MIB, MEMORY_MIB)" in runner
 
 
+def test_promotion_readiness_retains_sdk_startup_stages() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "SessionStartupTiming" in runner
+    assert "timing=self.startup_timing" in runner
+    assert 'observation["startup_timing"] = timing.as_dict()' in runner
+    assert '"startup_timings": startup_timings[arm]' in runner
+
+
 class FakeScreenshot:
     format = "png"
     width = 1024
