@@ -105,7 +105,11 @@ async def run_screenshot_capture_with_timing[T](
         raise error
     lock_wait_started = perf_counter()
     lock = (
-        ready_mutation_lock(request, semantic_data=mutation_semantic_data)
+        ready_mutation_lock(
+            request,
+            semantic_data=mutation_semantic_data,
+            reuse_current_readiness_proof=True,
+        )
         if mutation_semantic_data is not None
         else ready_input_lock(request)
     )

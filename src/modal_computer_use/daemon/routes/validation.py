@@ -39,6 +39,11 @@ def invalidate_desktop_readiness(state: Any) -> None:
         cache.invalidate()
 
 
+def has_current_desktop_readiness_proof(state: Any) -> bool:
+    cache = getattr(state, "readiness_cache", None)
+    return cache is not None and cache.has_current_proof(state.backend)
+
+
 def begin_display_restart(state: Any) -> None:
     """Atomically claim the display mutation slot before its first await."""
     if getattr(state, "display_restart_in_progress", False):
@@ -146,7 +151,10 @@ async def ready_input_lock(request: Request) -> AsyncIterator[None]:
     lock_was_contended = request.app.state.input_lock.locked()
     async with request.app.state.input_lock:
         if lock_was_contended:
-            await ensure_desktop_ready(request, force=True)
+            await ensure_desktop_ready(
+                request,
+                force=not has_current_desktop_readiness_proof(request.app.state),
+            )
         yield
 
 
@@ -180,13 +188,20 @@ async def ready_mutation_lock(
     *,
     semantic_data: Any,
     operation_kind: str | None = None,
+    reuse_current_readiness_proof: bool = False,
 ) -> AsyncIterator[None]:
     lock_was_contended = request.app.state.input_lock.locked()
     async with request.app.state.input_lock:
         await request.app.state.receipt_journal.ensure_mutation_allowed()
         credentials = lease_credentials_from_headers(request.headers)
         if lock_was_contended:
-            await ensure_desktop_ready(request, force=True)
+            await ensure_desktop_ready(
+                request,
+                force=(
+                    not reuse_current_readiness_proof
+                    or not has_current_desktop_readiness_proof(request.app.state)
+                ),
+            )
         handle = await begin_mutation_receipt(
             request.app.state,
             credentials=credentials,

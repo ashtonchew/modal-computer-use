@@ -26,26 +26,40 @@ class ReadinessCache:
         self._lock = asyncio.Lock()
         self._generation = 0
 
+    def has_current_proof(self, backend: Any) -> bool:
+        """Return whether a live proof still matches this backend generation."""
+
+        snapshot = self._current_snapshot(backend)
+        return snapshot is not None and snapshot.ready
+
+    def _current_snapshot(
+        self,
+        backend: Any,
+        *,
+        now: float | None = None,
+    ) -> ReadinessSnapshot | None:
+        snapshot = self._snapshot
+        checked_at = time.monotonic() if now is None else now
+        if (
+            snapshot is None
+            or snapshot.expires_at <= checked_at
+            or snapshot.backend_generation != _backend_generation(backend)
+        ):
+            return None
+        return snapshot
+
     async def backend_ready(self, backend: Any, *, force: bool = False) -> tuple[bool, list[str]]:
         now = time.monotonic()
         if not force:
-            snapshot = self._snapshot
-            if (
-                snapshot is not None
-                and snapshot.expires_at > now
-                and snapshot.backend_generation == _backend_generation(backend)
-            ):
+            snapshot = self._current_snapshot(backend, now=now)
+            if snapshot is not None:
                 return snapshot.ready, list(snapshot.errors)
 
         async with self._lock:
             now = time.monotonic()
             if not force:
-                snapshot = self._snapshot
-                if (
-                    snapshot is not None
-                    and snapshot.expires_at > now
-                    and snapshot.backend_generation == _backend_generation(backend)
-                ):
+                snapshot = self._current_snapshot(backend, now=now)
+                if snapshot is not None:
                     return snapshot.ready, list(snapshot.errors)
 
             generation = self._generation
