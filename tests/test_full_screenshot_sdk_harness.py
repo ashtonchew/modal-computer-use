@@ -42,6 +42,8 @@ def test_promotion_runner_exposes_the_bounded_x_server_probe() -> None:
     assert 'print(json.dumps(result, sort_keys=True))' in runner
     assert '"failure_phase": failure_phase' in runner
     assert '"failure_code": failure_code' in runner
+    assert "computer.screenshots.full(), timeout=10.0" in runner
+    assert "and elapsed_ms < 2_500.0" in runner
 
 
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
