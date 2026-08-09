@@ -102,6 +102,8 @@ def test_promotion_failure_attribution_never_retains_daemon_error_text() -> None
         maxsplit=1,
     )[0]
     assert 'details.get("type")' in helper
+    assert 'details.get("errors")' in helper
+    assert 'result["failure_readiness_categories"]' in helper
     assert 'details.get("error")' not in helper
 
 
