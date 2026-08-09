@@ -20,6 +20,7 @@ import sys
 import threading
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from time import monotonic
 from typing import Any, Literal, cast
 
@@ -233,8 +234,7 @@ class _SpawnedX11ScreenshotSession:
             self._process = subprocess.Popen(  # noqa: S603 - fixed private module argv.
                 [
                     sys.executable,
-                    "-m",
-                    "modal_computer_use.daemon.desktop._x11_shm_worker",
+                    str(Path(__file__).with_name("_x11_shm_worker.py")),
                     "--fd",
                     str(child_fd),
                     "--display",
