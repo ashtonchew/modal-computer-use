@@ -43,6 +43,32 @@ def _safe_failure_label(value: object) -> str:
     return value
 
 
+def _readiness_error_categories(value: object) -> str:
+    if not isinstance(value, list):
+        return "none"
+    categories: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            category = "unknown"
+        elif "screenshot" in item.lower():
+            category = "screenshot"
+        elif "input backend" in item.lower() or "xdotool" in item.lower():
+            category = "input"
+        elif "window" in item.lower():
+            category = "windows"
+        elif "missing required tools" in item.lower():
+            category = "tools"
+        elif "xdpyinfo" in item.lower() or "xvfb" in item.lower():
+            category = "display_probe"
+        elif "display lifecycle" in item.lower():
+            category = "lifecycle"
+        else:
+            category = "unknown"
+        if category not in categories:
+            categories.append(category)
+    return ",".join(categories) if categories else "none"
+
+
 def _annotate_daemon_failure(
     error: DaemonHTTPError,
     *,
@@ -55,7 +81,9 @@ def _annotate_daemon_failure(
         f"arm={arm} phase={phase} sample_index={sample_index} "
         f"status_code={error.status_code} code={_safe_failure_label(error.code)} "
         "error_type="
-        f"{_safe_failure_label(error.details.get('error_type'))}"
+        f"{_safe_failure_label(error.details.get('error_type'))} "
+        "readiness_errors="
+        f"{_readiness_error_categories(error.details.get('errors'))}"
     )
 
 
