@@ -11,13 +11,18 @@ The lifecycle order is:
 2. Call `owner.session_handle()` once after the desktop is ready.
 3. Dispatch the versioned session handle to an application-owned Modal Function.
 4. Enter one `borrow_async()` context for the complete repeated trajectory.
-5. Wait for the Function result or reach an explicit cancellation outcome.
-6. Let the borrower release its lease.
-7. Leave the owner context so it terminates the desktop and closes its client.
+5. Use `computer.step()` for each ordered action array and immediate post-action frame.
+6. Wait for the Function result or reach an explicit cancellation outcome.
+7. Let the borrower release its lease.
+8. Leave the owner context so it terminates the desktop and closes its client.
 
 The owner must outlive the dispatched Function. Do not return from the owner context after spawn
 unless the application has durably transferred lifecycle ownership and defined recovery. A
 borrower always detaches; it never terminates the owner's desktop.
+
+The immediate frame returned by `computer.step()` is not application readiness. Keep readiness
+checks in the application model loop. First-visual-change observation is a separate experimental
+Interface.
 
 Placement checks fail before desktop mutation when the Function region is missing, mismatched, or
 unverifiable. The SDK does not silently degrade to an external laptop caller. The handle does not

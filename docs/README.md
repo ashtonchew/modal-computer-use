@@ -20,8 +20,8 @@ procedures, and concise pointers for public guides.
 ## Use the SDK
 
 - [API](api.md): synchronous and native-async Python surfaces, ownership, and daemon behavior.
-- [Version 2 migration](migration-v2.md): hard-cutover changes, exact replacements, screenshot
-  payload migration, and rollback.
+- [Version 2 migration](migration-v2.md): hard-cutover changes, `computer.step()` replacements,
+  screenshot payload migration, and rollback.
 - [OpenAPI schema](openapi.json): generated HTTP request and response schemas.
 - [Artifacts](artifacts.md): artifact paths, persistence, and synchronization.
 - [Trace and replay](trace-replay.md): capture, validate, and replay action traces.
@@ -50,6 +50,10 @@ procedures, and concise pointers for public guides.
 - [Standard Image lifecycle results, 2026-08-08](benchmark-results-2026-08-08-image-lifecycle.md):
   paired inline-recipe and exact managed-Image evidence from Sandbox creation through the first
   valid frame.
+- [Computer Step promotion results, 2026-08-08](benchmark-results-2026-08-08-computer-step.md):
+  100-pair same-topology evidence for the fused `computer.step()` default.
+- [Weighted input-capacity results, 2026-08-08](benchmark-results-2026-08-08-input-capacity.md):
+  three passing same-runtime gates for the 100-token refill and 400-token burst.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
   diagnostic, and historical reports and protocols.
 

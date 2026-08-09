@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .hot_session import AsyncHotSessionClient
     from .latency import SessionStartupTiming
     from .observations import AsyncObservationClient
+    from .steps import ComputerStepResult
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -118,6 +119,44 @@ class DaemonClient:
         response = self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         return response.content, response.headers
 
+    def _post_step(self, payload: Mapping[str, Any]) -> ComputerStepResult:
+        """Execute one fused action-to-observation request.
+
+        The response parser is deliberately passed into ``_request`` so a
+        borrowed lease coordinator observes a fully decoded result inside its
+        serialized mutation callback.
+        """
+
+        from .steps import (
+            MAX_STEP_ENVELOPE_BYTES,
+            STEP_MEDIA_TYPE,
+            StepEnvelopeError,
+            decode_step_envelope,
+        )
+        from .steps.request import validate_step_screenshot_options
+
+        def parse(response: Any) -> ComputerStepResult:
+            content_type = response.headers.get("content-type")
+            if content_type != STEP_MEDIA_TYPE or "content-encoding" in response.headers:
+                raise StepEnvelopeError()
+            result = decode_step_envelope(response.content)
+            validate_step_screenshot_options(result, payload)
+            return result
+
+        return self._request(
+            "POST",
+            "/v1/steps",
+            json=dict(payload),
+            headers={
+                "Accept": STEP_MEDIA_TYPE,
+                "Accept-Encoding": "identity",
+                "Cache-Control": "no-store",
+            },
+            mutation=True,
+            _response_parser=parse,
+            _max_response_bytes=MAX_STEP_ENVELOPE_BYTES,
+        )
+
     def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:
         payload = self.transport.request(method, path, **kwargs).json()
         return model.model_validate(payload)
@@ -136,18 +175,28 @@ class DaemonClient:
         *,
         mutation: bool = False,
         headers: Mapping[str, str] | None = None,
+        _response_parser: Callable[[Any], Any] | None = None,
+        _max_response_bytes: int | None = None,
         **kwargs: Any,
     ) -> Any:
+        def send(request_headers: Mapping[str, str] | None) -> Any:
+            if _max_response_bytes is not None:
+                return self.transport.request_bounded(
+                    method,
+                    path,
+                    headers=request_headers,
+                    max_bytes=_max_response_bytes,
+                    **kwargs,
+                )
+            return self.transport.request(method, path, headers=request_headers, **kwargs)
+
         if not mutation or self._mutation_executor is None:
-            return self.transport.request(method, path, headers=headers, **kwargs)
+            response = send(headers)
+            return _response_parser(response) if _response_parser is not None else response
 
         def dispatch(metadata: Mapping[str, str]) -> Any:
-            return self.transport.request(
-                method,
-                path,
-                headers={**dict(headers or {}), **metadata},
-                **kwargs,
-            )
+            response = send({**dict(headers or {}), **metadata})
+            return _response_parser(response) if _response_parser is not None else response
 
         return self._mutation_executor(dispatch)
 
@@ -465,6 +514,39 @@ class AsyncDaemonClient:
         response = await self._request("POST", path, json=json, headers=headers, mutation=_mutation)
         return response.content, response.headers
 
+    async def _post_step(self, payload: Mapping[str, Any]) -> ComputerStepResult:
+        """Execute one fused action-to-observation request."""
+
+        from .steps import (
+            MAX_STEP_ENVELOPE_BYTES,
+            STEP_MEDIA_TYPE,
+            StepEnvelopeError,
+            decode_step_envelope,
+        )
+        from .steps.request import validate_step_screenshot_options
+
+        def parse(response: Any) -> ComputerStepResult:
+            content_type = response.headers.get("content-type")
+            if content_type != STEP_MEDIA_TYPE or "content-encoding" in response.headers:
+                raise StepEnvelopeError()
+            result = decode_step_envelope(response.content)
+            validate_step_screenshot_options(result, payload)
+            return result
+
+        return await self._request(
+            "POST",
+            "/v1/steps",
+            json=dict(payload),
+            headers={
+                "Accept": STEP_MEDIA_TYPE,
+                "Accept-Encoding": "identity",
+                "Cache-Control": "no-store",
+            },
+            mutation=True,
+            _response_parser=parse,
+            _max_response_bytes=MAX_STEP_ENVELOPE_BYTES,
+        )
+
     async def model(self, model: type[T], method: str, path: str, **kwargs: Any) -> T:
         payload = (await self.transport.request(method, path, **kwargs)).json()
         return model.model_validate(payload)
@@ -483,17 +565,27 @@ class AsyncDaemonClient:
         *,
         mutation: bool = False,
         headers: Mapping[str, str] | None = None,
+        _response_parser: Callable[[Any], Any] | None = None,
+        _max_response_bytes: int | None = None,
         **kwargs: Any,
     ) -> Any:
+        async def send(request_headers: Mapping[str, str] | None) -> Any:
+            if _max_response_bytes is not None:
+                return await self.transport.request_bounded(
+                    method,
+                    path,
+                    headers=request_headers,
+                    max_bytes=_max_response_bytes,
+                    **kwargs,
+                )
+            return await self.transport.request(method, path, headers=request_headers, **kwargs)
+
         if not mutation or self._mutation_executor is None:
-            return await self.transport.request(method, path, headers=headers, **kwargs)
+            response = await send(headers)
+            return _response_parser(response) if _response_parser is not None else response
 
         async def dispatch(metadata: Mapping[str, str]) -> Any:
-            return await self.transport.request(
-                method,
-                path,
-                headers={**dict(headers or {}), **metadata},
-                **kwargs,
-            )
+            response = await send({**dict(headers or {}), **metadata})
+            return _response_parser(response) if _response_parser is not None else response
 
         return await self._mutation_executor(dispatch)

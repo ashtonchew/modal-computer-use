@@ -19,7 +19,6 @@ from conftest import (
 from modal_computer_use.models import (
     ActionBatchResult,
     ActionItemResult,
-    ActionResult,
 )
 
 
@@ -49,10 +48,10 @@ class _AsyncScreenshotsBridge:
 
 
 def _async_computer(computer: RecordingComputer) -> Any:
-    return SimpleNamespace(
-        actions=_AsyncActionsBridge(computer),
-        screenshots=_AsyncScreenshotsBridge(computer),
-    )
+    async def step(actions: list[Any], **kwargs: Any) -> Any:
+        return computer.step(actions, **kwargs)
+
+    return SimpleNamespace(actions=_AsyncActionsBridge(computer), step=step)
 
 
 def _response(*tool_uses: Any) -> Any:
@@ -89,12 +88,15 @@ async def test_placed_anthropic_trajectory_borrows_once_for_the_full_model_loop(
         update={"bytes": b"png-bytes", "data_base64": None}
     )
 
-    async def full() -> Any:
-        assert handle.active
-        events.append("screenshot")
-        return screenshot
+    original_step = computer.step
 
-    computer.screenshots.full = full
+    async def step(actions: list[Any], **kwargs: Any) -> Any:
+        assert handle.active
+        events.append("step")
+        result = await original_step(actions, **kwargs)
+        return SimpleNamespace(actions=result.actions, screenshot=screenshot, timing=None)
+
+    computer.step = step
     responses = AsyncQueuedProviderResponses(
         [
             _response(
@@ -152,21 +154,19 @@ async def test_placed_anthropic_trajectory_borrows_once_for_the_full_model_loop(
 
     assert response.stop_reason == "end_turn"
     assert handle.borrow_calls == [("run-123", "us-west-2")]
-    assert [[action.type for action in batch] for batch in computer.actions.batches] == [
-        ["move", "click"]
-    ]
-    assert computer.actions.batch_kwargs == [
+    assert [[action.type for action in batch] for batch in computer.steps] == [["move", "click"]]
+    assert computer.step_kwargs == [
         {
             "continue_on_error": False,
-            "screenshot_after": False,
-            "source": "anthropic-adapter",
+            "call_id": "tool_batch",
+            "screenshot_options": None,
             "max_action_timeout_ms": 30_000,
         }
     ]
     assert events == [
         "borrow-enter",
         "model",
-        "screenshot",
+        "step",
         "model",
         "borrow-exit",
     ]
@@ -176,14 +176,14 @@ async def test_placed_anthropic_trajectory_borrows_once_for_the_full_model_loop(
 
 
 @pytest.mark.asyncio
-async def test_anthropic_stops_after_post_batch_screenshot_failure() -> None:
+async def test_anthropic_stops_after_step_result_loss() -> None:
     example = load_example("anthropic_message_server.py")
     computer = AsyncRecordingComputer()
 
-    async def fail_screenshot() -> Any:
+    async def fail_step(*_args: Any, **_kwargs: Any) -> Any:
         raise TimeoutError("https://private.invalid screenshot-secret")
 
-    computer.screenshots.full = fail_screenshot
+    computer.step = fail_step
     client, create = _client(
         [
             _response(
@@ -202,7 +202,7 @@ async def test_anthropic_stops_after_post_batch_screenshot_failure() -> None:
 
     with pytest.raises(
         RuntimeError,
-        match="Anthropic computer batch screenshot failed: TimeoutError",
+        match="Anthropic computer action batch failed: TimeoutError",
     ) as raised:
         await example.run_anthropic_computer_loop(
             client=client,
@@ -213,7 +213,7 @@ async def test_anthropic_stops_after_post_batch_screenshot_failure() -> None:
         )
 
     assert len(create.calls) == 1
-    assert len(computer.actions.batches) == 1
+    assert computer.steps == []
     assert "private.invalid" not in str(raised.value)
     assert "screenshot-secret" not in str(raised.value)
 
@@ -506,17 +506,17 @@ def test_anthropic_computer_batch_executes_one_ordered_batch() -> None:
 
     _run(example, client=client, computer=computer)
 
-    assert len(computer.actions.batches) == 1
-    assert [action.type for action in computer.actions.batches[0]] == [
+    assert len(computer.steps) == 1
+    assert [action.type for action in computer.steps[0]] == [
         "move",
         "click",
         "type",
     ]
-    assert computer.actions.batch_kwargs == [
+    assert computer.step_kwargs == [
         {
             "continue_on_error": False,
-            "screenshot_after": False,
-            "source": "anthropic-adapter",
+            "call_id": "tool_batch",
+            "screenshot_options": None,
             "max_action_timeout_ms": 30_000,
         }
     ]
@@ -527,7 +527,7 @@ def test_anthropic_computer_batch_executes_one_ordered_batch() -> None:
         '[actions[1]:left_click] {"ok":true}',
         '[actions[2]:type] {"ok":true}',
     ]
-    assert computer.screenshots.full_calls == 1
+    assert computer.screenshots.full_calls == 0
 
 
 def test_anthropic_computer_batch_rejects_zero_scroll_before_dispatch() -> None:
@@ -557,7 +557,7 @@ def test_anthropic_computer_batch_rejects_zero_scroll_before_dispatch() -> None:
 
     _run(example, client=client, computer=computer)
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert tool_result["is_error"] is True
     assert "[computer_batch] stopped at actions[1] (0 completed, 1 skipped)" in _text_blocks(
@@ -695,7 +695,7 @@ def test_anthropic_batch_uses_one_semantic_post_batch_screenshot(
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert sum(block["type"] == "image" for block in tool_result["content"]) == 1
     assert "[post_batch_screenshot]" not in _text_blocks(tool_result)
-    assert computer.screenshots.full_calls == 1
+    assert computer.screenshots.full_calls == 0
 
 
 def test_anthropic_batch_preserves_nested_native_image() -> None:
@@ -791,9 +791,21 @@ def test_anthropic_hosted_tool_uses_the_semantic_screenshot_interface(
     action_name: str,
 ) -> None:
     example = load_example("anthropic_message_server.py")
-    shot = tiny_screenshot()
+    shot = tiny_screenshot().model_copy(update={"data_base64": "bmF0aXZl", "bytes": None})
     computer = RecordingComputer(
-        apply_results=[ActionResult(ok=True, output=shot.model_dump(mode="json"))]
+        batch_results=[
+            ActionBatchResult(
+                ok=True,
+                results=[
+                    ActionItemResult(
+                        index=0,
+                        type=action_name,
+                        ok=True,
+                        output=shot.model_dump(mode="json"),
+                    )
+                ],
+            )
+        ]
     )
     action = (
         {"action": "screenshot"}
@@ -817,7 +829,9 @@ def test_anthropic_hosted_tool_uses_the_semantic_screenshot_interface(
 
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert tool_result["content"][0]["type"] == "image"
-    assert computer.screenshots.full_calls == 1
+    assert tool_result["content"][0]["source"]["data"] == "bmF0aXZl"
+    assert computer.step_kwargs[0]["call_id"] == "tool_native"
+    assert computer.screenshots.full_calls == 0
 
 
 def test_anthropic_hosted_tool_results_preserve_id_order() -> None:
@@ -839,10 +853,8 @@ def test_anthropic_hosted_tool_results_preserve_id_order() -> None:
 
     _run(example, client=client, computer=computer)
 
-    assert [action.type for action, _source in computer.actions.applied] == [
-        "click",
-        "cursor_position",
-    ]
+    assert [[action.type for action in batch] for batch in computer.steps] == [["click"]]
+    assert [action.type for action, _source in computer.actions.applied] == ["cursor_position"]
     results = create.calls[1]["messages"][2]["content"]
     assert create.calls[1]["messages"][1] == {
         "role": "assistant",
@@ -853,7 +865,7 @@ def test_anthropic_hosted_tool_results_preserve_id_order() -> None:
         "tool_cursor",
     ]
     assert results[1]["content"] == [{"type": "text", "text": '{"message":"X=12,Y=34","ok":true}'}]
-    assert computer.actions.batches == []
+    assert len(computer.steps) == 1
 
 
 def test_anthropic_batch_counts_nested_actions_before_dispatch() -> None:
@@ -890,7 +902,7 @@ def test_anthropic_batch_counts_nested_actions_before_dispatch() -> None:
         max_batch_actions=2,
     )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
     tool_result = create.calls[1]["messages"][2]["content"][0]
     assert tool_result["is_error"] is True
     assert "[computer_batch] stopped at actions[0] (0 completed, 0 skipped)" in _text_blocks(
@@ -936,7 +948,7 @@ def test_anthropic_trajectory_limit_counts_nested_actions_before_dispatch() -> N
             max_trajectory_actions=2,
         )
 
-    assert computer.actions.batches == []
+    assert computer.steps == []
 
 
 def test_anthropic_batch_allocates_remaining_deadline_across_actions_and_frame() -> None:
@@ -968,7 +980,7 @@ def test_anthropic_batch_allocates_remaining_deadline_across_actions_and_frame()
         max_elapsed_seconds=1.0,
     )
 
-    assert computer.actions.batch_kwargs[0]["max_action_timeout_ms"] == 333
+    assert computer.step_kwargs[0]["max_action_timeout_ms"] == 333
 
 
 def test_anthropic_request_and_terminal_response_obey_elapsed_deadline() -> None:
@@ -998,10 +1010,17 @@ def test_anthropic_request_and_terminal_response_obey_elapsed_deadline() -> None
 def test_anthropic_hosted_failure_is_sanitized_and_later_result_is_returned() -> None:
     example = load_example("anthropic_message_server.py")
     computer = RecordingComputer(
-        apply_results=[
-            ActionResult(
+        batch_results=[
+            ActionBatchResult(
                 ok=False,
-                message="Bearer daemon-secret artifact://screenshots/private.png",
+                results=[
+                    ActionItemResult(
+                        index=0,
+                        type="click",
+                        ok=False,
+                        error="Bearer daemon-secret artifact://screenshots/private.png",
+                    )
+                ],
             )
         ]
     )
@@ -1081,6 +1100,7 @@ def test_anthropic_stops_before_tools_on_final_allowed_turn() -> None:
         )
 
     assert computer.actions.applied == []
+    assert computer.steps == []
 
 
 @pytest.mark.asyncio
@@ -1191,7 +1211,8 @@ def test_anthropic_example_makes_cost_and_placement_choices_explicit() -> None:
     assert "min_containers=FUNCTION_MIN_CONTAINERS" in source
     assert "retries=FUNCTION_RETRIES" in source
     assert "async with handle.borrow_async" in source
-    assert "await computer.screenshots.full()" in source
+    assert "await computer.step(" in source
+    assert "await computer.screenshots.full()" not in source
     assert "full_bytes(" not in source
     assert "optimized=" not in source
 

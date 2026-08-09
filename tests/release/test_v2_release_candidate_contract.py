@@ -53,3 +53,5 @@ def test_release_record_keeps_publication_gated_and_records_rollback() -> None:
     assert "test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state" in record
     assert "Neither" in record
     assert "test may skip" in record
+    assert "scripts/run_step_promotion.py" in record
+    assert "must pass before `computer.step()` is promoted" in record

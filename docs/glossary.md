@@ -28,6 +28,16 @@ The mapping from the screenshot pixel grid the model sees to the desktop pixel g
 A frame correlated to a particular action request through matching request/action identifiers and
 causal metadata.
 
+## Computer Step
+
+One borrowed action-to-frame request through `computer.step()`. It validates and executes an
+ordered action array and returns `ComputerStepResult.actions`, `.screenshot`, and `.timing`.
+
+## Immediate post-action frame
+
+The screenshot returned by a Computer Step directly after its action phase. It is not proof of
+application readiness or visual stability.
+
 ## Daemon
 
 `computer-use-daemon`. The HTTP server that runs inside the sandbox on port `8080` and owns the desktop. The SDK is a thin client over its routes.

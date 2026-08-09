@@ -7,12 +7,25 @@ setting. The application establishes this path:
 2. The owner produces a versioned session handle.
 3. An application-owned Modal Function in the same requested region receives the handle.
 4. The Function enters one `borrow_async()` context around the complete model trajectory.
-5. One pooled async HTTP client carries screenshots and ordered action batches for that borrow.
+5. One pooled async HTTP client carries each `computer.step()` request for that borrow.
 6. The borrower releases its lease before the owner cleans up the desktop.
 
 See the executable
 [`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example. It
 keeps the application-owned model loop outside the core package.
+
+## Computer Step path
+
+`await computer.step(actions)` is the primary model-loop Interface. It validates and executes one
+ordered action batch, then captures an immediate post-action frame. One versioned binary response
+returns `ComputerStepResult.actions`, `ComputerStepResult.screenshot`, and
+`ComputerStepResult.timing`. The borrow requires the `computer-step-envelope-v1` daemon capability
+and fails before mutation when that capability is missing.
+
+Each call carries one ordered action batch.
+
+The immediate frame is a transport-level observation. It is not proof that an application is ready.
+Applications must define and check their own readiness conditions.
 
 ## Screenshot path
 
@@ -36,10 +49,10 @@ temporary file per successful native frame.
 The daemon prefers its persistent XTest/Xlib/XKB input session. It flushes and synchronizes native
 input before it reports success. One lock serializes keyboard, pointer, drag, and batch state.
 
-Send a model-produced ordered action array in one `actions.run([...])` request. The daemon validates
-the complete batch before mutation, runs actions in order, and stops on the first failure unless the
-application explicitly sets continuation. A fallback can run only before any native event is
-emitted. Never replay a mutation after dispatch may have started.
+Send a model-produced ordered action array in one `computer.step([...])` request. The daemon
+validates the complete batch before mutation, runs actions in order, and stops on the first failure
+unless the application explicitly sets continuation. A fallback can run only before any native
+event is emitted. Never replay a step after dispatch may have started.
 
 ## Authentication and transport
 
@@ -63,7 +76,7 @@ or desktop startup. Report these phases separately:
 - repeated warm operation time;
 - lease release and owner cleanup.
 
-Post-action first-visual-change observation is experimental. XDamage is a wake-up hint, and
+Post-action first-visual-change observation is separate and experimental. XDamage is a wake-up hint, and
 full-resolution pixel comparison verifies a changed frame. Polling remains the fallback. A changed
 frame is not application readiness.
 
@@ -79,3 +92,6 @@ Use direct daemon clients, local clients, synchronous ownership, attach, REST/id
 and `full_bytes()` when you need those specific primitives. These surfaces remain supported. They
 do not silently place an external caller into the optimized topology and are not the documented
 default trajectory.
+
+The existing JSON/base64, screenshot, action-only, and REST routes remain available. The optimized
+path never silently downgrades from `computer.step()` to two separate requests.

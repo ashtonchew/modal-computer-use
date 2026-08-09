@@ -36,6 +36,7 @@ EXPECTED_ROUTES = frozenset(
         "/reference/openapi",
         "/reference/migration-v2",
         "/benchmarks/current-results",
+        "/benchmarks/input-capacity",
         "/benchmarks/latency-evidence",
         "/benchmarks/overview",
         "/benchmarks/reproducibility",

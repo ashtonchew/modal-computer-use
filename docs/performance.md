@@ -155,10 +155,15 @@ the selected Modal ingress and is useful for end-to-end impact, but it can hide 
 improvement. Confirm each native case reports `input_backends=["xtest"]`; otherwise the run did not
 measure the intended adapter.
 
-## Screenshot hot paths
+## Computer Step and screenshot hot paths
 
-The primary borrowed trajectory calls `screenshots.full()`. Inline full screenshots use the raw
-binary HTTP route over the borrow's pooled client and return a byte-backed typed `Screenshot`:
+The primary model loop calls `computer.step(actions)`. The borrowed client sends one ordered action
+batch to `POST /v1/steps` and receives one versioned binary envelope. The SDK returns
+`ComputerStepResult.actions`, a byte-backed `ComputerStepResult.screenshot`, and timing metadata.
+The screenshot is an immediate post-action frame. It is not proof of application readiness.
+
+Initial and screenshot-only observations call `screenshots.full()`. Inline full screenshots use the
+raw binary HTTP route over the borrow's pooled client and return a byte-backed typed `Screenshot`:
 
 ```bash
 POST /v1/screenshots/full/raw
@@ -168,19 +173,33 @@ Cursor-hidden capture uses a persistent MSS/XShm session and in-memory encoding 
 Cursor-visible requests and failed display connections retain bounded fallback behavior. JSON and
 base64 routes remain available for low-level REST compatibility.
 
-The following surfaces are optional capabilities, not article parity and not the SDK default:
+## Input admission
+
+The default input token bucket refills 100 normalized input-work tokens per second and holds 400
+tokens. The refill is about 4.4 times the reciprocal of the measured 44.29 ms single-action Step
+median. It therefore should not shape a normal serialized provider loop. The bucket remains below
+the available simple native-input throughput estimate, so it still protects the daemon from
+sustained saturation.
+
+Repository measurements support this product default. External standards leave the numeric value
+to capacity testing. A same-runtime mixed input capacity gate must sustain at least 200 weighted
+tokens per second before release. Keep batch size, action and batch timeouts, total trajectory
+budgets, payload bounds, and one-in-flight Step serialization. The rate limit works alongside those
+controls.
+Run the same-runtime capacity gate before setting higher values for a faster setup. CPU and memory
+provide too little information to select the rate automatically.
+
+The following surfaces remain optional or low-level compatibility capabilities:
 
 ```bash
 POST /v1/actions/run/raw-screenshot
 GET /v1/session/hot
 ```
 
-The fused action route measures an immediate action-to-frame surface: it executes the requested
-actions and returns the post-action screenshot in one HTTP request. That avoids the extra network
-round trip of `POST /v1/actions/run` followed by `POST /v1/screenshots/full/raw`, but it does not
-define the canonical model loop or prove application readiness. The article's opening 47 ms value
-is arithmetic over separate raw-screenshot and click medians. It is not a fused turn and is not a
-promise for the new default.
+The older raw action route also measures an immediate action-to-frame surface, but it is not the
+canonical `ComputerStepResult` protocol. Keep it for explicit compatibility work. The article's
+opening 47.10 ms value is arithmetic over separate 37.25 ms raw-screenshot and 9.85 ms click
+medians. It is not a measured fused turn and is not a latency promise for `computer.step()`.
 
 The hot-session WebSocket is a separate advanced control surface:
 
@@ -1523,19 +1542,20 @@ variance plus per-request tunnel and payload costs, not as Connect-token exchang
 default. `artifact` writes the image to daemon-owned storage and returns its artifact reference.
 `auto` lets the daemon choose between the inline and artifact representations.
 
-The version 2 default optimization applies to full inline screenshots. `screenshots.full()` sends
+The version 2 screenshot optimization applies to full inline screenshots. `screenshots.full()` sends
 one request to `/v1/screenshots/full/raw` over the pooled client, validates the response metadata,
 and returns a byte-backed semantic `Screenshot`. It avoids JSON/base64 transfer without making
 callers use a bytes-only Interface. `screenshots.region()` and artifact/auto storage keep their
 structured route contracts.
 
-Use `screenshots.full()` in the primary placed trajectory. Choose `artifact` or `auto` only when
-the application's storage and transfer policy requires them.
+Use `screenshots.full()` for the initial model observation and explicit screenshot-only work. Use
+`computer.step()` for each ordered action array and its immediate follow-up frame. Choose `artifact`
+or `auto` only when the application's storage and transfer policy requires them.
 
-Fused action-plus-screenshot requests are separate advanced primitives. They are not part of the
-article-parity default and are not credited for the 37.25 ms screenshot or the arithmetic 47 ms
-screenshot-plus-click figure. They need their own correctness and same-topology benchmark evidence
-before a future default change.
+`computer.step()` is the primary action-to-frame Interface. It is not credited for the historical
+37.25 ms screenshot result or the arithmetic 47.10 ms screenshot-plus-click figure. Those results
+did not measure a step. Publish a step latency claim only after a same-topology promotion benchmark
+passes.
 
 First-visual-change requests are also separate and experimental. They can return binary image
 bytes plus change metadata, but a changed pixel does not prove application readiness. XDamage is a

@@ -185,7 +185,18 @@ class ActionConfig(StrictBaseModel):
     max_batch_duration_ms: int = Field(default=30_000, ge=1, le=600_000)
     default_action_timeout_ms: int = Field(default=5_000, ge=1, le=300_000)
     max_action_timeout_ms: int = Field(default=300_000, ge=1, le=600_000)
-    input_rate_limit_per_sec: int = Field(default=20, ge=0, le=10_000)
+    input_rate_limit_per_sec: int = Field(
+        default=100,
+        ge=0,
+        le=10_000,
+        description="Weighted input-work tokens refilled per second; zero disables the limit.",
+    )
+    input_rate_limit_burst: int = Field(
+        default=400,
+        ge=1,
+        le=100_000,
+        description="Maximum weighted input-work tokens available for atomic admission.",
+    )
     input_backend: Literal["auto", "xtest", "xdotool"] = "auto"
     subprocess_backend: Literal["asyncio", "threaded", "isolated-asyncio"] = (
         "isolated-asyncio"

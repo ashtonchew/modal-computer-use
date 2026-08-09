@@ -62,6 +62,8 @@ def installed_daemon_protocol_probe(*, port: int = 8080) -> str:
         from datetime import datetime
 
         import httpx
+        from modal_computer_use import ComputerStepResult
+        from modal_computer_use.steps import STEP_MEDIA_TYPE, decode_step_envelope
 
         base_url = "http://127.0.0.1:__DAEMON_PORT__"
         auth_headers = {"Authorization": "Bearer dev"}
@@ -92,6 +94,8 @@ def installed_daemon_protocol_probe(*, port: int = 8080) -> str:
                 time.sleep(0.25)
             else:
                 raise RuntimeError("installed daemon did not become ready")
+            if "computer-step-envelope-v1" not in capabilities.json().get("primitives", []):
+                raise RuntimeError("installed daemon omitted the computer step capability")
 
             lease_response = client.post(
                 "/v1/leases/acquire",
@@ -173,9 +177,46 @@ def installed_daemon_protocol_probe(*, port: int = 8080) -> str:
                 if not all(item.get("ok") is True for item in results):
                     raise RuntimeError("installed daemon failed an action batch item")
 
+                step_response = client.post(
+                    "/v1/steps",
+                    json={
+                        "actions": [{"type": "wait", "duration_ms": 1}],
+                        "continue_on_error": False,
+                        "screenshot_options": {
+                            "format": "png",
+                            "show_cursor": False,
+                            "storage": "inline",
+                        },
+                    },
+                    headers={
+                        **lease_headers,
+                        "accept": STEP_MEDIA_TYPE,
+                        "x-computer-use-operation-sequence": "1",
+                    },
+                )
+                expect(step_response, 200)
+                if not step_response.headers.get("content-type", "").startswith(STEP_MEDIA_TYPE):
+                    raise RuntimeError("installed daemon returned an unexpected step type")
+                if (
+                    step_response.headers.get("x-computer-use-step-protocol")
+                    != "computer-use.step.v1"
+                ):
+                    raise RuntimeError("installed daemon returned an unexpected step protocol")
+                result = decode_step_envelope(step_response.content)
+                if not isinstance(result, ComputerStepResult) or not result.actions.ok:
+                    raise RuntimeError("installed daemon returned an invalid computer step")
+                if [item.type for item in result.actions.results] != ["wait"]:
+                    raise RuntimeError("installed daemon changed the step action batch")
+                if not result.screenshot.as_bytes() or result.screenshot.width < 1:
+                    raise RuntimeError("installed daemon returned an invalid step screenshot")
+                if result.screenshot.height < 1 or result.screenshot.cursor_visible is not False:
+                    raise RuntimeError("installed daemon returned invalid step screenshot metadata")
+                if result.timing.action_ms is None or result.timing.screenshot_ms is None:
+                    raise RuntimeError("installed daemon omitted computer step phase timing")
+
                 receipt_response = client.post(
                     "/v1/receipts/status",
-                    json={"run_id": "distribution-probe-run", "sequence": 0},
+                    json={"run_id": "distribution-probe-run", "sequence": 1},
                     headers=lease_headers,
                 )
                 expect(receipt_response, 200)
@@ -261,6 +302,7 @@ def _validate_wheel(wheel: Path, *, root: Path, python: str) -> None:
             from pathlib import Path
 
             import modal_computer_use
+            from modal_computer_use import AsyncBorrowedComputer, BorrowedComputer
             from modal_computer_use.daemon.app import create_app
             from modal_computer_use.daemon.settings import DaemonSettings
 
@@ -271,6 +313,8 @@ def _validate_wheel(wheel: Path, *, root: Path, python: str) -> None:
             assert modal_computer_use.ImageReleaseSpec
             assert modal_computer_use.publish_image_release
             assert modal_computer_use.resolve_release_image
+            assert callable(BorrowedComputer.step)
+            assert callable(AsyncBorrowedComputer.step)
 
             scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
             assert scripts["computer-use"] == "modal_computer_use.cli:main"
@@ -331,6 +375,7 @@ def _validate_sdist(sdist: Path, *, root: Path, python: str) -> None:
             from pathlib import Path
 
             import modal_computer_use
+            from modal_computer_use import AsyncBorrowedComputer, BorrowedComputer
 
             module_path = Path(modal_computer_use.__file__).resolve()
             assert module_path.is_relative_to(Path(sys.prefix).resolve())
@@ -339,6 +384,8 @@ def _validate_sdist(sdist: Path, *, root: Path, python: str) -> None:
             assert modal_computer_use.ImageReleaseSpec
             assert modal_computer_use.publish_image_release
             assert modal_computer_use.resolve_release_image
+            assert callable(BorrowedComputer.step)
+            assert callable(AsyncBorrowedComputer.step)
             """
         ),
         cwd=probe,

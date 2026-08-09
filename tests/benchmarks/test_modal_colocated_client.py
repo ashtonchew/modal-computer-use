@@ -610,6 +610,7 @@ def _config(
         runner_cpu=None,
         runner_memory_mib=None,
         input_rate_limit_per_sec=0,
+        input_rate_limit_burst=1_000,
         subprocess_backend="isolated-asyncio",
         image_profile=None,
         surfaces=surfaces,  # type: ignore[arg-type]

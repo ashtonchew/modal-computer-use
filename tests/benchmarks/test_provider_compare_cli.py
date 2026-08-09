@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import deque
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +23,7 @@ from modal_computer_use.benchmarks.provider_comparison import (
     results,
 )
 from modal_computer_use.daemon import budget_policy
+from modal_computer_use.daemon.input_rate_limit import InputTokenBucket
 
 
 def test_e2b_benchmark_session_outlives_publishable_warm_matrix() -> None:
@@ -297,11 +297,13 @@ def test_provider_compare_created_modal_uses_public_computer_config_defaults(
     defaults = cli.ComputerConfig(run_id="compare-defaults")
     assert config.resources == defaults.resources
     assert config.browser == defaults.browser
-    assert config.actions.input_rate_limit_per_sec == 20
+    assert config.actions.input_rate_limit_per_sec == 100
+    assert config.actions.input_rate_limit_burst == 400
     assert seen["environment"]["resource_profile"] == "standard"
     assert seen["environment"]["browser"] is None
-    assert seen["environment"]["input_rate_limit_per_sec"] == 20
-    assert seen["environment"]["action_case_pacing_ms"] == 1050
+    assert seen["environment"]["input_rate_limit_per_sec"] == 100
+    assert seen["environment"]["input_rate_limit_burst"] == 400
+    assert seen["environment"]["action_case_pacing_ms"] is None
     capsys.readouterr()
 
 
@@ -372,24 +374,25 @@ def test_live_modal_provider_paces_action_cases_outside_case_timers(monkeypatch)
     assert "timeout_ms" not in payload["cases"]["type_1000_chars"]["request"]
 
 
-def test_modal_default_pacing_drains_real_rate_window_outside_samples(monkeypatch) -> None:
+def test_modal_default_token_bucket_does_not_require_sample_pacing(monkeypatch) -> None:
     clock = SimpleNamespace(now=0.0)
-    monkeypatch.setattr(budget_policy.time, "monotonic", lambda: clock.now)
     monkeypatch.setattr(measurement.time, "perf_counter", lambda: clock.now)
     state = SimpleNamespace(
         settings=SimpleNamespace(
-            input_rate_limit_per_sec=20,
+            input_rate_limit_per_sec=500,
+            input_rate_limit_burst=1_000,
             max_actions=None,
             max_idle_seconds=None,
         ),
         action_count=0,
-        action_rate_window=deque(),
+        input_token_bucket=InputTokenBucket(
+            refill_rate=500,
+            capacity=1_000,
+            clock=lambda: clock.now,
+        ),
         last_activity_at=0.0,
     )
     policy = budget_policy.BudgetPolicy(state)
-
-    def pace() -> None:
-        clock.now += 1.05
 
     def eight_action_sequence() -> dict[str, str]:
         for _ in range(8):
@@ -404,7 +407,7 @@ def test_modal_default_pacing_drains_real_rate_window_outside_samples(monkeypatc
         warmup_iterations=1,
         operation=eight_action_sequence,
         failures=failures,
-        before_iteration=pace,
+        before_iteration=None,
     )
 
     assert failures == []
