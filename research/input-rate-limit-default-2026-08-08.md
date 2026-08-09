@@ -15,6 +15,11 @@ limit, about 4.4 times the reciprocal 44.29 ms Step median, and below half of th
 mixed-workload throughput. Require repeated clean-commit runs to pass the 200-token gate before
 release. Do not promote `500/1000` or `200/400` from this report.
 
+Three independent runs from source revision `eee2b9456c76474a5b50a857af899ff11ca70a32`
+then passed the 200-token floor at 527.398, 505.135, and 380.704 tokens per second. The slowest run
+used 0.008381250 aggregate cgroup CPU-seconds per token, grew RSS by 29,941,760 bytes, completed all
+80 ordered batches, and released with zero survivors. This evidence supports `100/400`.
+
 ## Pre-measurement candidate
 
 Use this as the default promotion candidate:

@@ -64,6 +64,15 @@ See the [Computer Step report](../docs/benchmark-results-2026-08-08-computer-ste
 action-to-immediate-frame boundary and promotion result. These files do not replace or rewrite the
 historical article evidence.
 
+The weighted input-capacity promotion uses three independent same-runtime runs:
+
+- [`input-capacity-run-1-2026-08-08.json`](input-capacity-run-1-2026-08-08.json);
+- [`input-capacity-run-2-2026-08-08.json`](input-capacity-run-2-2026-08-08.json);
+- [`input-capacity-run-3-2026-08-08.json`](input-capacity-run-3-2026-08-08.json).
+
+See the [weighted input-capacity report](../docs/benchmark-results-2026-08-08-input-capacity.md) for
+the 100-token refill, 400-token burst, repeated-run result, and rejected higher candidates.
+
 ### Archived July 26 combined report
 
 The archived combined report remains bound to these immutable inputs:

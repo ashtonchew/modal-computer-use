@@ -648,6 +648,18 @@ def test_hosted_docs_handoff_cuts_provider_loops_over_to_computer_step() -> None
     assert "not a measured fused turn" in source
 
 
+def test_hosted_docs_handoff_publishes_weighted_input_capacity_evidence() -> None:
+    source = (DOCS / "hosted-documentation-handoff.json").read_text(encoding="utf-8")
+
+    assert '"route": "/benchmarks/input-capacity"' in source
+    assert "docs/benchmark-results-2026-08-08-input-capacity.md" in source
+    for index in range(1, 4):
+        assert f"benchmark-data/input-capacity-run-{index}-2026-08-08.json" in source
+    assert "100-token-per-second refill" in source
+    assert "400-token burst" in source
+    assert "scripts/run_input_capacity_gate.py" in source
+
+
 def test_api_trajectory_example_uses_one_exact_requested_region() -> None:
     source = (DOCS / "api.md").read_text(encoding="utf-8")
     section = _section(

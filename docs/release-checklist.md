@@ -93,6 +93,10 @@ normalized input-work tokens per second. Reject promotion on lost or misordered 
 input cleanup failure, unhealthy daemon state, material tail-latency regression, configuration
 mismatch, CPU use above 0.02 aggregate cgroup CPU-seconds per normalized token, RSS growth above
 128 MiB, or incomplete resource cleanup. Retain the sanitized capacity artifact and decision.
+For the 100/400 cutover, require all three dated artifacts in
+`benchmark-data/input-capacity-run-{1,2,3}-2026-08-08.json` and the matching dated report. The
+slowest run must remain above the 200-token promotion floor. A later rate change requires new dated
+evidence; do not rewrite these artifacts.
 
 Normal pull requests and main builds validate the mock report, wheel, and source distribution
 without uploading them. GitHub keeps new Actions logs for 14 days. Published distributions live on

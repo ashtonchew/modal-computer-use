@@ -361,8 +361,8 @@
     {
       "route": "/benchmarks/current-results",
       "page_class": "benchmark",
-      "source_local": ["docs/benchmark-results-2026-07-30-warm-paths.md", "docs/benchmark-results-2026-08-08-computer-step.md", "docs/benchmarking.md", "benchmark-data/modal-optimized-provider-2026-07-30.json", "benchmark-data/computer-step-prior-public-2026-08-08.json", "benchmark-data/computer-step-candidate-2026-08-08.json", "benchmark-data/computer-step-promotion-decision-2026-08-08.json"],
-      "v2_behavior": ["Keep the dated July 30 report and artifact immutable.", "Publish the new dated 100-pair Computer Step result and link its three sanitized artifacts.", "State that the fused path measured 44.29 ms p50 and 52.57 ms p95 in this experiment.", "Keep 47.10 ms labeled as historical arithmetic, not a fused measurement or promise."],
+      "source_local": ["docs/benchmark-results-2026-07-30-warm-paths.md", "docs/benchmark-results-2026-08-08-computer-step.md", "docs/benchmark-results-2026-08-08-input-capacity.md", "docs/benchmarking.md", "benchmark-data/modal-optimized-provider-2026-07-30.json", "benchmark-data/computer-step-prior-public-2026-08-08.json", "benchmark-data/computer-step-candidate-2026-08-08.json", "benchmark-data/computer-step-promotion-decision-2026-08-08.json", "benchmark-data/input-capacity-run-1-2026-08-08.json", "benchmark-data/input-capacity-run-2-2026-08-08.json", "benchmark-data/input-capacity-run-3-2026-08-08.json"],
+      "v2_behavior": ["Keep the dated July 30 report and artifact immutable.", "Publish the new dated 100-pair Computer Step result and link its three sanitized artifacts.", "Publish the three passing weighted input-capacity artifacts and the 100/400 default decision.", "State that the fused path measured 44.29 ms p50 and 52.57 ms p95 in this experiment.", "Keep 47.10 ms labeled as historical arithmetic, not a fused measurement or promise."],
       "v1_preservation": {"route": "/v1/benchmarks/current-results", "rule": "Keep the existing historical results unchanged under 1.x."},
       "tests": ["check historical artifact hashes and dates remain unchanged", "validate the published Computer Step artifacts and decision", "check every result link in preview"],
       "redirects": [],
@@ -370,6 +370,19 @@
       "preview": "Mintlify pull-request preview",
       "publish_order": 3,
       "rollback": "Remove only the new dated result link. Never edit the historical report."
+    },
+    {
+      "route": "/benchmarks/input-capacity",
+      "page_class": "benchmark",
+      "source_local": ["docs/benchmark-results-2026-08-08-input-capacity.md", "docs/benchmarking.md", "research/input-rate-limit-default-2026-08-08.md", "scripts/run_input_capacity_gate.py", "benchmark-data/input-capacity-run-1-2026-08-08.json", "benchmark-data/input-capacity-run-2-2026-08-08.json", "benchmark-data/input-capacity-run-3-2026-08-08.json"],
+      "v2_behavior": ["State the 100-token-per-second refill and 400-token burst decision.", "Explain the normalized-input-work-v1 weights and whole-batch admission.", "Report all three independent passing runs and the slowest observed throughput.", "Keep the diagnostic 2,000/4,000 limiter distinct from the product default.", "Explain the 200-token promotion floor, resource-efficiency limits, cleanup gate, and exact source revision."],
+      "v1_preservation": {"route": "/v1/benchmarks/input-capacity", "rule": "Do not retrofit the v2 weighted limiter into 1.x documentation."},
+      "tests": ["validate all three sanitized artifacts", "check report values against artifacts", "run authorization and clean-source guards offline", "check every artifact link in preview"],
+      "redirects": [],
+      "owner": "@ashtonchew",
+      "preview": "Mintlify pull-request preview",
+      "publish_order": 3,
+      "rollback": "Remove the v2 capacity page and result links. Keep the dated artifacts immutable."
     },
     {
       "route": "/benchmarks/latency-evidence",
@@ -400,7 +413,7 @@
     {
       "route": "/benchmarks/reproducibility",
       "page_class": "benchmark",
-      "source_local": ["docs/benchmarking.md", "docs/performance.md", "scripts/run_modal_v2_candidate_benchmark.py"],
+      "source_local": ["docs/benchmarking.md", "docs/performance.md", "scripts/run_modal_v2_candidate_benchmark.py", "scripts/run_input_capacity_gate.py"],
       "v2_behavior": ["Require preregistered interleaved samples with topology and configuration held constant.", "Retain sanitized raw observations, failures, placement, cold and warm splits, and cleanup results.", "Reject configuration mismatches."],
       "v1_preservation": {"route": "/v1/benchmarks/reproducibility", "rule": "Keep the prior reproduction procedure."},
       "tests": ["run the offline benchmark CLI checks", "validate sanitized candidate artifacts"],
@@ -413,7 +426,7 @@
     {
       "route": "/benchmarks/run",
       "page_class": "benchmark",
-      "source_local": ["docs/benchmarking.md", "scripts/run_modal_v2_candidate_benchmark.py", "docs/release-checklist.md"],
+      "source_local": ["docs/benchmarking.md", "scripts/run_modal_v2_candidate_benchmark.py", "scripts/run_input_capacity_gate.py", "docs/release-checklist.md"],
       "v2_behavior": ["Show offline checks first.", "Require explicit authorization before live or billable Modal runs.", "Require exact region, resource, image, ingress, screenshot, input, and cleanup arguments for a promotion run."],
       "v1_preservation": {"route": "/v1/benchmarks/run", "rule": "Keep the 1.1.0 benchmark commands under 1.x."},
       "tests": ["run command help and mock-local checks", "check that live commands remain authorization-gated"],
