@@ -722,7 +722,9 @@ class X11DesktopBackend(MockDesktopBackend):
         self._available_input_backends = ()
         await attempt_async(self._apps.invalidate_display_generation)
         await attempt_async(self._clipboard.invalidate_display_generation)
-        attempt_sync(self._screenshots.reset_capture_session)
+        await attempt_async(
+            lambda: asyncio.to_thread(self._screenshots.reset_capture_session)
+        )
         attempt_sync(self._windows.invalidate_display_generation)
         attempt_sync(self._keyboard.invalidate_display_generation)
         attempt_sync(self._mouse.invalidate_display_generation)
