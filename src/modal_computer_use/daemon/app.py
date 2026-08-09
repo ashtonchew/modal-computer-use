@@ -191,6 +191,8 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         hot_limit=settings.max_hot_session_connections,
         observation_limit=settings.max_observation_connections,
     )
+    app.state.active_http_observe_changes = 0
+    app.state.display_restart_in_progress = False
     app.state.action_count = 0
     app.state.screenshot_count = 0
     app.state.last_activity_at = time.monotonic()

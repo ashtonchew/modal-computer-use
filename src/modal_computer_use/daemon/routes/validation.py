@@ -39,7 +39,64 @@ def invalidate_desktop_readiness(state: Any) -> None:
         cache.invalidate()
 
 
+def begin_display_restart(state: Any) -> None:
+    """Atomically claim the display mutation slot before its first await."""
+    if getattr(state, "display_restart_in_progress", False):
+        raise DaemonError(
+            "display lifecycle mutation is already in progress",
+            status_code=409,
+            code="display_restart_busy",
+            details={"reason": "display_restart"},
+        )
+    if any(recording.status == "recording" for recording in state.recordings.list()):
+        raise DaemonError(
+            "display lifecycle mutation requires no active recording",
+            status_code=409,
+            code="display_restart_busy",
+            details={"reason": "recording"},
+        )
+    if state.websocket_admission.active("observation"):
+        raise DaemonError(
+            "display lifecycle mutation requires no active observation websocket",
+            status_code=409,
+            code="display_restart_busy",
+            details={"reason": "observation"},
+        )
+    if getattr(state, "active_http_observe_changes", 0):
+        raise DaemonError(
+            "display lifecycle mutation requires no active observe-change request",
+            status_code=409,
+            code="display_restart_busy",
+            details={"reason": "observe_change"},
+        )
+    state.display_restart_in_progress = True
+
+
+def end_display_restart(state: Any) -> None:
+    state.display_restart_in_progress = False
+
+
+@asynccontextmanager
+async def http_observe_change_scope(request: Request) -> AsyncIterator[None]:
+    """Admit one HTTP observe-change watcher with synchronous restart exclusion."""
+    state = request.app.state
+    if getattr(state, "display_restart_in_progress", False):
+        raise DaemonError(
+            "display lifecycle mutation is already in progress",
+            status_code=409,
+            code="display_restart_busy",
+            details={"reason": "display_restart"},
+        )
+    state.active_http_observe_changes = getattr(state, "active_http_observe_changes", 0) + 1
+    try:
+        yield
+    finally:
+        state.active_http_observe_changes = max(state.active_http_observe_changes - 1, 0)
+
+
 async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
+    if getattr(request.app.state, "display_restart_in_progress", False) and not force:
+        return False, ["display lifecycle mutation is in progress"]
     supervisor = request.app.state.supervisor
     if not supervisor.running:
         invalidate_desktop_readiness(request.app.state)
@@ -53,8 +110,12 @@ async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[b
     return ready, errors
 
 
-async def daemon_readiness(request: Request) -> tuple[bool, list[str]]:
-    ready, errors = await desktop_readiness(request)
+async def daemon_readiness(
+    request: Request,
+    *,
+    force: bool = False,
+) -> tuple[bool, list[str]]:
+    ready, errors = await desktop_readiness(request, force=force)
     if request.app.state.settings.vnc_mode == "off":
         return ready, errors
     for name in ("x11vnc", "novnc"):

@@ -279,8 +279,16 @@ async def observation_stream(websocket: WebSocket) -> None:
     if auth_error is not None:
         await websocket.close(code=1008, reason=auth_error)
         return
-    if not await websocket.app.state.websocket_admission.acquire("observation"):
+    state = websocket.app.state
+    if state.display_restart_in_progress:
+        await websocket.close(code=1013, reason="display_restart_busy")
+        return
+    if not await state.websocket_admission.acquire("observation"):
         await websocket.close(code=1013, reason="connection_limit_reached")
+        return
+    if state.display_restart_in_progress:
+        await state.websocket_admission.release("observation")
+        await websocket.close(code=1013, reason="display_restart_busy")
         return
     state = _StreamState()
     try:

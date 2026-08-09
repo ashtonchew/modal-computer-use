@@ -78,6 +78,48 @@ def test_observation_stream_connection_limit_is_global(tmp_path) -> None:
     assert exc_info.value.code == 1013
 
 
+def test_observation_stream_rejects_display_restart_in_progress(tmp_path) -> None:
+    app = _app(tmp_path, local_token="dev")
+    app.state.display_restart_in_progress = True
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        client.websocket_connect("/v1/observations/stream"),
+    ):
+        pass
+
+    assert exc_info.value.code == 1013
+    assert exc_info.value.reason == "display_restart_busy"
+
+
+def test_observation_stream_rechecks_restart_after_admission(tmp_path, monkeypatch) -> None:
+    app = _app(tmp_path, local_token="dev")
+    released: list[str] = []
+
+    async def acquire(kind: str) -> bool:
+        assert kind == "observation"
+        app.state.display_restart_in_progress = True
+        return True
+
+    async def release(kind: str) -> None:
+        released.append(kind)
+
+    monkeypatch.setattr(app.state.websocket_admission, "acquire", acquire)
+    monkeypatch.setattr(app.state.websocket_admission, "release", release)
+
+    with (
+        TestClient(app, headers={"Authorization": "Bearer dev"}) as client,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        client.websocket_connect("/v1/observations/stream"),
+    ):
+        pass
+
+    assert exc_info.value.code == 1013
+    assert exc_info.value.reason == "display_restart_busy"
+    assert released == ["observation"]
+
+
 def test_observation_stream_sends_metadata_then_binary_frame(test_client) -> None:
     with test_client.websocket_connect("/v1/observations/stream") as websocket:
         assert websocket.receive_json()["type"] == "ready"

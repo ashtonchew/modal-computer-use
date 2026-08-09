@@ -197,6 +197,18 @@ class X11InputSession:
             self._display = None
             self._available = None
 
+    def invalidate_display_generation(self) -> None:
+        """Close the old X display and forget generation-specific failure state."""
+        with self._lock:
+            try:
+                if self._display is not None and self._x11 is not None:
+                    self._x11.XCloseDisplay(ctypes.c_void_p(self._display))
+            finally:
+                self._display = None
+                self._available = None
+                self._failure = None
+                self._last_emission_result = None
+
     def resolve_keysym(self, name: str) -> int:
         encoded_name = name.encode()
         with self._lock:

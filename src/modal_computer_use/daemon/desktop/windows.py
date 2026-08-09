@@ -163,6 +163,19 @@ class NativeEwmhWindowAdapter:
             self._root = None
             self._atoms.clear()
 
+    def invalidate_display_generation(self) -> None:
+        """Close the old display and clear poison that belongs to that generation."""
+        with self._lock:
+            try:
+                if self._display is not None and self._x11 is not None:
+                    self._x11.XCloseDisplay(ctypes.c_void_p(self._display))
+            finally:
+                self._display = None
+                self._root = None
+                self._atoms.clear()
+                self._failure = None
+                self._permanently_unavailable = False
+
     def list(self) -> list[X11Window]:
         with self._lock:
             try:
@@ -743,6 +756,14 @@ class X11WindowController:
 
     def close(self) -> None:
         self._native.close_display()
+
+    def invalidate_display_generation(self) -> None:
+        invalidate = getattr(self._native, "invalidate_display_generation", None)
+        if invalidate is None:
+            self._native.close_display()
+        else:
+            invalidate()
+        self._backend_name = "xlib-ewmh"
 
     async def list(self) -> list[X11Window]:
         try:

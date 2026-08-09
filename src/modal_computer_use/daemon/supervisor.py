@@ -80,24 +80,24 @@ class Supervisor:
             process = self.processes.get(name)
             if process is None or process.poll() is not None:
                 continue
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
+            _stop_process(process)
 
     async def restart(self, name: str | None = None) -> None:
         if name:
             if name not in self.names:
                 raise ValueError(f"unknown process: {name}")
+            if name == "xvfb":
+                for process_name in self.names:
+                    self.restart_counts[process_name] = (
+                        self.restart_counts.get(process_name, 0) + 1
+                    )
+                await self.stop()
+                await self.start()
+                return
             self.restart_counts[name] = self.restart_counts.get(name, 0) + 1
             process = self.processes.get(name)
             if process is not None and process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                _stop_process(process)
             if self.settings.backend != "mock":
                 command = self.commands.get(name)
                 if command is not None:
@@ -169,3 +169,12 @@ class Supervisor:
         with path.open(encoding="utf-8", errors="replace") as handle:
             lines = deque(handle, maxlen=tail)
         return "\n".join(line.rstrip("\n") for line in lines)
+
+
+def _stop_process(process: subprocess.Popen[bytes]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)

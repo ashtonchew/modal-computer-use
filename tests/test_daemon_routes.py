@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
+from types import SimpleNamespace
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -12,6 +15,12 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputReleaseError,
     X11InputStateConflictError,
     X11InputUnavailableError,
+)
+from modal_computer_use.daemon.errors import DaemonError
+from modal_computer_use.daemon.routes.validation import (
+    begin_display_restart,
+    end_display_restart,
+    http_observe_change_scope,
 )
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult, Point, ProcessStatus, Screenshot
@@ -161,13 +170,13 @@ def test_status_reflects_stopped_mock_lifecycle(tmp_path) -> None:
 @pytest.mark.parametrize(
     "path", ["/v1/computer/start", "/v1/computer/stop", "/v1/computer/restart"]
 )
-def test_display_lifecycle_resets_screenshot_capture_before_supervisor_mutation(
+def test_display_lifecycle_invalidates_display_generation_before_supervisor_mutation(
     test_client, app, monkeypatch, path: str
 ) -> None:
     events: list[str] = []
 
-    def reset_screenshot_capture() -> None:
-        events.append("capture-reset")
+    async def invalidate_display_generation() -> None:
+        events.append("display-generation-invalidated")
 
     async def stop() -> None:
         events.append("supervisor-stop")
@@ -179,7 +188,11 @@ def test_display_lifecycle_resets_screenshot_capture_before_supervisor_mutation(
         assert name is None
         events.append("supervisor-restart")
 
-    monkeypatch.setattr(app.state.backend, "reset_screenshot_capture", reset_screenshot_capture)
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
     monkeypatch.setattr(app.state.supervisor, "stop", stop)
     monkeypatch.setattr(app.state.supervisor, "start", start)
     monkeypatch.setattr(app.state.supervisor, "restart", restart)
@@ -192,38 +205,42 @@ def test_display_lifecycle_resets_screenshot_capture_before_supervisor_mutation(
         "/v1/computer/stop": "supervisor-stop",
         "/v1/computer/restart": "supervisor-restart",
     }[path]
-    assert events == ["capture-reset", expected_mutation]
+    assert events == ["display-generation-invalidated", expected_mutation]
 
 
-def test_xvfb_process_restart_resets_screenshot_capture_first(
+def test_xvfb_process_restart_invalidates_display_generation_first(
     test_client, app, monkeypatch
 ) -> None:
     events: list[str] = []
 
-    def reset_screenshot_capture() -> None:
-        events.append("capture-reset")
+    async def invalidate_display_generation() -> None:
+        events.append("display-generation-invalidated")
 
     async def restart(name: str | None = None) -> None:
         assert name == "xvfb"
         events.append("supervisor-restart:xvfb")
 
-    monkeypatch.setattr(app.state.backend, "reset_screenshot_capture", reset_screenshot_capture)
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
     monkeypatch.setattr(app.state.supervisor, "restart", restart)
 
     response = test_client.post("/v1/processes/xvfb/restart")
 
     assert response.status_code == 200
-    assert events == ["capture-reset", "supervisor-restart:xvfb"]
+    assert events == ["display-generation-invalidated", "supervisor-restart:xvfb"]
 
 
 @pytest.mark.parametrize("path", ["/v1/computer/stop", "/v1/computer/restart"])
-def test_display_lifecycle_still_mutates_supervisor_when_capture_reset_fails(
+def test_display_lifecycle_still_mutates_supervisor_when_generation_invalidation_fails(
     test_client, app, monkeypatch, path: str
 ) -> None:
     events: list[str] = []
 
-    def reset_screenshot_capture() -> None:
-        events.append("capture-reset")
+    async def invalidate_display_generation() -> None:
+        events.append("display-generation-invalidated")
         raise RuntimeError("detach failed")
 
     async def stop() -> None:
@@ -233,7 +250,11 @@ def test_display_lifecycle_still_mutates_supervisor_when_capture_reset_fails(
         assert name is None
         events.append("supervisor-restart")
 
-    monkeypatch.setattr(app.state.backend, "reset_screenshot_capture", reset_screenshot_capture)
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
     monkeypatch.setattr(app.state.supervisor, "stop", stop)
     monkeypatch.setattr(app.state.supervisor, "restart", restart)
 
@@ -241,7 +262,192 @@ def test_display_lifecycle_still_mutates_supervisor_when_capture_reset_fails(
         test_client.post(path)
 
     expected_mutation = "supervisor-stop" if path.endswith("/stop") else "supervisor-restart"
-    assert events == ["capture-reset", expected_mutation]
+    assert events == ["display-generation-invalidated", expected_mutation]
+
+
+def test_display_lifecycle_preserves_generation_error_when_supervisor_also_fails(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+
+    async def invalidate_display_generation() -> None:
+        events.append("display-generation-invalidated")
+        raise RuntimeError("generation detach failed")
+
+    async def restart() -> None:
+        events.append("supervisor-restart")
+        raise RuntimeError("supervisor failed")
+
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
+    monkeypatch.setattr(app.state.supervisor, "restart", restart)
+
+    with pytest.raises(RuntimeError, match="generation detach failed"):
+        test_client.post("/v1/computer/restart")
+
+    assert events == ["display-generation-invalidated", "supervisor-restart"]
+    assert app.state.display_restart_in_progress is False
+
+
+def test_display_restart_retries_transient_readiness_and_leaves_final_probe_recoverable(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    outcomes = iter(
+        [
+            (False, ["display is settling"]),
+            (False, ["display is still settling"]),
+            (True, []),
+        ]
+    )
+    calls = 0
+
+    async def ready() -> tuple[bool, list[str]]:
+        nonlocal calls
+        calls += 1
+        return next(outcomes)
+
+    async def invalidate_display_generation() -> None:
+        return None
+
+    monkeypatch.setattr(app.state.backend, "ready", ready)
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
+
+    response = test_client.post("/v1/computer/restart")
+
+    assert response.status_code == 200
+    assert test_client.get("/readyz").json()["ready"] is True
+    assert calls == 3
+
+
+def test_display_restart_verifies_display_before_configured_browser_recovery(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    app.state.settings = replace(app.state.settings, browser_prewarm=True)
+    events: list[str] = []
+
+    async def ready() -> tuple[bool, list[str]]:
+        events.append("ready")
+        return True, []
+
+    async def prewarm_browser() -> ActionResult:
+        events.append("browser-prewarm")
+        return ActionResult(ok=True)
+
+    async def invalidate_display_generation() -> None:
+        events.append("invalidate")
+
+    monkeypatch.setattr(app.state.backend, "ready", ready)
+    monkeypatch.setattr(app.state.backend, "prewarm_browser", prewarm_browser)
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
+
+    response = test_client.post("/v1/computer/restart")
+
+    assert response.status_code == 200
+    assert events == ["invalidate", "ready", "browser-prewarm", "ready"]
+    assert app.state.browser_prewarm.ok is True
+
+
+def test_display_restart_browser_failure_invalidates_successful_readiness_snapshot(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    app.state.settings = replace(app.state.settings, browser_prewarm=True)
+    outcomes = iter([(True, []), (False, ["browser left display unavailable"])])
+    calls = 0
+
+    async def ready() -> tuple[bool, list[str]]:
+        nonlocal calls
+        calls += 1
+        return next(outcomes)
+
+    async def prewarm_browser() -> ActionResult:
+        return ActionResult(ok=False, message="browser failed")
+
+    monkeypatch.setattr(app.state.backend, "ready", ready)
+    monkeypatch.setattr(app.state.backend, "prewarm_browser", prewarm_browser)
+
+    response = test_client.post("/v1/computer/restart")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "browser_recovery_failed"
+    assert test_client.get("/readyz").json()["ready"] is False
+    assert calls == 2
+
+
+def test_display_restart_and_http_observe_change_admission_exclude_both_interleavings(
+    app,
+) -> None:
+    request = SimpleNamespace(app=app)
+
+    async def exercise() -> None:
+        async with http_observe_change_scope(request):
+            with pytest.raises(DaemonError, match="active observe-change"):
+                begin_display_restart(app.state)
+        begin_display_restart(app.state)
+        with pytest.raises(DaemonError, match="already in progress"):
+            async with http_observe_change_scope(request):
+                pass
+        end_display_restart(app.state)
+
+    anyio.run(exercise)
+
+
+def test_readyz_is_closed_during_display_restart_transition(test_client, app) -> None:
+    app.state.display_restart_in_progress = True
+
+    response = test_client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ready": False,
+        "errors": ["display lifecycle mutation is in progress"],
+    }
+
+
+@pytest.mark.parametrize("busy_kind", ["recording", "websocket", "observe-change"])
+def test_display_restart_rejects_active_display_observers(
+    test_client,
+    app,
+    monkeypatch,
+    busy_kind: str,
+) -> None:
+    if busy_kind == "recording":
+        monkeypatch.setattr(
+            app.state.recordings,
+            "list",
+            lambda: [SimpleNamespace(status="recording")],
+        )
+    elif busy_kind == "websocket":
+        monkeypatch.setattr(
+            app.state.websocket_admission,
+            "active",
+            lambda kind: 1 if kind == "observation" else 0,
+        )
+    else:
+        app.state.active_http_observe_changes = 1
+
+    response = test_client.post("/v1/computer/restart")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "display_restart_busy"
 
 
 def test_clipboard_and_release_all(test_client) -> None:
