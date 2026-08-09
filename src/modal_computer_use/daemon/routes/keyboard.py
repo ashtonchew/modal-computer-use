@@ -5,6 +5,10 @@ import asyncio
 from fastapi import APIRouter, Request
 
 from modal_computer_use.actions import KEY_ALIASES
+from modal_computer_use.daemon.input_rate_limit import (
+    hotkey_input_token_cost,
+    typing_input_token_cost,
+)
 from modal_computer_use.daemon.routes.execution import (
     raise_for_failed_action_result,
     run_input_action,
@@ -37,6 +41,7 @@ async def keyboard_type(payload: TypeRequest, request: Request) -> ActionResult:
         semantic_data=payload,
         fallback_code="keyboard_type_failed",
         fallback_message="keyboard type failed",
+        token_cost=typing_input_token_cost(payload.text),
     )
 
 
@@ -88,6 +93,7 @@ async def hotkey(payload: HotkeyRequest, request: Request) -> ActionResult:
         semantic_data=payload,
         fallback_code="keyboard_hotkey_failed",
         fallback_message="keyboard hotkey failed",
+        token_cost=hotkey_input_token_cost(len(payload.keys)),
     )
 
 

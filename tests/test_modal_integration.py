@@ -692,28 +692,29 @@ def test_modal_action_rate_limit_live_smoke() -> None:
 
     from modal_computer_use import ComputerConfig, ComputerSandbox
     from modal_computer_use.config import ActionConfig
+    from modal_computer_use.errors import DaemonHTTPError
 
     suffix = uuid.uuid4().hex[:10]
     computer = ComputerSandbox.create(
         config=ComputerConfig(
             run_id=f"mcu-v1-rate-limit-{suffix}",
-            actions=ActionConfig(input_rate_limit_per_sec=1),
+            actions=ActionConfig(input_rate_limit_per_sec=1, input_rate_limit_burst=1),
         ),
         tags={"computer-use.smoke": "v1-rate-limit"},
     )
     try:
-        result = computer.actions.run(
-            [
-                {"type": "move", "x": 10, "y": 10},
-                {"type": "move", "x": 20, "y": 20},
-            ],
-            continue_on_error=True,
-        )
-        assert result.ok is False
-        assert [item.ok for item in result.results] == [True, False]
-        assert result.results[1].error_code == "rate_limited"
-        assert result.results[1].output["code"] == "rate_limited"
-        assert "retry_after_seconds" in result.results[1].output
+        before = computer.mouse.position()
+        with pytest.raises(DaemonHTTPError) as exc_info:
+            computer.actions.run(
+                [
+                    {"type": "move", "x": 10, "y": 10},
+                    {"type": "move", "x": 20, "y": 20},
+                ],
+                continue_on_error=True,
+            )
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.code == "input_cost_exceeds_burst"
+        assert computer.mouse.position() == before
     finally:
         computer.terminate()
         computer.detach()

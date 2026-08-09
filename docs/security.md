@@ -102,9 +102,12 @@ use route paths and bounded action/artifact metadata; they do not include query 
 Authorization headers, typed text, clipboard text, screenshot bytes, recording bytes, stdout, or
 stderr.
 
-The daemon enforces action budgets and a simple per-sandbox rolling action rate limit. Over-limit
-requests fail with structured `budget_exceeded` or `rate_limited` errors and do not include typed
-text, clipboard text, raw command output, tokens, screenshot bytes, or artifact bytes.
+The daemon combines action budgets with a weighted, daemon-local input token bucket. It reserves a
+complete recursive action batch before mutation. This prevents partial execution at a rate-limit
+boundary. Over-limit requests fail with structured `budget_exceeded`, `rate_limited`, or
+`input_cost_exceeds_burst` errors. Errors may report non-secret input-work token counts, but they do
+not include bearer tokens, typed text, clipboard text, raw command output, screenshot bytes, or
+artifact bytes.
 Authenticated debug routes that intentionally return command output or process log tails sanitize
 known secret-bearing substrings such as bearer tokens, noVNC URLs, and artifact URIs before sending
 the response.

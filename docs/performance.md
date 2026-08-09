@@ -173,6 +173,19 @@ Cursor-hidden capture uses a persistent MSS/XShm session and in-memory encoding 
 Cursor-visible requests and failed display connections retain bounded fallback behavior. JSON and
 base64 routes remain available for low-level REST compatibility.
 
+## Input admission
+
+The default input token bucket refills 500 normalized input-work tokens per second and holds 1,000
+tokens. The refill is about 22 times the reciprocal of the measured 44.29 ms single-action Step
+median. It therefore should not shape a normal serialized provider loop. The bucket remains below
+the available simple native-input throughput estimate, so it still protects the daemon from
+sustained saturation.
+
+This number is an evidence-backed product default, not an external standard. A same-runtime mixed
+input capacity gate must sustain at least 1,000 weighted tokens per second before release. Keep
+batch size, action and batch timeouts, total trajectory budgets, payload bounds, and one-in-flight
+Step serialization. The rate limit complements those controls; it does not replace them.
+
 The following surfaces remain optional or low-level compatibility capabilities:
 
 ```bash

@@ -14,6 +14,7 @@ from modal_computer_use.daemon.actions.traces import ActionTraceWriter, _redacte
 from modal_computer_use.daemon.budget_policy import BudgetKind, BudgetPolicy
 from modal_computer_use.daemon.desktop.screenshots import CapturedScreenshot
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
+from modal_computer_use.daemon.input_rate_limit import batch_input_token_cost
 from modal_computer_use.daemon.leases import LeaseCredentials, lease_credentials_from_headers
 from modal_computer_use.daemon.receipts import (
     ReceiptHandle,
@@ -300,21 +301,6 @@ async def _run_impl(
         await context.state.receipt_journal.ensure_mutation_allowed()
         if lock_was_contended:
             await _ensure_desktop_ready(context, force=True)
-        if context.lease_credentials is not None:
-            _preflight_action_budget(context, payload.actions)
-        handle = await prepare_mutation_receipt(
-            context.state,
-            credentials=context.lease_credentials,
-            sequence=context.operation_sequence,
-            operation_kind="computer.step" if step_mode else "actions.run",
-            semantic_data={
-                "request": payload.model_dump(mode="json", exclude={"idempotency_key"}),
-                "raw_screenshot_after": raw_screenshot_after,
-            },
-        )
-        require_new_receipt(handle)
-        context.receipt_handle = handle
-        context.mutation_phase = "pre_dispatch"
         cache = context.state.idempotency_cache
         cached = (
             None
@@ -322,6 +308,17 @@ async def _run_impl(
             else _cached_idempotency_result(context, effective_idempotency_key, request_fingerprint)
         )
         if cached is not None:
+            handle = await prepare_mutation_receipt(
+                context.state,
+                credentials=context.lease_credentials,
+                sequence=context.operation_sequence,
+                operation_kind="computer.step" if step_mode else "actions.run",
+                semantic_data={
+                    "request": payload.model_dump(mode="json", exclude={"idempotency_key"}),
+                    "raw_screenshot_after": raw_screenshot_after,
+                },
+            )
+            require_new_receipt(handle)
             if handle is not None:
                 context.receipt_finalized = True
                 await context.state.receipt_journal.complete(
@@ -329,6 +326,24 @@ async def _run_impl(
                     classification="known_cached_result",
                 )
             return cached, None
+        input_token_cost = _reserve_batch_budget(context, payload.actions)
+        try:
+            handle = await prepare_mutation_receipt(
+                context.state,
+                credentials=context.lease_credentials,
+                sequence=context.operation_sequence,
+                operation_kind="computer.step" if step_mode else "actions.run",
+                semantic_data={
+                    "request": payload.model_dump(mode="json", exclude={"idempotency_key"}),
+                    "raw_screenshot_after": raw_screenshot_after,
+                },
+            )
+            require_new_receipt(handle)
+        except BaseException:
+            context.budget_policy.refund_input_tokens(token_cost=input_token_cost)
+            raise
+        context.receipt_handle = handle
+        context.mutation_phase = "pre_dispatch"
 
         batch_timeout_ms = context.state.settings.max_batch_duration_ms
         batch_deadline = time.perf_counter() + (batch_timeout_ms / 1000)
@@ -1144,7 +1159,15 @@ def _budget_kinds_for_action(action: Any) -> tuple[BudgetKind, ...]:
     return ()
 
 
-def _preflight_action_budget(context: ActionBatchContext, actions: list[Any]) -> None:
+def _reserve_batch_budget(context: ActionBatchContext, actions: list[Any]) -> int:
+    if context.lease_credentials is not None:
+        _preflight_count_budgets(context, actions)
+    token_cost = batch_input_token_cost(actions)
+    context.budget_policy.reserve_input_tokens(token_cost=token_cost)
+    return token_cost
+
+
+def _preflight_count_budgets(context: ActionBatchContext, actions: list[Any]) -> None:
     action_count, screenshot_count = _budget_counts(actions)
     if action_count:
         error = context.budget_policy.action_reservation_error(count=action_count)
@@ -1241,7 +1264,7 @@ def _reserve_action_budget(
             error=error.message,
             output=sanitize_payload({"code": error.code, **error.details}),
         )
-    context.budget_policy.reserve_action()
+    context.budget_policy.reserve_action_with_cost(token_cost=0)
     return None
 
 
@@ -1466,13 +1489,13 @@ async def _execute_action(
         return _checked_action_result(result, action)
     if isinstance(action, HoldKeyAction):
         nested_actions = _nested_hold_actions(action)
-        _preflight_action_budget(context, nested_actions)
+        _preflight_count_budgets(context, nested_actions)
         await backend.key_down(action.key)
         nested_results: list[dict[str, Any]] = []
         try:
             for nested_index, nested_action in enumerate(nested_actions):
                 if _counts_against_action_budget(nested_action):
-                    context.budget_policy.reserve_action()
+                    context.budget_policy.reserve_action_with_cost(token_cost=0)
                 nested_start = time.perf_counter()
                 nested_call = _execute_action(
                     nested_action,

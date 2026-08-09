@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -24,6 +24,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputUnavailableError,
 )
 from modal_computer_use.daemon.errors import DaemonError, public_input_error
+from modal_computer_use.daemon.input_rate_limit import InputTokenBucket
 from modal_computer_use.daemon.leases import LeaseCoordinator
 from modal_computer_use.daemon.logging import configure_logging
 from modal_computer_use.daemon.readiness import ReadinessCache
@@ -171,7 +172,10 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.state.action_count = 0
     app.state.screenshot_count = 0
     app.state.last_activity_at = time.monotonic()
-    app.state.action_rate_window = deque()
+    app.state.input_token_bucket = InputTokenBucket(
+        refill_rate=settings.input_rate_limit_per_sec,
+        capacity=settings.input_rate_limit_burst,
+    )
     app.state.budget_policy = BudgetPolicy(app.state)
     app.state.tracer = get_tracer(
         enabled=settings.otel_enabled,
@@ -209,6 +213,7 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         return _error_response(
             status_code=exc.status_code,
             code=exc.code,
+            headers=exc.headers,
             content={
                 "code": exc.code,
                 "message": sanitize_text(exc.message),
@@ -387,11 +392,22 @@ def _is_action_payload_validation_error(request: Request, exc: RequestValidation
     return False
 
 
-def _error_response(*, status_code: int, code: str, content: dict[str, object]) -> JSONResponse:
+def _error_response(
+    *,
+    status_code: int,
+    code: str,
+    content: dict[str, object],
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    response_headers = {
+        "x-computer-use-error-code": code,
+        "cache-control": "no-store",
+    }
+    response_headers.update(headers or {})
     return JSONResponse(
         status_code=status_code,
         content=content,
-        headers={"x-computer-use-error-code": code, "cache-control": "no-store"},
+        headers=response_headers,
     )
 
 

@@ -86,6 +86,14 @@ explicit authorization. Retain its new sanitized prior-arm, candidate-arm, and d
 Publish a new dated Computer Step report only after the gate passes. The historical optimized-
 default result and 47.10 ms arithmetic do not satisfy this release gate.
 
+Before publishing the 500/1,000 weighted input default, run
+`scripts/run_input_capacity_gate.py` from the exact clean release commit with explicit
+authorization. The minimum supported Modal runtime must sustain at least 1,000 representative
+normalized input-work tokens per second. Reject promotion on lost or misordered input, X11 errors,
+input cleanup failure, unhealthy daemon state, material tail-latency regression, configuration
+mismatch, CPU use above 95% on the one-CPU profile, RSS growth above 64 MiB, or incomplete resource
+cleanup. Retain the sanitized capacity artifact and decision.
+
 Normal pull requests and main builds validate the mock report, wheel, and source distribution
 without uploading them. GitHub keeps new Actions logs for 14 days. Published distributions live on
 PyPI and the immutable GitHub Release. Historical private-era logs and artifacts are deleted

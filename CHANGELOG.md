@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced the daemon's abrupt 20-action rolling window with a daemon-local token bucket. The
+  default refills 500 normalized input-work tokens per second and permits a 1,000-token burst.
+  Action arrays reserve their complete recursive cost before mutation, so rate limiting cannot
+  interrupt a validated batch halfway through. Transient limits return `429` with precise
+  `retry_after_ms` and an integer `Retry-After` header.
+
 ## 2.0.0 - 2026-08-08
 
 - Made the primary SDK path an async, explicitly placed Modal trajectory: one owner creates the

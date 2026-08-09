@@ -153,6 +153,11 @@ leaving the block terminates it. If the Sandbox already existed, leaving the blo
 A daemon inside the Sandbox executes desktop actions, captures screenshots and recordings, runs
 commands, and reads or writes files through `computer.artifacts`.
 
+The daemon admits input through one token bucket for the desktop. The default refills 500
+normalized input-work tokens per second and allows a 1,000-token burst. A complete ordered batch
+reserves its cost before the first mutation. This keeps the limit away from normal optimized Step
+loops and prevents a rate-limit boundary from partially executing a batch.
+
 ## Performance
 
 [![Warm-operation p50 latency on July 30, 2026. Modal optimized recorded the lowest p50 in each of six displayed rows; configurations and caller topologies differed.](https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/warm-operation-p50-2026-07-30.svg)](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)

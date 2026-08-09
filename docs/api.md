@@ -291,6 +291,9 @@ need to know whether a Modal noVNC URL exists.
 - `input_backends_available` is the most recent readiness probe's usable set. It is empty before
   the first probe and whenever the probe has not observed a usable adapter. `xdotool` appears only
   after a bounded, display-aware command probe succeeds; finding its executable is not sufficient.
+- `input_rate_limit_policy` identifies the normalized weight contract. Version 1 reports
+  `normalized-input-work-v1`.
+- `input_rate_limit_tokens_per_sec` and `input_rate_limit_burst` report the resolved daemon values.
 
 Capability reads report cached state and do not trigger a new input probe.
 
@@ -584,11 +587,15 @@ instead, and cursor-position queries do not consume the action budget. Successfu
 responses include timing metadata as `timing.daemon_ms`, measured inside the daemon for the
 batch request. The timing object contains only elapsed milliseconds and no command strings,
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
-`actions.input_rate_limit_per_sec` maps to `COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC` and enforces a
-simple per-daemon rolling one-second action limit. The limit applies to `/v1/actions/run` and
-direct desktop-affecting mutation routes, including mouse, keyboard, clipboard writes/clears,
-windows, apps, browser, and commands; failures return `rate_limited` without executing the
-over-limit action.
+`actions.input_rate_limit_per_sec` and `actions.input_rate_limit_burst` configure one daemon-local
+token bucket. The defaults are 500 normalized input-work tokens per second and a 1,000-token
+burst. Repeated clicks, long typing, large scrolls, drag paths, hotkeys, and nested `hold_key`
+actions cost more than a simple move or click. Screenshots, waits, zooms, and cursor queries use no
+input tokens. The daemon computes and reserves the complete recursive batch cost before mutation.
+A batch that can fit but lacks current credit returns `429 rate_limited`, `retry_after_ms`, and
+`Retry-After`. A batch whose cost exceeds the configured burst returns the non-retryable
+`422 input_cost_exceeds_burst`. Neither response executes an action or creates a Step receipt.
+Direct desktop mutation routes use the same bucket, so they cannot bypass the trajectory limit.
 `screenshot_after` is an implicit trailing screenshot operation. Its screenshot and artifact
 budgets are reserved after earlier batch actions complete, immediately before capture, so a budget
 failure is returned as a trailing `screenshot_after` result rather than rolling back already

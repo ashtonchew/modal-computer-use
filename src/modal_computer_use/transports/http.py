@@ -194,6 +194,7 @@ class HTTPTransport:
                 details=payload.get("details")
                 if isinstance(payload.get("details"), dict)
                 else None,
+                retry_after_seconds=_retry_after_seconds(response),
             )
 
 
@@ -386,7 +387,16 @@ class AsyncHTTPTransport:
             status_code=response.status_code,
             code=payload.get("code"),
             details=payload.get("details") if isinstance(payload.get("details"), dict) else None,
+            retry_after_seconds=_retry_after_seconds(response),
         )
+
+
+def _retry_after_seconds(response: httpx.Response) -> int | None:
+    value = response.headers.get("Retry-After")
+    if value is None or not value.isascii() or not value.isdigit():
+        return None
+    parsed = int(value)
+    return parsed if 0 <= parsed <= 2_147_483_647 else None
 
 
 def _validate_declared_length(headers: Mapping[str, str], *, max_bytes: int) -> None:

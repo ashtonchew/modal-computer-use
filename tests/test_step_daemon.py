@@ -6,6 +6,7 @@ from dataclasses import replace
 import httpx
 import pytest
 
+from modal_computer_use.daemon.input_rate_limit import InputTokenBucket
 from modal_computer_use.daemon.leases import (
     LEASE_EPOCH_HEADER,
     LEASE_FENCE_HEADER,
@@ -56,6 +57,42 @@ def test_step_requires_an_active_lease_before_mutation(test_client, app) -> None
     assert response.json()["code"] == "lease_required"
     assert app.state.backend.cursor.x == 0
     assert app.state.backend.cursor.y == 0
+
+
+def test_step_reserves_the_whole_weighted_batch_before_receipt_or_mutation(
+    test_client,
+    app,
+) -> None:
+    app.state.settings = replace(
+        app.state.settings,
+        input_rate_limit_per_sec=1,
+        input_rate_limit_burst=1,
+    )
+    app.state.input_token_bucket = InputTokenBucket(refill_rate=1, capacity=1)
+    headers = _acquire_lease(test_client, run_id="rate-limited-step")
+
+    response = test_client.post(
+        "/v1/steps",
+        headers=headers,
+        json={
+            "actions": [
+                {"type": "move", "x": 10, "y": 20},
+                {"type": "move", "x": 30, "y": 40},
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "input_cost_exceeds_burst"
+    assert app.state.backend.cursor == Point(x=0, y=0)
+    assert app.state.action_count == 0
+    receipt = test_client.post(
+        "/v1/receipts/status",
+        headers=headers,
+        json={"run_id": "rate-limited-step", "sequence": 0},
+    )
+    assert receipt.status_code == 200
+    assert receipt.json()["state"] == "MISSING"
 
 
 def test_step_rejects_an_unsupported_accept_before_mutation(test_client, app) -> None:

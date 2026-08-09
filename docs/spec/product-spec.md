@@ -342,6 +342,7 @@ Current defaults with architectural significance are:
 - standard resources;
 - `actions.input_backend="auto"`;
 - `actions.subprocess_backend="isolated-asyncio"`;
+- input admission refills 500 normalized input-work tokens per second with a 1,000-token burst;
 - daemon HTTP/1.1;
 - browser prewarm when a browser is configured;
 - ordered batches stop on the first error unless `continue_on_error` is explicit.
@@ -407,6 +408,7 @@ Action batches:
 - serialize input-emitting work under the daemon input lock;
 - stop at the first failure by default;
 - support explicit `continue_on_error`;
+- reserve the complete recursive weighted input cost before mutation;
 - enforce batch size, per-action deadline, batch deadline, screenshot-pixel, rate, and configured
   budget limits;
 - return per-item results and timing;
@@ -423,9 +425,9 @@ hold requests accept a key and optional duration only.
 Application route errors normally use a structured body with `code`, sanitized `message`, and
 `details`, plus `X-Computer-Use-Error-Code`. Auth middleware, `/readyz`, and WebSocket frames use
 purpose-specific schemas. Validation is `422`; unsafe paths are `400`; conflicts are `409`;
-oversized requests are `413`; budget/rate failures are `429`; readiness and recovery failures are
-service errors. Unhandled route exceptions return a generic `internal_error` and sanitized
-details.
+oversized requests are `413`; transient budget/rate failures are `429`; a batch that can never fit
+the configured input burst is `422 input_cost_exceeds_burst`; readiness and recovery failures are
+service errors. Unhandled route exceptions return a generic `internal_error` and sanitized details.
 
 Clients must branch on stable codes and typed exceptions, not raw exception text.
 
@@ -443,6 +445,11 @@ The `auto` input policy prefers persistent native XTest/XKB. Capability output s
 Typing supports `auto`, canonical direct `keystrokes`, clipboard-assisted input, and explicit
 legacy `xdotool`. Unsupported or active-layout-unmapped keys fail before emission. A possibly
 partial native operation is non-replayable and terminal.
+
+The `normalized-input-work-v1` policy gives extra weight to repeated clicks, long typing, large
+scrolls, drag paths, hotkeys, and nested actions. One daemon-local token bucket covers borrowed and
+direct mutation routes. Lease handoff does not reset it. Rate admission is resource protection; it
+does not replace approvals or semantic policy.
 
 Direct mouse and window responses report request-specific input or window backend headers. Raw
 screenshot routes report the request-specific capture backend. Global capability fields are
@@ -829,6 +836,8 @@ Boundary scans must confirm:
 - the frozen dependency graph passes audit;
 - Bandit and Semgrep report no material finding;
 - security regressions and the documented performance gates pass locally.
+- the minimum supported runtime sustains at least 1,000 representative normalized input-work
+  tokens per second before the 500/1,000 default is promoted.
 
 Modal smoke tests are credential-gated. The deployed-Function handoff smoke is a protected manual
 workflow and validates one bounded handoff, not benchmark performance or continuous production

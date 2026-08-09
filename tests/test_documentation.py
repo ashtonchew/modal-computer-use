@@ -262,7 +262,8 @@ def test_release_docs_identify_v2_release_candidate() -> None:
     specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
     assert "git@v1.1.0" not in readme
-    assert "## Unreleased\n\n## 2.0.0 - 2026-08-08" in changelog
+    assert "## Unreleased" in changelog
+    assert "## 2.0.0 - 2026-08-08" in changelog
     assert "active specification for the `2.0.0` release candidate" in specification
     assert "**Previous released baseline:** `v1.1.0`" in specification
     assert "**Release identity:** `v2.0.0`" in specification
@@ -581,6 +582,21 @@ def test_benchmarking_has_a_distinct_computer_step_promotion_gate() -> None:
     assert "not a measured fused turn" in step
     assert "non-gating engineering goal and distance metric" in step
     assert "a mutation-free placement probe and one measurement invocation" in step
+
+
+def test_benchmarking_has_an_executable_weighted_input_capacity_gate() -> None:
+    source = (DOCS / "benchmarking.md").read_text(encoding="utf-8")
+    capacity = " ".join(
+        _section(source, "## Weighted input capacity gate", "## Choose a command").split()
+    )
+
+    assert "scripts/run_input_capacity_gate.py" in capacity
+    assert "500-token-per-second refill and 1,000-token burst" in capacity
+    assert "at least 1,000 representative normalized input-work tokens per second" in capacity
+    assert "2,000-token refill and 4,000-token burst" in capacity
+    assert "95% CPU use" in capacity
+    assert "64 MiB of RSS" in capacity
+    assert "does not redefine that default" in capacity
 
 
 def test_performance_requires_exact_placement_for_the_primary_trajectory() -> None:

@@ -56,6 +56,18 @@ uses full-resolution pixel verification and can fall back to polling. A verified
 not application readiness or visual stability. Use an application-specific readiness condition
 before the next dependent action.
 
+## Input is rate limited
+
+Read `retry_after_ms` and the `Retry-After` header from a `429 rate_limited` response. The daemon
+rejected the complete request before mutation. Wait in application code only when it is safe to
+issue a new operation; the SDK does not replay mutations automatically.
+
+An `input_cost_exceeds_burst` response is different. Waiting cannot make that request fit. Raise
+`actions.input_rate_limit_burst` explicitly or split an application-owned batch only when doing so
+preserves its required semantics. Configure both refill and burst values for an intentionally
+restrictive demo or untrusted workload. The defaults are tuned to stay outside normal serialized
+Step loops, but rate limiting remains resource protection rather than an approval policy.
+
 Use the [troubleshooting guide](https://modal-computer-use.mintlify.app/operate/troubleshooting) for
 the public guide.
 

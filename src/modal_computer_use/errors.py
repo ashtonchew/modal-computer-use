@@ -52,11 +52,18 @@ class DaemonHTTPError(ComputerUseError):
         status_code: int | None = None,
         code: str | None = None,
         details: dict[str, Any] | None = None,
+        retry_after_seconds: int | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.details = details or {}
+        self.retry_after_seconds = retry_after_seconds
+
+    @property
+    def retry_after_ms(self) -> int | None:
+        value = self.details.get("retry_after_ms")
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 class UnsupportedActionError(ComputerUseError):

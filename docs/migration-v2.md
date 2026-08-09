@@ -59,6 +59,19 @@ the primary screenshot Interface because it omits the semantic `Screenshot` meta
 Warm capacity remains off unless an operator enables it. Function minimums and Sandbox warm pools
 are separate, inspectable cost choices; they are not part of article parity.
 
+## Input rate-limit migration
+
+The old `actions.input_rate_limit_per_sec=20` default counted flat actions in a rolling one-second
+window. The new default interprets that field as a token-bucket refill rate and sets it to `500`.
+`actions.input_rate_limit_burst=1000` is new. The daemon now charges normalized input-work tokens
+and reserves a complete recursive batch before mutation.
+
+If you set the old field explicitly, review both values. For an intentionally restrictive profile,
+set both the refill and burst. Do not assume that `20` with the new default burst reproduces the old
+boundary. A transient `rate_limited` response is safe because no action in that request ran. An
+`input_cost_exceeds_burst` response cannot succeed after waiting; change the explicit capacity or
+the application-owned request shape.
+
 ## Lifecycle and failure behavior
 
 The owner creates the desktop once. A Function borrows it once for one trajectory. The borrow uses

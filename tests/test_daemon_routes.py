@@ -31,6 +31,9 @@ def test_health_version_capabilities(test_client) -> None:
     assert caps["input_backend_configured"] == "mock"
     assert caps["input_backends_supported"] == ["mock"]
     assert caps["input_backends_available"] == ["mock"]
+    assert caps["input_rate_limit_policy"] == "normalized-input-work-v1"
+    assert caps["input_rate_limit_tokens_per_sec"] == 500
+    assert caps["input_rate_limit_burst"] == 1000
     for primitive in ("input", "lifecycle", "processes", "session", "debug"):
         assert primitive in caps["primitives"]
     assert "screenshot-binary-metadata-v1" in caps["primitives"]
@@ -247,6 +250,7 @@ def test_rate_limit_blocks_direct_release_all_before_backend_call(tmp_path) -> N
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             input_rate_limit_per_sec=1,
+            input_rate_limit_burst=1,
         )
     )
     calls = 0

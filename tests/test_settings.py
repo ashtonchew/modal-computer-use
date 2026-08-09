@@ -38,6 +38,8 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
         "COMPUTER_USE_POST_ACTION_DELAY_MS",
         "COMPUTER_USE_READINESS_CACHE_TTL_MS",
         "COMPUTER_USE_SUBPROCESS_BACKEND",
+        "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC",
+        "COMPUTER_USE_INPUT_RATE_LIMIT_BURST",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -55,6 +57,24 @@ def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     assert settings.max_observation_connections == 16
     assert settings.max_tunnel_sessions == 0
     assert settings.max_action_depth == 32
+    assert settings.input_rate_limit_per_sec == 500
+    assert settings.input_rate_limit_burst == 1_000
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "setting"),
+    [
+        ("input_rate_limit_per_sec", -1, "COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC"),
+        ("input_rate_limit_burst", 0, "COMPUTER_USE_INPUT_RATE_LIMIT_BURST"),
+    ],
+)
+def test_daemon_settings_reject_invalid_input_rate_limits(
+    field: str,
+    value: int,
+    setting: str,
+) -> None:
+    with pytest.raises(ValueError, match=rf"^{setting} must be"):
+        DaemonSettings(**{field: value})
 
 
 def test_daemon_settings_explicit_overrides_win(monkeypatch) -> None:

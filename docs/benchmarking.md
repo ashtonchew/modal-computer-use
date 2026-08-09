@@ -116,9 +116,10 @@ runner compares these arms inside the same placed Function and the same borrowed
 - each returned screenshot must report that coordinate and a daemon capture timestamp after its
   baseline. This is the deterministic causality check for the immediate frame without comparing
   clocks across the Function and Sandbox.
-- the runner retains the product's 20-input-events-per-second limit and waits 125 ms after each
-  arm. This untimed pacing keeps the preparation move and measured click below the rolling limit
-  without disabling a safety default, retrying, or replacing samples.
+- the dated runner fixed the then-current 20-actions-per-second setting and waited 125 ms after
+  each arm. This untimed pacing kept the preparation move and measured click below that historical
+  rolling limit without disabling it, retrying, or replacing samples. The result remains immutable
+  evidence for that configuration; it does not describe the later weighted token-bucket default.
 
 The runner uses one async owner, one versioned handle, one exact requested region, one
 `borrow_async()` context, and one pooled async HTTP client. It makes two calls to the same placed
@@ -143,6 +144,32 @@ are caller-observed request durations. The candidate's phase values are daemon-r
 one Step request. They are arm-specific diagnostics and must not be compared as equivalent phases.
 The prior arm records daemon total and transport-and-decode as null because its semantic screenshot
 does not expose a comparable daemon capture duration. Candidate values must be present and finite.
+
+## Weighted input capacity gate
+
+Run the capacity gate before promoting the 500-token-per-second refill and 1,000-token burst. The
+gate uses the minimum supported 1 CPU and 2,048 MiB Sandbox, exact placement, native XTest, one
+borrow, and one pooled client. It sends ordered mixed batches and verifies every result, XTest
+attribution, pointer sentinels, daemon health, cleanup, throughput, tail stability, CPU use, and RSS
+growth. It does not retry or replace failed work. A passing run stays at or below 95% CPU use on
+the one-CPU profile and adds no more than 64 MiB of RSS during the measured workload.
+
+The measurement configures a 2,000-token refill and 4,000-token burst so the candidate limiter does
+not become the test bottleneck. The release gate requires at least 1,000 representative normalized
+input-work tokens per second. This proves capacity headroom for the lower 500-token product default;
+it does not redefine that default.
+
+```bash
+modal run --env main scripts/run_input_capacity_gate.py \
+  --source-sha "$(git rev-parse HEAD)" \
+  --authorize \
+  --output benchmark-results/candidates/input-capacity-live.json
+```
+
+The runner rejects implicit authorization, missing Modal credentials, a dirty source tree, broad or
+mismatched placement, non-XTest attribution, missing or saturated resource observations,
+incomplete cleanup, and unsafe artifact fields. Keep failed artifacts immutable and publish only a
+new sanitized passing artifact with its exact source revision and resolved configuration.
 
 Do not wait for a browser paint or another visual change in this promotion gate. That would change
 the stable immediate-observation contract and favor the prior arm's extra network round trip. Run
@@ -509,13 +536,12 @@ uv run computer-use benchmark compare \
 ```
 
 Provider-default means the documented public SDK path and its default provider configuration.
-For Modal that means the `ComputerConfig` defaults: standard resources, no browser profile, the
-20-actions-per-second input limit, `auto` typing with a 10 ms character delay, and default placement.
+For Modal that means the `ComputerConfig` defaults: standard resources, no browser profile, a
+500-normalized-token-per-second input refill with a 1,000-token burst, `auto` typing with a 10 ms
+character delay, and default placement.
 For the 100- and 1000-character cases, `auto` resolves to clipboard, so the requested delay is not
-applied per character. When Modal retains the default input limit, its runner records and applies
-1.05 seconds of Modal-only pacing before every warmup and measured action invocation, including
-each action-batch subcase. The pacing is outside the timer and prevents earlier samples from
-crowding the next operation; the limit counts actions, not typed characters. The command workload
+applied per character. A benchmark must record both token-bucket values and any untimed pacing.
+The command workload
 requests `sh -c "printf '42\\n'"`, requires exit code 0 and stdout exactly `"42\n"`, and never
 strips whitespace. Record any override and do not label that provider arm as default. Only the
 separate Modal-optimized arm receives repository optimizations, including explicit `keystrokes`

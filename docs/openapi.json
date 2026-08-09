@@ -694,6 +694,41 @@
             "title": "Input Backends Supported",
             "type": "array"
           },
+          "input_rate_limit_burst": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Rate Limit Burst"
+          },
+          "input_rate_limit_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Rate Limit Policy"
+          },
+          "input_rate_limit_tokens_per_sec": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Rate Limit Tokens Per Sec"
+          },
           "primitives": {
             "items": {
               "type": "string"
