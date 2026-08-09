@@ -42,6 +42,17 @@ _FORBIDDEN_KEY_PARTS = (
     "token",
     "typed_text",
 )
+_FAILURE_CHECKS = {
+    "close_idempotent",
+    "closed_capture_rejected",
+    "constructor_geometry_failure",
+    "invalid_region_rejected",
+    "constructor_failure_falls_back_once",
+    "capture_failure_falls_back_once",
+    "invalid_result_falls_back_once",
+    "extension_load_failure_selects_mss",
+    "close_failure_reported",
+}
 
 
 def validate_x11_shm_screenshot_artifact(payload: Mapping[str, Any]) -> None:
@@ -51,6 +62,14 @@ def validate_x11_shm_screenshot_artifact(payload: Mapping[str, Any]) -> None:
     artifact accepted here must be sufficient to make the default decision.
     """
 
+    _validate_artifact_structure(payload)
+    actual = _mapping(payload.get("promotion"), "promotion")
+    expected = _evaluate_validated_artifact(payload)
+    if actual != expected:
+        raise ValueError("promotion decision does not match the retained observations")
+
+
+def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
     if not isinstance(payload, Mapping):
         raise ValueError("screenshot promotion artifact must be an object")
     _validate_safe_value(payload)
@@ -99,12 +118,19 @@ def validate_x11_shm_screenshot_artifact(payload: Mapping[str, Any]) -> None:
     _validate_operational_gates(
         _mapping(payload.get("operational_gates"), "operational_gates")
     )
+    _validate_operational_details(
+        _mapping(payload.get("operational_details"), "operational_details")
+    )
 
 
 def evaluate_x11_shm_screenshot_promotion(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Return the immutable gate decision for a validated artifact."""
 
-    validate_x11_shm_screenshot_artifact(payload)
+    _validate_artifact_structure(payload)
+    return _evaluate_validated_artifact(payload)
+
+
+def _evaluate_validated_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
     arms = _mapping(payload["arms"], "arms")
     baseline = _observations(_mapping(arms[BASELINE_ARM], BASELINE_ARM))
     candidate = _observations(_mapping(arms[CANDIDATE_ARM], CANDIDATE_ARM))
@@ -180,7 +206,7 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
         raise ValueError("source_revision must be a full Git commit")
     if configuration.get("worktree_clean") is not True:
         raise ValueError("publishable evidence requires a clean worktree")
-    for key in ("native_source_sha256", "cargo_lock_sha256"):
+    for key in ("x11_shm_source_sha256", "cargo_lock_sha256"):
         if _FULL_SHA256.fullmatch(str(configuration.get(key, ""))) is None:
             raise ValueError(f"{key} must be a SHA-256 digest")
     if configuration.get("rust_toolchain") != "rustc 1.91.0":
@@ -258,16 +284,54 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
         "chromium_fixture",
         "failure_matrix",
         "concurrency_matrix",
+        "x_server_restart",
         "cleanup_succeeded",
     ):
         if gates.get(key) is not True:
             raise ValueError(f"operational gate {key} did not pass")
     if gates.get("captures") != 10_000:
         raise ValueError("operational soak must contain 10000 captures")
+    if gates.get("full_captures") != 5_000 or gates.get("region_captures") != 5_000:
+        raise ValueError("operational soak must alternate 5000 full and regional captures")
     if gates.get("fd_delta") != 0 or gates.get("mapping_delta") != 0:
         raise ValueError("resource counts changed during the operational soak")
     if _nonnegative_integer(gates.get("rss_growth_bytes"), "rss_growth_bytes") > 16 * 1024 * 1024:
         raise ValueError("resource RSS growth exceeds the fixed 16 MiB ceiling")
+
+
+def _validate_operational_details(details: Mapping[str, Any]) -> None:
+    concurrency = _mapping(details.get("concurrency"), "concurrency")
+    levels = concurrency.get("levels")
+    if concurrency.get("passed") is not True or not isinstance(levels, list):
+        raise ValueError("concurrency detail did not pass")
+    if [row.get("concurrency") for row in levels if isinstance(row, Mapping)] != [1, 2, 4, 8]:
+        raise ValueError("concurrency detail must cover levels 1, 2, 4, and 8")
+    if any(
+        not isinstance(row, Mapping) or row.get("capture_backend") != CANDIDATE_ARM
+        for row in levels
+    ):
+        raise ValueError("concurrency detail contains unexpected source attribution")
+
+    failure_matrix = _mapping(details.get("failure_matrix"), "failure_matrix")
+    checks = _mapping(failure_matrix.get("checks"), "failure_matrix.checks")
+    if (
+        failure_matrix.get("passed") is not True
+        or set(checks) != _FAILURE_CHECKS
+        or any(value is not True for value in checks.values())
+    ):
+        raise ValueError("failure matrix is incomplete")
+
+    soak = _mapping(details.get("soak"), "soak")
+    if (
+        soak.get("passed") is not True
+        or soak.get("captures") != 10_000
+        or soak.get("full_captures") != 5_000
+        or soak.get("region_captures") != 5_000
+    ):
+        raise ValueError("daemon-local soak detail is incomplete")
+    restart = _mapping(details.get("x_server_restart"), "x_server_restart")
+    if restart.get("passed") is not True or restart.get("ready_after_restart") is not True:
+        raise ValueError("X server restart detail did not pass")
 
 
 def _paired_bootstrap_median_difference(
