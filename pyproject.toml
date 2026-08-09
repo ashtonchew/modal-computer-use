@@ -35,7 +35,7 @@ Issues = "https://github.com/ashtonchew/modal-computer-use/issues"
 Changelog = "https://github.com/ashtonchew/modal-computer-use/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-modal = ["modal~=1.5.2"]
+modal = ["modal~=1.5.3"]
 openai = ["openai>=2.36"]
 anthropic = ["anthropic>=0.101"]
 bench-daytona = ["daytona==0.175.0"]
