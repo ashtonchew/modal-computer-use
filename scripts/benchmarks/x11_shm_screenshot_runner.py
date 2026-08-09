@@ -1828,6 +1828,30 @@ def run_bounded_x_server_probe() -> dict[str, Any]:
     return result
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=600,
+    region=REGION,
+    retries=0,
+)
+def run_x_server_restart_probe() -> dict[str, Any]:
+    """Run only display-generation restart recovery for diagnosis."""
+
+    async def execute() -> dict[str, Any]:
+        try:
+            return await _run_x_server_restart_probe(lambda: _ArmContext("auto"))
+        finally:
+            cleanup = await _final_sandbox_cleanup()
+            if cleanup.get("succeeded") is not True:
+                raise RuntimeError("X server restart probe cleanup found live Sandboxes")
+
+    result = asyncio.run(execute())
+    print(json.dumps(result, sort_keys=True))
+    return result
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,

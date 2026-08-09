@@ -47,6 +47,17 @@ def test_promotion_runner_exposes_the_bounded_x_server_probe() -> None:
     assert "and elapsed_ms < 2_500.0" in runner
 
 
+def test_promotion_runner_exposes_the_x_server_restart_probe() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x_server_restart_probe(" in runner
+    assert 'return await _run_x_server_restart_probe(lambda: _ArmContext("auto"))' in runner
+    assert 'raise RuntimeError("X server restart probe cleanup found live Sandboxes")' in runner
+    assert 'print(json.dumps(result, sort_keys=True))' in runner
+
+
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
     runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
         encoding="utf-8"
