@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from modal_computer_use.errors import DaemonHTTPError
 from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
     _EXPECTED_PAYLOAD,
     _validate_sample,
@@ -140,12 +141,25 @@ def test_validate_sample_rejects_response_contract(header: str, value: str) -> N
 
 
 class FakeClient:
-    def __init__(self, backend: str) -> None:
+    def __init__(self, backend: str, *, fail_on_call: int | None = None) -> None:
         self.backend = backend
+        self.fail_on_call = fail_on_call
+        self.calls = 0
 
     async def post_bytes_with_headers(self, path: str, *, json: dict[str, object]):
         assert path == "/v1/screenshots/full/raw"
         assert json == _EXPECTED_PAYLOAD
+        self.calls += 1
+        if self.calls == self.fail_on_call:
+            raise DaemonHTTPError(
+                "internal server error",
+                status_code=500,
+                code="internal_error",
+                details={
+                    "error_type": "ScreenshotCaptureTimedOut",
+                    "token": "must-not-appear",
+                },
+            )
         return DATA, _trace(backend=self.backend)["response_headers"]
 
 
@@ -161,14 +175,20 @@ class FakeScreenshots:
 
 
 class FakeComputer:
-    def __init__(self, backend: str) -> None:
-        self.client = FakeClient(backend)
+    def __init__(self, backend: str, *, fail_on_call: int | None = None) -> None:
+        self.client = FakeClient(backend, fail_on_call=fail_on_call)
         self.screenshots = FakeScreenshots(self.client)
 
 
 class FakeContext:
-    def __init__(self, backend: str, *, fail_cleanup: bool = False) -> None:
-        self.computer = FakeComputer(backend)
+    def __init__(
+        self,
+        backend: str,
+        *,
+        fail_cleanup: bool = False,
+        fail_on_call: int | None = None,
+    ) -> None:
+        self.computer = FakeComputer(backend, fail_on_call=fail_on_call)
         self.fail_cleanup = fail_cleanup
 
     async def __aenter__(self) -> FakeComputer:
@@ -241,3 +261,24 @@ async def test_measure_full_screenshot_fails_cleanup() -> None:
             warmup_iterations=10,
             decode_parity=lambda _data: True,
         )
+
+
+@pytest.mark.asyncio
+async def test_measure_full_screenshot_annotates_daemon_failure_without_secrets() -> None:
+    with pytest.raises(DaemonHTTPError) as caught:
+        await measure_full_screenshot_arms(
+            {
+                "mss": lambda: FakeContext("mss"),
+                "x11-shm": lambda: FakeContext("x11-shm", fail_on_call=11),
+            },
+            sample_count=100,
+            warmup_iterations=10,
+            decode_parity=lambda _data: True,
+            schedule_seed=20260808,
+        )
+
+    notes = "\n".join(caught.value.__notes__)
+    assert "arm=x11-shm phase=sample sample_index=0" in notes
+    assert "status_code=500 code=internal_error" in notes
+    assert "error_type=ScreenshotCaptureTimedOut" in notes
+    assert "must-not-appear" not in notes
