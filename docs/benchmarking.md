@@ -563,7 +563,7 @@ Use these maintained workflows for new evidence:
 | Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
 | Current provider presentation | [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md) |
 | Optimized SDK default promotion | [`run_optimized_default_promotion.py`](../scripts/run_optimized_default_promotion.py); [eligible 2026-08-08 result](benchmark-results-2026-08-08-optimized-default.md) |
-| Inline versus Managed Image Release lifecycle | [`run_modal_image_lifecycle_benchmark.py`](../scripts/run_modal_image_lifecycle_benchmark.py); credential-gated paired Sandbox lifecycle evidence |
+| Inline versus Managed Image Release lifecycle | [`run_modal_image_lifecycle_benchmark.py`](../scripts/run_modal_image_lifecycle_benchmark.py); [eligible standard-variant result, 2026-08-08](benchmark-results-2026-08-08-image-lifecycle.md) |
 | Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |
 | Placement comparison | `computer-use benchmark modal-region-ab`, then `modal-region-summary` |
 | Modal V2 candidate or optimized-frontier experiments | Use [`run_modal_v2_candidate_benchmark.py`](../scripts/run_modal_v2_candidate_benchmark.py) or [`run_modal_optimized_frontier_benchmark.py`](../scripts/run_modal_optimized_frontier_benchmark.py) with the archived gated methodology linked below |

@@ -1,0 +1,449 @@
+{
+  "benchmark": "modal-image-lifecycle",
+  "comparison": {
+    "arms": {
+      "inline-recipe": {
+        "max": 22346.588167005393,
+        "mean": 20540.982687503856,
+        "min": 18735.37720800232,
+        "p50": 20540.982687503856,
+        "p95": 22166.02761905524
+      },
+      "managed-exact-id": {
+        "max": 15311.221874995681,
+        "mean": 14379.724812497443,
+        "min": 13448.227749999205,
+        "p50": 14379.724812497443,
+        "p95": 15218.072168745857
+      }
+    },
+    "managed_vs_inline": {
+      "mean_ratio": 0.7000504810923859,
+      "p50_delta_ms": -6161.257875006413
+    },
+    "paired_delta_ms": {
+      "bootstrap_95_ci": {
+        "mean": [
+          -7035.366292009712,
+          -5287.149458003114
+        ],
+        "median": [
+          -7035.366292009712,
+          -5287.149458003114
+        ],
+        "resamples": 2000,
+        "seed": 20260808
+      },
+      "direction": "managed-minus-inline",
+      "max": -5287.149458003114,
+      "mean": -6161.257875006413,
+      "min": -7035.366292009712,
+      "p50": -6161.257875006413,
+      "p95": -5374.560299703444
+    },
+    "status": "measured"
+  },
+  "configuration": {
+    "app_name": "modal-computer-use-image-lifecycle",
+    "benchmark_run_id": "image-lifecycle-pilot-4cb098207053",
+    "bootstrap": {
+      "resamples": 2000,
+      "seed": 20260808
+    },
+    "caller_label": "codex-desktop-local-process",
+    "caller_topology": "one-external-sdk-process",
+    "image_build_duration_included": false,
+    "managed_release": {
+      "environment_name": "main",
+      "image_builder_version": "2025.06",
+      "image_reference": "modal-computer-use-standard:4cb098207053931c2e6e693ce87f7f6e16ab215a",
+      "image_variant": "standard",
+      "logical_release": "2.0.0",
+      "modal_image_object_id": "im-PUBK2dnCEAaheWFqgQ9EgM",
+      "modal_sdk_version": "1.5.3",
+      "pyproject_sha256": "941035ccf284f04b8d42127816cb40535955fe7ab3f913d5720c1d7b0dfc6669",
+      "uv_lock_sha256": "36a463fcef97281951d875f9850ae3945be2692a939d087519cb9a534b7e7386",
+      "uv_version": "0.12.3",
+      "workspace_name": "modal-ai-hackathon"
+    },
+    "max_estimated_cost_usd": 20.0,
+    "measurement_scope": "sandbox-create-through-first-valid-frame",
+    "requested_region": "us-west-2",
+    "resource_limits": {
+      "cpu": 1.0,
+      "memory_mib": 2048
+    },
+    "resources": {
+      "cpu": 1.0,
+      "memory_mib": 2048
+    },
+    "samples_per_arm": 2,
+    "sandbox_timeout_seconds": 180,
+    "schedule_seed": 20260808,
+    "source_revision": "4cb098207053931c2e6e693ce87f7f6e16ab215a",
+    "warmup_pairs": 1
+  },
+  "cost": {
+    "currency": "USD",
+    "duration_policy": "create_start_through_cleanup_wall_time",
+    "exclusions": [
+      "Image build",
+      "canary Sandbox",
+      "control plane",
+      "billing adjustments"
+    ],
+    "lifecycle_wall_time_seconds": 114.520562751,
+    "maximum_estimate_usd": 0.0997164,
+    "pricing": {
+      "region_multiplier": 1.75,
+      "region_source_url": "https://modal.com/docs/guide/region-selection",
+      "retrieved_date": "2026-08-08",
+      "source_url": "https://modal.com/products/sandboxes"
+    },
+    "status": "estimated",
+    "target_cost_estimate_usd": 0.01057368355879983
+  },
+  "failures": [],
+  "generated_at": "2026-08-09T00:09:21Z",
+  "observations": [
+    {
+      "actual_placement": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      },
+      "arm": "inline-recipe",
+      "cleanup": {
+        "attempted": true,
+        "succeeded": true
+      },
+      "frame_valid": true,
+      "modal_image_object_id": "im-klPdaVL8Fcz5iKuUFB8sgm",
+      "pair_index": 0,
+      "position": 0,
+      "resource_lifetime_ms": 25000.686167,
+      "sample_index": 0,
+      "sequence": 2,
+      "startup_stages": {
+        "attestation_ready": {
+          "elapsed_ms": 20282.795541999803,
+          "status": "observed"
+        },
+        "connect_ready": {
+          "elapsed_ms": 19410.70425000362,
+          "status": "observed"
+        },
+        "connect_token_ready": {
+          "elapsed_ms": 12349.24704200239,
+          "status": "observed"
+        },
+        "daemon_started": {
+          "elapsed_ms": null,
+          "reason": "the daemon process does not yet emit an attested startup timestamp",
+          "status": "unsupported"
+        },
+        "first_valid_frame": {
+          "elapsed_ms": 22346.588167005393,
+          "status": "observed"
+        },
+        "request_received": {
+          "elapsed_ms": 0.009750001481734216,
+          "status": "observed"
+        },
+        "sandbox_create_started": {
+          "elapsed_ms": 113.92333399999188,
+          "status": "observed"
+        },
+        "sandbox_registered": {
+          "elapsed_ms": 2551.793209000607,
+          "status": "observed"
+        },
+        "scheduled": {
+          "elapsed_ms": null,
+          "reason": "Modal V1 does not expose a supported scheduling timestamp",
+          "status": "unsupported"
+        },
+        "tcp_ready": {
+          "elapsed_ms": 12257.608459003677,
+          "status": "observed"
+        },
+        "tunnel_ready": {
+          "elapsed_ms": 21404.588542005513,
+          "status": "observed"
+        }
+      },
+      "status": "ok",
+      "timings_ms": {
+        "create_call_return": 21404.821959,
+        "create_to_first_valid_frame": 22346.588167005393
+      }
+    },
+    {
+      "actual_placement": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      },
+      "arm": "managed-exact-id",
+      "cleanup": {
+        "attempted": true,
+        "succeeded": true
+      },
+      "frame_valid": true,
+      "modal_image_object_id": "im-PUBK2dnCEAaheWFqgQ9EgM",
+      "pair_index": 0,
+      "position": 1,
+      "resource_lifetime_ms": 17767.727459,
+      "sample_index": 0,
+      "sequence": 3,
+      "startup_stages": {
+        "attestation_ready": {
+          "elapsed_ms": 14440.073499994469,
+          "status": "observed"
+        },
+        "connect_ready": {
+          "elapsed_ms": 14228.483583996422,
+          "status": "observed"
+        },
+        "connect_token_ready": {
+          "elapsed_ms": 6275.316250001197,
+          "status": "observed"
+        },
+        "daemon_started": {
+          "elapsed_ms": null,
+          "reason": "the daemon process does not yet emit an attested startup timestamp",
+          "status": "unsupported"
+        },
+        "first_valid_frame": {
+          "elapsed_ms": 15311.221874995681,
+          "status": "observed"
+        },
+        "request_received": {
+          "elapsed_ms": 0.029124996217433363,
+          "status": "observed"
+        },
+        "sandbox_create_started": {
+          "elapsed_ms": 110.85333400114905,
+          "status": "observed"
+        },
+        "sandbox_registered": {
+          "elapsed_ms": 1032.2080839978298,
+          "status": "observed"
+        },
+        "scheduled": {
+          "elapsed_ms": null,
+          "reason": "Modal V1 does not expose a supported scheduling timestamp",
+          "status": "unsupported"
+        },
+        "tcp_ready": {
+          "elapsed_ms": 6192.565708995971,
+          "status": "observed"
+        },
+        "tunnel_ready": {
+          "elapsed_ms": 14565.30699999712,
+          "status": "observed"
+        }
+      },
+      "status": "ok",
+      "timings_ms": {
+        "create_call_return": 14565.687875,
+        "create_to_first_valid_frame": 15311.221874995681
+      }
+    },
+    {
+      "actual_placement": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      },
+      "arm": "managed-exact-id",
+      "cleanup": {
+        "attempted": true,
+        "succeeded": true
+      },
+      "frame_valid": true,
+      "modal_image_object_id": "im-PUBK2dnCEAaheWFqgQ9EgM",
+      "pair_index": 1,
+      "position": 0,
+      "resource_lifetime_ms": 15155.923875,
+      "sample_index": 1,
+      "sequence": 4,
+      "startup_stages": {
+        "attestation_ready": {
+          "elapsed_ms": 12488.655041997845,
+          "status": "observed"
+        },
+        "connect_ready": {
+          "elapsed_ms": 11772.359000002325,
+          "status": "observed"
+        },
+        "connect_token_ready": {
+          "elapsed_ms": 5401.396209002996,
+          "status": "observed"
+        },
+        "daemon_started": {
+          "elapsed_ms": null,
+          "reason": "the daemon process does not yet emit an attested startup timestamp",
+          "status": "unsupported"
+        },
+        "first_valid_frame": {
+          "elapsed_ms": 13448.227749999205,
+          "status": "observed"
+        },
+        "request_received": {
+          "elapsed_ms": 0.004875000740867108,
+          "status": "observed"
+        },
+        "sandbox_create_started": {
+          "elapsed_ms": 94.39312500035157,
+          "status": "observed"
+        },
+        "sandbox_registered": {
+          "elapsed_ms": 1047.718084002554,
+          "status": "observed"
+        },
+        "scheduled": {
+          "elapsed_ms": null,
+          "reason": "Modal V1 does not expose a supported scheduling timestamp",
+          "status": "unsupported"
+        },
+        "tcp_ready": {
+          "elapsed_ms": 5310.412999999244,
+          "status": "observed"
+        },
+        "tunnel_ready": {
+          "elapsed_ms": 12631.539250003698,
+          "status": "observed"
+        }
+      },
+      "status": "ok",
+      "timings_ms": {
+        "create_call_return": 12631.669208,
+        "create_to_first_valid_frame": 13448.227749999205
+      }
+    },
+    {
+      "actual_placement": {
+        "cloud": "aws",
+        "region": "us-west-2"
+      },
+      "arm": "inline-recipe",
+      "cleanup": {
+        "attempted": true,
+        "succeeded": true
+      },
+      "frame_valid": true,
+      "modal_image_object_id": "im-klPdaVL8Fcz5iKuUFB8sgm",
+      "pair_index": 1,
+      "position": 1,
+      "resource_lifetime_ms": 20904.594584,
+      "sample_index": 1,
+      "sequence": 5,
+      "startup_stages": {
+        "attestation_ready": {
+          "elapsed_ms": 18327.588874999492,
+          "status": "observed"
+        },
+        "connect_ready": {
+          "elapsed_ms": 17698.188916998333,
+          "status": "observed"
+        },
+        "connect_token_ready": {
+          "elapsed_ms": 11253.053083004488,
+          "status": "observed"
+        },
+        "daemon_started": {
+          "elapsed_ms": null,
+          "reason": "the daemon process does not yet emit an attested startup timestamp",
+          "status": "unsupported"
+        },
+        "first_valid_frame": {
+          "elapsed_ms": 18735.37720800232,
+          "status": "observed"
+        },
+        "request_received": {
+          "elapsed_ms": 0.004292000085115433,
+          "status": "observed"
+        },
+        "sandbox_create_started": {
+          "elapsed_ms": 98.4290830019745,
+          "status": "observed"
+        },
+        "sandbox_registered": {
+          "elapsed_ms": 2498.412125001778,
+          "status": "observed"
+        },
+        "scheduled": {
+          "elapsed_ms": null,
+          "reason": "Modal V1 does not expose a supported scheduling timestamp",
+          "status": "unsupported"
+        },
+        "tcp_ready": {
+          "elapsed_ms": 11159.387667001283,
+          "status": "observed"
+        },
+        "tunnel_ready": {
+          "elapsed_ms": 18448.064707998128,
+          "status": "observed"
+        }
+      },
+      "status": "ok",
+      "timings_ms": {
+        "create_call_return": 18448.15275,
+        "create_to_first_valid_frame": 18735.37720800232
+      }
+    }
+  ],
+  "replacement_samples": 0,
+  "retries": 0,
+  "run_kind": "pilot",
+  "schedule": [
+    {
+      "arm": "managed-exact-id",
+      "pair_index": 0,
+      "phase": "warmup",
+      "position": 0,
+      "sample_index": null,
+      "sequence": 0
+    },
+    {
+      "arm": "inline-recipe",
+      "pair_index": 0,
+      "phase": "warmup",
+      "position": 1,
+      "sample_index": null,
+      "sequence": 1
+    },
+    {
+      "arm": "inline-recipe",
+      "pair_index": 0,
+      "phase": "measure",
+      "position": 0,
+      "sample_index": 0,
+      "sequence": 2
+    },
+    {
+      "arm": "managed-exact-id",
+      "pair_index": 0,
+      "phase": "measure",
+      "position": 1,
+      "sample_index": 0,
+      "sequence": 3
+    },
+    {
+      "arm": "managed-exact-id",
+      "pair_index": 1,
+      "phase": "measure",
+      "position": 0,
+      "sample_index": 1,
+      "sequence": 4
+    },
+    {
+      "arm": "inline-recipe",
+      "pair_index": 1,
+      "phase": "measure",
+      "position": 1,
+      "sample_index": 1,
+      "sequence": 5
+    }
+  ],
+  "schema_version": 1,
+  "status": "complete"
+}
