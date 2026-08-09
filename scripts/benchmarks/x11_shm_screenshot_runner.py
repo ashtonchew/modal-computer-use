@@ -396,6 +396,30 @@ def _safe_daemon_failure(exc: Exception) -> dict[str, Any]:
         detail_type = _safe_diagnostic_label(details.get("type"))
         if detail_type is not None:
             result["failure_detail_type"] = detail_type
+        errors = details.get("errors")
+        if isinstance(errors, list):
+            categories: list[str] = []
+            for error in errors:
+                if not isinstance(error, str):
+                    category = "unknown"
+                elif "screenshot" in error.lower():
+                    category = "screenshot"
+                elif "input backend" in error.lower() or "xdotool" in error.lower():
+                    category = "input"
+                elif "window" in error.lower():
+                    category = "windows"
+                elif "missing required tools" in error.lower():
+                    category = "tools"
+                elif "xdpyinfo" in error.lower() or "xvfb" in error.lower():
+                    category = "display_probe"
+                elif "display lifecycle" in error.lower():
+                    category = "lifecycle"
+                else:
+                    category = "unknown"
+                if category not in categories:
+                    categories.append(category)
+            if categories:
+                result["failure_readiness_categories"] = categories
     return result
 
 
@@ -580,6 +604,7 @@ async def _run_readiness_probe(
                     if backends != [arm]:
                         raise RuntimeError("fresh readiness used an unexpected source")
                 except Exception as exc:
+                    observation["status"] = "failed"
                     observation["failure_type"] = type(exc).__name__
                     if phase == "context_enter" and isinstance(context, _ArmContext):
                         observation["failure_phase"] = (
