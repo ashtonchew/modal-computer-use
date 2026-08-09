@@ -86,8 +86,6 @@ def _artifact() -> dict:
                     "codec": "png-deflate-level1-fixed-up",
                     "module_sha256": "d" * 64,
                     "image_object_id": "im-test-image",
-                    "cpu": 1.0,
-                    "memory_bytes": 2048 * 1024 * 1024,
                     "machine": "x86_64",
                 }
                 for arm in ("mss", "x11-shm")

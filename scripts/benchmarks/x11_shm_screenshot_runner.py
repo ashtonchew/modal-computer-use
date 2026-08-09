@@ -1386,7 +1386,17 @@ def _promotion_artifact(
             "image_identity": provenance["image_identity"],
             "image_object_id": target_identities["x11-shm"]["image_object_id"],
             "native_builds": {
-                arm: dict(target_identities[arm]) for arm in ("mss", "x11-shm")
+                arm: {
+                    key: target_identities[arm][key]
+                    for key in (
+                        "backend",
+                        "codec",
+                        "module_sha256",
+                        "image_object_id",
+                        "machine",
+                    )
+                }
+                for arm in ("mss", "x11-shm")
             },
             "requested_placement": {"cloud": CLOUD, "region": REGION},
             "observed_placement": {
