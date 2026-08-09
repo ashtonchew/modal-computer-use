@@ -181,6 +181,11 @@ async def measure_full_screenshot_arms(
                     "status": "ok",
                     "complete_sdk_ms": round(complete_ms, 4),
                     "daemon_total_ms": timings["total_ms"],
+                    "capture_ms": timings["capture_ms"],
+                    "encode_ms": timings["encode_ms"],
+                    "x11_shm_capture_encode_ms": timings[
+                        "x11_shm_capture_encode_ms"
+                    ],
                     "hash_ms": timings["hash_ms"],
                     "payload_bytes": screenshot.size_bytes,
                     "decoded_pixel_parity": decoded_pixel_parity,
@@ -294,7 +299,30 @@ def _timing_metrics(headers: Mapping[str, Any]) -> dict[str, float]:
             or value < 0
         ):
             raise AssertionError(f"full screenshot timing header missing valid {key}")
-    return {"hash_ms": float(timings["hash_ms"]), "total_ms": float(timings["total_ms"])}
+    stages: dict[str, float | None] = {}
+    for key in ("capture_ms", "encode_ms", "x11_shm_capture_encode_ms"):
+        value = timings.get(key)
+        if value is None:
+            stages[key] = None
+        elif (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise AssertionError(f"full screenshot timing header has invalid {key}")
+        else:
+            stages[key] = float(value)
+    if stages["x11_shm_capture_encode_ms"] is None:
+        if stages["capture_ms"] is None or stages["encode_ms"] is None:
+            raise AssertionError("full screenshot timing header is missing capture stages")
+    elif stages["capture_ms"] is not None or stages["encode_ms"] is not None:
+        raise AssertionError("full screenshot timing header mixed fused and split stages")
+    return {
+        "hash_ms": float(timings["hash_ms"]),
+        "total_ms": float(timings["total_ms"]),
+        **stages,
+    }
 
 
 def _screenshot_metadata(screenshot: Any) -> tuple[Any, ...]:

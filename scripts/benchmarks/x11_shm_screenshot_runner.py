@@ -987,18 +987,18 @@ async def _run_x11_shm_failure_matrix(
             finally:
                 real.close()
 
-            class ConstructorFailure:
+            class AttachFailure:
                 calls = 0
                 def __init__(self, *_args):
-                    ConstructorFailure.calls += 1
-                    raise RuntimeError("attach failed")
+                    AttachFailure.calls += 1
+                    raise RuntimeError("AttachFd failed")
 
-            class CaptureFailure:
+            class EncodeFailure:
                 calls = 0
                 def __init__(self, *_args):
-                    CaptureFailure.calls += 1
+                    EncodeFailure.calls += 1
                 def capture_png(self, *_args):
-                    raise RuntimeError("GetImage failed")
+                    raise RuntimeError("PNG encode failed")
                 def close(self):
                     pass
 
@@ -1046,11 +1046,11 @@ async def _run_x11_shm_failure_matrix(
                 finally:
                     controller.close()
 
-            checks["constructor_failure_falls_back_once"] = asyncio.run(
-                fallback_check(ConstructorFailure)
+            checks["attach_failure_falls_back_once"] = asyncio.run(
+                fallback_check(AttachFailure)
             )
-            checks["capture_failure_falls_back_once"] = asyncio.run(
-                fallback_check(CaptureFailure)
+            checks["encode_failure_falls_back_once"] = asyncio.run(
+                fallback_check(EncodeFailure)
             )
             checks["invalid_result_falls_back_once"] = asyncio.run(
                 fallback_check(InvalidResult)
@@ -1098,8 +1098,8 @@ async def _run_x11_shm_failure_matrix(
             "closed_capture_rejected",
             "constructor_geometry_failure",
             "invalid_region_rejected",
-            "constructor_failure_falls_back_once",
-            "capture_failure_falls_back_once",
+            "attach_failure_falls_back_once",
+            "encode_failure_falls_back_once",
             "invalid_result_falls_back_once",
             "extension_load_failure_selects_mss",
             "close_failure_reported",
