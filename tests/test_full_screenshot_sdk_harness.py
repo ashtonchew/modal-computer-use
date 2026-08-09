@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,14 @@ from scripts.benchmarks.full_screenshot_sdk_harness import (
 
 DATA = b"png-body-for-contract-test"
 SHA = hashlib.sha256(DATA).hexdigest()
+
+
+def test_promotion_runner_uses_the_mounted_chromium_fixture_path() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/opt/mcu-scripts/benchmarks/fixtures/x11_shm_chromium_fixture.html" in runner
 
 
 class FakeScreenshot:
