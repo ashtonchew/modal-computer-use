@@ -683,6 +683,8 @@ async def _run_x_server_timeout_probe(
         sandbox = getattr(computer, "_sandbox", None)
         if sandbox is None or not hasattr(sandbox, "exec"):
             raise RuntimeError("sandbox handle unavailable for X server timeout probe")
+        phase = "prime_public_capture"
+        await computer.screenshots.full()
         phase = "pause_xvfb"
         stop = await sandbox.exec.aio(
             "sh",
@@ -694,6 +696,29 @@ async def _run_x_server_timeout_probe(
         xvfb_pid = await _process_stdout_text(stop)
         if stop_exit != 0 or not xvfb_pid.isdigit():
             raise RuntimeError("Xvfb stop command failed")
+        phase = "public_capture"
+        started = time.perf_counter()
+        failed_bounded = False
+        public_error_type: str | None = None
+        public_error_code: str | None = None
+        public_error_detail_type: str | None = None
+        try:
+            await asyncio.wait_for(computer.screenshots.full(), timeout=10.0)
+        except Exception as exc:
+            public_error_type = type(exc).__name__
+            public_error_code = getattr(exc, "code", None)
+            details = getattr(exc, "details", None)
+            if isinstance(details, Mapping):
+                detail_type = details.get("type")
+                if isinstance(detail_type, str):
+                    public_error_detail_type = detail_type
+            failed_bounded = (
+                isinstance(exc, DaemonHTTPError)
+                and exc.status_code == 500
+                and public_error_code == "internal_error"
+                and public_error_detail_type == "ScreenshotCaptureTimedOut"
+            )
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
         phase = "constructor"
         constructor_probe = dedent(
             """
@@ -733,29 +758,6 @@ async def _run_x_server_timeout_probe(
             and constructor_result.get("exception_type") == "ScreenshotCaptureTimedOut"
             and float(constructor_result.get("elapsed_ms", 3_000.0)) < 2_500.0
         )
-        phase = "public_capture"
-        started = time.perf_counter()
-        failed_bounded = False
-        public_error_type: str | None = None
-        public_error_code: str | None = None
-        public_error_detail_type: str | None = None
-        try:
-            await asyncio.wait_for(computer.screenshots.full(), timeout=10.0)
-        except Exception as exc:
-            public_error_type = type(exc).__name__
-            public_error_code = getattr(exc, "code", None)
-            details = getattr(exc, "details", None)
-            if isinstance(details, Mapping):
-                detail_type = details.get("type")
-                if isinstance(detail_type, str):
-                    public_error_detail_type = detail_type
-            failed_bounded = (
-                isinstance(exc, DaemonHTTPError)
-                and exc.status_code == 500
-                and public_error_code == "internal_error"
-                and public_error_detail_type == "ScreenshotCaptureTimedOut"
-            )
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
         phase = "resume_xvfb"
         resume = await sandbox.exec.aio(
             "sh", "-c", 'kill -CONT "$1"', "sh", xvfb_pid, timeout=10
