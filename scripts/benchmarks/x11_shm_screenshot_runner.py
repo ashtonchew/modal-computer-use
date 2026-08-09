@@ -59,7 +59,7 @@ FIXTURE_PATH = _RUNNER_PATH.parent / "fixtures" / "x11_shm_chromium_fixture.html
 def _load_fixture_html() -> str:
     candidates = (
         FIXTURE_PATH,
-        Path("/opt/mcu-scripts/fixtures/x11_shm_chromium_fixture.html"),
+        Path("/opt/mcu-scripts/benchmarks/fixtures/x11_shm_chromium_fixture.html"),
     )
     for candidate in candidates:
         if candidate.is_file():
