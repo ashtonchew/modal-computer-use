@@ -185,6 +185,8 @@ This number is an evidence-backed product default, not an external standard. A s
 input capacity gate must sustain at least 200 weighted tokens per second before release. Keep
 batch size, action and batch timeouts, total trajectory budgets, payload bounds, and one-in-flight
 Step serialization. The rate limit complements those controls; it does not replace them.
+Faster setups can use explicit higher values after the same-runtime capacity gate passes. The SDK
+does not derive the rate from CPU or memory alone.
 
 The following surfaces remain optional or low-level compatibility capabilities:
 

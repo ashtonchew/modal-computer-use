@@ -599,6 +599,21 @@ def test_benchmarking_has_an_executable_weighted_input_capacity_gate() -> None:
     assert "does not redefine that default" in capacity
 
 
+def test_input_rate_docs_separate_the_portable_default_from_setup_capacity() -> None:
+    readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    configuration = " ".join(
+        (DOCS / "configuration.md").read_text(encoding="utf-8").split()
+    )
+    performance = " ".join(
+        (DOCS / "performance.md").read_text(encoding="utf-8").split()
+    )
+
+    assert "portable default for the minimum tested Sandbox, not a hardware limit" in readme
+    assert "does not infer a hidden limit from CPU or memory" in configuration
+    assert "run the same-runtime capacity gate, then set both fields explicitly" in configuration
+    assert "does not derive the rate from CPU or memory alone" in performance
+
+
 def test_performance_requires_exact_placement_for_the_primary_trajectory() -> None:
     source = " ".join((DOCS / "performance.md").read_text(encoding="utf-8").split())
 

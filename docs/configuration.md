@@ -180,6 +180,10 @@ The `normalized-input-work-v1` policy uses these costs:
 
 These are normalized admission units, not native X11 event counts. The daemon uses one bucket across
 leases and direct routes. It does not reset the bucket when ownership changes.
+The 100/400 values are portable defaults for the minimum tested 1 CPU, 2,048 MiB Sandbox. Input
+capacity also depends on browser load, action mix, X11, capture work, and CPU scheduling. The SDK
+does not infer a hidden limit from CPU or memory. For a faster setup, run the same-runtime capacity
+gate, then set both fields explicitly.
 With the default burst, one `type` action can contain about 12,768 characters before its normalized
 cost exceeds capacity. Larger schema-valid input requests need an explicit larger burst or a
 different application-owned request shape.

@@ -157,6 +157,8 @@ The daemon admits input through one token bucket for the desktop. The default re
 normalized input-work tokens per second and allows a 400-token burst. A complete ordered batch
 reserves its cost before the first mutation. This keeps the limit away from normal optimized Step
 loops and prevents a rate-limit boundary from partially executing a batch.
+The 100/400 setting is a portable default for the minimum tested Sandbox, not a hardware limit.
+Use explicit higher values only after the same-runtime capacity gate passes for that setup.
 
 ## Performance
 
