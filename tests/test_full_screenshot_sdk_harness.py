@@ -7,19 +7,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.benchmarks.full_screenshot_sdk_harness import (
+from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
     _EXPECTED_PAYLOAD,
     _validate_sample,
     build_paired_random_schedule,
     measure_full_screenshot_arms,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
 SHA = hashlib.sha256(DATA).hexdigest()
 
 
 def test_promotion_runner_uses_the_mounted_chromium_fixture_path() -> None:
-    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+    runner = (ROOT / "scripts" / "benchmarks" / "x11_shm_screenshot_runner.py").read_text(
         encoding="utf-8"
     )
 
