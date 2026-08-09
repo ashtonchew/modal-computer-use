@@ -78,8 +78,8 @@ class DesktopBackend(ABC):
         """Release persistent backend resources."""
         return None
 
-    def reset_screenshot_capture(self) -> None:
-        """Release screenshot state bound to the current display server."""
+    async def invalidate_display_generation(self) -> None:
+        """Release state bound to an X display before its supervisor restarts."""
         return None
 
     @abstractmethod
@@ -671,6 +671,7 @@ class X11DesktopBackend(MockDesktopBackend):
     def close(self) -> None:
         first_error: Exception | None = None
         for close in (
+            self._apps.close,
             self._clipboard.close,
             self._screenshots.close,
             self._windows.close,
@@ -685,8 +686,50 @@ class X11DesktopBackend(MockDesktopBackend):
         if first_error is not None:
             raise first_error
 
-    def reset_screenshot_capture(self) -> None:
-        self._screenshots.reset_capture_session()
+    async def invalidate_display_generation(self) -> None:
+        first_error: Exception | None = None
+
+        async def attempt_async(operation) -> None:
+            nonlocal first_error
+            try:
+                await operation()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+
+        def attempt_sync(operation) -> None:
+            nonlocal first_error
+            try:
+                operation()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+
+        try:
+            release_result = await self.release_all()
+            if not release_result.ok and first_error is None:
+                first_error = RuntimeError(
+                    release_result.message or "failed to release all held input"
+                )
+        except Exception as exc:
+            first_error = exc
+
+        # The old server may disappear immediately after this seam returns. Clear
+        # logical ownership even when a best-effort release could not reach it.
+        self.held_keys.clear()
+        self.held_buttons.clear()
+        self._last_input_backend = None
+        self._available_input_backends = ()
+        await attempt_async(self._apps.invalidate_display_generation)
+        await attempt_async(self._clipboard.invalidate_display_generation)
+        attempt_sync(self._screenshots.reset_capture_session)
+        attempt_sync(self._windows.invalidate_display_generation)
+        attempt_sync(self._keyboard.invalidate_display_generation)
+        attempt_sync(self._mouse.invalidate_display_generation)
+        attempt_sync(self._input.invalidate_display_generation)
+
+        if first_error is not None:
+            raise first_error
 
     @property
     def readiness_generation(self) -> int:

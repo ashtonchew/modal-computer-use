@@ -91,6 +91,11 @@ class X11MouseController:
     def backend_name(self) -> str:
         return self._active_backend
 
+    def invalidate_display_generation(self) -> None:
+        """Forget held buttons after the X server generation changes."""
+        self._held_buttons.clear()
+        self._release_attempt_backend = None
+
     @property
     def release_attempt_backend(self) -> Literal["xtest", "xdotool"] | None:
         return self._release_attempt_backend

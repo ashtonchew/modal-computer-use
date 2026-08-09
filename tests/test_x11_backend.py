@@ -1177,6 +1177,7 @@ def test_x11_backend_close_releases_every_resource_and_preserves_first_error(
 
         return operation
 
+    monkeypatch.setattr(backend._apps, "close", close("apps"))
     monkeypatch.setattr(backend._clipboard, "close", close("clipboard", fail=True))
     monkeypatch.setattr(backend._screenshots, "close", close("screenshots"))
     monkeypatch.setattr(backend._windows, "close", close("windows", fail=True))
@@ -1186,7 +1187,66 @@ def test_x11_backend_close_releases_every_resource_and_preserves_first_error(
     with pytest.raises(RuntimeError, match="clipboard"):
         backend.close()
 
-    assert events == ["clipboard", "screenshots", "windows", "input", "runner"]
+    assert events == ["apps", "clipboard", "screenshots", "windows", "input", "runner"]
+
+
+def test_x11_backend_invalidates_display_generation_in_place_and_preserves_first_error(
+    monkeypatch,
+) -> None:
+    backend = X11DesktopBackend(input_backend="auto")
+    backend.held_keys.add("shift")
+    backend.held_buttons.add("left")
+    events: list[str] = []
+
+    async def release_all() -> ActionResult:
+        events.append("release")
+        return ActionResult(ok=False, message="release failed")
+
+    async def invalidate_clipboard() -> None:
+        events.append("clipboard")
+
+    async def invalidate_apps() -> None:
+        events.append("apps")
+
+    def reset_screenshots() -> None:
+        events.append("screenshots")
+
+    def invalidate_windows() -> None:
+        events.append("windows")
+
+    def clear_keyboard() -> None:
+        events.append("keyboard")
+
+    def clear_mouse() -> None:
+        events.append("mouse")
+
+    def invalidate_input() -> None:
+        events.append("input")
+
+    monkeypatch.setattr(backend, "release_all", release_all)
+    monkeypatch.setattr(backend._apps, "invalidate_display_generation", invalidate_apps)
+    monkeypatch.setattr(backend._clipboard, "invalidate_display_generation", invalidate_clipboard)
+    monkeypatch.setattr(backend._screenshots, "reset_capture_session", reset_screenshots)
+    monkeypatch.setattr(backend._windows, "invalidate_display_generation", invalidate_windows)
+    monkeypatch.setattr(backend._keyboard, "invalidate_display_generation", clear_keyboard)
+    monkeypatch.setattr(backend._mouse, "invalidate_display_generation", clear_mouse)
+    monkeypatch.setattr(backend._input, "invalidate_display_generation", invalidate_input)
+
+    with pytest.raises(RuntimeError, match="release failed"):
+        anyio.run(backend.invalidate_display_generation)
+
+    assert events == [
+        "release",
+        "apps",
+        "clipboard",
+        "screenshots",
+        "windows",
+        "keyboard",
+        "mouse",
+        "input",
+    ]
+    assert backend.held_keys == set()
+    assert backend.held_buttons == set()
 
 
 def test_input_backend_metadata_separates_policy_support_availability_and_last_use(

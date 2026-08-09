@@ -67,6 +67,28 @@ class X11ClipboardController:
         self._owner = None
         self._stop_owner(owner)
 
+    async def invalidate_display_generation(self) -> None:
+        """Drop the old X selection owner and clear inherited clipboard state."""
+        async with self._owner_lock:
+            owner = self._owner
+            self._owner = None
+            first_error: Exception | None = None
+            try:
+                self._stop_owner(owner)
+            except Exception as exc:
+                first_error = exc
+            try:
+                result = await self._clear_state()
+                if not result.ok and first_error is None:
+                    first_error = RuntimeError(
+                        result.message or "failed to clear clipboard state"
+                    )
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+            if first_error is not None:
+                raise first_error
+
     async def _wait_until_owned(
         self,
         expected: str,

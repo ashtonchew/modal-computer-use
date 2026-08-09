@@ -33,7 +33,10 @@ from modal_computer_use.daemon.routes.screenshots import (
     _screenshot_headers,
     enforce_screenshot_options_pixels,
 )
-from modal_computer_use.daemon.routes.validation import validate_region
+from modal_computer_use.daemon.routes.validation import (
+    http_observe_change_scope,
+    validate_region,
+)
 from modal_computer_use.daemon.schemas import ActionObserveChangeScreenshotRequest
 from modal_computer_use.models import (
     ActionBatchRequest,
@@ -135,6 +138,19 @@ async def run_raw_screenshot(
     responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
 )
 async def run_observe_change_raw_screenshot(
+    payload: ActionObserveChangeScreenshotRequest,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> Response:
+    async with http_observe_change_scope(request):
+        return await _run_observe_change_raw_screenshot(
+            payload,
+            request,
+            idempotency_key=idempotency_key,
+        )
+
+
+async def _run_observe_change_raw_screenshot(
     payload: ActionObserveChangeScreenshotRequest,
     request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),

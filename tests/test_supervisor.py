@@ -1,12 +1,36 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.daemon.supervisor import Supervisor
 
 
-def test_supervisor_restarts_only_named_process(tmp_path) -> None:
+class _StubbornProcess:
+    pid = 123
+
+    def __init__(self) -> None:
+        self.killed = False
+        self.wait_calls = 0
+
+    def poll(self) -> int | None:
+        return 0 if self.killed else None
+
+    def terminate(self) -> None:
+        return None
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.wait_calls += 1
+        if not self.killed:
+            raise subprocess.TimeoutExpired("Xvfb", timeout)
+        return 0
+
+
+def test_supervisor_restarts_full_display_stack_for_named_xvfb(tmp_path) -> None:
     supervisor = Supervisor(
         DaemonSettings(
             backend="x11",
@@ -14,6 +38,7 @@ def test_supervisor_restarts_only_named_process(tmp_path) -> None:
             recordings_dir=tmp_path / "recordings",
             runtime_dir=tmp_path / "runtime",
             local_token="dev",
+            vnc_mode="off",
         )
     )
     starts: list[str] = []
@@ -23,18 +48,38 @@ def test_supervisor_restarts_only_named_process(tmp_path) -> None:
         supervisor.commands[name] = command
 
     supervisor._start_process = fake_start  # type: ignore[method-assign]
-    supervisor.commands = {
-        "xvfb": ["Xvfb"],
-        "window_manager": ["openbox"],
-    }
+    supervisor.commands = {"xvfb": ["Xvfb"], "window_manager": ["openbox"]}
 
     import anyio
 
     anyio.run(supervisor.restart, "xvfb")
 
-    assert starts == ["xvfb"]
+    assert starts == ["xvfb", "window_manager"]
     assert supervisor.restart_counts["xvfb"] == 1
-    assert "window_manager" not in supervisor.restart_counts
+    assert supervisor.restart_counts["window_manager"] == 1
+
+
+def test_supervisor_reaps_a_process_after_kill_before_returning(tmp_path) -> None:
+    import anyio
+
+    supervisor = Supervisor(
+        DaemonSettings(
+            backend="x11",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+            vnc_mode="off",
+        )
+    )
+    process = _StubbornProcess()
+    supervisor.running = True
+    supervisor.processes["xvfb"] = process  # type: ignore[assignment]
+
+    anyio.run(supervisor.stop)
+
+    assert process.killed is True
+    assert process.wait_calls == 2
 
 
 def test_supervisor_uses_server_side_view_only_vnc(tmp_path) -> None:

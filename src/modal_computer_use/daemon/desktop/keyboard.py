@@ -368,6 +368,11 @@ class X11KeyboardController:
     def backend_name(self) -> str:
         return self._active_backend
 
+    def invalidate_display_generation(self) -> None:
+        """Forget held keys after the X server generation changes."""
+        self._held_keys.clear()
+        self._release_attempt_backend = None
+
     async def type_text(
         self, text: str, delay_ms: int = 10, method: TypingMethod = "auto"
     ) -> ActionResult:
