@@ -994,6 +994,31 @@ def test_readiness_invalidation_during_probe_does_not_publish_stale_snapshot() -
     asyncio.run(scenario())
 
 
+def test_backend_generation_invalidates_cached_readiness() -> None:
+    class Backend:
+        readiness_generation = 0
+        calls = 0
+
+        async def ready(self):
+            self.calls += 1
+            return self.readiness_generation == 0, (
+                [] if self.readiness_generation == 0 else ["capture source quarantined"]
+            )
+
+    async def scenario() -> None:
+        cache = readiness.ReadinessCache(60_000)
+        backend = Backend()
+        assert await cache.backend_ready(backend) == (True, [])
+        backend.readiness_generation += 1
+        assert await cache.backend_ready(backend) == (
+            False,
+            ["capture source quarantined"],
+        )
+        assert backend.calls == 2
+
+    asyncio.run(scenario())
+
+
 def test_screenshot_success_refreshes_readiness_cache(tmp_path, monkeypatch) -> None:
     now = 0.0
 

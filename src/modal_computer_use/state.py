@@ -16,6 +16,31 @@ def new_run_id(prefix: str = "run") -> str:
 
 def compute_config_hash(config: ComputerConfig) -> str:
     payload = config.model_dump(mode="json", exclude={"vnc_password", "request_id"})
+    return _config_payload_hash(payload)
+
+
+def compatible_config_hashes(config: ComputerConfig) -> tuple[str, ...]:
+    """Return current and safe pre-capture-source hashes for named reuse.
+
+    The new ``auto`` selector preserves the prior MSS-compatible behavior when
+    the native capability is absent.  Accepting the one legacy shape keeps
+    named sessions reusable across this schema addition; explicit source
+    choices remain exact and fail closed.
+    """
+
+    current = compute_config_hash(config)
+    if config.actions.screenshot_capture_source != "auto":
+        return (current,)
+    payload = config.model_dump(mode="json", exclude={"vnc_password", "request_id"})
+    actions = payload.get("actions")
+    if not isinstance(actions, dict):
+        return (current,)
+    actions.pop("screenshot_capture_source", None)
+    legacy = _config_payload_hash(payload)
+    return (current,) if legacy == current else (current, legacy)
+
+
+def _config_payload_hash(payload: dict[str, object]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()[:16]
 

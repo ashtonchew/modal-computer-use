@@ -103,6 +103,22 @@ class X11ScreenshotController:
         self._x11_shm_fallback = False
         self._x11_shm_failed = False
         self._x11_shm_timed_out = False
+        self._readiness_generation = 0
+
+    @property
+    def readiness_generation(self) -> int:
+        """Identify capture state whose readiness proof remains valid."""
+
+        return self._readiness_generation
+
+    def _invalidate_readiness(self) -> None:
+        self._readiness_generation += 1
+
+    def _raise_if_display_timed_out(self) -> None:
+        if self._x11_shm_timed_out:
+            raise ScreenshotCaptureTimedOut(
+                "X11 screenshot capture is quarantined until display restart"
+            )
 
     def _ensure_x11_shm(self) -> None:
         """Open the XCB/MIT-SHM session after the supervisor starts Xvfb.
@@ -137,10 +153,12 @@ class X11ScreenshotController:
         except ScreenshotCaptureTimedOut:
             self._x11_shm_failed = True
             self._x11_shm_timed_out = True
+            self._invalidate_readiness()
             raise
         except ScreenshotCaptureUnavailable:
             if self._capture_resolution.requested != "auto":
                 self._x11_shm_failed = True
+                self._invalidate_readiness()
                 raise
             self._select_mss_fallback(
                 "X11 shared-memory screenshot session could not start"
@@ -184,6 +202,7 @@ class X11ScreenshotController:
         try:
             self.close()
         finally:
+            self._invalidate_readiness()
             self._capture_resolution = resolve_capture_source(requested)
             self._x11_shm_fallback = False
             self._x11_shm_failed = False
@@ -306,6 +325,7 @@ class X11ScreenshotController:
         include_cursor_position: bool = False,
         prefer_native_png: bool = False,
     ) -> CapturedScreenshot:
+        self._raise_if_display_timed_out()
         started_total = perf_counter()
         timings_ms: dict[str, float] = {}
         source = region or Region(x=0, y=0, width=self.width, height=self.height)
@@ -335,11 +355,13 @@ class X11ScreenshotController:
                 self._close_x11_shm(suppress=True)
                 self._x11_shm_failed = True
                 self._x11_shm_timed_out = True
+                self._invalidate_readiness()
                 raise
             except ScreenshotCaptureFailed:
                 if self._capture_resolution.requested != "auto":
                     self._close_x11_shm(suppress=True)
                     self._x11_shm_failed = True
+                    self._invalidate_readiness()
                     raise
                 self._select_mss_fallback(
                     "X11 shared-memory screenshot capture failed"
@@ -408,6 +430,7 @@ class X11ScreenshotController:
         *,
         region: Region | None = None,
     ) -> CapturedRawScreenshot | None:
+        self._raise_if_display_timed_out()
         started_total = perf_counter()
         timings_ms: dict[str, float] = {}
         source = region or Region(x=0, y=0, width=self.width, height=self.height)

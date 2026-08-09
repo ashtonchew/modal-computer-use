@@ -54,6 +54,8 @@ def main() -> None:
     try:
         _wait_for_display(process)
         x11_shm = importlib.import_module("_modal_computer_use_x11_shm")
+        if not issubclass(x11_shm.X11ScreenshotTimeoutError, RuntimeError):
+            raise RuntimeError("X11 screenshot timeout contract is unavailable")
         session = x11_shm.X11SharedMemoryScreenshotSession(DISPLAY, WIDTH, HEIGHT)
         _validate_png(session.capture_png(0, 0, WIDTH, HEIGHT))
     finally:

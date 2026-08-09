@@ -88,13 +88,17 @@ def _artifact() -> dict:
                     "image_object_id": "im-test-image",
                     "cpu": 1.0,
                     "memory_bytes": 2048 * 1024 * 1024,
+                    "machine": "x86_64",
                 }
                 for arm in ("mss", "x11-shm")
             },
             "requested_placement": {"cloud": "aws", "region": "us-west-2"},
             "observed_placement": {
                 "runner": {"cloud": "aws", "region": "us-west-2"},
-                "target": {"cloud": "aws", "region": "us-west-2"},
+                "targets": {
+                    arm: {"cloud": "aws", "region": "us-west-2"}
+                    for arm in ("mss", "x11-shm")
+                },
             },
             "resources": {"cpu": 1.0, "memory_mib": 2048},
             "observed_resources": {
@@ -124,7 +128,7 @@ def _artifact() -> dict:
                 ),
             },
             "x11-shm": {
-                "requested_source": "x11-shm",
+                "requested_source": "auto",
                 "expected_backend": "x11-shm",
                 "observations": observations(
                     "x11-shm", complete_ms=20.0, daemon_ms=8.0, payload_bytes=105_000
@@ -143,6 +147,7 @@ def _artifact() -> dict:
             "readiness_parity": True,
             "x_server_restart": True,
             "bounded_x_server_failure": True,
+            "region_parity": True,
             "captures": 10_000,
             "full_captures": 5_000,
             "region_captures": 5_000,
@@ -226,10 +231,42 @@ def _artifact() -> dict:
             "x_server_timeout": {
                 "passed": True,
                 "failed_bounded": True,
+                "public_error_type": "DaemonHTTPError",
+                "public_error_code": "internal_error",
+                "public_error_detail_type": "ScreenshotCaptureTimedOut",
+                "no_fallback_observed": True,
                 "constructor_bounded": True,
+                "constructor_error_type": "ScreenshotCaptureTimedOut",
                 "elapsed_ms": 600.0,
                 "constructor_elapsed_ms": 600.0,
                 "backend_after_restart": "x11-shm",
+            },
+            "region_parity": {
+                "passed": True,
+                "case_count": 4,
+                "decoded_pixel_and_metadata_parity": True,
+                "arms": {
+                    arm: [
+                        {
+                            "region": {"x": index, "y": index, "width": 1, "height": 1},
+                            "pixels_sha256": "e" * 64,
+                            "width": 1,
+                            "height": 1,
+                            "cursor_visible": False,
+                            "cursor_position_valid": True,
+                            "coordinate_space": {"image_width": 1, "image_height": 1},
+                            "capture_backend": arm,
+                        }
+                        for index in range(4)
+                    ]
+                    for arm in ("mss", "x11-shm")
+                },
+            },
+            "terminal_cleanup": {
+                "succeeded": True,
+                "survivors_before_sweep": 0,
+                "remaining_sandboxes": 0,
+                "cleanup_error_types": [],
             },
         },
     }

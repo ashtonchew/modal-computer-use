@@ -114,7 +114,8 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "rustup" in joined
     assert "1.91.0" in joined
     assert "cargo build --locked --release --features extension-module" in joined
-    assert "x86_64-unknown-linux-gnu" in joined
+    assert "rustup target add" not in joined
+    assert "/target/release/lib_modal_computer_use_x11_shm.so" in joined
     assert "_modal_computer_use_x11_shm.so" in joined
     assert "sysconfig.get_path(\"platlib\")" in joined
     assert "import _modal_computer_use_x11_shm" in joined
