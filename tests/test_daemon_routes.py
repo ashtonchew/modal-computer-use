@@ -19,6 +19,7 @@ from modal_computer_use.daemon.desktop.xtest import (
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.validation import (
     begin_display_restart,
+    desktop_readiness,
     end_display_restart,
     http_observe_change_scope,
 )
@@ -167,6 +168,34 @@ def test_status_reflects_stopped_mock_lifecycle(tmp_path) -> None:
     assert {item["status"] for item in status["processes"].values()} == {"stopped"}
 
 
+def test_mock_lifecycle_stop_start_restart_reprobes_each_display_generation(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+
+    async def invalidate_display_generation() -> None:
+        events.append("invalidate")
+
+    async def ready() -> tuple[bool, list[str]]:
+        events.append("ready")
+        return True, []
+
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
+    monkeypatch.setattr(app.state.backend, "ready", ready)
+
+    assert test_client.post("/v1/computer/stop").status_code == 200
+    assert test_client.post("/v1/computer/start").status_code == 200
+    assert test_client.post("/v1/computer/restart").status_code == 200
+
+    assert events == ["invalidate", "invalidate", "ready", "invalidate", "ready"]
+
+
 @pytest.mark.parametrize(
     "path", ["/v1/computer/start", "/v1/computer/stop", "/v1/computer/restart"]
 )
@@ -292,6 +321,8 @@ def test_display_lifecycle_preserves_generation_error_when_supervisor_also_fails
 
     assert events == ["display-generation-invalidated", "supervisor-restart"]
     assert app.state.display_restart_in_progress is False
+    assert app.state.display_reconstruction_failed is True
+    assert test_client.get("/readyz").json()["ready"] is False
 
 
 def test_display_restart_retries_transient_readiness_and_leaves_final_probe_recoverable(
@@ -364,6 +395,49 @@ def test_display_restart_verifies_display_before_configured_browser_recovery(
     assert app.state.browser_prewarm.ok is True
 
 
+def test_display_restart_reopens_configured_browser_url_after_readiness(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    app.state.settings = replace(
+        app.state.settings,
+        browser_open_url_on_start="https://example.com",
+    )
+    events: list[str] = []
+
+    async def ready() -> tuple[bool, list[str]]:
+        events.append("ready")
+        return True, []
+
+    async def open_url(url: str, wait_for_window: bool = True) -> ActionResult:
+        events.append(f"open-url:{url}:{wait_for_window}")
+        return ActionResult(ok=True, output={"url": url})
+
+    async def invalidate_display_generation() -> None:
+        events.append("invalidate")
+
+    monkeypatch.setattr(app.state.backend, "ready", ready)
+    monkeypatch.setattr(app.state.backend, "open_url", open_url)
+    monkeypatch.setattr(
+        app.state.backend,
+        "invalidate_display_generation",
+        invalidate_display_generation,
+    )
+
+    response = test_client.post("/v1/computer/restart")
+
+    assert response.status_code == 200
+    assert events == [
+        "invalidate",
+        "ready",
+        "open-url:https://example.com:True",
+        "ready",
+    ]
+    assert app.state.browser_prewarm.ok is True
+    assert app.state.browser_prewarm.output == {"url": "https://example.com"}
+
+
 def test_display_restart_browser_failure_invalidates_successful_readiness_snapshot(
     test_client,
     app,
@@ -389,7 +463,12 @@ def test_display_restart_browser_failure_invalidates_successful_readiness_snapsh
     assert response.status_code == 503
     assert response.json()["code"] == "browser_recovery_failed"
     assert test_client.get("/readyz").json()["ready"] is False
-    assert calls == 2
+
+    async def forced_readiness() -> tuple[bool, list[str]]:
+        return await desktop_readiness(SimpleNamespace(app=app), force=True)
+
+    assert anyio.run(forced_readiness) == (False, ["display lifecycle reconstruction failed"])
+    assert calls == 1
 
 
 def test_display_restart_and_http_observe_change_admission_exclude_both_interleavings(

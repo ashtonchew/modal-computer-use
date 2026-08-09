@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+import os
 import secrets
+import signal
 import subprocess
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ProcessStatus
 
 from .process_environment import desktop_process_environment
+
+
+class _ManagedProcess(Protocol):
+    pid: int
+
+    def poll(self) -> int | None: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
 
 
 class Supervisor:
@@ -76,11 +91,18 @@ class Supervisor:
 
     async def stop(self) -> None:
         self.running = False
+        first_error: Exception | None = None
         for name in reversed(self.names):
             process = self.processes.get(name)
             if process is None or process.poll() is not None:
                 continue
-            _stop_process(process)
+            try:
+                _stop_process(process)
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     async def restart(self, name: str | None = None) -> None:
         if name:
@@ -171,10 +193,26 @@ class Supervisor:
         return "\n".join(line.rstrip("\n") for line in lines)
 
 
-def _stop_process(process: subprocess.Popen[bytes]) -> None:
-    process.terminate()
+def _stop_process(process: _ManagedProcess) -> None:
+    if isinstance(process, subprocess.Popen):
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            if process.poll() is not None:
+                return
+            raise
+    else:
+        process.terminate()
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        process.kill()
+        if isinstance(process, subprocess.Popen):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                if process.poll() is not None:
+                    return
+                raise
+        else:
+            process.kill()
         process.wait(timeout=5)

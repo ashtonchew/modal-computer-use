@@ -97,6 +97,8 @@ async def http_observe_change_scope(request: Request) -> AsyncIterator[None]:
 async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
     if getattr(request.app.state, "display_restart_in_progress", False) and not force:
         return False, ["display lifecycle mutation is in progress"]
+    if getattr(request.app.state, "display_reconstruction_failed", False):
+        return False, ["display lifecycle reconstruction failed"]
     supervisor = request.app.state.supervisor
     if not supervisor.running:
         invalidate_desktop_readiness(request.app.state)

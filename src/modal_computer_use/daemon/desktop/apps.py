@@ -2,12 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import os
+import signal
 import subprocess
 from collections.abc import Awaitable, Callable, Sequence
+from typing import Protocol
 
 from modal_computer_use.models import ActionResult
 
 SpawnProcess = Callable[..., Awaitable[subprocess.Popen[str]]]
+
+
+class _ManagedProcess(Protocol):
+    pid: int
+
+    def poll(self) -> int | None: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
 
 
 class X11AppController:
@@ -60,12 +75,28 @@ class X11AppController:
             raise first_error
 
 
-def _stop_owned_process(process: subprocess.Popen[str]) -> None:
+def _stop_owned_process(process: _ManagedProcess) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    if isinstance(process, subprocess.Popen):
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            if process.poll() is not None:
+                return
+            raise
+    else:
+        process.terminate()
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        process.kill()
+        if isinstance(process, subprocess.Popen):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                if process.poll() is not None:
+                    return
+                raise
+        else:
+            process.kill()
         process.wait(timeout=2)

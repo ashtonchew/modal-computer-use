@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import signal
 import subprocess
 
 import anyio
 
+from modal_computer_use.daemon.desktop import apps as apps_module
 from modal_computer_use.daemon.desktop.apps import X11AppController
 
 
@@ -71,3 +73,28 @@ def test_display_generation_invalidation_kills_owned_app_after_timeout() -> None
     assert process.terminated is True
     assert process.killed is True
     assert controller._processes == set()
+
+
+def test_display_generation_invalidation_signals_owned_process_group(monkeypatch) -> None:
+    process = _OwnedProcess()
+    signals: list[tuple[int, int]] = []
+
+    async def spawn(*_args: object) -> _OwnedProcess:
+        return process
+
+    def killpg(pid: int, signum: int) -> None:
+        signals.append((pid, signum))
+        process.running = False
+
+    monkeypatch.setattr(apps_module.subprocess, "Popen", _OwnedProcess)
+    monkeypatch.setattr(apps_module.os, "killpg", killpg)
+    controller = X11AppController(spawn=spawn)  # type: ignore[arg-type]
+
+    async def exercise() -> None:
+        result = await controller.launch("chromium")
+        assert result.ok is True
+        await controller.invalidate_display_generation()
+
+    anyio.run(exercise)
+
+    assert signals == [(process.pid, signal.SIGTERM)]
