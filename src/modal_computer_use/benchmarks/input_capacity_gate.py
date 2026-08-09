@@ -85,9 +85,16 @@ _FORBIDDEN_KEYS = {
 class InputCapacityGateError(RuntimeError):
     """Raised when capacity evidence is not eligible for promotion."""
 
-    def __init__(self, category: str, message: str) -> None:
+    def __init__(
+        self,
+        category: str,
+        message: str,
+        *,
+        evidence: Mapping[str, str | int] | None = None,
+    ) -> None:
         super().__init__(message)
         self.category = category
+        self.evidence = dict(evidence or {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +251,7 @@ async def run_input_capacity_measurement(
     measured_elapsed_ms = 0.0
     expected_final = workload[-1].final_point
     try:
-        await _require_healthy(computer)
+        await _require_healthy(computer, stage="initial")
         for warmup_index in range(settings.warmup_batches):
             await _run_batch(computer, workload[warmup_index % len(workload)], clock=clock)
         resources_before = await _resource_sample(computer)
@@ -253,7 +260,7 @@ async def run_input_capacity_measurement(
             result = await _run_batch(computer, expected, clock=clock)
             elapsed_ms = max(0.001, (clock() - started) * 1000.0)
             _validate_batch_result(result, expected, index=index)
-            await _require_healthy(computer)
+            await _require_healthy(computer, stage="post_batch", batch_index=index)
             throughput = expected.weighted_tokens / (elapsed_ms / 1000.0)
             observations.append(
                 {
@@ -285,13 +292,14 @@ async def run_input_capacity_measurement(
             raise InputCapacityGateError("lost_input", "final cursor sentinel was not observed")
         resources_after = await _resource_sample(computer)
     except InputCapacityGateError as exc:
-        failures.append(
-            {
-                "phase": "measure",
-                "category": exc.category,
-                "status": "failed",
-            }
-        )
+        failure: dict[str, Any] = {
+            "phase": "measure",
+            "category": exc.category,
+            "status": "failed",
+        }
+        if exc.evidence:
+            failure["evidence"] = _safe_value(exc.evidence)
+        failures.append(failure)
     except Exception as exc:
         failures.append(
             {
@@ -420,14 +428,44 @@ async def _run_batch(
         raise InputCapacityGateError(_error_category(exc), "input batch request failed") from exc
 
 
-async def _require_healthy(computer: InputCapacityComputer) -> None:
+async def _require_healthy(
+    computer: InputCapacityComputer,
+    *,
+    stage: str,
+    batch_index: int | None = None,
+) -> None:
+    evidence: dict[str, str | int] = {"stage": stage}
+    if batch_index is not None:
+        evidence["batch_index"] = batch_index
     try:
         status = await computer.lifecycle.status()
     except Exception as exc:
-        raise InputCapacityGateError("unhealthy_daemon", "daemon health check failed") from exc
+        evidence["outcome"] = "request_failed"
+        raise InputCapacityGateError(
+            "unhealthy_daemon",
+            "daemon health check failed",
+            evidence=evidence,
+        ) from exc
     ready = status.get("ready") if isinstance(status, Mapping) else getattr(status, "ready", None)
     if ready is not True:
-        raise InputCapacityGateError("unhealthy_daemon", "daemon is not ready")
+        raw_status = (
+            status.get("status")
+            if isinstance(status, Mapping)
+            else getattr(status, "status", None)
+        )
+        evidence.update(
+            {
+                "outcome": "not_ready",
+                "status": raw_status
+                if raw_status in {"starting", "running", "stopped", "degraded", "failed"}
+                else "unknown",
+            }
+        )
+        raise InputCapacityGateError(
+            "unhealthy_daemon",
+            "daemon is not ready",
+            evidence=evidence,
+        )
 
 
 async def _resource_sample(computer: InputCapacityComputer) -> dict[str, float | int]:

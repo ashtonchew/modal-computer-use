@@ -268,6 +268,11 @@ async def test_measurement_rejects_unhealthy_daemon() -> None:
 
     assert artifact["status"] == "failed"
     assert artifact["failures"][0]["category"] == "unhealthy_daemon"
+    assert artifact["failures"][0]["evidence"] == {
+        "stage": "initial",
+        "outcome": "not_ready",
+        "status": "unknown",
+    }
 
 
 @pytest.mark.asyncio
