@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from io import BytesIO
 from types import SimpleNamespace
@@ -136,6 +137,142 @@ def test_x11_shared_memory_adapter_uses_private_extension_abi(monkeypatch) -> No
         ("capture", 3, 4, 10, 11),
         ("close",),
     ]
+
+
+def test_canonical_extension_uses_spawned_process_owner(monkeypatch) -> None:
+    extension_constructor_calls: list[tuple[object, ...]] = []
+    owner_calls: list[tuple[object, ...]] = []
+
+    class CanonicalExtensionSession:
+        def __init__(self, *args: object) -> None:
+            extension_constructor_calls.append(args)
+
+    class SpawnedOwner:
+        def __init__(self, *args: object) -> None:
+            owner_calls.append(("init", *args))
+
+        def capture_png(self, x: int, y: int, width: int, height: int) -> bytes:
+            owner_calls.append(("capture", x, y, width, height))
+            return _png_bytes((width, height))
+
+        def close(self) -> None:
+            owner_calls.append(("close",))
+
+    module = SimpleNamespace(
+        __name__="_modal_computer_use_x11_shm",
+        X11ScreenshotTimeoutError=RuntimeError,
+        X11SharedMemoryScreenshotSession=CanonicalExtensionSession,
+    )
+    monkeypatch.setattr(screenshot_capture, "_load_module", lambda: module)
+    monkeypatch.setattr(screenshot_capture, "_SpawnedX11ScreenshotSession", SpawnedOwner)
+
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=1024, height=768
+    )
+
+    assert session.capture_png(x=3, y=4, width=10, height=11).startswith(b"\x89PNG")
+    session.close()
+
+    assert extension_constructor_calls == []
+    assert owner_calls == [
+        ("init", ":99", 1024, 768),
+        ("capture", 3, 4, 10, 11),
+        ("close",),
+    ]
+
+
+def test_spawned_process_owner_round_trips_png_and_reaps_child(tmp_path, monkeypatch) -> None:
+    png = _png_bytes((5, 6))
+    (tmp_path / "_modal_computer_use_x11_shm.py").write_text(
+        "\n".join(
+            [
+                "class X11ScreenshotTimeoutError(RuntimeError):",
+                "    pass",
+                "class X11SharedMemoryScreenshotSession:",
+                "    def __init__(self, display, width, height):",
+                "        self.dimensions = (width, height)",
+                "    def capture_png(self, x, y, width, height):",
+                f"        return bytes.fromhex({png.hex()!r})",
+                "    def close(self):",
+                "        pass",
+            ]
+        )
+        + "\n"
+    )
+    existing_path = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        str(tmp_path) if not existing_path else f"{tmp_path}{os.pathsep}{existing_path}",
+    )
+    module = SimpleNamespace(
+        __name__="_modal_computer_use_x11_shm",
+        X11ScreenshotTimeoutError=RuntimeError,
+        X11SharedMemoryScreenshotSession=object,
+    )
+    monkeypatch.setattr(screenshot_capture, "_load_module", lambda: module)
+
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=10, height=11
+    )
+    owner = session._session
+    process = owner._process
+
+    assert session.capture_png(x=1, y=2, width=5, height=6) == png
+    session.close()
+
+    assert process is not None
+    assert process.poll() == 0
+
+
+def test_spawned_process_owner_times_out_and_reaps_stalled_child(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "_modal_computer_use_x11_shm.py").write_text(
+        "\n".join(
+            [
+                "import time",
+                "class X11ScreenshotTimeoutError(RuntimeError):",
+                "    pass",
+                "class X11SharedMemoryScreenshotSession:",
+                "    def __init__(self, display, width, height):",
+                "        pass",
+                "    def capture_png(self, x, y, width, height):",
+                "        time.sleep(10)",
+                "    def close(self):",
+                "        pass",
+            ]
+        )
+        + "\n"
+    )
+    existing_path = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        str(tmp_path) if not existing_path else f"{tmp_path}{os.pathsep}{existing_path}",
+    )
+    monkeypatch.setattr(screenshot_capture, "_WORKER_OPERATION_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(
+            __name__="_modal_computer_use_x11_shm",
+            X11ScreenshotTimeoutError=RuntimeError,
+            X11SharedMemoryScreenshotSession=object,
+        ),
+    )
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=10, height=11
+    )
+    owner = session._session
+    process = owner._process
+
+    started = time.monotonic()
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+        session.capture_png(x=0, y=0, width=10, height=11)
+
+    assert time.monotonic() - started < 1
+    assert process is not None
+    assert process.poll() is not None
+    session.close()
 
 
 def test_x11_shared_memory_adapter_rejects_wrong_png_dimensions(monkeypatch) -> None:

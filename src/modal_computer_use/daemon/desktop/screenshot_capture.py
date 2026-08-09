@@ -9,12 +9,35 @@ be loaded or used.
 
 from __future__ import annotations
 
+import fcntl
 import importlib
+import os
+import signal
 import socket
 import struct
+import subprocess
+import sys
+import threading
+from contextlib import suppress
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any, Literal, cast
+
+from ._x11_shm_worker import (
+    CAPTURE_PAYLOAD,
+    OP_CAPTURE,
+    OP_CLOSE,
+    PROTOCOL_MAGIC,
+    REQUEST_HEADER,
+    RESPONSE_HEADER,
+    STATUS_CAPTURED,
+    STATUS_CLOSED,
+    STATUS_FAILED,
+    STATUS_READY,
+    STATUS_TIMED_OUT,
+    STATUS_UNAVAILABLE,
+    max_png_payload,
+)
 
 ScreenshotCaptureSource = Literal["auto", "mss", "x11-shm"]
 ResolvedScreenshotCaptureSource = Literal["mss", "x11-shm"]
@@ -46,6 +69,15 @@ class ScreenshotCaptureResolution:
 _MODULE_NAME = "_modal_computer_use_x11_shm"
 _module: Any | None = None
 _module_checked = False
+
+# This deadline covers the parent/child transport as well as an extension call.
+# The extension has its own shorter X11 reply deadline; the parent deadline is
+# deliberately a little wider so a typed child reply can cross the socket. A
+# child that exceeds either bound is terminated and reaped before the typed
+# error reaches the daemon.
+_WORKER_OPERATION_TIMEOUT_SECONDS = 1.0
+_WORKER_START_TIMEOUT_SECONDS = 2.0
+_WORKER_REAP_TIMEOUT_SECONDS = 0.25
 
 
 def normalize_capture_source(value: str) -> ScreenshotCaptureSource:
@@ -91,7 +123,11 @@ def resolve_capture_source(
 
 
 class X11SharedMemoryScreenshotSession:
-    """Python owner for one persistent X11 shared-memory session."""
+    """Python owner for one persistent X11 shared-memory session.
+
+    A real packaged extension is owned by one spawned child process. Fake
+    modules used by local tests retain the direct in-process ABI seam.
+    """
 
     def __init__(self, *, display: str, width: int, height: int) -> None:
         module = _load_module()
@@ -113,17 +149,18 @@ class X11SharedMemoryScreenshotSession:
                 "X11 shared-memory screenshot extension has no session constructor"
             )
         if getattr(module, "__name__", None) == _MODULE_NAME:
-            _probe_x11_setup(display)
-        try:
-            self._session = constructor(display, width, height)
-        except Exception as exc:
-            if _is_native_timeout(exc, timeout_error):
-                raise ScreenshotCaptureTimedOut(
-                    "X11 shared-memory screenshot startup exceeded its reply deadline"
+            self._session = _SpawnedX11ScreenshotSession(display, width, height)
+        else:
+            try:
+                self._session = constructor(display, width, height)
+            except Exception as exc:
+                if _is_native_timeout(exc, timeout_error):
+                    raise ScreenshotCaptureTimedOut(
+                        "X11 shared-memory screenshot startup exceeded its reply deadline"
+                    ) from exc
+                raise ScreenshotCaptureUnavailable(
+                    "X11 shared-memory screenshot session could not start"
                 ) from exc
-            raise ScreenshotCaptureUnavailable(
-                "X11 shared-memory screenshot session could not start"
-            ) from exc
         self._timeout_error = timeout_error
         self._closed = False
 
@@ -134,6 +171,10 @@ class X11SharedMemoryScreenshotSession:
             )
         try:
             data = self._session.capture_png(x, y, width, height)
+        except ScreenshotCaptureTimedOut:
+            raise
+        except ScreenshotCaptureFailed:
+            raise
         except Exception as exc:
             if _is_native_timeout(exc, self._timeout_error):
                 raise ScreenshotCaptureTimedOut(
@@ -159,12 +200,225 @@ class X11SharedMemoryScreenshotSession:
         try:
             if callable(close):
                 close()
+        except ScreenshotCaptureTimedOut:
+            raise
+        except ScreenshotCaptureFailed:
+            raise
         except Exception as exc:
             raise ScreenshotCaptureFailed(
                 "X11 shared-memory screenshot cleanup failed"
             ) from exc
         finally:
             self._closed = True
+
+
+class _SpawnedX11ScreenshotSession:
+    """Own one real native session in a deadline-bound helper process."""
+
+    def __init__(self, display: str, width: int, height: int) -> None:
+        self._lock = threading.Lock()
+        self._request_id = 0
+        self._closed = False
+        self._payload_limit = max_png_payload(width, height)
+        parent_socket, child_socket = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._socket = parent_socket
+        self._process: subprocess.Popen[bytes] | None = None
+        try:
+            child_fd = child_socket.fileno()
+            if child_fd < 3:
+                duplicated = fcntl.fcntl(child_fd, fcntl.F_DUPFD_CLOEXEC, 3)
+                child_socket.close()
+                child_socket = socket.socket(fileno=duplicated)
+                child_fd = duplicated
+            self._process = subprocess.Popen(  # noqa: S603 - fixed private module argv.
+                [
+                    sys.executable,
+                    "-m",
+                    "modal_computer_use.daemon.desktop._x11_shm_worker",
+                    "--fd",
+                    str(child_fd),
+                    "--display",
+                    display,
+                    "--width",
+                    str(width),
+                    "--height",
+                    str(height),
+                ],
+                close_fds=True,
+                pass_fds=(child_fd,),
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            child_socket.close()
+            status, request_id, payload = self._receive(
+                monotonic() + _WORKER_START_TIMEOUT_SECONDS
+            )
+            if request_id != 0 or payload:
+                raise ScreenshotCaptureUnavailable(
+                    "X11 shared-memory screenshot worker returned an invalid startup response"
+                )
+            if status == STATUS_TIMED_OUT:
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot startup exceeded its process deadline"
+                )
+            if status != STATUS_READY:
+                raise ScreenshotCaptureUnavailable(
+                    "X11 shared-memory screenshot session could not start"
+                )
+        except ScreenshotCaptureError:
+            self._terminate()
+            raise
+        except (OSError, TimeoutError, ValueError) as exc:
+            self._terminate()
+            if isinstance(exc, TimeoutError):
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot startup exceeded its process deadline"
+                ) from exc
+            raise ScreenshotCaptureUnavailable(
+                "X11 shared-memory screenshot worker could not start"
+            ) from exc
+        finally:
+            child_socket.close()
+
+    def capture_png(self, x: int, y: int, width: int, height: int) -> bytes:
+        with self._lock:
+            if self._closed:
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker is closed"
+                )
+            request_id = self._next_request_id()
+            deadline = monotonic() + _WORKER_OPERATION_TIMEOUT_SECONDS
+            try:
+                self._send(
+                    OP_CAPTURE,
+                    request_id,
+                    CAPTURE_PAYLOAD.pack(x, y, width, height),
+                    deadline,
+                )
+                status, response_id, payload = self._receive(deadline)
+            except TimeoutError as exc:
+                self._terminate()
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot exceeded its process deadline"
+                ) from exc
+            except (OSError, ValueError, struct.error) as exc:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker failed"
+                ) from exc
+            if response_id != request_id:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker returned an invalid response"
+                )
+            if status == STATUS_TIMED_OUT:
+                self._terminate()
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot exceeded its reply deadline"
+                )
+            if status != STATUS_CAPTURED or not payload:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker could not capture"
+                )
+            return payload
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            request_id = self._next_request_id()
+            deadline = monotonic() + _WORKER_OPERATION_TIMEOUT_SECONDS
+            try:
+                self._send(OP_CLOSE, request_id, b"", deadline)
+                status, response_id, payload = self._receive(deadline)
+                if status != STATUS_CLOSED or response_id != request_id or payload:
+                    raise ScreenshotCaptureFailed(
+                        "X11 shared-memory screenshot worker cleanup failed"
+                    )
+                process = self._process
+                if process is not None:
+                    process.wait(timeout=_WORKER_REAP_TIMEOUT_SECONDS)
+            except (OSError, TimeoutError, subprocess.TimeoutExpired) as exc:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker cleanup failed"
+                ) from exc
+            except ScreenshotCaptureFailed:
+                self._terminate()
+                raise
+            finally:
+                self._closed = True
+                self._socket.close()
+
+    def _next_request_id(self) -> int:
+        self._request_id = (self._request_id % (2**32 - 1)) + 1
+        return self._request_id
+
+    def _send(self, operation: int, request_id: int, payload: bytes, deadline: float) -> None:
+        self._socket.settimeout(_remaining(deadline))
+        self._socket.sendall(
+            REQUEST_HEADER.pack(PROTOCOL_MAGIC, operation, request_id, len(payload))
+            + payload
+        )
+
+    def _receive(self, deadline: float) -> tuple[int, int, bytes]:
+        header = _recv_exact(self._socket, RESPONSE_HEADER.size, deadline)
+        magic, status, request_id, payload_length = RESPONSE_HEADER.unpack(header)
+        if magic != PROTOCOL_MAGIC or payload_length > self._payload_limit:
+            raise ValueError("invalid X11 screenshot worker response")
+        payload = _recv_exact(self._socket, payload_length, deadline)
+        if status not in {
+            STATUS_READY,
+            STATUS_CAPTURED,
+            STATUS_CLOSED,
+            STATUS_UNAVAILABLE,
+            STATUS_TIMED_OUT,
+            STATUS_FAILED,
+        }:
+            raise ValueError("unknown X11 screenshot worker status")
+        return status, request_id, payload
+
+    def _terminate(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._socket.close()
+        process = self._process
+        if process is None or process.poll() is not None:
+            if process is not None:
+                process.wait()
+            return
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=_WORKER_REAP_TIMEOUT_SECONDS)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+
+
+def _remaining(deadline: float) -> float:
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise TimeoutError("X11 screenshot worker deadline expired")
+    return remaining
+
+
+def _recv_exact(connection: socket.socket, length: int, deadline: float) -> bytes:
+    output = bytearray()
+    while len(output) < length:
+        connection.settimeout(_remaining(deadline))
+        chunk = connection.recv(length - len(output))
+        if not chunk:
+            raise OSError("X11 screenshot worker connection closed")
+        output.extend(chunk)
+    return bytes(output)
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import shutil
 import subprocess
@@ -120,7 +121,7 @@ class X11ScreenshotController:
                 "X11 screenshot capture is quarantined until display restart"
             )
 
-    def _ensure_x11_shm(self) -> None:
+    async def _ensure_x11_shm(self) -> None:
         """Open the XCB/MIT-SHM session after the supervisor starts Xvfb.
 
         ``X11DesktopBackend`` is constructed while the ASGI app is imported,
@@ -145,7 +146,8 @@ class X11ScreenshotController:
         if selected == "mss":
             return
         try:
-            self._x11_shm = X11SharedMemoryScreenshotSession(
+            self._x11_shm = await asyncio.to_thread(
+                X11SharedMemoryScreenshotSession,
                 display=self.display,
                 width=self.width,
                 height=self.height,
@@ -217,7 +219,7 @@ class X11ScreenshotController:
                 # This is a real hidden full-frame GetImage probe.  It runs
                 # after Supervisor.start(), so the display is live even though
                 # this controller was constructed during app creation.
-                self._ensure_x11_shm()
+                await self._ensure_x11_shm()
                 captured = await self.capture_bytes(
                     ScreenshotOptions(format="png", show_cursor=False),
                     prefer_native_png=True,
@@ -335,17 +337,16 @@ class X11ScreenshotController:
             options
         )
         if x11_shm_eligible:
-            self._ensure_x11_shm()
+            await self._ensure_x11_shm()
         x11_shm_requested = x11_shm_eligible and (
             self._x11_shm_fallback or self._capture_resolution.selected == "x11-shm"
         )
-        if (
-            self._x11_shm is not None
-            and x11_shm_eligible
-        ):
+        session = self._x11_shm
+        if session is not None and x11_shm_eligible:
             started = perf_counter()
             try:
-                data = self._x11_shm.capture_png(
+                data = await asyncio.to_thread(
+                    session.capture_png,
                     x=source.x,
                     y=source.y,
                     width=source.width,
