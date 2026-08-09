@@ -74,22 +74,14 @@ class _Clock:
         return (self.calls * elapsed) / 1000.0
 
 
-class _FakeLifecycle:
-    def __init__(self, *, ready: bool = True, error: Exception | None = None) -> None:
-        self.ready = ready
+class _FakeMouse:
+    def __init__(self, owner: _FakeComputer, *, error: Exception | None = None) -> None:
+        self.owner = owner
         self.error = error
 
-    async def status(self) -> dict[str, bool]:
+    async def position(self) -> dict[str, int]:
         if self.error is not None:
             raise self.error
-        return {"ready": self.ready}
-
-
-class _FakeMouse:
-    def __init__(self, owner: _FakeComputer) -> None:
-        self.owner = owner
-
-    async def position(self) -> dict[str, int]:
         return dict(self.owner.final_point)
 
 
@@ -160,9 +152,11 @@ class _FakeComputer:
     ) -> None:
         self.calls = 0
         self.final_point = {"x": 0, "y": 0}
-        self.lifecycle = _FakeLifecycle(ready=ready)
         self.actions = _FakeActions(self, reorder=reorder)
-        self.mouse = _FakeMouse(self)
+        self.mouse = _FakeMouse(
+            self,
+            error=RuntimeError("pointer probe failed") if not ready else None,
+        )
         self.commands = commands or _FakeCommands()
 
 
@@ -273,15 +267,18 @@ async def test_measurement_rejects_unhealthy_daemon() -> None:
     assert artifact["failures"][0]["category"] == "unhealthy_daemon"
     assert artifact["failures"][0]["evidence"] == {
         "stage": "initial",
-        "outcome": "not_ready",
-        "status": "unknown",
+        "outcome": "pointer_probe_failed",
+        "exception_type": "RuntimeError",
     }
 
 
 @pytest.mark.asyncio
 async def test_health_failure_records_only_allowlisted_exception_attribution() -> None:
     computer = _FakeComputer()
-    computer.lifecycle = _FakeLifecycle(error=RuntimeError("Bearer must never be retained"))
+    computer.mouse = _FakeMouse(
+        computer,
+        error=RuntimeError("Bearer must never be retained"),
+    )
 
     artifact = await run_input_capacity_measurement(
         computer,
@@ -292,7 +289,7 @@ async def test_health_failure_records_only_allowlisted_exception_attribution() -
 
     assert artifact["failures"][0]["evidence"] == {
         "stage": "initial",
-        "outcome": "request_failed",
+        "outcome": "pointer_probe_failed",
         "exception_type": "RuntimeError",
     }
     assert "bearer" not in str(artifact).lower()

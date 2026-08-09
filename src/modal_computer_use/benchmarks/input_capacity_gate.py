@@ -159,7 +159,6 @@ class InputCapacityComputer(Protocol):
     """The small public seam used by the gate and its offline fakes."""
 
     actions: Any
-    lifecycle: Any
     mouse: Any
     commands: Any
 
@@ -260,7 +259,12 @@ async def run_input_capacity_measurement(
             result = await _run_batch(computer, expected, clock=clock)
             elapsed_ms = max(0.001, (clock() - started) * 1000.0)
             _validate_batch_result(result, expected, index=index)
-            await _require_healthy(computer, stage="post_batch", batch_index=index)
+            await _require_healthy(
+                computer,
+                stage="post_batch",
+                batch_index=index,
+                expected_point=expected.final_point,
+            )
             throughput = expected.weighted_tokens / (elapsed_ms / 1000.0)
             observations.append(
                 {
@@ -433,14 +437,15 @@ async def _require_healthy(
     *,
     stage: str,
     batch_index: int | None = None,
+    expected_point: tuple[int, int] | None = None,
 ) -> None:
     evidence: dict[str, str | int] = {"stage": stage}
     if batch_index is not None:
         evidence["batch_index"] = batch_index
     try:
-        status = await computer.lifecycle.status()
+        point = _point_tuple(await computer.mouse.position())
     except Exception as exc:
-        evidence["outcome"] = "request_failed"
+        evidence["outcome"] = "pointer_probe_failed"
         exception_type = type(exc).__name__
         if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", exception_type):
             evidence["exception_type"] = exception_type
@@ -455,24 +460,11 @@ async def _require_healthy(
             "daemon health check failed",
             evidence=evidence,
         ) from exc
-    ready = status.get("ready") if isinstance(status, Mapping) else getattr(status, "ready", None)
-    if ready is not True:
-        raw_status = (
-            status.get("status")
-            if isinstance(status, Mapping)
-            else getattr(status, "status", None)
-        )
-        evidence.update(
-            {
-                "outcome": "not_ready",
-                "status": raw_status
-                if raw_status in {"starting", "running", "stopped", "degraded", "failed"}
-                else "unknown",
-            }
-        )
+    if expected_point is not None and point != expected_point:
+        evidence["outcome"] = "pointer_sentinel_mismatch"
         raise InputCapacityGateError(
-            "unhealthy_daemon",
-            "daemon is not ready",
+            "lost_input",
+            "post-batch pointer sentinel was not observed",
             evidence=evidence,
         )
 
