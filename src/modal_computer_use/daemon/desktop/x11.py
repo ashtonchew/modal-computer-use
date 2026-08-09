@@ -669,11 +669,21 @@ class X11DesktopBackend(MockDesktopBackend):
         return self._windows.backend_name
 
     def close(self) -> None:
-        self._clipboard.close()
-        self._screenshots.close()
-        self._windows.close()
-        self._input.close()
-        self._process_runner.close()
+        first_error: Exception | None = None
+        for close in (
+            self._clipboard.close,
+            self._screenshots.close,
+            self._windows.close,
+            self._input.close,
+            self._process_runner.close,
+        ):
+            try:
+                close()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     def reset_screenshot_capture(self) -> None:
         self._screenshots.reset_capture_session()

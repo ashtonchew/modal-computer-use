@@ -118,6 +118,7 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "_modal_computer_use_x11_shm.so" in joined
     assert "sysconfig.get_path(\"platlib\")" in joined
     assert "import _modal_computer_use_x11_shm" in joined
+    assert "/opt/modal-computer-use/native/x11_shm/canary.py" in joined
 
 
 def test_native_build_helper_rejects_a_missing_packaged_source(
@@ -190,10 +191,12 @@ def test_root_artifacts_keep_universal_wheel_and_bundle_locked_native_source(
     required = {
         "src/modal_computer_use/_native/x11_shm/Cargo.toml",
         "src/modal_computer_use/_native/x11_shm/Cargo.lock",
+        "src/modal_computer_use/_native/x11_shm/canary.py",
         "src/modal_computer_use/_native/x11_shm/src/lib.rs",
     }
     assert any(member.endswith("/_native/x11_shm/Cargo.toml") for member in wheel_members)
     assert any(member.endswith("/_native/x11_shm/Cargo.lock") for member in wheel_members)
+    assert any(member.endswith("/_native/x11_shm/canary.py") for member in wheel_members)
     assert all(name in sdist_members for name in required)
     assert not any(member.endswith(".so") for member in wheel_members)
     assert not any("target/" in member for member in wheel_members)

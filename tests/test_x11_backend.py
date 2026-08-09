@@ -1157,6 +1157,32 @@ def test_x11_backend_defaults_to_isolated_asyncio_subprocesses() -> None:
         backend.close()
 
 
+def test_x11_backend_close_releases_every_resource_and_preserves_first_error(
+    monkeypatch,
+) -> None:
+    backend = X11DesktopBackend(input_backend="auto")
+    events: list[str] = []
+
+    def close(name: str, *, fail: bool = False):
+        def operation() -> None:
+            events.append(name)
+            if fail:
+                raise RuntimeError(name)
+
+        return operation
+
+    monkeypatch.setattr(backend._clipboard, "close", close("clipboard", fail=True))
+    monkeypatch.setattr(backend._screenshots, "close", close("screenshots"))
+    monkeypatch.setattr(backend._windows, "close", close("windows", fail=True))
+    monkeypatch.setattr(backend._input, "close", close("input"))
+    monkeypatch.setattr(backend._process_runner, "close", close("runner"))
+
+    with pytest.raises(RuntimeError, match="clipboard"):
+        backend.close()
+
+    assert events == ["clipboard", "screenshots", "windows", "input", "runner"]
+
+
 def test_input_backend_metadata_separates_policy_support_availability_and_last_use(
     monkeypatch,
 ) -> None:

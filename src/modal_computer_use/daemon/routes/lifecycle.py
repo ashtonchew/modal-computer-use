@@ -51,8 +51,10 @@ async def start(request: Request) -> LifecycleResult:
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
-        request.app.state.backend.reset_screenshot_capture()
-        await request.app.state.supervisor.stop()
+        try:
+            request.app.state.backend.reset_screenshot_capture()
+        finally:
+            await request.app.state.supervisor.stop()
         return LifecycleResult(ok=True, status="stopped")
 
     return await run_idle_only_mutation(request, operation, semantic_data={})
@@ -61,8 +63,10 @@ async def stop(request: Request) -> LifecycleResult:
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
-        request.app.state.backend.reset_screenshot_capture()
-        await request.app.state.supervisor.restart()
+        try:
+            request.app.state.backend.reset_screenshot_capture()
+        finally:
+            await request.app.state.supervisor.restart()
         return LifecycleResult(ok=True, status="running")
 
     return await run_idle_only_mutation(request, operation, semantic_data={})
