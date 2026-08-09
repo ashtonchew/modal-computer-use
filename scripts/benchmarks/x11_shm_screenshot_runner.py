@@ -234,10 +234,7 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
             app_name=APP_NAME,
             image=image,
             owner=f"x11-shm-screenshot-{self.source}",
-            tags={
-                "benchmark": "x11-shm-screenshot",
-                "benchmark_run": BENCHMARK_RUN_TAG,
-            },
+            tags={"benchmark_run": BENCHMARK_RUN_TAG},
         )
         try:
             self._computer = await self._context.__aenter__()
