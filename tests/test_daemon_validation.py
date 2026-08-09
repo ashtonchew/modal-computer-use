@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,13 @@ from fastapi.testclient import TestClient
 import modal_computer_use.daemon.readiness as readiness
 import modal_computer_use.daemon.routes.commands as command_routes
 from modal_computer_use.daemon.app import create_app
-from modal_computer_use.daemon.routes.validation import command_argument_byte_limit
+from modal_computer_use.daemon.routes.validation import (
+    command_argument_byte_limit,
+    ensure_desktop_ready,
+    invalidate_desktop_readiness,
+    ready_input_lock,
+    ready_mutation_lock,
+)
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ActionResult, Point
 
@@ -904,6 +911,7 @@ def test_action_rechecks_readiness_after_waiting_for_input_lock(tmp_path) -> Non
         await app.state.input_lock.acquire()
         task = asyncio.create_task(app(scope, receive, send))
         await asyncio.wait_for(precheck_complete.wait(), timeout=1)
+        invalidate_desktop_readiness(app.state)
         app.state.input_lock.release()
         await asyncio.wait_for(task, timeout=1)
         return next(message for message in sent if message["type"] == "http.response.start")[
@@ -913,6 +921,124 @@ def test_action_rechecks_readiness_after_waiting_for_input_lock(tmp_path) -> Non
     assert asyncio.run(call_with_readiness_flipped_while_queued()) == 503
     assert app.state.backend.cursor == Point(x=0, y=0)
     assert app.state.action_count == 0
+
+
+def test_queued_input_reuses_same_generation_readiness_proof(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            readiness_cache_ttl_ms=60_000,
+        )
+    )
+    app.state.supervisor.running = True
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    async def scenario() -> None:
+        app.state.backend.ready = counted_ready
+        request = SimpleNamespace(app=app)
+        await ensure_desktop_ready(request)
+        await app.state.input_lock.acquire()
+        queued = asyncio.create_task(_enter_ready_input_lock(request))
+        await asyncio.sleep(0)
+        app.state.input_lock.release()
+        await queued
+
+    async def _enter_ready_input_lock(request) -> None:
+        async with ready_input_lock(request):
+            pass
+
+    asyncio.run(scenario())
+
+    assert readiness_calls == 1
+
+
+def test_queued_screenshot_mutation_reuses_same_generation_readiness_proof(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            readiness_cache_ttl_ms=60_000,
+        )
+    )
+    app.state.supervisor.running = True
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    async def scenario() -> None:
+        app.state.backend.ready = counted_ready
+        request = SimpleNamespace(app=app, headers={}, scope={})
+        await ensure_desktop_ready(request)
+        await app.state.input_lock.acquire()
+        queued = asyncio.create_task(_enter_ready_mutation_lock(request))
+        await asyncio.sleep(0)
+        app.state.input_lock.release()
+        await queued
+
+    async def _enter_ready_mutation_lock(request) -> None:
+        async with ready_mutation_lock(
+            request,
+            semantic_data={"storage": "artifact"},
+            reuse_current_readiness_proof=True,
+        ):
+            pass
+
+    asyncio.run(scenario())
+
+    assert readiness_calls == 1
+
+
+def test_queued_general_mutation_still_forces_readiness(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            local_token="dev",
+            readiness_cache_ttl_ms=60_000,
+        )
+    )
+    app.state.supervisor.running = True
+    readiness_calls = 0
+
+    async def counted_ready():
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return True, []
+
+    async def scenario() -> None:
+        app.state.backend.ready = counted_ready
+        request = SimpleNamespace(app=app, headers={}, scope={})
+        await ensure_desktop_ready(request)
+        await app.state.input_lock.acquire()
+        queued = asyncio.create_task(_enter_ready_mutation_lock(request))
+        await asyncio.sleep(0)
+        app.state.input_lock.release()
+        await queued
+
+    async def _enter_ready_mutation_lock(request) -> None:
+        async with ready_mutation_lock(
+            request,
+            semantic_data={"type": "move"},
+        ):
+            pass
+
+    asyncio.run(scenario())
+
+    assert readiness_calls == 2
 
 
 def test_screenshot_hot_path_reuses_successful_readiness_probe(tmp_path) -> None:
