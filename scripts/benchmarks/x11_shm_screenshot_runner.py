@@ -208,9 +208,11 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         self.target_identity: dict[str, Any] | None = None
         self.fixture_verified = False
         self.startup_timing: SessionStartupTiming | None = None
+        self.enter_phase = "not_started"
 
     async def __aenter__(self) -> Any:
         self.startup_timing = SessionStartupTiming()
+        self.enter_phase = "create_sandbox"
         config = ComputerConfig(
             desktop=DesktopConfig(
                 resolution=(WIDTH, HEIGHT),
@@ -254,11 +256,15 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         )
         try:
             self._computer = await self._context.__aenter__()
+            self.enter_phase = "runtime_placement"
             self.target_placement = _normalize_placement(
                 await self._computer.runtime_placement()
             )
+            self.enter_phase = "runtime_identity"
             self.target_identity = await _target_runtime_identity(self._computer)
+            self.enter_phase = "browser_status"
             status = await self._computer.browser.status()
+            self.enter_phase = "fixture_validation"
             prewarm_result = status.get("prewarm_result")
             if (
                 status.get("configured_browser") != "chromium"
@@ -271,6 +277,7 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
             ):
                 raise RuntimeError("managed Chromium fixture did not become ready")
             self.fixture_verified = True
+            self.enter_phase = "ready"
             return self._computer
         except BaseException as exc:
             context, self._context = self._context, None
@@ -373,6 +380,52 @@ def _safe_diagnostic_label(value: object) -> str | None:
     if not all(character.isalnum() or character in "._-" for character in value):
         return None
     return value
+
+
+def _safe_daemon_failure(exc: Exception) -> dict[str, Any]:
+    """Retain only bounded daemon error attribution, never response text."""
+
+    if not isinstance(exc, DaemonHTTPError):
+        return {}
+    result: dict[str, Any] = {"failure_status_code": exc.status_code}
+    code = _safe_diagnostic_label(exc.code)
+    if code is not None:
+        result["failure_code"] = code
+    details = exc.details
+    if isinstance(details, Mapping):
+        detail_type = _safe_diagnostic_label(details.get("type"))
+        if detail_type is not None:
+            result["failure_detail_type"] = detail_type
+    return result
+
+
+def _startup_failure_phase(timing: SessionStartupTiming | None) -> str:
+    """Map the last secret-free startup mark to the operation still pending."""
+
+    if timing is None:
+        return "create_sandbox"
+    stages = timing.as_dict().get("stages")
+    if not isinstance(stages, Mapping):
+        return "create_sandbox"
+    observed = [
+        name
+        for name, value in stages.items()
+        if isinstance(name, str)
+        and isinstance(value, Mapping)
+        and value.get("status") == "observed"
+    ]
+    if not observed:
+        return "create_sandbox"
+    return {
+        "request_received": "modal_app_lookup",
+        "sandbox_create_started": "modal_sandbox_allocation",
+        "sandbox_registered": "sandbox_tcp_readiness",
+        "tcp_ready": "connection_parameters",
+        "connection_parameters_ready": "daemon_readiness",
+        "connect_ready": "tunnel_attestation",
+        "attestation_ready": "attested_tunnel_readiness",
+        "tunnel_ready": "context_post_ready",
+    }.get(observed[-1], "create_sandbox")
 
 
 async def _completed_process_stdout_text(process: Any) -> str:
@@ -499,11 +552,13 @@ async def _run_readiness_probe(
                     "sample_index": sample_index,
                     "status": "failed",
                 }
+                phase = "context_enter"
                 started = time.perf_counter()
                 try:
                     computer = await context.__aenter__()
                     samples[arm].append((time.perf_counter() - started) * 1000.0)
                     observation["status"] = "ok"
+                    phase = "public_capture"
                     backends: list[str | None] = []
                     original = computer.client.post_bytes_with_headers
 
@@ -526,6 +581,15 @@ async def _run_readiness_probe(
                         raise RuntimeError("fresh readiness used an unexpected source")
                 except Exception as exc:
                     observation["failure_type"] = type(exc).__name__
+                    if phase == "context_enter" and isinstance(context, _ArmContext):
+                        observation["failure_phase"] = (
+                            _startup_failure_phase(context.startup_timing)
+                            if context.enter_phase == "create_sandbox"
+                            else context.enter_phase
+                        )
+                    else:
+                        observation["failure_phase"] = phase
+                    observation.update(_safe_daemon_failure(exc))
                     raise
                 finally:
                     timing = getattr(context, "startup_timing", None)
@@ -537,7 +601,9 @@ async def _run_readiness_probe(
                                 await context.__aexit__(None, None, None)
                             except Exception as exc:
                                 cleanup_failure_type = type(exc).__name__
+                                observation["status"] = "failed"
                                 observation["cleanup_failure_type"] = type(exc).__name__
+                                observation["failure_phase"] = "cleanup"
                                 raise
                     finally:
                         startup_timings[arm].append(observation)
@@ -600,6 +666,8 @@ async def _run_x_server_restart_probe(
     computer: Any | None = None
     result: dict[str, Any] | None = None
     failure_type: str | None = None
+    failure: dict[str, Any] = {}
+    phase = "context_enter"
     try:
         computer = await context.__aenter__()
 
@@ -620,8 +688,11 @@ async def _run_x_server_restart_probe(
                 computer.client.post_bytes_with_headers = original
             return screenshot, backend
 
+        phase = "capture_before_restart"
         before, backend_before = await capture_with_backend()
+        phase = "lifecycle_restart"
         restarted = await computer.lifecycle.restart()
+        phase = "wait_for_readiness"
         ready = False
         for _ in range(100):
             status = await computer.lifecycle.status()
@@ -629,6 +700,7 @@ async def _run_x_server_restart_probe(
                 ready = True
                 break
             await asyncio.sleep(0.1)
+        phase = "capture_after_restart"
         after, backend_after = await capture_with_backend()
         result = {
             "passed": (
@@ -647,6 +719,7 @@ async def _run_x_server_restart_probe(
         }
     except Exception as exc:
         failure_type = type(exc).__name__
+        failure = {"failure_phase": phase, **_safe_daemon_failure(exc)}
     cleanup_type: str | None = None
     if computer is not None:
         try:
@@ -657,6 +730,12 @@ async def _run_x_server_restart_probe(
         return {
             "passed": False,
             **({"failure_type": failure_type} if failure_type else {}),
+            **failure,
+            **(
+                {"failure_phase": "cleanup"}
+                if failure_type is None and cleanup_type is not None
+                else {}
+            ),
             **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
         }
     return result or {"passed": False, "failure_type": "NoResult"}
