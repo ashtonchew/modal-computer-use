@@ -36,13 +36,24 @@ DEFAULT_MAX_CPU_UTILIZATION_PERCENT = 95.0
 DEFAULT_MAX_RSS_GROWTH_BYTES = 64 * 1024 * 1024
 _EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _RESOURCE_SAMPLE_SCRIPT = """
-import json, pathlib
-cpu = {}
-for line in pathlib.Path("/sys/fs/cgroup/cpu.stat").read_text(encoding="utf-8").splitlines():
-    key, value = line.split()
-    cpu[key] = int(value)
-memory = int(pathlib.Path("/sys/fs/cgroup/memory.current").read_text(encoding="utf-8"))
-print(json.dumps({"cpu_seconds": cpu["usage_usec"] / 1_000_000, "rss_bytes": memory}))
+import glob, json, os, pathlib
+membership = pathlib.Path("/proc/self/cgroup").read_text(encoding="utf-8")
+ticks = os.sysconf("SC_CLK_TCK")
+page = os.sysconf("SC_PAGE_SIZE")
+cpu_ticks = 0
+rss_pages = 0
+for path in glob.glob("/proc/[0-9]*/stat"):
+    root = pathlib.Path(path).parent
+    try:
+        if (root / "cgroup").read_text(encoding="utf-8") != membership:
+            continue
+        fields = (root / "stat").read_text(encoding="utf-8").split()
+        memory = (root / "statm").read_text(encoding="utf-8").split()
+        cpu_ticks += int(fields[13]) + int(fields[14])
+        rss_pages += int(memory[1])
+    except (FileNotFoundError, PermissionError, IndexError, ValueError):
+        pass
+print(json.dumps({"cpu_seconds": cpu_ticks / ticks, "rss_bytes": rss_pages * page}))
 """.strip()
 
 _INPUT_ACTION_TYPES = {

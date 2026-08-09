@@ -153,8 +153,8 @@ borrow, and one pooled client. It sends ordered mixed batches and verifies every
 attribution, pointer sentinels, daemon health, cleanup, throughput, tail stability, CPU use, and RSS
 growth. It does not retry or replace failed work. A passing run stays at or below 95% CPU use on
 the one-CPU profile and adds no more than 64 MiB of RSS during the measured workload. The
-application-owned Function samples the target Sandbox's cgroup counters; it does not expose
-privileged command execution through the borrowed-computer Interface.
+application-owned Function samples only processes with the target Sandbox's cgroup membership; it
+does not expose privileged command execution through the borrowed-computer Interface.
 
 The measurement configures a 2,000-token refill and 4,000-token burst so the candidate limiter does
 not become the test bottleneck. The release gate requires at least 400 representative normalized

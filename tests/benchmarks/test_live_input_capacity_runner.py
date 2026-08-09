@@ -43,9 +43,9 @@ def test_capacity_runner_accepts_environment_or_authenticated_profile(
     runner.require_live_authorization(True, credential_probe=lambda: False)
 
 
-def test_capacity_runner_samples_the_target_cgroup_not_host_visible_processes() -> None:
+def test_capacity_runner_samples_only_processes_in_the_target_cgroup() -> None:
     runner = _load_runner()
 
-    assert "/sys/fs/cgroup/cpu.stat" in runner._RESOURCE_SAMPLE_SCRIPT
-    assert "/sys/fs/cgroup/memory.current" in runner._RESOURCE_SAMPLE_SCRIPT
-    assert "/proc/[0-9]" not in runner._RESOURCE_SAMPLE_SCRIPT
+    assert "/proc/self/cgroup" in runner._RESOURCE_SAMPLE_SCRIPT
+    assert '(root / "cgroup").read_text' in runner._RESOURCE_SAMPLE_SCRIPT
+    assert "!= membership" in runner._RESOURCE_SAMPLE_SCRIPT
