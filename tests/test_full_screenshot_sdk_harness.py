@@ -72,6 +72,8 @@ def test_promotion_runner_exposes_a_retained_100_pair_readiness_replication() ->
     assert '"sample_count_per_arm": samples' in runner
     assert 'observation["startup_total_ms"] = round(elapsed_ms, 4)' in runner
     assert '"position": position' in runner
+    assert "continue_on_failure=True" in runner
+    assert '"failure_count": failure_count' in runner
     assert '"terminal_cleanup": cleanup' in runner
     assert "def readiness_main(" in runner
 

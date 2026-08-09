@@ -553,6 +553,7 @@ async def _run_readiness_probe(
     factories: Mapping[str, Callable[[], AbstractAsyncContextManager[Any]]],
     *,
     sample_count: int = READINESS_SAMPLES,
+    continue_on_failure: bool = False,
 ) -> dict[str, Any]:
     """Measure paired fresh create-to-ready samples for both capture sources."""
 
@@ -620,7 +621,8 @@ async def _run_readiness_probe(
                     else:
                         observation["failure_phase"] = phase
                     observation.update(_safe_daemon_failure(exc))
-                    raise
+                    if not continue_on_failure:
+                        raise
                 finally:
                     timing = getattr(context, "startup_timing", None)
                     if isinstance(timing, SessionStartupTiming):
@@ -644,7 +646,11 @@ async def _run_readiness_probe(
 
     arms = {
         arm: {
-            "passed": len(values) == sample_count,
+            "passed": len(values) == sample_count
+            and all(
+                observation.get("status") == "ok"
+                for observation in startup_timings[arm]
+            ),
             "source": arm,
             "samples": len(values),
             "startup_p50_ms": round(statistics.median(values), 4) if values else 0.0,
@@ -654,7 +660,16 @@ async def _run_readiness_probe(
         }
         for arm, values in samples.items()
     }
-    passed = failure_type is None and cleanup_failure_type is None
+    failure_count = sum(
+        observation.get("status") != "ok"
+        for observations in startup_timings.values()
+        for observation in observations
+    )
+    passed = (
+        failure_type is None
+        and cleanup_failure_type is None
+        and failure_count == 0
+    )
     if passed:
         passed = float(arms["x11-shm"]["startup_p95_ms"]) <= float(
             arms["mss"]["startup_p95_ms"]
@@ -662,6 +677,7 @@ async def _run_readiness_probe(
     return {
         "passed": passed,
         "maximum_p95_regression_percent": MAX_OPERATIONAL_REGRESSION_PERCENT,
+        "failure_count": failure_count,
         "arms": arms,
         **({"failure_type": failure_type} if failure_type else {}),
         **({"failure_arm": failure_arm} if failure_arm else {}),
@@ -1913,6 +1929,7 @@ def run_readiness_replication(
                     for arm in ("mss", "x11-shm")
                 },
                 sample_count=samples,
+                continue_on_failure=True,
             )
         except BaseException as primary:
             try:
