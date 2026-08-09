@@ -79,6 +79,15 @@ HEIGHT = 768
 DEPTH = 24
 CPU = 1.0
 MEMORY_MIB = 2048
+BROWSER_LAUNCH_ARGS = (
+    "--kiosk",
+    "--window-position=0,0",
+    "--window-size=1024,768",
+    "--force-device-scale-factor=1",
+    "--no-first-run",
+    "--disable-session-crashed-bubble",
+    "--disable-infobars",
+)
 SCHEDULE_SEED = 20260808
 BOOTSTRAP_SEED = 20260808
 BOOTSTRAP_RESAMPLES = 1_000
@@ -209,7 +218,9 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
             browser=BrowserConfig(
                 kind="chromium",
                 prewarm=True,
+                launch_args=list(BROWSER_LAUNCH_ARGS),
                 open_url_on_start=FIXTURE_DATA_URL,
+                gpu_mode="off",
             ),
             runtime=RuntimeConfig(
                 modal_environment=ENVIRONMENT,
@@ -1394,6 +1405,8 @@ def _promotion_artifact(
                 for arm in ("mss", "x11-shm")
             },
             "browser": "chromium",
+            "browser_launch_args": list(BROWSER_LAUNCH_ARGS),
+            "browser_gpu_mode": "off",
             "display": {"width": WIDTH, "height": HEIGHT, "depth": DEPTH},
             "screenshot": {
                 "format": "png",

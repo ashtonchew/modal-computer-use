@@ -254,6 +254,16 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
         raise ValueError("benchmark arms used different native Image builds")
     if configuration.get("browser") != "chromium":
         raise ValueError("publishable evidence requires a real Chromium fixture")
+    if configuration.get("browser_launch_args") != [
+        "--kiosk",
+        "--window-position=0,0",
+        "--window-size=1024,768",
+        "--force-device-scale-factor=1",
+        "--no-first-run",
+        "--disable-session-crashed-bubble",
+        "--disable-infobars",
+    ] or configuration.get("browser_gpu_mode") != "off":
+        raise ValueError("Chromium fixture launch configuration changed")
     if configuration.get("display") != {"width": 1024, "height": 768, "depth": 24}:
         raise ValueError("display must be 1024x768x24")
     if configuration.get("screenshot") != {

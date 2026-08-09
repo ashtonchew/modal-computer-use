@@ -106,6 +106,16 @@ def _artifact() -> dict:
                 for arm in ("mss", "x11-shm")
             },
             "browser": "chromium",
+            "browser_launch_args": [
+                "--kiosk",
+                "--window-position=0,0",
+                "--window-size=1024,768",
+                "--force-device-scale-factor=1",
+                "--no-first-run",
+                "--disable-session-crashed-bubble",
+                "--disable-infobars",
+            ],
+            "browser_gpu_mode": "off",
             "display": {"width": 1024, "height": 768, "depth": 24},
             "screenshot": {
                 "format": "png",
