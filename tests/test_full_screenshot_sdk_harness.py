@@ -55,7 +55,12 @@ def _trace(*, backend: str = "mss") -> dict[str, object]:
             "x-computer-use-capture-backend": backend,
             "x-computer-use-cursor-position": '{"x":17,"y":23}',
             "x-computer-use-timing-ms": json.dumps(
-                {"capture_ms": 1.0, "hash_ms": 0.25, "total_ms": 1.5}
+                {
+                    "capture_ms": 1.0,
+                    "encode_ms": 0.2,
+                    "hash_ms": 0.25,
+                    "total_ms": 1.5,
+                }
             ),
         },
     }

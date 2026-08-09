@@ -54,8 +54,8 @@ _FAILURE_CHECKS = {
     "closed_capture_rejected",
     "constructor_geometry_failure",
     "invalid_region_rejected",
-    "constructor_failure_falls_back_once",
-    "capture_failure_falls_back_once",
+    "attach_failure_falls_back_once",
+    "encode_failure_falls_back_once",
     "invalid_result_falls_back_once",
     "extension_load_failure_selects_mss",
     "close_failure_reported",
@@ -348,6 +348,21 @@ def _validate_arm(arm_payload: Mapping[str, Any], *, arm: str, samples: int) -> 
             raise ValueError(f"{arm} metadata parity failed")
         for key in ("complete_sdk_ms", "daemon_total_ms", "hash_ms", "payload_bytes"):
             _nonnegative_number(observation.get(key), f"{arm}.{key}")
+        if arm == BASELINE_ARM:
+            _nonnegative_number(observation.get("capture_ms"), f"{arm}.capture_ms")
+            _nonnegative_number(observation.get("encode_ms"), f"{arm}.encode_ms")
+            if observation.get("x11_shm_capture_encode_ms") is not None:
+                raise ValueError("MSS observation reported fused native timing")
+        else:
+            _nonnegative_number(
+                observation.get("x11_shm_capture_encode_ms"),
+                f"{arm}.x11_shm_capture_encode_ms",
+            )
+            if (
+                observation.get("capture_ms") is not None
+                or observation.get("encode_ms") is not None
+            ):
+                raise ValueError("X11 shared-memory observation reported split timing")
 
 
 def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
