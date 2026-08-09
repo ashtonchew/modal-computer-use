@@ -147,10 +147,10 @@ class DaemonSettings:
         default_factory=lambda: os.getenv("COMPUTER_USE_VNC_PASSWORD") or None
     )
     backend: str = field(default_factory=lambda: os.getenv("COMPUTER_USE_BACKEND", "auto"))
-    # Capture source selector. ``auto`` prefers native X11 shared memory and
-    # keeps MSS as the session fallback when the optional source is unavailable.
+    # MSS remains the production default; ``auto`` is an opt-in evaluation mode
+    # for the native X11 shared-memory source.
     screenshot_capture_source: str = field(
-        default_factory=lambda: os.getenv("COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE", "auto")
+        default_factory=lambda: os.getenv("COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE", "mss")
     )
     max_batch_actions: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_MAX_BATCH_ACTIONS", 50)
