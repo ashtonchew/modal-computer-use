@@ -333,7 +333,16 @@ async def _completed_process_stdout_text(process: Any) -> str:
     exit_code = await process.wait.aio()
     raw = await _process_stdout_text(process)
     if exit_code != 0:
-        raise RuntimeError(f"benchmark subprocess exited with status {exit_code}")
+        stderr_raw = await process.stderr.read.aio()
+        stderr = (
+            stderr_raw.decode("utf-8", errors="replace")
+            if isinstance(stderr_raw, bytes)
+            else str(stderr_raw)
+        ).strip()
+        detail = stderr[-1_000:] if stderr else "no stderr"
+        raise RuntimeError(
+            f"benchmark subprocess exited with status {exit_code}: {detail}"
+        )
     if not raw:
         raise RuntimeError("benchmark subprocess returned empty stdout")
     return raw
