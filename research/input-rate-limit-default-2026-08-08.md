@@ -9,10 +9,11 @@ The first preregistered same-runtime gate rejected the `500/1000` candidate. On 
 normalized tokens per second. All 80 batches completed in order, cleanup succeeded, and RSS grew
 by about 3 MiB. The run did not meet the 1,000-token promotion threshold.
 
-Use the predeclared `200/400` fallback. It is ten times the former sustained limit, about 8.9 times
-the reciprocal 44.29 ms Step median, and below half of the observed mixed-workload throughput. A
-new clean-commit run must still pass the 400-token gate before release. Do not promote `500/1000`
-from this report.
+Follow-up runs showed material capacity variance. The same fixed workload sustained between
+246.495 and 579.158 normalized tokens per second. Use `100/400`: five times the former sustained
+limit, about 4.4 times the reciprocal 44.29 ms Step median, and below half of the slowest observed
+mixed-workload throughput. Require repeated clean-commit runs to pass the 200-token gate before
+release. Do not promote `500/1000` or `200/400` from this report.
 
 ## Pre-measurement candidate
 
@@ -202,6 +203,6 @@ capacity margin. It must not become the default from this evidence.
 
 `2000/4000` is not yet a better default. It has more application headroom, but current evidence does not show that the minimum runtime can process that sustained rate safely. A limiter above backend capacity only records overload after the protected resource is already saturated.
 
-Apply the predeclared `200/400` fallback. If later evidence shows materially higher sustained
-normalized throughput with a suitable safety margin, raise the default in a new evidence-backed
-change.
+The first fallback did not preserve a two-times margin across repeated runs. Use `100/400`. If
+later evidence shows materially higher sustained normalized throughput with a suitable safety
+margin, raise the default in a new evidence-backed change.

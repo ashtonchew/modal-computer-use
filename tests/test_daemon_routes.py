@@ -32,7 +32,7 @@ def test_health_version_capabilities(test_client) -> None:
     assert caps["input_backends_supported"] == ["mock"]
     assert caps["input_backends_available"] == ["mock"]
     assert caps["input_rate_limit_policy"] == "normalized-input-work-v1"
-    assert caps["input_rate_limit_tokens_per_sec"] == 200
+    assert caps["input_rate_limit_tokens_per_sec"] == 100
     assert caps["input_rate_limit_burst"] == 400
     for primitive in ("input", "lifecycle", "processes", "session", "debug"):
         assert primitive in caps["primitives"]

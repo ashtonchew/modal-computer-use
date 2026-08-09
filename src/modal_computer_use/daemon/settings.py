@@ -180,7 +180,7 @@ class DaemonSettings:
         default_factory=lambda: _int_env("COMPUTER_USE_MAX_KEY_COLLECTION_SIZE", 64)
     )
     input_rate_limit_per_sec: int = field(
-        default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 200)
+        default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_PER_SEC", 100)
     )
     input_rate_limit_burst: int = field(
         default_factory=lambda: _int_env("COMPUTER_USE_INPUT_RATE_LIMIT_BURST", 400)

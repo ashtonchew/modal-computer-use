@@ -183,8 +183,8 @@ async def test_workload_is_mixed_ordered_and_below_batch_limit() -> None:
 def test_settings_require_minimum_capacity_and_native_backend() -> None:
     _settings().validate(batch_cost=10)
 
-    with pytest.raises(ValueError, match="400-token"):
-        _settings(input_rate_limit_per_sec=399).validate(batch_cost=10)
+    with pytest.raises(ValueError, match="200-token"):
+        _settings(input_rate_limit_per_sec=199).validate(batch_cost=10)
     with pytest.raises(ValueError, match="native XTest"):
         _settings(input_backend="xdotool").validate(batch_cost=10)
     with pytest.raises(ValueError, match="minimum 1 CPU"):
@@ -374,7 +374,7 @@ async def test_measurement_rejects_resource_saturation() -> None:
     computer = _FakeComputer(
         resource_sampler=_FakeResourceSampler(
             cpu_samples=(10.0, 10.009),
-            rss_samples=(100_000_000, 200_000_000),
+            rss_samples=(100_000_000, 250_000_000),
         )
     )
 

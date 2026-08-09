@@ -588,7 +588,7 @@ responses include timing metadata as `timing.daemon_ms`, measured inside the dae
 batch request. The timing object contains only elapsed milliseconds and no command strings,
 stdout/stderr, typed text, clipboard text, screenshots, artifacts, or paths.
 `actions.input_rate_limit_per_sec` and `actions.input_rate_limit_burst` configure one daemon-local
-token bucket. The defaults are 200 normalized input-work tokens per second and a 400-token
+token bucket. The defaults are 100 normalized input-work tokens per second and a 400-token
 burst. Repeated clicks, long typing, large scrolls, drag paths, hotkeys, and nested `hold_key`
 actions cost more than a simple move or click. Screenshots, waits, zooms, and cursor queries use no
 input tokens. The daemon computes and reserves the complete recursive batch cost before mutation.

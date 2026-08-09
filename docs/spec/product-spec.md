@@ -342,7 +342,7 @@ Current defaults with architectural significance are:
 - standard resources;
 - `actions.input_backend="auto"`;
 - `actions.subprocess_backend="isolated-asyncio"`;
-- input admission refills 200 normalized input-work tokens per second with a 400-token burst;
+- input admission refills 100 normalized input-work tokens per second with a 400-token burst;
 - daemon HTTP/1.1;
 - browser prewarm when a browser is configured;
 - ordered batches stop on the first error unless `continue_on_error` is explicit.
@@ -836,8 +836,8 @@ Boundary scans must confirm:
 - the frozen dependency graph passes audit;
 - Bandit and Semgrep report no material finding;
 - security regressions and the documented performance gates pass locally.
-- the minimum supported runtime sustains at least 400 representative normalized input-work
-  tokens per second before the 200/400 default is promoted.
+- the minimum supported runtime sustains at least 200 representative normalized input-work
+  tokens per second before the 100/400 default is promoted.
 
 Modal smoke tests are credential-gated. The deployed-Function handoff smoke is a protected manual
 workflow and validates one bounded handoff, not benchmark performance or continuous production

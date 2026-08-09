@@ -46,7 +46,7 @@ def _settings(tmp_path, **overrides: object) -> DaemonSettings:
 def test_public_defaults_leave_headroom_for_the_optimized_step_path() -> None:
     actions = ActionConfig()
 
-    assert actions.input_rate_limit_per_sec == 200
+    assert actions.input_rate_limit_per_sec == 100
     assert actions.input_rate_limit_burst == 400
 
 

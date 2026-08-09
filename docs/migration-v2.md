@@ -62,7 +62,7 @@ are separate, inspectable cost choices; they are not part of article parity.
 ## Input rate-limit migration
 
 The old `actions.input_rate_limit_per_sec=20` default counted flat actions in a rolling one-second
-window. The new default interprets that field as a token-bucket refill rate and sets it to `200`.
+window. The new default interprets that field as a token-bucket refill rate and sets it to `100`.
 `actions.input_rate_limit_burst=400` is new. The daemon now charges normalized input-work tokens
 and reserves a complete recursive batch before mutation.
 

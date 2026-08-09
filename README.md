@@ -153,7 +153,7 @@ leaving the block terminates it. If the Sandbox already existed, leaving the blo
 A daemon inside the Sandbox executes desktop actions, captures screenshots and recordings, runs
 commands, and reads or writes files through `computer.artifacts`.
 
-The daemon admits input through one token bucket for the desktop. The default refills 200
+The daemon admits input through one token bucket for the desktop. The default refills 100
 normalized input-work tokens per second and allows a 400-token burst. A complete ordered batch
 reserves its cost before the first mutation. This keeps the limit away from normal optimized Step
 loops and prevents a rate-limit boundary from partially executing a batch.

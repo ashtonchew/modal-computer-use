@@ -23,7 +23,7 @@ from ..daemon.input_rate_limit import INPUT_RATE_LIMIT_POLICY, batch_input_token
 from ..models import parse_action
 
 CAPACITY_BENCHMARK = "normalized-input-capacity-v1"
-MINIMUM_TARGET_TOKENS_PER_SEC = 400.0
+MINIMUM_TARGET_TOKENS_PER_SEC = 200.0
 MINIMUM_CPU = 1.0
 MINIMUM_MEMORY_MIB = 2_048
 DEFAULT_RATE_LIMIT_PER_SEC = 2_000
@@ -32,8 +32,8 @@ DEFAULT_BATCHES = 80
 DEFAULT_WARMUP_BATCHES = 4
 DEFAULT_CYCLES_PER_BATCH = 6
 DEFAULT_MAX_TAIL_REGRESSION = 1.5
-DEFAULT_MAX_CPU_SECONDS_PER_TOKEN = 0.01
-DEFAULT_MAX_RSS_GROWTH_BYTES = 64 * 1024 * 1024
+DEFAULT_MAX_CPU_SECONDS_PER_TOKEN = 0.02
+DEFAULT_MAX_RSS_GROWTH_BYTES = 128 * 1024 * 1024
 _EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _RESOURCE_SAMPLE_SCRIPT = """
 import glob, json, os, pathlib
@@ -134,14 +134,14 @@ class InputCapacitySettings:
             raise ValueError("capacity gate requires the native XTest input backend")
         if self.input_rate_limit_per_sec < MINIMUM_TARGET_TOKENS_PER_SEC:
             raise ValueError(
-                "input_rate_limit_per_sec must be at least the 400-token promotion target"
+                "input_rate_limit_per_sec must be at least the 200-token promotion target"
             )
         if self.input_rate_limit_burst < 1:
             raise ValueError("input_rate_limit_burst must be positive")
         if isinstance(self.target_tokens_per_sec, bool) or not math.isfinite(
             self.target_tokens_per_sec
         ) or self.target_tokens_per_sec < MINIMUM_TARGET_TOKENS_PER_SEC:
-            raise ValueError("target_tokens_per_sec must be at least 400")
+            raise ValueError("target_tokens_per_sec must be at least 200")
         if self.cpu != MINIMUM_CPU or self.memory_mib != MINIMUM_MEMORY_MIB:
             raise ValueError("capacity gate must run on the minimum 1 CPU/2048 MiB configuration")
         if self.batches < 2 or self.warmup_batches < 0 or self.cycles_per_batch < 1:

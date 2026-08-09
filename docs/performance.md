@@ -175,14 +175,14 @@ base64 routes remain available for low-level REST compatibility.
 
 ## Input admission
 
-The default input token bucket refills 200 normalized input-work tokens per second and holds 400
-tokens. The refill is about 8.9 times the reciprocal of the measured 44.29 ms single-action Step
+The default input token bucket refills 100 normalized input-work tokens per second and holds 400
+tokens. The refill is about 4.4 times the reciprocal of the measured 44.29 ms single-action Step
 median. It therefore should not shape a normal serialized provider loop. The bucket remains below
 the available simple native-input throughput estimate, so it still protects the daemon from
 sustained saturation.
 
 This number is an evidence-backed product default, not an external standard. A same-runtime mixed
-input capacity gate must sustain at least 400 weighted tokens per second before release. Keep
+input capacity gate must sustain at least 200 weighted tokens per second before release. Keep
 batch size, action and batch timeouts, total trajectory budgets, payload bounds, and one-in-flight
 Step serialization. The rate limit complements those controls; it does not replace them.
 

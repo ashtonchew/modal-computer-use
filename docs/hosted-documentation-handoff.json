@@ -206,7 +206,7 @@
       "route": "/operate/configure",
       "page_class": "configuration",
       "source_local": ["docs/configuration.md", "docs/api.md"],
-      "v2_behavior": ["List defaults separately from explicit operator choices.", "Document the 200-token-per-second refill, 400-token burst, normalized-input-work-v1 weights, and atomic whole-batch admission.", "Keep region, CPU, memory, image, browser, and warm capacity explicit and inspectable.", "Do not add an optimized flag, performance profile, or hidden environment switch."],
+      "v2_behavior": ["List defaults separately from explicit operator choices.", "Document the 100-token-per-second refill, 400-token burst, normalized-input-work-v1 weights, and atomic whole-batch admission.", "Keep region, CPU, memory, image, browser, and warm capacity explicit and inspectable.", "Do not add an optimized flag, performance profile, or hidden environment switch."],
       "v1_preservation": {"route": "/v1/operate/configure", "rule": "Keep the 1.1.0 configuration page."},
       "tests": ["check documented defaults against source", "check secret-free resolved configuration"],
       "redirects": [],
