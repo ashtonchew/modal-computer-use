@@ -9,13 +9,14 @@ Feature branch: `feat/native-screenshot-capture`.
 
 - [x] Semantic source contract and private module boundary.
 - [x] XCB/MIT-SHM capture, fixed-Up level-1 PNG, validation, and deterministic close.
-- [x] Readiness, sticky automatic fallback, explicit fail-closed behavior, and display restart reset.
+- [x] Generation-scoped readiness, sticky automatic fallback, explicit fail-closed behavior,
+  bounded XCB reply waits, and display restart reset/re-probe.
 - [x] Managed Image build, universal package source delivery, and real build-time Xvfb canary.
 - [x] Full/region/structured/action/hot consumer coverage and existing-path preservation.
 - [x] Versioned evidence validator, paired public-call harness, failure matrix, concurrency probe,
   display restart probe, and 10,000-request daemon-local soak.
 - [x] First post-implementation two-axis adversarial review; all reported code/harness blockers fixed.
-- [ ] Second independent two-axis adversarial review.
+- [x] Second independent two-axis adversarial review; all reported P1 runtime blockers fixed.
 - [ ] Exact clean-commit matched Modal run and retained promotion decision.
 - [ ] Performance/release/changelog/README cutover after the live gates pass.
 - [ ] Final rebase, full verification, push, and ready PR.
@@ -154,9 +155,13 @@ Red:
 - `/readyz` executes a real hidden-cursor native GetImage/PNG capture before selecting `x11-shm`;
 - invalid PNG signature or dimensions fail the readiness probe;
 - unavailable/unsupported native under `auto` selects MSS once with a bounded sanitized reason;
-- a runtime native failure closes and quarantines the source for the session generation;
+- an ordinary non-timeout runtime native failure closes and quarantines the source for the
+  session generation;
 - later requests do not retry a quarantined native source;
-- the request that detects failure returns through MSS with `mss-fallback` attribution;
+- the request that detects an ordinary failure returns through MSS with `mss-fallback`
+  attribution;
+- a native setup or reply deadline fails closed without calling another client against the same
+  unresponsive X server, and display restart clears that timeout quarantine;
 - explicit `x11-shm` fails readiness/capture without fallback; and
 - shutdown closes the native session and MSS exactly once.
 
@@ -229,8 +234,10 @@ Run in the exact production-style Modal Image:
    memory budget.
 6. Injected extension load, constructor, attach, GetImage, encode, invalid-result, and close
    failures.
-7. X server loss/restart behavior: automatic mode quarantines native and continues through MSS;
-   explicit mode fails clearly.
+7. X server loss/restart behavior: automatic mode uses MSS for ordinary native failures, but a
+   bounded X-server reply timeout fails closed because every capture source shares that display;
+   display restart clears the quarantine and restores attributed `x11-shm`. Explicit mode fails
+   clearly without fallback.
 8. Terminal daemon/Sandbox cleanup with no survivor and stable resource counts.
 
 Retain failures. Do not replace samples.

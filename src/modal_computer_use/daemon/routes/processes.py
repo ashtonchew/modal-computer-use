@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query, Request, Response
 
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_idle_only_mutation
+from modal_computer_use.daemon.routes.validation import invalidate_desktop_readiness
 from modal_computer_use.models import ProcessStatus
 from modal_computer_use.redaction import sanitize_text
 
@@ -30,6 +31,7 @@ async def process_restart(name: str, request: Request) -> ProcessStatus:
 
     async def operation() -> ProcessStatus:
         if name == "xvfb":
+            invalidate_desktop_readiness(request.app.state)
             try:
                 request.app.state.backend.reset_screenshot_capture()
             finally:

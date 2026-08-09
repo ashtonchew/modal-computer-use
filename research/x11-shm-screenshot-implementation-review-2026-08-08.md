@@ -15,7 +15,8 @@ await computer.screenshots.full()
 The product feature is **X11 shared-memory screenshot capture** and its source token is `x11-shm`.
 The public selector is `screenshot_capture_source = auto | mss | x11-shm`. `auto` is a policy:
 use `x11-shm` only after the extension and live display pass readiness, otherwise select MSS once
-for the daemon session. Explicit `x11-shm` fails closed.
+for the current X-server generation. Display restart clears the quarantine and re-probes. Explicit
+`x11-shm` fails closed.
 
 Rust, XCB, MIT-SHM AttachFd, fixed-Up filtering, and DEFLATE level 1 describe the current private
 implementation. They are not stable product or configuration names. Response attribution continues
@@ -76,19 +77,27 @@ Two pre-implementation reviews and the first post-implementation two-axis review
 2. readiness that imported the extension without executing `GetImage`;
 3. runtime PNGs whose IHDR dimensions were not checked per request;
 4. automatic failures that retried the native constructor every screenshot;
-5. display stop/restart leaving capture state attached to the old X server;
+5. display stop/restart leaving capture state or source quarantine attached to the old X server;
 6. shutdown stopping after the first component cleanup failure;
 7. Image publication that imported the module without a real Xvfb/MIT-SHM capture canary;
 8. an RSS gate based on `ru_maxrss` rather than the daemon's current `VmRSS`;
 9. a 10,000-capture soak that bypassed the daemon/controller;
 10. an artifact without an evaluated decision, confidence interval, cursor-position semantics, or
     clean local Git provenance; and
-11. concurrency and failure booleans that did not retain enough detail to audit source attribution.
+11. concurrency and failure booleans that did not retain enough detail to audit source attribution;
+12. cached readiness and automatic fallback state surviving an X-server generation change; and
+13. unbounded XCB reply waits and explicit failures retaining a broken native session.
 
 The current runner uses a real managed Chromium fixture, at least 100 paired randomized public SDK
 samples per arm, a 10,000-request daemon-local full/region soak, concurrency levels 1/2/4/8, a
-controller failure matrix, and an X-server restart probe. The retained artifact must validate and
-carry its exact computed promotion decision. Failed or partial runs remain untracked.
+controller failure matrix, warm readiness and matched concurrency comparisons, a bounded paused-X
+failure probe, and an attributed X-server restart probe. Runtime XCB reply waits are bounded at
+500 ms. The retained artifact must bind the actual Modal Image object and native module digest,
+validate, and carry its exact computed promotion decision. Failed or partial runs remain untracked.
+
+Automatic mode still selects MSS after ordinary native construction or capture failures. It does
+not call MSS after an X-server reply deadline: MSS and the file tools share that unresponsive
+display, so the safe behavior is a bounded failure until display restart clears the quarantine.
 
 ## Decision rule
 

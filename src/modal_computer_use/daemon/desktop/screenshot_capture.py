@@ -10,7 +10,10 @@ be loaded or used.
 from __future__ import annotations
 
 import importlib
+import socket
+import struct
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Literal, cast
 
 ScreenshotCaptureSource = Literal["auto", "mss", "x11-shm"]
@@ -27,6 +30,10 @@ class ScreenshotCaptureUnavailable(ScreenshotCaptureError):
 
 class ScreenshotCaptureFailed(ScreenshotCaptureError):
     """Raised when an active X11 shared-memory source cannot return a complete PNG."""
+
+
+class ScreenshotCaptureTimedOut(ScreenshotCaptureFailed):
+    """Raised when the X server does not complete a bounded native operation."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,9 +104,15 @@ class X11SharedMemoryScreenshotSession:
             raise ScreenshotCaptureUnavailable(
                 "X11 shared-memory screenshot extension has no session constructor"
             )
+        if getattr(module, "__name__", None) == _MODULE_NAME:
+            _probe_x11_setup(display)
         try:
             self._session = constructor(display, width, height)
         except Exception as exc:
+            if "exceeded the 500 ms deadline" in str(exc):
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot startup exceeded its reply deadline"
+                ) from exc
             raise ScreenshotCaptureUnavailable(
                 "X11 shared-memory screenshot session could not start"
             ) from exc
@@ -113,6 +126,10 @@ class X11SharedMemoryScreenshotSession:
         try:
             data = self._session.capture_png(x, y, width, height)
         except Exception as exc:
+            if "exceeded the 500 ms deadline" in str(exc):
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot exceeded its reply deadline"
+                ) from exc
             raise ScreenshotCaptureFailed(
                 "X11 shared-memory screenshot capture failed"
             ) from exc
@@ -155,6 +172,60 @@ def validate_png_dimensions(data: bytes, *, width: int, height: int) -> bool:
     actual_width = int.from_bytes(data[16:20], "big")
     actual_height = int.from_bytes(data[20:24], "big")
     return actual_width == width and actual_height == height
+
+
+def _probe_x11_setup(display: str) -> None:
+    """Bound the X11 setup handshake before libxcb opens its persistent connection."""
+
+    host, separator, display_part = display.rpartition(":")
+    if not separator:
+        raise ScreenshotCaptureUnavailable("X11 display address is invalid")
+    try:
+        display_number = int(display_part.split(".", 1)[0])
+    except ValueError as exc:
+        raise ScreenshotCaptureUnavailable("X11 display address is invalid") from exc
+    connection: socket.socket | None = None
+    deadline = monotonic() + 0.5
+
+    def remaining() -> float:
+        value = deadline - monotonic()
+        if value <= 0:
+            raise TimeoutError("X11 setup deadline expired")
+        return value
+
+    try:
+        if host in {"", "unix"}:
+            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            connection.settimeout(remaining())
+            connection.connect(
+                f"/tmp/.X11-unix/X{display_number}"  # noqa: S108 - standard X11 socket.
+            )
+        else:
+            connection = socket.create_connection(
+                (host, 6000 + display_number), timeout=remaining()
+            )
+        connection.settimeout(remaining())
+        connection.sendall(struct.pack("<BBHHHHH", ord("l"), 0, 11, 0, 0, 0, 0))
+        response = bytearray()
+        while len(response) < 8:
+            connection.settimeout(remaining())
+            chunk = connection.recv(8 - len(response))
+            if not chunk:
+                break
+            response.extend(chunk)
+    except TimeoutError as exc:
+        raise ScreenshotCaptureTimedOut(
+            "X11 shared-memory screenshot startup exceeded its reply deadline"
+        ) from exc
+    except OSError as exc:
+        raise ScreenshotCaptureUnavailable(
+            "X11 shared-memory screenshot could not connect to the display"
+        ) from exc
+    finally:
+        if connection is not None:
+            connection.close()
+    if len(response) < 8 or response[0] != 1:
+        raise ScreenshotCaptureUnavailable("X11 display rejected the setup handshake")
 
 
 def _load_module() -> Any | None:

@@ -3,7 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from modal_computer_use.daemon.routes.execution import budget_policy, run_idle_only_mutation
-from modal_computer_use.daemon.routes.validation import daemon_readiness
+from modal_computer_use.daemon.routes.validation import (
+    daemon_readiness,
+    invalidate_desktop_readiness,
+)
 from modal_computer_use.models import ComputerStatus, LifecycleResult
 
 router = APIRouter(prefix="/v1/computer")
@@ -42,7 +45,11 @@ async def status(request: Request) -> ComputerStatus:
 @router.post("/start")
 async def start(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
-        await request.app.state.supervisor.start()
+        invalidate_desktop_readiness(request.app.state)
+        try:
+            request.app.state.backend.reset_screenshot_capture()
+        finally:
+            await request.app.state.supervisor.start()
         return LifecycleResult(ok=True, status="running")
 
     return await run_idle_only_mutation(request, operation, semantic_data={})
@@ -51,6 +58,7 @@ async def start(request: Request) -> LifecycleResult:
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
+        invalidate_desktop_readiness(request.app.state)
         try:
             request.app.state.backend.reset_screenshot_capture()
         finally:
@@ -63,6 +71,7 @@ async def stop(request: Request) -> LifecycleResult:
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
     async def operation() -> LifecycleResult:
+        invalidate_desktop_readiness(request.app.state)
         try:
             request.app.state.backend.reset_screenshot_capture()
         finally:

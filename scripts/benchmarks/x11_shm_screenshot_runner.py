@@ -19,6 +19,8 @@ import hashlib
 import json
 import os
 import platform
+import random
+import statistics
 import subprocess
 import sys
 import time
@@ -81,6 +83,10 @@ BOOTSTRAP_RESAMPLES = 1_000
 RUST_TOOLCHAIN = "rustc 1.91.0"
 TARGET = "x86_64-unknown-linux-gnu"
 CONCURRENCY_LEVELS = (1, 2, 4, 8)
+CONCURRENCY_TRIALS = 5
+READINESS_SAMPLES = 20
+MAX_OPERATIONAL_REGRESSION_PERCENT = 5.0
+MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 
 
 def _git_output(*args: str) -> str | None:
@@ -146,7 +152,7 @@ def _local_provenance() -> dict[str, str | bool]:
         "worktree_clean": True,
         "x11_shm_source_sha256": source_sha256,
         "cargo_lock_sha256": cargo_lock_sha256,
-        "image_identity": f"inline-source-{revision}-x11-shm-{source_sha256[:16]}",
+        "image_identity": "inline:browser-chromium-x11-shm",
     }
 
 
@@ -175,12 +181,13 @@ image = (
 
 class _ArmContext(AbstractAsyncContextManager[Any]):
     def __init__(self, source: str) -> None:
-        if source not in {"mss", "x11-shm"}:
-            raise ValueError("screenshot arm must be mss or x11-shm")
+        if source not in {"auto", "mss", "x11-shm"}:
+            raise ValueError("screenshot source must be auto, mss, or x11-shm")
         self.source = source
         self._context: AbstractAsyncContextManager[Any] | None = None
         self._computer: Any | None = None
         self.target_placement: dict[str, str | None] | None = None
+        self.target_identity: dict[str, Any] | None = None
         self.fixture_verified = False
 
     async def __aenter__(self) -> Any:
@@ -223,6 +230,7 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         try:
             self._computer = await self._context.__aenter__()
             self.target_placement = await self._computer.runtime_placement()
+            self.target_identity = await _target_runtime_identity(self._computer)
             status = await self._computer.browser.status()
             if (
                 status.get("configured_browser") != "chromium"
@@ -247,9 +255,68 @@ class _ArmContext(AbstractAsyncContextManager[Any]):
         self._computer = None
 
 
+async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
+    """Observe the built extension and cgroup limits inside the target Sandbox."""
+
+    sandbox = getattr(computer, "_sandbox", None)
+    if sandbox is None or not hasattr(sandbox, "exec"):
+        raise RuntimeError("sandbox handle unavailable for target identity")
+    script = dedent(
+        """
+        import hashlib
+        import json
+        import os
+        from pathlib import Path
+
+        import _modal_computer_use_x11_shm as native
+
+        def read_text(path):
+            return Path(path).read_text(encoding="utf-8").strip()
+
+        cpu_quota, cpu_period = read_text("/sys/fs/cgroup/cpu.max").split()
+        if cpu_quota == "max":
+            raise RuntimeError("target CPU quota is unbounded")
+        memory_limit = read_text("/sys/fs/cgroup/memory.max")
+        if memory_limit == "max":
+            raise RuntimeError("target memory limit is unbounded")
+        module_bytes = Path(native.__file__).read_bytes()
+        print(json.dumps({
+            "backend": native.backend,
+            "codec": native.codec,
+            "module_sha256": hashlib.sha256(module_bytes).hexdigest(),
+            "image_object_id": os.environ.get("MODAL_IMAGE_ID"),
+            "cpu": int(cpu_quota) / int(cpu_period),
+            "memory_bytes": int(memory_limit),
+        }, sort_keys=True))
+        """
+    )
+    process = await sandbox.exec.aio("python", "-c", script, timeout=30)
+    raw = await _process_stdout_text(process)
+    payload = json.loads(raw)
+    if (
+        not isinstance(payload, dict)
+        or payload.get("backend") != "x11-shm"
+        or payload.get("codec") != "png-deflate-level1-fixed-up"
+        or not isinstance(payload.get("module_sha256"), str)
+        or not str(payload.get("image_object_id", "")).startswith("im-")
+    ):
+        raise RuntimeError("target native build identity is invalid")
+    return payload
+
+
+async def _process_stdout_text(process: Any) -> str:
+    raw = await process.stdout.read.aio()
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace").strip()
+    if isinstance(raw, str):
+        return raw.strip()
+    raise RuntimeError("sandbox process stdout has an unexpected type")
+
+
 async def _run_concurrency_probe(
     factory: Callable[[], AbstractAsyncContextManager[Any]],
     *,
+    expected_backend: str,
     levels: tuple[int, ...] = CONCURRENCY_LEVELS,
 ) -> dict[str, Any]:
     """Exercise concurrent public calls; the daemon lock must preserve safety."""
@@ -261,42 +328,46 @@ async def _run_concurrency_probe(
     try:
         computer = await context.__aenter__()
         for level in levels:
-            backends: list[str | None] = []
-            original = computer.client.post_bytes_with_headers
+            elapsed_samples: list[float] = []
+            for _ in range(CONCURRENCY_TRIALS):
+                backends: list[str | None] = []
+                original = computer.client.post_bytes_with_headers
 
-            async def traced_request(
-                *args: Any,
-                _original: Any = original,
-                _backends: list[str | None] = backends,
-                **kwargs: Any,
-            ) -> Any:
-                data, headers = await _original(*args, **kwargs)
-                _backends.append(headers.get("x-computer-use-capture-backend"))
-                return data, headers
+                async def traced_request(
+                    *args: Any,
+                    _original: Any = original,
+                    _backends: list[str | None] = backends,
+                    **kwargs: Any,
+                ) -> Any:
+                    data, headers = await _original(*args, **kwargs)
+                    _backends.append(headers.get("x-computer-use-capture-backend"))
+                    return data, headers
 
-            computer.client.post_bytes_with_headers = traced_request
-            started = time.perf_counter()
-            try:
-                screenshots = await asyncio.gather(
-                    *(computer.screenshots.full() for _ in range(level))
-                )
-            finally:
-                computer.client.post_bytes_with_headers = original
-            elapsed_ms = (time.perf_counter() - started) * 1000.0
-            if any(
-                shot.width != WIDTH
-                or shot.height != HEIGHT
-                or shot.cursor_visible
-                or shot.format != "png"
-                for shot in screenshots
-            ) or backends != ["x11-shm"] * level:
-                raise RuntimeError("concurrent screenshot contract mismatch")
+                computer.client.post_bytes_with_headers = traced_request
+                started = time.perf_counter()
+                try:
+                    screenshots = await asyncio.gather(
+                        *(computer.screenshots.full() for _ in range(level))
+                    )
+                finally:
+                    computer.client.post_bytes_with_headers = original
+                elapsed_samples.append((time.perf_counter() - started) * 1000.0)
+                if any(
+                    shot.width != WIDTH
+                    or shot.height != HEIGHT
+                    or shot.cursor_visible
+                    or shot.format != "png"
+                    for shot in screenshots
+                ) or backends != [expected_backend] * level:
+                    raise RuntimeError("concurrent screenshot contract mismatch")
             rows.append(
                 {
                     "concurrency": level,
-                    "captures": level,
-                    "elapsed_ms": round(elapsed_ms, 4),
-                    "capture_backend": "x11-shm",
+                    "trials": CONCURRENCY_TRIALS,
+                    "captures_per_trial": level,
+                    "elapsed_p50_ms": round(statistics.median(elapsed_samples), 4),
+                    "elapsed_p95_ms": round(_percentile(elapsed_samples, 0.95), 4),
+                    "capture_backend": expected_backend,
                 }
             )
     except Exception as exc:
@@ -317,7 +388,95 @@ async def _run_concurrency_probe(
             **({"failure_type": failure_type} if failure_type else {}),
             **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
         }
-    return {"passed": True, "levels": rows}
+    return {"passed": True, "source": expected_backend, "levels": rows}
+
+
+async def _run_readiness_probe(
+    factories: Mapping[str, Callable[[], AbstractAsyncContextManager[Any]]],
+) -> dict[str, Any]:
+    """Measure paired fresh create-to-ready samples for both capture sources."""
+
+    samples: dict[str, list[float]] = {"mss": [], "x11-shm": []}
+    rng = random.Random(SCHEDULE_SEED)  # noqa: S311 - reproducible benchmark order.
+    failure_type: str | None = None
+    cleanup_failure_type: str | None = None
+    try:
+        for _ in range(READINESS_SAMPLES):
+            pair = ["mss", "x11-shm"]
+            rng.shuffle(pair)
+            for arm in pair:
+                context = factories[arm]()
+                computer: Any | None = None
+                started = time.perf_counter()
+                try:
+                    computer = await context.__aenter__()
+                    samples[arm].append((time.perf_counter() - started) * 1000.0)
+                    backends: list[str | None] = []
+                    original = computer.client.post_bytes_with_headers
+
+                    async def traced_request(
+                        *args: Any,
+                        _original: Any = original,
+                        _backends: list[str | None] = backends,
+                        **kwargs: Any,
+                    ) -> Any:
+                        data, headers = await _original(*args, **kwargs)
+                        _backends.append(headers.get("x-computer-use-capture-backend"))
+                        return data, headers
+
+                    computer.client.post_bytes_with_headers = traced_request
+                    try:
+                        await computer.screenshots.full()
+                    finally:
+                        computer.client.post_bytes_with_headers = original
+                    if backends != [arm]:
+                        raise RuntimeError("fresh readiness used an unexpected source")
+                finally:
+                    if computer is not None:
+                        try:
+                            await context.__aexit__(None, None, None)
+                        except Exception as exc:
+                            cleanup_failure_type = type(exc).__name__
+                            raise
+    except Exception as exc:
+        failure_type = type(exc).__name__
+
+    arms = {
+        arm: {
+            "passed": len(values) == READINESS_SAMPLES,
+            "source": arm,
+            "samples": len(values),
+            "startup_p50_ms": round(statistics.median(values), 4) if values else 0.0,
+            "startup_p95_ms": round(_percentile(values, 0.95), 4) if values else 0.0,
+            "capture_backend": arm,
+        }
+        for arm, values in samples.items()
+    }
+    passed = failure_type is None and cleanup_failure_type is None
+    if passed:
+        passed = float(arms["x11-shm"]["startup_p95_ms"]) <= float(
+            arms["mss"]["startup_p95_ms"]
+        ) * (1.0 + MAX_OPERATIONAL_REGRESSION_PERCENT / 100.0)
+    return {
+        "passed": passed,
+        "maximum_p95_regression_percent": MAX_OPERATIONAL_REGRESSION_PERCENT,
+        "arms": arms,
+        **({"failure_type": failure_type} if failure_type else {}),
+        **(
+            {"cleanup_failure_type": cleanup_failure_type}
+            if cleanup_failure_type
+            else {}
+        ),
+    }
+
+
+def _percentile(values: list[float], quantile: float) -> float:
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * quantile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
 
 
 async def _run_x_server_restart_probe(
@@ -331,7 +490,25 @@ async def _run_x_server_restart_probe(
     failure_type: str | None = None
     try:
         computer = await context.__aenter__()
-        before = await computer.screenshots.full()
+
+        async def capture_with_backend() -> tuple[Any, str | None]:
+            backend: str | None = None
+            original = computer.client.post_bytes_with_headers
+
+            async def traced_request(*args: Any, **kwargs: Any) -> Any:
+                nonlocal backend
+                data, headers = await original(*args, **kwargs)
+                backend = headers.get("x-computer-use-capture-backend")
+                return data, headers
+
+            computer.client.post_bytes_with_headers = traced_request
+            try:
+                screenshot = await computer.screenshots.full()
+            finally:
+                computer.client.post_bytes_with_headers = original
+            return screenshot, backend
+
+        before, backend_before = await capture_with_backend()
         restarted = await computer.lifecycle.restart()
         ready = False
         for _ in range(100):
@@ -340,7 +517,7 @@ async def _run_x_server_restart_probe(
                 ready = True
                 break
             await asyncio.sleep(0.1)
-        after = await computer.screenshots.full()
+        after, backend_after = await capture_with_backend()
         result = {
             "passed": (
                 restarted.ok
@@ -349,11 +526,139 @@ async def _run_x_server_restart_probe(
                 and before.height == after.height == HEIGHT
                 and not before.cursor_visible
                 and not after.cursor_visible
+                and backend_before == "x11-shm"
+                and backend_after == "x11-shm"
             ),
             "ready_after_restart": ready,
+            "backend_before": backend_before,
+            "backend_after": backend_after,
         }
     except Exception as exc:
         failure_type = type(exc).__name__
+    cleanup_type: str | None = None
+    if computer is not None:
+        try:
+            await context.__aexit__(None, None, None)
+        except Exception as exc:
+            cleanup_type = type(exc).__name__
+    if failure_type is not None or cleanup_type is not None:
+        return {
+            "passed": False,
+            **({"failure_type": failure_type} if failure_type else {}),
+            **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
+        }
+    return result or {"passed": False, "failure_type": "NoResult"}
+
+
+async def _run_x_server_timeout_probe(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+) -> dict[str, Any]:
+    """Pause Xvfb and prove a native public call has a bounded failure policy."""
+
+    context = factory()
+    computer: Any | None = None
+    failure_type: str | None = None
+    result: dict[str, Any] | None = None
+    resumed = False
+    try:
+        computer = await context.__aenter__()
+        sandbox = getattr(computer, "_sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "exec"):
+            raise RuntimeError("sandbox handle unavailable for X server timeout probe")
+        stop = await sandbox.exec.aio(
+            "sh", "-c", "pid=$(pgrep -x Xvfb); test -n \"$pid\"; kill -STOP $pid", timeout=10
+        )
+        await stop.wait.aio()
+        constructor_probe = dedent(
+            """
+            import json
+            import time
+            from modal_computer_use.daemon.desktop.screenshot_capture import (
+                X11SharedMemoryScreenshotSession,
+            )
+
+            started = time.perf_counter()
+            failed = False
+            try:
+                X11SharedMemoryScreenshotSession(
+                    display=":99", width=1024, height=768
+                )
+            except Exception:
+                failed = True
+            print(json.dumps({
+                "failed": failed,
+                "elapsed_ms": (time.perf_counter() - started) * 1000.0,
+            }))
+            """
+        )
+        constructor_process = await sandbox.exec.aio(
+            "python", "-c", constructor_probe, timeout=3
+        )
+        constructor_result = json.loads(await _process_stdout_text(constructor_process))
+        constructor_bounded = (
+            isinstance(constructor_result, dict)
+            and constructor_result.get("failed") is True
+            and float(constructor_result.get("elapsed_ms", 3_000.0)) < 2_500.0
+        )
+        started = time.perf_counter()
+        failed_bounded = False
+        try:
+            await asyncio.wait_for(computer.screenshots.full(), timeout=3.0)
+        except Exception:
+            failed_bounded = True
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        resume = await sandbox.exec.aio(
+            "sh", "-c", "pid=$(pgrep -x Xvfb); test -n \"$pid\"; kill -CONT $pid", timeout=10
+        )
+        await resume.wait.aio()
+        resumed = True
+        restarted = await computer.lifecycle.restart()
+        backend_after: str | None = None
+        original = computer.client.post_bytes_with_headers
+
+        async def traced_request(*args: Any, **kwargs: Any) -> Any:
+            nonlocal backend_after
+            data, headers = await original(*args, **kwargs)
+            backend_after = headers.get("x-computer-use-capture-backend")
+            return data, headers
+
+        computer.client.post_bytes_with_headers = traced_request
+        try:
+            after = await computer.screenshots.full()
+        finally:
+            computer.client.post_bytes_with_headers = original
+        result = {
+            "passed": (
+                failed_bounded
+                and constructor_bounded
+                and elapsed_ms < 2_500.0
+                and restarted.ok
+                and after.width == WIDTH
+                and after.height == HEIGHT
+                and backend_after == "x11-shm"
+            ),
+            "failed_bounded": failed_bounded,
+            "constructor_bounded": constructor_bounded,
+            "constructor_elapsed_ms": round(
+                float(constructor_result.get("elapsed_ms", 0.0)), 4
+            ),
+            "elapsed_ms": round(elapsed_ms, 4),
+            "backend_after_restart": backend_after,
+        }
+    except Exception as exc:
+        failure_type = type(exc).__name__
+    finally:
+        if computer is not None and not resumed:
+            sandbox = getattr(computer, "_sandbox", None)
+            if sandbox is not None and hasattr(sandbox, "exec"):
+                with suppress(Exception):
+                    resume = await sandbox.exec.aio(
+                        "sh",
+                        "-c",
+                        "pid=$(pgrep -x Xvfb); test -z \"$pid\" || kill -CONT $pid",
+                        timeout=10,
+                    )
+                    await resume.wait.aio()
     cleanup_type: str | None = None
     if computer is not None:
         try:
@@ -536,7 +841,7 @@ async def _run_x11_shm_failure_matrix(
             """
         )
         process = await sandbox.exec.aio("python", "-c", script, timeout=60)
-        raw = (await process.stdout.read.aio()).decode("utf-8", errors="replace").strip()
+        raw = await _process_stdout_text(process)
         payload = json.loads(raw)
         required = {
             "close_idempotent",
@@ -692,7 +997,7 @@ async def _run_x11_shm_soak(
             """
         )
         process = await sandbox.exec.aio("python", "-c", script, timeout=900)
-        raw = (await process.stdout.read.aio()).decode("utf-8", errors="replace").strip()
+        raw = await _process_stdout_text(process)
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise RuntimeError("X11 shared-memory soak returned invalid output")
@@ -708,6 +1013,7 @@ async def _run_x11_shm_soak(
                 and int(payload["fd_after"]) - int(payload["fd_before"]) == 0
                 and int(payload["mapping_after"]) - int(payload["mapping_before"]) == 0
                 and rss_growth <= 16 * 1024 * 1024
+                and peak_growth <= 16 * 1024 * 1024
             ),
             "captures": captures,
             "full_captures": int(payload["full_captures"]),
@@ -750,10 +1056,13 @@ def _promotion_artifact(
     samples: int,
     warmups: int,
     target_placement: Mapping[str, str | None] | None,
+    target_identities: Mapping[str, Mapping[str, Any]],
     concurrency: Mapping[str, Any],
+    readiness: Mapping[str, Any],
     failure_matrix: Mapping[str, Any],
     soak: Mapping[str, Any],
     restart: Mapping[str, Any],
+    x_server_timeout: Mapping[str, Any],
     chromium_fixture_verified: bool,
     provenance: Mapping[str, str | bool],
 ) -> dict[str, Any]:
@@ -761,13 +1070,16 @@ def _promotion_artifact(
         "chromium_fixture": chromium_fixture_verified,
         "failure_matrix": failure_matrix.get("passed") is True,
         "concurrency_matrix": concurrency.get("passed") is True,
+        "readiness_parity": readiness.get("passed") is True,
         "x_server_restart": restart.get("passed") is True,
+        "bounded_x_server_failure": x_server_timeout.get("passed") is True,
         "captures": soak.get("captures", 0),
         "full_captures": soak.get("full_captures", 0),
         "region_captures": soak.get("region_captures", 0),
         "fd_delta": soak.get("fd_delta", -1),
         "mapping_delta": soak.get("mapping_delta", -1),
         "rss_growth_bytes": soak.get("rss_growth_bytes", 0),
+        "peak_rss_growth_bytes": soak.get("peak_rss_growth_bytes", 0),
         "cleanup_succeeded": measurement.get("cleanup", {}).get("succeeded") is True,
     }
     artifact = {
@@ -782,6 +1094,13 @@ def _promotion_artifact(
             "bootstrap_seed": BOOTSTRAP_SEED,
             "bootstrap_resamples": BOOTSTRAP_RESAMPLES,
             "gates": dict(FIXED_GATES),
+            "operational_ceilings": {
+                "maximum_readiness_p95_regression_percent": MAX_OPERATIONAL_REGRESSION_PERCENT,
+                "maximum_concurrency_p95_regression_percent": MAX_OPERATIONAL_REGRESSION_PERCENT,
+                "maximum_rss_growth_bytes": MAX_RSS_GROWTH_BYTES,
+                "maximum_fd_delta": 0,
+                "maximum_mapping_delta": 0,
+            },
         },
         "configuration": {
             "source_revision": provenance["source_revision"],
@@ -792,12 +1111,23 @@ def _promotion_artifact(
             "python_version": platform.python_version(),
             "target": TARGET,
             "image_identity": provenance["image_identity"],
+            "image_object_id": target_identities["x11-shm"]["image_object_id"],
+            "native_builds": {
+                arm: dict(target_identities[arm]) for arm in ("mss", "x11-shm")
+            },
             "requested_placement": {"cloud": CLOUD, "region": REGION},
             "observed_placement": {
                 "runner": _observed_runner_placement(),
                 "target": dict(target_placement or {"cloud": CLOUD, "region": REGION}),
             },
             "resources": {"cpu": CPU, "memory_mib": MEMORY_MIB},
+            "observed_resources": {
+                arm: {
+                    "cpu": target_identities[arm]["cpu"],
+                    "memory_bytes": target_identities[arm]["memory_bytes"],
+                }
+                for arm in ("mss", "x11-shm")
+            },
             "browser": "chromium",
             "display": {"width": WIDTH, "height": HEIGHT, "depth": DEPTH},
             "screenshot": {
@@ -831,9 +1161,11 @@ def _promotion_artifact(
         "operational_gates": operational,
         "operational_details": {
             "concurrency": dict(concurrency),
+            "readiness": dict(readiness),
             "failure_matrix": dict(failure_matrix),
             "soak": dict(soak),
             "x_server_restart": dict(restart),
+            "x_server_timeout": dict(x_server_timeout),
         },
     }
     artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
@@ -882,25 +1214,58 @@ async def _measure(
         expected_capture_backends={"mss": "mss", "x11-shm": "x11-shm"},
     )
     # Operational checks are intentionally outside the timed paired sample.
-    concurrency = await _run_concurrency_probe(lambda: _ArmContext("x11-shm"))
+    concurrency_arms = {
+        arm: await _run_concurrency_probe(
+            lambda arm=arm: _ArmContext(arm), expected_backend=arm
+        )
+        for arm in ("mss", "x11-shm")
+    }
+    concurrency_passed = all(result.get("passed") is True for result in concurrency_arms.values())
+    if concurrency_passed:
+        baseline_rows = concurrency_arms["mss"]["levels"]
+        candidate_rows = concurrency_arms["x11-shm"]["levels"]
+        concurrency_passed = all(
+            float(candidate["elapsed_p95_ms"])
+            <= float(baseline["elapsed_p95_ms"])
+            * (1.0 + MAX_OPERATIONAL_REGRESSION_PERCENT / 100.0)
+            for baseline, candidate in zip(baseline_rows, candidate_rows, strict=True)
+        )
+    concurrency = {
+        "passed": concurrency_passed,
+        "maximum_p95_regression_percent": MAX_OPERATIONAL_REGRESSION_PERCENT,
+        "arms": concurrency_arms,
+    }
+    readiness = await _run_readiness_probe(
+        {
+            arm: (lambda arm=arm: _ArmContext(arm))
+            for arm in ("mss", "x11-shm")
+        }
+    )
     failure_matrix = await _run_x11_shm_failure_matrix(
         lambda: _ArmContext("x11-shm")
     )
     restart = await _run_x_server_restart_probe(lambda: _ArmContext("x11-shm"))
+    x_server_timeout = await _run_x_server_timeout_probe(lambda: _ArmContext("auto"))
     soak = await _run_x11_shm_soak(
         lambda: _ArmContext("x11-shm"), captures=soak_captures
     )
     target = contexts.get("x11-shm", contexts.get("mss"))
     target_placement = target.target_placement if target is not None else None
+    target_identities = {
+        arm: context.target_identity or {} for arm, context in contexts.items()
+    }
     return _promotion_artifact(
         measurement,
         samples=samples,
         warmups=warmups,
         target_placement=target_placement,
+        target_identities=target_identities,
         concurrency=concurrency,
+        readiness=readiness,
         failure_matrix=failure_matrix,
         soak=soak,
         restart=restart,
+        x_server_timeout=x_server_timeout,
         chromium_fixture_verified=all(
             context.fixture_verified for context in contexts.values()
         ),

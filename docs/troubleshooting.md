@@ -32,8 +32,11 @@ the installed daemon and client have a compatible screenshot protocol.
 
 Cursor-hidden lossless PNG requests use X11 shared-memory capture in a managed Image after its
 extension and live display pass readiness. Under `auto`, an unavailable or failed source is
-quarantined for the daemon session and subsequent eligible captures report `mss-fallback` instead
-of repeatedly reopening it. Explicit `x11-shm` fails readiness. Cursor-visible, scaled, JPEG,
+quarantined for the current X-server generation and subsequent eligible captures report
+`mss-fallback` instead of repeatedly reopening it. Restarting the display clears the quarantine
+and re-probes the source. If the X server itself misses the bounded reply deadline, the request
+fails closed: MSS, `scrot`, and `maim` depend on that same display and are not safe fallbacks while
+it is unresponsive. Explicit `x11-shm` fails readiness. Cursor-visible, scaled, JPEG,
 WebP, and raw-RGB requests keep their existing capture paths.
 
 If `/readyz` reports an X11 shared-memory screenshot probe failure, verify that the runtime Image

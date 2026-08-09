@@ -16,6 +16,10 @@ use std::slice;
 use std::ffi::{c_void, CString};
 #[cfg(target_os = "linux")]
 use std::ptr::NonNull;
+#[cfg(target_os = "linux")]
+use std::thread;
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
 
 #[cfg(all(target_os = "linux", feature = "extension-module"))]
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -29,6 +33,8 @@ use xcb::{shm, x, Connection};
 
 const BACKEND_MARKER: &str = "x11-shm";
 const CODEC_MARKER: &str = "png-deflate-level1-fixed-up";
+#[cfg(target_os = "linux")]
+const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rect {
@@ -137,12 +143,12 @@ impl Drop for SharedMemorySlot {
 }
 
 #[derive(Default)]
-struct PngScratch {
+struct RgbPngEncoder {
     rgb: Vec<u8>,
 }
 
 #[cfg(target_os = "linux")]
-impl PngScratch {
+impl RgbPngEncoder {
     fn encode(
         &mut self,
         slot: &SharedMemorySlot,
@@ -215,8 +221,30 @@ pub struct X11SharedMemoryScreenshotSession {
     format: DisplayFormat,
     slot: Option<SharedMemorySlot>,
     slot_len: usize,
-    encoder: PngScratch,
+    encoder: RgbPngEncoder,
     closed: bool,
+    connection_failed: bool,
+}
+
+#[cfg(target_os = "linux")]
+fn poll_reply_bounded<C>(conn: &Connection, cookie: &C, operation: &str) -> Result<C::Reply>
+where
+    C: xcb::CookieWithReplyChecked,
+{
+    conn.flush()
+        .with_context(|| format!("{operation} flush failed"))?;
+    let deadline = Instant::now() + X11_REPLY_TIMEOUT;
+    loop {
+        if let Some(reply) = conn.poll_for_reply(cookie) {
+            return reply.with_context(|| format!("{operation} reply failed"));
+        }
+        conn.has_error()
+            .with_context(|| format!("{operation} connection failed"))?;
+        if Instant::now() >= deadline {
+            bail!("{operation} exceeded the 500 ms deadline");
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -234,9 +262,8 @@ impl X11SharedMemoryScreenshotSession {
         if shm::get_extension_data(&conn).is_none() {
             bail!("server does not advertise MIT-SHM");
         }
-        let version = conn
-            .wait_for_reply(conn.send_request(&shm::QueryVersion {}))
-            .context("MIT-SHM QueryVersion failed")?;
+        let version_cookie = conn.send_request(&shm::QueryVersion {});
+        let version = poll_reply_bounded(&conn, &version_cookie, "MIT-SHM QueryVersion")?;
         if (version.major_version(), version.minor_version()) < (1, 2) {
             bail!("MIT-SHM FD attach requires version >= 1.2");
         }
@@ -300,8 +327,9 @@ impl X11SharedMemoryScreenshotSession {
             format,
             slot: Some(slot),
             slot_len,
-            encoder: PngScratch::default(),
+            encoder: RgbPngEncoder::default(),
             closed: false,
+            connection_failed: false,
         })
     }
 
@@ -331,10 +359,13 @@ impl X11SharedMemoryScreenshotSession {
             shmseg: slot.shmseg,
             offset: 0,
         });
-        let reply = self
-            .conn
-            .wait_for_reply(cookie)
-            .context("XShm GetImage reply failed")?;
+        let reply = match poll_reply_bounded(&self.conn, &cookie, "XShm GetImage") {
+            Ok(reply) => reply,
+            Err(error) => {
+                self.connection_failed = true;
+                return Err(error);
+            }
+        };
         if reply.depth() != self.format.depth || reply.visual() != self.root_visual {
             bail!("XShm reply visual or depth differs from the validated root");
         }
@@ -363,26 +394,35 @@ impl X11SharedMemoryScreenshotSession {
         if self.closed {
             return Ok(());
         }
-        // Mark closed before sending the request: even if the X server has
-        // gone away, Drop must not retry a detach or leak the mapping.
-        self.closed = true;
-        let slot = self.slot.take();
-        let Some(slot) = slot else {
+        if self.slot.is_none() {
+            self.closed = true;
             return Ok(());
-        };
-        let cookie = self.conn.send_request_checked(&shm::Detach {
-            shmseg: slot.shmseg,
+        }
+        if self.connection_failed {
+            // Keep the mapping in the struct. Field drop order disconnects
+            // XCB before the slot is unmapped, so a timed-out server cannot
+            // retain a pointer into released client memory.
+            self.closed = true;
+            return Ok(());
+        }
+        let detach_cookie = self.conn.send_request_checked(&shm::Detach {
+            shmseg: self.slot.as_ref().expect("slot checked above").shmseg,
         });
-        let detach_result = self
-            .conn
-            .check_request(cookie)
-            .map_err(|error| anyhow!("XShm detach failed: {error:?}"));
-        // Drop the mapping only after the checked detach has completed.  The
-        // checked request is the synchronization point that keeps X from
-        // retaining a pointer into an unmapped segment.
+        let fence_cookie = self.conn.send_request(&x::GetInputFocus {});
+        if let Err(error) = poll_reply_bounded(&self.conn, &fence_cookie, "XShm detach fence") {
+            self.connection_failed = true;
+            self.closed = true;
+            return Err(error);
+        }
+        if let Err(error) = self.conn.check_request(detach_cookie) {
+            self.connection_failed = true;
+            self.closed = true;
+            return Err(anyhow!("XShm detach failed: {error:?}"));
+        }
+        self.closed = true;
+        let slot = self.slot.take().expect("slot checked above");
         drop(slot);
-        self.conn.flush().context("XShm detach flush failed")?;
-        detach_result
+        Ok(())
     }
 }
 
@@ -441,7 +481,7 @@ fn create_slot(conn: &Connection, len: usize) -> Result<SharedMemorySlot> {
         bail!("mmap returned a null pointer");
     };
     let shmseg: shm::Seg = conn.generate_id();
-    let cookie = conn.send_request_checked(&shm::AttachFd {
+    let attach_cookie = conn.send_request_checked(&shm::AttachFd {
         shmseg,
         shm_fd: fd,
         read_only: false,
@@ -450,11 +490,17 @@ fn create_slot(conn: &Connection, len: usize) -> Result<SharedMemorySlot> {
     // closes the descriptor after sending it.  Do not close fd here.  On a
     // protocol error XCB still owns the descriptor and will close it while
     // processing the failed request.  We only release our mapping.
-    if let Err(error) = conn.check_request(cookie) {
+    let fence_cookie = conn.send_request(&x::GetInputFocus {});
+    let attach_result =
+        poll_reply_bounded(conn, &fence_cookie, "XShm AttachFd fence").and_then(|_| {
+            conn.check_request(attach_cookie)
+                .map_err(|error| anyhow!("XShm AttachFd failed: {error:?}"))
+        });
+    if let Err(error) = attach_result {
         unsafe {
             let _ = libc::munmap(ptr.as_ptr().cast::<c_void>(), len);
         }
-        return Err(anyhow!("XShm AttachFd failed: {error:?}"));
+        return Err(error);
     }
     Ok(SharedMemorySlot { ptr, len, shmseg })
 }
@@ -652,7 +698,7 @@ mod tests {
             len: pixels.len(),
             shmseg: xcb::shm::Seg::none(),
         });
-        let mut scratch = PngScratch::default();
+        let mut scratch = RgbPngEncoder::default();
         let output = scratch.encode(&slot, 2, 1, 8).unwrap();
         let decoder = png::Decoder::new(Cursor::new(output));
         let mut reader = decoder.read_info().unwrap();
@@ -698,7 +744,7 @@ mod tests {
             len: bgra.len(),
             shmseg: xcb::shm::Seg::none(),
         });
-        let mut scratch = PngScratch::default();
+        let mut scratch = RgbPngEncoder::default();
         let native = scratch
             .encode(&slot, WIDTH, HEIGHT, WIDTH as usize * 4)
             .unwrap();

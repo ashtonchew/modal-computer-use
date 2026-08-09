@@ -919,12 +919,18 @@ def test_x11_screenshot_readiness_owns_cursor_capture_probe(monkeypatch) -> None
         display=":99",
         cursor_position=cursor_position,
     )
+    monkeypatch.setattr(
+        controller._mss,
+        "grab",
+        lambda _source: _fake_mss_capture((10, 10)),
+    )
 
     ready, error = anyio.run(controller.probe)
 
     assert ready is True
     assert error is None
     assert commands == [("maim", commands[0][-1])]
+    controller.close()
 
 
 def test_x11_screenshot_readiness_requires_maim_but_not_scrot(monkeypatch) -> None:
