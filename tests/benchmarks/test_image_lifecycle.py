@@ -147,6 +147,7 @@ def test_image_lifecycle_surface_runs_one_paired_interleaved_schedule() -> None:
         memory_mib=2048,
         sandbox_timeout_seconds=180,
         max_estimated_cost_usd=20.0,
+        caller_label="test-external-caller",
     )
     arms = {
         INLINE_RECIPE_ARM: _FakeArm(INLINE_RECIPE_ARM, clock, events),
@@ -156,7 +157,6 @@ def test_image_lifecycle_surface_runs_one_paired_interleaved_schedule() -> None:
     artifact = run_image_lifecycle_benchmark(
         spec,
         arms=arms,
-        caller_placement={"cloud": "aws", "region": "us-west-2"},
         clock=clock,
         generated_at=lambda: "2026-08-08T21:00:00Z",
     )
@@ -210,13 +210,8 @@ def test_image_lifecycle_surface_runs_one_paired_interleaved_schedule() -> None:
 
     placement_drift = deepcopy(artifact)
     placement_drift["observations"][0]["actual_placement"]["cloud"] = "gcp"
-    with pytest.raises(ValueError, match="differs from the runner"):
+    with pytest.raises(ValueError, match="one observed placement"):
         validate_image_lifecycle_artifact(placement_drift)
-
-    runner_drift = deepcopy(artifact)
-    runner_drift["configuration"]["runner"]["actual_placement"]["region"] = "us-east-1"
-    with pytest.raises(ValueError, match="runner placement"):
-        validate_image_lifecycle_artifact(runner_drift)
 
     understated_cost = deepcopy(artifact)
     understated_cost["cost"]["maximum_estimate_usd"] = 0.01
@@ -239,6 +234,7 @@ def test_image_lifecycle_surface_stops_without_retry_and_redacts_failures() -> N
         memory_mib=2048,
         sandbox_timeout_seconds=180,
         max_estimated_cost_usd=20.0,
+        caller_label="test-external-caller",
     )
     arms = {
         INLINE_RECIPE_ARM: _FakeArm(
@@ -253,7 +249,6 @@ def test_image_lifecycle_surface_stops_without_retry_and_redacts_failures() -> N
     artifact = run_image_lifecycle_benchmark(
         spec,
         arms=arms,
-        caller_placement={"cloud": "aws", "region": "us-west-2"},
         clock=clock,
         generated_at=lambda: "2026-08-08T21:00:00Z",
     )
@@ -281,6 +276,7 @@ def test_image_lifecycle_surface_retains_cleanup_failure_without_replacement() -
         memory_mib=2048,
         sandbox_timeout_seconds=180,
         max_estimated_cost_usd=20.0,
+        caller_label="test-external-caller",
     )
     arms = {
         arm: _FakeArm(
@@ -295,7 +291,6 @@ def test_image_lifecycle_surface_retains_cleanup_failure_without_replacement() -
     artifact = run_image_lifecycle_benchmark(
         spec,
         arms=arms,
-        caller_placement={"cloud": "aws", "region": "us-west-2"},
         clock=clock,
         generated_at=lambda: "2026-08-08T21:00:00Z",
     )
@@ -332,6 +327,7 @@ def test_image_lifecycle_surface_marks_a_measured_cleanup_failure() -> None:
         memory_mib=2048,
         sandbox_timeout_seconds=180,
         max_estimated_cost_usd=20.0,
+        caller_label="test-external-caller",
     )
     arms = {
         arm: _FakeArm(
@@ -347,7 +343,6 @@ def test_image_lifecycle_surface_marks_a_measured_cleanup_failure() -> None:
     artifact = run_image_lifecycle_benchmark(
         spec,
         arms=arms,
-        caller_placement={"cloud": "aws", "region": "us-west-2"},
         clock=clock,
         generated_at=lambda: "2026-08-08T21:00:00Z",
     )
@@ -372,6 +367,7 @@ def test_image_lifecycle_spec_enforces_primary_count_identity_and_budget() -> No
         "memory_mib": 2048,
         "sandbox_timeout_seconds": 180,
         "max_estimated_cost_usd": 20.0,
+        "caller_label": "test-external-caller",
     }
 
     with pytest.raises(ValueError, match="primary samples_per_arm"):

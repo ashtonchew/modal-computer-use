@@ -112,19 +112,20 @@ into the Image. The result therefore measures the complete Image policy that use
 
 The timer starts before `ComputerSandbox.create()`. It ends at the `first_valid_frame` startup mark.
 Image identity and placement checks run after that mark. Their time is outside lifecycle latency but
-inside the measured lifecycle wall time and cost estimate. One application-owned Modal Function runs
-the complete schedule from the requested region. Its dispatch and startup are outside the lifecycle
-samples. Every target must report the same cloud and region as that runner. The run does not measure
-Image build time. Modal cache state cannot be reset reliably for a paired Sandbox experiment, so
-record release build duration as separate deployment evidence.
+inside the measured lifecycle wall time and cost estimate. One long-lived external SDK process runs
+the complete schedule. Record that caller with `--caller-label`. The label identifies the harness;
+it does not claim that the caller is in the target region. Every target must use the requested exact
+region, and both arms must report one observed cloud and region. This topology preserves the inline
+recipe's caller-local source mount. A Modal Function cannot recreate that local mount. The run does
+not measure Image build time. Modal cache state cannot be reset reliably for a paired Sandbox
+experiment, so record release build duration as separate deployment evidence.
 
 Both arms request and cap the target at 1 physical CPU core and 2048 MiB for the commands below.
-The runner requests and caps 1 physical CPU core and 1024 MiB. The cost estimate applies Modal's
-narrow-region multiplier. The fixed limits prevent resource bursts from exceeding the preregistered
-allocations. They apply only to this Benchmark Surface. At the rates recorded on 8 August 2026, the
-pilot's runner-plus-target ceiling is $0.22 and the primary ceiling is $1.96. Image build, canary,
-control-plane, and billing adjustments remain outside those ceilings. The commands stop before launch
-if the runner-plus-target ceiling exceeds the $20 budget.
+The cost estimate applies Modal's narrow-region multiplier. The fixed limits prevent resource bursts
+from exceeding the preregistered target allocation. They apply only to this Benchmark Surface. At the
+rates recorded on 8 August 2026, the pilot target ceiling is $0.10 and the primary target ceiling is
+$1.04. Image build, canary, the external caller, control-plane, and billing adjustments remain outside
+those ceilings. The commands stop before launch if the target ceiling exceeds the $20 budget.
 
 Publish one verified standard Managed Image Release from the clean benchmark commit:
 
@@ -159,6 +160,7 @@ uv run python scripts/run_modal_image_lifecycle_benchmark.py pilot \
   --memory-mib 2048 \
   --sandbox-timeout-seconds 180 \
   --max-estimated-cost-usd 20 \
+  --caller-label codex-desktop-local-process \
   --output "$result_root/pilot.json"
 ```
 
@@ -175,15 +177,16 @@ uv run python scripts/run_modal_image_lifecycle_benchmark.py primary \
   --memory-mib 2048 \
   --sandbox-timeout-seconds 180 \
   --max-estimated-cost-usd 20 \
+  --caller-label codex-desktop-local-process \
   --pilot-result "$result_root/pilot.json" \
   --output "$result_root/primary.json"
 ```
 
-The Benchmark Surface stops on the first runner, create, identity, placement, frame, or cleanup failure.
+The Benchmark Surface stops on the first create, identity, placement, frame, or cleanup failure.
 It records raw paired samples, p50, p95, mean, paired deltas, bootstrap 95% confidence intervals,
-lifecycle wall time, and public-rate runner and target cost estimates. The estimates exclude Image
-build, canary, control-plane, and billing adjustments. Reconcile delayed Modal billing separately
-before you publish a cost claim.
+lifecycle wall time, and a public-rate target cost estimate. The estimate excludes Image build,
+canary, the external caller, control-plane, and billing adjustments. Reconcile delayed Modal billing
+separately before you publish a cost claim.
 
 ## Choose a command
 

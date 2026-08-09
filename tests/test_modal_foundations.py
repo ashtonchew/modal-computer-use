@@ -24,7 +24,6 @@ from modal_computer_use.image import (
 from modal_computer_use.sandbox import (
     modal_billing_report,
     run_modal_benchmark_function_once,
-    run_modal_benchmark_function_with_image_once,
 )
 
 REVISION = "0123456789abcdef0123456789abcdef01234567"
@@ -259,55 +258,6 @@ def test_modal_benchmark_function_uses_importable_image_module(monkeypatch) -> N
     assert function_options["single_use_containers"] is True
     assert function_options["cpu"] == 4.0
     assert function_options["memory"] == 8192
-
-
-def test_modal_benchmark_function_with_image_uses_exact_environment(monkeypatch) -> None:
-    function_options: dict[str, object] = {}
-    run_options: dict[str, object] = {}
-
-    class FakeRemote:
-        def remote(self, config: object, *, run_tag: str) -> dict[str, bool]:
-            assert config == "config"
-            assert run_tag == "run-tag"
-            return {"ok": True}
-
-    class FakeApp:
-        def __init__(self, name: str) -> None:
-            assert name == "image-lifecycle-runner"
-
-        def function(self, **kwargs: object):
-            function_options.update(kwargs)
-            return lambda _entrypoint: FakeRemote()
-
-        def run(self, **kwargs: object):
-            run_options.update(kwargs)
-            return nullcontext()
-
-    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(App=FakeApp))
-
-    result = run_modal_benchmark_function_with_image_once(
-        lambda: {},
-        config="config",
-        run_tag="run-tag",
-        app_name="image-lifecycle-runner",
-        region="us-west-2",
-        environment_name="main",
-        image="exact-image",
-        cpu=1.0,
-        memory_mib=1024,
-        timeout_seconds=900,
-        cpu_limit=1.0,
-        memory_limit_mib=1024,
-    )
-
-    assert result == {"ok": True}
-    assert function_options["image"] == "exact-image"
-    assert function_options["cpu"] == (1.0, 1.0)
-    assert function_options["memory"] == (1024, 1024)
-    assert function_options["serialized"] is False
-    assert function_options["include_source"] is False
-    assert function_options["single_use_containers"] is True
-    assert run_options == {"environment_name": "main"}
 
 
 @pytest.mark.parametrize(

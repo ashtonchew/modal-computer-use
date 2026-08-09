@@ -3,10 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from modal_computer_use.benchmarks.image_lifecycle import ImageLifecycleBenchmarkSpec
-from modal_computer_use.benchmarks.modal_image_lifecycle import (
-    run_modal_image_lifecycle,
-    run_modal_image_lifecycle_in_runner,
-)
+from modal_computer_use.benchmarks.modal_image_lifecycle import run_modal_image_lifecycle
 from modal_computer_use.image import ImageCanaryRecord, ImageReleaseRecord
 
 
@@ -88,14 +85,14 @@ class _FakeComputer:
         return {"cloud": "aws", "region": "us-west-2"}
 
 
-def test_modal_image_lifecycle_runner_uses_inline_and_exact_release_adapters() -> None:
+def test_modal_image_lifecycle_uses_inline_and_exact_release_adapters() -> None:
     clock = _Clock()
     exact_image = object()
     create_calls: list[dict[str, Any]] = []
     computers: list[_FakeComputer] = []
 
-    def resolve_exact_image(object_id: str) -> object:
-        assert object_id == "im-managed"
+    def resolve_image(record: ImageReleaseRecord) -> object:
+        assert record.modal_image_object_id == "im-managed"
         return exact_image
 
     def create_computer(**kwargs: Any) -> _FakeComputer:
@@ -124,15 +121,14 @@ def test_modal_image_lifecycle_runner_uses_inline_and_exact_release_adapters() -
         memory_mib=2048,
         sandbox_timeout_seconds=180,
         max_estimated_cost_usd=20.0,
+        caller_label="test-external-caller",
         benchmark_run_id="image-lifecycle-test",
     )
 
-    artifact = run_modal_image_lifecycle_in_runner(
+    artifact = run_modal_image_lifecycle(
         spec,
-        run_tag="image-lifecycle-test",
-        runner_placement={"cloud": "aws", "region": "us-west-2"},
         create_computer=create_computer,
-        resolve_exact_image=resolve_exact_image,
+        resolve_image=resolve_image,
         clock=clock,
         generated_at=lambda: "2026-08-08T21:00:00Z",
     )
@@ -157,50 +153,3 @@ def test_modal_image_lifecycle_runner_uses_inline_and_exact_release_adapters() -
         for call in create_calls
     )
     assert all(computer.closed for computer in computers)
-
-
-def test_modal_image_lifecycle_dispatches_one_exact_regional_function() -> None:
-    calls: list[dict[str, Any]] = []
-    exact_image = object()
-    spec = ImageLifecycleBenchmarkSpec(
-        source_revision="a" * 40,
-        release_record=_release_record(),
-        run_kind="pilot",
-        samples_per_arm=1,
-        warmup_pairs=1,
-        schedule_seed=7,
-        requested_region="us-west-2",
-        cpu=1.0,
-        memory_mib=2048,
-        sandbox_timeout_seconds=180,
-        max_estimated_cost_usd=20.0,
-        benchmark_run_id="image-lifecycle-test",
-    )
-
-    def launch(_entrypoint: Any, **kwargs: Any) -> dict[str, Any]:
-        calls.append(kwargs)
-        return {"status": "complete"}
-
-    result = run_modal_image_lifecycle(
-        spec,
-        function_launcher=launch,
-        resolve_image=lambda _record: exact_image,
-    )
-
-    assert result == {"status": "complete"}
-    assert calls == [
-        {
-            "config": spec,
-            "run_tag": "image-lifecycle-test",
-            "app_name": "modal-computer-use-image-lifecycle-runner",
-            "region": "us-west-2",
-            "environment_name": "test-environment",
-            "image": exact_image,
-            "cpu": 1.0,
-            "memory_mib": 1024,
-            "timeout_seconds": 1020,
-            "cpu_limit": 1.0,
-            "memory_limit_mib": 1024,
-            "retries": 0,
-        }
-    ]

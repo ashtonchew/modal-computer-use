@@ -683,80 +683,34 @@ def run_modal_benchmark_function_once(
     retries: int = 0,
 ) -> dict[str, Any]:
     """Invoke one regional benchmark Function without including dispatch in its measurements."""
-    image = named_image(revision=image_revision, profile="browser", browser="chromium")
-    return run_modal_benchmark_function_with_image_once(
-        entrypoint,
-        config=config,
-        run_tag=run_tag,
-        app_name=f"{app_name}-optimized-provider-runner",
-        region=region,
-        environment_name=None,
-        image=image,
-        cpu=cpu,
-        memory_mib=memory_mib,
-        timeout_seconds=timeout_seconds,
-        retries=retries,
-    )
-
-
-def run_modal_benchmark_function_with_image_once(
-    entrypoint: Callable[..., dict[str, Any]],
-    *,
-    config: object,
-    run_tag: str,
-    app_name: str,
-    region: str,
-    environment_name: str | None,
-    image: object,
-    cpu: float,
-    memory_mib: int,
-    timeout_seconds: int,
-    cpu_limit: float | None = None,
-    memory_limit_mib: int | None = None,
-    retries: int = 0,
-) -> dict[str, Any]:
-    """Invoke one regional benchmark Function from an exact caller Image."""
     if retries != 0:
         raise ValueError("benchmark Function retries must be disabled")
     if not region.strip():
         raise ValueError("benchmark Function region must be explicit")
-    if environment_name is not None and not environment_name.strip():
-        raise ValueError("benchmark Function environment must be non-empty")
-    if (cpu_limit is None) != (memory_limit_mib is None):
-        raise ValueError("benchmark Function resource limits must be provided together")
-    if cpu_limit is not None and cpu_limit < cpu:
-        raise ValueError("benchmark Function CPU limit must not be below its request")
-    if memory_limit_mib is not None and memory_limit_mib < memory_mib:
-        raise ValueError("benchmark Function memory limit must not be below its request")
     try:
         import modal
     except ImportError as exc:
         raise ModalNotInstalledError("Modal benchmark Function requires the modal extra") from exc
 
-    app = modal.App(app_name)
+    app = modal.App(f"{app_name}-optimized-provider-runner")
+    image = named_image(revision=image_revision, profile="browser", browser="chromium")
     remote = app.function(
         image=image,
         region=region,
-        cpu=(cpu, cpu_limit) if cpu_limit is not None else cpu,
-        memory=(memory_mib, memory_limit_mib)
-        if memory_limit_mib is not None
-        else memory_mib,
+        cpu=cpu,
+        memory=memory_mib,
         timeout=timeout_seconds,
         retries=0,
         min_containers=0,
         max_containers=1,
         single_use_containers=True,
-        # The exact Image owns this importable module. Avoid cloudpickling the
-        # Function or mounting caller source, so its release identity stays exact.
+        # The named image owns this importable module. Avoid cloudpickling the
+        # function or mounting local source so the image revision is authoritative
+        # and the local caller and the Python 3.12 image may differ.
         serialized=False,
         include_source=False,
     )(entrypoint)
-    run_options = (
-        {"environment_name": environment_name}
-        if environment_name is not None
-        else {}
-    )
-    with app.run(**run_options):
+    with app.run():
         result = remote.remote(config, run_tag=run_tag)
     if not isinstance(result, dict):
         raise SandboxUnavailableError("benchmark Function returned a non-object result")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,13 +9,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..config import BrowserConfig, ComputerConfig, ResourceConfig, RuntimeConfig
-from ..image import (
-    ImageReleaseRecord,
-    _resolve_release_image_object_id,
-    resolve_release_image,
-)
+from ..image import ImageReleaseRecord, resolve_release_image
 from ..latency import SessionStartupTiming
-from ..sandbox import ComputerSandbox, run_modal_benchmark_function_with_image_once
+from ..sandbox import ComputerSandbox
 from .image_lifecycle import (
     IMAGE_LIFECYCLE_BENCHMARK,
     INLINE_RECIPE_ARM,
@@ -25,14 +20,11 @@ from .image_lifecycle import (
     ImageLifecycleBenchmarkSpec,
     ImageLifecycleObservation,
     ImageLifecycleTrial,
-    image_lifecycle_runner_timeout_seconds,
     run_image_lifecycle_benchmark,
 )
 
 ComputerFactory = Callable[..., ComputerSandbox]
 ImageResolver = Callable[[ImageReleaseRecord], object]
-ExactImageResolver = Callable[[str], object]
-FunctionLauncher = Callable[..., dict[str, Any]]
 
 
 @dataclass(slots=True)
@@ -92,52 +84,14 @@ class _ModalImageLifecycleArm:
 def run_modal_image_lifecycle(
     spec: ImageLifecycleBenchmarkSpec,
     *,
-    function_launcher: FunctionLauncher = run_modal_benchmark_function_with_image_once,
-    resolve_image: ImageResolver = resolve_release_image,
-) -> dict[str, Any]:
-    """Run the lifecycle schedule in one exact, same-region Modal Function."""
-
-    runner_image = resolve_image(spec.release_record)
-    return function_launcher(
-        run_modal_image_lifecycle_in_runner,
-        config=spec,
-        run_tag=spec.benchmark_run_id,
-        app_name=f"{spec.app_name}-runner",
-        region=spec.requested_region,
-        environment_name=spec.release_record.environment_name,
-        image=runner_image,
-        cpu=1.0,
-        memory_mib=1024,
-        timeout_seconds=image_lifecycle_runner_timeout_seconds(spec),
-        cpu_limit=1.0,
-        memory_limit_mib=1024,
-        retries=0,
-    )
-
-
-def run_modal_image_lifecycle_in_runner(
-    spec: ImageLifecycleBenchmarkSpec,
-    *,
-    run_tag: str,
-    runner_placement: dict[str, str | None] | None = None,
     create_computer: ComputerFactory = ComputerSandbox.create,
-    resolve_exact_image: ExactImageResolver = _resolve_release_image_object_id,
+    resolve_image: ImageResolver = resolve_release_image,
     clock: Callable[[], float] = time.perf_counter,
     generated_at: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
-    """Create both target arms from the single application-owned runner."""
+    """Run both lifecycle arms from one long-lived external SDK process."""
 
-    if run_tag != spec.benchmark_run_id:
-        raise ValueError("Image lifecycle runner tag differs from the specification")
-    placement = runner_placement or {
-        "cloud": os.environ.get("MODAL_CLOUD_PROVIDER"),
-        "region": os.environ.get("MODAL_REGION"),
-    }
-    caller_placement = {
-        "cloud": _normalize_cloud(placement.get("cloud")),
-        "region": placement.get("region") or "",
-    }
-    managed_image = resolve_exact_image(spec.release_record.modal_image_object_id)
+    managed_image = resolve_image(spec.release_record)
     arms = {
         INLINE_RECIPE_ARM: _ModalImageLifecycleArm(
             name=INLINE_RECIPE_ARM,
@@ -157,7 +111,6 @@ def run_modal_image_lifecycle_in_runner(
     return run_image_lifecycle_benchmark(
         spec,
         arms=arms,
-        caller_placement=caller_placement,
         clock=clock,
         generated_at=generated_at or _utc_now,
     )

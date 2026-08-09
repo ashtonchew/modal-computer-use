@@ -70,6 +70,7 @@ def main() -> int:
         memory_mib=args.memory_mib,
         sandbox_timeout_seconds=args.sandbox_timeout_seconds,
         max_estimated_cost_usd=args.max_estimated_cost_usd,
+        caller_label=args.caller_label,
         benchmark_run_id=f"image-lifecycle-{run_kind}-{args.source_sha[:12]}",
         app_name=args.app_name,
     )
@@ -94,6 +95,7 @@ def _common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--memory-mib", type=int, default=2048)
     parser.add_argument("--sandbox-timeout-seconds", type=int, default=180)
     parser.add_argument("--max-estimated-cost-usd", type=float, required=True)
+    parser.add_argument("--caller-label", required=True)
     parser.add_argument(
         "--app-name",
         default="modal-computer-use-image-lifecycle",
@@ -119,6 +121,7 @@ def _require_pilot_matches_spec(
         "resource_limits": {"cpu": spec.cpu, "memory_mib": spec.memory_mib},
         "sandbox_timeout_seconds": spec.sandbox_timeout_seconds,
         "max_estimated_cost_usd": spec.max_estimated_cost_usd,
+        "caller_label": spec.caller_label,
         "modal_image_object_id": spec.release_record.modal_image_object_id,
         "image_reference": spec.release_record.image_reference,
         "image_variant": spec.release_record.image_variant,
@@ -138,6 +141,7 @@ def _require_pilot_matches_spec(
         "resource_limits": configuration.get("resource_limits"),
         "sandbox_timeout_seconds": configuration.get("sandbox_timeout_seconds"),
         "max_estimated_cost_usd": configuration.get("max_estimated_cost_usd"),
+        "caller_label": configuration.get("caller_label"),
         "modal_image_object_id": release.get("modal_image_object_id"),
         "image_reference": release.get("image_reference"),
         "image_variant": release.get("image_variant"),

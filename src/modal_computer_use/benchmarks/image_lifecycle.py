@@ -29,10 +29,7 @@ BOOTSTRAP_SEED = 20260808
 MODAL_NARROW_REGION_MULTIPLIER = 1.75
 IMAGE_LIFECYCLE_PRICING_RETRIEVED_DATE = "2026-08-08"
 MODAL_REGION_PRICING_SOURCE = "https://modal.com/docs/guide/region-selection"
-IMAGE_LIFECYCLE_CALLER_TOPOLOGY = "one-application-owned-modal-function"
-IMAGE_LIFECYCLE_RUNNER_CPU = 1.0
-IMAGE_LIFECYCLE_RUNNER_MEMORY_MIB = 1024
-IMAGE_LIFECYCLE_RUNNER_TIMEOUT_MARGIN_SECONDS = 300
+IMAGE_LIFECYCLE_CALLER_TOPOLOGY = "one-external-sdk-process"
 
 ImageLifecycleArmName = Literal["inline-recipe", "managed-exact-id"]
 ImageLifecycleRunKind = Literal["pilot", "primary"]
@@ -70,6 +67,7 @@ class ImageLifecycleBenchmarkSpec:
     memory_mib: int
     sandbox_timeout_seconds: int
     max_estimated_cost_usd: float
+    caller_label: str
     benchmark_run_id: str = "image-lifecycle"
     app_name: str = "modal-computer-use-image-lifecycle"
 
@@ -109,6 +107,8 @@ class ImageLifecycleBenchmarkSpec:
             or self.max_estimated_cost_usd <= 0
         ):
             raise ValueError("max_estimated_cost_usd must be positive")
+        if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", self.caller_label) is None:
+            raise ValueError("caller_label must be a safe non-empty label")
         for field_name in ("benchmark_run_id", "app_name"):
             value = getattr(self, field_name)
             if (
@@ -172,7 +172,6 @@ def run_image_lifecycle_benchmark(
     spec: ImageLifecycleBenchmarkSpec,
     *,
     arms: Mapping[str, ImageLifecycleArm],
-    caller_placement: Mapping[str, str],
     clock: Callable[[], float],
     generated_at: Callable[[], str],
 ) -> dict[str, Any]:
@@ -185,14 +184,10 @@ def run_image_lifecycle_benchmark(
             raise ValueError("Image lifecycle arm name does not match its mapping key")
 
     schedule = _build_schedule(spec)
-    caller_cloud = caller_placement.get("cloud", "").strip().lower()
-    caller_region = caller_placement.get("region", "").strip()
-    if not caller_cloud or caller_region != spec.requested_region:
-        raise ValueError("Image lifecycle caller placement must match the requested region")
     observations: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     lifecycle_wall_time_ms = 0.0
-    observed_placement: tuple[str, str] | None = (caller_cloud, caller_region)
+    observed_placement: tuple[str, str] | None = None
     stopped = False
     for trial in schedule:
         if stopped:
@@ -274,10 +269,7 @@ def run_image_lifecycle_benchmark(
         "status": "complete" if complete else "rejected",
         "generated_at": generated_at(),
         "run_kind": spec.run_kind,
-        "configuration": _configuration(
-            spec,
-            caller_placement={"cloud": caller_cloud, "region": caller_region},
-        ),
+        "configuration": _configuration(spec),
         "schedule": [_trial_dict(trial) for trial in schedule],
         "observations": observations,
         "failures": failures,
@@ -348,40 +340,11 @@ def validate_image_lifecycle_artifact(payload: Mapping[str, Any]) -> None:
         raise ValueError("Image build duration must stay outside lifecycle evidence")
     if configuration.get("caller_topology") != IMAGE_LIFECYCLE_CALLER_TOPOLOGY:
         raise ValueError("Image lifecycle caller topology is invalid")
-    runner = _require_mapping(configuration.get("runner"), "runner")
-    runner_placement = _require_mapping(
-        runner.get("actual_placement"), "runner actual_placement"
-    )
-    runner_cloud = runner_placement.get("cloud")
-    if (
-        set(runner_placement) != {"cloud", "region"}
-        or not isinstance(runner_cloud, str)
-        or not runner_cloud
-        or runner_placement.get("region") != requested_region
-    ):
-        raise ValueError("Image lifecycle runner placement is invalid")
-    if runner.get("resources") != {
-        "cpu": IMAGE_LIFECYCLE_RUNNER_CPU,
-        "memory_mib": IMAGE_LIFECYCLE_RUNNER_MEMORY_MIB,
-    }:
-        raise ValueError("Image lifecycle runner resources are invalid")
-    if runner.get("resource_limits") != runner.get("resources"):
-        raise ValueError("Image lifecycle runner resource limits are invalid")
-    if runner.get("timeout_seconds") != _runner_timeout_seconds_from_values(
-        samples_per_arm=samples_per_arm,
-        warmup_pairs=warmup_pairs,
-        sandbox_timeout_seconds=_positive_int(
-            configuration.get("sandbox_timeout_seconds"),
-            "sandbox_timeout_seconds",
-        ),
-    ):
-        raise ValueError("Image lifecycle runner timeout is invalid")
-    if runner.get("image_modal_object_id") != managed_object_id:
-        raise ValueError("Image lifecycle runner Image object ID is invalid")
-    if runner.get("invocations") != 1:
-        raise ValueError("Image lifecycle runner invocation count is invalid")
-    if runner.get("startup_included_in_samples") is not False:
-        raise ValueError("Image lifecycle runner startup must stay outside samples")
+    caller_label = configuration.get("caller_label")
+    if not isinstance(caller_label, str) or re.fullmatch(
+        r"[A-Za-z0-9._-]{1,128}", caller_label
+    ) is None:
+        raise ValueError("Image lifecycle caller label is invalid")
 
     raw_schedule = payload.get("schedule")
     if not isinstance(raw_schedule, list):
@@ -430,11 +393,6 @@ def validate_image_lifecycle_artifact(payload: Mapping[str, Any]) -> None:
         if placement.get("region") != requested_region or not placement.get("cloud"):
             raise ValueError("Image lifecycle placement differs from the request")
         observed_placements.add((placement.get("cloud"), placement.get("region")))
-        if (placement.get("cloud"), placement.get("region")) != (
-            runner_cloud,
-            requested_region,
-        ):
-            raise ValueError("Image lifecycle target placement differs from the runner")
         object_id = row.get("modal_image_object_id")
         if not isinstance(object_id, str) or not object_id.startswith("im-"):
             raise ValueError("Image lifecycle observation object ID is invalid")
@@ -482,7 +440,7 @@ def validate_image_lifecycle_artifact(payload: Mapping[str, Any]) -> None:
 
 
 def maximum_image_lifecycle_cost_usd(spec: ImageLifecycleBenchmarkSpec) -> float:
-    """Return the runner-plus-target ceiling for the preregistered schedule."""
+    """Return the target ceiling for the preregistered schedule."""
 
     return _maximum_cost_from_values(
         samples_per_arm=spec.samples_per_arm,
@@ -506,15 +464,7 @@ def _maximum_cost_from_values(
         cpu=cpu,
         memory_mib=memory_mib,
     )
-    runner_cost = _runner_timeout_seconds_from_values(
-        samples_per_arm=samples_per_arm,
-        warmup_pairs=warmup_pairs,
-        sandbox_timeout_seconds=sandbox_timeout_seconds,
-    ) * _resource_rate_per_second(
-        cpu=IMAGE_LIFECYCLE_RUNNER_CPU,
-        memory_mib=IMAGE_LIFECYCLE_RUNNER_MEMORY_MIB,
-    )
-    return target_cost + runner_cost
+    return target_cost
 
 
 def _build_schedule(spec: ImageLifecycleBenchmarkSpec) -> list[ImageLifecycleTrial]:
@@ -571,11 +521,7 @@ def _verify_observation(
         raise ValueError("managed lifecycle target does not use the release object ID")
 
 
-def _configuration(
-    spec: ImageLifecycleBenchmarkSpec,
-    *,
-    caller_placement: Mapping[str, str],
-) -> dict[str, Any]:
+def _configuration(spec: ImageLifecycleBenchmarkSpec) -> dict[str, Any]:
     record = spec.release_record
     return {
         "source_revision": spec.source_revision,
@@ -605,21 +551,7 @@ def _configuration(
         "measurement_scope": "sandbox-create-through-first-valid-frame",
         "image_build_duration_included": False,
         "caller_topology": IMAGE_LIFECYCLE_CALLER_TOPOLOGY,
-        "runner": {
-            "actual_placement": dict(caller_placement),
-            "image_modal_object_id": record.modal_image_object_id,
-            "invocations": 1,
-            "resources": {
-                "cpu": IMAGE_LIFECYCLE_RUNNER_CPU,
-                "memory_mib": IMAGE_LIFECYCLE_RUNNER_MEMORY_MIB,
-            },
-            "resource_limits": {
-                "cpu": IMAGE_LIFECYCLE_RUNNER_CPU,
-                "memory_mib": IMAGE_LIFECYCLE_RUNNER_MEMORY_MIB,
-            },
-            "timeout_seconds": _runner_timeout_seconds(spec),
-            "startup_included_in_samples": False,
-        },
+        "caller_label": spec.caller_label,
         "bootstrap": {
             "resamples": BOOTSTRAP_RESAMPLES,
             "seed": BOOTSTRAP_SEED,
@@ -721,17 +653,11 @@ def _cost(spec: ImageLifecycleBenchmarkSpec, lifecycle_wall_time_ms: float) -> d
         "currency": "USD",
         "maximum_estimate_usd": maximum_image_lifecycle_cost_usd(spec),
         "target_cost_estimate_usd": measured_seconds * _modal_rate_per_second(spec),
-        "runner_cost_estimate_usd": measured_seconds
-        * _resource_rate_per_second(
-            cpu=IMAGE_LIFECYCLE_RUNNER_CPU,
-            memory_mib=IMAGE_LIFECYCLE_RUNNER_MEMORY_MIB,
-        ),
         "lifecycle_wall_time_seconds": measured_seconds,
         "duration_policy": "create_start_through_cleanup_wall_time",
         "exclusions": [
             "Image build",
             "canary Sandbox",
-            "runner startup and dispatch",
             "control plane",
             "billing adjustments",
         ],
@@ -757,30 +683,6 @@ def _resource_rate_per_second(*, cpu: float, memory_mib: int) -> float:
     return base_rate * MODAL_NARROW_REGION_MULTIPLIER
 
 
-def image_lifecycle_runner_timeout_seconds(spec: ImageLifecycleBenchmarkSpec) -> int:
-    """Return the fixed timeout for the single application-owned runner."""
-
-    return _runner_timeout_seconds(spec)
-
-
-def _runner_timeout_seconds(spec: ImageLifecycleBenchmarkSpec) -> int:
-    return _runner_timeout_seconds_from_values(
-        samples_per_arm=spec.samples_per_arm,
-        warmup_pairs=spec.warmup_pairs,
-        sandbox_timeout_seconds=spec.sandbox_timeout_seconds,
-    )
-
-
-def _runner_timeout_seconds_from_values(
-    *,
-    samples_per_arm: int,
-    warmup_pairs: int,
-    sandbox_timeout_seconds: int,
-) -> int:
-    lifecycle_count = (warmup_pairs + samples_per_arm) * len(_ARMS)
-    return lifecycle_count * sandbox_timeout_seconds + (
-        IMAGE_LIFECYCLE_RUNNER_TIMEOUT_MARGIN_SECONDS
-    )
 
 
 def _elapsed_ms(clock: Callable[[], float], started: float) -> float:

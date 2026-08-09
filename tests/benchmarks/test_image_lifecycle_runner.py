@@ -91,6 +91,8 @@ def test_image_lifecycle_runner_pilot_uses_fixed_protocol(
             "us-west-2",
             "--max-estimated-cost-usd",
             "20",
+            "--caller-label",
+            "test-external-caller",
             "--output",
             str(output),
         ],
@@ -105,6 +107,7 @@ def test_image_lifecycle_runner_pilot_uses_fixed_protocol(
     assert benchmark_spec.cpu == 1.0
     assert benchmark_spec.memory_mib == 2048
     assert benchmark_spec.max_estimated_cost_usd == 20.0
+    assert benchmark_spec.caller_label == "test-external-caller"
     assert json.loads(output.read_text()) == artifact
 
 
@@ -140,6 +143,8 @@ def test_image_lifecycle_runner_primary_requires_matching_complete_pilot(
             "us-west-2",
             "--max-estimated-cost-usd",
             "20",
+            "--caller-label",
+            "test-external-caller",
             "--pilot-result",
             str(pilot),
             "--output",
