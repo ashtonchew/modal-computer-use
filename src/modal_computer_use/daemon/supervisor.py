@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
 import signal
@@ -7,12 +8,16 @@ import subprocess
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Protocol
 
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ProcessStatus
 
 from .process_environment import desktop_process_environment
+
+_X_SERVER_STARTUP_TIMEOUT_SECONDS = 5.0
+_X_SERVER_STARTUP_POLL_INTERVAL_SECONDS = 0.05
 
 
 class _ManagedProcess(Protocol):
@@ -67,6 +72,17 @@ class Supervisor:
                 str(self.settings.desktop_dpi),
             ],
         )
+        try:
+            await self._wait_for_x_server_ready()
+        except Exception as startup_error:
+            try:
+                await self.stop()
+            except Exception as cleanup_error:
+                startup_error.add_note(
+                    "display stack cleanup also failed: "
+                    f"{type(cleanup_error).__name__}"
+                )
+            raise
         wm_command = ["openbox"] if self.settings.window_manager == "openbox" else ["startxfce4"]
         self._start_process("window_manager", wm_command)
         if self.settings.vnc_mode != "off":
@@ -88,6 +104,36 @@ class Supervisor:
                 "novnc",
                 ["websockify", "--web=/usr/share/novnc/", "6080", "127.0.0.1:5900"],
             )
+
+    async def _wait_for_x_server_ready(self) -> None:
+        """Wait until the new X server accepts an authenticated client."""
+
+        deadline = monotonic() + _X_SERVER_STARTUP_TIMEOUT_SECONDS
+        while True:
+            xvfb = self.processes.get("xvfb")
+            if xvfb is not None and xvfb.poll() is not None:
+                raise RuntimeError("Xvfb exited before accepting clients")
+            if await asyncio.to_thread(self._x_server_accepts_clients):
+                return
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Xvfb did not accept clients before its startup deadline")
+            await asyncio.sleep(min(_X_SERVER_STARTUP_POLL_INTERVAL_SECONDS, remaining))
+
+    def _x_server_accepts_clients(self) -> bool:
+        env = desktop_process_environment(display=self.settings.display)
+        try:
+            completed = subprocess.run(  # noqa: S603 - fixed readiness probe.
+                ("xdpyinfo", "-display", self.settings.display),  # noqa: S607
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=1,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return completed.returncode == 0
 
     async def stop(self) -> None:
         self.running = False
