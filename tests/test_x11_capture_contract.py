@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import sys
+import threading
+import time
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
+from modal_computer_use.daemon.desktop.screenshot_capture import ScreenshotCaptureResolution
 from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import Point
@@ -242,9 +248,88 @@ def test_capture_failure_is_request_scoped_and_next_capture_can_succeed(
     assert recovered.headers["x-computer-use-capture-backend"] == "scrot"
 
 
-def _png_bytes() -> bytes:
+@pytest.mark.asyncio
+async def test_native_capture_wait_does_not_block_daemon_health(tmp_path, monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingNativeSession:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def capture_png(self, **kwargs: int) -> bytes:
+            entered.set()
+            if not release.wait(timeout=1):
+                raise AssertionError("test capture release was not signalled")
+            return _png_bytes(width=kwargs["width"], height=kwargs["height"])
+
+        def close(self) -> None:
+            pass
+
+    class NativeCaptureBackend(CaptureContractBackend):
+        def __init__(self) -> None:
+            X11DesktopBackend.__init__(
+                self,
+                width=10,
+                height=10,
+                display=":99",
+                capture_source="x11-shm",
+            )
+            self.commands = []
+
+    monkeypatch.setattr(
+        screenshots_module,
+        "resolve_capture_source",
+        lambda _source: ScreenshotCaptureResolution(
+            requested="x11-shm", selected="x11-shm"
+        ),
+    )
+    monkeypatch.setattr(
+        screenshots_module,
+        "X11SharedMemoryScreenshotSession",
+        BlockingNativeSession,
+    )
+    backend = NativeCaptureBackend()
+    app = _capture_app(tmp_path, backend)
+
+    def release_capture() -> None:
+        assert entered.wait(timeout=1)
+        time.sleep(0.3)
+        release.set()
+
+    releaser = threading.Thread(target=release_capture)
+    releaser.start()
+    try:
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://testserver",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                started = time.perf_counter()
+                screenshot = asyncio.create_task(
+                    client.post(
+                        "/v1/screenshots/full/raw",
+                        json={"format": "png", "show_cursor": False},
+                    )
+                )
+                health_request = asyncio.create_task(client.get("/healthz"))
+                health = await asyncio.wait_for(health_request, timeout=0.15)
+                assert time.perf_counter() - started < 0.15
+                assert health.status_code == 200
+                assert not screenshot.done()
+                response = await screenshot
+                assert response.status_code == 200
+                assert response.headers["x-computer-use-capture-backend"] == "x11-shm"
+    finally:
+        release.set()
+        releaser.join(timeout=1)
+
+
+def _png_bytes(*, width: int = 10, height: int = 10) -> bytes:
     output = BytesIO()
-    Image.new("RGB", (10, 10), "black").save(output, format="PNG")
+    Image.new("RGB", (width, height), "black").save(output, format="PNG")
     return output.getvalue()
 
 
