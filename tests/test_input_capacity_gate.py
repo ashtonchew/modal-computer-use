@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from typing import Any
@@ -117,7 +116,7 @@ class _FakeActions:
         return {"ok": True, "results": results}
 
 
-class _FakeCommands:
+class _FakeResourceSampler:
     def __init__(
         self,
         *,
@@ -130,16 +129,15 @@ class _FakeCommands:
         self.malformed = malformed
         self.calls = 0
 
-    async def run(self, *_: Any, **__: Any) -> dict[str, Any]:
+    async def __call__(self) -> dict[str, Any]:
         index = min(self.calls, 1)
         self.calls += 1
-        stdout = "not-json" if self.malformed else json.dumps(
-            {
-                "cpu_seconds": self.cpu_samples[index],
-                "rss_bytes": self.rss_samples[index],
-            }
-        )
-        return {"ok": True, "output": {"stdout": stdout}}
+        if self.malformed:
+            return {"cpu_seconds": "invalid", "rss_bytes": -1}
+        return {
+            "cpu_seconds": self.cpu_samples[index],
+            "rss_bytes": self.rss_samples[index],
+        }
 
 
 class _FakeComputer:
@@ -148,7 +146,7 @@ class _FakeComputer:
         *,
         ready: bool = True,
         reorder: bool = False,
-        commands: _FakeCommands | None = None,
+        resource_sampler: _FakeResourceSampler | None = None,
     ) -> None:
         self.calls = 0
         self.final_point = {"x": 0, "y": 0}
@@ -157,7 +155,7 @@ class _FakeComputer:
             self,
             error=RuntimeError("pointer probe failed") if not ready else None,
         )
-        self.commands = commands or _FakeCommands()
+        self.resource_sampler = resource_sampler or _FakeResourceSampler()
 
 
 @pytest.mark.asyncio
@@ -205,6 +203,7 @@ async def test_measurement_rejects_configuration_drift_before_input() -> None:
             computer,
             settings=_settings(),
             configuration=_configuration(input_rate_limit_burst=3_999),
+            resource_sampler=computer.resource_sampler,
             clock=_Clock(),
         )
     assert computer.calls == 0
@@ -219,6 +218,7 @@ async def test_measurement_passes_mixed_input_at_target_and_records_sanitized_ob
         computer,
         settings=_settings(),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -243,10 +243,12 @@ async def test_measurement_passes_mixed_input_at_target_and_records_sanitized_ob
 
 @pytest.mark.asyncio
 async def test_measurement_rejects_reordered_input() -> None:
+    computer = _FakeComputer(reorder=True)
     artifact = await run_input_capacity_measurement(
-        _FakeComputer(reorder=True),
+        computer,
         settings=_settings(batches=2),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -256,10 +258,12 @@ async def test_measurement_rejects_reordered_input() -> None:
 
 @pytest.mark.asyncio
 async def test_measurement_rejects_unhealthy_daemon() -> None:
+    computer = _FakeComputer(ready=False)
     artifact = await run_input_capacity_measurement(
-        _FakeComputer(ready=False),
+        computer,
         settings=_settings(batches=2),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -284,6 +288,7 @@ async def test_health_failure_records_only_allowlisted_exception_attribution() -
         computer,
         settings=_settings(batches=2),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -309,10 +314,12 @@ async def test_measurement_rejects_material_tail_regression() -> None:
                 self.now += 0.001 if measured_pair <= 4 else 0.003
             return self.now
 
+    computer = _FakeComputer()
     artifact = await run_input_capacity_measurement(
-        _FakeComputer(),
+        computer,
         settings=_settings(batches=8, max_tail_regression=1.5),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=TailClock(),
     )
 
@@ -331,6 +338,7 @@ async def test_execute_gate_records_borrow_cleanup_failure() -> None:
         broken_borrow,
         settings=_settings(batches=2),
         configuration=_configuration(),
+        resource_sampler=_FakeResourceSampler(),
         clock=_Clock(),
     )
 
@@ -352,6 +360,7 @@ async def test_measurement_does_not_retry_after_operation_error() -> None:
         computer,
         settings=_settings(batches=2),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -363,7 +372,7 @@ async def test_measurement_does_not_retry_after_operation_error() -> None:
 @pytest.mark.asyncio
 async def test_measurement_rejects_resource_saturation() -> None:
     computer = _FakeComputer(
-        commands=_FakeCommands(
+        resource_sampler=_FakeResourceSampler(
             cpu_samples=(10.0, 10.009),
             rss_samples=(100_000_000, 200_000_000),
         )
@@ -373,6 +382,7 @@ async def test_measurement_rejects_resource_saturation() -> None:
         computer,
         settings=_settings(),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -382,10 +392,12 @@ async def test_measurement_rejects_resource_saturation() -> None:
 
 @pytest.mark.asyncio
 async def test_measurement_rejects_unverifiable_resource_usage() -> None:
+    computer = _FakeComputer(resource_sampler=_FakeResourceSampler(malformed=True))
     artifact = await run_input_capacity_measurement(
-        _FakeComputer(commands=_FakeCommands(malformed=True)),
+        computer,
         settings=_settings(),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 
@@ -395,10 +407,12 @@ async def test_measurement_rejects_unverifiable_resource_usage() -> None:
 
 @pytest.mark.asyncio
 async def test_artifact_validator_rejects_incomplete_or_tampered_promotion_evidence() -> None:
+    computer = _FakeComputer()
     artifact = await run_input_capacity_measurement(
-        _FakeComputer(),
+        computer,
         settings=_settings(),
         configuration=_configuration(),
+        resource_sampler=computer.resource_sampler,
         clock=_Clock(),
     )
 

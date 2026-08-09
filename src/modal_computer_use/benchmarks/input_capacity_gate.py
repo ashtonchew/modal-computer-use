@@ -14,7 +14,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -160,7 +160,9 @@ class InputCapacityComputer(Protocol):
 
     actions: Any
     mouse: Any
-    commands: Any
+
+
+ResourceSampler = Callable[[], Awaitable[Mapping[str, Any]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +231,7 @@ async def run_input_capacity_measurement(
     *,
     settings: InputCapacitySettings,
     configuration: Mapping[str, Any],
+    resource_sampler: ResourceSampler,
     clock: Callable[[], float] = time.perf_counter,
 ) -> dict[str, Any]:
     """Run the same-client workload and return a promotion-ready artifact."""
@@ -253,7 +256,7 @@ async def run_input_capacity_measurement(
         await _require_healthy(computer, stage="initial")
         for warmup_index in range(settings.warmup_batches):
             await _run_batch(computer, workload[warmup_index % len(workload)], clock=clock)
-        resources_before = await _resource_sample(computer)
+        resources_before = await _resource_sample(resource_sampler)
         for index, expected in enumerate(workload):
             started = clock()
             result = await _run_batch(computer, expected, clock=clock)
@@ -294,7 +297,7 @@ async def run_input_capacity_measurement(
             ) from exc
         if observed_point != expected_final:
             raise InputCapacityGateError("lost_input", "final cursor sentinel was not observed")
-        resources_after = await _resource_sample(computer)
+        resources_after = await _resource_sample(resource_sampler)
     except InputCapacityGateError as exc:
         failure: dict[str, Any] = {
             "phase": "measure",
@@ -391,6 +394,7 @@ async def execute_input_capacity_gate(
     *,
     settings: InputCapacitySettings,
     configuration: Mapping[str, Any],
+    resource_sampler: ResourceSampler,
     clock: Callable[[], float] = time.perf_counter,
 ) -> dict[str, Any]:
     """Measure one borrow and preserve cleanup failures in the artifact."""
@@ -401,6 +405,7 @@ async def execute_input_capacity_gate(
                 computer,
                 settings=settings,
                 configuration=configuration,
+                resource_sampler=resource_sampler,
                 clock=clock,
             )
     except Exception as exc:
@@ -469,23 +474,14 @@ async def _require_healthy(
         )
 
 
-async def _resource_sample(computer: InputCapacityComputer) -> dict[str, float | int]:
+async def _resource_sample(resource_sampler: ResourceSampler) -> dict[str, float | int]:
     try:
-        result = await computer.commands.run("python", "-c", _RESOURCE_SAMPLE_SCRIPT, timeout=10)
-        payload = _as_mapping(result)
-        output = payload.get("output")
-        stdout = output.get("stdout") if isinstance(output, Mapping) else None
-        decoded = json.loads(stdout) if isinstance(stdout, str) else None
+        decoded = await resource_sampler()
     except Exception as exc:
         raise InputCapacityGateError(
             "resource_observation",
             "Sandbox resource usage was unavailable",
         ) from exc
-    if not isinstance(decoded, Mapping):
-        raise InputCapacityGateError(
-            "resource_observation",
-            "Sandbox resource usage was malformed",
-        )
     cpu_seconds = decoded.get("cpu_seconds")
     rss_bytes = decoded.get("rss_bytes")
     if (

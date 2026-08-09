@@ -28,6 +28,7 @@ import modal
 
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig, ComputerSessionHandle
 from modal_computer_use.benchmarks.input_capacity_gate import (
+    _RESOURCE_SAMPLE_SCRIPT,
     CAPACITY_BENCHMARK,
     INPUT_RATE_LIMIT_POLICY,
     InputCapacitySettings,
@@ -199,10 +200,26 @@ async def run_input_capacity_function(
             readiness_timeout=SANDBOX_READINESS_TIMEOUT_SECONDS,
         ),
     )
+    target = await modal.Sandbox.from_id.aio(handle.sandbox_id)
+
+    async def resource_sampler() -> Mapping[str, Any]:
+        process = await target.exec.aio(
+            "python",
+            "-c",
+            _RESOURCE_SAMPLE_SCRIPT,
+            timeout=10,
+        )
+        raw = (await process.stdout.read.aio()).strip()
+        decoded = json.loads(raw)
+        if not isinstance(decoded, Mapping):
+            raise RuntimeError("Sandbox resource sample was malformed")
+        return decoded
+
     return await execute_input_capacity_gate(
         borrow,
         settings=settings,
         configuration=measured_configuration,
+        resource_sampler=resource_sampler,
     )
 
 
