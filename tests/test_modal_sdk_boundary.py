@@ -28,6 +28,7 @@ from modal_computer_use.sandbox import (
     ModalBenchmarkAllocationContext,
     ModalVolumeMount,
     _connect_token_parts,
+    _daemon_environment,
     cleanup_modal_benchmark_run,
     create_modal_benchmark_computer,
     create_modal_benchmark_runner,
@@ -2801,6 +2802,30 @@ def test_attach_or_create_accepts_pre_capture_source_hash_for_auto(monkeypatch) 
     assert FakeSandbox.create_calls == []
     assert target.terminate_wait_calls == []
     assert target.detach_calls == 1
+
+
+def test_x11_shm_config_hash_accepts_only_current_source_shape() -> None:
+    config = ComputerConfig(
+        run_id="run-123",
+        actions={"screenshot_capture_source": "x11-shm"},
+    )
+
+    assert compatible_config_hashes(config) == (compute_config_hash(config),)
+
+
+def test_daemon_environment_projects_default_screenshot_source() -> None:
+    env = _daemon_environment(ComputerConfig(), vnc_mode="off")
+
+    assert env["COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE"] == "mss"
+
+
+def test_daemon_environment_projects_explicit_x11_shm_source() -> None:
+    env = _daemon_environment(
+        ComputerConfig(actions={"screenshot_capture_source": "x11-shm"}),
+        vnc_mode="off",
+    )
+
+    assert env["COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE"] == "x11-shm"
 
 
 def test_attach_or_create_omitted_run_id_adopts_existing_tag_before_hash(monkeypatch) -> None:

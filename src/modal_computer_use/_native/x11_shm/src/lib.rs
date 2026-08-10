@@ -47,6 +47,8 @@ const BACKEND_MARKER: &str = "x11-shm";
 const CODEC_MARKER: &str = "png-deflate-level1-no-filter-stock-zlib";
 #[cfg(not(feature = "stock-zlib"))]
 const CODEC_MARKER: &str = "png-deflate-level1-no-filter";
+#[cfg(not(feature = "stock-zlib"))]
+const CODEC_RUNTIME_MARKER: &str = "in-process-miniz_oxide";
 const X11_REPLY_TIMEOUT_MS: u64 = 750;
 #[cfg(target_os = "linux")]
 const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(X11_REPLY_TIMEOUT_MS);
@@ -950,7 +952,7 @@ fn _modal_computer_use_x11_shm(py: Python<'_>, module: &Bound<'_, PyModule>) -> 
     #[cfg(feature = "stock-zlib")]
     module.add("codec_runtime", stock_zlib_png::runtime_version())?;
     #[cfg(not(feature = "stock-zlib"))]
-    module.add("codec_runtime", "in-process-fdeflate")?;
+    module.add("codec_runtime", CODEC_RUNTIME_MARKER)?;
     #[cfg(feature = "stock-zlib")]
     module.add("codec_library", "system-libz")?;
     #[cfg(not(feature = "stock-zlib"))]
@@ -1050,6 +1052,20 @@ mod tests {
         assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter-stock-zlib");
         #[cfg(not(feature = "stock-zlib"))]
         assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter");
+    }
+
+    #[test]
+    fn codec_markers_attribute_miniz_and_stock_zlib_independently() {
+        #[cfg(feature = "stock-zlib")]
+        {
+            assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter-stock-zlib");
+            assert_ne!(CODEC_MARKER, "png-deflate-level1-no-filter");
+        }
+        #[cfg(not(feature = "stock-zlib"))]
+        {
+            assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter");
+            assert_eq!(CODEC_RUNTIME_MARKER, "in-process-miniz_oxide");
+        }
     }
 
     #[test]
