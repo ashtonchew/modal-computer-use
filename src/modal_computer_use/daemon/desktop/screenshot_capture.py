@@ -99,7 +99,7 @@ _module_checked = False
 # deliberately a little wider so a typed child reply can cross the socket. A
 # child that exceeds either bound is terminated and reaped before the typed
 # error reaches the daemon.
-_WORKER_OPERATION_TIMEOUT_SECONDS = 1.0
+_WORKER_OPERATION_TIMEOUT_SECONDS = 1.5
 _WORKER_START_TIMEOUT_SECONDS = 2.0
 _WORKER_REAP_TIMEOUT_SECONDS = 0.25
 

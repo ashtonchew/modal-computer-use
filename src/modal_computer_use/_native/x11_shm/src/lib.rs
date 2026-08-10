@@ -44,8 +44,9 @@ use xcb::{shm, x, Connection};
 
 const BACKEND_MARKER: &str = "x11-shm";
 const CODEC_MARKER: &str = "png-deflate-level1-fixed-up";
+const X11_REPLY_TIMEOUT_MS: u64 = 750;
 #[cfg(target_os = "linux")]
-const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(500);
+const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(X11_REPLY_TIMEOUT_MS);
 
 #[cfg(target_os = "linux")]
 #[derive(Debug)]
@@ -56,7 +57,11 @@ struct X11ReplyTimeout {
 #[cfg(target_os = "linux")]
 impl fmt::Display for X11ReplyTimeout {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} exceeded the 500 ms deadline", self.operation)
+        write!(
+            formatter,
+            "{} exceeded the {} ms deadline",
+            self.operation, X11_REPLY_TIMEOUT_MS
+        )
     }
 }
 
@@ -765,6 +770,11 @@ mod tests {
     fn native_markers_keep_backend_and_codec_semantic() {
         assert_eq!(BACKEND_MARKER, "x11-shm");
         assert_eq!(CODEC_MARKER, "png-deflate-level1-fixed-up");
+    }
+
+    #[test]
+    fn x11_reply_budget_keeps_the_preregistered_headroom() {
+        assert_eq!(X11_REPLY_TIMEOUT_MS, 750);
     }
 
     #[test]
