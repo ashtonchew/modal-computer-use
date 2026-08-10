@@ -224,6 +224,10 @@ def test_spawned_process_owner_round_trips_png_and_reaps_child(tmp_path, monkeyp
     assert process.poll() == 0
 
 
+def test_worker_deadline_keeps_headroom_above_native_reply_budget() -> None:
+    assert screenshot_capture._WORKER_OPERATION_TIMEOUT_SECONDS == 1.5
+
+
 def test_spawned_process_owner_times_out_and_reaps_stalled_child(
     tmp_path, monkeypatch
 ) -> None:
