@@ -12,8 +12,8 @@ environment setting, or performance-profile toggle.
 5. One pooled async HTTP client carries every operation for that borrow.
 6. The borrower releases the lease before the owner cleans up the desktop.
 
-The executable
-[`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example owns
+Follow the executable
+[`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example for
 the full lifecycle. Provider model calls remain in application code.
 
 ## Use the model-loop path
@@ -31,8 +31,8 @@ full screenshots use the binary response and return a typed `Screenshot`. Call `
 integration needs bytes and `to_base64()` when a provider payload needs base64.
 
 The daemon prefers persistent MSS capture for cursor-hidden screenshots and persistent XTest input.
-It can use a compatibility backend only before capture or input has produced an uncertain result.
-The SDK never replays a mutation after dispatch may have started.
+The daemon falls back to a compatibility backend only before capture or input has produced an
+uncertain result. The SDK never replays a mutation after dispatch may have started.
 
 ## Keep cost choices visible
 
@@ -44,8 +44,8 @@ Native async provisioning improves cancellation and cleanup behavior. It does no
 allocation or desktop startup. Report allocation, Function dispatch, borrow entry, warm operations,
 and cleanup separately.
 
-See [Performance](performance.md) for tuning and measurement boundaries. See
-[Benchmarking](benchmarking.md) for commands and evidence rules.
+[Performance](performance.md) covers tuning and measurement boundaries. [Benchmarking](benchmarking.md)
+covers commands and evidence rules.
 
 ## Low-level compatibility
 

@@ -78,18 +78,18 @@ Run it:
 uv run modal run --env main quickstart.py
 ```
 
-This is the optimized default topology. The async owner creates one desktop and produces a
-versioned handle. The application-owned Modal Function enters one borrow for the whole trajectory.
-That borrow reuses one pooled async HTTP client. `computer.step()` sends the ordered action batch
-and returns its immediate, byte-backed post-action screenshot in one request. The Function releases
-the lease before the owner terminates the Sandbox. Warm capacity is
-off because `min_containers=0`; enable paid idle capacity only after you measure the tradeoff.
+The async owner creates one desktop and produces a versioned handle. An application-owned Modal
+Function enters one borrow for the whole trajectory and reuses one pooled async HTTP client.
+`computer.step()` sends the ordered action batch and returns its immediate, byte-backed screenshot
+in one request. The Function releases the lease before the owner terminates the Sandbox. This
+lifecycle is the optimized default topology. Warm capacity stays off because
+`min_containers=0`; enable paid idle capacity only after measuring the tradeoff.
 
 ## Core API
 
 `AsyncComputerSandbox` plus `ComputerSessionHandle.borrow_async()` is the primary Modal trajectory
-interface. Keep the provider model loop in your application-owned Modal Function. Use one borrow
-around the repeated model loop. Use `computer.step()` for each ordered action array and its
+interface. The provider model loop belongs in the application-owned Modal Function. Enclose the
+repeated loop in one borrow, then call `computer.step()` for each ordered action array and its
 immediate post-action frame.
 
 The synchronous SDK, direct daemon clients, attach flows, REST routes, and idempotency tools remain
@@ -123,12 +123,12 @@ HTTP request and response shapes.
 ## Lifecycle and limits
 
 The owner, placed Function, and borrow have separate cleanup scopes. Native async provisioning
-keeps cancellation and cleanup safe, but it does not shorten cold allocation or desktop startup.
-Measure allocation, Function dispatch, borrow entry, and repeated warm operations separately.
+supports cancellation and cleanup without reducing cold allocation or desktop startup. Measure
+allocation, Function dispatch, borrow entry, and repeated warm operations separately.
 
-The daemon reserves the cost of a complete ordered batch before its first mutation. The default
-input limit is 100 normalized tokens per second with a 400-token burst. This is the portable
-baseline for the minimum tested Sandbox. Measure another setup before raising both values. See
+The daemon reserves the cost of a complete ordered batch before its first mutation. The default is
+the portable baseline for the minimum tested Sandbox: 100 normalized tokens per second with a
+400-token burst. Measure another setup before raising both values. See
 [Performance](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/performance.md) for
 placement, capacity, and measurement guidance.
 

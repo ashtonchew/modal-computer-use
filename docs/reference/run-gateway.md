@@ -1,12 +1,10 @@
 # Run gateway
 
 The [`modal_run_gateway.py`](../../examples/modal_run_gateway.py) example shows how an application
-can expose a bounded spawn-and-poll control plane to a non-Python client. This is application code.
-The core SDK does not supply authentication, authorization, storage, or model policy for it.
+can expose a bounded spawn-and-poll control plane to a non-Python client. Applications own this
+control plane, including its authentication, authorization, storage, and model policy.
 
 ## Required application components
-
-The host application supplies:
 
 - a principal resolver;
 - desktop and task ownership catalogs;
