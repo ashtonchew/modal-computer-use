@@ -925,6 +925,7 @@ async def _run_x_server_timeout_probe(
     failure_status_code: int | None = None
     failure_code: str | None = None
     failure_detail_type: str | None = None
+    failure_readiness_categories: list[str] | None = None
     phase = "context_enter"
     result: dict[str, Any] | None = None
     resumed = False
@@ -1061,6 +1062,12 @@ async def _run_x_server_timeout_probe(
     except Exception as exc:
         failure_type = type(exc).__name__
         failure_phase = phase
+        safe_failure = _safe_daemon_failure(exc)
+        categories = safe_failure.get("failure_readiness_categories")
+        if isinstance(categories, list) and all(
+            isinstance(category, str) for category in categories
+        ):
+            failure_readiness_categories = list(categories)
         if isinstance(exc, DaemonHTTPError):
             failure_status_code = exc.status_code
             failure_code = _safe_diagnostic_label(exc.code)
@@ -1101,6 +1108,11 @@ async def _run_x_server_timeout_probe(
             **(
                 {"failure_detail_type": failure_detail_type}
                 if failure_detail_type
+                else {}
+            ),
+            **(
+                {"failure_readiness_categories": failure_readiness_categories}
+                if failure_readiness_categories
                 else {}
             ),
             **({"cleanup_failure_type": cleanup_type} if cleanup_type else {}),
@@ -2004,7 +2016,9 @@ def run(
 
 
 def _build_repeated_bounded_x_server_diagnostic(
-    observations: list[dict[str, Any]], cleanup: Mapping[str, Any]
+    observations: list[dict[str, Any]],
+    cleanup: Mapping[str, Any],
+    provenance: Mapping[str, str | bool],
 ) -> dict[str, Any]:
     retained_observations = [dict(observation) for observation in observations]
     failure_count = sum(
@@ -2025,24 +2039,31 @@ def _build_repeated_bounded_x_server_diagnostic(
         ),
         "retries": 0,
         "replacement_samples": 0,
+        "provenance": dict(provenance),
         "observations": retained_observations,
         "terminal_cleanup": retained_cleanup,
     }
 
 
 async def _run_repeated_bounded_x_server_diagnostic(
-    *, sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES
+    *,
+    sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES,
+    provenance: Mapping[str, str | bool] | None = None,
 ) -> dict[str, Any]:
     if sample_count != BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES:
         raise ValueError(
             "bounded X server diagnostic requires exactly 10 samples"
         )
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
     observations: list[dict[str, Any]] = []
     for sample_index in range(sample_count):
         result = await _run_x_server_timeout_probe(lambda: _ArmContext("auto"))
         observations.append({"sample_index": sample_index, **result})
     cleanup = await _final_sandbox_cleanup()
-    return _build_repeated_bounded_x_server_diagnostic(observations, cleanup)
+    return _build_repeated_bounded_x_server_diagnostic(
+        observations, cleanup, provenance
+    )
 
 
 @app.function(
@@ -2055,6 +2076,7 @@ async def _run_repeated_bounded_x_server_diagnostic(
 )
 def run_repeated_bounded_x_server_probe(
     sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES,
+    provenance: dict[str, str | bool] | None = None,
 ) -> dict[str, Any]:
     """Run ten exact bounded-X probes and retain every safe observation."""
 
@@ -2062,8 +2084,12 @@ def run_repeated_bounded_x_server_probe(
         raise ValueError(
             "bounded X server diagnostic requires exactly 10 samples"
         )
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
     return asyncio.run(
-        _run_repeated_bounded_x_server_diagnostic(sample_count=sample_count)
+        _run_repeated_bounded_x_server_diagnostic(
+            sample_count=sample_count, provenance=provenance
+        )
     )
 
 
@@ -2285,6 +2311,7 @@ def repeated_bounded_x_server_main(
 ) -> None:
     result = run_repeated_bounded_x_server_probe.remote(
         sample_count=sample_count,
+        provenance=_local_provenance(),
     )
     path = (
         Path(output)
