@@ -97,6 +97,14 @@ CONCURRENCY_TRIALS = 5
 READINESS_SAMPLES = 20
 MAX_OPERATIONAL_REGRESSION_PERCENT = 5.0
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
+SAFE_TIMEOUT_ORIGINS = frozenset(
+    {
+        "native_x11_setup_deadline",
+        "native_x11_reply_deadline",
+        "worker_startup_deadline",
+        "worker_process_deadline",
+    }
+)
 BENCHMARK_RUN_TAG = f"x11-shm-{uuid.uuid4().hex}"
 REGION_PARITY_CASES = (
     (0, 0, 1, 1),
@@ -396,6 +404,9 @@ def _safe_daemon_failure(exc: Exception) -> dict[str, Any]:
         detail_type = _safe_diagnostic_label(details.get("type"))
         if detail_type is not None:
             result["failure_detail_type"] = detail_type
+        timeout_origin = _safe_diagnostic_label(details.get("timeout_origin"))
+        if timeout_origin in SAFE_TIMEOUT_ORIGINS:
+            result["failure_timeout_origin"] = timeout_origin
         errors = details.get("errors")
         if isinstance(errors, list):
             categories: list[str] = []
@@ -603,9 +614,14 @@ async def _run_readiness_probe(
                         return data, headers
 
                     computer.client.post_bytes_with_headers = traced_request
+                    public_capture_started = time.perf_counter()
                     try:
                         await computer.screenshots.full()
                     finally:
+                        observation["public_capture_elapsed_ms"] = round(
+                            (time.perf_counter() - public_capture_started) * 1000.0,
+                            4,
+                        )
                         computer.client.post_bytes_with_headers = original
                     if backends != [arm]:
                         raise RuntimeError("fresh readiness used an unexpected source")
@@ -691,6 +707,111 @@ async def _run_readiness_probe(
             if cleanup_failure_type
             else {}
         ),
+    }
+
+
+async def _run_x11_shm_timeout_origin_probe(
+    *,
+    sample_count: int,
+) -> dict[str, Any]:
+    """Classify candidate setup and capture timeouts across fresh contexts."""
+
+    observations: list[dict[str, Any]] = []
+    timeout_origin_counts: dict[str, int] = {}
+    for sample_index in range(sample_count):
+        context = _ArmContext("x11-shm")
+        computer: Any | None = None
+        observation: dict[str, Any] = {
+            "sample_index": sample_index,
+            "status": "failed",
+        }
+        phase = "context_enter"
+        started = time.perf_counter()
+        try:
+            computer = await context.__aenter__()
+            observation["startup_total_ms"] = round(
+                (time.perf_counter() - started) * 1000.0,
+                4,
+            )
+            phase = "public_capture"
+            backends: list[str | None] = []
+            original = computer.client.post_bytes_with_headers
+
+            async def traced_request(
+                *args: Any,
+                _original: Any = original,
+                _backends: list[str | None] = backends,
+                **kwargs: Any,
+            ) -> Any:
+                data, headers = await _original(*args, **kwargs)
+                _backends.append(headers.get("x-computer-use-capture-backend"))
+                return data, headers
+
+            computer.client.post_bytes_with_headers = traced_request
+            public_capture_started = time.perf_counter()
+            try:
+                await computer.screenshots.full()
+            finally:
+                observation["public_capture_elapsed_ms"] = round(
+                    (time.perf_counter() - public_capture_started) * 1000.0,
+                    4,
+                )
+                computer.client.post_bytes_with_headers = original
+            if backends != ["x11-shm"]:
+                raise RuntimeError("timeout-origin probe used an unexpected source")
+            observation["status"] = "ok"
+            observation["capture_backend"] = "x11-shm"
+        except Exception as exc:
+            observation["failure_type"] = type(exc).__name__
+            if phase == "context_enter":
+                observation["failure_phase"] = (
+                    _startup_failure_phase(context.startup_timing)
+                    if context.enter_phase == "create_sandbox"
+                    else context.enter_phase
+                )
+            else:
+                observation["failure_phase"] = phase
+            observation.update(_safe_daemon_failure(exc))
+            timeout_origin = observation.get("failure_timeout_origin")
+            if (
+                observation.get("failure_detail_type")
+                == "ScreenshotCaptureTimedOut"
+                and isinstance(timeout_origin, str)
+            ):
+                timeout_origin_counts[timeout_origin] = (
+                    timeout_origin_counts.get(timeout_origin, 0) + 1
+                )
+        finally:
+            observation["startup_timing"] = context.startup_timing.as_dict()
+            if computer is not None:
+                try:
+                    await context.__aexit__(None, None, None)
+                except Exception as exc:
+                    observation["status"] = "failed"
+                    observation["cleanup_failure_type"] = type(exc).__name__
+                    observation["failure_phase"] = "cleanup"
+            observations.append(observation)
+
+    timeout_observations = [
+        observation
+        for observation in observations
+        if observation.get("failure_detail_type") == "ScreenshotCaptureTimedOut"
+    ]
+    timeout_failures = len(timeout_observations)
+    unknown_timeout_origins = sum(
+        observation.get("failure_timeout_origin") not in SAFE_TIMEOUT_ORIGINS
+        for observation in timeout_observations
+    )
+    return {
+        "passed": all(observation.get("status") == "ok" for observation in observations),
+        "sample_count": sample_count,
+        "failure_count": sum(
+            observation.get("status") != "ok" for observation in observations
+        ),
+        "timeout_failure_count": timeout_failures,
+        "unknown_timeout_origin_count": unknown_timeout_origins,
+        "timeout_origin_counts": timeout_origin_counts,
+        "observations": observations,
     }
 
 
@@ -1957,6 +2078,53 @@ def run_readiness_replication(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=4_200,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_timeout_origin_probe(
+    samples: int = 100,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run 100 fresh candidate captures to classify timeout ownership."""
+
+    if samples != 100:
+        raise ValueError("timeout-origin probe requires exactly 100 samples")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            result = await _run_x11_shm_timeout_origin_probe(sample_count=samples)
+        except BaseException as primary:
+            try:
+                await _final_sandbox_cleanup()
+            except BaseException as cleanup_error:
+                primary.add_note(
+                    "timeout-origin probe cleanup also failed: "
+                    f"{type(cleanup_error).__name__}"
+                )
+            raise
+
+        cleanup = await _final_sandbox_cleanup()
+        if cleanup.get("succeeded") is not True:
+            raise RuntimeError("timeout-origin probe cleanup found live Sandboxes")
+        return {
+            "schema_version": "x11-shm-timeout-origin.v1",
+            "benchmark": "x11-shm-timeout-origin",
+            "retries": 0,
+            "provenance": provenance,
+            **result,
+            "terminal_cleanup": cleanup,
+        }
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -1989,6 +2157,25 @@ def readiness_main(
         Path(output)
         if output
         else Path("benchmark-data/x11-shm-readiness-replication-100.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def timeout_origin_main(
+    samples: int = 100,
+    output: str = "",
+) -> None:
+    result = run_x11_shm_timeout_origin_probe.remote(
+        samples=samples,
+        provenance=_local_provenance(),
+    )
+    path = (
+        Path(output)
+        if output
+        else Path("benchmark-data/x11-shm-timeout-origin-100.json")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
