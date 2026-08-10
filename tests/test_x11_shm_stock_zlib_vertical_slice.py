@@ -85,11 +85,23 @@ def _live_result() -> dict[str, object]:
     }
 
 
-def test_remote_relocation_uses_guarded_root_and_fixture_fallback(tmp_path: Path) -> None:
-    remote_path = Path("/root/x11_shm_stock_zlib_vertical_slice.py")
-    assert runner._project_root_for(remote_path) == Path("/root")
+def test_remote_relocation_uses_guarded_root_and_fixture_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    remote_path = tmp_path / "relocated" / "x11_shm_stock_zlib_vertical_slice.py"
+    assert runner._project_root_for(remote_path) == remote_path.parents[2]
     fallback = tmp_path / "x11_shm_chromium_fixture.html"
     fallback.write_text("<html>relocated</html>", encoding="utf-8")
+
+    first_candidate = remote_path.parent / "fixtures" / "x11_shm_chromium_fixture.html"
+    original_is_file = Path.is_file
+
+    def raise_for_relocated_candidate(candidate: Path) -> bool:
+        if candidate == first_candidate:
+            raise PermissionError("relocated runner directory is inaccessible")
+        return original_is_file(candidate)
+
+    monkeypatch.setattr(Path, "is_file", raise_for_relocated_candidate)
     assert runner._load_fixture_html(remote_path, fallback) == "<html>relocated</html>"
 
 

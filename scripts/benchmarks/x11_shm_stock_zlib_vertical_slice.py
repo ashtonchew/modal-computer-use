@@ -92,8 +92,11 @@ def _load_fixture_html(
         fallback_path,
     )
     for candidate in candidates:
-        if candidate.is_file():
-            return candidate.read_text(encoding="utf-8")
+        try:
+            if candidate.is_file():
+                return candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
     raise RuntimeError("Chromium screenshot fixture is not available in the benchmark image")
 
 
