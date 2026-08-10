@@ -1782,6 +1782,152 @@ def _build_x11_shm_soak_diagnostic(
     }
 
 
+def _build_x11_shm_soak_diagnostic_script(captures: int) -> str:
+    return dedent(
+        f"""
+        import http.client
+        import json
+        import os
+        from pathlib import Path
+
+{indent(_DAEMON_ARGV_MATCHER_SOURCE, "        ")}
+
+        def daemon_identity():
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    command = (entry / "cmdline").read_bytes()
+                    stat_text = (entry / "stat").read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                if not _is_modal_daemon_cmdline(command):
+                    continue
+                try:
+                    pid = int(entry.name)
+                    starttime_ticks = int(stat_text.rsplit(") ", 1)[1].split()[19])
+                except (IndexError, ValueError):
+                    continue
+                return {{
+                    "pid": pid,
+                    "starttime_ticks": starttime_ticks,
+                    "argv_match": True,
+                    "argv_module": "modal_computer_use.daemon",
+                }}
+            return None
+
+        def status_bytes(pid, key):
+            with open(f"/proc/{{pid}}/status", encoding="utf-8") as status_file:
+                for line in status_file:
+                    if line.startswith(key + ":"):
+                        return int(line.split()[1]) * 1024
+            raise RuntimeError(f"{{key}} missing for daemon process")
+
+        def counts(pid):
+            with open(f"/proc/{{pid}}/maps", encoding="utf-8") as maps_file:
+                mappings = sum(1 for _ in maps_file)
+            return {{
+                "fd": len(os.listdir(f"/proc/{{pid}}/fd")),
+                "mappings": mappings,
+                "rss": status_bytes(pid, "VmRSS"),
+                "peak_rss": status_bytes(pid, "VmHWM"),
+            }}
+
+        token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
+        port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
+        headers = {{
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        }}
+        full = json.dumps({{
+            "format": "png", "quality": 90, "scale": 1.0,
+            "show_cursor": False, "processing": "auto", "storage": "inline",
+        }})
+        region = json.dumps({{
+            "format": "png", "quality": 90, "scale": 1.0,
+            "show_cursor": False, "processing": "auto", "storage": "inline",
+            "region": {{"x": 7, "y": 9, "width": 511, "height": 383}},
+        }})
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        observed_backend = None
+        failure_type = None
+        failure_phase = None
+        identity_before = None
+        identity_after = None
+        counts_before = None
+        counts_after = None
+        full_captures = 0
+        region_captures = 0
+
+        def capture(path, body, expected_width, expected_height):
+            global observed_backend
+            connection.request("POST", path, body=body, headers=headers)
+            response = connection.getresponse()
+            data = response.read()
+            if response.status != 200 or not data.startswith(b"\\x89PNG"):
+                raise RuntimeError("daemon-local screenshot failed")
+            backend = response.getheader("x-computer-use-capture-backend")
+            if backend != "x11-shm":
+                raise RuntimeError("daemon-local screenshot used an unexpected source")
+            if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
+                raise RuntimeError("daemon-local screenshot width changed")
+            if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
+                raise RuntimeError("daemon-local screenshot height changed")
+            observed_backend = backend
+
+        try:
+            failure_phase = "prime_capture"
+            capture("/v1/screenshots/full/raw", full, 1024, 768)
+            capture("/v1/screenshots/region/raw", region, 511, 383)
+            failure_phase = "identity_before"
+            identity_before = daemon_identity()
+            if identity_before is None:
+                raise RuntimeError("daemon process was not found")
+            counts_before = counts(identity_before["pid"])
+            failure_phase = "soak_capture"
+            for index in range({captures}):
+                if index % 2:
+                    capture("/v1/screenshots/region/raw", region, 511, 383)
+                    region_captures += 1
+                else:
+                    capture("/v1/screenshots/full/raw", full, 1024, 768)
+                    full_captures += 1
+            failure_phase = "identity_after"
+            identity_after = daemon_identity()
+            if identity_after is None:
+                raise RuntimeError("daemon process was not found after soak")
+            counts_after = counts(identity_after["pid"])
+        except Exception as exc:
+            failure_type = type(exc).__name__
+        finally:
+            connection.close()
+
+        signed_deltas = None
+        if counts_before is not None and counts_after is not None:
+            signed_deltas = {{
+                key: counts_after[key] - counts_before[key]
+                for key in ("fd", "mappings", "rss", "peak_rss")
+            }}
+        print(json.dumps({{
+            "passed": failure_type is None,
+            "requested_source": "auto",
+            "observed_backend": observed_backend,
+            "captures_requested": {captures},
+            "captures_completed": full_captures + region_captures,
+            "full_captures": full_captures,
+            "region_captures": region_captures,
+            "daemon_identity_before": identity_before,
+            "daemon_identity_after": identity_after,
+            "counts_before": counts_before,
+            "counts_after": counts_after,
+            "signed_deltas": signed_deltas,
+            "failure_type": failure_type,
+            "failure_phase": failure_phase,
+        }}))
+        """
+    )
+
+
 async def _run_x11_shm_soak_diagnostic(
     factory: Callable[[], AbstractAsyncContextManager[Any]],
     *,
@@ -1799,153 +1945,17 @@ async def _run_x11_shm_soak_diagnostic(
         sandbox = getattr(computer, "_sandbox", None)
         if sandbox is None or not hasattr(sandbox, "exec"):
             raise RuntimeError("sandbox handle unavailable for X11 soak diagnostic")
-        script = dedent(
-            f"""
-            import http.client
-            import json
-            import os
-            from pathlib import Path
-
-{indent(_DAEMON_ARGV_MATCHER_SOURCE, "            ")}
-
-            def daemon_identity():
-                for entry in Path("/proc").iterdir():
-                    if not entry.name.isdigit():
-                        continue
-                    try:
-                        command = (entry / "cmdline").read_bytes()
-                        stat_text = (entry / "stat").read_text(encoding="utf-8")
-                    except OSError:
-                        continue
-                    if not _is_modal_daemon_cmdline(command):
-                        continue
-                    try:
-                        pid = int(entry.name)
-                        starttime_ticks = int(stat_text.rsplit(") ", 1)[1].split()[19])
-                    except (IndexError, ValueError):
-                        continue
-                    return {{
-                        "pid": pid,
-                        "starttime_ticks": starttime_ticks,
-                        "argv_match": True,
-                        "argv_module": "modal_computer_use.daemon",
-                    }}
-                return None
-
-            def status_bytes(pid, key):
-                with open(f"/proc/{{pid}}/status", encoding="utf-8") as status_file:
-                    for line in status_file:
-                        if line.startswith(key + ":"):
-                            return int(line.split()[1]) * 1024
-                raise RuntimeError(f"{{key}} missing for daemon process")
-
-            def counts(pid):
-                with open(f"/proc/{{pid}}/maps", encoding="utf-8") as maps_file:
-                    mappings = sum(1 for _ in maps_file)
-                return {{
-                    "fd": len(os.listdir(f"/proc/{{pid}}/fd")),
-                    "mappings": mappings,
-                    "rss": status_bytes(pid, "VmRSS"),
-                    "peak_rss": status_bytes(pid, "VmHWM"),
-                }}
-
-            token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
-            port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
-            headers = {{
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-            }}
-            full = json.dumps({{
-                "format": "png", "quality": 90, "scale": 1.0,
-                "show_cursor": False, "processing": "auto", "storage": "inline",
-            }})
-            region = json.dumps({{
-                "format": "png", "quality": 90, "scale": 1.0,
-                "show_cursor": False, "processing": "auto", "storage": "inline",
-                "region": {{"x": 7, "y": 9, "width": 511, "height": 383}},
-            }})
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
-            observed_backend = None
-            failure_type = None
-            failure_phase = None
-            identity_before = None
-            identity_after = None
-            counts_before = None
-            counts_after = None
-            full_captures = 0
-            region_captures = 0
-
-            def capture(path, body, expected_width, expected_height):
-                nonlocal observed_backend
-                connection.request("POST", path, body=body, headers=headers)
-                response = connection.getresponse()
-                data = response.read()
-                if response.status != 200 or not data.startswith(b"\\x89PNG"):
-                    raise RuntimeError("daemon-local screenshot failed")
-                backend = response.getheader("x-computer-use-capture-backend")
-                if backend != "x11-shm":
-                    raise RuntimeError("daemon-local screenshot used an unexpected source")
-                if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
-                    raise RuntimeError("daemon-local screenshot width changed")
-                if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
-                    raise RuntimeError("daemon-local screenshot height changed")
-                observed_backend = backend
-
-            try:
-                failure_phase = "prime_capture"
-                capture("/v1/screenshots/full/raw", full, 1024, 768)
-                capture("/v1/screenshots/region/raw", region, 511, 383)
-                failure_phase = "identity_before"
-                identity_before = daemon_identity()
-                if identity_before is None:
-                    raise RuntimeError("daemon process was not found")
-                counts_before = counts(identity_before["pid"])
-                failure_phase = "soak_capture"
-                for index in range({captures}):
-                    if index % 2:
-                        capture("/v1/screenshots/region/raw", region, 511, 383)
-                        region_captures += 1
-                    else:
-                        capture("/v1/screenshots/full/raw", full, 1024, 768)
-                        full_captures += 1
-                failure_phase = "identity_after"
-                identity_after = daemon_identity()
-                if identity_after is None:
-                    raise RuntimeError("daemon process was not found after soak")
-                counts_after = counts(identity_after["pid"])
-            except Exception as exc:
-                failure_type = type(exc).__name__
-            finally:
-                connection.close()
-
-            signed_deltas = None
-            if counts_before is not None and counts_after is not None:
-                signed_deltas = {{
-                    key: counts_after[key] - counts_before[key]
-                    for key in ("fd", "mappings", "rss", "peak_rss")
-                }}
-            print(json.dumps({{
-                "passed": failure_type is None,
-                "requested_source": "auto",
-                "observed_backend": observed_backend,
-                "captures_requested": {captures},
-                "captures_completed": full_captures + region_captures,
-                "full_captures": full_captures,
-                "region_captures": region_captures,
-                "daemon_identity_before": identity_before,
-                "daemon_identity_after": identity_after,
-                "counts_before": counts_before,
-                "counts_after": counts_after,
-                "signed_deltas": signed_deltas,
-                "failure_type": failure_type,
-                "failure_phase": failure_phase,
-            }}))
-            """
-        )
+        script = _build_x11_shm_soak_diagnostic_script(captures)
         phase = "daemon_local_soak"
         process = await sandbox.exec.aio("python", "-c", script, timeout=900)
+        exit_code = await process.wait.aio()
+        raw = await _process_stdout_text(process)
+        if exit_code != 0:
+            raise RuntimeError("X11 soak diagnostic child exited")
+        if not raw:
+            raise RuntimeError("X11 soak diagnostic child returned empty output")
         phase = "parse_soak_output"
-        payload = json.loads(await _completed_process_stdout_text(process))
+        payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise RuntimeError("X11 soak diagnostic returned invalid output")
         observation = payload
