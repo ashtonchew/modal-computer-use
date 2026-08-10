@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
+import json as json_module
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,13 +16,16 @@ from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
 )
 from modal_computer_use.errors import DaemonHTTPError
 from scripts.benchmarks.x11_shm_screenshot_runner import (
+    TRANSPORT_THRESHOLD_SWEEP_SPECS,
     _build_repeated_bounded_x_server_diagnostic,
     _build_x11_shm_resource_snapshot_diagnostic,
     _build_x11_shm_soak_diagnostic,
     _build_x11_shm_soak_diagnostic_script,
+    _build_x11_shm_transport_threshold_diagnostic,
     _is_modal_daemon_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
     _run_x11_shm_soak,
+    _run_x11_shm_transport_threshold_diagnostic,
     _validate_bounded_x_server_sample_count,
 )
 
@@ -133,6 +136,240 @@ def test_repeated_bounded_x_server_diagnostic_retains_safe_iterations_and_cleanu
     assert payload["replacement_samples"] == 0
     assert payload["schema_version"] == "x11-shm-bounded-x-diagnostic.v1"
     assert payload["provenance"] == provenance
+
+
+def test_transport_threshold_diagnostic_exposes_fixed_public_sweep() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "TRANSPORT_THRESHOLD_SWEEP_TRIALS = 30" in runner
+    assert "TRANSPORT_THRESHOLD_BYTES = 65_536" in runner
+    assert "def run_x11_shm_transport_threshold_diagnostic(" in runner
+    assert "def x11_shm_transport_threshold_main(" in runner
+    assert "run_x11_shm_transport_threshold_diagnostic.remote(" in runner
+    assert 'Path(f"benchmark-data/x11-shm-transport-threshold-{trials}.json")' in runner
+    assert '"retries": 0' in runner
+    assert '"replacement_samples": 0' in runner
+    assert [
+        (spec["case"], spec["route"], spec["expected_backend"])
+        for spec in TRANSPORT_THRESHOLD_SWEEP_SPECS
+    ] == [
+        ("full-control", "/v1/screenshots/full/raw", "x11-shm"),
+        ("region-below", "/v1/screenshots/region/raw", "x11-shm"),
+        ("region-around", "/v1/screenshots/region/raw", "x11-shm"),
+        ("region-above", "/v1/screenshots/region/raw", "mss"),
+    ]
+
+
+def test_transport_threshold_builder_retains_only_safe_trial_evidence() -> None:
+    case_rows = (
+        ("full-control", "/v1/screenshots/full/raw", 1024, 768, 1.0, "x11-shm", 65_407, "below"),
+        ("region-below", "/v1/screenshots/region/raw", 1024, 736, 1.0, "x11-shm", 62_000, "below"),
+        ("region-around", "/v1/screenshots/region/raw", 1024, 768, 1.0, "x11-shm", 65_407, "below"),
+        ("region-above", "/v1/screenshots/region/raw", 1024, 768, 1.05, "mss", 66_000, "above"),
+    )
+    observations = []
+    for trial_index in range(30):
+        for case, route, width, height, scale, backend, payload_bytes, relation in case_rows:
+            observations.append(
+                {
+                    "case": case,
+                    "trial_index": trial_index,
+                    "status": "ok",
+                    "requested_source": "x11-shm",
+                    "public_route": route,
+                    "observed_backend": backend,
+                    "width": round(width * scale),
+                    "height": round(height * scale),
+                    "requested_width": width,
+                    "requested_height": height,
+                    "scale": scale,
+                    "requested_scale": scale,
+                    "payload_bytes": payload_bytes,
+                    "payload_relation": relation,
+                    "png_signature_validated": True,
+                    "size_header_validated": True,
+                    "complete_sdk_ms": 15.0,
+                    "residual_sdk_minus_daemon_ms": 10.0,
+                    "daemon_timing_ms": {
+                        "capture_ms": None,
+                        "encode_ms": None,
+                        "x11_shm_capture_encode_ms": 4.5,
+                        "hash_ms": 0.2,
+                        "total_ms": 5.0,
+                    },
+                    "response_metadata": {
+                        "content_length": payload_bytes,
+                        "transfer_encoding": None,
+                    },
+                    "body": "must-not-retain",
+                }
+            )
+    cleanup = {"succeeded": True, "remaining_sandboxes": 0}
+    provenance = {
+        "source_revision": "a" * 40,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": "b" * 64,
+        "cargo_lock_sha256": "c" * 64,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
+
+    payload = _build_x11_shm_transport_threshold_diagnostic(
+        observations, cleanup, provenance, trials=30
+    )
+
+    assert payload["schema_version"] == "x11-shm-transport-threshold.v1"
+    assert payload["benchmark"] == "x11-shm-transport-threshold"
+    assert payload["threshold_bytes"] == 65_536
+    assert payload["trials_per_case"] == 30
+    assert payload["case_order"] == [
+        "full-control",
+        "region-below",
+        "region-around",
+        "region-above",
+    ]
+    assert payload["retries"] == 0
+    assert payload["replacement_samples"] == 0
+    assert payload["sample_count"] == 120
+    assert payload["passed"] is True
+    assert payload["terminal_cleanup"] == cleanup
+    def keys(value: object) -> list[str]:
+        if isinstance(value, dict):
+            return [str(key) for key in value] + [
+                item for child in value.values() for item in keys(child)
+            ]
+        if isinstance(value, list):
+            return [item for child in value for item in keys(child)]
+        return []
+
+    assert not set(keys(payload)) & {"raw", "body", "screenshot_bytes", "data_base64"}
+
+    invalid = [dict(observation) for observation in observations]
+    invalid[5]["residual_sdk_minus_daemon_ms"] = float("nan")
+    invalid[5]["body"] = "private-body-must-not-retain"
+    rejected = _build_x11_shm_transport_threshold_diagnostic(
+        invalid, cleanup, provenance, trials=30
+    )
+    assert rejected["passed"] is False
+    assert rejected["failure_count"] == 1
+    assert rejected["observations"][5] == {
+        "schedule_index": 5,
+        "trial_index": 1,
+        "case": "region-below",
+        "requested_source": "x11-shm",
+        "public_route": "/v1/screenshots/region/raw",
+        "status": "failed",
+        "failure_type": "EvidenceValidationError",
+        "failure_phase": "artifact_validation",
+    }
+    assert not set(keys(rejected)) & {"raw", "body", "screenshot_bytes", "data_base64"}
+    invalid_schedule = [dict(observation) for observation in observations]
+    invalid_schedule[1]["case"] = "region-around"
+    with pytest.raises(ValueError, match="fixed case order"):
+        _build_x11_shm_transport_threshold_diagnostic(
+            invalid_schedule, cleanup, provenance, trials=30
+        )
+
+
+@pytest.mark.asyncio
+async def test_transport_threshold_runner_retains_order_and_wire_metadata() -> None:
+    class FakeClient:
+        def __init__(self, source: str) -> None:
+            self.source = source
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def post_bytes_with_headers(self, path: str, *, json: dict[str, object]):
+            self.calls.append((path, json))
+            assert path in {"/v1/screenshots/region/raw", "/v1/screenshots/full/raw"}
+            region = json.get("region")
+            width = 1024
+            height = 768
+            if isinstance(region, dict):
+                width = int(region["width"])
+                height = int(region["height"])
+            scale = float(json["scale"])
+            payload_bytes = 62_000 if height == 736 else 65_407
+            if scale > 1.0:
+                payload_bytes = 66_000
+            data = b"\x89PNG\r\n\x1a\n" + b"x" * (payload_bytes - 8)
+            headers = {
+                "content-type": "image/png",
+                "content-length": str(payload_bytes),
+                "transfer-encoding": "chunked",
+                "x-computer-use-size-bytes": str(payload_bytes),
+                "x-computer-use-width": str(round(width * scale)),
+                "x-computer-use-height": str(round(height * scale)),
+                "x-computer-use-capture-backend": (
+                    "mss" if scale > 1.0 else self.source
+                ),
+                "x-computer-use-timing-ms": json_module.dumps(
+                    {
+                        "capture_ms": None if scale <= 1.0 else 0.0,
+                        "encode_ms": None if scale <= 1.0 else 0.0,
+                        "x11_shm_capture_encode_ms": 0.0 if scale <= 1.0 else None,
+                        "hash_ms": 0.0,
+                        "total_ms": 0.0,
+                    }
+                ),
+            }
+            return data, headers
+
+    class FakeComputer:
+        def __init__(self, source: str) -> None:
+            self.client = FakeClient(source)
+
+    class FakeContext:
+        def __init__(self, source: str) -> None:
+            self.computer = FakeComputer(source)
+
+        async def __aenter__(self) -> FakeComputer:
+            return self.computer
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    async def fake_cleanup() -> dict[str, object]:
+        return {"succeeded": True, "remaining_sandboxes": 0}
+
+    # Keep this test independent of Modal cleanup and use the public route seam.
+    import scripts.benchmarks.x11_shm_screenshot_runner as runner
+
+    original_cleanup = runner._final_sandbox_cleanup
+    runner._final_sandbox_cleanup = fake_cleanup
+    try:
+        provenance = {"source_revision": "a" * 40, "worktree_clean": True}
+        result = await _run_x11_shm_transport_threshold_diagnostic(
+            lambda: FakeContext("x11-shm"), trials=30, provenance=provenance
+        )
+    finally:
+        runner._final_sandbox_cleanup = original_cleanup
+
+    assert result["sample_count"] == 120
+    assert result["failure_count"] == 0
+    assert result["terminal_cleanup"]["succeeded"] is True
+    rows = result["observations"]
+    assert [row["case"] for row in rows] == [
+        "full-control",
+        "region-below",
+        "region-around",
+        "region-above",
+    ] * 30
+    assert [row["trial_index"] for row in rows] == [
+        trial for trial in range(30) for _case in range(4)
+    ]
+    assert all(row["requested_source"] == "x11-shm" for row in rows)
+    assert all(
+        row["observed_backend"] == ("mss" if row["case"] == "region-above" else "x11-shm")
+        for row in rows
+    )
+    assert rows[0]["public_route"] == "/v1/screenshots/full/raw"
+    assert rows[1]["public_route"] == "/v1/screenshots/region/raw"
+    assert rows[0]["residual_sdk_minus_daemon_ms"] >= 0
+    assert all(
+        row["response_metadata"]["transfer_encoding"] == "chunked"
+        for row in rows
+    )
 
 
 def test_repeated_bounded_x_server_diagnostic_requires_exactly_ten_samples() -> None:
@@ -464,7 +701,7 @@ def test_promotion_soak_parses_sampled_rss_contract() -> None:
 
     class FakeRead:
         async def aio(self) -> str:
-            return json.dumps(payload)
+            return json_module.dumps(payload)
 
     class FakeStdout:
         read = FakeRead()
@@ -643,7 +880,7 @@ def _trace(*, backend: str = "mss") -> dict[str, object]:
             "x-computer-use-sha256": SHA,
             "x-computer-use-capture-backend": backend,
             "x-computer-use-cursor-position": '{"x":17,"y":23}',
-            "x-computer-use-timing-ms": json.dumps(
+            "x-computer-use-timing-ms": json_module.dumps(
                 {
                     "capture_ms": 1.0,
                     "encode_ms": 0.2,
