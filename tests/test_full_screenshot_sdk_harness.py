@@ -16,14 +16,20 @@ from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
 )
 from modal_computer_use.errors import DaemonHTTPError
 from scripts.benchmarks.x11_shm_screenshot_runner import (
+    DAEMON_LOCAL_TAIL_CAPTURES,
+    DAEMON_LOCAL_TAIL_WARMUPS,
     TRANSPORT_THRESHOLD_SWEEP_SPECS,
     _build_repeated_bounded_x_server_diagnostic,
+    _build_x11_shm_daemon_local_tail_diagnostic,
+    _build_x11_shm_daemon_local_tail_script,
     _build_x11_shm_resource_snapshot_diagnostic,
     _build_x11_shm_soak_diagnostic,
     _build_x11_shm_soak_diagnostic_script,
     _build_x11_shm_transport_threshold_diagnostic,
+    _daemon_unattributed_ms,
     _is_modal_daemon_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
+    _run_x11_shm_daemon_local_tail_diagnostic,
     _run_x11_shm_soak,
     _run_x11_shm_transport_threshold_diagnostic,
     _validate_bounded_x_server_sample_count,
@@ -32,6 +38,287 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
 ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
 SHA = hashlib.sha256(DATA).hexdigest()
+
+
+def test_daemon_local_tail_script_compiles_with_fixed_workload() -> None:
+    assert DAEMON_LOCAL_TAIL_CAPTURES == 1_000
+    assert DAEMON_LOCAL_TAIL_WARMUPS == 2
+
+    script = _build_x11_shm_daemon_local_tail_script(
+        captures=DAEMON_LOCAL_TAIL_CAPTURES,
+        warmups=DAEMON_LOCAL_TAIL_WARMUPS,
+    )
+
+    compile(script, "<x11-shm-daemon-local-tail>", "exec")
+    assert 'HTTPConnection("127.0.0.1", port' in script
+    assert "range(1000)" in script
+    assert "range(2)" in script
+    assert "index % 2" in script
+    assert '"/v1/screenshots/full/raw"' in script
+    assert '"/v1/screenshots/region/raw"' in script
+    assert '"x-computer-use-timing-ms"' in script
+    assert '"x-computer-use-size-bytes"' in script
+    assert '"x-computer-use-size"' not in script
+    assert '"x11_shm_capture_encode_ms"' in script
+    assert '"cursor_position_ms"' in script
+    assert '"daemon_unattributed_ms"' in script
+    assert '"local_residual_ms"' in script
+    assert '"tail_schedule"' in script
+    assert "time.perf_counter_ns()" in script
+    assert "del response_body" in script
+    assert "_is_modal_daemon_cmdline(command)" in script
+    assert '"body"' not in script
+    assert '"data"' not in script
+
+    assert _daemon_unattributed_ms(100.0, 60.0, 5.0, 20.0) == 15.0
+    assert _daemon_unattributed_ms(100.0, 60.0, 5.0, 35.0) == 0.0
+
+
+def test_daemon_local_tail_builder_retains_only_fixed_safe_evidence() -> None:
+    identity = {
+        "pid": 41,
+        "starttime_ticks": 123,
+        "argv_match": True,
+        "argv_module": "modal_computer_use.daemon",
+    }
+    metric_names = (
+        "local_wall_ms",
+        "daemon_total_ms",
+        "x11_shm_capture_encode_ms",
+        "hash_ms",
+        "cursor_position_ms",
+        "daemon_unattributed_ms",
+        "local_residual_ms",
+    )
+
+    def metric_summary(*, tail_count: int) -> dict[str, float | int]:
+        return {
+            "p50_ms": 5.0,
+            "p95_ms": 10.0,
+            "p99_ms": 20.0 if tail_count else 10.0,
+            "max_ms": 600.0 if tail_count else 10.0,
+            "over_50_count": tail_count,
+            "over_100_count": tail_count,
+            "over_500_count": tail_count,
+        }
+
+    observation = {
+        "passed": True,
+        "requested_source": "x11-shm",
+        "observed_backend": "x11-shm",
+        "warmups_requested": 2,
+        "warmups_completed": 2,
+        "captures_requested": 1_000,
+        "captures_completed": 1_000,
+        "full_captures": 500,
+        "region_captures": 500,
+        "daemon_identity_before": identity,
+        "daemon_identity_after": identity,
+        "summaries": {
+            "combined": {
+                "sample_count": 1_000,
+                "metrics": {name: metric_summary(tail_count=1) for name in metric_names},
+            },
+            "full": {
+                "sample_count": 500,
+                "metrics": {name: metric_summary(tail_count=1) for name in metric_names},
+            },
+            "region": {
+                "sample_count": 500,
+                "metrics": {name: metric_summary(tail_count=0) for name in metric_names},
+            },
+        },
+        "tail_schedule": {
+            name: [{"schedule_index": 10, "timing_ms": 600.0}]
+            for name in metric_names
+        },
+        "body": "must not survive",
+        "data": "must not survive",
+    }
+    cleanup = {
+        "succeeded": True,
+        "remaining_sandboxes": 0,
+        "survivors_before_sweep": 0,
+    }
+    provenance = {
+        "source_revision": "a" * 40,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": "b" * 64,
+        "cargo_lock_sha256": "c" * 64,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
+
+    artifact = _build_x11_shm_daemon_local_tail_diagnostic(
+        observation,
+        cleanup,
+        provenance,
+    )
+
+    assert artifact["schema_version"] == "x11-shm-daemon-local-tail.v1"
+    assert artifact["passed"] is True
+    assert artifact["non_gating"] is True
+    assert artifact["promotion_proxy"] is False
+    assert artifact["captures_completed"] == 1_000
+    assert artifact["full_captures"] == 500
+    assert artifact["region_captures"] == 500
+    assert artifact["warmups_completed"] == 2
+    assert artifact["daemon_identity_same"] is True
+    assert set(artifact["summaries"]) == {"combined", "full", "region"}
+    assert set(artifact["summaries"]["combined"]["metrics"]) == set(metric_names)
+    assert artifact["summaries"]["combined"]["metrics"]["local_wall_ms"] == {
+        "p50_ms": 5.0,
+        "p95_ms": 10.0,
+        "p99_ms": 20.0,
+        "max_ms": 600.0,
+        "over_50_count": 1,
+        "over_100_count": 1,
+        "over_500_count": 1,
+    }
+    assert artifact["tail_schedule"]["local_wall_ms"] == [
+        {"schedule_index": 10, "timing_ms": 600.0}
+    ]
+    assert artifact["retries"] == 0
+    assert artifact["replacement_samples"] == 0
+    assert artifact["terminal_cleanup"] == cleanup
+    assert artifact["provenance"] == provenance
+
+    def keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return set(value) | {key for child in value.values() for key in keys(child)}
+        if isinstance(value, list):
+            return {key for child in value for key in keys(child)}
+        return set()
+
+    assert keys(artifact).isdisjoint({"body", "data", "raw", "screenshot_bytes"})
+
+    nested_raw = json_module.loads(json_module.dumps(observation))
+    nested_raw["summaries"]["combined"]["metrics"]["local_wall_ms"][
+        "body"
+    ] = "must not survive"
+    rejected = _build_x11_shm_daemon_local_tail_diagnostic(
+        nested_raw,
+        cleanup,
+        provenance,
+    )
+
+    assert rejected["passed"] is False
+    assert rejected["failure_type"] == "EvidenceValidationError"
+    assert rejected["failure_phase"] == "artifact_validation"
+    assert rejected["summaries"] is None
+    assert rejected["tail_schedule"] == {}
+    assert keys(rejected).isdisjoint({"body", "data", "raw", "screenshot_bytes"})
+
+    wrong_counts = json_module.loads(json_module.dumps(observation))
+    wrong_counts["captures_completed"] = 999
+    rejected_counts = _build_x11_shm_daemon_local_tail_diagnostic(
+        wrong_counts,
+        cleanup,
+        provenance,
+    )
+    assert rejected_counts["passed"] is False
+    assert rejected_counts["sample_count"] == 999
+    assert rejected_counts["expected_sample_count"] == 1_000
+    assert rejected_counts["failure_type"] == "EvidenceValidationError"
+
+    changed_identity = json_module.loads(json_module.dumps(observation))
+    changed_identity["daemon_identity_after"]["starttime_ticks"] = 124
+    rejected_identity = _build_x11_shm_daemon_local_tail_diagnostic(
+        changed_identity,
+        cleanup,
+        provenance,
+    )
+    assert rejected_identity["passed"] is False
+    assert rejected_identity["daemon_identity_same"] is False
+    assert rejected_identity["failure_type"] == "EvidenceValidationError"
+
+    dirty_provenance = dict(provenance, worktree_clean=False)
+    rejected_provenance = _build_x11_shm_daemon_local_tail_diagnostic(
+        observation,
+        cleanup,
+        dirty_provenance,
+    )
+    assert rejected_provenance["passed"] is False
+    assert rejected_provenance["provenance"] is None
+    assert rejected_provenance["failure_type"] == "EvidenceValidationError"
+
+
+def test_daemon_local_tail_runner_executes_one_generated_localhost_child() -> None:
+    child_payload = {
+        "passed": False,
+        "requested_source": "x11-shm",
+        "observed_backend": "x11-shm",
+        "warmups_requested": 2,
+        "warmups_completed": 2,
+        "captures_requested": 1_000,
+        "captures_completed": 17,
+        "full_captures": 9,
+        "region_captures": 8,
+        "daemon_identity_before": None,
+        "daemon_identity_after": None,
+        "summaries": None,
+        "tail_schedule": {},
+        "failure_type": "RuntimeError",
+        "failure_phase": "capture",
+    }
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json_module.dumps(child_payload)
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeProcess:
+        stdout = SimpleNamespace(read=FakeRead())
+        wait = FakeWait()
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:2] == ("python", "-c")
+            assert "HTTPConnection(\"127.0.0.1\", port" in str(args[2])
+            assert kwargs == {"timeout": 300}
+            return FakeProcess()
+
+    class FakeContext:
+        exited = False
+
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+        async def __aexit__(self, *args: object) -> None:
+            self.exited = True
+
+    context = FakeContext()
+    result = asyncio.run(
+        _run_x11_shm_daemon_local_tail_diagnostic(
+            lambda: context,
+            captures=1_000,
+            warmups=2,
+        )
+    )
+
+    assert result == child_payload
+    assert context.exited is True
+
+
+def test_daemon_local_tail_diagnostic_has_safe_remote_and_local_entrypoints() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x11_shm_daemon_local_tail_diagnostic(" in runner
+    assert "def x11_shm_daemon_local_tail_main(" in runner
+    assert "run_x11_shm_daemon_local_tail_diagnostic.remote(" in runner
+    assert 'lambda: _ArmContext("x11-shm")' in runner
+    assert '"retries": 0' in runner
+    assert '"replacement_samples": 0' in runner
+    assert "provenance=_local_provenance()" in runner
+    assert (
+        'Path("benchmark-data/x11-shm-daemon-local-tail-1000.json")'
+        in runner
+    )
+    assert "path.write_text(json.dumps(result, indent=2, sort_keys=True) + \"\\n\")" in runner
 
 
 def test_promotion_runner_uses_the_mounted_chromium_fixture_path() -> None:

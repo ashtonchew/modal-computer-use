@@ -112,6 +112,18 @@ SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "sampled_vm_rss")
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 TRANSPORT_THRESHOLD_BYTES = 65_536
 TRANSPORT_THRESHOLD_SWEEP_TRIALS = 30
+DAEMON_LOCAL_TAIL_CAPTURES = 1_000
+DAEMON_LOCAL_TAIL_WARMUPS = 2
+DAEMON_LOCAL_TAIL_THRESHOLDS_MS = (50, 100, 500)
+DAEMON_LOCAL_TAIL_METRICS = (
+    "local_wall_ms",
+    "daemon_total_ms",
+    "x11_shm_capture_encode_ms",
+    "hash_ms",
+    "cursor_position_ms",
+    "daemon_unattributed_ms",
+    "local_residual_ms",
+)
 TRANSPORT_THRESHOLD_SWEEP_SPECS: tuple[dict[str, int | float | str], ...] = (
     {
         "case": "full-control",
@@ -507,6 +519,20 @@ def _is_modal_daemon_cmdline(command: bytes) -> bool:
 
 _DAEMON_ARGV_MATCHER_SOURCE = dedent(
     inspect.getsource(_is_modal_daemon_cmdline)
+).strip()
+
+
+def _daemon_unattributed_ms(
+    total_ms: float,
+    fused_ms: float,
+    hash_ms: float,
+    cursor_position_ms: float,
+) -> float:
+    return max(0.0, total_ms - fused_ms - hash_ms - cursor_position_ms)
+
+
+_DAEMON_UNATTRIBUTED_SOURCE = dedent(
+    inspect.getsource(_daemon_unattributed_ms)
 ).strip()
 
 
@@ -1939,6 +1965,327 @@ def _build_x11_shm_resource_snapshot_diagnostic(
     }
 
 
+def _daemon_local_nonnegative_float(value: object) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError("daemon-local timing summary is invalid")
+    return float(value)
+
+
+def _retain_daemon_local_tail_summaries(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"combined", "full", "region"}:
+        raise ValueError("daemon-local summaries have invalid lanes")
+    expected_counts = {
+        "combined": DAEMON_LOCAL_TAIL_CAPTURES,
+        "full": DAEMON_LOCAL_TAIL_CAPTURES // 2,
+        "region": DAEMON_LOCAL_TAIL_CAPTURES // 2,
+    }
+    retained: dict[str, Any] = {}
+    expected_summary_keys = {
+        "p50_ms",
+        "p95_ms",
+        "p99_ms",
+        "max_ms",
+        *(f"over_{threshold}_count" for threshold in DAEMON_LOCAL_TAIL_THRESHOLDS_MS),
+    }
+    for lane, expected_count in expected_counts.items():
+        lane_value = value.get(lane)
+        if (
+            not isinstance(lane_value, Mapping)
+            or set(lane_value) != {"sample_count", "metrics"}
+            or lane_value.get("sample_count") != expected_count
+        ):
+            raise ValueError("daemon-local summary sample count is invalid")
+        metrics = lane_value.get("metrics")
+        if not isinstance(metrics, Mapping) or set(metrics) != set(
+            DAEMON_LOCAL_TAIL_METRICS
+        ):
+            raise ValueError("daemon-local summary metrics are invalid")
+        retained_metrics: dict[str, Any] = {}
+        for metric in DAEMON_LOCAL_TAIL_METRICS:
+            summary = metrics.get(metric)
+            if not isinstance(summary, Mapping) or set(summary) != expected_summary_keys:
+                raise ValueError("daemon-local metric summary is invalid")
+            p50 = _daemon_local_nonnegative_float(summary.get("p50_ms"))
+            p95 = _daemon_local_nonnegative_float(summary.get("p95_ms"))
+            p99 = _daemon_local_nonnegative_float(summary.get("p99_ms"))
+            maximum = _daemon_local_nonnegative_float(summary.get("max_ms"))
+            if p50 > p95 or p95 > p99 or p99 > maximum:
+                raise ValueError("daemon-local timing percentiles are invalid")
+            tail_counts: list[int] = []
+            for threshold in DAEMON_LOCAL_TAIL_THRESHOLDS_MS:
+                count = summary.get(f"over_{threshold}_count")
+                if (
+                    not isinstance(count, int)
+                    or isinstance(count, bool)
+                    or count < 0
+                    or count > expected_count
+                ):
+                    raise ValueError("daemon-local tail count is invalid")
+                tail_counts.append(count)
+            if tail_counts != sorted(tail_counts, reverse=True):
+                raise ValueError("daemon-local tail counts are not monotonic")
+            retained_metrics[metric] = {
+                "p50_ms": p50,
+                "p95_ms": p95,
+                "p99_ms": p99,
+                "max_ms": maximum,
+                **{
+                    f"over_{threshold}_count": count
+                    for threshold, count in zip(
+                        DAEMON_LOCAL_TAIL_THRESHOLDS_MS,
+                        tail_counts,
+                        strict=True,
+                    )
+                },
+            }
+        retained[lane] = {
+            "sample_count": expected_count,
+            "metrics": retained_metrics,
+        }
+    for metric in DAEMON_LOCAL_TAIL_METRICS:
+        combined = retained["combined"]["metrics"][metric]
+        full = retained["full"]["metrics"][metric]
+        region = retained["region"]["metrics"][metric]
+        if combined["max_ms"] != max(full["max_ms"], region["max_ms"]):
+            raise ValueError("daemon-local lane maxima are inconsistent")
+        for threshold in DAEMON_LOCAL_TAIL_THRESHOLDS_MS:
+            key = f"over_{threshold}_count"
+            if combined[key] != full[key] + region[key]:
+                raise ValueError("daemon-local lane tail counts are inconsistent")
+    return retained
+
+
+def _retain_daemon_local_tail_schedule(
+    value: object,
+    summaries: Mapping[str, Any],
+) -> dict[str, list[dict[str, int | float]]]:
+    if not isinstance(value, Mapping) or set(value) != set(DAEMON_LOCAL_TAIL_METRICS):
+        raise ValueError("daemon-local tail schedule metrics are invalid")
+    retained: dict[str, list[dict[str, int | float]]] = {}
+    for metric in DAEMON_LOCAL_TAIL_METRICS:
+        entries = value.get(metric)
+        if not isinstance(entries, list):
+            raise ValueError("daemon-local tail schedule is invalid")
+        retained_entries: list[dict[str, int | float]] = []
+        previous_index = -1
+        for entry in entries:
+            if not isinstance(entry, Mapping) or set(entry) != {
+                "schedule_index",
+                "timing_ms",
+            }:
+                raise ValueError("daemon-local tail entry is invalid")
+            schedule_index = entry.get("schedule_index")
+            if (
+                not isinstance(schedule_index, int)
+                or isinstance(schedule_index, bool)
+                or schedule_index <= previous_index
+                or schedule_index >= DAEMON_LOCAL_TAIL_CAPTURES
+            ):
+                raise ValueError("daemon-local tail schedule index is invalid")
+            timing_ms = _daemon_local_nonnegative_float(entry.get("timing_ms"))
+            if timing_ms <= DAEMON_LOCAL_TAIL_THRESHOLDS_MS[0]:
+                raise ValueError("daemon-local tail entry does not cross the floor")
+            retained_entries.append(
+                {"schedule_index": schedule_index, "timing_ms": timing_ms}
+            )
+            previous_index = schedule_index
+        combined = summaries["combined"]["metrics"][metric]
+        full = summaries["full"]["metrics"][metric]
+        region = summaries["region"]["metrics"][metric]
+        for threshold in DAEMON_LOCAL_TAIL_THRESHOLDS_MS:
+            key = f"over_{threshold}_count"
+            threshold_entries = [
+                entry for entry in retained_entries if entry["timing_ms"] > threshold
+            ]
+            if (
+                len(threshold_entries) != combined[key]
+                or sum(
+                    entry["schedule_index"] % 2 == 0
+                    for entry in threshold_entries
+                )
+                != full[key]
+                or sum(
+                    entry["schedule_index"] % 2 == 1
+                    for entry in threshold_entries
+                )
+                != region[key]
+            ):
+                raise ValueError("daemon-local tail schedule disagrees with summaries")
+        if retained_entries:
+            if max(entry["timing_ms"] for entry in retained_entries) != combined[
+                "max_ms"
+            ]:
+                raise ValueError("daemon-local tail maximum disagrees with summary")
+        elif combined["max_ms"] > DAEMON_LOCAL_TAIL_THRESHOLDS_MS[0]:
+            raise ValueError("daemon-local tail maximum is missing from schedule")
+        retained[metric] = retained_entries
+    return retained
+
+
+def _retain_daemon_local_count(value: object, *, maximum: int) -> int | None:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < 0
+        or value > maximum
+    ):
+        return None
+    return value
+
+
+def _retain_daemon_local_provenance(
+    value: Mapping[str, str | bool],
+) -> dict[str, str | bool] | None:
+    source_revision = value.get("source_revision")
+    x11_sha = value.get("x11_shm_source_sha256")
+    cargo_sha = value.get("cargo_lock_sha256")
+    if (
+        not isinstance(source_revision, str)
+        or len(source_revision) != 40
+        or any(character not in "0123456789abcdef" for character in source_revision)
+        or value.get("worktree_clean") is not True
+        or not isinstance(x11_sha, str)
+        or len(x11_sha) != 64
+        or any(character not in "0123456789abcdef" for character in x11_sha)
+        or not isinstance(cargo_sha, str)
+        or len(cargo_sha) != 64
+        or any(character not in "0123456789abcdef" for character in cargo_sha)
+        or value.get("image_identity") != "inline:browser-chromium-x11-shm"
+    ):
+        return None
+    return {
+        "source_revision": source_revision,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": x11_sha,
+        "cargo_lock_sha256": cargo_sha,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
+
+
+def _build_x11_shm_daemon_local_tail_diagnostic(
+    observation: Mapping[str, Any],
+    cleanup: Mapping[str, Any],
+    provenance: Mapping[str, str | bool],
+) -> dict[str, Any]:
+    before_identity = _retain_daemon_identity(
+        observation.get("daemon_identity_before")
+    )
+    after_identity = _retain_daemon_identity(observation.get("daemon_identity_after"))
+    identity_same = bool(
+        before_identity
+        and after_identity
+        and before_identity["pid"] == after_identity["pid"]
+        and before_identity["starttime_ticks"] == after_identity["starttime_ticks"]
+        and before_identity["argv_match"]
+        and after_identity["argv_match"]
+    )
+    validation_failed = False
+    summaries: dict[str, Any] | None = None
+    tail_schedule: dict[str, list[dict[str, int | float]]] = {}
+    if observation.get("passed") is True:
+        try:
+            summaries = _retain_daemon_local_tail_summaries(
+                observation.get("summaries")
+            )
+            tail_schedule = _retain_daemon_local_tail_schedule(
+                observation.get("tail_schedule"),
+                summaries,
+            )
+        except (TypeError, ValueError, OverflowError):
+            validation_failed = True
+    cleanup_succeeded = cleanup.get("succeeded") is True and cleanup.get(
+        "remaining_sandboxes"
+    ) == 0
+    captures_completed = _retain_daemon_local_count(
+        observation.get("captures_completed"),
+        maximum=DAEMON_LOCAL_TAIL_CAPTURES,
+    )
+    full_captures = _retain_daemon_local_count(
+        observation.get("full_captures"),
+        maximum=DAEMON_LOCAL_TAIL_CAPTURES // 2,
+    )
+    region_captures = _retain_daemon_local_count(
+        observation.get("region_captures"),
+        maximum=DAEMON_LOCAL_TAIL_CAPTURES // 2,
+    )
+    warmups_completed = _retain_daemon_local_count(
+        observation.get("warmups_completed"),
+        maximum=DAEMON_LOCAL_TAIL_WARMUPS,
+    )
+    observed_backend = _safe_diagnostic_label(observation.get("observed_backend"))
+    retained_provenance = _retain_daemon_local_provenance(provenance)
+    contract_matches = bool(
+        observation.get("requested_source") == "x11-shm"
+        and observed_backend == "x11-shm"
+        and observation.get("warmups_requested") == DAEMON_LOCAL_TAIL_WARMUPS
+        and warmups_completed == DAEMON_LOCAL_TAIL_WARMUPS
+        and observation.get("captures_requested") == DAEMON_LOCAL_TAIL_CAPTURES
+        and captures_completed == DAEMON_LOCAL_TAIL_CAPTURES
+        and full_captures == DAEMON_LOCAL_TAIL_CAPTURES // 2
+        and region_captures == DAEMON_LOCAL_TAIL_CAPTURES // 2
+        and identity_same
+        and summaries is not None
+        and retained_provenance is not None
+    )
+    if observation.get("passed") is True and not contract_matches:
+        validation_failed = True
+    passed = bool(
+        observation.get("passed") is True
+        and not validation_failed
+        and contract_matches
+        and cleanup_succeeded
+    )
+    failure_type = (
+        "EvidenceValidationError"
+        if validation_failed
+        else "CleanupError"
+        if observation.get("passed") is True and not cleanup_succeeded
+        else _safe_diagnostic_label(observation.get("failure_type"))
+    )
+    failure_phase = (
+        "artifact_validation"
+        if validation_failed
+        else "terminal_cleanup"
+        if observation.get("passed") is True and not cleanup_succeeded
+        else _safe_diagnostic_label(observation.get("failure_phase"))
+    )
+    return {
+        "schema_version": "x11-shm-daemon-local-tail.v1",
+        "benchmark": "x11-shm-daemon-local-tail",
+        "status": "complete",
+        "passed": passed,
+        "scope": "daemon-local-tail-mechanism-only",
+        "non_gating": True,
+        "promotion_proxy": False,
+        "requested_source": "x11-shm",
+        "observed_backend": observed_backend,
+        "warmups_requested": DAEMON_LOCAL_TAIL_WARMUPS,
+        "warmups_completed": warmups_completed,
+        "expected_sample_count": DAEMON_LOCAL_TAIL_CAPTURES,
+        "sample_count": captures_completed,
+        "captures_requested": DAEMON_LOCAL_TAIL_CAPTURES,
+        "captures_completed": captures_completed,
+        "full_captures": full_captures,
+        "region_captures": region_captures,
+        "daemon_identity_before": before_identity,
+        "daemon_identity_after": after_identity,
+        "daemon_identity_same": identity_same,
+        "summaries": summaries,
+        "tail_schedule": tail_schedule,
+        "failure_type": failure_type,
+        "failure_phase": failure_phase,
+        "retries": 0,
+        "replacement_samples": 0,
+        "provenance": retained_provenance,
+        "terminal_cleanup": dict(cleanup),
+    }
+
+
 def _build_x11_shm_soak_diagnostic_script(
     captures: int,
     *,
@@ -2187,6 +2534,374 @@ def _build_x11_shm_soak_diagnostic_script(
         }}))
         """
     )
+
+
+def _build_x11_shm_daemon_local_tail_script(
+    *,
+    captures: int = DAEMON_LOCAL_TAIL_CAPTURES,
+    warmups: int = DAEMON_LOCAL_TAIL_WARMUPS,
+) -> str:
+    if captures != DAEMON_LOCAL_TAIL_CAPTURES:
+        raise ValueError("daemon-local tail diagnostic requires exactly 1000 captures")
+    if warmups != DAEMON_LOCAL_TAIL_WARMUPS:
+        raise ValueError("daemon-local tail diagnostic requires exactly 2 warmups")
+    return dedent(
+        f"""
+        import http.client
+        import json
+        import math
+        import os
+        import time
+        from pathlib import Path
+
+{indent(_DAEMON_ARGV_MATCHER_SOURCE, "        ")}
+
+{indent(_DAEMON_UNATTRIBUTED_SOURCE, "        ")}
+
+        CAPTURES = {captures}
+        WARMUPS = {warmups}
+        METRICS = {DAEMON_LOCAL_TAIL_METRICS!r}
+        TAIL_THRESHOLDS_MS = {DAEMON_LOCAL_TAIL_THRESHOLDS_MS!r}
+
+        def daemon_identity():
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    command = (entry / "cmdline").read_bytes()
+                    stat_text = (entry / "stat").read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                if not _is_modal_daemon_cmdline(command):
+                    continue
+                try:
+                    pid = int(entry.name)
+                    starttime_ticks = int(stat_text.rsplit(") ", 1)[1].split()[19])
+                except (IndexError, ValueError):
+                    continue
+                return {{
+                    "pid": pid,
+                    "starttime_ticks": starttime_ticks,
+                    "argv_match": True,
+                    "argv_module": "modal_computer_use.daemon",
+                }}
+            return None
+
+        def finite_timing(value):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError("invalid timing header")
+            return float(value)
+
+        def percentile(values, percentile_value):
+            ordered = sorted(values)
+            if not ordered:
+                raise ValueError("empty timing sample")
+            rank = (len(ordered) - 1) * percentile_value
+            lower = int(rank)
+            upper = min(lower + 1, len(ordered) - 1)
+            fraction = rank - lower
+            return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+
+        def metric_summary(values):
+            return {{
+                "p50_ms": percentile(values, 0.50),
+                "p95_ms": percentile(values, 0.95),
+                "p99_ms": percentile(values, 0.99),
+                "max_ms": max(values),
+                **{{
+                    f"over_{{threshold}}_count": sum(
+                        value > threshold for value in values
+                    )
+                    for threshold in TAIL_THRESHOLDS_MS
+                }},
+            }}
+
+        def summarize(samples):
+            return {{
+                "sample_count": len(samples),
+                "metrics": {{
+                    metric: metric_summary([sample[metric] for sample in samples])
+                    for metric in METRICS
+                }},
+            }}
+
+        token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
+        port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
+        headers = {{
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        }}
+        full_request = json.dumps({{
+            "format": "png", "quality": 90, "scale": 1.0,
+            "show_cursor": False, "processing": "auto", "storage": "inline",
+        }})
+        region_request = json.dumps({{
+            "format": "png", "quality": 90, "scale": 1.0,
+            "show_cursor": False, "processing": "auto", "storage": "inline",
+            "region": {{"x": 7, "y": 9, "width": 511, "height": 383}},
+        }})
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        observed_backend = None
+        warmups_completed = 0
+        captures_completed = 0
+        full_captures = 0
+        region_captures = 0
+        identity_before = None
+        identity_after = None
+        summaries = None
+        tail_schedule = {{}}
+        failure_type = None
+        failure_phase = "identity_before"
+        samples = []
+
+        def capture(path, request_body, expected_width, expected_height):
+            nonlocal_observed = None
+            started_ns = time.perf_counter_ns()
+            connection.request("POST", path, body=request_body, headers=headers)
+            response = connection.getresponse()
+            response_body = response.read()
+            finished_ns = time.perf_counter_ns()
+            payload_size = len(response_body)
+            png_valid = response_body.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+            del response_body
+            if response.status != 200 or not png_valid:
+                raise RuntimeError("daemon-local screenshot failed")
+            nonlocal_observed = response.getheader(
+                "x-computer-use-capture-backend"
+            )
+            if nonlocal_observed != "x11-shm":
+                raise RuntimeError("daemon-local screenshot used an unexpected source")
+            if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
+                raise RuntimeError("daemon-local screenshot width changed")
+            if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
+                raise RuntimeError("daemon-local screenshot height changed")
+            if int(response.getheader("x-computer-use-size-bytes", "-1")) != payload_size:
+                raise RuntimeError("daemon-local screenshot size changed")
+            timing_header = response.getheader("x-computer-use-timing-ms")
+            try:
+                timing = json.loads(timing_header)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("invalid timing header") from exc
+            if not isinstance(timing, dict):
+                raise ValueError("invalid timing header")
+            daemon_total_ms = finite_timing(timing.get("total_ms"))
+            hash_ms = finite_timing(timing.get("hash_ms"))
+            x11_fused_ms = finite_timing(
+                timing.get("x11_shm_capture_encode_ms")
+            )
+            cursor_value = timing.get("cursor_position_ms")
+            if path == "/v1/screenshots/full/raw":
+                cursor_position_ms = finite_timing(cursor_value)
+            elif cursor_value is None:
+                cursor_position_ms = 0.0
+            else:
+                cursor_position_ms = finite_timing(cursor_value)
+                if cursor_position_ms != 0.0:
+                    raise ValueError("region timing included cursor positioning")
+            local_wall_ms = (finished_ns - started_ns) / 1_000_000.0
+            if not math.isfinite(local_wall_ms) or local_wall_ms < 0:
+                raise ValueError("invalid local timing")
+            return nonlocal_observed, {{
+                "local_wall_ms": local_wall_ms,
+                "daemon_total_ms": daemon_total_ms,
+                "x11_shm_capture_encode_ms": x11_fused_ms,
+                "hash_ms": hash_ms,
+                "cursor_position_ms": cursor_position_ms,
+                "daemon_unattributed_ms": _daemon_unattributed_ms(
+                    daemon_total_ms,
+                    x11_fused_ms,
+                    hash_ms,
+                    cursor_position_ms,
+                ),
+                "local_residual_ms": max(0.0, local_wall_ms - daemon_total_ms),
+            }}
+
+        try:
+            identity_before = daemon_identity()
+            if identity_before is None:
+                raise RuntimeError("daemon process was not found")
+            failure_phase = "warmup"
+            for index in range({warmups}):
+                if index % 2:
+                    observed_backend, _ = capture(
+                        "/v1/screenshots/region/raw", region_request, 511, 383
+                    )
+                else:
+                    observed_backend, _ = capture(
+                        "/v1/screenshots/full/raw", full_request, 1024, 768
+                    )
+                warmups_completed += 1
+            failure_phase = "capture"
+            for index in range({captures}):
+                if index % 2:
+                    observed_backend, metrics = capture(
+                        "/v1/screenshots/region/raw", region_request, 511, 383
+                    )
+                    lane = "region"
+                    region_captures += 1
+                else:
+                    observed_backend, metrics = capture(
+                        "/v1/screenshots/full/raw", full_request, 1024, 768
+                    )
+                    lane = "full"
+                    full_captures += 1
+                samples.append({{
+                    "schedule_index": index,
+                    "lane": lane,
+                    **metrics,
+                }})
+                captures_completed += 1
+            failure_phase = "identity_after"
+            identity_after = daemon_identity()
+            if identity_after is None:
+                raise RuntimeError("daemon process was not found after captures")
+            if (
+                identity_after["pid"] != identity_before["pid"]
+                or identity_after["starttime_ticks"]
+                != identity_before["starttime_ticks"]
+            ):
+                raise RuntimeError("daemon process identity changed")
+            failure_phase = "summarize"
+            summaries = {{
+                "combined": summarize(samples),
+                "full": summarize([sample for sample in samples if sample["lane"] == "full"]),
+                "region": summarize(
+                    [sample for sample in samples if sample["lane"] == "region"]
+                ),
+            }}
+            tail_schedule = {{
+                metric: [
+                    {{
+                        "schedule_index": sample["schedule_index"],
+                        "timing_ms": sample[metric],
+                    }}
+                    for sample in samples
+                    if sample[metric] > TAIL_THRESHOLDS_MS[0]
+                ]
+                for metric in METRICS
+            }}
+        except Exception as exc:
+            failure_type = type(exc).__name__
+        finally:
+            connection.close()
+
+        print(json.dumps({{
+            "passed": failure_type is None,
+            "requested_source": "x11-shm",
+            "observed_backend": observed_backend,
+            "warmups_requested": WARMUPS,
+            "warmups_completed": warmups_completed,
+            "captures_requested": CAPTURES,
+            "captures_completed": captures_completed,
+            "full_captures": full_captures,
+            "region_captures": region_captures,
+            "daemon_identity_before": identity_before,
+            "daemon_identity_after": identity_after,
+            "summaries": summaries,
+            "tail_schedule": tail_schedule,
+            "failure_type": failure_type,
+            "failure_phase": failure_phase if failure_type is not None else None,
+        }}))
+        """
+    )
+
+
+async def _run_x11_shm_daemon_local_tail_diagnostic(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    captures: int = DAEMON_LOCAL_TAIL_CAPTURES,
+    warmups: int = DAEMON_LOCAL_TAIL_WARMUPS,
+) -> dict[str, Any]:
+    if captures != DAEMON_LOCAL_TAIL_CAPTURES:
+        raise ValueError("daemon-local tail diagnostic requires exactly 1000 captures")
+    if warmups != DAEMON_LOCAL_TAIL_WARMUPS:
+        raise ValueError("daemon-local tail diagnostic requires exactly 2 warmups")
+    context = factory()
+    computer: Any | None = None
+    phase = "context_enter"
+    observation: dict[str, Any] | None = None
+    try:
+        computer = await context.__aenter__()
+        phase = "sandbox_handle"
+        sandbox = getattr(computer, "_sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "exec"):
+            raise RuntimeError("sandbox handle unavailable for daemon-local diagnostic")
+        script = _build_x11_shm_daemon_local_tail_script(
+            captures=captures,
+            warmups=warmups,
+        )
+        phase = "daemon_local_child"
+        process = await sandbox.exec.aio("python", "-c", script, timeout=300)
+        exit_code = await process.wait.aio()
+        raw = await _process_stdout_text(process)
+        if exit_code != 0:
+            raise RuntimeError("daemon-local diagnostic child exited")
+        if not raw:
+            raise RuntimeError("daemon-local diagnostic child returned empty output")
+        phase = "parse_child_output"
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("daemon-local diagnostic returned invalid output")
+        observation = payload
+    except Exception as exc:
+        observation = {
+            "passed": False,
+            "requested_source": "x11-shm",
+            "observed_backend": None,
+            "warmups_requested": warmups,
+            "warmups_completed": 0,
+            "captures_requested": captures,
+            "captures_completed": 0,
+            "full_captures": 0,
+            "region_captures": 0,
+            "daemon_identity_before": None,
+            "daemon_identity_after": None,
+            "summaries": None,
+            "tail_schedule": {},
+            "failure_type": type(exc).__name__,
+            "failure_phase": phase,
+        }
+    finally:
+        if computer is not None:
+            try:
+                await context.__aexit__(None, None, None)
+            except Exception as exc:
+                if observation is None:
+                    observation = {
+                        "passed": False,
+                        "requested_source": "x11-shm",
+                        "observed_backend": None,
+                        "warmups_requested": warmups,
+                        "warmups_completed": 0,
+                        "captures_requested": captures,
+                        "captures_completed": 0,
+                        "full_captures": 0,
+                        "region_captures": 0,
+                        "daemon_identity_before": None,
+                        "daemon_identity_after": None,
+                        "summaries": None,
+                        "tail_schedule": {},
+                    }
+                observation["passed"] = False
+                observation["failure_type"] = type(exc).__name__
+                observation["failure_phase"] = "context_cleanup"
+    return observation or {
+        "passed": False,
+        "requested_source": "x11-shm",
+        "warmups_requested": warmups,
+        "warmups_completed": 0,
+        "captures_requested": captures,
+        "captures_completed": 0,
+        "full_captures": 0,
+        "region_captures": 0,
+        "failure_type": "NoResult",
+        "failure_phase": phase,
+    }
 
 
 async def _run_x11_shm_soak_diagnostic(
@@ -3565,6 +4280,63 @@ def run_x11_shm_transport_threshold_diagnostic(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=900,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_daemon_local_tail_diagnostic(
+    captures: int = DAEMON_LOCAL_TAIL_CAPTURES,
+    warmups: int = DAEMON_LOCAL_TAIL_WARMUPS,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run one diagnostic-only daemon-local X11 capture tail campaign."""
+
+    if captures != DAEMON_LOCAL_TAIL_CAPTURES:
+        raise ValueError("daemon-local tail diagnostic requires exactly 1000 captures")
+    if warmups != DAEMON_LOCAL_TAIL_WARMUPS:
+        raise ValueError("daemon-local tail diagnostic requires exactly 2 warmups")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            observation = await _run_x11_shm_daemon_local_tail_diagnostic(
+                lambda: _ArmContext("x11-shm"),
+                captures=captures,
+                warmups=warmups,
+            )
+        except BaseException as exc:
+            observation = {
+                "passed": False,
+                "requested_source": "x11-shm",
+                "observed_backend": None,
+                "warmups_requested": warmups,
+                "warmups_completed": 0,
+                "captures_requested": captures,
+                "captures_completed": 0,
+                "full_captures": 0,
+                "region_captures": 0,
+                "daemon_identity_before": None,
+                "daemon_identity_after": None,
+                "summaries": None,
+                "tail_schedule": {},
+                "failure_type": type(exc).__name__,
+                "failure_phase": "diagnostic",
+            }
+        cleanup = await _final_sandbox_cleanup()
+        return _build_x11_shm_daemon_local_tail_diagnostic(
+            observation,
+            cleanup,
+            provenance,
+        )
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -3669,6 +4441,27 @@ def x11_shm_transport_threshold_main(
         Path(output)
         if output
         else Path(f"benchmark-data/x11-shm-transport-threshold-{trials}.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def x11_shm_daemon_local_tail_main(
+    captures: int = DAEMON_LOCAL_TAIL_CAPTURES,
+    warmups: int = DAEMON_LOCAL_TAIL_WARMUPS,
+    output: str = "",
+) -> None:
+    result = run_x11_shm_daemon_local_tail_diagnostic.remote(
+        captures=captures,
+        warmups=warmups,
+        provenance=_local_provenance(),
+    )
+    path = (
+        Path(output)
+        if output
+        else Path("benchmark-data/x11-shm-daemon-local-tail-1000.json")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
