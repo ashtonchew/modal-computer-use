@@ -185,10 +185,12 @@ ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})
 
 For a daemon configured outside the SDK, set
 `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=x11-shm`. The X11-SHM source requires a Managed Image
-with the X11-SHM extension and native worker. It applies to cursor-hidden, full-resolution PNG
-screenshots at scale `1`. The encoder uses `miniz_oxide`, PNG Deflate level 1, and `NoFilter`.
-Treat this source as optional and experimental. See [Performance](performance.md) for its scope
-and retained fixture evidence.
+with the X11-SHM extension and native worker. It applies to eligible cursor-hidden,
+full-resolution PNG screenshots at scale `1`, including region captures. The encoder uses
+`miniz_oxide`, PNG Deflate level 1, and `NoFilter`. Scaled, JPEG, WebP, raw-pixel, and
+cursor-visible requests use the compatibility path. Treat this source as optional and
+experimental. See [Performance](performance.md#compare-screenshot-sources) for measurement
+evidence.
 
 The `normalized-input-work-v1` policy uses these costs:
 
