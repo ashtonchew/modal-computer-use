@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import platform
@@ -27,7 +28,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager, suppress
 from pathlib import Path
-from textwrap import dedent
+from textwrap import dedent, indent
 from typing import Any
 from urllib.parse import quote
 
@@ -438,6 +439,21 @@ def _safe_daemon_failure(exc: Exception) -> dict[str, Any]:
             if categories:
                 result["failure_readiness_categories"] = categories
     return result
+
+
+def _is_modal_daemon_cmdline(command: bytes) -> bool:
+    """Match the daemon's ``-m`` argv pair, excluding helper-script text."""
+
+    argv = command.split(b"\0")
+    return any(
+        argv[index : index + 2] == [b"-m", b"modal_computer_use.daemon"]
+        for index in range(len(argv) - 1)
+    )
+
+
+_DAEMON_ARGV_MATCHER_SOURCE = dedent(
+    inspect.getsource(_is_modal_daemon_cmdline)
+).strip()
 
 
 def _validate_bounded_x_server_sample_count(sample_count: int) -> None:
@@ -1517,6 +1533,8 @@ async def _run_x11_shm_soak(
             import os
             from pathlib import Path
 
+{indent(_DAEMON_ARGV_MATCHER_SOURCE, "            ")}
+
             def daemon_pid():
                 for entry in Path("/proc").iterdir():
                     if not entry.name.isdigit():
@@ -1525,7 +1543,7 @@ async def _run_x11_shm_soak(
                         command = (entry / "cmdline").read_bytes()
                     except OSError:
                         continue
-                    if b"modal_computer_use.daemon" in command:
+                    if _is_modal_daemon_cmdline(command):
                         return int(entry.name)
                 raise RuntimeError("daemon process was not found")
 
