@@ -64,13 +64,22 @@ fn main() {
 
     let decoder = png::Decoder::new(Cursor::new(&encoded));
     let mut reader = decoder.read_info().expect("codec proof PNG header");
-    let mut decoded = vec![0_u8; reader.output_buffer_size().expect("codec proof buffer size")];
-    let info = reader.next_frame(&mut decoded).expect("codec proof PNG decode");
+    let mut decoded = vec![
+        0_u8;
+        reader
+            .output_buffer_size()
+            .expect("codec proof buffer size")
+    ];
+    let info = reader
+        .next_frame(&mut decoded)
+        .expect("codec proof PNG decode");
     decoded.truncate(info.buffer_size());
-    let pixel_parity = info.width == u32::from(WIDTH)
-        && info.height == u32::from(HEIGHT)
-        && decoded == expected;
-    assert!(pixel_parity, "codec proof decoded pixels or dimensions differ");
+    let pixel_parity =
+        info.width == u32::from(WIDTH) && info.height == u32::from(HEIGHT) && decoded == expected;
+    assert!(
+        pixel_parity,
+        "codec proof decoded pixels or dimensions differ"
+    );
 
     println!(
         "{{\"codec\":\"{}\",\"width\":{},\"height\":{},\"payload_bytes\":{},\"encode_ms\":{:.6},\"decoded_pixel_bytes\":{},\"pixel_parity\":true,\"pixel_hash\":\"{:016x}\"}}",

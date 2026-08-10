@@ -255,16 +255,16 @@ mod stock_zlib_png {
             scanlines.extend_from_slice(row);
         }
 
-        let scanline_len = c_ulong::try_from(scanlines.len())
-            .context("scanline buffer is too large for zlib")?;
+        let scanline_len =
+            c_ulong::try_from(scanlines.len()).context("scanline buffer is too large for zlib")?;
         let bound = usize::try_from(unsafe { compress_bound(scanline_len) })
             .context("zlib compression bound does not fit usize")?;
         if bound == 0 {
             bail!("zlib returned an empty compression bound");
         }
         let mut compressed = vec![0_u8; bound];
-        let mut compressed_len = c_ulong::try_from(bound)
-            .context("compression bound does not fit zlib length type")?;
+        let mut compressed_len =
+            c_ulong::try_from(bound).context("compression bound does not fit zlib length type")?;
         let status = unsafe {
             compress2(
                 compressed.as_mut_ptr(),
@@ -277,8 +277,8 @@ mod stock_zlib_png {
         if status != Z_OK {
             bail!("zlib compression failed with status {status}");
         }
-        let compressed_len = usize::try_from(compressed_len)
-            .context("zlib compressed length does not fit usize")?;
+        let compressed_len =
+            usize::try_from(compressed_len).context("zlib compressed length does not fit usize")?;
         if compressed_len > compressed.len() {
             bail!("zlib returned a compressed length beyond its bound");
         }
@@ -1375,7 +1375,13 @@ mod tests {
         decoded.truncate(info.buffer_size());
         assert_eq!((info.width, info.height, decoded), (2, 2, rgb));
         let runtime = stock_zlib_png::runtime_version();
-        assert!(runtime.chars().filter(|character| *character == '.').count() >= 2);
+        assert!(
+            runtime
+                .chars()
+                .filter(|character| *character == '.')
+                .count()
+                >= 2
+        );
     }
 
     #[cfg(target_os = "linux")]
