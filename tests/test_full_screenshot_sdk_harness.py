@@ -76,6 +76,18 @@ def test_promotion_runner_exposes_repeated_bounded_x_server_diagnostic() -> None
     assert '"replacement_samples": 0' in runner
 
 
+def test_repeated_bounded_x_server_diagnostic_persists_the_remote_result() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def repeated_bounded_x_server_main(" in runner
+    assert "run_repeated_bounded_x_server_probe.remote(" in runner
+    assert 'Path("benchmark-data/x11-shm-bounded-x-diagnostic-10.json")' in runner
+    assert "path.write_text(json.dumps(result, indent=2, sort_keys=True) + \"\\n\")" in runner
+    assert "print(json.dumps(result, indent=2, sort_keys=True))" in runner
+
+
 def test_repeated_bounded_x_server_diagnostic_retains_safe_iterations_and_cleanup() -> None:
     observations = [
         {
