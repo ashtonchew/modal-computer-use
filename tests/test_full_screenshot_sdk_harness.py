@@ -22,6 +22,7 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _build_x11_shm_soak_diagnostic_script,
     _is_modal_daemon_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
+    _run_x11_shm_soak,
     _validate_bounded_x_server_sample_count,
 )
 
@@ -246,22 +247,30 @@ def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() ->
             "argv_match": True,
             "argv_module": "modal_computer_use.daemon",
         },
-        "counts_before": {"fd": 12, "mappings": 34, "rss": 56, "peak_rss": 78},
-        "counts_after": {"fd": 11, "mappings": 34, "rss": 60, "peak_rss": 80},
-        "signed_deltas": {"fd": -1, "mappings": 0, "rss": 4, "peak_rss": 2},
+        "counts_before": {"fd": 12, "mappings": 34, "rss": 56},
+        "counts_after": {"fd": 11, "mappings": 34, "rss": 60},
+        "signed_deltas": {"fd": -1, "mappings": 0, "rss": 4},
         "resource_metrics_before": {
             "maps": True,
             "fd": True,
             "VmRSS": True,
-            "VmHWM": True,
+            "sampled_vm_rss": True,
         },
         "resource_metrics_after": {
             "maps": True,
             "fd": True,
             "VmRSS": True,
-            "VmHWM": True,
+            "sampled_vm_rss": True,
         },
         "failure_resource_metric": None,
+        "rss_metric_source": "sampled_vm_rss",
+        "rss_sample_count": 102,
+        "rss_before_bytes": 56,
+        "rss_current_bytes": 60,
+        "rss_final_bytes": 60,
+        "rss_observed_peak_bytes": 63,
+        "rss_peak_growth_bytes": 7,
+        "final_included": True,
         "failure_phase": None,
         "failure_type": None,
     }
@@ -293,6 +302,13 @@ def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() ->
     assert payload["resource_metrics_before"] == observation["resource_metrics_before"]
     assert payload["resource_metrics_after"] == observation["resource_metrics_after"]
     assert payload["failure_resource_metric"] is None
+    assert payload["rss_metric_source"] == "sampled_vm_rss"
+    assert payload["rss_sample_count"] == 102
+    assert payload["rss_before_bytes"] == 56
+    assert payload["rss_current_bytes"] == 60
+    assert payload["rss_final_bytes"] == 60
+    assert payload["rss_observed_peak_bytes"] == 63
+    assert payload["rss_peak_growth_bytes"] == 7
     assert payload["terminal_cleanup"] == cleanup
     assert payload["provenance"] == provenance
     assert payload["retries"] == 0
@@ -316,12 +332,20 @@ def test_x11_shm_resource_snapshot_diagnostic_retains_failure_metric() -> None:
         "resource_metrics_before": {
             "maps": True,
             "fd": True,
-            "VmRSS": False,
-            "VmHWM": False,
+            "VmRSS": True,
+            "sampled_vm_rss": False,
         },
-        "failure_resource_metric": "VmRSS",
-        "failure_phase": "counts_before",
+        "failure_resource_metric": "sampled_vm_rss",
+        "failure_phase": "rss_sample_before",
         "failure_type": "ResourceMetricUnavailable",
+        "rss_metric_source": "sampled_vm_rss",
+        "rss_sample_count": 1,
+        "rss_before_bytes": 56,
+        "rss_current_bytes": None,
+        "rss_final_bytes": None,
+        "rss_observed_peak_bytes": 56,
+        "rss_peak_growth_bytes": 0,
+        "final_included": False,
     }
     provenance = {
         "source_revision": "a" * 40,
@@ -344,12 +368,63 @@ def test_x11_shm_resource_snapshot_diagnostic_retains_failure_metric() -> None:
     assert payload["benchmark"] == "x11-shm-resource-snapshot"
     assert payload["prime_captures"] == 2
     assert payload["resource_metrics_before"] == observation["resource_metrics_before"]
-    assert payload["failure_resource_metric"] == "VmRSS"
-    assert payload["failure_phase"] == "counts_before"
+    assert payload["failure_resource_metric"] == "sampled_vm_rss"
+    assert payload["failure_phase"] == "rss_sample_before"
+    assert payload["rss_metric_source"] == "sampled_vm_rss"
+    assert payload["rss_sample_count"] == 1
+    assert payload["final_included"] is False
     assert payload["retries"] == 0
     assert payload["replacement_samples"] == 0
     assert payload["terminal_cleanup"] == cleanup
     assert payload["provenance"] == provenance
+    assert payload["passed"] is False
+
+
+def test_x11_shm_soak_diagnostic_rejects_inconsistent_signed_deltas() -> None:
+    identity = {
+        "pid": 41,
+        "starttime_ticks": 123,
+        "argv_match": True,
+        "argv_module": "modal_computer_use.daemon",
+    }
+    observation = {
+        "passed": True,
+        "requested_source": "auto",
+        "observed_backend": "x11-shm",
+        "captures_completed": 10_000,
+        "full_captures": 5_000,
+        "region_captures": 5_000,
+        "daemon_identity_before": identity,
+        "daemon_identity_after": identity,
+        "counts_before": {"fd": 12, "mappings": 34, "rss": 56},
+        "counts_after": {"fd": 12, "mappings": 34, "rss": 60},
+        "signed_deltas": {"fd": 0, "mappings": 0, "rss": 999},
+        "resource_metrics_before": {
+            "maps": True,
+            "fd": True,
+            "VmRSS": True,
+            "sampled_vm_rss": True,
+        },
+        "resource_metrics_after": {
+            "maps": True,
+            "fd": True,
+            "VmRSS": True,
+            "sampled_vm_rss": True,
+        },
+        "rss_metric_source": "sampled_vm_rss",
+        "rss_sample_count": 102,
+        "rss_before_bytes": 56,
+        "rss_current_bytes": 60,
+        "rss_final_bytes": 60,
+        "rss_observed_peak_bytes": 60,
+        "rss_peak_growth_bytes": 4,
+        "final_included": True,
+    }
+    cleanup = {"succeeded": True, "remaining_sandboxes": 0}
+
+    payload = _build_x11_shm_soak_diagnostic(observation, cleanup, {})
+
+    assert payload["signed_deltas"] == observation["signed_deltas"]
     assert payload["passed"] is False
 
 
@@ -361,6 +436,69 @@ def test_x11_shm_soak_diagnostic_script_compiles() -> None:
         0, snapshot_only=True
     )
     compile(snapshot_script, "<x11-shm-resource-snapshot>", "exec")
+    assert "VmHWM" not in script
+    assert '"sampled_vm_rss"' in script
+
+
+def test_promotion_soak_parses_sampled_rss_contract() -> None:
+    payload = {
+        "passed": True,
+        "captures_requested": 10_000,
+        "prime_captures": 2,
+        "full_captures": 5_000,
+        "region_captures": 5_000,
+        "signed_deltas": {"fd": 0, "mappings": 0, "rss": 4},
+        "rss_metric_source": "sampled_vm_rss",
+        "rss_sample_count": 102,
+        "rss_before_bytes": 100,
+        "rss_current_bytes": 104,
+        "rss_final_bytes": 104,
+        "rss_observed_peak_bytes": 110,
+        "rss_peak_growth_bytes": 10,
+        "final_included": True,
+    }
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json.dumps(payload)
+
+    class FakeStdout:
+        read = FakeRead()
+
+    class FakeProcess:
+        wait = FakeWait()
+        stdout = FakeStdout()
+
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:2] == ("python", "-c")
+            assert kwargs["timeout"] == 900
+            return FakeProcess()
+
+    class FakeContext:
+        def __init__(self) -> None:
+            self.computer = SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+        async def __aenter__(self) -> SimpleNamespace:
+            return self.computer
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    result = asyncio.run(_run_x11_shm_soak(lambda: FakeContext(), captures=10_000))
+
+    assert result["passed"] is True
+    assert result["fd_delta"] == 0
+    assert result["mapping_delta"] == 0
+    assert result["rss_metric_source"] == "sampled_vm_rss"
+    assert result["rss_sample_count"] == 102
+    assert result["rss_peak_growth_bytes"] == 10
+    assert result["final_included"] is True
 
 
 def test_x11_shm_soak_diagnostic_retains_safe_entrypoint_and_provenance() -> None:
@@ -374,7 +512,12 @@ def test_x11_shm_soak_diagnostic_retains_safe_entrypoint_and_provenance() -> Non
     assert "def x11_shm_resource_snapshot_main(" in runner
     assert "run_x11_shm_resource_snapshot_diagnostic.remote(" in runner
     assert 'Path("benchmark-data/x11-shm-resource-snapshot.json")' in runner
-    assert 'SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "VmHWM")' in runner
+    assert "SOAK_RSS_SAMPLE_INTERVAL = 100" in runner
+    assert (
+        "SOAK_RSS_SAMPLE_COUNT = SOAK_DIAGNOSTIC_CAPTURES // SOAK_RSS_SAMPLE_INTERVAL + 2"
+        in runner
+    )
+    assert 'SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "sampled_vm_rss")' in runner
     assert "SOAK_DIAGNOSTIC_CAPTURES = 10_000" in runner
     assert "captures != SOAK_DIAGNOSTIC_CAPTURES" in runner
     assert "run_x11_shm_soak_diagnostic.remote(" in runner
