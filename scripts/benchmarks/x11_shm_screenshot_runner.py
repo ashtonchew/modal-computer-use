@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import math
 import os
 import platform
 import random
@@ -109,6 +110,54 @@ SOAK_RSS_SAMPLE_INTERVAL = 100
 SOAK_RSS_SAMPLE_COUNT = SOAK_DIAGNOSTIC_CAPTURES // SOAK_RSS_SAMPLE_INTERVAL + 2
 SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "sampled_vm_rss")
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
+TRANSPORT_THRESHOLD_BYTES = 65_536
+TRANSPORT_THRESHOLD_SWEEP_TRIALS = 30
+TRANSPORT_THRESHOLD_SWEEP_SPECS: tuple[dict[str, int | float | str], ...] = (
+    {
+        "case": "full-control",
+        "route": "/v1/screenshots/full/raw",
+        "x": 0,
+        "y": 0,
+        "width": WIDTH,
+        "height": HEIGHT,
+        "scale": 1.0,
+        "expected_payload_relation": "around",
+        "expected_backend": "x11-shm",
+    },
+    {
+        "case": "region-below",
+        "route": "/v1/screenshots/region/raw",
+        "x": 0,
+        "y": 0,
+        "width": WIDTH,
+        "height": 736,
+        "scale": 1.0,
+        "expected_payload_relation": "below",
+        "expected_backend": "x11-shm",
+    },
+    {
+        "case": "region-around",
+        "route": "/v1/screenshots/region/raw",
+        "x": 0,
+        "y": 0,
+        "width": WIDTH,
+        "height": HEIGHT,
+        "scale": 1.0,
+        "expected_payload_relation": "around",
+        "expected_backend": "x11-shm",
+    },
+    {
+        "case": "region-above",
+        "route": "/v1/screenshots/region/raw",
+        "x": 0,
+        "y": 0,
+        "width": WIDTH,
+        "height": HEIGHT,
+        "scale": 1.05,
+        "expected_payload_relation": "above",
+        "expected_backend": "mss",
+    },
+)
 SAFE_TIMEOUT_ORIGINS = frozenset(
     {
         "native_x11_setup_deadline",
@@ -2297,6 +2346,494 @@ async def _run_x11_shm_resource_snapshot_diagnostic(
     }
 
 
+def _threshold_timing_metrics(headers: Mapping[str, Any]) -> dict[str, float | None]:
+    raw = _threshold_header(headers, "x-computer-use-timing-ms")
+    try:
+        timings = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("threshold timing header is invalid") from exc
+    if not isinstance(timings, Mapping):
+        raise ValueError("threshold timing header is invalid")
+    parsed: dict[str, float | None] = {}
+    for key in ("capture_ms", "encode_ms", "x11_shm_capture_encode_ms"):
+        value = timings.get(key)
+        if value is None:
+            parsed[key] = None
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("threshold timing header is invalid")
+        parsed[key] = float(value)
+    for key in ("hash_ms", "total_ms"):
+        value = timings.get(key)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError("threshold timing header is invalid")
+        parsed[key] = float(value)
+    fused = parsed["x11_shm_capture_encode_ms"]
+    if fused is None:
+        if parsed["capture_ms"] is None or parsed["encode_ms"] is None:
+            raise ValueError("threshold timing header is missing capture stages")
+    elif parsed["capture_ms"] is not None or parsed["encode_ms"] is not None:
+        raise ValueError("threshold timing header mixed capture stages")
+    return parsed
+
+
+def _threshold_request(spec: Mapping[str, int | float | str]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "format": "png",
+        "quality": 90,
+        "scale": float(spec["scale"]),
+        "show_cursor": False,
+        "processing": "daemon",
+        "storage": "inline",
+    }
+    if spec["route"] == "/v1/screenshots/region/raw":
+        payload["region"] = {
+            "x": int(spec["x"]),
+            "y": int(spec["y"]),
+            "width": int(spec["width"]),
+            "height": int(spec["height"]),
+        }
+    return payload
+
+
+def _threshold_header(headers: Mapping[str, Any], name: str) -> Any:
+    lowered = name.lower()
+    return next(
+        (value for key, value in headers.items() if str(key).lower() == lowered),
+        None,
+    )
+
+
+def _threshold_int_header(headers: Mapping[str, Any], name: str) -> int | None:
+    value = _threshold_header(headers, name)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _threshold_wire_metadata(headers: Mapping[str, Any]) -> dict[str, int | str | None]:
+    transfer_encoding = _safe_diagnostic_label(
+        _threshold_header(headers, "transfer-encoding")
+    )
+    return {
+        "content_length": _threshold_int_header(headers, "content-length"),
+        "transfer_encoding": transfer_encoding,
+    }
+
+
+def _threshold_payload_relation(payload_bytes: int) -> str:
+    if payload_bytes < TRANSPORT_THRESHOLD_BYTES:
+        return "below"
+    if payload_bytes == TRANSPORT_THRESHOLD_BYTES:
+        return "at"
+    return "above"
+
+
+def _sanitize_x11_shm_transport_observation(
+    observation: Mapping[str, Any],
+    *,
+    schedule_index: int,
+) -> dict[str, Any]:
+    if not isinstance(observation, Mapping):
+        raise ValueError("threshold observation must be an object")
+    if observation.get("case") == "context":
+        if observation.get("status") != "failed":
+            raise ValueError("threshold context observation status is invalid")
+        failure_type = _safe_diagnostic_label(observation.get("failure_type"))
+        failure_phase = _safe_diagnostic_label(observation.get("failure_phase"))
+        if failure_type is None or failure_phase is None:
+            raise ValueError("threshold context failure attribution is invalid")
+        return {
+            "schedule_index": schedule_index,
+            "trial_index": None,
+            "case": "context",
+            "requested_source": "x11-shm",
+            "status": "failed",
+            "failure_type": failure_type,
+            "failure_phase": failure_phase,
+        }
+    case_index = schedule_index % len(TRANSPORT_THRESHOLD_SWEEP_SPECS)
+    spec = TRANSPORT_THRESHOLD_SWEEP_SPECS[case_index]
+    if observation.get("case") != spec["case"]:
+        raise ValueError("threshold observations are out of fixed case order")
+    if observation.get("trial_index") != schedule_index // len(
+        TRANSPORT_THRESHOLD_SWEEP_SPECS
+    ):
+        raise ValueError("threshold observations have an invalid trial index")
+    if observation.get("requested_source") != "x11-shm":
+        raise ValueError("threshold observation requested source is invalid")
+    if observation.get("public_route") != spec["route"]:
+        raise ValueError("threshold observation route does not match its case")
+    status = observation.get("status")
+    if status not in {"ok", "failed"}:
+        raise ValueError("threshold observation status is invalid")
+    retained: dict[str, Any] = {
+        "schedule_index": schedule_index,
+        "trial_index": int(observation["trial_index"]),
+        "case": str(spec["case"]),
+        "requested_source": "x11-shm",
+        "public_route": str(spec["route"]),
+        "expected_payload_relation": str(spec["expected_payload_relation"]),
+        "status": status,
+    }
+    if status == "failed":
+        failure_type = _safe_diagnostic_label(observation.get("failure_type"))
+        failure_phase = _safe_diagnostic_label(observation.get("failure_phase"))
+        if failure_type is None or failure_phase is None:
+            raise ValueError("threshold failure attribution is invalid")
+        retained.update({"failure_type": failure_type, "failure_phase": failure_phase})
+        return retained
+
+    backend = _safe_diagnostic_label(observation.get("observed_backend"))
+    allowed_backends = {"x11-shm", "mss", "mss-fallback", "scrot", "maim"}
+    if backend not in allowed_backends:
+        raise ValueError("threshold observation backend is invalid")
+    if spec["expected_backend"] == "x11-shm" and backend != "x11-shm":
+        raise ValueError("scale-one threshold observation did not use x11-shm")
+    if spec["expected_backend"] == "mss" and backend != "mss":
+        raise ValueError("scaled threshold observation did not use mss")
+    try:
+        width = int(observation["width"])
+        height = int(observation["height"])
+        requested_width = int(observation["requested_width"])
+        requested_height = int(observation["requested_height"])
+        payload_bytes = int(observation["payload_bytes"])
+        trial_scale = float(observation["scale"])
+        complete_sdk_ms = float(observation["complete_sdk_ms"])
+        residual_ms = float(observation["residual_sdk_minus_daemon_ms"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("threshold observation numeric fields are invalid") from exc
+    if (
+        width < 1
+        or height < 1
+        or requested_width != int(spec["width"])
+        or requested_height != int(spec["height"])
+        or trial_scale != float(spec["scale"])
+        or payload_bytes < 1
+        or complete_sdk_ms < 0
+        or residual_ms < 0
+        or not all(math.isfinite(value) for value in (trial_scale, complete_sdk_ms, residual_ms))
+        or width != round(requested_width * trial_scale)
+        or height != round(requested_height * trial_scale)
+    ):
+        raise ValueError("threshold observation dimensions or timing are invalid")
+    if (
+        observation.get("png_signature_validated") is not True
+        or observation.get("size_header_validated") is not True
+    ):
+        raise ValueError("threshold observation PNG signature was not validated")
+    relation = observation.get("payload_relation")
+    if relation != _threshold_payload_relation(payload_bytes):
+        raise ValueError("threshold observation payload relation is invalid")
+    if not isinstance(observation.get("daemon_timing_ms"), Mapping):
+        raise ValueError("threshold daemon timing is invalid")
+    timing: dict[str, float | None] = {}
+    for key in ("capture_ms", "encode_ms", "x11_shm_capture_encode_ms", "hash_ms", "total_ms"):
+        value = observation["daemon_timing_ms"].get(key)
+        if value is not None:
+            try:
+                value = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("threshold daemon timing is invalid") from exc
+            if value < 0 or not math.isfinite(value):
+                raise ValueError("threshold daemon timing is invalid")
+        timing[key] = value
+    if timing["total_ms"] is None:
+        raise ValueError("threshold daemon total timing is unavailable")
+    metadata = observation.get("response_metadata")
+    if not isinstance(metadata, Mapping):
+        raise ValueError("threshold response metadata is invalid")
+    content_length = metadata.get("content_length")
+    if content_length is not None:
+        try:
+            content_length = int(content_length)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("threshold content length is invalid") from exc
+        if content_length != payload_bytes:
+            raise ValueError("threshold content length does not match payload")
+    transfer_encoding = metadata.get("transfer_encoding")
+    if transfer_encoding is not None:
+        transfer_encoding = _safe_diagnostic_label(transfer_encoding)
+        if transfer_encoding is None:
+            raise ValueError("threshold transfer encoding is invalid")
+    retained.update(
+        {
+            "observed_backend": backend,
+            "width": width,
+            "height": height,
+            "requested_width": requested_width,
+            "requested_height": requested_height,
+            "requested_scale": trial_scale,
+            "scale": trial_scale,
+            "payload_bytes": payload_bytes,
+            "payload_relation": relation,
+            "png_signature_validated": True,
+            "size_header_validated": True,
+            "complete_sdk_ms": complete_sdk_ms,
+            "daemon_timing_ms": timing,
+            "residual_sdk_minus_daemon_ms": residual_ms,
+            "response_metadata": {
+                "content_length": content_length,
+                "transfer_encoding": transfer_encoding,
+            },
+        }
+    )
+    return retained
+
+
+def _build_x11_shm_transport_threshold_diagnostic(
+    observations: list[dict[str, Any]],
+    cleanup: Mapping[str, Any],
+    provenance: Mapping[str, str | bool],
+    *,
+    trials: int = TRANSPORT_THRESHOLD_SWEEP_TRIALS,
+) -> dict[str, Any]:
+    expected_count = len(TRANSPORT_THRESHOLD_SWEEP_SPECS) * trials
+    if len(observations) > expected_count:
+        raise ValueError("threshold observations exceed the fixed schedule")
+    retained_observations: list[dict[str, Any]] = []
+    for schedule_index, observation in enumerate(observations):
+        if isinstance(observation, Mapping) and observation.get("case") == "context":
+            retained_observations.append(
+                _sanitize_x11_shm_transport_observation(
+                    observation, schedule_index=schedule_index
+                )
+            )
+            continue
+        if schedule_index >= expected_count:
+            raise ValueError("threshold observations exceed the fixed schedule")
+        expected_spec = TRANSPORT_THRESHOLD_SWEEP_SPECS[
+            schedule_index % len(TRANSPORT_THRESHOLD_SWEEP_SPECS)
+        ]
+        expected_trial = schedule_index // len(TRANSPORT_THRESHOLD_SWEEP_SPECS)
+        if (
+            not isinstance(observation, Mapping)
+            or observation.get("case") != expected_spec["case"]
+            or observation.get("trial_index") != expected_trial
+            or observation.get("requested_source") != "x11-shm"
+            or observation.get("public_route") != expected_spec["route"]
+        ):
+            raise ValueError("threshold observations are out of fixed case order")
+        try:
+            retained_observations.append(
+                _sanitize_x11_shm_transport_observation(
+                    observation, schedule_index=schedule_index
+                )
+            )
+        except (ValueError, TypeError, OverflowError):
+            retained_observations.append(
+                {
+                    "schedule_index": schedule_index,
+                    "trial_index": expected_trial,
+                    "case": str(expected_spec["case"]),
+                    "requested_source": "x11-shm",
+                    "public_route": str(expected_spec["route"]),
+                    "status": "failed",
+                    "failure_type": "EvidenceValidationError",
+                    "failure_phase": "artifact_validation",
+                }
+            )
+    failure_count = sum(
+        observation.get("status") != "ok" for observation in retained_observations
+    )
+    retained_cleanup = dict(cleanup)
+    return {
+        "schema_version": "x11-shm-transport-threshold.v1",
+        "benchmark": "x11-shm-transport-threshold",
+        "status": "complete",
+        "scope": "transport-threshold-mechanism-only",
+        "non_gating": True,
+        "promotion_proxy": False,
+        "requested_source": "x11-shm",
+        "public_routes": sorted(
+            {str(spec["route"]) for spec in TRANSPORT_THRESHOLD_SWEEP_SPECS}
+        ),
+        "cases": [
+            {
+                "case": str(spec["case"]),
+                "route": str(spec["route"]),
+                "x": int(spec["x"]),
+                "y": int(spec["y"]),
+                "width": int(spec["width"]),
+                "height": int(spec["height"]),
+                "scale": float(spec["scale"]),
+                "expected_payload_relation": str(
+                    spec["expected_payload_relation"]
+                ),
+                "expected_backend": str(spec["expected_backend"]),
+            }
+            for spec in TRANSPORT_THRESHOLD_SWEEP_SPECS
+        ],
+        "threshold_bytes": TRANSPORT_THRESHOLD_BYTES,
+        "case_order": [
+            str(spec["case"]) for spec in TRANSPORT_THRESHOLD_SWEEP_SPECS
+        ],
+        "trials_per_case": trials,
+        "sample_count": len(observations),
+        "expected_sample_count": expected_count,
+        "failure_count": failure_count,
+        "passed": (
+            len(observations) == expected_count
+            and failure_count == 0
+            and retained_cleanup.get("succeeded") is True
+            and retained_cleanup.get("remaining_sandboxes") == 0
+        ),
+        "retries": 0,
+        "replacement_samples": 0,
+        "provenance": dict(provenance),
+        "observations": retained_observations,
+        "terminal_cleanup": retained_cleanup,
+    }
+
+
+async def _run_x11_shm_transport_threshold_diagnostic(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    trials: int = TRANSPORT_THRESHOLD_SWEEP_TRIALS,
+    provenance: Mapping[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    if trials != TRANSPORT_THRESHOLD_SWEEP_TRIALS:
+        raise ValueError("transport threshold diagnostic requires exactly 30 trials")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    observations: list[dict[str, Any]] = []
+    context = factory()
+    computer: Any | None = None
+    context_entered = False
+    try:
+        computer = await context.__aenter__()
+        context_entered = True
+        client = getattr(computer, "client", None)
+        if client is None or not hasattr(client, "post_bytes_with_headers"):
+            raise RuntimeError("threshold diagnostic client is unavailable")
+        for trial_index in range(trials):
+            for schedule_index, spec in enumerate(TRANSPORT_THRESHOLD_SWEEP_SPECS):
+                route = str(spec["route"])
+                row: dict[str, Any] = {
+                    "schedule_index": trial_index * len(TRANSPORT_THRESHOLD_SWEEP_SPECS)
+                    + schedule_index,
+                    "trial_index": trial_index,
+                    "case": str(spec["case"]),
+                    "requested_source": "x11-shm",
+                    "public_route": route,
+                    "expected_payload_relation": str(
+                        spec["expected_payload_relation"]
+                    ),
+                }
+                started = time.perf_counter()
+                try:
+                    data, headers = await client.post_bytes_with_headers(
+                        route,
+                        json=_threshold_request(spec),
+                    )
+                    complete_sdk_ms = max(
+                        0.0, (time.perf_counter() - started) * 1000.0
+                    )
+                    if not isinstance(data, bytes) or not data:
+                        raise TypeError("threshold response body is invalid")
+                    if not isinstance(headers, Mapping):
+                        raise TypeError("threshold response headers are invalid")
+                    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                        raise ValueError("threshold response is not PNG")
+                    timings = _threshold_timing_metrics(headers)
+                    payload_bytes = len(data)
+                    declared_size = _threshold_int_header(
+                        headers, "x-computer-use-size-bytes"
+                    )
+                    if declared_size is None or declared_size != payload_bytes:
+                        raise ValueError("threshold response size metadata mismatched")
+                    dimensions = {
+                        "width": _threshold_int_header(
+                            headers, "x-computer-use-width"
+                        ),
+                        "height": _threshold_int_header(
+                            headers, "x-computer-use-height"
+                        ),
+                    }
+                    if dimensions["width"] is None or dimensions["height"] is None:
+                        raise ValueError("threshold response dimensions are unavailable")
+                    daemon_total_ms = timings["total_ms"]
+                    if daemon_total_ms is None:
+                        raise ValueError("threshold daemon total timing is unavailable")
+                    row.update(
+                        {
+                            "status": "ok",
+                            "observed_backend": _safe_diagnostic_label(
+                                _threshold_header(
+                                    headers, "x-computer-use-capture-backend"
+                                )
+                            ),
+                            "width": dimensions["width"],
+                            "height": dimensions["height"],
+                            "requested_width": int(spec["width"]),
+                            "requested_height": int(spec["height"]),
+                            "requested_scale": float(spec["scale"]),
+                            "scale": float(spec["scale"]),
+                            "payload_bytes": payload_bytes,
+                            "payload_relation": _threshold_payload_relation(
+                                payload_bytes
+                            ),
+                            "png_signature_validated": True,
+                            "size_header_validated": True,
+                            "complete_sdk_ms": round(complete_sdk_ms, 4),
+                            "daemon_timing_ms": timings,
+                            "residual_sdk_minus_daemon_ms": round(
+                                complete_sdk_ms - daemon_total_ms, 4
+                            ),
+                            "response_metadata": _threshold_wire_metadata(headers),
+                        }
+                    )
+                except Exception as exc:
+                    row.update(
+                        {
+                            "status": "failed",
+                            "failure_type": type(exc).__name__,
+                            "failure_phase": "capture_or_response_validation",
+                        }
+                    )
+                observations.append(row)
+    except Exception as exc:
+        observations.append(
+            {
+                "schedule_index": len(observations),
+                "trial_index": None,
+                "case": "context",
+                "requested_source": "x11-shm",
+                "status": "failed",
+                "failure_type": type(exc).__name__,
+                "failure_phase": "context_enter",
+            }
+        )
+    finally:
+        if context_entered:
+            try:
+                await context.__aexit__(None, None, None)
+            except Exception as exc:
+                observations.append(
+                    {
+                        "schedule_index": len(observations),
+                        "trial_index": None,
+                        "case": "context",
+                        "requested_source": "x11-shm",
+                        "status": "failed",
+                        "failure_type": type(exc).__name__,
+                        "failure_phase": "context_exit",
+                    }
+                )
+        cleanup = await _final_sandbox_cleanup()
+    return _build_x11_shm_transport_threshold_diagnostic(
+        observations, cleanup, provenance, trials=trials
+    )
+
+
 def _normalize_placement(placement: Mapping[str, Any]) -> dict[str, str | None]:
     cloud = placement.get("cloud")
     cloud_names = {
@@ -2986,6 +3523,48 @@ def run_x11_shm_resource_snapshot_diagnostic(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=1_200,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_transport_threshold_diagnostic(
+    trials: int = TRANSPORT_THRESHOLD_SWEEP_TRIALS,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run one non-gating x11-shm wire-threshold mechanism diagnostic."""
+
+    if trials != TRANSPORT_THRESHOLD_SWEEP_TRIALS:
+        raise ValueError("transport threshold diagnostic requires exactly 30 trials")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            return await _run_x11_shm_transport_threshold_diagnostic(
+                lambda: _ArmContext("x11-shm"),
+                trials=trials,
+                provenance=provenance,
+            )
+        except BaseException as primary:
+            try:
+                cleanup = await _final_sandbox_cleanup()
+            except BaseException as cleanup_error:
+                primary.add_note(
+                    "transport threshold diagnostic cleanup also failed: "
+                    f"{type(cleanup_error).__name__}"
+                )
+            else:
+                if cleanup.get("succeeded") is not True:
+                    primary.add_note("transport threshold cleanup found live Sandboxes")
+            raise
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -3071,6 +3650,25 @@ def x11_shm_resource_snapshot_main(output: str = "") -> None:
         Path(output)
         if output
         else Path("benchmark-data/x11-shm-resource-snapshot.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def x11_shm_transport_threshold_main(
+    trials: int = TRANSPORT_THRESHOLD_SWEEP_TRIALS,
+    output: str = "",
+) -> None:
+    result = run_x11_shm_transport_threshold_diagnostic.remote(
+        trials=trials,
+        provenance=_local_provenance(),
+    )
+    path = (
+        Path(output)
+        if output
+        else Path(f"benchmark-data/x11-shm-transport-threshold-{trials}.json")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
