@@ -574,11 +574,27 @@ def _is_x11_shm_worker_cmdline(command: bytes) -> bool:
     )
 
 
+def _select_root_daemon_match(
+    matches: list[dict[str, int | bool | str]],
+) -> tuple[dict[str, int | bool | str] | None, int, int]:
+    """Select the one PID-namespace root from exact daemon argv matches."""
+
+    roots = [match for match in matches if match.get("parent_pid") == 0]
+    if len(roots) != 1:
+        return None, len(matches), len(roots)
+    selected = dict(roots[0])
+    selected.pop("parent_pid", None)
+    return selected, len(matches), 1
+
+
 _DAEMON_ARGV_MATCHER_SOURCE = dedent(
     inspect.getsource(_is_modal_daemon_cmdline)
 ).strip()
 _X11_WORKER_ARGV_MATCHER_SOURCE = dedent(
     inspect.getsource(_is_x11_shm_worker_cmdline)
+).strip()
+_ROOT_DAEMON_SELECTOR_SOURCE = dedent(
+    inspect.getsource(_select_root_daemon_match)
 ).strip()
 
 
@@ -2822,6 +2838,32 @@ def _build_x11_shm_scheduling_diagnostic(
             validation_failed = True
         else:
             captures_completed = full_captures = region_captures = None
+    daemon_match_count = _retain_daemon_local_count(
+        observation.get("daemon_match_count"), maximum=100
+    )
+    daemon_root_match_count = _retain_daemon_local_count(
+        observation.get("daemon_root_match_count"), maximum=100
+    )
+    daemon_match_count_after = _retain_daemon_local_count(
+        observation.get("daemon_match_count_after"), maximum=100
+    )
+    daemon_root_match_count_after = _retain_daemon_local_count(
+        observation.get("daemon_root_match_count_after"), maximum=100
+    )
+    daemon_count_pair_valid = bool(
+        daemon_match_count is not None
+        and daemon_root_match_count is not None
+        and daemon_root_match_count <= daemon_match_count
+    )
+    daemon_count_pair_after_valid = bool(
+        daemon_match_count_after is not None
+        and daemon_root_match_count_after is not None
+        and daemon_root_match_count_after <= daemon_match_count_after
+    )
+    if not daemon_count_pair_valid:
+        daemon_match_count = daemon_root_match_count = None
+    if not daemon_count_pair_after_valid:
+        daemon_match_count_after = daemon_root_match_count_after = None
     daemon_same = bool(
         daemon_before
         and daemon_after
@@ -2849,6 +2891,14 @@ def _build_x11_shm_scheduling_diagnostic(
         and full_captures == X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2
         and region_captures == X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2
         and daemon_same
+        and daemon_count_pair_valid
+        and daemon_match_count is not None
+        and daemon_match_count >= 1
+        and daemon_root_match_count == 1
+        and daemon_count_pair_after_valid
+        and daemon_match_count_after is not None
+        and daemon_match_count_after >= 1
+        and daemon_root_match_count_after == 1
         and worker_same
         and summaries is not None
         and correlations is not None
@@ -2913,6 +2963,10 @@ def _build_x11_shm_scheduling_diagnostic(
         "daemon_identity_before": daemon_before,
         "daemon_identity_after": daemon_after,
         "daemon_identity_same": daemon_same,
+        "daemon_match_count": daemon_match_count,
+        "daemon_root_match_count": daemon_root_match_count,
+        "daemon_match_count_after": daemon_match_count_after,
+        "daemon_root_match_count_after": daemon_root_match_count_after,
         "worker_identity_before": worker_before,
         "worker_identity_after": worker_after,
         "worker_identity_same": worker_same,
@@ -3482,6 +3536,8 @@ def _build_x11_shm_scheduling_diagnostic_script(
 
         __DAEMON_MATCHER__
 
+        __ROOT_DAEMON_SELECTOR__
+
         __WORKER_MATCHER__
 
         CAPTURES = __CAPTURES__
@@ -3534,10 +3590,11 @@ def _build_x11_shm_scheduling_diagnostic_script(
                     matches.append({
                         "pid": int(entry.name),
                         "starttime_ticks": stat["starttime_ticks"],
+                        "parent_pid": stat["ppid"],
                         "argv_match": True,
                         "argv_module": "modal_computer_use.daemon",
                     })
-            return matches[0] if len(matches) == 1 else None
+            return _select_root_daemon_match(matches)
 
         def worker_identity(daemon_pid):
             matches = []
@@ -3753,6 +3810,10 @@ def _build_x11_shm_scheduling_diagnostic_script(
         region_captures = 0
         daemon_before = None
         daemon_after = None
+        daemon_match_count = None
+        daemon_root_match_count = None
+        daemon_match_count_after = None
+        daemon_root_match_count_after = None
         worker_before = None
         worker_after = None
         daemon_sched_before = None
@@ -3859,7 +3920,11 @@ def _build_x11_shm_scheduling_diagnostic_script(
                 _, observed_backend = request(warmup_index, measured=False)
                 warmups_completed += 1
             failure_phase = "identity_before"
-            daemon_before = daemon_identity()
+            (
+                daemon_before,
+                daemon_match_count,
+                daemon_root_match_count,
+            ) = daemon_identity()
             if daemon_before is None:
                 raise RuntimeError("daemon process identity unavailable")
             worker_before = worker_identity(daemon_before["pid"])
@@ -3896,7 +3961,11 @@ def _build_x11_shm_scheduling_diagnostic_script(
             if cgroup_after is None:
                 raise RuntimeError("terminal cgroup cpu.stat unavailable")
             failure_phase = "identity_after"
-            daemon_after = daemon_identity()
+            (
+                daemon_after,
+                daemon_match_count_after,
+                daemon_root_match_count_after,
+            ) = daemon_identity()
             if daemon_after is None:
                 raise RuntimeError("terminal daemon identity unavailable")
             worker_after = worker_identity(daemon_after["pid"])
@@ -3982,6 +4051,10 @@ def _build_x11_shm_scheduling_diagnostic_script(
             "region_captures": region_captures,
             "daemon_identity_before": daemon_before,
             "daemon_identity_after": daemon_after,
+            "daemon_match_count": daemon_match_count,
+            "daemon_root_match_count": daemon_root_match_count,
+            "daemon_match_count_after": daemon_match_count_after,
+            "daemon_root_match_count_after": daemon_root_match_count_after,
             "worker_identity_before": worker_before,
             "worker_identity_after": worker_after,
             "daemon_schedstat_before": daemon_sched_before,
@@ -4005,6 +4078,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
     )
     return (
         template.replace("__DAEMON_MATCHER__", _DAEMON_ARGV_MATCHER_SOURCE)
+        .replace("__ROOT_DAEMON_SELECTOR__", _ROOT_DAEMON_SELECTOR_SOURCE)
         .replace("__WORKER_MATCHER__", _X11_WORKER_ARGV_MATCHER_SOURCE)
         .replace("__CAPTURES__", str(captures))
         .replace("__WARMUPS__", str(warmups))

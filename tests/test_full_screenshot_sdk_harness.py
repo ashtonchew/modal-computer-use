@@ -38,6 +38,7 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _run_x11_shm_scheduling_diagnostic,
     _run_x11_shm_soak,
     _run_x11_shm_transport_threshold_diagnostic,
+    _select_root_daemon_match,
     _validate_bounded_x_server_sample_count,
 )
 
@@ -70,6 +71,38 @@ def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:
         b"1024\0--height\0"
         b"768\0--extra\0"
     )
+    root_daemon = {
+        "pid": 1,
+        "starttime_ticks": 18,
+        "parent_pid": 0,
+        "argv_match": True,
+        "argv_module": "modal_computer_use.daemon",
+    }
+    child_daemon = {
+        "pid": 41,
+        "starttime_ticks": 123,
+        "parent_pid": 1,
+        "argv_match": True,
+        "argv_module": "modal_computer_use.daemon",
+    }
+    selected, match_count, root_match_count = _select_root_daemon_match(
+        [child_daemon, root_daemon]
+    )
+    assert selected == {
+        "pid": 1,
+        "starttime_ticks": 18,
+        "argv_match": True,
+        "argv_module": "modal_computer_use.daemon",
+    }
+    assert match_count == 2
+    assert root_match_count == 1
+    second_root = dict(root_daemon, pid=2, starttime_ticks=19)
+    selected, match_count, root_match_count = _select_root_daemon_match(
+        [root_daemon, second_root]
+    )
+    assert selected is None
+    assert match_count == 2
+    assert root_match_count == 2
 
     script = _build_x11_shm_scheduling_diagnostic_script(
         captures=1_000,
@@ -187,6 +220,10 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
         "region_captures": 500,
         "daemon_identity_before": identity,
         "daemon_identity_after": identity,
+        "daemon_match_count": 2,
+        "daemon_root_match_count": 1,
+        "daemon_match_count_after": 2,
+        "daemon_root_match_count_after": 1,
         "worker_identity_before": worker_identity,
         "worker_identity_after": worker_identity,
         "daemon_schedstat_before": {
@@ -284,6 +321,8 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
         "runqueue_wait_ns": 60,
         "timeslices": 4,
     }
+    assert artifact["daemon_match_count"] == 2
+    assert artifact["daemon_root_match_count"] == 1
     assert artifact["worker_schedstat_delta"] == {
         "cpu_runtime_ns": 80,
         "runqueue_wait_ns": 90,
@@ -336,6 +375,16 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
     )
     assert rejected_parent["passed"] is False
     assert rejected_parent["failure_type"] == "EvidenceValidationError"
+
+    contradictory_matches = json_module.loads(json_module.dumps(observation))
+    contradictory_matches["daemon_root_match_count"] = 3
+    rejected_matches = _build_x11_shm_scheduling_diagnostic(
+        contradictory_matches, cleanup, provenance
+    )
+    assert rejected_matches["passed"] is False
+    assert rejected_matches["daemon_match_count"] is None
+    assert rejected_matches["daemon_root_match_count"] is None
+    assert rejected_matches["failure_type"] == "EvidenceValidationError"
 
     partial = json_module.loads(json_module.dumps(observation))
     partial.update(
