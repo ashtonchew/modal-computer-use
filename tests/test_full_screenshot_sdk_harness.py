@@ -17,6 +17,7 @@ from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
 from modal_computer_use.errors import DaemonHTTPError
 from scripts.benchmarks.x11_shm_screenshot_runner import (
     _build_repeated_bounded_x_server_diagnostic,
+    _build_x11_shm_soak_diagnostic,
     _is_modal_daemon_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
     _validate_bounded_x_server_sample_count,
@@ -220,6 +221,84 @@ def test_promotion_soak_matches_daemon_argv_token_not_helper_text() -> None:
     )[0]
     assert 'argv[index : index + 2] == [b"-m", b"modal_computer_use.daemon"]' in runner
     assert "_is_modal_daemon_cmdline(command)" in soak
+
+
+def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() -> None:
+    observation = {
+        "passed": False,
+        "requested_source": "auto",
+        "observed_backend": "x11-shm",
+        "captures_requested": 10_000,
+        "captures_completed": 10_000,
+        "full_captures": 5_000,
+        "region_captures": 5_000,
+        "daemon_identity_before": {
+            "pid": 41,
+            "starttime_ticks": 123,
+            "argv_match": True,
+            "argv_module": "modal_computer_use.daemon",
+        },
+        "daemon_identity_after": {
+            "pid": 41,
+            "starttime_ticks": 123,
+            "argv_match": True,
+            "argv_module": "modal_computer_use.daemon",
+        },
+        "counts_before": {"fd": 12, "mappings": 34, "rss": 56, "peak_rss": 78},
+        "counts_after": {"fd": 11, "mappings": 34, "rss": 60, "peak_rss": 80},
+        "signed_deltas": {"fd": -1, "mappings": 0, "rss": 4, "peak_rss": 2},
+        "failure_phase": None,
+        "failure_type": None,
+    }
+    provenance = {
+        "source_revision": "a" * 40,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": "b" * 64,
+        "cargo_lock_sha256": "c" * 64,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
+    cleanup = {
+        "succeeded": True,
+        "remaining_sandboxes": 0,
+        "survivors_before_sweep": 0,
+    }
+
+    payload = _build_x11_shm_soak_diagnostic(observation, cleanup, provenance)
+
+    assert payload["schema_version"] == "x11-shm-soak-diagnostic.v1"
+    assert payload["status"] == "complete"
+    assert payload["sample_count"] == 10_000
+    assert payload["requested_source"] == "auto"
+    assert payload["observed_backend"] == "x11-shm"
+    assert payload["daemon_identity_before"] == observation["daemon_identity_before"]
+    assert payload["daemon_identity_after"] == observation["daemon_identity_after"]
+    assert payload["counts_before"] == observation["counts_before"]
+    assert payload["counts_after"] == observation["counts_after"]
+    assert payload["signed_deltas"] == observation["signed_deltas"]
+    assert payload["terminal_cleanup"] == cleanup
+    assert payload["provenance"] == provenance
+    assert payload["retries"] == 0
+    assert payload["replacement_samples"] == 0
+    assert payload["passed"] is False
+
+
+def test_x11_shm_soak_diagnostic_retains_safe_entrypoint_and_provenance() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x11_shm_soak_diagnostic(" in runner
+    assert "def x11_shm_soak_diagnostic_main(" in runner
+    assert "SOAK_DIAGNOSTIC_CAPTURES = 10_000" in runner
+    assert "captures != SOAK_DIAGNOSTIC_CAPTURES" in runner
+    assert "run_x11_shm_soak_diagnostic.remote(" in runner
+    assert 'Path(f"benchmark-data/x11-shm-soak-diagnostic-{captures}.json")' in runner
+    assert '"schema_version": "x11-shm-soak-diagnostic.v1"' in runner
+    assert '"signed_deltas"' in runner
+    assert '"daemon_identity_before"' in runner
+    assert '"daemon_identity_after"' in runner
+    assert '"terminal_cleanup"' in runner
+    assert 'provenance=_local_provenance()' in runner
 
 
 def test_promotion_artifact_retains_missing_resource_deltas_as_unknown() -> None:
