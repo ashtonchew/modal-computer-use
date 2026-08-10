@@ -17,6 +17,7 @@ from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
 from modal_computer_use.errors import DaemonHTTPError
 from scripts.benchmarks.x11_shm_screenshot_runner import (
     _build_repeated_bounded_x_server_diagnostic,
+    _build_x11_shm_resource_snapshot_diagnostic,
     _build_x11_shm_soak_diagnostic,
     _build_x11_shm_soak_diagnostic_script,
     _is_modal_daemon_cmdline,
@@ -248,6 +249,19 @@ def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() ->
         "counts_before": {"fd": 12, "mappings": 34, "rss": 56, "peak_rss": 78},
         "counts_after": {"fd": 11, "mappings": 34, "rss": 60, "peak_rss": 80},
         "signed_deltas": {"fd": -1, "mappings": 0, "rss": 4, "peak_rss": 2},
+        "resource_metrics_before": {
+            "maps": True,
+            "fd": True,
+            "VmRSS": True,
+            "VmHWM": True,
+        },
+        "resource_metrics_after": {
+            "maps": True,
+            "fd": True,
+            "VmRSS": True,
+            "VmHWM": True,
+        },
+        "failure_resource_metric": None,
         "failure_phase": None,
         "failure_type": None,
     }
@@ -276,6 +290,9 @@ def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() ->
     assert payload["counts_before"] == observation["counts_before"]
     assert payload["counts_after"] == observation["counts_after"]
     assert payload["signed_deltas"] == observation["signed_deltas"]
+    assert payload["resource_metrics_before"] == observation["resource_metrics_before"]
+    assert payload["resource_metrics_after"] == observation["resource_metrics_after"]
+    assert payload["failure_resource_metric"] is None
     assert payload["terminal_cleanup"] == cleanup
     assert payload["provenance"] == provenance
     assert payload["retries"] == 0
@@ -283,10 +300,67 @@ def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() ->
     assert payload["passed"] is False
 
 
+def test_x11_shm_resource_snapshot_diagnostic_retains_failure_metric() -> None:
+    observation = {
+        "passed": False,
+        "requested_source": "auto",
+        "observed_backend": "x11-shm",
+        "prime_captures": 2,
+        "daemon_identity_before": {
+            "pid": 41,
+            "starttime_ticks": 123,
+            "argv_match": True,
+            "argv_module": "modal_computer_use.daemon",
+        },
+        "counts_before": None,
+        "resource_metrics_before": {
+            "maps": True,
+            "fd": True,
+            "VmRSS": False,
+            "VmHWM": False,
+        },
+        "failure_resource_metric": "VmRSS",
+        "failure_phase": "counts_before",
+        "failure_type": "ResourceMetricUnavailable",
+    }
+    provenance = {
+        "source_revision": "a" * 40,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": "b" * 64,
+        "cargo_lock_sha256": "c" * 64,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
+    cleanup = {
+        "succeeded": True,
+        "remaining_sandboxes": 0,
+        "survivors_before_sweep": 0,
+    }
+
+    payload = _build_x11_shm_resource_snapshot_diagnostic(
+        observation, cleanup, provenance
+    )
+
+    assert payload["schema_version"] == "x11-shm-resource-snapshot.v1"
+    assert payload["benchmark"] == "x11-shm-resource-snapshot"
+    assert payload["prime_captures"] == 2
+    assert payload["resource_metrics_before"] == observation["resource_metrics_before"]
+    assert payload["failure_resource_metric"] == "VmRSS"
+    assert payload["failure_phase"] == "counts_before"
+    assert payload["retries"] == 0
+    assert payload["replacement_samples"] == 0
+    assert payload["terminal_cleanup"] == cleanup
+    assert payload["provenance"] == provenance
+    assert payload["passed"] is False
+
+
 def test_x11_shm_soak_diagnostic_script_compiles() -> None:
     script = _build_x11_shm_soak_diagnostic_script(10_000)
 
     compile(script, "<x11-shm-soak>", "exec")
+    snapshot_script = _build_x11_shm_soak_diagnostic_script(
+        0, snapshot_only=True
+    )
+    compile(snapshot_script, "<x11-shm-resource-snapshot>", "exec")
 
 
 def test_x11_shm_soak_diagnostic_retains_safe_entrypoint_and_provenance() -> None:
@@ -296,6 +370,11 @@ def test_x11_shm_soak_diagnostic_retains_safe_entrypoint_and_provenance() -> Non
 
     assert "def run_x11_shm_soak_diagnostic(" in runner
     assert "def x11_shm_soak_diagnostic_main(" in runner
+    assert "def run_x11_shm_resource_snapshot_diagnostic(" in runner
+    assert "def x11_shm_resource_snapshot_main(" in runner
+    assert "run_x11_shm_resource_snapshot_diagnostic.remote(" in runner
+    assert 'Path("benchmark-data/x11-shm-resource-snapshot.json")' in runner
+    assert 'SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "VmHWM")' in runner
     assert "SOAK_DIAGNOSTIC_CAPTURES = 10_000" in runner
     assert "captures != SOAK_DIAGNOSTIC_CAPTURES" in runner
     assert "run_x11_shm_soak_diagnostic.remote(" in runner
