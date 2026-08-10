@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -14,6 +15,10 @@ from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
     measure_full_screenshot_arms,
 )
 from modal_computer_use.errors import DaemonHTTPError
+from scripts.benchmarks.x11_shm_screenshot_runner import (
+    _build_repeated_bounded_x_server_diagnostic,
+    _run_repeated_bounded_x_server_diagnostic,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
@@ -54,6 +59,56 @@ def test_promotion_runner_exposes_the_bounded_x_server_probe() -> None:
     assert "computer.screenshots.full(), timeout=10.0" in runner
     assert '"python", "-c", constructor_probe, timeout=10' in runner
     assert "and elapsed_ms < 2_500.0" in runner
+
+
+def test_promotion_runner_exposes_repeated_bounded_x_server_diagnostic() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES = 10" in runner
+    assert "def run_repeated_bounded_x_server_probe(" in runner
+    assert "sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES" in runner
+    assert '"sample_count": sample_count' in runner
+    assert '"observations": observations' in runner
+    assert '"terminal_cleanup": cleanup' in runner
+    assert '"retries": 0' in runner
+    assert '"replacement_samples": 0' in runner
+
+
+def test_repeated_bounded_x_server_diagnostic_retains_safe_iterations_and_cleanup() -> None:
+    observations = [
+        {
+            "passed": True,
+            "public_error_code": "internal_error",
+            "public_error_detail_type": "ScreenshotCaptureTimedOut",
+            "constructor_elapsed_ms": 2006.9,
+        },
+        {
+            "passed": False,
+            "failure_type": "RuntimeError",
+            "failure_phase": "capture_after_restart",
+        },
+    ]
+    cleanup = {"succeeded": True, "remaining_sandboxes": 0}
+
+    payload = _build_repeated_bounded_x_server_diagnostic(observations, cleanup)
+
+    assert payload["sample_count"] == 2
+    assert payload["failure_count"] == 1
+    assert payload["passed"] is False
+    assert payload["observations"] == observations
+    assert payload["terminal_cleanup"] == cleanup
+    assert payload["retries"] == 0
+    assert payload["replacement_samples"] == 0
+    assert payload["schema_version"] == "x11-shm-bounded-x-diagnostic.v1"
+
+
+def test_repeated_bounded_x_server_diagnostic_requires_exactly_ten_samples() -> None:
+    with pytest.raises(
+        ValueError, match="bounded X server diagnostic requires exactly 10 samples"
+    ):
+        asyncio.run(_run_repeated_bounded_x_server_diagnostic(sample_count=9))
 
 
 def test_promotion_runner_exposes_the_x_server_restart_probe() -> None:

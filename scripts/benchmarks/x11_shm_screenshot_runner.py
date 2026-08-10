@@ -100,6 +100,7 @@ MAX_OPERATIONAL_REGRESSION_PERCENT = 5.0
 # preregistered operational probes and 10,000-capture soak. Keep enough
 # bounded wall-clock budget for the full run to finish without partial data.
 PROMOTION_RUN_TIMEOUT_SECONDS = 7_200
+BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES = 10
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 SAFE_TIMEOUT_ORIGINS = frozenset(
     {
@@ -1973,6 +1974,70 @@ def run(
             raise
 
     return asyncio.run(execute())
+
+
+def _build_repeated_bounded_x_server_diagnostic(
+    observations: list[dict[str, Any]], cleanup: Mapping[str, Any]
+) -> dict[str, Any]:
+    retained_observations = [dict(observation) for observation in observations]
+    failure_count = sum(
+        observation.get("passed") is not True
+        for observation in retained_observations
+    )
+    retained_cleanup = dict(cleanup)
+    return {
+        "schema_version": "x11-shm-bounded-x-diagnostic.v1",
+        "benchmark": "x11-shm-bounded-x-diagnostic",
+        "status": "complete",
+        "sample_count": len(retained_observations),
+        "failure_count": failure_count,
+        "passed": (
+            failure_count == 0
+            and retained_cleanup.get("succeeded") is True
+            and retained_cleanup.get("remaining_sandboxes") == 0
+        ),
+        "retries": 0,
+        "replacement_samples": 0,
+        "observations": retained_observations,
+        "terminal_cleanup": retained_cleanup,
+    }
+
+
+async def _run_repeated_bounded_x_server_diagnostic(
+    *, sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES
+) -> dict[str, Any]:
+    if sample_count != BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES:
+        raise ValueError(
+            "bounded X server diagnostic requires exactly 10 samples"
+        )
+    observations: list[dict[str, Any]] = []
+    for sample_index in range(sample_count):
+        result = await _run_x_server_timeout_probe(lambda: _ArmContext("auto"))
+        observations.append({"sample_index": sample_index, **result})
+    cleanup = await _final_sandbox_cleanup()
+    return _build_repeated_bounded_x_server_diagnostic(observations, cleanup)
+
+
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=4_200,
+    region=REGION,
+    retries=0,
+)
+def run_repeated_bounded_x_server_probe(
+    sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES,
+) -> dict[str, Any]:
+    """Run ten exact bounded-X probes and retain every safe observation."""
+
+    if sample_count != BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES:
+        raise ValueError(
+            "bounded X server diagnostic requires exactly 10 samples"
+        )
+    return asyncio.run(
+        _run_repeated_bounded_x_server_diagnostic(sample_count=sample_count)
+    )
 
 
 @app.function(
