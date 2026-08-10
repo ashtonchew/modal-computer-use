@@ -1742,8 +1742,10 @@ def _promotion_artifact(
         "captures": soak.get("captures", 0),
         "full_captures": soak.get("full_captures", 0),
         "region_captures": soak.get("region_captures", 0),
-        "fd_delta": soak.get("fd_delta", -1),
-        "mapping_delta": soak.get("mapping_delta", -1),
+        # A failed soak may not have taken either resource snapshot. Keep that
+        # state explicit instead of manufacturing a signed count.
+        "fd_delta": soak.get("fd_delta"),
+        "mapping_delta": soak.get("mapping_delta"),
         "rss_growth_bytes": soak.get("rss_growth_bytes", 0),
         "peak_rss_growth_bytes": soak.get("peak_rss_growth_bytes", 0),
         "cleanup_succeeded": (
