@@ -86,6 +86,34 @@ class ModalNotInstalledError(ComputerUseError):
     """Raised when Modal-specific APIs are requested without the modal extra."""
 
 
+class ImageReleaseError(ComputerUseError):
+    """Base exception for managed Modal Image release failures."""
+
+
+class ImageReleaseConflictError(ImageReleaseError):
+    """Raised when an immutable Image release reference has conflicting state."""
+
+
+class ImageReleaseCanaryError(ImageReleaseError):
+    """Raised when an Image release does not pass its protected canary."""
+
+
+class ImageReleaseManifestError(ImageReleaseError):
+    """Raised when an Image release manifest cannot be read or written safely."""
+
+
+class ImageReleaseLockError(ImageReleaseError):
+    """Raised when the managed Image dependency lock is missing, stale, or unverifiable."""
+
+
+class ImageReleaseNotFoundError(ImageReleaseError):
+    """Raised when a managed Image release is absent from its recorded Environment."""
+
+
+class ImageReleaseIdentityMismatchError(ImageReleaseError):
+    """Raised when a named Image reference resolves to an unexpected object ID."""
+
+
 class SandboxUnavailableError(ComputerUseError):
     """Raised when a sandbox cannot be found or contacted."""
 

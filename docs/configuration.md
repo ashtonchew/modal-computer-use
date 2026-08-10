@@ -107,6 +107,17 @@ Named images do not support `resources.profile="custom"` and require XFCE. The `
 explicit application choice and may be `false`. Passing an explicit `image=` to
 `ComputerSandbox.create` bypasses the `image.source` selection step.
 
+An inline image recipe is the default. Modal may reuse its cached build layers, but
+`inline:<variant>` is a recipe label, not an immutable artifact ID. A named image reference has
+the form `modal-computer-use-<variant>:<full-git-revision>`. The reference is a lookup name and
+tag. Modal can move a tag to another object, so release automation must enforce write-once tags.
+
+A managed image release adds a versioned manifest and a protected canary. The manifest records the
+source revision, frozen dependency-lock hash, Image Builder Version, named reference, and exact
+Modal object ID. Use `resolve_release_image(record)` when runtime selection must use that exact
+object. This is an opt-in release workflow. SDK users do not build or publish the maintainer's
+managed Images when they use the default inline recipe.
+
 `resources.cpu` and `resources.memory_mib` are requests, not caps. Modal charges whichever is
 higher, the request or the actual usage, so a request above real usage costs the difference
 ([Resources](https://modal.com/docs/guide/resources), accessed 2026-07-29). These fields size the

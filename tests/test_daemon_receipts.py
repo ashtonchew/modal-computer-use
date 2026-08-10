@@ -1684,6 +1684,24 @@ def test_contended_forced_readiness_failure_does_not_consume_sequence(
     monkeypatch.setattr(app.state.readiness_cache, "backend_ready", controlled_readiness)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         _, lease = _acquire(client, "run-contended-readiness")
+        input_lock = app.state.input_lock
+        contention_observed = threading.Event()
+
+        class ObservedInputLock:
+            def locked(self) -> bool:
+                locked = input_lock.locked()
+                if locked:
+                    contention_observed.set()
+                return locked
+
+            async def __aenter__(self) -> ObservedInputLock:
+                await input_lock.acquire()
+                return self
+
+            async def __aexit__(self, *_args: object) -> None:
+                input_lock.release()
+
+        app.state.input_lock = ObservedInputLock()
         responses: dict[str, Any] = {}
 
         def first_request() -> None:
@@ -1705,6 +1723,7 @@ def test_contended_forced_readiness_failure_does_not_consume_sequence(
         assert first_entered.wait(timeout=2)
         contended_thread = threading.Thread(target=contended_request)
         contended_thread.start()
+        assert contention_observed.wait(timeout=2)
         release_first.set()
         first_thread.join(timeout=2)
         contended_thread.join(timeout=2)
