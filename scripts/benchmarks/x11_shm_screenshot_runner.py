@@ -103,6 +103,7 @@ MAX_OPERATIONAL_REGRESSION_PERCENT = 5.0
 PROMOTION_RUN_TIMEOUT_SECONDS = 7_200
 BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES = 10
 BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLE_COUNTS = frozenset((10, 30))
+SOAK_DIAGNOSTIC_CAPTURES = 10_000
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 SAFE_TIMEOUT_ORIGINS = frozenset(
     {
@@ -1672,6 +1673,332 @@ async def _run_x11_shm_soak(
     return result
 
 
+def _retain_soak_counts(value: object) -> dict[str, int] | None:
+    if not isinstance(value, Mapping):
+        return None
+    retained: dict[str, int] = {}
+    for key in ("fd", "mappings", "rss", "peak_rss"):
+        candidate = value.get(key)
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            retained[key] = candidate
+    return retained if len(retained) == 4 else None
+
+
+def _retain_daemon_identity(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    pid = value.get("pid")
+    starttime_ticks = value.get("starttime_ticks")
+    argv_match = value.get("argv_match")
+    argv_module = value.get("argv_module")
+    if (
+        not isinstance(pid, int)
+        or isinstance(pid, bool)
+        or not isinstance(starttime_ticks, int)
+        or isinstance(starttime_ticks, bool)
+        or not isinstance(argv_match, bool)
+        or argv_module != "modal_computer_use.daemon"
+    ):
+        return None
+    return {
+        "pid": pid,
+        "starttime_ticks": starttime_ticks,
+        "argv_match": argv_match,
+        "argv_module": argv_module,
+    }
+
+
+def _build_x11_shm_soak_diagnostic(
+    observation: Mapping[str, Any],
+    cleanup: Mapping[str, Any],
+    provenance: Mapping[str, str | bool],
+) -> dict[str, Any]:
+    before_identity = _retain_daemon_identity(
+        observation.get("daemon_identity_before")
+    )
+    after_identity = _retain_daemon_identity(observation.get("daemon_identity_after"))
+    counts_before = _retain_soak_counts(observation.get("counts_before"))
+    counts_after = _retain_soak_counts(observation.get("counts_after"))
+    signed_deltas = _retain_soak_counts(observation.get("signed_deltas"))
+    identity_same = bool(
+        before_identity
+        and after_identity
+        and before_identity["pid"] == after_identity["pid"]
+        and before_identity["starttime_ticks"] == after_identity["starttime_ticks"]
+        and before_identity["argv_match"]
+        and after_identity["argv_match"]
+    )
+    resource_delta_zero = bool(signed_deltas) and all(
+        value == 0 for value in signed_deltas.values()
+    )
+    captures_completed = observation.get("captures_completed")
+    full_captures = observation.get("full_captures")
+    region_captures = observation.get("region_captures")
+    captures_shape = (
+        captures_completed == SOAK_DIAGNOSTIC_CAPTURES
+        and full_captures == SOAK_DIAGNOSTIC_CAPTURES // 2
+        and region_captures == SOAK_DIAGNOSTIC_CAPTURES // 2
+    )
+    observed_backend = _safe_diagnostic_label(observation.get("observed_backend"))
+    cleanup_succeeded = cleanup.get("succeeded") is True and cleanup.get(
+        "remaining_sandboxes"
+    ) == 0
+    failure_type = _safe_diagnostic_label(observation.get("failure_type"))
+    failure_phase = _safe_diagnostic_label(observation.get("failure_phase"))
+    passed = bool(
+        observation.get("passed") is True
+        and observation.get("requested_source") == "auto"
+        and observed_backend == "x11-shm"
+        and captures_shape
+        and identity_same
+        and resource_delta_zero
+        and cleanup_succeeded
+    )
+    return {
+        "schema_version": "x11-shm-soak-diagnostic.v1",
+        "benchmark": "x11-shm-soak-diagnostic",
+        "status": "complete",
+        "passed": passed,
+        "sample_count": SOAK_DIAGNOSTIC_CAPTURES,
+        "captures_requested": SOAK_DIAGNOSTIC_CAPTURES,
+        "captures_completed": captures_completed,
+        "full_captures": full_captures,
+        "region_captures": region_captures,
+        "requested_source": "auto",
+        "observed_backend": observed_backend,
+        "daemon_identity_before": before_identity,
+        "daemon_identity_after": after_identity,
+        "daemon_identity_same": identity_same,
+        "counts_before": counts_before,
+        "counts_after": counts_after,
+        "signed_deltas": signed_deltas,
+        "resource_delta_zero": resource_delta_zero,
+        "failure_type": failure_type,
+        "failure_phase": failure_phase,
+        "retries": 0,
+        "replacement_samples": 0,
+        "provenance": dict(provenance),
+        "terminal_cleanup": dict(cleanup),
+    }
+
+
+async def _run_x11_shm_soak_diagnostic(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    captures: int = SOAK_DIAGNOSTIC_CAPTURES,
+) -> dict[str, Any]:
+    if captures != SOAK_DIAGNOSTIC_CAPTURES:
+        raise ValueError("the soak diagnostic is fixed at 10000 captures")
+    context = factory()
+    computer: Any | None = None
+    phase = "context_enter"
+    observation: dict[str, Any] | None = None
+    try:
+        computer = await context.__aenter__()
+        phase = "sandbox_handle"
+        sandbox = getattr(computer, "_sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "exec"):
+            raise RuntimeError("sandbox handle unavailable for X11 soak diagnostic")
+        script = dedent(
+            f"""
+            import http.client
+            import json
+            import os
+            from pathlib import Path
+
+{indent(_DAEMON_ARGV_MATCHER_SOURCE, "            ")}
+
+            def daemon_identity():
+                for entry in Path("/proc").iterdir():
+                    if not entry.name.isdigit():
+                        continue
+                    try:
+                        command = (entry / "cmdline").read_bytes()
+                        stat_text = (entry / "stat").read_text(encoding="utf-8")
+                    except OSError:
+                        continue
+                    if not _is_modal_daemon_cmdline(command):
+                        continue
+                    try:
+                        pid = int(entry.name)
+                        starttime_ticks = int(stat_text.rsplit(") ", 1)[1].split()[19])
+                    except (IndexError, ValueError):
+                        continue
+                    return {{
+                        "pid": pid,
+                        "starttime_ticks": starttime_ticks,
+                        "argv_match": True,
+                        "argv_module": "modal_computer_use.daemon",
+                    }}
+                return None
+
+            def status_bytes(pid, key):
+                with open(f"/proc/{{pid}}/status", encoding="utf-8") as status_file:
+                    for line in status_file:
+                        if line.startswith(key + ":"):
+                            return int(line.split()[1]) * 1024
+                raise RuntimeError(f"{{key}} missing for daemon process")
+
+            def counts(pid):
+                with open(f"/proc/{{pid}}/maps", encoding="utf-8") as maps_file:
+                    mappings = sum(1 for _ in maps_file)
+                return {{
+                    "fd": len(os.listdir(f"/proc/{{pid}}/fd")),
+                    "mappings": mappings,
+                    "rss": status_bytes(pid, "VmRSS"),
+                    "peak_rss": status_bytes(pid, "VmHWM"),
+                }}
+
+            token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
+            port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
+            headers = {{
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+            }}
+            full = json.dumps({{
+                "format": "png", "quality": 90, "scale": 1.0,
+                "show_cursor": False, "processing": "auto", "storage": "inline",
+            }})
+            region = json.dumps({{
+                "format": "png", "quality": 90, "scale": 1.0,
+                "show_cursor": False, "processing": "auto", "storage": "inline",
+                "region": {{"x": 7, "y": 9, "width": 511, "height": 383}},
+            }})
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+            observed_backend = None
+            failure_type = None
+            failure_phase = None
+            identity_before = None
+            identity_after = None
+            counts_before = None
+            counts_after = None
+            full_captures = 0
+            region_captures = 0
+
+            def capture(path, body, expected_width, expected_height):
+                nonlocal observed_backend
+                connection.request("POST", path, body=body, headers=headers)
+                response = connection.getresponse()
+                data = response.read()
+                if response.status != 200 or not data.startswith(b"\\x89PNG"):
+                    raise RuntimeError("daemon-local screenshot failed")
+                backend = response.getheader("x-computer-use-capture-backend")
+                if backend != "x11-shm":
+                    raise RuntimeError("daemon-local screenshot used an unexpected source")
+                if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
+                    raise RuntimeError("daemon-local screenshot width changed")
+                if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
+                    raise RuntimeError("daemon-local screenshot height changed")
+                observed_backend = backend
+
+            try:
+                failure_phase = "prime_capture"
+                capture("/v1/screenshots/full/raw", full, 1024, 768)
+                capture("/v1/screenshots/region/raw", region, 511, 383)
+                failure_phase = "identity_before"
+                identity_before = daemon_identity()
+                if identity_before is None:
+                    raise RuntimeError("daemon process was not found")
+                counts_before = counts(identity_before["pid"])
+                failure_phase = "soak_capture"
+                for index in range({captures}):
+                    if index % 2:
+                        capture("/v1/screenshots/region/raw", region, 511, 383)
+                        region_captures += 1
+                    else:
+                        capture("/v1/screenshots/full/raw", full, 1024, 768)
+                        full_captures += 1
+                failure_phase = "identity_after"
+                identity_after = daemon_identity()
+                if identity_after is None:
+                    raise RuntimeError("daemon process was not found after soak")
+                counts_after = counts(identity_after["pid"])
+            except Exception as exc:
+                failure_type = type(exc).__name__
+            finally:
+                connection.close()
+
+            signed_deltas = None
+            if counts_before is not None and counts_after is not None:
+                signed_deltas = {{
+                    key: counts_after[key] - counts_before[key]
+                    for key in ("fd", "mappings", "rss", "peak_rss")
+                }}
+            print(json.dumps({{
+                "passed": failure_type is None,
+                "requested_source": "auto",
+                "observed_backend": observed_backend,
+                "captures_requested": {captures},
+                "captures_completed": full_captures + region_captures,
+                "full_captures": full_captures,
+                "region_captures": region_captures,
+                "daemon_identity_before": identity_before,
+                "daemon_identity_after": identity_after,
+                "counts_before": counts_before,
+                "counts_after": counts_after,
+                "signed_deltas": signed_deltas,
+                "failure_type": failure_type,
+                "failure_phase": failure_phase,
+            }}))
+            """
+        )
+        phase = "daemon_local_soak"
+        process = await sandbox.exec.aio("python", "-c", script, timeout=900)
+        phase = "parse_soak_output"
+        payload = json.loads(await _completed_process_stdout_text(process))
+        if not isinstance(payload, dict):
+            raise RuntimeError("X11 soak diagnostic returned invalid output")
+        observation = payload
+    except Exception as exc:
+        observation = {
+            "passed": False,
+            "requested_source": "auto",
+            "observed_backend": None,
+            "captures_requested": captures,
+            "captures_completed": 0,
+            "full_captures": 0,
+            "region_captures": 0,
+            "daemon_identity_before": None,
+            "daemon_identity_after": None,
+            "counts_before": None,
+            "counts_after": None,
+            "signed_deltas": None,
+            "failure_type": type(exc).__name__,
+            "failure_phase": phase,
+        }
+    finally:
+        if computer is not None:
+            try:
+                await context.__aexit__(None, None, None)
+            except Exception as exc:
+                if observation is None:
+                    observation = {
+                        "passed": False,
+                        "requested_source": "auto",
+                        "observed_backend": None,
+                        "captures_requested": captures,
+                        "captures_completed": 0,
+                        "full_captures": 0,
+                        "region_captures": 0,
+                        "daemon_identity_before": None,
+                        "daemon_identity_after": None,
+                        "counts_before": None,
+                        "counts_after": None,
+                        "signed_deltas": None,
+                        "failure_type": type(exc).__name__,
+                        "failure_phase": "cleanup",
+                    }
+                else:
+                    observation["passed"] = False
+                    observation["failure_type"] = type(exc).__name__
+                    observation["failure_phase"] = "cleanup"
+    return observation or {
+        "passed": False,
+        "failure_type": "NoResult",
+        "failure_phase": phase,
+    }
+
+
 def _normalize_placement(placement: Mapping[str, Any]) -> dict[str, str | None]:
     cloud = placement.get("cloud")
     cloud_names = {
@@ -2278,6 +2605,47 @@ def run_x11_shm_timeout_origin_probe(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=1_200,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_soak_diagnostic(
+    captures: int = SOAK_DIAGNOSTIC_CAPTURES,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Retain one exact X11 soak's signed resource and process identity evidence."""
+
+    if captures != SOAK_DIAGNOSTIC_CAPTURES:
+        raise ValueError("the soak diagnostic is fixed at 10000 captures")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            observation = await _run_x11_shm_soak_diagnostic(
+                lambda: _ArmContext("auto"), captures=captures
+            )
+        except BaseException as exc:
+            observation = {
+                "passed": False,
+                "requested_source": "auto",
+                "observed_backend": None,
+                "captures_completed": 0,
+                "full_captures": 0,
+                "region_captures": 0,
+                "failure_type": type(exc).__name__,
+                "failure_phase": "diagnostic",
+            }
+        cleanup = await _final_sandbox_cleanup()
+        return _build_x11_shm_soak_diagnostic(observation, cleanup, provenance)
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -2329,6 +2697,25 @@ def timeout_origin_main(
         Path(output)
         if output
         else Path("benchmark-data/x11-shm-timeout-origin-100.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def x11_shm_soak_diagnostic_main(
+    captures: int = SOAK_DIAGNOSTIC_CAPTURES,
+    output: str = "",
+) -> None:
+    result = run_x11_shm_soak_diagnostic.remote(
+        captures=captures,
+        provenance=_local_provenance(),
+    )
+    path = (
+        Path(output)
+        if output
+        else Path(f"benchmark-data/x11-shm-soak-diagnostic-{captures}.json")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
