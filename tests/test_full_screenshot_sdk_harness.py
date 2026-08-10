@@ -17,6 +17,7 @@ from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
 from modal_computer_use.errors import DaemonHTTPError
 from scripts.benchmarks.x11_shm_screenshot_runner import (
     _build_repeated_bounded_x_server_diagnostic,
+    _is_modal_daemon_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
     _validate_bounded_x_server_sample_count,
 )
@@ -199,6 +200,26 @@ def test_promotion_runner_exposes_candidate_timeout_origin_diagnostic() -> None:
     assert '"retries": 0' in runner
     assert '"terminal_cleanup": cleanup' in runner
     assert "def timeout_origin_main(" in runner
+
+
+def test_promotion_soak_matches_daemon_argv_token_not_helper_text() -> None:
+    daemon_argv = b"python\0-m\0modal_computer_use.daemon\0--display\0:99\0"
+    helper_argv = (
+        b"python\0-c\0"
+        b"modal_computer_use.daemon\0"
+    )
+
+    assert _is_modal_daemon_cmdline(daemon_argv) is True
+    assert _is_modal_daemon_cmdline(helper_argv) is False
+
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+    soak = runner.split("async def _run_x11_shm_soak", maxsplit=1)[1].split(
+        "async def _measure", maxsplit=1
+    )[0]
+    assert 'argv[index : index + 2] == [b"-m", b"modal_computer_use.daemon"]' in runner
+    assert "_is_modal_daemon_cmdline(command)" in soak
 
 
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
