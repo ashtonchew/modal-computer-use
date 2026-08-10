@@ -85,6 +85,14 @@ def _live_result() -> dict[str, object]:
     }
 
 
+def test_remote_relocation_uses_guarded_root_and_fixture_fallback(tmp_path: Path) -> None:
+    remote_path = Path("/root/x11_shm_stock_zlib_vertical_slice.py")
+    assert runner._project_root_for(remote_path) == Path("/root")
+    fallback = tmp_path / "x11_shm_chromium_fixture.html"
+    fallback.write_text("<html>relocated</html>", encoding="utf-8")
+    assert runner._load_fixture_html(remote_path, fallback) == "<html>relocated</html>"
+
+
 def test_builder_records_preregistered_p95_tail_and_live_payload_rules() -> None:
     artifact = runner._build_artifact(
         codec_proof={

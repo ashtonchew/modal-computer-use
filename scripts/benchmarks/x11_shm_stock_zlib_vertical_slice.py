@@ -42,9 +42,15 @@ from modal_computer_use.image import (
 )
 from modal_computer_use.latency import SessionStartupTiming
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def _project_root_for(runner_path: Path) -> Path:
+    return runner_path.parents[2] if len(runner_path.parents) > 2 else Path("/root")
+
+
+_RUNNER_PATH = Path(__file__).resolve()
+PROJECT_ROOT = _project_root_for(_RUNNER_PATH)
 NATIVE_SOURCE = PROJECT_ROOT / "src" / "modal_computer_use" / "_native" / "x11_shm"
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "x11_shm_chromium_fixture.html"
+FIXTURE_PATH = _RUNNER_PATH.parent / "fixtures" / "x11_shm_chromium_fixture.html"
 APP_NAME = "mcu-x11-shm-stock-zlib-vertical-slice"
 REGION = "us-west-2"
 ENVIRONMENT = "main"
@@ -74,9 +80,24 @@ BROWSER_LAUNCH_ARGS = (
 )
 
 
+def _load_fixture_html(
+    runner_path: Path = _RUNNER_PATH,
+    fallback_path: Path = Path(
+        "/opt/mcu-scripts/benchmarks/fixtures/x11_shm_chromium_fixture.html"
+    ),
+) -> str:
+    candidates = (
+        runner_path.parent / "fixtures" / "x11_shm_chromium_fixture.html",
+        fallback_path,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
+    raise RuntimeError("Chromium screenshot fixture is not available in the benchmark image")
+
+
 def _fixture_data_url() -> str:
-    html = FIXTURE_PATH.read_text(encoding="utf-8")
-    return "data:text/html;charset=utf-8," + quote(html, safe="")
+    return "data:text/html;charset=utf-8," + quote(_load_fixture_html(), safe="")
 
 
 FIXTURE_DATA_URL = _fixture_data_url()
