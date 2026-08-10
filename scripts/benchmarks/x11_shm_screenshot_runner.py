@@ -96,6 +96,10 @@ CONCURRENCY_LEVELS = (1, 2, 4, 8)
 CONCURRENCY_TRIALS = 5
 READINESS_SAMPLES = 20
 MAX_OPERATIONAL_REGRESSION_PERCENT = 5.0
+# The fixed campaign creates 100 fresh paired contexts, then runs the
+# preregistered operational probes and 10,000-capture soak. Keep enough
+# bounded wall-clock budget for the full run to finish without partial data.
+PROMOTION_RUN_TIMEOUT_SECONDS = 7_200
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 SAFE_TIMEOUT_ORIGINS = frozenset(
     {
@@ -1934,7 +1938,7 @@ async def _measure(
     image=image,
     cpu=1,
     memory=MEMORY_MIB,
-    timeout=1_800,
+    timeout=PROMOTION_RUN_TIMEOUT_SECONDS,
     region=REGION,
     retries=0,
 )

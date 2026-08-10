@@ -32,6 +32,15 @@ def test_promotion_runner_uses_the_mounted_chromium_fixture_path() -> None:
     assert "memory=(MEMORY_MIB, MEMORY_MIB)" in runner
 
 
+def test_promotion_runner_allows_the_complete_fixed_campaign_to_finish() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "PROMOTION_RUN_TIMEOUT_SECONDS = 7_200" in runner
+    assert "timeout=PROMOTION_RUN_TIMEOUT_SECONDS" in runner
+
+
 def test_promotion_runner_exposes_the_bounded_x_server_probe() -> None:
     runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
         encoding="utf-8"
