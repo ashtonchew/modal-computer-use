@@ -90,25 +90,16 @@ daemon resets that session once after an open or grab failure, then uses the bou
 `maim` fallback path. Cursor-visible capture uses `maim` because MSS does not compose the desktop
 cursor.
 
-### Select the screenshot source
+### Compare screenshot sources
 
-MSS is the default. To request the optional X11 shared-memory source, set
-`ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})` or set
-`COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=x11-shm` for a daemon configured directly. The source
-requires a Managed Image with the X11-SHM extension and native worker.
+MSS is the default. See [configuration](configuration.md#actions) for source selection, Managed
+Image requirements, eligible requests, and codec policy. Measure the complete SDK call and inspect
+the raw response metadata when comparing sources.
 
-X11-SHM applies only to cursor-hidden, full-resolution PNG screenshots at scale `1`. It uses
-`miniz_oxide`, PNG Deflate level 1, and `NoFilter`. The source is optional and experimental.
-Scaled, region, JPEG, WebP, raw-pixel, and cursor-visible requests use the compatibility path.
-
-The SDK field and environment variable select a policy. The raw response header
-`X-Computer-Use-Capture-Backend` reports the source that ran. With `auto`, that header may report
-`mss-fallback` after a native failure. The `ComputerStepResult.screenshot` model does not include
-the backend.
-
-Retained fixture evidence recorded 57,721 bytes for X11-SHM and 52,315 bytes for MSS. The X11-SHM
-payload was 10.33% larger. Rare long calls remained in the same run. This evidence does not
-provide a latency guarantee.
+One retained X11-SHM fixture produced a 57,721-byte full PNG. A separate retained MSS campaign
+produced a 52,315-byte comparator. The X11-SHM payload was 10.33% larger. The runs were separate,
+so this is not a paired payload result. Rare long calls occurred in the X11-SHM evidence. These
+measurements do not provide a latency guarantee.
 
 Screenshot storage modes have different purposes:
 
