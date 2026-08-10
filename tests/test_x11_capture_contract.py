@@ -250,8 +250,16 @@ def test_capture_failure_is_request_scoped_and_next_capture_can_succeed(
 
 @pytest.mark.asyncio
 async def test_native_capture_wait_does_not_block_daemon_health(tmp_path, monkeypatch) -> None:
+    enter_timeout = 3.0
+    release_delay = 1.0
+    health_timeout = 2.0
+    # Keep this below the release delay so healthy offload answers while the
+    # capture remains pending; synchronous capture completes first and fails
+    # the pending-screenshot assertion below.
+    health_max_elapsed = 0.5
     entered = threading.Event()
     release = threading.Event()
+    releaser_errors: list[str] = []
 
     class BlockingNativeSession:
         def __init__(self, **_kwargs: object) -> None:
@@ -259,8 +267,7 @@ async def test_native_capture_wait_does_not_block_daemon_health(tmp_path, monkey
 
         def capture_png(self, **kwargs: int) -> bytes:
             entered.set()
-            if not release.wait(timeout=1):
-                raise AssertionError("test capture release was not signalled")
+            release.wait(timeout=enter_timeout + release_delay)
             return _png_bytes(width=kwargs["width"], height=kwargs["height"])
 
         def close(self) -> None:
@@ -280,9 +287,7 @@ async def test_native_capture_wait_does_not_block_daemon_health(tmp_path, monkey
     monkeypatch.setattr(
         screenshots_module,
         "resolve_capture_source",
-        lambda _source: ScreenshotCaptureResolution(
-            requested="x11-shm", selected="x11-shm"
-        ),
+        lambda _source: ScreenshotCaptureResolution(requested="x11-shm", selected="x11-shm"),
     )
     monkeypatch.setattr(
         screenshots_module,
@@ -293,38 +298,55 @@ async def test_native_capture_wait_does_not_block_daemon_health(tmp_path, monkey
     app = _capture_app(tmp_path, backend)
 
     def release_capture() -> None:
-        assert entered.wait(timeout=1)
-        time.sleep(0.3)
+        if not entered.wait(timeout=enter_timeout):
+            releaser_errors.append("capture did not enter the blocking session")
+            release.set()
+            return
+        time.sleep(release_delay)
         release.set()
 
     releaser = threading.Thread(target=release_capture)
     releaser.start()
     try:
-        async with app.router.lifespan_context(app):
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(
-                transport=transport,
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
                 base_url="http://testserver",
                 headers={"Authorization": "Bearer dev"},
-            ) as client:
-                started = time.perf_counter()
-                screenshot = asyncio.create_task(
-                    client.post(
-                        "/v1/screenshots/full/raw",
-                        json={"format": "png", "show_cursor": False},
-                    )
+            ) as screenshot_client,
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+                headers={"Authorization": "Bearer dev"},
+            ) as health_client,
+        ):
+            screenshot = asyncio.create_task(
+                screenshot_client.post(
+                    "/v1/screenshots/full/raw",
+                    json={"format": "png", "show_cursor": False},
                 )
-                health_request = asyncio.create_task(client.get("/healthz"))
-                health = await asyncio.wait_for(health_request, timeout=0.15)
-                assert time.perf_counter() - started < 0.15
-                assert health.status_code == 200
-                assert not screenshot.done()
-                response = await screenshot
-                assert response.status_code == 200
-                assert response.headers["x-computer-use-capture-backend"] == "x11-shm"
+            )
+            assert await asyncio.wait_for(
+                asyncio.to_thread(entered.wait, enter_timeout),
+                timeout=enter_timeout,
+            )
+            started = time.perf_counter()
+            health_request = asyncio.create_task(health_client.get("/healthz"))
+            health = await asyncio.wait_for(health_request, timeout=health_timeout)
+            elapsed = time.perf_counter() - started
+            assert elapsed < health_max_elapsed
+            assert health.status_code == 200
+            assert not screenshot.done()
+            release.set()
+            response = await screenshot
+            assert response.status_code == 200
+            assert response.headers["x-computer-use-capture-backend"] == "x11-shm"
     finally:
         release.set()
-        releaser.join(timeout=1)
+        releaser.join(timeout=enter_timeout)
+        assert not releaser.is_alive()
+        assert releaser_errors == []
 
 
 def _png_bytes(*, width: int = 10, height: int = 10) -> bytes:
