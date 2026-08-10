@@ -22,7 +22,7 @@ borrower always detaches; it never terminates the owner's desktop.
 
 The immediate frame returned by `computer.step()` is not application readiness. Keep readiness
 checks in the application model loop. First-visual-change observation is a separate experimental
-Interface.
+interface.
 
 Placement checks fail before desktop mutation when the Function region is missing, mismatched, or
 unverifiable. The SDK does not silently degrade to an external laptop caller. The handle does not

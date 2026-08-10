@@ -1,97 +1,58 @@
-# Modal optimization
+# Optimize Modal for production
 
-The optimized default is one complete placed trajectory. It is not a flag or a hidden environment
-setting. The application establishes this path:
+Use one placed trajectory for the primary SDK path. There is no `optimized=True` flag, hidden
+environment setting, or performance-profile toggle.
 
-1. An async owner creates one desktop with an exact requested region and explicit resources.
+## Establish the trajectory
+
+1. An async owner creates one desktop in an exact requested region.
 2. The owner produces a versioned session handle.
 3. An application-owned Modal Function in the same requested region receives the handle.
-4. The Function enters one `borrow_async()` context around the complete model trajectory.
-5. One pooled async HTTP client carries each `computer.step()` request for that borrow.
-6. The borrower releases its lease before the owner cleans up the desktop.
+4. The Function enters one `borrow_async()` context around the complete model loop.
+5. One pooled async HTTP client carries every operation for that borrow.
+6. The borrower releases the lease before the owner cleans up the desktop.
 
-See the executable
-[`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example. It
-keeps the application-owned model loop outside the core package.
+The executable
+[`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example owns
+the full lifecycle. Provider model calls remain in application code.
 
-## Computer Step path
+## Use the model-loop path
 
-`await computer.step(actions)` is the primary model-loop Interface. It validates and executes one
-ordered action batch, then captures an immediate post-action frame. One versioned binary response
-returns `ComputerStepResult.actions`, `ComputerStepResult.screenshot`, and
-`ComputerStepResult.timing`. The borrow requires the `computer-step-envelope-v1` daemon capability
-and fails before mutation when that capability is missing.
+Send one ordered action batch through `await computer.step(actions)`. The daemon validates the full
+batch before mutation, runs actions in order, and captures an immediate post-action frame. The
+versioned response returns action results, a byte-backed `Screenshot`, and timing metadata.
 
-Each call carries one ordered action batch.
+The immediate post-action frame does not establish application readiness. Keep workload-specific
+readiness checks in the application. First visual change remains experimental and has a separate
+[observation contract](experimental-visual-change-observation.md).
 
-The immediate frame is a transport-level observation. It is not proof that an application is ready.
-Applications must define and check their own readiness conditions.
+Use `await computer.screenshots.full()` for the initial observation or screenshot-only work. Inline
+full screenshots use the binary response and return a typed `Screenshot`. Call `as_bytes()` when an
+integration needs bytes and `to_base64()` when a provider payload needs base64.
 
-## Screenshot path
+The daemon prefers persistent MSS capture for cursor-hidden screenshots and persistent XTest input.
+It can use a compatibility backend only before capture or input has produced an uncertain result.
+The SDK never replays a mutation after dispatch may have started.
 
-`await computer.screenshots.full()` is the primary screenshot Interface. For inline storage, it
-uses the binary HTTP response and returns a byte-backed `Screenshot`. The public model keeps width,
-height, format, hash, capture time, coordinate space, and cursor metadata. Use `Screenshot.bytes`
-or `Screenshot.as_bytes()` for bytes. Use `Screenshot.to_base64()` only when a provider payload
-needs base64.
+## Keep cost choices visible
 
-The JSON/base64 and REST routes remain available. `screenshots.full_bytes()` remains an explicit
-low-level compatibility method. Do not use it in the primary trajectory: it discards the typed
-metadata contract.
+Set the region, Function and Sandbox resources, images, timeouts, retries, and capacity in
+application code. The SDK has no universal values for those choices. The primary example keeps warm
+capacity off with `min_containers=0`.
 
-Cursor-hidden PNG capture uses the persistent MSS/XShm session and in-memory encoding when the
-native display connection is available. Cursor-visible capture and failed display connections use
-the bounded documented fallback. The daemon does not launch one screenshot process or write one
-temporary file per successful native frame.
+Native async provisioning improves cancellation and cleanup behavior. It does not shorten cold
+allocation or desktop startup. Report allocation, Function dispatch, borrow entry, warm operations,
+and cleanup separately.
 
-## Input and batching
-
-The daemon prefers its persistent XTest/Xlib/XKB input session. It flushes and synchronizes native
-input before it reports success. One lock serializes keyboard, pointer, drag, and batch state.
-
-Send a model-produced ordered action array in one `computer.step([...])` request. The daemon
-validates the complete batch before mutation, runs actions in order, and stops on the first failure
-unless the application explicitly sets continuation. A fallback can run only before any native
-event is emitted. Never replay a step after dispatch may have started.
-
-## Authentication and transport
-
-An attested-tunnel borrow exchanges authentication once and reuses the client state. Each request
-still crosses authenticated Modal ingress. This path reduces repeated authentication work; it does
-not remove ingress routing.
-
-## Cost choices
-
-Region, Function CPU and memory, Sandbox CPU and memory, images, timeouts, retries, and capacity are
-explicit application choices. The SDK does not define one universal value. Warm capacity is off in
-the primary example. A positive Function `min_containers` or a Sandbox warm pool creates optional
-idle cost and needs its own lifecycle policy.
-
-Native async provisioning makes cancellation and cleanup safe. It does not shorten cold allocation
-or desktop startup. Report these phases separately:
-
-- cold allocation and desktop startup;
-- Function dispatch;
-- borrow entry and authentication;
-- repeated warm operation time;
-- lease release and owner cleanup.
-
-Post-action first-visual-change observation is separate and experimental. XDamage is a wake-up hint, and
-full-resolution pixel comparison verifies a changed frame. Polling remains the fallback. A changed
-frame is not application readiness.
-
-Use the [performance guide](https://modal-computer-use.mintlify.app/operate/performance) for the
-public guide.
-
-The repository [benchmarking procedure](benchmarking.md) remains canonical for measurements and
-evidence.
+See [Performance](performance.md) for tuning and measurement boundaries. See
+[Benchmarking](benchmarking.md) for commands and evidence rules.
 
 ## Low-level compatibility
 
-Use direct daemon clients, local clients, synchronous ownership, attach, REST/idempotency routes,
-and `full_bytes()` when you need those specific primitives. These surfaces remain supported. They
-do not silently place an external caller into the optimized topology and are not the documented
-default trajectory.
+Direct daemon clients, local clients, synchronous ownership, attach flows, REST and idempotency
+routes, JSON/base64 screenshots, and `full_bytes()` remain supported. They serve explicit local,
+debugging, recovery, and compatibility workflows. They do not establish the placed trajectory on
+their own, and the SDK does not silently downgrade `computer.step()` to two requests.
 
-The existing JSON/base64, screenshot, action-only, and REST routes remain available. The optimized
-path never silently downgrades from `computer.step()` to two separate requests.
+Use the [public performance guide](https://modal-computer-use.mintlify.app/operate/performance) for
+the hosted workflow.

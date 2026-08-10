@@ -10,9 +10,9 @@ from the pre-action baseline. The signal can reduce unnecessary fixed delays whe
 response is useful. It does not tell you when the application is ready for the next interaction.
 The primary SDK trajectory does not enable this feature by default.
 
-The stable `computer.step()` Interface returns one immediate post-action frame. It does not wait
-for a pixel change. Use this experimental Interface only when the first verified visual difference
-is the observation you need. Neither Interface proves application readiness.
+The stable `computer.step()` interface returns one immediate post-action frame. It does not wait
+for a pixel change. Use this experimental interface only when the first verified visual difference
+is the observation you need. Neither interface proves application readiness.
 
 ```mermaid
 flowchart LR

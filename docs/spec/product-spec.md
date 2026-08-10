@@ -204,7 +204,7 @@ mutation. Protocol preflight also fails before lease acquisition when the daemon
 screenshot metadata, trajectory lease, operation receipt, or `computer-step-envelope-v1` contract.
 The runtime does not fall back to an external caller or to separate action and screenshot requests.
 
-`AsyncComputerSandbox.create()` is the owner Interface. `session_handle()` produces the handoff
+`AsyncComputerSandbox.create()` is the owner interface. `session_handle()` produces the handoff
 value. The canonical executable composition is in
 [`examples/modal_function_session_handoff.py`](../../examples/modal_function_session_handoff.py).
 
@@ -259,7 +259,7 @@ async with AsyncComputerSandbox.create(config=config) as computer:
     await computer.mouse.click(320, 240)
 ```
 
-`create()` is the primary placed-owner Interface. Entry validates a non-empty Modal environment
+`create()` is the primary placed-owner interface. Entry validates a non-empty Modal environment
 and one exact Modal region before any Modal lookup or Sandbox allocation. It also rejects tunnel
 ingress, control VNC, and warm-pool tagging because those modes cannot produce its handoff. The explicitly named
 `create_unplaced()` compatibility method retains low-level async ownership without promising an
@@ -294,7 +294,7 @@ leased mutation; malformed or truncated envelope data enters receipt recovery.
 Screenshot and zoom actions are valid inside a step. Their action-item outputs remain available in
 `actions`. The final `screenshot` remains the one immediate post-action frame. A provider may
 suppress a duplicate final frame in its own output when the last action already supplies the same
-semantic image. Cursor-position queries may stay on the action-only Interface when no frame is
+semantic image. Cursor-position queries may stay on the action-only interface when no frame is
 needed.
 
 ### 5.3 Namespaces
@@ -491,8 +491,8 @@ Its authoritative contract and promotion gates live in
 
 ### 8.1 Supported Modal baseline
 
-The `modal` extra pins the Modal 1.5 line and requires 1.5.2 or later. v8 is locked and tested with
-Modal 1.5.3, the latest stable patch in the audited line on 2026-07-30. The maintained production
+The `modal` extra pins the Modal 1.5 line and requires 1.5.2 or later. The v8 baseline was tested
+with Modal 1.5.3, the latest stable patch in the audited line on 2026-07-30. The maintained production
 path uses standard `modal.Sandbox.create`, Connect Tokens, encrypted tunnels, optional Volumes,
 tags, readiness probes, and supported snapshot methods. Modal 1.5.3 offers the Beta
 `sandbox.filesystem` orchestration API, but the product artifact boundary remains daemon-native.
@@ -911,4 +911,4 @@ Future changes should deepen those contracts rather than broaden core into appli
 surface is canonical only when its ownership, maturity, security boundary, executable behavior,
 and pinning evidence agree.
 
-(End of v8.)
+(End of v9.)

@@ -1,6 +1,6 @@
 # API
 
-The primary Interface is an async owner, a versioned session handle, and one borrowed trajectory in
+The primary interface is an async owner, a versioned session handle, and one borrowed trajectory in
 an application-owned Modal Function. This establishes the placed, connection-reusing path by
 default. There is no `optimized=True` switch and no performance-profile toggle.
 
@@ -117,70 +117,11 @@ The handle is routing identity, not a bearer credential or an authorization boun
 or publish it. A public HTTP wrapper must authenticate callers and authorize the target before it
 invokes the deployed Function; the Function's Modal identity is what resolves fresh access.
 
-For non-Python clients, the
-[application-owned run gateway example](../examples/modal_run_gateway.py) provides a bounded
-spawn-and-poll HTTP control plane. It accepts only opaque application `desktop_key`, `task_key`,
-and required `idempotency_key` values. The host application must inject its principal resolver,
-ownership catalogs, atomic durable run store, and one deployed trajectory Function dispatcher.
-There is no permissive resolver or in-memory production store. Responses contain only the stable
-application run ID and sanitized state; provider call identities, handles, task text, results,
-endpoints, and tokens stay private.
-
-The gateway's closed lifecycle is `reserved -> dispatching -> running`, followed by a terminal
-state or `cancellation_requested`. Every admitted record has an absolute `deadline_at`; extending
-a reconciliation interval never extends that deadline. One application-store admission transaction authoritatively
-handles replay, quota, exclusive ownership of a stable application desktop identity, run creation,
-and creation of a payload-free pending dispatch intent. Versioned HMAC-SHA256 bindings keep raw
-idempotency keys and internal desktop/task identities out of the run record. A matching replay is
-returned before capacity checks; mismatched replay, desktop contention, and tenant quota exhaustion
-return sanitized errors without writes. A second atomic claim moves both the run and intent before
-the sole winner may spawn, including on replay after admission commit. The intent is not an
-automatic delivery queue and has no worker or delivered state.
-A safe cancellation or expiry before dispatch atomically revokes the still-pending intent while it
-releases capacity.
-A stale dispatch claim becomes `indeterminate` and is never automatically spawned again. Modal
-Function dispatch and durable persistence are not one transaction: the stable application run ID
-fences a repeated `borrow_async(run_id=run_id, ...)`, but it cannot reconstruct a missing
-FunctionCall identity after a dispatch/persistence gap.
-
-`GET /v1/runs/{run_id}` is a durable read and never polls Modal or advances state. The cancel route
-only records `cancellation_requested`, its request time, and a bounded cancellation deadline. A
-scheduled application reconciler owns polling and provider cancellation. It keyset-scans a bounded
-number of bounded pages and atomically leases each due record; every write requires both the opaque
-lease token and expected record version. Overlapping reconciler containers are therefore safe.
-Single-container Modal settings are cost controls, not correctness primitives.
-
-Pending polls reset the consecutive provider-error counter. Transiently unavailable polls use
-capped exponential backoff and become `indeterminate` at the configured error cap. At the absolute
-run deadline, recovery first persists cancellation intent, then polls before requesting
-`cancel(terminate_containers=False)`. Cancellation recovery polls before each request and remains
-`cancellation_requested` after an accepted or transiently failed request. Missing call identity,
-irrecoverable provider ambiguity, an error cap, or the cancellation deadline seals the record as
-`indeterminate`; it continues to hold quota and its desktop claim.
-
-The `RunStore` contract is intentionally incompatible with the former `reserve_if_absent` example.
-Adapters need an explicit migration, drain, or backfill. Existing SHA-only rows cannot safely infer
-desktop claims and must not be upgraded implicitly. Terminal `succeeded`, `failed`, and `cancelled`
-transitions release quota and the desktop claim exactly once; `indeterminate` retains both.
-For HMAC rotation, add the replacement as active and retain every referenced prior key for
-verification. Migrate, drain, or expire all rows and tombstones using a retiring version, verify no
-references remain, and only then remove that key. A missing retained key version is an internal
-configuration/migration failure: admission fails closed with no writes rather than treating an old
-identity as new. The example intentionally provides no migration worker or database adapter.
-
-The store contract also owns operator recovery and retention. `SAFE_RELEASE` and `SAFE_REPLACE`
-require a sealed `indeterminate` record, expected version, and non-empty actor, reason, and audit
-identity. Replacement atomically seals the old record and creates a successor with a fresh run and
-idempotency identity; it never reopens the ambiguous run. There is deliberately no production admin
-HTTP route. Retention may compact only released `succeeded`, `failed`, or `cancelled` records after
-the configured interval. Active, leased, cancellation, unresolved-audit, and all `indeterminate`
-records are protected. Replay tombstones must remain authoritative through their fencing window,
-and admission must consult them before quota or desktop acquisition.
-
-The gateway dispatcher calls the user-owned trajectory Function with
-`(handle, task, run_id, deadline_at)`. The deadline is the original timezone-aware absolute value
-from admission, so Function retries or container replacement cannot silently restart the wall-clock
-budget.
+Non-Python applications can place a bounded spawn-and-poll gateway in front of the deployed
+trajectory Function. The gateway has a separate state, idempotency, reconciliation, recovery, and
+retention contract. Read [Run gateway](reference/run-gateway.md) before adapting the
+[`modal_run_gateway.py`](../examples/modal_run_gateway.py) example. The core package does not own
+that application policy.
 
 Use the native-async borrow context inside an async user-owned Modal Function:
 
