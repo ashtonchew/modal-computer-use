@@ -1,5 +1,7 @@
 # Hosted documentation release system
 
+Audience: documentation and release maintainers.
+
 This record defines how the project previews, publishes, and rolls back the hosted
 documentation. It does not publish content.
 
@@ -96,8 +98,8 @@ The production `docs.json` did not define `navigation.versions` on 2026-08-08. T
 therefore unversioned.
 
 The semver-major cutover must add a version selector before publication. Use Mintlify's
-`navigation.versions` Interface. Keep the new major version as `2.x` with a `Latest` tag. Keep the
-last version of the prior Interface as `1.x` with a `Previous` tag. The `2.x` entry may keep the
+`navigation.versions` interface. Keep the new major version as `2.x` with a `Latest` tag. Keep the
+last version of the prior interface as `1.x` with a `Previous` tag. The `2.x` entry may keep the
 current route paths. Store the preserved `1.x` pages below a stable `v1/` path. Do not redirect the
 preserved pages to `2.x`.
 

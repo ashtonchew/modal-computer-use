@@ -1,6 +1,6 @@
 # Migrate from v1 to v2
 
-Version 2 is a semantic-version major release. It changes the primary Modal Interface and its
+Version 2 is a semantic-version major release. It changes the primary Modal interface and its
 lifecycle contract. It does not remove the daemon's JSON/base64 or REST compatibility routes.
 
 Use `AsyncComputerSandbox.create()` in an async context for the primary owner. Call
@@ -54,7 +54,7 @@ not remove those daemon routes. It also does not silently fall back from a rejec
 to JSON after a request has been dispatched.
 
 `screenshots.full_bytes()` remains available for an explicit low-level bytes-only client. It is not
-the primary screenshot Interface because it omits the semantic `Screenshot` metadata contract.
+the primary screenshot interface because it omits the semantic `Screenshot` metadata contract.
 
 Warm capacity remains off unless an operator enables it. Function minimums and Sandbox warm pools
 are separate, inspectable cost choices; they are not part of article parity.

@@ -623,6 +623,46 @@ def test_performance_requires_exact_placement_for_the_primary_trajectory() -> No
     assert "General SDK usage | Leave `runtime.modal_region=None`" not in source
 
 
+def test_performance_guide_links_procedure_and_history_instead_of_embedding_them() -> None:
+    source = (DOCS / "performance.md").read_text(encoding="utf-8")
+
+    assert "[Benchmarking](benchmarking.md)" in source
+    assert "[Archived benchmark evidence](archive/README.md#archived-benchmarks)" in source
+    for removed_section in (
+        "## Benchmark report",
+        "## SDK benchmark surfaces",
+        "### Mock-local baseline",
+        "### Modal ingress comparison",
+    ):
+        assert removed_section not in source
+
+
+def test_run_gateway_contract_has_one_focused_guide() -> None:
+    api = (DOCS / "api.md").read_text(encoding="utf-8")
+    gateway = (DOCS / "reference" / "run-gateway.md").read_text(encoding="utf-8")
+
+    assert "[Run gateway](reference/run-gateway.md)" in api
+    assert "The gateway's closed lifecycle" not in api
+    for contract in (
+        "reserved -> dispatching -> running",
+        "idempotency_key",
+        "cancellation_requested",
+        "indeterminate",
+        "SAFE_RELEASE",
+        "SAFE_REPLACE",
+        "HMAC-SHA256",
+    ):
+        assert contract in gateway
+
+
+def test_active_product_spec_uses_one_revision_marker() -> None:
+    source = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
+
+    assert "**Revision:** v9" in source
+    assert source.rstrip().endswith("(End of v9.)")
+    assert "(End of v8.)" not in source
+
+
 def test_named_image_documentation_matches_browser_prewarm_validation() -> None:
     source = " ".join((DOCS / "configuration.md").read_text(encoding="utf-8").split())
 

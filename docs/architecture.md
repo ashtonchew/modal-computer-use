@@ -9,7 +9,7 @@ The primary composition is async owner → versioned session handle → applicat
 Function → one trajectory borrow → pooled daemon client → owner cleanup. The Function and Sandbox
 use the same exact requested region. Missing or unverifiable placement fails before mutation.
 
-The borrowed computer exposes one deep model-loop Interface: `computer.step()`. The step module
+The borrowed computer exposes one deep model-loop interface: `computer.step()`. The step module
 owns the action-to-immediate-frame contract, envelope encoding and decoding, and result validation.
 It reuses action-batch execution and screenshot capture behind internal seams. Provider examples
 consume the semantic result; they do not know the wire format.
@@ -123,10 +123,6 @@ settle policy, and provider model loops stay outside core. See the
 ## Local mock backend
 
 When `COMPUTER_USE_BACKEND=mock` is set, the daemon answers every action with a deterministic stub response. This lets tests and CI exercise the same routes and SDK surface without an X server. See [local-development.md](local-development.md).
-
-## Reference projects
-
-The design borrows operational patterns from Daytona's computer-use primitives, E2B's compact SDK, the Modal Sandbox examples, and the `anthropic-computer-use-modal` reference. It deliberately does not copy provider-first server APIs or hardcoded model loops; this package stays closer to a primitives layer than a provider-specific agent server.
 
 ## Formal spec
 

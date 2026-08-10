@@ -88,7 +88,7 @@ off because `min_containers=0`; enable paid idle capacity only after you measure
 ## Core API
 
 `AsyncComputerSandbox` plus `ComputerSessionHandle.borrow_async()` is the primary Modal trajectory
-Interface. Keep the provider model loop in your application-owned Modal Function. Use one borrow
+interface. Keep the provider model loop in your application-owned Modal Function. Use one borrow
 around the repeated model loop. Use `computer.step()` for each ordered action array and its
 immediate post-action frame.
 
@@ -110,59 +110,31 @@ article-backed placed topology by themselves.
 | Files and recordings | `computer.artifacts.download()`, `computer.recordings.start()` |
 | Operate | `computer.lifecycle.status()`, `computer.processes.logs(name)` |
 
-Action batches validate the full request before execution. They stop on the first error by default,
-can opt into `continue_on_error`, and can capture a trailing screenshot in the same request.
-The trailing-screenshot option is a retained low-level capability. The borrowed `computer.step()`
-Interface is the default model-loop path. It returns `ComputerStepResult.actions`,
-`ComputerStepResult.screenshot`, and timing metadata.
-
-Inside an active `ComputerSandbox`:
-
-```python
-batch = computer.actions.run(
-    [
-        {"type": "move", "x": 320, "y": 240},
-        {"type": "click", "x": 320, "y": 240},
-    ],
-    screenshot_after=True,
-)
-```
-
-`batch.screenshot` contains the trailing observation when the batch succeeds.
+Action batches validate the full request before execution and stop after the first failure unless
+the caller enables continuation. The trailing-screenshot option is a retained low-level capability.
+The default model-loop path is the borrowed `computer.step()` interface, which returns action
+results, an immediate screenshot, and timing metadata.
 
 See the [API reference](https://modal-computer-use.mintlify.app/reference/overview) for namespace
 semantics and the generated
 [OpenAPI schema](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/openapi.json) for
 HTTP request and response shapes.
 
-## How it works
+## Lifecycle and limits
 
-The primary path has two lifecycle scopes. The async owner creates and owns the Modal Sandbox. It
-waits while the placed Function uses the versioned handle. The Function enters one exclusive
-borrow, runs the complete trajectory over one pooled client, and releases the borrow. The owner then
-terminates the Sandbox, including on ordinary exceptions and cancellation.
+The owner, placed Function, and borrow have separate cleanup scopes. Native async provisioning
+keeps cancellation and cleanup safe, but it does not shorten cold allocation or desktop startup.
+Measure allocation, Function dispatch, borrow entry, and repeated warm operations separately.
 
-Native async provisioning keeps cancellation and cleanup safe. It does not shorten cold allocation
-or desktop startup. Measure cold allocation, Function dispatch, borrow entry, and repeated warm
-operation time separately.
-
-`ComputerSandbox.attach_or_create(name=...)` and its async counterpart acquire a compatible live
-Sandbox with that app-scoped name, or create one if it is missing. If the call creates the Sandbox,
-leaving the block terminates it. If the Sandbox already existed, leaving the block keeps it running.
-
-A daemon inside the Sandbox executes desktop actions, captures screenshots and recordings, runs
-commands, and reads or writes files through `computer.artifacts`.
-
-The daemon admits input through one token bucket for the desktop. The default refills 100
-normalized input-work tokens per second and allows a 400-token burst. A complete ordered batch
-reserves its cost before the first mutation. This keeps the limit away from normal optimized Step
-loops and prevents a rate-limit boundary from partially executing a batch.
-The 100/400 setting is the portable baseline for the minimum tested Sandbox. Run the same-runtime
-capacity gate before setting higher values for another setup.
+The daemon reserves the cost of a complete ordered batch before its first mutation. The default
+input limit is 100 normalized tokens per second with a 400-token burst. This is the portable
+baseline for the minimum tested Sandbox. Measure another setup before raising both values. See
+[Performance](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/performance.md) for
+placement, capacity, and measurement guidance.
 
 ## Performance
 
-[![Warm-operation p50 latency on July 30, 2026. Modal optimized recorded the lowest p50 in each of six displayed rows; configurations and caller topologies differed.](https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/warm-operation-p50-2026-07-30.svg)](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)
+[![Warm-operation p50 latency on July 30, 2026; lower is better.](https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/warm-operation-p50-2026-07-30.svg)](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)
 
 The figure shows July 2026 p50 latency for six computer-use cases, based on 30 successful samples
 per cell. Lower is better. Warm-operation latency starts after the desktop and client connection

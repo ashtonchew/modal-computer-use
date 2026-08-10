@@ -192,7 +192,7 @@ separately before you publish a cost claim.
 
 ## Promote Computer Step
 
-Use a separate gate for the canonical action-to-observation Interface. Run
+Use a separate gate for the canonical action-to-observation interface. Run
 `scripts/run_step_promotion.py` only after an operator authorizes the live, billable run. The
 runner compares these arms inside the same placed Function and the same borrowed trajectory:
 
@@ -244,7 +244,7 @@ growth. It does not retry or replace failed work. A passing run uses no more tha
 cgroup CPU-seconds per normalized token and adds no more than 128 MiB of RSS during the measured
 workload. The
 application-owned Function samples only processes with the target Sandbox's cgroup membership; it
-does not expose privileged command execution through the borrowed-computer Interface.
+does not expose privileged command execution through the borrowed-computer interface.
 
 The measurement configures a 2,000-token refill and 4,000-token burst to keep the limiter outside
 the capacity result. The release gate requires at least 200 representative normalized input-work

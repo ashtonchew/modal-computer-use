@@ -2,6 +2,9 @@
 
 Status: live-verified branch candidate; not published.
 
+Audience: release maintainers. User setup and migration guidance lives in
+[Version 2 migration](migration-v2.md).
+
 This record binds the package, daemon, protocol, documentation, benchmark, and rollback contracts
 for version 2.0.0. It does not authorize a live Modal run, artifact publication, package
 publication, or hosted-documentation publication.

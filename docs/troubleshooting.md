@@ -16,7 +16,7 @@ sealed run ID. Check daemon health, readiness, version, capabilities, and the li
 The SDK closes any partially created client when borrow entry fails.
 
 If the error names `computer-step-envelope-v1`, the installed daemon cannot support the primary
-`computer.step()` Interface. Install a compatible runtime artifact. Do not work around the error by
+`computer.step()` interface. Install a compatible runtime artifact. Do not work around the error by
 issuing separate action and screenshot requests in the optimized path.
 
 If a mutation may have reached the daemon but its response was lost, do not repeat it. Use the
