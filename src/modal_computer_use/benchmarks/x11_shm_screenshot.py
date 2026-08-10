@@ -327,7 +327,7 @@ def _validate_configuration(configuration: Mapping[str, Any]) -> None:
             raise ValueError("native build identity fields changed")
         if build.get("backend") != CANDIDATE_ARM:
             raise ValueError("native build backend marker changed")
-        if build.get("codec") != "png-deflate-level1-fixed-sub":
+        if build.get("codec") != "png-deflate-level1-no-filter":
             raise ValueError("native build codec marker changed")
         if _FULL_SHA256.fullmatch(str(build.get("module_sha256", ""))) is None:
             raise ValueError("native module digest is invalid")

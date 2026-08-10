@@ -43,7 +43,7 @@ pyo3::create_exception!(
 use xcb::{shm, x, Connection};
 
 const BACKEND_MARKER: &str = "x11-shm";
-const CODEC_MARKER: &str = "png-deflate-level1-fixed-sub";
+const CODEC_MARKER: &str = "png-deflate-level1-no-filter";
 const X11_REPLY_TIMEOUT_MS: u64 = 750;
 #[cfg(target_os = "linux")]
 const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(X11_REPLY_TIMEOUT_MS);
@@ -228,10 +228,10 @@ impl RgbPngEncoder {
         // `Compression::Fast` in png 0.18 selects fdeflate's ultra-fast
         // profile, not zlib level 1.  The general route is compared against
         // MSS's level-1 encoder, so select the explicit level here.  The
-        // fixed Sub filter is deliberately stable across frames while
-        // retaining the explicit level-one DEFLATE budget.
+        // Use MSS's filter-0 and level-one policy; the Rust implementation
+        // remains a separate codec and must be validated against live MSS.
         encoder.set_deflate_compression(png::DeflateCompression::Level(1));
-        encoder.set_filter(png::Filter::Sub);
+        encoder.set_filter(png::Filter::NoFilter);
         let mut writer = encoder.write_header().context("PNG header write failed")?;
         writer
             .write_image_data(&self.rgb)
@@ -799,6 +799,7 @@ fn _modal_computer_use_x11_shm(py: Python<'_>, module: &Bound<'_, PyModule>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
     use std::io::Cursor;
     #[cfg(target_os = "linux")]
     use xcb::Xid;
@@ -883,7 +884,7 @@ mod tests {
     #[test]
     fn native_markers_keep_backend_and_codec_semantic() {
         assert_eq!(BACKEND_MARKER, "x11-shm");
-        assert_eq!(CODEC_MARKER, "png-deflate-level1-fixed-sub");
+        assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter");
     }
 
     #[test]
@@ -1096,53 +1097,6 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[test]
-    fn fixed_sub_level_one_stays_within_mss_level_one_payload_budget() {
-        const WIDTH: u16 = 320;
-        const HEIGHT: u16 = 240;
-        let mut bgra = vec![0_u8; WIDTH as usize * HEIGHT as usize * 4];
-        for y in 0..HEIGHT as usize {
-            for x in 0..WIDTH as usize {
-                // Flat browser-like chrome/content bands with repeated cards
-                // exercise the same low-entropy vertical structure as a
-                // Chromium screenshot without depending on a live display.
-                let (red, green, blue) = if y < 48 {
-                    (28, 38, 52)
-                } else if ((x / 64) + (y / 48)) % 2 == 0 {
-                    (246, 247, 249)
-                } else {
-                    (232, 235, 239)
-                };
-                let offset = (y * WIDTH as usize + x) * 4;
-                bgra[offset..offset + 4].copy_from_slice(&[blue, green, red, 255]);
-            }
-        }
-        let mut rgb = vec![0_u8; WIDTH as usize * HEIGHT as usize * 3];
-        for (source, destination) in bgra
-            .chunks_exact(WIDTH as usize * 4)
-            .zip(rgb.chunks_exact_mut(WIDTH as usize * 3))
-        {
-            convert_bgra_row(source, destination);
-        }
-        let ptr = std::ptr::NonNull::new(bgra.as_ptr() as *mut u8).unwrap();
-        let slot = std::mem::ManuallyDrop::new(SharedMemorySlot {
-            ptr,
-            len: bgra.len(),
-            shmseg: xcb::shm::Seg::none(),
-        });
-        let mut scratch = RgbPngEncoder::default();
-        let native = scratch
-            .encode(&slot, WIDTH, HEIGHT, WIDTH as usize * 4)
-            .unwrap();
-        let mss_level_one = encode_reference_png(&rgb, WIDTH, HEIGHT, png::Filter::NoFilter);
-        assert!(
-            native.len() * 100 <= mss_level_one.len() * 110,
-            "fixed-Sub payload {} exceeds MSS level-1 reference {} by more than 10%",
-            native.len(),
-            mss_level_one.len()
-        );
-    }
-
     fn representative_browser_rgb(width: u16, height: u16) -> Vec<u8> {
         let width = width as usize;
         let height = height as usize;
@@ -1185,6 +1139,7 @@ mod tests {
         rgb
     }
 
+    #[cfg(target_os = "linux")]
     fn decode_rgb_png(encoded: &[u8]) -> (u32, u32, Vec<u8>) {
         let decoder = png::Decoder::new(Cursor::new(encoded));
         let mut reader = decoder.read_info().unwrap();
@@ -1212,115 +1167,28 @@ mod tests {
             .unwrap()
     }
 
-    #[test]
-    fn fixed_sub_reference_preserves_rgb_and_reduces_payload_vs_up() {
-        for (width, height) in [(1024_u16, 768_u16), (511_u16, 383_u16)] {
-            let rgb = representative_browser_rgb(width, height);
-            let fixed_sub = encode_reference_png(&rgb, width, height, png::Filter::Sub);
-            let fixed_up = encode_reference_png(&rgb, width, height, png::Filter::Up);
-            let (sub_width, sub_height, sub_rgb) = decode_rgb_png(&fixed_sub);
-            assert_eq!(
-                (sub_width, sub_height, sub_rgb),
-                (u32::from(width), u32::from(height), rgb),
-                "fixed-Sub reference changed decoded RGB for {width}x{height}"
-            );
-            assert!(
-                fixed_sub.len() * 100 <= fixed_up.len() * 88,
-                "fixed-Sub payload {} is not at least 12% below fixed-Up {} for {width}x{height}",
-                fixed_sub.len(),
-                fixed_up.len()
-            );
-        }
-    }
-
     #[cfg(target_os = "linux")]
     #[test]
-    fn fixed_sub_preserves_rgb_and_reduces_representative_payload_vs_up() {
+    fn no_filter_preserves_rgb_and_matches_reference() {
         for (width, height) in [(1024_u16, 768_u16), (511_u16, 383_u16)] {
             let rgb = representative_browser_rgb(width, height);
             let native = encode_native_rgb(&rgb, width, height);
-            let fixed_sub = encode_reference_png(&rgb, width, height, png::Filter::Sub);
-            let fixed_up = encode_reference_png(&rgb, width, height, png::Filter::Up);
+            let reference = encode_reference_png(&rgb, width, height, png::Filter::NoFilter);
             let (native_width, native_height, native_rgb) = decode_rgb_png(&native);
             assert_eq!(
                 (native_width, native_height, native_rgb),
                 (u32::from(width), u32::from(height), rgb),
-                "fixed-Sub PNG changed decoded RGB for {width}x{height}"
+                "NoFilter PNG changed decoded RGB for {width}x{height}"
             );
             assert_eq!(
                 native.len(),
-                fixed_sub.len(),
-                "native fixed-Sub PNG differs from the reference payload for {width}x{height}"
-            );
-            assert!(
-                native.len() * 100 <= fixed_up.len() * 88,
-                "fixed-Sub payload {} is not at least 12% below fixed-Up {} for {width}x{height}",
-                native.len(),
-                fixed_up.len()
+                reference.len(),
+                "native NoFilter PNG differs from the reference payload for {width}x{height}"
             );
         }
     }
 
     #[cfg(target_os = "linux")]
-    #[test]
-    #[ignore = "offline codec measurement; does not assert timing thresholds"]
-    fn report_fixed_sub_vs_up_encode_percentiles() {
-        use std::time::Instant;
-
-        const WARMUPS: usize = 5;
-        const SAMPLES: usize = 20;
-        for (width, height, label) in [(1024_u16, 768_u16, "full"), (511_u16, 383_u16, "region")] {
-            let rgb = representative_browser_rgb(width, height);
-            for _ in 0..WARMUPS {
-                let _ = encode_native_rgb(&rgb, width, height);
-                let _ = encode_reference_png(&rgb, width, height, png::Filter::Up);
-            }
-            let mut sub_ms = Vec::with_capacity(SAMPLES);
-            let mut up_ms = Vec::with_capacity(SAMPLES);
-            let mut sub_sizes = Vec::with_capacity(SAMPLES);
-            let mut up_sizes = Vec::with_capacity(SAMPLES);
-            for sample in 0..SAMPLES {
-                let mut measure_sub = || {
-                    let started = Instant::now();
-                    let encoded = encode_native_rgb(&rgb, width, height);
-                    sub_ms.push(started.elapsed().as_secs_f64() * 1000.0);
-                    sub_sizes.push(encoded.len());
-                };
-                let mut measure_up = || {
-                    let started = Instant::now();
-                    let encoded = encode_reference_png(&rgb, width, height, png::Filter::Up);
-                    up_ms.push(started.elapsed().as_secs_f64() * 1000.0);
-                    up_sizes.push(encoded.len());
-                };
-                if sample % 2 == 0 {
-                    measure_sub();
-                    measure_up();
-                } else {
-                    measure_up();
-                    measure_sub();
-                }
-            }
-            let percentile = |values: &mut [f64], fraction: f64| {
-                values.sort_by(f64::total_cmp);
-                let rank = (values.len() - 1) as f64 * fraction;
-                let lower = rank.floor() as usize;
-                let upper = rank.ceil() as usize;
-                values[lower] + (values[upper] - values[lower]) * (rank - lower as f64)
-            };
-            let sub_size = sub_sizes[0];
-            let up_size = up_sizes[0];
-            assert!(sub_sizes.iter().all(|size| *size == sub_size));
-            assert!(up_sizes.iter().all(|size| *size == up_size));
-            println!(
-                "{{\"case\":\"{label}\",\"width\":{width},\"height\":{height},\"samples\":{SAMPLES},\"sub_payload_bytes\":{sub_size},\"up_payload_bytes\":{up_size},\"sub_encode_p50_ms\":{:.6},\"sub_encode_p95_ms\":{:.6},\"up_encode_p50_ms\":{:.6},\"up_encode_p95_ms\":{:.6}}}",
-                percentile(&mut sub_ms, 0.50),
-                percentile(&mut sub_ms, 0.95),
-                percentile(&mut up_ms, 0.50),
-                percentile(&mut up_ms, 0.95),
-            );
-        }
-    }
-
     fn encode_reference_png(rgb: &[u8], width: u16, height: u16, filter: png::Filter) -> Vec<u8> {
         let mut output = Vec::new();
         let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
