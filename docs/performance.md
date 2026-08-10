@@ -90,8 +90,25 @@ daemon resets that session once after an open or grab failure, then uses the bou
 `maim` fallback path. Cursor-visible capture uses `maim` because MSS does not compose the desktop
 cursor.
 
-Raw responses report the capture backend and timing. A benchmark of the MSS path must verify that
-attribution instead of inferring it from latency.
+### Select the screenshot source
+
+MSS is the default. To request the optional X11 shared-memory source, set
+`ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})` or set
+`COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=x11-shm` for a daemon configured directly. The source
+requires a Managed Image with the X11-SHM extension and native worker.
+
+X11-SHM applies only to cursor-hidden, full-resolution PNG screenshots at scale `1`. It uses
+`miniz_oxide`, PNG Deflate level 1, and `NoFilter`. The source is optional and experimental.
+Scaled, region, JPEG, WebP, raw-pixel, and cursor-visible requests use the compatibility path.
+
+The SDK field and environment variable select a policy. The raw response header
+`X-Computer-Use-Capture-Backend` reports the source that ran. With `auto`, that header may report
+`mss-fallback` after a native failure. The `ComputerStepResult.screenshot` model does not include
+the backend.
+
+Retained fixture evidence recorded 57,721 bytes for X11-SHM and 52,315 bytes for MSS. The X11-SHM
+payload was 10.33% larger. Rare long calls remained in the same run. This evidence does not
+provide a latency guarantee.
 
 Screenshot storage modes have different purposes:
 
@@ -113,16 +130,11 @@ direct REST clients and compatibility work.
 
 Measure CPU use and transferred bytes before changing the default.
 
-The optional `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=auto` policy evaluates the managed
-X11 shared-memory source only after its extension and live display pass readiness. MSS remains the
-production default and the sticky fallback for ordinary native failures in that X-server generation;
-`x11-shm` is an explicit fail-closed choice. Display reply timeouts fail closed rather than starting
-another capture client against the same unresponsive server, and a display restart clears the
-quarantine so the source can be probed again. MSS remains the source for scaled, JPEG, WebP,
-raw-pixel, and other native-ineligible captures; cursor-visible requests use the compatibility path.
-
-Raw screenshot responses report `x11-shm`, `mss`, `mss-fallback`, `scrot`, `maim`, or `unknown` in
-their capture-backend metadata so benchmark artifacts can attribute the actual source directly.
+The optional `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=auto` policy probes X11 shared memory only
+after its extension and live display pass readiness. MSS handles ordinary native failures in that
+X-server generation. An X-server reply timeout fails closed, and a display restart clears the
+quarantine before the source is probed again. Raw screenshot responses report `x11-shm`, `mss`,
+`mss-fallback`, `scrot`, `maim`, or `unknown` in their capture-backend metadata.
 
 ## Batch input
 

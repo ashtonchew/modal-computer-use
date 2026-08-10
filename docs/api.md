@@ -47,6 +47,19 @@ remain open for the complete trajectory.
 normal `ActionBatchResult`. The `screenshot` field is a byte-backed `Screenshot` captured
 immediately after the action phase. This immediate post-action frame is not application readiness.
 
+### Screenshot source selection
+
+MSS is the default screenshot source. Request the optional X11 shared-memory source with
+`ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})`, or set
+`COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=x11-shm` for a directly configured daemon. The source
+requires a Managed Image with the X11-SHM extension and native worker. It covers cursor-hidden,
+full-resolution PNG screenshots at scale `1` and uses `miniz_oxide`, PNG Deflate level 1, and
+`NoFilter`. The source is optional and experimental.
+
+The request selects a policy. The raw response header
+`X-Computer-Use-Capture-Backend` reports the source that ran. `auto` may report `mss-fallback`.
+The `ComputerStepResult.screenshot` model omits the backend.
+
 ## Low-level compatibility
 
 `ComputerSandbox`, `DaemonClient`, `AsyncDaemonClient.local()`, direct REST routes, attach flows,

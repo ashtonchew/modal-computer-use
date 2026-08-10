@@ -166,7 +166,7 @@ Modal Function acting as the client, carries its own request and is not covered 
 | `actions.screenshot_after` | `false` | Retained SDK configuration field. It is not projected into daemon environment and is not a global default for `actions.run`; use the per-call `screenshot_after=` argument. |
 | `actions.trace_actions` | `false` | Maps to `COMPUTER_USE_TRACE_ACTIONS`. `action_trace` is an accepted compatibility input alias. |
 | `actions.screenshot_processing_location` | `"auto"` | `"auto"`, `"daemon"`, or `"client"`; maps to `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION`. The daemon currently records this setting but no route branches on it. `screenshot_processing` is an accepted compatibility input alias. |
-| `actions.screenshot_capture_source` | `"mss"` | `"mss"`, `"auto"`, or `"x11-shm"`; maps to `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE`. `mss` is the production default. `auto` evaluates X11 shared-memory capture only after its extension and live display pass readiness, then keeps MSS as a sticky fallback for ordinary native failures in that X-server generation. A display reply timeout fails closed rather than calling another capture client against the same unresponsive server. Display restart clears the quarantine and re-probes. Explicit `x11-shm` fails readiness instead of silently selecting MSS. |
+| `actions.screenshot_capture_source` | `"mss"` | `"mss"`, `"auto"`, or `"x11-shm"`; maps to `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE`. MSS is the default. `auto` probes X11 shared memory when the extension and display are ready, then may report `mss-fallback` after an ordinary native failure. Explicit `x11-shm` fails readiness when the source is unavailable. |
 | `actions.max_batch_actions` | `50` | Integer `1..500`; maps to `COMPUTER_USE_MAX_BATCH_ACTIONS`. Nested actions count toward the daemon cap. |
 | `actions.max_batch_duration_ms` | `30000` | Integer `1..600000`; maps to `COMPUTER_USE_MAX_BATCH_DURATION_MS`, the wall-clock cap for one batch. |
 | `actions.default_action_timeout_ms` | `5000` | Integer `1..300000`; maps to `COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS`. |
@@ -175,6 +175,20 @@ Modal Function acting as the client, carries its own request and is not covered 
 | `actions.input_rate_limit_burst` | `400` | Integer `1..100000`; maps to `COMPUTER_USE_INPUT_RATE_LIMIT_BURST`. This is the maximum cost that one atomic batch can reserve. |
 | `actions.input_backend` | `"auto"` | `"auto"`, `"xtest"`, or `"xdotool"`; maps to `COMPUTER_USE_INPUT_BACKEND`. |
 | `actions.subprocess_backend` | `"isolated-asyncio"` | `"asyncio"`, `"threaded"`, or `"isolated-asyncio"`; maps to `COMPUTER_USE_SUBPROCESS_BACKEND`. This selects subprocess-backed command and compatibility execution, not native XTest input. |
+
+MSS is the default screenshot source. To request the optional X11 shared-memory source, set the
+SDK field directly:
+
+```python
+ComputerConfig(actions={"screenshot_capture_source": "x11-shm"})
+```
+
+For a daemon configured outside the SDK, set
+`COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE=x11-shm`. The X11-SHM source requires a Managed Image
+with the X11-SHM extension and native worker. It applies to cursor-hidden, full-resolution PNG
+screenshots at scale `1`. The encoder uses `miniz_oxide`, PNG Deflate level 1, and `NoFilter`.
+Treat this source as optional and experimental. See [Performance](performance.md) for its scope
+and retained fixture evidence.
 
 The `normalized-input-work-v1` policy uses these costs:
 
@@ -266,7 +280,7 @@ use `int()` and the documented range remains authoritative.
 | `COMPUTER_USE_INPUT_RATE_LIMIT_BURST` | `400` | Integer; SDK range `1..100000`. Sets the maximum weighted cost admitted at once. |
 | `COMPUTER_USE_SCREENSHOT_MAX_PIXELS` | `8294400` | Integer output-pixel ceiling for region and screenshot-after captures. This has no `ComputerConfig` field. |
 | `COMPUTER_USE_SCREENSHOT_PROCESSING_LOCATION` | `auto` | Supported label: `auto`, `daemon`, `client`. SDK-generated from `actions.screenshot_processing_location`; the daemon stores it but currently has no route behavior that reads it. |
-| `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE` | `mss` | Screenshot source selector: `mss`, `auto`, or `x11-shm`. `mss` is the production default. `auto` evaluates X11 shared-memory capture when the managed Image and live display support it, otherwise it selects MSS for ordinary native failures in that X-server generation. An X-server reply timeout fails closed; display restart clears the quarantine and re-probes. Explicit `x11-shm` fails readiness when unavailable. |
+| `COMPUTER_USE_SCREENSHOT_CAPTURE_SOURCE` | `mss` | Screenshot source selector: `mss`, `auto`, or `x11-shm`. SDK configs project this field to the environment. `auto` may report `mss-fallback` after a native failure. Explicit `x11-shm` fails readiness when unavailable. |
 | `COMPUTER_USE_READINESS_CACHE_TTL_MS` | `1000` | Integer milliseconds for successful desktop-readiness probe caching. Values at or below zero disable caching. This has no `ComputerConfig` field. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_MAX_ENTRIES` | `1000` | Integer cache capacity. `0` disables retention. This has no `ComputerConfig` field. |
 | `COMPUTER_USE_IDEMPOTENCY_CACHE_TTL_SECONDS` | `3600` | Integer cache TTL in seconds. This has no `ComputerConfig` field. |
