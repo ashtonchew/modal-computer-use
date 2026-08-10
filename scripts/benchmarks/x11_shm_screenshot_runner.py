@@ -2276,3 +2276,21 @@ def timeout_origin_main(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def repeated_bounded_x_server_main(
+    sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES,
+    output: str = "",
+) -> None:
+    result = run_repeated_bounded_x_server_probe.remote(
+        sample_count=sample_count,
+    )
+    path = (
+        Path(output)
+        if output
+        else Path("benchmark-data/x11-shm-bounded-x-diagnostic-10.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
