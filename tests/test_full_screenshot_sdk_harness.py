@@ -18,6 +18,7 @@ from modal_computer_use.errors import DaemonHTTPError
 from scripts.benchmarks.x11_shm_screenshot_runner import (
     _build_repeated_bounded_x_server_diagnostic,
     _build_x11_shm_soak_diagnostic,
+    _build_x11_shm_soak_diagnostic_script,
     _is_modal_daemon_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
     _validate_bounded_x_server_sample_count,
@@ -280,6 +281,12 @@ def test_x11_shm_soak_diagnostic_retains_signed_counts_identity_and_cleanup() ->
     assert payload["retries"] == 0
     assert payload["replacement_samples"] == 0
     assert payload["passed"] is False
+
+
+def test_x11_shm_soak_diagnostic_script_compiles() -> None:
+    script = _build_x11_shm_soak_diagnostic_script(10_000)
+
+    compile(script, "<x11-shm-soak>", "exec")
 
 
 def test_x11_shm_soak_diagnostic_retains_safe_entrypoint_and_provenance() -> None:
