@@ -17,11 +17,11 @@ use std::ffi::{c_void, CString};
 #[cfg(target_os = "linux")]
 use std::fmt;
 #[cfg(target_os = "linux")]
-use std::os::fd::AsRawFd;
+use std::io;
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, RawFd};
 #[cfg(target_os = "linux")]
 use std::ptr::NonNull;
-#[cfg(target_os = "linux")]
-use std::thread;
 #[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
@@ -271,27 +271,123 @@ pub struct X11SharedMemoryScreenshotSession {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+enum PollState {
+    Ready(libc::c_short),
+    Timeout,
+}
+
+#[cfg(target_os = "linux")]
+fn poll_timeout_ms(remaining: Duration) -> libc::c_int {
+    (remaining.as_nanos().saturating_add(999_999) / 1_000_000).min(i32::MAX as u128) as libc::c_int
+}
+
+#[cfg(target_os = "linux")]
+fn poll_socket_until_with<F>(
+    fd: RawFd,
+    events: libc::c_short,
+    deadline: Instant,
+    mut poll: F,
+) -> Result<PollState>
+where
+    F: FnMut(&mut libc::pollfd, libc::c_int) -> io::Result<libc::c_int>,
+{
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(PollState::Timeout);
+        }
+        // Round up so a sub-millisecond remainder cannot turn into a busy
+        // loop of zero-timeout polls while the absolute deadline remains
+        // authoritative.
+        let timeout_ms = poll_timeout_ms(remaining);
+        let mut descriptor = libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        };
+        match poll(&mut descriptor, timeout_ms) {
+            Ok(0) => return Ok(PollState::Timeout),
+            Ok(result) if result > 0 => return Ok(PollState::Ready(descriptor.revents)),
+            Ok(result) => {
+                return Err(anyhow!("poll returned unexpected result {result}"));
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn poll_socket_until(fd: RawFd, events: libc::c_short, deadline: Instant) -> Result<PollState> {
+    poll_socket_until_with(fd, events, deadline, |descriptor, timeout_ms| {
+        let result = unsafe { libc::poll(descriptor, 1, timeout_ms) };
+        if result >= 0 {
+            Ok(result)
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn poll_socket_error(operation: &str, revents: libc::c_short) -> anyhow::Error {
+    anyhow!(
+        "{operation} socket became unavailable (poll revents 0x{:x})",
+        revents as libc::c_ushort
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn poll_ready_reply<T, E, F>(
+    operation: &str,
+    revents: libc::c_short,
+    deadline: Instant,
+    mut poll_for_reply: F,
+) -> Result<Option<T>>
+where
+    E: std::error::Error + Send + Sync + 'static,
+    F: FnMut() -> Option<std::result::Result<T, E>>,
+{
+    if revents & libc::POLLNVAL != 0 {
+        return Err(poll_socket_error(operation, revents));
+    }
+    if Instant::now() >= deadline {
+        return Err(reply_timeout(operation));
+    }
+    if let Some(reply) = poll_for_reply() {
+        if Instant::now() >= deadline {
+            return Err(reply_timeout(operation));
+        }
+        return reply
+            .map(Some)
+            .with_context(|| format!("{operation} reply failed"));
+    }
+    if revents & (libc::POLLERR | libc::POLLHUP) != 0 {
+        return Err(poll_socket_error(operation, revents));
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "linux")]
 fn poll_reply_bounded<C>(conn: &Connection, cookie: &C, operation: &str) -> Result<C::Reply>
 where
     C: xcb::CookieWithReplyChecked,
 {
     let deadline = Instant::now() + X11_REPLY_TIMEOUT;
-    let remaining_ms = deadline
-        .saturating_duration_since(Instant::now())
-        .as_millis();
-    let timeout_ms = i32::try_from(remaining_ms).unwrap_or(i32::MAX).max(1);
-    let mut descriptor = libc::pollfd {
-        fd: conn.as_raw_fd(),
-        events: libc::POLLOUT,
-        revents: 0,
-    };
-    let poll_result = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
-    if poll_result == 0 {
-        return Err(reply_timeout(operation));
+    match poll_socket_until(conn.as_raw_fd(), libc::POLLOUT, deadline)
+        .with_context(|| format!("{operation} socket poll failed"))?
+    {
+        PollState::Timeout => return Err(reply_timeout(operation)),
+        PollState::Ready(revents)
+            if revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 =>
+        {
+            return Err(poll_socket_error(operation, revents));
+        }
+        PollState::Ready(_) => {}
     }
-    if poll_result < 0 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("{operation} socket poll failed"));
+    if Instant::now() >= deadline {
+        return Err(reply_timeout(operation));
     }
     conn.flush()
         .with_context(|| format!("{operation} flush failed"))?;
@@ -299,15 +395,33 @@ where
         return Err(reply_timeout(operation));
     }
     loop {
-        if let Some(reply) = conn.poll_for_reply(cookie) {
-            return reply.with_context(|| format!("{operation} reply failed"));
+        if let Some(reply) =
+            poll_ready_reply(operation, 0, deadline, || conn.poll_for_reply(cookie))?
+        {
+            return Ok(reply);
         }
         conn.has_error()
             .with_context(|| format!("{operation} connection failed"))?;
-        if Instant::now() >= deadline {
-            return Err(reply_timeout(operation));
+        let poll_state = poll_socket_until(
+            conn.as_raw_fd(),
+            libc::POLLIN | libc::POLLERR | libc::POLLHUP | libc::POLLNVAL,
+            deadline,
+        )
+        .with_context(|| format!("{operation} socket poll failed"))?;
+        match poll_state {
+            PollState::Timeout => return Err(reply_timeout(operation)),
+            PollState::Ready(revents) => {
+                // Give XCB one last chance to drain a reply when readiness
+                // arrives together with a terminal error/hangup event.
+                if let Some(reply) =
+                    poll_ready_reply(operation, revents, deadline, || conn.poll_for_reply(cookie))?
+                {
+                    return Ok(reply);
+                }
+                conn.has_error()
+                    .with_context(|| format!("{operation} connection failed"))?;
+            }
         }
-        thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -775,6 +889,176 @@ mod tests {
     #[test]
     fn x11_reply_budget_keeps_the_preregistered_headroom() {
         assert_eq!(X11_REPLY_TIMEOUT_MS, 750);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn poll_timeout_rounds_up_without_extending_the_deadline() {
+        assert_eq!(poll_timeout_ms(Duration::from_nanos(1)), 1);
+        assert_eq!(poll_timeout_ms(Duration::from_millis(750)), 750);
+        assert_eq!(
+            poll_timeout_ms(Duration::from_millis(100) + Duration::from_nanos(1)),
+            101
+        );
+        assert!(poll_timeout_ms(Duration::from_millis(100)) > 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn test_pipe() -> [RawFd; 2] {
+        let mut fds = [-1; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        fds
+    }
+
+    #[cfg(target_os = "linux")]
+    fn close_test_fd(fd: RawFd) {
+        assert_eq!(unsafe { libc::close(fd) }, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_poll_wakes_for_readable_pipe() {
+        let [read_fd, write_fd] = test_pipe();
+        let byte = [1_u8];
+        assert_eq!(
+            unsafe { libc::write(write_fd, byte.as_ptr().cast(), byte.len()) },
+            1
+        );
+        let state = poll_socket_until(
+            read_fd,
+            libc::POLLIN,
+            Instant::now() + Duration::from_millis(100),
+        )
+        .unwrap();
+        assert!(matches!(
+            state,
+            PollState::Ready(revents) if revents & libc::POLLIN != 0
+        ));
+        close_test_fd(read_fd);
+        close_test_fd(write_fd);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_poll_returns_timeout_at_deadline() {
+        let [read_fd, write_fd] = test_pipe();
+        let state = poll_socket_until(
+            read_fd,
+            libc::POLLIN,
+            Instant::now() + Duration::from_millis(20),
+        )
+        .unwrap();
+        assert_eq!(state, PollState::Timeout);
+        close_test_fd(read_fd);
+        close_test_fd(write_fd);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_poll_reports_hup_and_invalid_fd() {
+        let [read_fd, write_fd] = test_pipe();
+        close_test_fd(write_fd);
+        let state = poll_socket_until(
+            read_fd,
+            libc::POLLIN | libc::POLLHUP,
+            Instant::now() + Duration::from_millis(100),
+        )
+        .unwrap();
+        assert!(matches!(
+            state,
+            PollState::Ready(revents) if revents & libc::POLLHUP != 0
+        ));
+        close_test_fd(read_fd);
+
+        let state = poll_socket_until(
+            -1,
+            libc::POLLIN,
+            Instant::now() + Duration::from_millis(100),
+        )
+        .unwrap();
+        assert!(matches!(
+            state,
+            PollState::Ready(revents) if revents & libc::POLLNVAL != 0
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_poll_retries_interrupted_syscalls() {
+        let mut calls = 0;
+        let mut max_timeout_ms = 0;
+        let state = poll_socket_until_with(
+            -1,
+            libc::POLLIN,
+            Instant::now() + Duration::from_millis(100),
+            |descriptor, timeout_ms| {
+                calls += 1;
+                max_timeout_ms = max_timeout_ms.max(timeout_ms);
+                if calls == 1 {
+                    Err(io::Error::from_raw_os_error(libc::EINTR))
+                } else {
+                    descriptor.revents = libc::POLLIN;
+                    Ok(1)
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, 2);
+        assert!(max_timeout_ms > 0 && max_timeout_ms <= 100);
+        assert_eq!(state, PollState::Ready(libc::POLLIN));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ready_reply_is_drained_before_hup_error() {
+        let mut calls = 0;
+        let reply = poll_ready_reply(
+            "test reply",
+            libc::POLLHUP,
+            Instant::now() + Duration::from_millis(100),
+            || {
+                calls += 1;
+                Some(Ok::<u8, io::Error>(7_u8))
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(reply, Some(7));
+
+        let error = poll_ready_reply(
+            "test reply",
+            libc::POLLHUP,
+            Instant::now() + Duration::from_millis(100),
+            || None::<std::result::Result<u8, io::Error>>,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("socket became unavailable"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ready_reply_does_not_cross_the_deadline() {
+        let error = poll_ready_reply(
+            "expired reply",
+            0,
+            Instant::now() - Duration::from_millis(1),
+            || Some(Ok::<u8, io::Error>(7_u8)),
+        )
+        .unwrap_err();
+        assert!(is_reply_timeout(&error));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn socket_poll_propagates_non_interrupted_errors() {
+        let error = poll_socket_until_with(
+            -1,
+            libc::POLLIN,
+            Instant::now() + Duration::from_millis(100),
+            |_descriptor, _timeout_ms| Err(io::Error::from_raw_os_error(libc::EBADF)),
+        )
+        .unwrap_err();
+        assert!(error.chain().any(|cause| cause.is::<io::Error>()));
     }
 
     #[test]
