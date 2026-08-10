@@ -142,6 +142,11 @@ def _validate_artifact_structure(
     _validate_operational_details(
         operational_details, require_publishable=require_publishable
     )
+    _validate_soak_resource_consistency(
+        operational_gates,
+        operational_details,
+        require_publishable=require_publishable,
+    )
     for gate, detail in (
         ("concurrency_matrix", "concurrency"),
         ("readiness_parity", "readiness"),
@@ -216,8 +221,27 @@ def _evaluate_validated_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
         or operational_gates.get("region_captures") != 5_000
     ):
         reasons.append("operational soak did not complete balanced full and regional captures")
-    if operational_gates.get("fd_delta") != 0 or operational_gates.get("mapping_delta") != 0:
-        reasons.append("operational soak resource counts changed")
+    missing_resource_deltas = [
+        name
+        for name in ("fd_delta", "mapping_delta")
+        if operational_gates.get(name) is None
+    ]
+    changed_resource_deltas = [
+        name
+        for name in ("fd_delta", "mapping_delta")
+        if operational_gates.get(name) is not None
+        and operational_gates.get(name) != 0
+    ]
+    if missing_resource_deltas:
+        reasons.append(
+            "operational soak resource counts unavailable: "
+            + ", ".join(missing_resource_deltas)
+        )
+    if changed_resource_deltas:
+        reasons.append(
+            "operational soak resource counts changed: "
+            + ", ".join(changed_resource_deltas)
+        )
     if (
         _nonnegative_integer(operational_gates.get("rss_growth_bytes"), "rss_growth_bytes")
         > 16 * 1024 * 1024
@@ -449,8 +473,12 @@ def _validate_operational_gates(
         raise ValueError("operational soak must contain 10000 captures")
     if require_publishable and (full_captures != 5_000 or region_captures != 5_000):
         raise ValueError("operational soak must alternate 5000 full and regional captures")
-    fd_delta = _nonnegative_integer(gates.get("fd_delta"), "fd_delta")
-    mapping_delta = _nonnegative_integer(gates.get("mapping_delta"), "mapping_delta")
+    if require_publishable:
+        fd_delta = _nonnegative_integer(gates.get("fd_delta"), "fd_delta")
+        mapping_delta = _nonnegative_integer(gates.get("mapping_delta"), "mapping_delta")
+    else:
+        fd_delta = _optional_integer(gates.get("fd_delta"), "fd_delta")
+        mapping_delta = _optional_integer(gates.get("mapping_delta"), "mapping_delta")
     if require_publishable and (fd_delta != 0 or mapping_delta != 0):
         raise ValueError("resource counts changed during the operational soak")
     rss_growth = _nonnegative_integer(gates.get("rss_growth_bytes"), "rss_growth_bytes")
@@ -655,6 +683,38 @@ def _validate_operational_details(
         raise ValueError("terminal Sandbox cleanup detail did not pass")
 
 
+def _validate_soak_resource_consistency(
+    gates: Mapping[str, Any],
+    details: Mapping[str, Any],
+    *,
+    require_publishable: bool,
+) -> None:
+    """Keep retained resource gate values tied to the daemon-local soak."""
+
+    soak = _mapping(details.get("soak"), "soak")
+    if not isinstance(soak.get("passed"), bool):
+        raise ValueError("soak detail must retain a boolean decision")
+    for key in ("fd_delta", "mapping_delta"):
+        gate_value = (
+            _nonnegative_integer(gates.get(key), f"operational_gates.{key}")
+            if require_publishable
+            else _optional_integer(gates.get(key), f"operational_gates.{key}")
+        )
+        detail_value = (
+            _nonnegative_integer(soak.get(key), f"operational_details.soak.{key}")
+            if require_publishable
+            else _optional_integer(soak.get(key), f"operational_details.soak.{key}")
+        )
+        if gate_value != detail_value:
+            raise ValueError(f"soak detail disagrees with operational gate {key}")
+    if soak.get("passed") and (
+        gates.get("fd_delta") != 0 or gates.get("mapping_delta") != 0
+    ):
+        raise ValueError(
+            "soak detail passed despite incomplete or changed resource counts"
+        )
+
+
 def _paired_bootstrap_median_difference(
     baseline: Sequence[float],
     candidate: Sequence[float],
@@ -732,6 +792,12 @@ def _positive_integer(value: Any, label: str) -> int:
     if result <= 0:
         raise ValueError(f"{label} must be positive")
     return result
+
+
+def _optional_integer(value: Any, label: str) -> int | None:
+    if value is None:
+        return None
+    return _integer(value, label)
 
 
 def _nonnegative_integer(value: Any, label: str) -> int:

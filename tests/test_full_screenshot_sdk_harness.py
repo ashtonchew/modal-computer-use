@@ -222,6 +222,17 @@ def test_promotion_soak_matches_daemon_argv_token_not_helper_text() -> None:
     assert "_is_modal_daemon_cmdline(command)" in soak
 
 
+def test_promotion_artifact_retains_missing_resource_deltas_as_unknown() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"fd_delta": soak.get("fd_delta"),' in runner
+    assert '"mapping_delta": soak.get("mapping_delta"),' in runner
+    assert 'soak.get("fd_delta", -1)' not in runner
+    assert 'soak.get("mapping_delta", -1)' not in runner
+
+
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
     runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
         encoding="utf-8"

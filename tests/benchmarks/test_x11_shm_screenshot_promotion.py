@@ -431,6 +431,57 @@ def test_rejected_artifact_retains_failed_operational_details() -> None:
         validate_x11_shm_screenshot_artifact(artifact)
 
 
+@pytest.mark.parametrize("key", ["fd_delta", "mapping_delta"])
+def test_rejected_artifact_retains_missing_resource_delta(key: str) -> None:
+    artifact = _artifact()
+    artifact["status"] = "rejected"
+    artifact["operational_gates"][key] = None
+    artifact["operational_details"]["soak"].pop(key)
+    artifact["operational_details"]["soak"]["passed"] = False
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(
+        artifact, require_publishable=False
+    )
+
+    validate_x11_shm_screenshot_artifact(artifact, require_publishable=False)
+
+    assert artifact["promotion"]["decision"] == "reject"
+    assert any(
+        "unavailable" in reason and key in reason
+        for reason in artifact["promotion"]["reasons"]
+    )
+
+
+@pytest.mark.parametrize("key", ["fd_delta", "mapping_delta"])
+def test_rejected_artifact_retains_signed_resource_delta(key: str) -> None:
+    artifact = _artifact()
+    artifact["status"] = "rejected"
+    artifact["operational_gates"][key] = -1
+    artifact["operational_details"]["soak"][key] = -1
+    artifact["operational_details"]["soak"]["passed"] = False
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(
+        artifact, require_publishable=False
+    )
+
+    validate_x11_shm_screenshot_artifact(artifact, require_publishable=False)
+
+    assert artifact["promotion"]["decision"] == "reject"
+    assert any(
+        "changed" in reason and key in reason
+        for reason in artifact["promotion"]["reasons"]
+    )
+
+
+def test_rejected_artifact_rejects_gate_and_soak_delta_disagreement() -> None:
+    artifact = _artifact()
+    artifact["status"] = "rejected"
+    artifact["operational_gates"]["fd_delta"] = None
+    artifact["operational_details"]["soak"]["fd_delta"] = -1
+    artifact["operational_details"]["soak"]["passed"] = False
+
+    with pytest.raises(ValueError, match="soak detail disagrees"):
+        evaluate_x11_shm_screenshot_promotion(artifact, require_publishable=False)
+
+
 def test_gate_retains_and_rejects_concurrency_regression() -> None:
     artifact = _artifact()
     artifact["operational_gates"]["concurrency_matrix"] = False
