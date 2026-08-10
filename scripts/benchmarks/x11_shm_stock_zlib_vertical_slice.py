@@ -28,6 +28,7 @@ import modal
 from PIL import Image
 
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig
+from modal_computer_use.benchmarks.full_screenshot_sdk_harness import build_paired_schedule
 from modal_computer_use.config import (
     ActionConfig,
     BrowserConfig,
@@ -769,11 +770,6 @@ def _safe_codec_proof(proof: object) -> dict[str, Any]:
 
 def _validate_fixed_schedule(measurement: Mapping[str, Any]) -> bool:
     """Require the exact preregistered AB/BA rows, not only a label."""
-
-    try:
-        from benchmarks.full_screenshot_sdk_harness import build_paired_schedule
-    except ModuleNotFoundError:
-        from scripts.benchmarks.full_screenshot_sdk_harness import build_paired_schedule
 
     measured = measurement.get("schedule")
     warmups = measurement.get("warmup_schedule")

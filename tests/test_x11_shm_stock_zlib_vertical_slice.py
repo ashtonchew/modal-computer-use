@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from modal_computer_use.benchmarks.full_screenshot_sdk_harness import build_paired_schedule
 from scripts.benchmarks import x11_shm_stock_zlib_vertical_slice as runner
-from scripts.benchmarks.full_screenshot_sdk_harness import build_paired_schedule
 
 
 def _observation(*, backend: str, sdk_ms: float, payload: int) -> dict[str, object]:
