@@ -574,17 +574,45 @@ def _is_x11_shm_worker_cmdline(command: bytes) -> bool:
     )
 
 
-def _select_root_daemon_match(
-    matches: list[dict[str, int | bool | str]],
-) -> tuple[dict[str, int | bool | str] | None, int, int]:
-    """Select the one PID-namespace root from exact daemon argv matches."""
+def _select_daemon_worker_pair(
+    daemon_matches: list[dict[str, int | bool | str]],
+    worker_matches: list[dict[str, int | bool | str]],
+) -> tuple[
+    dict[str, int | bool | str] | None,
+    dict[str, int | bool | str] | None,
+    int,
+    int,
+    int,
+    int,
+]:
+    """Select the unique exact daemon/worker pair joined by worker PPID."""
 
-    roots = [match for match in matches if match.get("parent_pid") == 0]
-    if len(roots) != 1:
-        return None, len(matches), len(roots)
-    selected = dict(roots[0])
-    selected.pop("parent_pid", None)
-    return selected, len(matches), 1
+    pairs = [
+        (daemon, worker)
+        for daemon in daemon_matches
+        for worker in worker_matches
+        if worker.get("parent_pid") == daemon.get("pid")
+    ]
+    root_count = sum(match.get("parent_pid") == 0 for match in daemon_matches)
+    if len(pairs) != 1:
+        return (
+            None,
+            None,
+            len(daemon_matches),
+            len(worker_matches),
+            len(pairs),
+            root_count,
+        )
+    selected_daemon = dict(pairs[0][0])
+    selected_daemon.pop("parent_pid", None)
+    return (
+        selected_daemon,
+        dict(pairs[0][1]),
+        len(daemon_matches),
+        len(worker_matches),
+        1,
+        root_count,
+    )
 
 
 _DAEMON_ARGV_MATCHER_SOURCE = dedent(
@@ -593,8 +621,8 @@ _DAEMON_ARGV_MATCHER_SOURCE = dedent(
 _X11_WORKER_ARGV_MATCHER_SOURCE = dedent(
     inspect.getsource(_is_x11_shm_worker_cmdline)
 ).strip()
-_ROOT_DAEMON_SELECTOR_SOURCE = dedent(
-    inspect.getsource(_select_root_daemon_match)
+_DAEMON_WORKER_SELECTOR_SOURCE = dedent(
+    inspect.getsource(_select_daemon_worker_pair)
 ).strip()
 
 
@@ -2850,20 +2878,40 @@ def _build_x11_shm_scheduling_diagnostic(
     daemon_root_match_count_after = _retain_daemon_local_count(
         observation.get("daemon_root_match_count_after"), maximum=100
     )
+    worker_match_count = _retain_daemon_local_count(
+        observation.get("worker_match_count"), maximum=100
+    )
+    worker_match_count_after = _retain_daemon_local_count(
+        observation.get("worker_match_count_after"), maximum=100
+    )
+    daemon_worker_pair_count = _retain_daemon_local_count(
+        observation.get("daemon_worker_pair_count"), maximum=100
+    )
+    daemon_worker_pair_count_after = _retain_daemon_local_count(
+        observation.get("daemon_worker_pair_count_after"), maximum=100
+    )
     daemon_count_pair_valid = bool(
         daemon_match_count is not None
         and daemon_root_match_count is not None
+        and worker_match_count is not None
+        and daemon_worker_pair_count is not None
         and daemon_root_match_count <= daemon_match_count
+        and daemon_worker_pair_count <= worker_match_count
     )
     daemon_count_pair_after_valid = bool(
         daemon_match_count_after is not None
         and daemon_root_match_count_after is not None
+        and worker_match_count_after is not None
+        and daemon_worker_pair_count_after is not None
         and daemon_root_match_count_after <= daemon_match_count_after
+        and daemon_worker_pair_count_after <= worker_match_count_after
     )
     if not daemon_count_pair_valid:
         daemon_match_count = daemon_root_match_count = None
+        worker_match_count = daemon_worker_pair_count = None
     if not daemon_count_pair_after_valid:
         daemon_match_count_after = daemon_root_match_count_after = None
+        worker_match_count_after = daemon_worker_pair_count_after = None
     daemon_same = bool(
         daemon_before
         and daemon_after
@@ -2894,11 +2942,17 @@ def _build_x11_shm_scheduling_diagnostic(
         and daemon_count_pair_valid
         and daemon_match_count is not None
         and daemon_match_count >= 1
-        and daemon_root_match_count == 1
+        and daemon_root_match_count is not None
+        and worker_match_count is not None
+        and worker_match_count >= 1
+        and daemon_worker_pair_count == 1
         and daemon_count_pair_after_valid
         and daemon_match_count_after is not None
         and daemon_match_count_after >= 1
-        and daemon_root_match_count_after == 1
+        and daemon_root_match_count_after is not None
+        and worker_match_count_after is not None
+        and worker_match_count_after >= 1
+        and daemon_worker_pair_count_after == 1
         and worker_same
         and summaries is not None
         and correlations is not None
@@ -2967,6 +3021,10 @@ def _build_x11_shm_scheduling_diagnostic(
         "daemon_root_match_count": daemon_root_match_count,
         "daemon_match_count_after": daemon_match_count_after,
         "daemon_root_match_count_after": daemon_root_match_count_after,
+        "worker_match_count": worker_match_count,
+        "worker_match_count_after": worker_match_count_after,
+        "daemon_worker_pair_count": daemon_worker_pair_count,
+        "daemon_worker_pair_count_after": daemon_worker_pair_count_after,
         "worker_identity_before": worker_before,
         "worker_identity_after": worker_after,
         "worker_identity_same": worker_same,
@@ -3536,7 +3594,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
 
         __DAEMON_MATCHER__
 
-        __ROOT_DAEMON_SELECTOR__
+        __DAEMON_WORKER_SELECTOR__
 
         __WORKER_MATCHER__
 
@@ -3574,7 +3632,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
             except (OSError, IndexError, ValueError):
                 return None
 
-        def daemon_identity():
+        def daemon_candidates():
             matches = []
             for entry in Path("/proc").iterdir():
                 if not entry.name.isdigit():
@@ -3594,9 +3652,9 @@ def _build_x11_shm_scheduling_diagnostic_script(
                         "argv_match": True,
                         "argv_module": "modal_computer_use.daemon",
                     })
-            return _select_root_daemon_match(matches)
+            return matches
 
-        def worker_identity(daemon_pid):
+        def worker_candidates():
             matches = []
             for entry in Path("/proc").iterdir():
                 if not entry.name.isdigit():
@@ -3608,7 +3666,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
                 if not _is_x11_shm_worker_cmdline(command):
                     continue
                 stat = process_stat(int(entry.name))
-                if stat is not None and stat["ppid"] == daemon_pid:
+                if stat is not None:
                     matches.append({
                         "pid": int(entry.name),
                         "starttime_ticks": stat["starttime_ticks"],
@@ -3616,7 +3674,12 @@ def _build_x11_shm_scheduling_diagnostic_script(
                         "argv_match": True,
                         "argv_module": "_x11_shm_worker.py",
                     })
-            return matches[0] if len(matches) == 1 else None
+            return matches
+
+        def process_identity_pair():
+            return _select_daemon_worker_pair(
+                daemon_candidates(), worker_candidates()
+            )
 
         def schedstat(pid):
             try:
@@ -3814,6 +3877,10 @@ def _build_x11_shm_scheduling_diagnostic_script(
         daemon_root_match_count = None
         daemon_match_count_after = None
         daemon_root_match_count_after = None
+        worker_match_count = None
+        worker_match_count_after = None
+        daemon_worker_pair_count = None
+        daemon_worker_pair_count_after = None
         worker_before = None
         worker_after = None
         daemon_sched_before = None
@@ -3922,14 +3989,14 @@ def _build_x11_shm_scheduling_diagnostic_script(
             failure_phase = "identity_before"
             (
                 daemon_before,
+                worker_before,
                 daemon_match_count,
+                worker_match_count,
+                daemon_worker_pair_count,
                 daemon_root_match_count,
-            ) = daemon_identity()
-            if daemon_before is None:
-                raise RuntimeError("daemon process identity unavailable")
-            worker_before = worker_identity(daemon_before["pid"])
-            if worker_before is None:
-                raise RuntimeError("x11-shm worker identity unavailable")
+            ) = process_identity_pair()
+            if daemon_before is None or worker_before is None:
+                raise RuntimeError("daemon/worker process identity pair unavailable")
             daemon_sched_before = schedstat(daemon_before["pid"])
             client_sched_before = schedstat(os.getpid())
             if daemon_sched_before is None or client_sched_before is None:
@@ -3963,14 +4030,14 @@ def _build_x11_shm_scheduling_diagnostic_script(
             failure_phase = "identity_after"
             (
                 daemon_after,
+                worker_after,
                 daemon_match_count_after,
+                worker_match_count_after,
+                daemon_worker_pair_count_after,
                 daemon_root_match_count_after,
-            ) = daemon_identity()
-            if daemon_after is None:
-                raise RuntimeError("terminal daemon identity unavailable")
-            worker_after = worker_identity(daemon_after["pid"])
-            if worker_after is None:
-                raise RuntimeError("terminal x11-shm worker identity unavailable")
+            ) = process_identity_pair()
+            if daemon_after is None or worker_after is None:
+                raise RuntimeError("terminal daemon/worker identity pair unavailable")
             daemon_sched_after = schedstat(daemon_after["pid"])
             client_sched_after = schedstat(os.getpid())
             if daemon_sched_after is None or client_sched_after is None:
@@ -4055,6 +4122,10 @@ def _build_x11_shm_scheduling_diagnostic_script(
             "daemon_root_match_count": daemon_root_match_count,
             "daemon_match_count_after": daemon_match_count_after,
             "daemon_root_match_count_after": daemon_root_match_count_after,
+            "worker_match_count": worker_match_count,
+            "worker_match_count_after": worker_match_count_after,
+            "daemon_worker_pair_count": daemon_worker_pair_count,
+            "daemon_worker_pair_count_after": daemon_worker_pair_count_after,
             "worker_identity_before": worker_before,
             "worker_identity_after": worker_after,
             "daemon_schedstat_before": daemon_sched_before,
@@ -4078,7 +4149,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
     )
     return (
         template.replace("__DAEMON_MATCHER__", _DAEMON_ARGV_MATCHER_SOURCE)
-        .replace("__ROOT_DAEMON_SELECTOR__", _ROOT_DAEMON_SELECTOR_SOURCE)
+        .replace("__DAEMON_WORKER_SELECTOR__", _DAEMON_WORKER_SELECTOR_SOURCE)
         .replace("__WORKER_MATCHER__", _X11_WORKER_ARGV_MATCHER_SOURCE)
         .replace("__CAPTURES__", str(captures))
         .replace("__WARMUPS__", str(warmups))
