@@ -180,6 +180,24 @@ def test_full_inline_returns_semantic_screenshot_from_one_binary_request() -> No
     ]
 
 
+def test_full_inline_accepts_prefixed_route_timing_metadata() -> None:
+    client = _BinaryScreenshotClient(
+        header_overrides={
+            "x-computer-use-timing-ms": (
+                '{"total_ms":5.0,"route_ready_ms":0.1,'
+                '"route_lock_wait_ms":0.2,"route_operation_ms":5.5,'
+                '"route_total_ms":6.0}'
+            )
+        }
+    )
+    namespace = ScreenshotsNamespace(client)  # type: ignore[arg-type]
+
+    screenshot = namespace.full()
+
+    assert screenshot.as_bytes() == b"image-bytes"
+    assert len(client.calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_async_full_inline_returns_semantic_screenshot_from_one_binary_request() -> None:
     client = _AsyncBinaryScreenshotClient()

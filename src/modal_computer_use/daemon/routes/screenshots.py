@@ -5,7 +5,11 @@ import json
 from fastapi import APIRouter, Request, Response
 
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.routes.execution import run_screenshot_capture
+from modal_computer_use.daemon.routes.execution import (
+    ScreenshotCaptureTiming,
+    run_screenshot_capture,
+    run_screenshot_capture_with_timing,
+)
 from modal_computer_use.daemon.routes.validation import (
     validate_region,
 )
@@ -92,12 +96,26 @@ def enforce_screenshot_options_pixels(
     )
 
 
-def _screenshot_headers(shot) -> dict[str, str]:
+def _screenshot_headers(
+    shot,
+    *,
+    capture_timing: ScreenshotCaptureTiming | None = None,
+) -> dict[str, str]:
     cursor_position = (
         shot.cursor_position.model_dump(mode="json")
         if shot.cursor_position is not None
         else None
     )
+    timing_ms = dict(shot.timings_ms)
+    if capture_timing is not None:
+        timing_ms.update(
+            {
+                "route_ready_ms": capture_timing.ready_ms,
+                "route_lock_wait_ms": capture_timing.lock_wait_ms,
+                "route_operation_ms": capture_timing.operation_ms,
+                "route_total_ms": capture_timing.total_ms,
+            }
+        )
     return {
         "x-computer-use-width": str(shot.width),
         "x-computer-use-height": str(shot.height),
@@ -105,7 +123,7 @@ def _screenshot_headers(shot) -> dict[str, str]:
         "x-computer-use-sha256": shot.sha256,
         "x-computer-use-captured-at": shot.captured_at.isoformat(),
         "x-computer-use-coordinate-space": shot.coordinate_space.model_dump_json(),
-        "x-computer-use-timing-ms": json.dumps(shot.timings_ms, separators=(",", ":")),
+        "x-computer-use-timing-ms": json.dumps(timing_ms, separators=(",", ":")),
         "x-computer-use-capture-backend": shot.capture_backend or "unknown",
         "x-computer-use-cursor-visible": str(shot.cursor_visible).lower(),
         "x-computer-use-cursor-position": json.dumps(
@@ -168,11 +186,13 @@ async def full_raw(payload: ScreenshotRequest, request: Request) -> Response:
             prefer_native_png=True,
         )
 
-    shot = await run_screenshot_capture(request, operation)
+    shot, capture_timing = await run_screenshot_capture_with_timing(
+        request, operation
+    )
     return Response(
         content=shot.data,
         media_type=f"image/{options.format}",
-        headers=_screenshot_headers(shot),
+        headers=_screenshot_headers(shot, capture_timing=capture_timing),
     )
 
 
@@ -225,11 +245,13 @@ async def region_raw(payload: ScreenshotRequest, request: Request) -> Response:
             prefer_native_png=True,
         )
 
-    shot = await run_screenshot_capture(request, operation)
+    shot, capture_timing = await run_screenshot_capture_with_timing(
+        request, operation
+    )
     return Response(
         content=shot.data,
         media_type=f"image/{options.format}",
-        headers=_screenshot_headers(shot),
+        headers=_screenshot_headers(shot, capture_timing=capture_timing),
     )
 
 
@@ -297,9 +319,11 @@ async def zoom_raw(payload: ZoomScreenshotRequest, request: Request) -> Response
             prefer_native_png=True,
         )
 
-    shot = await run_screenshot_capture(request, operation)
+    shot, capture_timing = await run_screenshot_capture_with_timing(
+        request, operation
+    )
     return Response(
         content=shot.data,
         media_type=f"image/{options.format}",
-        headers=_screenshot_headers(shot),
+        headers=_screenshot_headers(shot, capture_timing=capture_timing),
     )
