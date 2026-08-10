@@ -101,6 +101,95 @@ the offline gate, and cleans up the owner and Function App. Its Function and San
 1 CPU and 2048 MiB, use zero warm capacity, and permit no retries. Change these explicit source
 constants only in a new preregistered experiment.
 
+## Compare inline and managed Image lifecycles
+
+Use the Image Lifecycle Benchmark when you need to decide whether a Managed Image Release should
+replace the inline image recipe. This is a credential-gated Benchmark Surface. It is not part of
+`benchmark sdk`.
+
+The two arms are `inline-recipe` and `managed-exact-id`. They represent the current product paths.
+They do not isolate name lookup. The inline browser recipe installs both supported browsers and
+mounts SDK source at startup. A managed browser recipe installs one browser and bakes SDK source
+into the Image. The result therefore measures the complete Image policy that users would receive.
+
+The timer starts before `ComputerSandbox.create()`. It ends at the `first_valid_frame` startup mark.
+Image identity and placement checks run after that mark. Their time is outside lifecycle latency but
+inside the measured lifecycle wall time and cost estimate. One long-lived external SDK process runs
+the complete schedule. Record that caller with `--caller-label`. The label identifies the harness;
+it does not claim that the caller is in the target region. Every target must use the requested exact
+region, and both arms must report one observed cloud and region. This topology preserves the inline
+recipe's caller-local source mount. A Modal Function cannot recreate that local mount. The run does
+not measure Image build time. Modal cache state cannot be reset reliably for a paired Sandbox
+experiment, so record release build duration as separate deployment evidence.
+
+Both arms request and cap the target at 1 physical CPU core and 2048 MiB for the commands below.
+The cost estimate applies Modal's narrow-region multiplier. The fixed limits prevent resource bursts
+from exceeding the preregistered target allocation. They apply only to this Benchmark Surface. At the
+rates recorded on 8 August 2026, the pilot target ceiling is $0.10 and the primary target ceiling is
+$1.04. Image build, canary, the external caller, control-plane, and billing adjustments remain outside
+those ceilings. The commands stop before launch if the target ceiling exceeds the $20 budget.
+
+Publish one verified standard Managed Image Release from the clean benchmark commit:
+
+Confirm that `uv --version` reports `0.12.3` first. The publisher verifies the same executable
+through `UV_EXECUTABLE` before it contacts Modal. Set that variable to the exact `uv 0.12.3`
+binary when the first `uv` on `PATH` is a different version.
+
+```bash
+source_sha="$(git rev-parse HEAD)"
+result_root="benchmark-results/image-lifecycle/$source_sha"
+
+UV_EXECUTABLE="$(command -v uv)" uv run python scripts/publish_modal_image_release.py \
+  --logical-release 2.0.0 \
+  --variant standard \
+  --environment main \
+  --image-builder-version 2025.06 \
+  --manifest "$result_root/standard-image-release.json"
+```
+
+Replace the Environment and Image Builder Version with the exact values approved for the run. The
+publication command builds the Image, runs its protected canary, verifies the revision tag, and
+records the exact Modal object ID. Stop if any step fails.
+
+Run the pilot first. It uses one warmup pair and two measured samples per arm:
+
+```bash
+uv run python scripts/run_modal_image_lifecycle_benchmark.py pilot \
+  --source-sha "$source_sha" \
+  --manifest "$result_root/standard-image-release.json" \
+  --region us-west-2 \
+  --cpu 1 \
+  --memory-mib 2048 \
+  --sandbox-timeout-seconds 180 \
+  --max-estimated-cost-usd 20 \
+  --caller-label codex-desktop-local-process \
+  --output "$result_root/pilot.json"
+```
+
+Run the primary experiment only when the pilot status is `complete`. The primary run uses one
+warmup pair and 30 measured samples per arm. It creates 62 Sandboxes in a deterministic paired and
+interleaved order. It allows no retry or replacement sample.
+
+```bash
+uv run python scripts/run_modal_image_lifecycle_benchmark.py primary \
+  --source-sha "$source_sha" \
+  --manifest "$result_root/standard-image-release.json" \
+  --region us-west-2 \
+  --cpu 1 \
+  --memory-mib 2048 \
+  --sandbox-timeout-seconds 180 \
+  --max-estimated-cost-usd 20 \
+  --caller-label codex-desktop-local-process \
+  --pilot-result "$result_root/pilot.json" \
+  --output "$result_root/primary.json"
+```
+
+The Benchmark Surface stops on the first create, identity, placement, frame, or cleanup failure.
+It records raw paired samples, p50, p95, mean, paired deltas, bootstrap 95% confidence intervals,
+lifecycle wall time, and a public-rate target cost estimate. The estimate excludes Image build,
+canary, the external caller, control-plane, and billing adjustments. Reconcile delayed Modal billing
+separately before you publish a cost claim.
+
 ## Promote Computer Step
 
 Use a separate gate for the canonical action-to-observation Interface. Run
@@ -577,6 +666,7 @@ Use these maintained workflows for new evidence:
 | Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
 | Current provider presentation | [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md) |
 | Optimized SDK default promotion | [`run_optimized_default_promotion.py`](../scripts/run_optimized_default_promotion.py); [eligible 2026-08-08 result](benchmark-results-2026-08-08-optimized-default.md) |
+| Inline versus Managed Image Release lifecycle | [`run_modal_image_lifecycle_benchmark.py`](../scripts/run_modal_image_lifecycle_benchmark.py); [eligible standard-variant result, 2026-08-08](benchmark-results-2026-08-08-image-lifecycle.md) |
 | Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |
 | Placement comparison | `computer-use benchmark modal-region-ab`, then `modal-region-summary` |
 | Modal V2 candidate or optimized-frontier experiments | Use [`run_modal_v2_candidate_benchmark.py`](../scripts/run_modal_v2_candidate_benchmark.py) or [`run_modal_optimized_frontier_benchmark.py`](../scripts/run_modal_optimized_frontier_benchmark.py) with the archived gated methodology linked below |

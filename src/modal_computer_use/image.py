@@ -61,6 +61,18 @@ class _ImageVariantDefinition:
     browser_apt_package: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _ImageRecipeDefinition:
+    """One explicit set of inputs for the shared Modal Image recipe."""
+
+    profile: Literal["standard", "browser", "browser-gpu", "custom"]
+    browser: Literal["firefox", "chromium"] | None
+    browser_prewarm: bool
+    browser_packages: tuple[str, ...]
+    window_manager: Literal["xfce", "openbox"]
+    copy_source: bool
+
+
 _IMAGE_VARIANTS: dict[NamedImageVariant, _ImageVariantDefinition] = {
     "standard": _ImageVariantDefinition(
         profile="standard", browser=None, browser_apt_package=None
@@ -373,30 +385,21 @@ def default_image(
     window_manager: Literal["xfce", "openbox"] = "xfce",
     browser_prewarm: bool = False,
 ) -> object:
-    context = _image_runtime_context()
-    modal = _modal()
-    packages = list(DESKTOP_APT_PACKAGES)
-    if profile in ("browser", "browser-gpu") or browser:
-        packages.extend(BROWSER_APT_PACKAGES)
-    image = (
-        modal.Image.debian_slim(python_version="3.12")
-        .apt_install(*packages)
-        .uv_sync(
-            uv_project_dir=str(context),
-            frozen=True,
-            uv_version=IMAGE_UV_VERSION,
-        )
-        .env(
-            {
-                "COMPUTER_USE_WINDOW_MANAGER": window_manager,
-                "COMPUTER_USE_IMAGE_PROFILE": profile,
-                "COMPUTER_USE_BROWSER_PREWARM": str(browser_prewarm).lower(),
-                "COMPUTER_USE_BROWSER": browser or "",
-            }
-        )
-        .add_local_python_source("modal_computer_use")
+    browser_packages = (
+        tuple(BROWSER_APT_PACKAGES)
+        if profile in ("browser", "browser-gpu") or browser
+        else ()
     )
-    return image
+    return _image_recipe(
+        _ImageRecipeDefinition(
+            profile=profile,
+            browser=browser,
+            browser_prewarm=browser_prewarm,
+            browser_packages=browser_packages,
+            window_manager=window_manager,
+            copy_source=False,
+        )
+    )
 
 
 def named_image_name(
@@ -582,25 +585,16 @@ def publish_image_release(spec: ImageReleaseSpec) -> ImageReleaseRecord:
 
 def resolve_release_image(record: ImageReleaseRecord) -> object:
     """Verify a release reference in its Environment, then resolve its exact object ID."""
-    modal = _modal()
-    try:
-        named_image = modal.Image.from_name(
-            record.image_reference,
-            environment_name=record.environment_name,
-        ).hydrate()
-    except Exception as exc:
-        not_found_type = getattr(
-            getattr(modal, "exception", None), "NotFoundError", None
+    assignments = _published_named_image_assignments(
+        environment_name=record.environment_name
+    )
+    assigned_object_id = assignments.get(record.image_reference)
+    if assigned_object_id is None:
+        raise ImageReleaseNotFoundError(
+            f"managed Image release {record.image_reference} was not found in "
+            f"Environment {record.environment_name}"
         )
-        if isinstance(not_found_type, type) and isinstance(exc, not_found_type):
-            raise ImageReleaseNotFoundError(
-                f"managed Image release {record.image_reference} was not found in "
-                f"Environment {record.environment_name}"
-            ) from exc
-        raise ImageReleaseIdentityMismatchError(
-            "the managed Image reference could not be resolved in its recorded Environment"
-        ) from exc
-    if getattr(named_image, "object_id", None) != record.modal_image_object_id:
+    if assigned_object_id != record.modal_image_object_id:
         raise ImageReleaseIdentityMismatchError(
             "the managed Image reference does not identify the recorded Modal object ID"
         )
@@ -635,6 +629,16 @@ def _require_record_matches_spec(
         raise ImageReleaseConflictError(
             "the existing release manifest does not match the requested release"
         )
+
+
+def load_image_release_record(path: str | Path) -> ImageReleaseRecord:
+    """Load one strict managed Image release manifest from a regular file."""
+
+    manifest_path = Path(path)
+    record = _read_image_release_record_if_present(manifest_path)
+    if record is None:
+        raise ImageReleaseManifestError("the release manifest does not exist")
+    return record
 
 
 def _read_image_release_record_if_present(path: Path) -> ImageReleaseRecord | None:
@@ -720,7 +724,8 @@ def _verify_image_runtime_lock(context: Path) -> None:
             text=True,
             timeout=10,
         ).stdout.strip()
-        if version != f"uv {IMAGE_UV_VERSION}":
+        version_parts = version.split()
+        if version_parts[:2] != ["uv", IMAGE_UV_VERSION]:
             raise ImageReleaseLockError(
                 f"managed Image releases require uv {IMAGE_UV_VERSION}; found {version}"
             )
@@ -874,13 +879,30 @@ def _named_image_recipe(
     variant: NamedImageVariant,
     window_manager: Literal["xfce", "openbox"],
 ) -> object:
+    definition = _IMAGE_VARIANTS[variant]
+    return _image_recipe(
+        _ImageRecipeDefinition(
+            profile=definition.profile,
+            browser=definition.browser,
+            browser_prewarm=definition.browser is not None,
+            browser_packages=(
+                (definition.browser_apt_package,)
+                if definition.browser_apt_package is not None
+                else ()
+            ),
+            window_manager=window_manager,
+            copy_source=True,
+        )
+    )
+
+
+def _image_recipe(definition: _ImageRecipeDefinition) -> object:
+    """Build the one shared recipe while preserving explicit policy differences."""
+
     context = _image_runtime_context()
     modal = _modal()
-    packages = list(DESKTOP_APT_PACKAGES)
-    definition = _IMAGE_VARIANTS[variant]
-    if definition.browser_apt_package is not None:
-        packages.append(definition.browser_apt_package)
-    return (
+    packages = [*DESKTOP_APT_PACKAGES, *definition.browser_packages]
+    image = (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install(*packages)
         .uv_sync(
@@ -890,15 +912,18 @@ def _named_image_recipe(
         )
         .env(
             {
-                "COMPUTER_USE_WINDOW_MANAGER": window_manager,
+                "COMPUTER_USE_WINDOW_MANAGER": definition.window_manager,
                 "COMPUTER_USE_IMAGE_PROFILE": definition.profile,
                 "COMPUTER_USE_BROWSER_PREWARM": str(
-                    definition.browser is not None
+                    definition.browser_prewarm
                 ).lower(),
                 "COMPUTER_USE_BROWSER": definition.browser or "",
             }
         )
-        .add_local_python_source("modal_computer_use", copy=True)
+    )
+    return image.add_local_python_source(
+        "modal_computer_use",
+        copy=definition.copy_source,
     )
 
 

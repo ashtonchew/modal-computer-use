@@ -1,0 +1,33 @@
+{
+  "build_app_name": "modal-computer-use-image-builds",
+  "canary": {
+    "checked_at": "2026-08-09T00:07:11Z",
+    "checks": [
+      "healthz",
+      "readyz",
+      "version",
+      "capabilities",
+      "image_object_id",
+      "browser",
+      "screenshot",
+      "cleanup"
+    ],
+    "status": "passed"
+  },
+  "environment_name": "main",
+  "image_builder_version": "2025.06",
+  "image_name": "modal-computer-use-standard",
+  "image_reference": "modal-computer-use-standard:4cb098207053931c2e6e693ce87f7f6e16ab215a",
+  "image_tag": "4cb098207053931c2e6e693ce87f7f6e16ab215a",
+  "image_variant": "standard",
+  "logical_release": "2.0.0",
+  "modal_image_object_id": "im-PUBK2dnCEAaheWFqgQ9EgM",
+  "modal_sdk_version": "1.5.3",
+  "published_at": "2026-08-09T00:07:13Z",
+  "pyproject_sha256": "941035ccf284f04b8d42127816cb40535955fe7ab3f913d5720c1d7b0dfc6669",
+  "schema_version": 1,
+  "source_revision": "4cb098207053931c2e6e693ce87f7f6e16ab215a",
+  "uv_lock_sha256": "36a463fcef97281951d875f9850ae3945be2692a939d087519cb9a534b7e7386",
+  "uv_version": "0.12.3",
+  "workspace_name": "modal-ai-hackathon"
+}

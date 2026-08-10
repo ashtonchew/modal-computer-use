@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +19,7 @@ from modal_computer_use.image import (
     ImageCanaryRecord,
     ImageReleaseRecord,
     ImageReleaseSpec,
+    load_image_release_record,
     publish_image_release,
     resolve_release_image,
 )
@@ -115,6 +117,22 @@ def test_image_release_record_round_trips_without_losing_identity() -> None:
     assert restored == record
     assert restored.modal_image_object_id == "im-release-object"
     assert "digest" not in restored.to_dict()
+
+
+def test_load_image_release_record_uses_the_strict_manifest_contract(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "modal-image-release.v1.json"
+    path.write_text(
+        json.dumps(_release_record().to_dict()),
+        encoding="utf-8",
+    )
+
+    assert load_image_release_record(path) == _release_record()
+
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(ImageReleaseManifestError, match="could not read"):
+        load_image_release_record(path)
 
 
 def test_image_release_record_rejects_unknown_or_inconsistent_fields() -> None:
@@ -485,42 +503,45 @@ def test_resolve_release_image_verifies_name_then_uses_exact_object_id(
 
     calls: list[str] = []
     expected = object()
-    named = SimpleNamespace(
-        object_id="im-release-object",
-        hydrate=lambda: named,
-    )
     fake_modal = SimpleNamespace(
         Image=SimpleNamespace(
             from_id=lambda object_id: calls.append(f"id:{object_id}") or expected,
-            from_name=lambda name, environment_name: calls.append(
-                f"name:{name}:{environment_name}"
-            )
-            or named,
         )
     )
     monkeypatch.setattr(image_module, "_modal", lambda: fake_modal)
+    monkeypatch.setattr(
+        image_module,
+        "_published_named_image_assignments",
+        lambda *, environment_name: calls.append(f"inventory:{environment_name}")
+        or {
+            f"modal-computer-use-standard:{REVISION}": "im-release-object",
+        },
+    )
 
     assert resolve_release_image(_release_record()) is expected
     assert calls == [
-        f"name:modal-computer-use-standard:{REVISION}:prod",
+        "inventory:prod",
         "id:im-release-object",
     ]
 
 
-def test_resolve_release_image_rejects_a_mismatched_hydrated_id(
+def test_resolve_release_image_rejects_a_mismatched_named_assignment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import modal_computer_use.image as image_module
 
-    named = SimpleNamespace(object_id="im-other-object")
-    named.hydrate = lambda: named
-    fake_modal = SimpleNamespace(
-        Image=SimpleNamespace(
-            from_name=lambda name, environment_name: named,
-            from_id=lambda object_id: pytest.fail("must reject before exact lookup"),
-        )
+    monkeypatch.setattr(
+        image_module,
+        "_published_named_image_assignments",
+        lambda *, environment_name: {
+            f"modal-computer-use-standard:{REVISION}": "im-other-object",
+        },
     )
-    monkeypatch.setattr(image_module, "_modal", lambda: fake_modal)
+    monkeypatch.setattr(
+        image_module,
+        "_resolve_release_image_object_id",
+        lambda object_id: pytest.fail("must reject before exact lookup"),
+    )
 
     with pytest.raises(ImageReleaseIdentityMismatchError, match="object ID"):
         resolve_release_image(_release_record())
@@ -531,18 +552,11 @@ def test_resolve_release_image_maps_modal_not_found_to_stable_error(
 ) -> None:
     import modal_computer_use.image as image_module
 
-    class FakeNotFoundError(Exception):
-        pass
-
-    fake_modal = SimpleNamespace(
-        exception=SimpleNamespace(NotFoundError=FakeNotFoundError),
-        Image=SimpleNamespace(
-            from_name=lambda name, environment_name: (_ for _ in ()).throw(
-                FakeNotFoundError("provider detail")
-            )
-        ),
+    monkeypatch.setattr(
+        image_module,
+        "_published_named_image_assignments",
+        lambda *, environment_name: {},
     )
-    monkeypatch.setattr(image_module, "_modal", lambda: fake_modal)
 
     with pytest.raises(
         ImageReleaseNotFoundError,
@@ -584,7 +598,10 @@ def test_publish_image_release_uses_the_pinned_uv_for_lock_check(
 
     def run(command: list[str], **kwargs: object) -> SimpleNamespace:
         lock_commands.append(command)
-        return SimpleNamespace(stdout="uv 0.12.3\n", returncode=0)
+        return SimpleNamespace(
+            stdout="uv 0.12.3 (507230998 2026-08-07 aarch64-apple-darwin)\n",
+            returncode=0,
+        )
 
     monkeypatch.setattr(image_module.subprocess, "run", run)
 
@@ -600,3 +617,22 @@ def test_publish_image_release_uses_the_pinned_uv_for_lock_check(
             str(image_module._image_runtime_context()),
         ],
     ]
+
+
+def test_image_release_lock_check_rejects_a_different_uv_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import modal_computer_use.image as image_module
+
+    monkeypatch.setenv("UV_EXECUTABLE", "/tools/uv")
+    monkeypatch.setattr(
+        image_module.subprocess,
+        "run",
+        lambda _command, **_kwargs: SimpleNamespace(
+            stdout="uv 0.12.4 (different-build)\n",
+            returncode=0,
+        ),
+    )
+
+    with pytest.raises(ImageReleaseLockError, match=r"require uv 0\.12\.3"):
+        image_module._verify_image_runtime_lock(image_module._image_runtime_context())
