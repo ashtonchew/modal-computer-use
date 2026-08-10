@@ -120,12 +120,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 await asyncio.to_thread(app.state.recordings.shutdown)
             finally:
-                await supervisor.stop()
+                try:
+                    app.state.backend.close()
+                finally:
+                    await supervisor.stop()
         finally:
-            try:
-                app.state.backend.close()
-            finally:
-                await app.state.receipt_journal.close()
+            await app.state.receipt_journal.close()
 
 
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
