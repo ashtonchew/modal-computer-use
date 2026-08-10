@@ -1811,8 +1811,35 @@ def _promotion_artifact(
             "terminal_cleanup": dict(terminal_cleanup),
         },
     }
-    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(artifact)
-    validate_x11_shm_screenshot_artifact(artifact)
+    operational_gates = artifact["operational_gates"]
+    failed_operational_gate = any(
+        operational_gates.get(gate) is not True
+        for gate in (
+            "chromium_fixture",
+            "failure_matrix",
+            "x_server_restart",
+            "bounded_x_server_failure",
+            "region_parity",
+            "cleanup_succeeded",
+        )
+    ) or any(
+        operational_gates.get(key) != expected
+        for key, expected in (
+            ("captures", 10_000),
+            ("full_captures", 5_000),
+            ("region_captures", 5_000),
+            ("fd_delta", 0),
+            ("mapping_delta", 0),
+        )
+    )
+    if failed_operational_gate:
+        artifact["status"] = "rejected"
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(
+        artifact, require_publishable=not failed_operational_gate
+    )
+    validate_x11_shm_screenshot_artifact(
+        artifact, require_publishable=not failed_operational_gate
+    )
     return artifact
 
 
