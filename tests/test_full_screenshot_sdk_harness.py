@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from modal_computer_use.errors import DaemonHTTPError
 from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
     _EXPECTED_PAYLOAD,
     _validate_sample,
     build_paired_random_schedule,
     measure_full_screenshot_arms,
 )
+from modal_computer_use.errors import DaemonHTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
