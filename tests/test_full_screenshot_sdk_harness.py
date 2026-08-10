@@ -38,7 +38,7 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _run_x11_shm_scheduling_diagnostic,
     _run_x11_shm_soak,
     _run_x11_shm_transport_threshold_diagnostic,
-    _select_root_daemon_match,
+    _select_daemon_worker_pair,
     _validate_bounded_x_server_sample_count,
 )
 
@@ -85,24 +85,45 @@ def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:
         "argv_match": True,
         "argv_module": "modal_computer_use.daemon",
     }
-    selected, match_count, root_match_count = _select_root_daemon_match(
-        [child_daemon, root_daemon]
+    worker = {
+        "pid": 42,
+        "starttime_ticks": 124,
+        "parent_pid": 41,
+        "argv_match": True,
+        "argv_module": "_x11_shm_worker.py",
+    }
+    selected_daemon, selected_worker, daemon_count, worker_count, pair_count, root_count = (
+        _select_daemon_worker_pair([child_daemon, root_daemon], [worker])
     )
-    assert selected == {
-        "pid": 1,
-        "starttime_ticks": 18,
+    assert selected_daemon == {
+        "pid": 41,
+        "starttime_ticks": 123,
         "argv_match": True,
         "argv_module": "modal_computer_use.daemon",
     }
-    assert match_count == 2
-    assert root_match_count == 1
-    second_root = dict(root_daemon, pid=2, starttime_ticks=19)
-    selected, match_count, root_match_count = _select_root_daemon_match(
-        [root_daemon, second_root]
+    assert selected_worker == worker
+    assert (daemon_count, worker_count, pair_count, root_count) == (2, 1, 1, 1)
+    assert _select_daemon_worker_pair([root_daemon], [])[0:5] == (
+        None,
+        None,
+        1,
+        0,
+        0,
     )
-    assert selected is None
-    assert match_count == 2
-    assert root_match_count == 2
+    second_worker = dict(worker, pid=43, starttime_ticks=125)
+    assert _select_daemon_worker_pair(
+        [child_daemon], [worker, second_worker]
+    ) == (None, None, 1, 2, 2, 0)
+    second_daemon = dict(child_daemon, pid=44, starttime_ticks=126)
+    second_pair_worker = dict(
+        worker,
+        pid=45,
+        starttime_ticks=127,
+        parent_pid=44,
+    )
+    assert _select_daemon_worker_pair(
+        [child_daemon, second_daemon], [worker, second_pair_worker]
+    )[0:5] == (None, None, 2, 2, 2)
 
     script = _build_x11_shm_scheduling_diagnostic_script(
         captures=1_000,
@@ -224,6 +245,10 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
         "daemon_root_match_count": 1,
         "daemon_match_count_after": 2,
         "daemon_root_match_count_after": 1,
+        "worker_match_count": 1,
+        "worker_match_count_after": 1,
+        "daemon_worker_pair_count": 1,
+        "daemon_worker_pair_count_after": 1,
         "worker_identity_before": worker_identity,
         "worker_identity_after": worker_identity,
         "daemon_schedstat_before": {
@@ -323,6 +348,8 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
     }
     assert artifact["daemon_match_count"] == 2
     assert artifact["daemon_root_match_count"] == 1
+    assert artifact["worker_match_count"] == 1
+    assert artifact["daemon_worker_pair_count"] == 1
     assert artifact["worker_schedstat_delta"] == {
         "cpu_runtime_ns": 80,
         "runqueue_wait_ns": 90,
@@ -414,6 +441,26 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
     assert keys(rejected_partial).isdisjoint(
         {"body", "headers", "raw", "data", "authorization", "token"}
     )
+
+    ambiguous_partial = json_module.loads(json_module.dumps(partial))
+    ambiguous_partial.update(
+        {
+            "daemon_identity_before": None,
+            "worker_identity_before": None,
+            "daemon_match_count": 1,
+            "daemon_root_match_count": 0,
+            "worker_match_count": 2,
+            "daemon_worker_pair_count": 2,
+        }
+    )
+    retained_ambiguity = _build_x11_shm_scheduling_diagnostic(
+        ambiguous_partial, cleanup, provenance
+    )
+    assert retained_ambiguity["passed"] is False
+    assert retained_ambiguity["daemon_match_count"] == 1
+    assert retained_ambiguity["daemon_root_match_count"] == 0
+    assert retained_ambiguity["worker_match_count"] == 2
+    assert retained_ambiguity["daemon_worker_pair_count"] == 2
 
     contradictory_partial = json_module.loads(json_module.dumps(partial))
     contradictory_partial["full_captures"] = 10
