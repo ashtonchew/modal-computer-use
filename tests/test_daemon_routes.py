@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
+from modal_computer_use.daemon.desktop.screenshot_capture import ScreenshotCaptureTimedOut
 from modal_computer_use.daemon.desktop.xtest import (
     X11InputInjectionError,
     X11InputReleaseError,
@@ -147,6 +148,68 @@ def test_raw_screenshot_rejects_artifact_storage(test_client) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_screenshot_storage"
+
+
+def test_screenshot_timeout_retains_only_safe_origin(app) -> None:
+    async def timed_out(*_args, **_kwargs):
+        raise ScreenshotCaptureTimedOut(
+            "private worker detail",
+            timeout_origin="worker_process_deadline",
+        )
+
+    app.state.backend.screenshot_bytes = timed_out
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.post(
+            "/v1/screenshots/full/raw",
+            json={"format": "png", "show_cursor": False},
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "code": "internal_error",
+        "message": "internal server error",
+        "details": {
+            "redacted": True,
+            "type": "ScreenshotCaptureTimedOut",
+            "timeout_origin": "worker_process_deadline",
+        },
+    }
+    assert "private worker detail" not in response.text
+
+
+def test_screenshot_timeout_drops_unknown_origin(app) -> None:
+    error = ScreenshotCaptureTimedOut(
+        "private worker detail",
+        timeout_origin="worker_process_deadline",
+    )
+    error.timeout_origin = "private_secret"  # type: ignore[assignment]
+
+    async def timed_out(*_args, **_kwargs):
+        raise error
+
+    app.state.backend.screenshot_bytes = timed_out
+
+    with TestClient(
+        app,
+        headers={"Authorization": "Bearer dev"},
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.post(
+            "/v1/screenshots/full/raw",
+            json={"format": "png", "show_cursor": False},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["details"] == {
+        "redacted": True,
+        "type": "ScreenshotCaptureTimedOut",
+    }
+    assert "private_secret" not in response.text
 
 
 def test_status_reflects_stopped_mock_lifecycle(tmp_path) -> None:

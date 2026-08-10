@@ -32,6 +32,7 @@ from .screenshot_capture import (
     ScreenshotCaptureResolution,
     ScreenshotCaptureSource,
     ScreenshotCaptureTimedOut,
+    ScreenshotCaptureTimeoutOrigin,
     ScreenshotCaptureUnavailable,
     X11SharedMemoryScreenshotSession,
     resolve_capture_source,
@@ -104,6 +105,7 @@ class X11ScreenshotController:
         self._x11_shm_fallback = False
         self._x11_shm_failed = False
         self._x11_shm_timed_out = False
+        self._x11_shm_timeout_origin: ScreenshotCaptureTimeoutOrigin | None = None
         self._readiness_generation = 0
 
     @property
@@ -117,8 +119,10 @@ class X11ScreenshotController:
 
     def _raise_if_display_timed_out(self) -> None:
         if self._x11_shm_timed_out:
+            assert self._x11_shm_timeout_origin is not None
             raise ScreenshotCaptureTimedOut(
-                "X11 screenshot capture is quarantined until display restart"
+                "X11 screenshot capture is quarantined until display restart",
+                timeout_origin=self._x11_shm_timeout_origin,
             )
 
     async def _ensure_x11_shm(self) -> None:
@@ -134,12 +138,9 @@ class X11ScreenshotController:
         if self._x11_shm is not None:
             return
         if self._x11_shm_failed:
-            error_type = (
-                ScreenshotCaptureTimedOut
-                if self._x11_shm_timed_out
-                else ScreenshotCaptureFailed
-            )
-            raise error_type(
+            if self._x11_shm_timed_out:
+                self._raise_if_display_timed_out()
+            raise ScreenshotCaptureFailed(
                 "X11 shared-memory screenshot source is quarantined until display restart"
             )
         selected = self._capture_resolution.selected
@@ -152,9 +153,10 @@ class X11ScreenshotController:
                 width=self.width,
                 height=self.height,
             )
-        except ScreenshotCaptureTimedOut:
+        except ScreenshotCaptureTimedOut as exc:
             self._x11_shm_failed = True
             self._x11_shm_timed_out = True
+            self._x11_shm_timeout_origin = exc.timeout_origin
             self._invalidate_readiness()
             raise
         except ScreenshotCaptureUnavailable:
@@ -177,6 +179,7 @@ class X11ScreenshotController:
         self._x11_shm_fallback = True
         self._x11_shm_failed = False
         self._x11_shm_timed_out = False
+        self._x11_shm_timeout_origin = None
 
     def _close_x11_shm(self, *, suppress: bool) -> None:
         session = self._x11_shm
@@ -209,6 +212,7 @@ class X11ScreenshotController:
             self._x11_shm_fallback = False
             self._x11_shm_failed = False
             self._x11_shm_timed_out = False
+            self._x11_shm_timeout_origin = None
 
     async def probe(self) -> tuple[bool, str | None]:
         """Verify that the public cursor-visible screenshot path can capture."""
@@ -352,10 +356,11 @@ class X11ScreenshotController:
                     width=source.width,
                     height=source.height,
                 )
-            except ScreenshotCaptureTimedOut:
+            except ScreenshotCaptureTimedOut as exc:
                 self._close_x11_shm(suppress=True)
                 self._x11_shm_failed = True
                 self._x11_shm_timed_out = True
+                self._x11_shm_timeout_origin = exc.timeout_origin
                 self._invalidate_readiness()
                 raise
             except ScreenshotCaptureFailed:

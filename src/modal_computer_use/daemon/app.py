@@ -18,6 +18,10 @@ from modal_computer_use.daemon.auth import AuthMiddleware
 from modal_computer_use.daemon.budget_policy import BudgetPolicy
 from modal_computer_use.daemon.desktop import choose_backend
 from modal_computer_use.daemon.desktop.recordings import RecordingRegistry
+from modal_computer_use.daemon.desktop.screenshot_capture import (
+    SCREENSHOT_CAPTURE_TIMEOUT_ORIGINS,
+    ScreenshotCaptureTimedOut,
+)
 from modal_computer_use.daemon.desktop.xtest import (
     X11InputInjectionError,
     X11InputStateConflictError,
@@ -350,13 +354,19 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
                     "details": mapped_error.details,
                 },
             )
+        details = safe_exception_payload(exc)
+        if (
+            isinstance(exc, ScreenshotCaptureTimedOut)
+            and exc.timeout_origin in SCREENSHOT_CAPTURE_TIMEOUT_ORIGINS
+        ):
+            details["timeout_origin"] = exc.timeout_origin
         return _error_response(
             status_code=500,
             code="internal_error",
             content={
                 "code": "internal_error",
                 "message": "internal server error",
-                "details": safe_exception_payload(exc),
+                "details": details,
             },
         )
 

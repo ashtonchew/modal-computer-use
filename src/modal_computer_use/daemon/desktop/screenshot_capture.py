@@ -42,6 +42,20 @@ from ._x11_shm_worker import (
 
 ScreenshotCaptureSource = Literal["auto", "mss", "x11-shm"]
 ResolvedScreenshotCaptureSource = Literal["mss", "x11-shm"]
+ScreenshotCaptureTimeoutOrigin = Literal[
+    "native_x11_setup_deadline",
+    "native_x11_reply_deadline",
+    "worker_startup_deadline",
+    "worker_process_deadline",
+]
+SCREENSHOT_CAPTURE_TIMEOUT_ORIGINS = frozenset(
+    {
+        "native_x11_setup_deadline",
+        "native_x11_reply_deadline",
+        "worker_startup_deadline",
+        "worker_process_deadline",
+    }
+)
 
 
 class ScreenshotCaptureError(RuntimeError):
@@ -58,6 +72,15 @@ class ScreenshotCaptureFailed(ScreenshotCaptureError):
 
 class ScreenshotCaptureTimedOut(ScreenshotCaptureFailed):
     """Raised when the X server does not complete a bounded native operation."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        timeout_origin: ScreenshotCaptureTimeoutOrigin,
+    ) -> None:
+        super().__init__(message)
+        self.timeout_origin = timeout_origin
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +180,8 @@ class X11SharedMemoryScreenshotSession:
             except Exception as exc:
                 if _is_native_timeout(exc, timeout_error):
                     raise ScreenshotCaptureTimedOut(
-                        "X11 shared-memory screenshot startup exceeded its reply deadline"
+                        "X11 shared-memory screenshot startup exceeded its reply deadline",
+                        timeout_origin="native_x11_setup_deadline",
                     ) from exc
                 raise ScreenshotCaptureUnavailable(
                     "X11 shared-memory screenshot session could not start"
@@ -179,7 +203,8 @@ class X11SharedMemoryScreenshotSession:
         except Exception as exc:
             if _is_native_timeout(exc, self._timeout_error):
                 raise ScreenshotCaptureTimedOut(
-                    "X11 shared-memory screenshot exceeded its reply deadline"
+                    "X11 shared-memory screenshot exceeded its reply deadline",
+                    timeout_origin="native_x11_reply_deadline",
                 ) from exc
             raise ScreenshotCaptureFailed(
                 "X11 shared-memory screenshot capture failed"
@@ -261,7 +286,8 @@ class _SpawnedX11ScreenshotSession:
                 )
             if status == STATUS_TIMED_OUT:
                 raise ScreenshotCaptureTimedOut(
-                    "X11 shared-memory screenshot startup exceeded its process deadline"
+                    "X11 shared-memory screenshot startup exceeded its process deadline",
+                    timeout_origin="native_x11_setup_deadline",
                 )
             if status != STATUS_READY:
                 raise ScreenshotCaptureUnavailable(
@@ -274,7 +300,8 @@ class _SpawnedX11ScreenshotSession:
             self._terminate()
             if isinstance(exc, TimeoutError):
                 raise ScreenshotCaptureTimedOut(
-                    "X11 shared-memory screenshot startup exceeded its process deadline"
+                    "X11 shared-memory screenshot startup exceeded its process deadline",
+                    timeout_origin="worker_startup_deadline",
                 ) from exc
             raise ScreenshotCaptureUnavailable(
                 "X11 shared-memory screenshot worker could not start"
@@ -301,7 +328,8 @@ class _SpawnedX11ScreenshotSession:
             except TimeoutError as exc:
                 self._terminate()
                 raise ScreenshotCaptureTimedOut(
-                    "X11 shared-memory screenshot exceeded its process deadline"
+                    "X11 shared-memory screenshot exceeded its process deadline",
+                    timeout_origin="worker_process_deadline",
                 ) from exc
             except (OSError, ValueError, struct.error) as exc:
                 self._terminate()
@@ -316,7 +344,8 @@ class _SpawnedX11ScreenshotSession:
             if status == STATUS_TIMED_OUT:
                 self._terminate()
                 raise ScreenshotCaptureTimedOut(
-                    "X11 shared-memory screenshot exceeded its reply deadline"
+                    "X11 shared-memory screenshot exceeded its reply deadline",
+                    timeout_origin="native_x11_reply_deadline",
                 )
             if status != STATUS_CAPTURED or not payload:
                 self._terminate()
@@ -334,7 +363,16 @@ class _SpawnedX11ScreenshotSession:
             try:
                 self._send(OP_CLOSE, request_id, b"", deadline)
                 status, response_id, payload = self._receive(deadline)
-                if status != STATUS_CLOSED or response_id != request_id or payload:
+                if response_id != request_id or payload:
+                    raise ScreenshotCaptureFailed(
+                        "X11 shared-memory screenshot worker cleanup failed"
+                    )
+                if status == STATUS_TIMED_OUT:
+                    raise ScreenshotCaptureTimedOut(
+                        "X11 shared-memory screenshot cleanup exceeded its reply deadline",
+                        timeout_origin="native_x11_reply_deadline",
+                    )
+                if status != STATUS_CLOSED:
                     raise ScreenshotCaptureFailed(
                         "X11 shared-memory screenshot worker cleanup failed"
                     )
@@ -490,7 +528,8 @@ def _probe_x11_setup(display: str) -> None:
                 expected_size += setup_words * 4
     except TimeoutError as exc:
         raise ScreenshotCaptureTimedOut(
-            "X11 shared-memory screenshot startup exceeded its reply deadline"
+            "X11 shared-memory screenshot startup exceeded its reply deadline",
+            timeout_origin="native_x11_setup_deadline",
         ) from exc
     except OSError as exc:
         raise ScreenshotCaptureUnavailable(

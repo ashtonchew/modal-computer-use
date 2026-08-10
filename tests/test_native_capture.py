@@ -266,13 +266,111 @@ def test_spawned_process_owner_times_out_and_reaps_stalled_child(
     process = owner._process
 
     started = time.monotonic()
-    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut):
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut) as caught:
         session.capture_png(x=0, y=0, width=10, height=11)
 
+    assert caught.value.timeout_origin == "worker_process_deadline"
     assert time.monotonic() - started < 1
     assert process is not None
     assert process.poll() is not None
     session.close()
+
+
+def test_spawned_process_owner_classifies_native_reply_deadline(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "_modal_computer_use_x11_shm.py").write_text(
+        "\n".join(
+            [
+                "class X11ScreenshotTimeoutError(RuntimeError):",
+                "    pass",
+                "class X11SharedMemoryScreenshotSession:",
+                "    def __init__(self, display, width, height):",
+                "        pass",
+                "    def capture_png(self, x, y, width, height):",
+                "        raise X11ScreenshotTimeoutError('private native detail')",
+                "    def close(self):",
+                "        pass",
+            ]
+        )
+        + "\n"
+    )
+    existing_path = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        str(tmp_path) if not existing_path else f"{tmp_path}{os.pathsep}{existing_path}",
+    )
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(
+            __name__="_modal_computer_use_x11_shm",
+            X11ScreenshotTimeoutError=RuntimeError,
+            X11SharedMemoryScreenshotSession=object,
+        ),
+    )
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=10, height=11
+    )
+    owner = session._session
+    process = owner._process
+
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut) as caught:
+        session.capture_png(x=0, y=0, width=10, height=11)
+
+    assert caught.value.timeout_origin == "native_x11_reply_deadline"
+    assert "private native detail" not in str(caught.value)
+    assert process is not None
+    assert process.poll() is not None
+    session.close()
+
+
+def test_spawned_process_owner_classifies_native_close_deadline(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "_modal_computer_use_x11_shm.py").write_text(
+        "\n".join(
+            [
+                "class X11ScreenshotTimeoutError(RuntimeError):",
+                "    pass",
+                "class X11SharedMemoryScreenshotSession:",
+                "    def __init__(self, display, width, height):",
+                "        pass",
+                "    def capture_png(self, x, y, width, height):",
+                "        return b'unused'",
+                "    def close(self):",
+                "        raise X11ScreenshotTimeoutError('private close detail')",
+            ]
+        )
+        + "\n"
+    )
+    existing_path = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        str(tmp_path) if not existing_path else f"{tmp_path}{os.pathsep}{existing_path}",
+    )
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(
+            __name__="_modal_computer_use_x11_shm",
+            X11ScreenshotTimeoutError=RuntimeError,
+            X11SharedMemoryScreenshotSession=object,
+        ),
+    )
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=10, height=11
+    )
+    owner = session._session
+    process = owner._process
+
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut) as caught:
+        session.close()
+
+    assert caught.value.timeout_origin == "native_x11_reply_deadline"
+    assert "private close detail" not in str(caught.value)
+    assert process is not None
+    assert process.poll() is not None
 
 
 def test_x11_shared_memory_adapter_rejects_wrong_png_dimensions(monkeypatch) -> None:
