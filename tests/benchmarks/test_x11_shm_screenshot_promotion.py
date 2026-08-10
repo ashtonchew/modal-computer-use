@@ -406,6 +406,31 @@ def test_gate_retains_and_rejects_readiness_regression() -> None:
     assert any("readiness" in reason for reason in artifact["promotion"]["reasons"])
 
 
+def test_rejected_artifact_retains_failed_operational_details() -> None:
+    artifact = _artifact()
+    artifact["status"] = "rejected"
+    artifact["operational_gates"]["bounded_x_server_failure"] = False
+    timeout = artifact["operational_details"]["x_server_timeout"]
+    timeout["passed"] = False
+    timeout["failed_bounded"] = False
+    timeout["public_error_detail_type"] = "UnexpectedError"
+    artifact["promotion"] = evaluate_x11_shm_screenshot_promotion(
+        artifact, require_publishable=False
+    )
+
+    validate_x11_shm_screenshot_artifact(artifact, require_publishable=False)
+
+    assert artifact["promotion"]["decision"] == "reject"
+    assert artifact["promotion"]["eligible"] is False
+    assert any("bounded X server" in reason for reason in artifact["promotion"]["reasons"])
+    assert artifact["operational_details"]["x_server_timeout"][
+        "public_error_detail_type"
+    ] == "UnexpectedError"
+
+    with pytest.raises(ValueError, match="publishable"):
+        validate_x11_shm_screenshot_artifact(artifact)
+
+
 def test_gate_retains_and_rejects_concurrency_regression() -> None:
     artifact = _artifact()
     artifact["operational_gates"]["concurrency_matrix"] = False

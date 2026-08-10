@@ -62,21 +62,26 @@ _FAILURE_CHECKS = {
 }
 
 
-def validate_x11_shm_screenshot_artifact(payload: Mapping[str, Any]) -> None:
-    """Validate complete, publishable promotion evidence.
+def validate_x11_shm_screenshot_artifact(
+    payload: Mapping[str, Any], *, require_publishable: bool = True
+) -> None:
+    """Validate publishable or explicitly rejected promotion evidence.
 
-    Rejected or partial attempts belong in untracked raw results.  A tracked
-    artifact accepted here must be sufficient to make the default decision.
+    The default requires a complete publishable artifact.  A caller may opt
+    into the rejected status to retain a secret-free operational failure and
+    its promotion decision without making it eligible for the default.
     """
 
-    _validate_artifact_structure(payload)
+    _validate_artifact_structure(payload, require_publishable=require_publishable)
     actual = _mapping(payload.get("promotion"), "promotion")
     expected = _evaluate_validated_artifact(payload)
     if actual != expected:
         raise ValueError("promotion decision does not match the retained observations")
 
 
-def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
+def _validate_artifact_structure(
+    payload: Mapping[str, Any], *, require_publishable: bool = True
+) -> None:
     if not isinstance(payload, Mapping):
         raise ValueError("screenshot promotion artifact must be an object")
     _validate_safe_value(payload)
@@ -84,8 +89,11 @@ def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
         raise ValueError("unsupported screenshot promotion schema")
     if payload.get("benchmark") != BENCHMARK:
         raise ValueError("unexpected screenshot promotion benchmark")
-    if payload.get("status") != "complete":
+    status = payload.get("status")
+    if require_publishable and status != "complete":
         raise ValueError("publishable screenshot evidence must be complete")
+    if not require_publishable and status not in {"complete", "rejected"}:
+        raise ValueError("screenshot evidence must be complete or rejected")
     if payload.get("public_call") != "await computer.screenshots.full()":
         raise ValueError("promotion boundary must be the exact public SDK call")
     if payload.get("retries") != 0 or payload.get("replacement_samples") != 0:
@@ -128,8 +136,12 @@ def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
     operational_details = _mapping(
         payload.get("operational_details"), "operational_details"
     )
-    _validate_operational_gates(operational_gates)
-    _validate_operational_details(operational_details)
+    _validate_operational_gates(
+        operational_gates, require_publishable=require_publishable
+    )
+    _validate_operational_details(
+        operational_details, require_publishable=require_publishable
+    )
     for gate, detail in (
         ("concurrency_matrix", "concurrency"),
         ("readiness_parity", "readiness"),
@@ -139,10 +151,12 @@ def _validate_artifact_structure(payload: Mapping[str, Any]) -> None:
             raise ValueError(f"operational gate {gate} disagrees with retained detail")
 
 
-def evaluate_x11_shm_screenshot_promotion(payload: Mapping[str, Any]) -> dict[str, Any]:
+def evaluate_x11_shm_screenshot_promotion(
+    payload: Mapping[str, Any], *, require_publishable: bool = True
+) -> dict[str, Any]:
     """Return the immutable gate decision for a validated artifact."""
 
-    _validate_artifact_structure(payload)
+    _validate_artifact_structure(payload, require_publishable=require_publishable)
     return _evaluate_validated_artifact(payload)
 
 
@@ -181,10 +195,38 @@ def _evaluate_validated_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
     if daemon_saving < FIXED_GATES["minimum_daemon_saving_ms"]:
         reasons.append("daemon-side absolute saving is below 5 ms")
     operational_gates = _mapping(payload["operational_gates"], "operational_gates")
+    for gate, label in (
+        ("chromium_fixture", "Chromium fixture"),
+        ("failure_matrix", "failure matrix"),
+        ("x_server_restart", "X server restart"),
+        ("bounded_x_server_failure", "bounded X server failure"),
+        ("region_parity", "region parity"),
+        ("cleanup_succeeded", "cleanup"),
+    ):
+        if operational_gates.get(gate) is not True:
+            reasons.append(f"{label} gate did not pass")
     if operational_gates.get("readiness_parity") is not True:
         reasons.append("fresh readiness p95 regresses by more than 5%")
     if operational_gates.get("concurrency_matrix") is not True:
         reasons.append("screenshot concurrency p95 regresses by more than 5%")
+    if operational_gates.get("captures") != 10_000:
+        reasons.append("operational soak did not complete 10000 captures")
+    if (
+        operational_gates.get("full_captures") != 5_000
+        or operational_gates.get("region_captures") != 5_000
+    ):
+        reasons.append("operational soak did not complete balanced full and regional captures")
+    if operational_gates.get("fd_delta") != 0 or operational_gates.get("mapping_delta") != 0:
+        reasons.append("operational soak resource counts changed")
+    if (
+        _nonnegative_integer(operational_gates.get("rss_growth_bytes"), "rss_growth_bytes")
+        > 16 * 1024 * 1024
+        or _nonnegative_integer(
+            operational_gates.get("peak_rss_growth_bytes"), "peak_rss_growth_bytes"
+        )
+        > 16 * 1024 * 1024
+    ):
+        reasons.append("operational soak RSS growth exceeds 16 MiB")
 
     preregistration = _mapping(payload["preregistration"], "preregistration")
     bootstrap_ci = _paired_bootstrap_median_difference(
@@ -377,7 +419,9 @@ def _validate_arm(arm_payload: Mapping[str, Any], *, arm: str, samples: int) -> 
                 raise ValueError("X11 shared-memory observation reported split timing")
 
 
-def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
+def _validate_operational_gates(
+    gates: Mapping[str, Any], *, require_publishable: bool
+) -> None:
     for key in (
         "chromium_fixture",
         "failure_matrix",
@@ -390,26 +434,57 @@ def _validate_operational_gates(gates: Mapping[str, Any]) -> None:
     ):
         if not isinstance(gates.get(key), bool):
             raise ValueError(f"operational gate {key} must be boolean")
-        if key not in {"concurrency_matrix", "readiness_parity"} and gates.get(key) is not True:
+        if (
+            require_publishable
+            and key not in {"concurrency_matrix", "readiness_parity"}
+            and gates.get(key) is not True
+        ):
             raise ValueError(f"operational gate {key} did not pass")
-    if gates.get("captures") != 10_000:
+    captures = _nonnegative_integer(gates.get("captures"), "captures")
+    full_captures = _nonnegative_integer(gates.get("full_captures"), "full_captures")
+    region_captures = _nonnegative_integer(
+        gates.get("region_captures"), "region_captures"
+    )
+    if require_publishable and captures != 10_000:
         raise ValueError("operational soak must contain 10000 captures")
-    if gates.get("full_captures") != 5_000 or gates.get("region_captures") != 5_000:
+    if require_publishable and (full_captures != 5_000 or region_captures != 5_000):
         raise ValueError("operational soak must alternate 5000 full and regional captures")
-    if gates.get("fd_delta") != 0 or gates.get("mapping_delta") != 0:
+    fd_delta = _nonnegative_integer(gates.get("fd_delta"), "fd_delta")
+    mapping_delta = _nonnegative_integer(gates.get("mapping_delta"), "mapping_delta")
+    if require_publishable and (fd_delta != 0 or mapping_delta != 0):
         raise ValueError("resource counts changed during the operational soak")
-    if _nonnegative_integer(gates.get("rss_growth_bytes"), "rss_growth_bytes") > 16 * 1024 * 1024:
+    rss_growth = _nonnegative_integer(gates.get("rss_growth_bytes"), "rss_growth_bytes")
+    if require_publishable and rss_growth > 16 * 1024 * 1024:
         raise ValueError("resource RSS growth exceeds the fixed 16 MiB ceiling")
-    if (
-        _nonnegative_integer(
-            gates.get("peak_rss_growth_bytes"), "peak_rss_growth_bytes"
-        )
-        > 16 * 1024 * 1024
-    ):
+    peak_rss_growth = _nonnegative_integer(
+        gates.get("peak_rss_growth_bytes"), "peak_rss_growth_bytes"
+    )
+    if require_publishable and peak_rss_growth > 16 * 1024 * 1024:
         raise ValueError("resource peak RSS growth exceeds the fixed 16 MiB ceiling")
 
 
-def _validate_operational_details(details: Mapping[str, Any]) -> None:
+def _validate_operational_details(
+    details: Mapping[str, Any], *, require_publishable: bool
+) -> None:
+    if not require_publishable:
+        required_details = (
+            "concurrency",
+            "readiness",
+            "failure_matrix",
+            "soak",
+            "x_server_restart",
+            "x_server_timeout",
+            "region_parity",
+            "terminal_cleanup",
+        )
+        for name in required_details:
+            if not isinstance(details.get(name), Mapping):
+                raise ValueError(f"rejected evidence detail {name} is incomplete")
+        for name in ("concurrency", "readiness"):
+            if not isinstance(details[name].get("passed"), bool):
+                raise ValueError(f"rejected evidence detail {name} has no decision")
+        return
+
     concurrency = _mapping(details.get("concurrency"), "concurrency")
     concurrency_arms = _mapping(concurrency.get("arms"), "concurrency.arms")
     if not isinstance(concurrency.get("passed"), bool) or set(concurrency_arms) != {
