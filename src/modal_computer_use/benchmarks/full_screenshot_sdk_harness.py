@@ -87,28 +87,43 @@ def _annotate_daemon_failure(
     )
 
 
-def build_paired_random_schedule(
-    arms: Sequence[str], *, sample_count: int, seed: int
+def build_paired_schedule(
+    arms: Sequence[str],
+    *,
+    sample_count: int,
+    seed: int,
+    order: str = "random",
+    minimum_sample_count: int = _MINIMUM_SAMPLES_PER_ARM,
 ) -> list[dict[str, int | str]]:
-    """Return a reproducible two-arm schedule with randomized pair order.
+    """Return a reproducible two-arm schedule.
 
     Pairing keeps each arm exposed to the same warm session drift while the
-    per-pair shuffle prevents a fixed arm from always paying first-request or
-    scheduler effects.  The promotion artifact intentionally supports exactly
-    the MSS baseline and X11 shared-memory candidate.
+    ``random`` order prevents a fixed arm from always paying first-request or
+    scheduler effects; ``alternating`` gives a fixed AB/BA protocol. The
+    promotion artifact intentionally supports exactly the MSS baseline and
+    X11 shared-memory candidate.
     """
 
     if len(arms) != 2 or len(set(arms)) != 2:
         raise ValueError("the screenshot promotion schedule requires two distinct arms")
-    if isinstance(sample_count, bool) or sample_count < _MINIMUM_SAMPLES_PER_ARM:
-        raise ValueError("sample_count must be at least 100 per arm")
+    if (
+        isinstance(minimum_sample_count, bool)
+        or minimum_sample_count < 1
+        or sample_count < minimum_sample_count
+    ):
+        raise ValueError(f"sample_count must be at least {minimum_sample_count} per arm")
     if isinstance(seed, bool) or seed <= 0:
         raise ValueError("schedule seed must be positive")
+    if order not in {"random", "alternating"}:
+        raise ValueError("schedule order must be random or alternating")
     rng = random.Random(seed)  # noqa: S311 - deterministic benchmark schedule.
     schedule: list[dict[str, int | str]] = []
     for sample_index in range(sample_count):
         pair = list(arms)
-        rng.shuffle(pair)
+        if order == "random":
+            rng.shuffle(pair)
+        elif sample_index % 2:
+            pair.reverse()
         for position, arm in enumerate(pair):
             schedule.append(
                 {
@@ -121,6 +136,25 @@ def build_paired_random_schedule(
     return schedule
 
 
+def build_paired_random_schedule(
+    arms: Sequence[str],
+    *,
+    sample_count: int,
+    seed: int,
+    order: str = "random",
+    minimum_sample_count: int = _MINIMUM_SAMPLES_PER_ARM,
+) -> list[dict[str, int | str]]:
+    """Compatibility alias for :func:`build_paired_schedule`."""
+
+    return build_paired_schedule(
+        arms,
+        sample_count=sample_count,
+        seed=seed,
+        order=order,
+        minimum_sample_count=minimum_sample_count,
+    )
+
+
 async def measure_full_screenshot_arms(
     borrow_for_arm: Mapping[
         str, Callable[[], AbstractAsyncContextManager[Any]]
@@ -129,6 +163,8 @@ async def measure_full_screenshot_arms(
     sample_count: int = _MINIMUM_SAMPLES_PER_ARM,
     warmup_iterations: int = _MINIMUM_WARMUP_ITERATIONS,
     schedule_seed: int = 20260808,
+    schedule_order: str = "random",
+    retain_partial_evidence: bool = False,
     decode_parity: Callable[[bytes], bool] | None = None,
     expected_capture_backends: Mapping[str, str] | None = None,
     clock: Callable[[], float] = time.perf_counter,
@@ -149,38 +185,59 @@ async def measure_full_screenshot_arms(
     if decode_parity is None:
         raise ValueError("decode_parity callback is required for independent pixel parity")
     arms = tuple(borrow_for_arm)
-    schedule = build_paired_random_schedule(
-        arms, sample_count=sample_count, seed=schedule_seed
+    schedule = build_paired_schedule(
+        arms, sample_count=sample_count, seed=schedule_seed, order=schedule_order
+    )
+    warmup_schedule = build_paired_schedule(
+        arms,
+        sample_count=warmup_iterations,
+        seed=schedule_seed,
+        order=schedule_order,
+        minimum_sample_count=1,
     )
     observations: dict[str, list[dict[str, Any]]] = {arm: [] for arm in arms}
     traces: dict[str, list[dict[str, Any]]] = {arm: [] for arm in arms}
     fallback_counts: dict[str, int] = {arm: 0 for arm in arms}
+    warmup_completed: dict[str, int] = {arm: 0 for arm in arms}
     contexts = {arm: borrow_for_arm[arm]() for arm in arms}
     entered: dict[str, Any] = {}
     cleanup_errors: list[dict[str, str]] = []
     reference_metadata: tuple[Any, ...] | None = None
+    failure: dict[str, Any] | None = None
+    phase = "enter"
+    current_arm: str | None = None
+    current_sample_index: int | None = None
     try:
         for arm in arms:
+            current_arm = arm
             entered[arm] = await contexts[arm].__aenter__()
             _require_public_client(entered[arm])
 
-        # Warm every session before the paired schedule.  Warmups are not
-        # included in any percentile or promotion observation.
-        for arm in arms:
-            for warmup_index in range(warmup_iterations):
-                try:
-                    await entered[arm].screenshots.full()
-                except DaemonHTTPError as error:
-                    _annotate_daemon_failure(
-                        error,
-                        arm=arm,
-                        phase="warmup",
-                        sample_index=warmup_index,
-                    )
-                    raise
+        # Warm every session before the paired schedule using the same fixed
+        # AB/BA protocol as measured calls. Warmups are excluded from
+        # percentiles but completed counts are retained for auditability.
+        phase = "warmup"
+        for item in warmup_schedule:
+            arm = str(item["arm"])
+            current_arm = arm
+            current_sample_index = int(item["sample_index"])
+            try:
+                await entered[arm].screenshots.full()
+            except DaemonHTTPError as error:
+                _annotate_daemon_failure(
+                    error,
+                    arm=arm,
+                    phase="warmup",
+                    sample_index=current_sample_index,
+                )
+                raise
+            warmup_completed[arm] += 1
 
+        phase = "sample"
         for item in schedule:
             arm = str(item["arm"])
+            current_arm = arm
+            current_sample_index = int(item["sample_index"])
             computer = entered[arm]
             trace: dict[str, Any] = {}
             original = computer.client.post_bytes_with_headers
@@ -265,6 +322,15 @@ async def measure_full_screenshot_arms(
                 }
             )
             traces[arm].append(trace)
+    except Exception as exc:
+        if not retain_partial_evidence:
+            raise
+        failure = {
+            "phase": phase,
+            "exception_type": type(exc).__name__,
+            "arm": current_arm,
+            "sample_index": current_sample_index,
+        }
     finally:
         for arm in reversed(arms):
             if arm not in entered:
@@ -273,16 +339,19 @@ async def measure_full_screenshot_arms(
                 await contexts[arm].__aexit__(None, None, None)
             except Exception as exc:
                 cleanup_errors.append({"arm": arm, "exception_type": type(exc).__name__})
-        if cleanup_errors:
+        if cleanup_errors and not retain_partial_evidence:
             raise RuntimeError("screenshot benchmark cleanup failed")
 
-    return {
+    result = {
         "benchmark": "x11-shm-screenshot-promotion",
         "public_call": "await computer.screenshots.full()",
         "payload": dict(_EXPECTED_PAYLOAD),
         "sample_count_per_arm": sample_count,
         "warmup_iterations": warmup_iterations,
+        "warmup_schedule": warmup_schedule,
+        "warmup_completed_per_arm": warmup_completed,
         "schedule_seed": schedule_seed,
+        "schedule_order": schedule_order,
         "schedule": schedule,
         "arms": {
             arm: {
@@ -300,6 +369,20 @@ async def measure_full_screenshot_arms(
         "cleanup": {"errors": cleanup_errors, "succeeded": not cleanup_errors},
         "fallback_counts": fallback_counts,
     }
+    if failure is not None:
+        result["status"] = "rejected"
+        result["failure"] = failure
+    elif cleanup_errors:
+        result["status"] = "rejected"
+        result["failure"] = {
+            "phase": "cleanup",
+            "exception_type": "CleanupError",
+            "arm": None,
+            "sample_index": None,
+        }
+    else:
+        result["status"] = "complete"
+    return result
 
 
 def _require_public_client(computer: Any) -> None:

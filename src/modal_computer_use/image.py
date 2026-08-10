@@ -384,15 +384,27 @@ def _native_screenshot_source() -> Path:
     return Path(__file__).resolve().parent / "_native" / "x11_shm"
 
 
-def _add_x11_shared_memory_capture(image: object) -> object:
-    """Compile and bake the managed X11 shared-memory screenshot extension."""
+def _add_x11_shared_memory_capture(
+    image: object,
+    *,
+    cargo_features: tuple[str, ...] = ("extension-module",),
+) -> object:
+    """Compile and bake one explicit X11 shared-memory codec artifact.
+
+    The default image keeps the existing Rust miniz_oxide build. Benchmark
+    images may pass one alternate, compile-time codec feature; no runtime
+    selector is added to the SDK surface.
+    """
     source = _native_screenshot_source()
     if not source.is_dir():
         raise RuntimeError(
             "the managed image build is missing the packaged X11 shared-memory Cargo source"
         )
 
-    image = image.apt_install(*_X11_SHARED_MEMORY_BUILD_PACKAGES)
+    build_packages = list(_X11_SHARED_MEMORY_BUILD_PACKAGES)
+    if "stock-zlib" in cargo_features:
+        build_packages.append("zlib1g-dev")
+    image = image.apt_install(*build_packages)
     image = image.add_local_dir(
         str(source),
         remote_path=_X11_SHARED_MEMORY_REMOTE_PATH,
@@ -400,6 +412,15 @@ def _add_x11_shared_memory_capture(image: object) -> object:
         ignore=_X11_SHARED_MEMORY_SOURCE_IGNORES,
     )
     cargo_manifest = f"{_X11_SHARED_MEMORY_REMOTE_PATH}/Cargo.toml"
+    if not cargo_features or any(
+        not feature or not all(character.isalnum() or character in "_-" for character in feature)
+        for feature in cargo_features
+    ):
+        raise ValueError("native Cargo features must be non-empty safe identifiers")
+    # Cargo accepts a comma-separated feature list as one shell-safe value;
+    # passing multiple bare arguments would interpret the second feature as a
+    # package name.
+    feature_args = ",".join(cargo_features)
     cargo_output = (
         f"{_X11_SHARED_MEMORY_REMOTE_PATH}/target/release/"
         f"lib{_X11_SHARED_MEMORY_EXTENSION}.so"
@@ -411,7 +432,7 @@ def _add_x11_shared_memory_capture(image: object) -> object:
         "export PATH=/root/.cargo/bin:$PATH && "
         f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=/usr/local/bin/python3 "
         "cargo build "
-        f"--locked --release --features extension-module "
+        f"--locked --release --features {feature_args} "
         f"--manifest-path {cargo_manifest}",
         "/usr/local/bin/python3 -c 'import pathlib, shutil, sysconfig; "
         f"source = pathlib.Path(\"{cargo_output}\"); assert source.is_file(); "

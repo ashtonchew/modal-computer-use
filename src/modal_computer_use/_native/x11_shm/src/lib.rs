@@ -43,6 +43,9 @@ pyo3::create_exception!(
 use xcb::{shm, x, Connection};
 
 const BACKEND_MARKER: &str = "x11-shm";
+#[cfg(feature = "stock-zlib")]
+const CODEC_MARKER: &str = "png-deflate-level1-no-filter-stock-zlib";
+#[cfg(not(feature = "stock-zlib"))]
 const CODEC_MARKER: &str = "png-deflate-level1-no-filter";
 const X11_REPLY_TIMEOUT_MS: u64 = 750;
 #[cfg(target_os = "linux")]
@@ -191,6 +194,173 @@ struct RgbPngEncoder {
     rgb: Vec<u8>,
 }
 
+#[cfg(feature = "stock-zlib")]
+mod stock_zlib_png {
+    use anyhow::{bail, Context, Result};
+    use libc::{c_char, c_int, c_uint, c_ulong};
+    use std::ffi::CStr;
+
+    const Z_OK: c_int = 0;
+    const Z_BEST_SPEED: c_int = 1;
+
+    // png 0.18.1 enables flate2's default Rust backend transitively.  A
+    // direct flate2/zlib feature would therefore enable two additive
+    // backends in one binary.  This benchmark-only build uses the system
+    // zlib entry points directly, so the selected codec is unambiguous.
+    #[link(name = "z")]
+    unsafe extern "C" {
+        fn compress2(
+            destination: *mut u8,
+            destination_length: *mut c_ulong,
+            source: *const u8,
+            source_length: c_ulong,
+            level: c_int,
+        ) -> c_int;
+        #[link_name = "compressBound"]
+        fn compress_bound(source_length: c_ulong) -> c_ulong;
+        fn crc32(crc: c_ulong, buffer: *const u8, length: c_uint) -> c_ulong;
+        fn zlibVersion() -> *const c_char;
+    }
+
+    pub fn runtime_version() -> String {
+        let pointer = unsafe { zlibVersion() };
+        if pointer.is_null() {
+            return "unknown".to_owned();
+        }
+        unsafe { CStr::from_ptr(pointer) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    pub fn encode_rgb(rgb: &[u8], width: u16, height: u16) -> Result<Vec<u8>> {
+        let width = usize::from(width);
+        let height = usize::from(height);
+        let expected_rgb_len = width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(3))
+            .context("RGB buffer size overflows usize")?;
+        if rgb.len() != expected_rgb_len {
+            bail!("RGB buffer length does not match PNG dimensions");
+        }
+        let scanline_len = width
+            .checked_mul(3)
+            .and_then(|row| row.checked_add(1))
+            .context("PNG scanline size overflows usize")?;
+        let scanline_bytes = scanline_len
+            .checked_mul(height)
+            .context("PNG scanline buffer size overflows usize")?;
+        let mut scanlines = Vec::with_capacity(scanline_bytes);
+        for row in rgb.chunks_exact(width * 3) {
+            scanlines.push(0);
+            scanlines.extend_from_slice(row);
+        }
+
+        let scanline_len = c_ulong::try_from(scanlines.len())
+            .context("scanline buffer is too large for zlib")?;
+        let bound = usize::try_from(unsafe { compress_bound(scanline_len) })
+            .context("zlib compression bound does not fit usize")?;
+        if bound == 0 {
+            bail!("zlib returned an empty compression bound");
+        }
+        let mut compressed = vec![0_u8; bound];
+        let mut compressed_len = c_ulong::try_from(bound)
+            .context("compression bound does not fit zlib length type")?;
+        let status = unsafe {
+            compress2(
+                compressed.as_mut_ptr(),
+                &mut compressed_len,
+                scanlines.as_ptr(),
+                scanline_len,
+                Z_BEST_SPEED,
+            )
+        };
+        if status != Z_OK {
+            bail!("zlib compression failed with status {status}");
+        }
+        let compressed_len = usize::try_from(compressed_len)
+            .context("zlib compressed length does not fit usize")?;
+        if compressed_len > compressed.len() {
+            bail!("zlib returned a compressed length beyond its bound");
+        }
+        compressed.truncate(compressed_len);
+
+        let mut output = Vec::with_capacity(compressed.len() + 128);
+        output.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+        let width = u32::try_from(width).context("PNG width exceeds u32")?;
+        let height = u32::try_from(height).context("PNG height exceeds u32")?;
+        let mut header = [0_u8; 13];
+        header[..4].copy_from_slice(&width.to_be_bytes());
+        header[4..8].copy_from_slice(&height.to_be_bytes());
+        header[8] = 8; // bit depth
+        header[9] = 2; // truecolour RGB
+        append_chunk(&mut output, b"IHDR", &header)?;
+        append_chunk(&mut output, b"IDAT", &compressed)?;
+        append_chunk(&mut output, b"IEND", &[])?;
+        Ok(output)
+    }
+
+    fn append_chunk(output: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) -> Result<()> {
+        let length = u32::try_from(data.len()).context("PNG chunk exceeds u32")?;
+        output.extend_from_slice(&length.to_be_bytes());
+        output.extend_from_slice(kind);
+        output.extend_from_slice(data);
+        let kind_len = c_uint::try_from(kind.len()).context("PNG chunk type is too long")?;
+        let data_len = c_uint::try_from(data.len()).context("PNG chunk is too long")?;
+        let kind_crc = unsafe { crc32(0, kind.as_ptr(), kind_len) };
+        let checksum = unsafe { crc32(kind_crc, data.as_ptr(), data_len) };
+        output.extend_from_slice(&(checksum as u32).to_be_bytes());
+        Ok(())
+    }
+}
+
+fn encode_rgb_buffer(rgb: &[u8], width: u16, height: u16) -> Result<Vec<u8>> {
+    let expected_rgb_len = usize::from(width)
+        .checked_mul(usize::from(height))
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| anyhow!("RGB buffer size overflows usize"))?;
+    if rgb.len() != expected_rgb_len {
+        bail!("RGB buffer length does not match PNG dimensions");
+    }
+
+    #[cfg(feature = "stock-zlib")]
+    return stock_zlib_png::encode_rgb(rgb, width, height);
+
+    #[cfg(not(feature = "stock-zlib"))]
+    {
+        let mut output = Vec::with_capacity(rgb.len() / 2);
+        let mut encoder = png::Encoder::new(&mut output, u32::from(width), u32::from(height));
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        // `Compression::Fast` in png 0.18 selects fdeflate's ultra-fast
+        // profile, not zlib level 1. Use explicit Level(1) and NoFilter to
+        // mirror MSS's policy; Rust remains a separate codec requiring live
+        // MSS validation.
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
+        encoder.set_filter(png::Filter::NoFilter);
+        let mut writer = encoder.write_header().context("PNG header write failed")?;
+        writer
+            .write_image_data(rgb)
+            .context("PNG image write failed")?;
+        writer.finish().context("PNG finish failed")?;
+        Ok(output)
+    }
+}
+
+/// Encode a deterministic RGB buffer for the benchmark-only codec proof.
+///
+/// This is not part of the Python SDK surface. The compile-time Cargo feature
+/// selects exactly one encoder implementation per native artifact.
+#[doc(hidden)]
+pub fn encode_rgb_for_proof(rgb: &[u8], width: u16, height: u16) -> Result<Vec<u8>> {
+    encode_rgb_buffer(rgb, width, height)
+}
+
+/// Return the compile-time codec identity used by the benchmark proof.
+#[doc(hidden)]
+pub fn codec_marker_for_proof() -> &'static str {
+    CODEC_MARKER
+}
+
 #[cfg(target_os = "linux")]
 impl RgbPngEncoder {
     fn encode(
@@ -221,22 +391,7 @@ impl RgbPngEncoder {
             convert_bgra_row(source_row, destination_row);
         }
 
-        let mut output = Vec::with_capacity(rgb_len / 2);
-        let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        // `Compression::Fast` in png 0.18 selects fdeflate's ultra-fast
-        // profile, not zlib level 1. Use explicit Level(1) and NoFilter to
-        // mirror MSS's policy; Rust remains a separate codec requiring live
-        // MSS validation.
-        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
-        encoder.set_filter(png::Filter::NoFilter);
-        let mut writer = encoder.write_header().context("PNG header write failed")?;
-        writer
-            .write_image_data(&self.rgb)
-            .context("PNG image write failed")?;
-        writer.finish().context("PNG finish failed")?;
-        Ok(output)
+        encode_rgb_buffer(&self.rgb, width, height)
     }
 }
 
@@ -792,6 +947,14 @@ fn _modal_computer_use_x11_shm(py: Python<'_>, module: &Bound<'_, PyModule>) -> 
     )?;
     module.add("backend", BACKEND_MARKER)?;
     module.add("codec", CODEC_MARKER)?;
+    #[cfg(feature = "stock-zlib")]
+    module.add("codec_runtime", stock_zlib_png::runtime_version())?;
+    #[cfg(not(feature = "stock-zlib"))]
+    module.add("codec_runtime", "in-process-fdeflate")?;
+    #[cfg(feature = "stock-zlib")]
+    module.add("codec_library", "system-libz")?;
+    #[cfg(not(feature = "stock-zlib"))]
+    module.add("codec_library", "in-process")?;
     Ok(())
 }
 
@@ -883,6 +1046,9 @@ mod tests {
     #[test]
     fn native_markers_keep_backend_and_codec_semantic() {
         assert_eq!(BACKEND_MARKER, "x11-shm");
+        #[cfg(feature = "stock-zlib")]
+        assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter-stock-zlib");
+        #[cfg(not(feature = "stock-zlib"))]
         assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter");
     }
 
@@ -1179,12 +1345,37 @@ mod tests {
                 (u32::from(width), u32::from(height), rgb),
                 "NoFilter PNG changed decoded RGB for {width}x{height}"
             );
+            #[cfg(not(feature = "stock-zlib"))]
             assert_eq!(
                 native.len(),
                 reference.len(),
                 "native NoFilter PNG differs from the reference payload for {width}x{height}"
             );
+            #[cfg(feature = "stock-zlib")]
+            assert_eq!(
+                decode_rgb_png(&reference).2,
+                decode_rgb_png(&native).2,
+                "stock-zlib NoFilter PNG changed decoded RGB for {width}x{height}"
+            );
         }
+    }
+
+    #[cfg(feature = "stock-zlib")]
+    #[test]
+    fn stock_zlib_encoder_round_trips_and_exposes_runtime_identity() {
+        let rgb = vec![
+            0_u8, 1, 2, 3, 4, 5, // first row
+            250, 249, 248, 247, 246, 245,
+        ];
+        let encoded = stock_zlib_png::encode_rgb(&rgb, 2, 2).unwrap();
+        let decoder = png::Decoder::new(std::io::Cursor::new(encoded));
+        let mut reader = decoder.read_info().unwrap();
+        let mut decoded = vec![0_u8; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut decoded).unwrap();
+        decoded.truncate(info.buffer_size());
+        assert_eq!((info.width, info.height, decoded), (2, 2, rgb));
+        let runtime = stock_zlib_png::runtime_version();
+        assert!(runtime.chars().filter(|character| *character == '.').count() >= 2);
     }
 
     #[cfg(target_os = "linux")]

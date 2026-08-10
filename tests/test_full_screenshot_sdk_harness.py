@@ -1703,6 +1703,22 @@ def test_schedule_is_reproducible_paired_and_randomized() -> None:
     )
 
 
+def test_schedule_supports_fixed_alternating_pairs() -> None:
+    schedule = build_paired_random_schedule(
+        ("mss", "x11-shm"),
+        sample_count=100,
+        seed=20260808,
+        order="alternating",
+    )
+
+    assert len(schedule) == 200
+    for sample_index in range(100):
+        pair = schedule[sample_index * 2 : sample_index * 2 + 2]
+        expected = ("mss", "x11-shm") if sample_index % 2 == 0 else ("x11-shm", "mss")
+        assert tuple(entry["arm"] for entry in pair) == expected
+        assert tuple(entry["position"] for entry in pair) == (0, 1)
+
+
 def test_validate_sample_accepts_canonical_contract() -> None:
     _validate_sample(FakeScreenshot(), _trace())
 
@@ -1813,6 +1829,7 @@ async def test_measure_full_screenshot_records_public_and_daemon_boundaries() ->
         decode_parity=lambda _data: True,
         expected_capture_backends={"mss": "mss", "x11-shm": "x11-shm"},
         schedule_seed=20260808,
+        schedule_order="alternating",
     )
 
     assert result["public_call"] == "await computer.screenshots.full()"
@@ -1824,6 +1841,14 @@ async def test_measure_full_screenshot_records_public_and_daemon_boundaries() ->
         assert observations[0]["hash_ms"] == 0.25
         assert observations[0]["payload_bytes"] == len(DATA)
         assert observations[0]["metadata_parity"] is True
+        assert result["warmup_completed_per_arm"][arm] == 10
+    assert result["status"] == "complete"
+    assert [entry["arm"] for entry in result["warmup_schedule"][:4]] == [
+        "mss",
+        "x11-shm",
+        "x11-shm",
+        "mss",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1866,6 +1891,33 @@ async def test_measure_full_screenshot_fails_cleanup() -> None:
             warmup_iterations=10,
             decode_parity=lambda _data: True,
         )
+
+
+@pytest.mark.asyncio
+async def test_measure_full_screenshot_retains_safe_partial_on_failure_and_cleanup() -> None:
+    result = await measure_full_screenshot_arms(
+        {
+            "mss": lambda: FakeContext("mss"),
+            "x11-shm": lambda: FakeContext("x11-shm", fail_cleanup=True, fail_on_call=11),
+        },
+        sample_count=100,
+        warmup_iterations=10,
+        decode_parity=lambda _data: True,
+        expected_capture_backends={"mss": "mss", "x11-shm": "x11-shm"},
+        schedule_order="alternating",
+        retain_partial_evidence=True,
+    )
+
+    assert result["status"] == "rejected"
+    assert result["failure"]["phase"] == "sample"
+    assert result["failure"]["exception_type"] == "DaemonHTTPError"
+    assert result["warmup_completed_per_arm"] == {"mss": 10, "x11-shm": 10}
+    assert len(result["arms"]["mss"]["observations"]) == 1
+    assert result["arms"]["x11-shm"]["observations"] == []
+    assert result["cleanup"]["succeeded"] is False
+    assert result["cleanup"]["errors"] == [
+        {"arm": "x11-shm", "exception_type": "RuntimeError"}
+    ]
 
 
 @pytest.mark.asyncio

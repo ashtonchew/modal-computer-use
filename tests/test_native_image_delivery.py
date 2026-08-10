@@ -150,6 +150,25 @@ def test_native_build_helper_rejects_a_missing_packaged_source(
         _add_x11_shared_memory_capture(image)
 
 
+def test_native_build_helper_can_select_stock_zlib_without_changing_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_modal(monkeypatch)
+    image = _FakeImage()
+
+    _add_x11_shared_memory_capture(
+        image,
+        cargo_features=("extension-module", "stock-zlib"),
+    )
+
+    packages = next(value for name, value in image.calls if name == "apt_install")
+    assert "zlib1g-dev" in packages
+    commands = next(value for name, value in image.calls if name == "run_commands")
+    assert "cargo build --locked --release --features extension-module,stock-zlib" in "\n".join(
+        commands
+    )
+
+
 @pytest.mark.parametrize("variant", ["standard", "firefox", "chromium"])
 def test_all_named_image_variants_use_the_same_native_recipe(
     monkeypatch: pytest.MonkeyPatch,

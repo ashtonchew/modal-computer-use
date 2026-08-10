@@ -12,6 +12,9 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 extension-module = ["pyo3/extension-module"]
+# Build one codec per native artifact.  This is benchmark-only today; the
+# default artifact remains the existing Rust miniz_oxide implementation.
+stock-zlib = []
 
 [dependencies]
 anyhow = "1.0"
