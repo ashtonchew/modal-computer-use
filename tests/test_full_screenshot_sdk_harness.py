@@ -69,6 +69,7 @@ def test_promotion_runner_exposes_repeated_bounded_x_server_diagnostic() -> None
     assert "BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES = 10" in runner
     assert "def run_repeated_bounded_x_server_probe(" in runner
     assert "sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES" in runner
+    assert "provenance: dict[str, str | bool] | None = None" in runner
     assert '"sample_count": sample_count' in runner
     assert '"observations": observations' in runner
     assert '"terminal_cleanup": cleanup' in runner
@@ -86,6 +87,7 @@ def test_repeated_bounded_x_server_diagnostic_persists_the_remote_result() -> No
     assert 'Path("benchmark-data/x11-shm-bounded-x-diagnostic-10.json")' in runner
     assert "path.write_text(json.dumps(result, indent=2, sort_keys=True) + \"\\n\")" in runner
     assert "print(json.dumps(result, indent=2, sort_keys=True))" in runner
+    assert "provenance=_local_provenance()" in runner
 
 
 def test_repeated_bounded_x_server_diagnostic_retains_safe_iterations_and_cleanup() -> None:
@@ -103,8 +105,17 @@ def test_repeated_bounded_x_server_diagnostic_retains_safe_iterations_and_cleanu
         },
     ]
     cleanup = {"succeeded": True, "remaining_sandboxes": 0}
+    provenance = {
+        "source_revision": "a" * 40,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": "b" * 64,
+        "cargo_lock_sha256": "c" * 64,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
 
-    payload = _build_repeated_bounded_x_server_diagnostic(observations, cleanup)
+    payload = _build_repeated_bounded_x_server_diagnostic(
+        observations, cleanup, provenance
+    )
 
     assert payload["sample_count"] == 2
     assert payload["failure_count"] == 1
@@ -114,6 +125,7 @@ def test_repeated_bounded_x_server_diagnostic_retains_safe_iterations_and_cleanu
     assert payload["retries"] == 0
     assert payload["replacement_samples"] == 0
     assert payload["schema_version"] == "x11-shm-bounded-x-diagnostic.v1"
+    assert payload["provenance"] == provenance
 
 
 def test_repeated_bounded_x_server_diagnostic_requires_exactly_ten_samples() -> None:
@@ -121,6 +133,13 @@ def test_repeated_bounded_x_server_diagnostic_requires_exactly_ten_samples() -> 
         ValueError, match="bounded X server diagnostic requires exactly 10 samples"
     ):
         asyncio.run(_run_repeated_bounded_x_server_diagnostic(sample_count=9))
+
+
+def test_repeated_bounded_x_server_diagnostic_requires_provenance() -> None:
+    with pytest.raises(
+        ValueError, match="clean local benchmark provenance is required"
+    ):
+        asyncio.run(_run_repeated_bounded_x_server_diagnostic(sample_count=10))
 
 
 def test_promotion_runner_exposes_the_x_server_restart_probe() -> None:
@@ -203,6 +222,18 @@ def test_promotion_restart_retains_safe_failure_attribution() -> None:
     assert '"failure_phase": phase' in runner
     assert '{"failure_phase": "cleanup"}' in runner
     assert "**_safe_daemon_failure(exc)" in runner
+
+
+def test_promotion_restart_retains_allowlisted_readiness_categories() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+    restart_probe = runner.split(
+        "async def _run_x_server_timeout_probe", maxsplit=1
+    )[1].split("async def _run_region_parity_probe", maxsplit=1)[0]
+
+    assert "_safe_daemon_failure(exc)" in restart_probe
+    assert '"failure_readiness_categories"' in restart_probe
 
 
 def test_promotion_failure_attribution_never_retains_daemon_error_text() -> None:
