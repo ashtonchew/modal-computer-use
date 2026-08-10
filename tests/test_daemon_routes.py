@@ -138,6 +138,39 @@ def test_raw_screenshot_returns_image_bytes_and_complete_metadata(
     assert json.loads(response.headers["x-computer-use-cursor-position"]) == {"x": 0, "y": 0}
     timing = json.loads(response.headers["x-computer-use-timing-ms"])
     assert isinstance(timing, dict)
+    assert timing["route_ready_ms"] >= 0
+    assert timing["route_lock_wait_ms"] >= 0
+    assert timing["route_operation_ms"] >= 0
+    assert timing["route_total_ms"] >= timing["route_ready_ms"]
+    assert timing["route_total_ms"] >= timing["route_lock_wait_ms"]
+    assert timing["route_total_ms"] >= timing["route_operation_ms"]
+    assert timing["route_total_ms"] >= (
+        timing["route_ready_ms"]
+        + timing["route_lock_wait_ms"]
+        + timing["route_operation_ms"]
+    )
+
+
+def test_raw_screenshot_route_timing_preserves_controller_timing(
+    test_client,
+    app,
+    monkeypatch,
+) -> None:
+    original = app.state.backend.screenshot_bytes
+
+    async def screenshot_bytes(*args, **kwargs):
+        shot = await original(*args, **kwargs)
+        return replace(shot, timings_ms={"total_ms": 7.5, "hash_ms": 0.5})
+
+    monkeypatch.setattr(app.state.backend, "screenshot_bytes", screenshot_bytes)
+
+    response = test_client.post("/v1/screenshots/full/raw", json={"format": "png"})
+
+    assert response.status_code == 200
+    timing = json.loads(response.headers["x-computer-use-timing-ms"])
+    assert timing["total_ms"] == 7.5
+    assert timing["hash_ms"] == 0.5
+    assert timing["route_operation_ms"] >= 0
 
 
 def test_raw_screenshot_rejects_artifact_storage(test_client) -> None:
@@ -148,6 +181,49 @@ def test_raw_screenshot_rejects_artifact_storage(test_client) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_screenshot_storage"
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/v1/screenshots/region/raw",
+            {"format": "png", "region": {"x": 0, "y": 0, "width": 16, "height": 16}},
+        ),
+        (
+            "/v1/screenshots/zoom/raw",
+            {
+                "format": "png",
+                "region": {"x": 0, "y": 0, "width": 16, "height": 16},
+                "scale": 2.0,
+            },
+        ),
+    ],
+)
+def test_region_and_zoom_raw_screenshots_include_route_timing(
+    test_client,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    response = test_client.post(path, json=payload)
+
+    assert response.status_code == 200
+    timing = json.loads(response.headers["x-computer-use-timing-ms"])
+    for key in (
+        "route_ready_ms",
+        "route_lock_wait_ms",
+        "route_operation_ms",
+        "route_total_ms",
+    ):
+        assert timing[key] >= 0
+    assert timing["route_total_ms"] >= timing["route_ready_ms"]
+    assert timing["route_total_ms"] >= timing["route_lock_wait_ms"]
+    assert timing["route_total_ms"] >= timing["route_operation_ms"]
+    assert timing["route_total_ms"] >= (
+        timing["route_ready_ms"]
+        + timing["route_lock_wait_ms"]
+        + timing["route_operation_ms"]
+    )
 
 
 def test_screenshot_timeout_retains_only_safe_origin(app) -> None:
