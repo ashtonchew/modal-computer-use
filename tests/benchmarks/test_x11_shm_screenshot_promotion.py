@@ -86,7 +86,7 @@ def _artifact() -> dict:
             "native_builds": {
                 arm: {
                     "backend": "x11-shm",
-                    "codec": "png-deflate-level1-fixed-up",
+                    "codec": "png-deflate-level1-fixed-sub",
                     "module_sha256": "d" * 64,
                     "image_object_id": "im-test-image",
                     "machine": "x86_64",
@@ -306,6 +306,15 @@ def test_publishable_artifact_passes_fixed_promotion_gates() -> None:
     assert decision["eligible"] is True
     assert decision["metrics"]["complete_sdk_ms"]["p50_improvement_percent"] > 20
     assert decision["metrics"]["daemon_total_ms"]["absolute_saving_ms"] >= 5
+
+
+def test_validator_rejects_old_fixed_up_codec_marker() -> None:
+    artifact = _artifact()
+    artifact["configuration"]["native_builds"]["x11-shm"][
+        "codec"
+    ] = "png-deflate-level1-fixed-up"
+    with pytest.raises(ValueError, match="native build codec marker changed"):
+        validate_x11_shm_screenshot_artifact(artifact)
 
 
 def test_validator_accepts_secret_free_startup_timing_stages() -> None:
