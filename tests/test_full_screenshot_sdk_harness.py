@@ -71,11 +71,26 @@ def test_promotion_runner_exposes_a_retained_100_pair_readiness_replication() ->
     )
     assert '"sample_count_per_arm": samples' in runner
     assert 'observation["startup_total_ms"] = round(elapsed_ms, 4)' in runner
+    assert 'observation["public_capture_elapsed_ms"]' in runner
     assert '"position": position' in runner
     assert "continue_on_failure=True" in runner
     assert '"failure_count": failure_count' in runner
     assert '"terminal_cleanup": cleanup' in runner
     assert "def readiness_main(" in runner
+
+
+def test_promotion_runner_exposes_candidate_timeout_origin_diagnostic() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x11_shm_timeout_origin_probe(" in runner
+    assert 'if samples != 100:' in runner
+    assert '"sample_count": sample_count' in runner
+    assert '"timeout_origin_counts": timeout_origin_counts' in runner
+    assert '"retries": 0' in runner
+    assert '"terminal_cleanup": cleanup' in runner
+    assert "def timeout_origin_main(" in runner
 
 
 def test_promotion_readiness_retains_sdk_startup_stages() -> None:
@@ -94,6 +109,8 @@ def test_promotion_readiness_retains_sdk_startup_stages() -> None:
     assert '"connection_parameters_ready": "daemon_readiness"' in runner
     assert '"attestation_ready": "attested_tunnel_readiness"' in runner
     assert 'observation.update(_safe_daemon_failure(exc))' in runner
+    assert 'details.get("timeout_origin")' in runner
+    assert 'result["failure_timeout_origin"]' in runner
     assert 'observation["status"] = "failed"' in runner
     assert 'observation["failure_phase"] = "cleanup"' in runner
 
