@@ -19,17 +19,23 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     DAEMON_LOCAL_TAIL_CAPTURES,
     DAEMON_LOCAL_TAIL_WARMUPS,
     TRANSPORT_THRESHOLD_SWEEP_SPECS,
+    X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+    X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
     _build_repeated_bounded_x_server_diagnostic,
     _build_x11_shm_daemon_local_tail_diagnostic,
     _build_x11_shm_daemon_local_tail_script,
     _build_x11_shm_resource_snapshot_diagnostic,
+    _build_x11_shm_scheduling_diagnostic,
+    _build_x11_shm_scheduling_diagnostic_script,
     _build_x11_shm_soak_diagnostic,
     _build_x11_shm_soak_diagnostic_script,
     _build_x11_shm_transport_threshold_diagnostic,
     _daemon_unattributed_ms,
     _is_modal_daemon_cmdline,
+    _is_x11_shm_worker_cmdline,
     _run_repeated_bounded_x_server_diagnostic,
     _run_x11_shm_daemon_local_tail_diagnostic,
+    _run_x11_shm_scheduling_diagnostic,
     _run_x11_shm_soak,
     _run_x11_shm_transport_threshold_diagnostic,
     _validate_bounded_x_server_sample_count,
@@ -38,6 +44,407 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
 ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
 SHA = hashlib.sha256(DATA).hexdigest()
+
+
+def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:
+    assert X11_SCHEDULING_DIAGNOSTIC_CAPTURES == 1_000
+    assert X11_SCHEDULING_DIAGNOSTIC_WARMUPS == 2
+    assert _is_x11_shm_worker_cmdline(
+        b"python\0/opt/mcu/_x11_shm_worker.py\0--fd\0"
+        b"3\0--display\0:99\0--width\0"
+        b"1024\0--height\0"
+        b"768\0"
+    )
+    assert not _is_x11_shm_worker_cmdline(
+        b"python\0-c\0/opt/mcu/_x11_shm_worker.py --fd 3\0"
+    )
+    assert not _is_x11_shm_worker_cmdline(
+        b"python\0/opt/mcu/_x11_shm_worker.py\0--fd\0"
+        b"3\0--display\0:99\0--width\0"
+        b"800\0--height\0"
+        b"768\0"
+    )
+    assert not _is_x11_shm_worker_cmdline(
+        b"python\0/opt/mcu/_x11_shm_worker.py\0--fd\0"
+        b"3\0--display\0:99\0--width\0"
+        b"1024\0--height\0"
+        b"768\0--extra\0"
+    )
+
+    script = _build_x11_shm_scheduling_diagnostic_script(
+        captures=1_000,
+        warmups=2,
+    )
+
+    compile(script, "<x11-shm-scheduling-diagnostic>", "exec")
+    assert 'HTTPConnection("127.0.0.1", port' in script
+    assert '"request_write_ms"' in script
+    assert '"response_headers_ms"' in script
+    assert '"body_read_ms"' in script
+    assert '"route_ready_ms"' in script
+    assert '"route_lock_wait_ms"' in script
+    assert '"route_operation_ms"' in script
+    assert '"route_total_ms"' in script
+    assert '"local_outside_route_residual_ms"' in script
+    assert '"usage_usec"' in script
+    assert '"nr_periods"' in script
+    assert '"nr_throttled"' in script
+    assert '"throttled_usec"' in script
+    assert 'directory / "cpu.max"' in script
+    assert 'cpu_limit["quota_usec"] != cpu_limit["period_usec"]' in script
+    assert "client_sched_before = schedstat(os.getpid())" in script
+    assert '"correlations"' in script
+    assert '"body"' not in script
+    assert '"headers"' not in script
+
+
+def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> None:
+    timing_metrics = (
+        "local_wall_ms",
+        "request_write_ms",
+        "response_headers_ms",
+        "body_read_ms",
+        "controller_total_ms",
+        "x11_shm_capture_encode_ms",
+        "cursor_position_ms",
+        "hash_ms",
+        "controller_unattributed_ms",
+        "route_ready_ms",
+        "route_lock_wait_ms",
+        "route_operation_ms",
+        "route_total_ms",
+        "route_outside_controller_residual_ms",
+        "local_outside_route_residual_ms",
+    )
+    cpu_metrics = (
+        "cgroup_usage_usec_delta",
+        "cgroup_nr_periods_delta",
+        "cgroup_nr_throttled_delta",
+        "cgroup_throttled_usec_delta",
+    )
+
+    def timing_summary(tail_count: int) -> dict[str, float | int]:
+        return {
+            "p50_ms": 5.0,
+            "p95_ms": 10.0,
+            "p99_ms": 20.0 if tail_count else 10.0,
+            "max_ms": 600.0 if tail_count else 10.0,
+            "over_50_count": tail_count,
+            "over_100_count": tail_count,
+            "over_500_count": tail_count,
+        }
+
+    def numeric_summary(maximum: float) -> dict[str, float]:
+        return {"p50": 1.0, "p95": 2.0, "p99": 3.0, "max": maximum}
+
+    summaries = {}
+    for lane, sample_count, tail_count in (
+        ("combined", 1_000, 1),
+        ("full", 500, 1),
+        ("region", 500, 0),
+    ):
+        summaries[lane] = {
+            "sample_count": sample_count,
+            "metrics": {
+                **{name: timing_summary(tail_count) for name in timing_metrics},
+                **{name: numeric_summary(4.0) for name in cpu_metrics},
+            },
+        }
+    identity = {
+        "pid": 41,
+        "starttime_ticks": 123,
+        "argv_match": True,
+        "argv_module": "modal_computer_use.daemon",
+    }
+    worker_identity = {
+        "pid": 42,
+        "starttime_ticks": 124,
+        "parent_pid": 41,
+        "argv_match": True,
+        "argv_module": "_x11_shm_worker.py",
+    }
+    cgroup_before = {
+        "usage_usec": 1_000,
+        "nr_periods": 10,
+        "nr_throttled": 2,
+        "throttled_usec": 100,
+    }
+    cgroup_after = {
+        "usage_usec": 5_000,
+        "nr_periods": 14,
+        "nr_throttled": 3,
+        "throttled_usec": 300,
+    }
+    observation = {
+        "passed": True,
+        "requested_source": "x11-shm",
+        "observed_backend": "x11-shm",
+        "warmups_requested": 2,
+        "warmups_completed": 2,
+        "captures_requested": 1_000,
+        "captures_completed": 1_000,
+        "full_captures": 500,
+        "region_captures": 500,
+        "daemon_identity_before": identity,
+        "daemon_identity_after": identity,
+        "worker_identity_before": worker_identity,
+        "worker_identity_after": worker_identity,
+        "daemon_schedstat_before": {
+            "cpu_runtime_ns": 100,
+            "runqueue_wait_ns": 200,
+            "timeslices": 3,
+        },
+        "daemon_schedstat_after": {
+            "cpu_runtime_ns": 150,
+            "runqueue_wait_ns": 260,
+            "timeslices": 7,
+        },
+        "worker_schedstat_before": {
+            "cpu_runtime_ns": 300,
+            "runqueue_wait_ns": 400,
+            "timeslices": 5,
+        },
+        "worker_schedstat_after": {
+            "cpu_runtime_ns": 380,
+            "runqueue_wait_ns": 490,
+            "timeslices": 11,
+        },
+        "client_schedstat_before": {
+            "cpu_runtime_ns": 500,
+            "runqueue_wait_ns": 600,
+            "timeslices": 7,
+        },
+        "client_schedstat_after": {
+            "cpu_runtime_ns": 590,
+            "runqueue_wait_ns": 710,
+            "timeslices": 15,
+        },
+        "cpu_max": {"quota_usec": 100_000, "period_usec": 100_000},
+        "cgroup_cpu_stat_before": cgroup_before,
+        "cgroup_cpu_stat_after": cgroup_after,
+        "cgroup_cpu_stat_deltas": {
+            key: cgroup_after[key] - cgroup_before[key] for key in cgroup_before
+        },
+        "per_request_cgroup_delta_sums": {
+            "usage_usec": 3_500,
+            "nr_periods": 3,
+            "nr_throttled": 1,
+            "throttled_usec": 150,
+        },
+        "summaries": summaries,
+        "tail_schedule": {
+            name: [{"schedule_index": 10, "timing_ms": 600.0}]
+            for name in timing_metrics
+        },
+        "correlations": {
+            timing_name: {
+                cpu_name: {"coefficient": 0.25, "sample_count": 1_000}
+                for cpu_name in cpu_metrics
+            }
+            for timing_name in timing_metrics
+        },
+        "body": "must not survive",
+        "headers": {"authorization": "must not survive"},
+    }
+    cleanup = {
+        "succeeded": True,
+        "remaining_sandboxes": 0,
+        "survivors_before_sweep": 0,
+    }
+    provenance = {
+        "source_revision": "a" * 40,
+        "worktree_clean": True,
+        "x11_shm_source_sha256": "b" * 64,
+        "cargo_lock_sha256": "c" * 64,
+        "image_identity": "inline:browser-chromium-x11-shm",
+    }
+
+    artifact = _build_x11_shm_scheduling_diagnostic(
+        observation,
+        cleanup,
+        provenance,
+    )
+
+    assert artifact["schema_version"] == "x11-shm-scheduling-diagnostic.v1"
+    assert artifact["passed"] is True
+    assert artifact["non_gating"] is True
+    assert artifact["promotion_proxy"] is False
+    assert artifact["endpoint_order_confounded"] is True
+    assert artifact["instrumentation_intrusive"] is True
+    assert artifact["sample_count"] == 1_000
+    assert artifact["cpu_max"] == observation["cpu_max"]
+    assert artifact["cgroup_cpu_stat_deltas"] == {
+        "usage_usec": 4_000,
+        "nr_periods": 4,
+        "nr_throttled": 1,
+        "throttled_usec": 200,
+    }
+    assert artifact["daemon_schedstat_delta"] == {
+        "cpu_runtime_ns": 50,
+        "runqueue_wait_ns": 60,
+        "timeslices": 4,
+    }
+    assert artifact["worker_schedstat_delta"] == {
+        "cpu_runtime_ns": 80,
+        "runqueue_wait_ns": 90,
+        "timeslices": 6,
+    }
+    assert artifact["client_schedstat_delta"] == {
+        "cpu_runtime_ns": 90,
+        "runqueue_wait_ns": 110,
+        "timeslices": 8,
+    }
+    assert artifact["correlations"]["body_read_ms"][
+        "cgroup_throttled_usec_delta"
+    ] == {"coefficient": 0.25, "sample_count": 1_000}
+    assert artifact["tail_schedule"]["response_headers_ms"] == [
+        {"schedule_index": 10, "timing_ms": 600.0}
+    ]
+
+    def keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return set(value) | {key for child in value.values() for key in keys(child)}
+        if isinstance(value, list):
+            return {key for child in value for key in keys(child)}
+        return set()
+
+    assert keys(artifact).isdisjoint(
+        {"body", "headers", "raw", "data", "authorization", "token"}
+    )
+
+    unsafe = json_module.loads(json_module.dumps(observation))
+    unsafe["correlations"]["body_read_ms"]["cgroup_usage_usec_delta"][
+        "coefficient"
+    ] = float("nan")
+    unsafe["summaries"]["combined"]["body"] = "must not survive"
+    rejected = _build_x11_shm_scheduling_diagnostic(unsafe, cleanup, provenance)
+
+    assert rejected["passed"] is False
+    assert rejected["failure_type"] == "EvidenceValidationError"
+    assert rejected["failure_phase"] == "artifact_validation"
+    assert rejected["summaries"] is None
+    assert rejected["correlations"] is None
+    assert rejected["tail_schedule"] == {}
+    assert keys(rejected).isdisjoint(
+        {"body", "headers", "raw", "data", "authorization", "token"}
+    )
+
+    wrong_worker_parent = json_module.loads(json_module.dumps(observation))
+    wrong_worker_parent["worker_identity_after"]["parent_pid"] = 99
+    rejected_parent = _build_x11_shm_scheduling_diagnostic(
+        wrong_worker_parent, cleanup, provenance
+    )
+    assert rejected_parent["passed"] is False
+    assert rejected_parent["failure_type"] == "EvidenceValidationError"
+
+    partial = json_module.loads(json_module.dumps(observation))
+    partial.update(
+        {
+            "passed": False,
+            "captures_completed": 17,
+            "full_captures": 9,
+            "region_captures": 8,
+            "summaries": {"body": "must not survive"},
+            "correlations": {"headers": "must not survive"},
+            "failure_type": "RuntimeError",
+            "failure_phase": "captures",
+        }
+    )
+    rejected_partial = _build_x11_shm_scheduling_diagnostic(
+        partial, cleanup, provenance
+    )
+    assert rejected_partial["passed"] is False
+    assert rejected_partial["sample_count"] == 17
+    assert rejected_partial["failure_type"] == "RuntimeError"
+    assert rejected_partial["failure_phase"] == "captures"
+    assert rejected_partial["daemon_identity_before"] == identity
+    assert rejected_partial["worker_identity_before"] == worker_identity
+    assert rejected_partial["cgroup_cpu_stat_before"] == cgroup_before
+    assert rejected_partial["summaries"] is None
+    assert rejected_partial["correlations"] is None
+    assert keys(rejected_partial).isdisjoint(
+        {"body", "headers", "raw", "data", "authorization", "token"}
+    )
+
+    contradictory_partial = json_module.loads(json_module.dumps(partial))
+    contradictory_partial["full_captures"] = 10
+    contradictory = _build_x11_shm_scheduling_diagnostic(
+        contradictory_partial, cleanup, provenance
+    )
+    assert contradictory["sample_count"] is None
+    assert contradictory["captures_completed"] is None
+    assert contradictory["full_captures"] is None
+    assert contradictory["region_captures"] is None
+
+
+def test_scheduling_diagnostic_runner_executes_one_generated_localhost_child() -> None:
+    child_payload = {
+        "passed": False,
+        "requested_source": "x11-shm",
+        "observed_backend": "x11-shm",
+        "warmups_requested": 2,
+        "warmups_completed": 2,
+        "captures_requested": 1_000,
+        "captures_completed": 17,
+        "full_captures": 9,
+        "region_captures": 8,
+        "failure_type": "RuntimeError",
+        "failure_phase": "captures",
+    }
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json_module.dumps(child_payload)
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeProcess:
+        stdout = SimpleNamespace(read=FakeRead())
+        wait = FakeWait()
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:2] == ("python", "-c")
+            assert 'HTTPConnection("127.0.0.1", port' in str(args[2])
+            assert kwargs == {"timeout": 600}
+            return FakeProcess()
+
+    class FakeContext:
+        exited = False
+
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+        async def __aexit__(self, *args: object) -> None:
+            self.exited = True
+
+    context = FakeContext()
+    result = asyncio.run(
+        _run_x11_shm_scheduling_diagnostic(
+            lambda: context,
+            captures=1_000,
+            warmups=2,
+        )
+    )
+
+    assert result == child_payload
+    assert context.exited is True
+
+
+def test_scheduling_diagnostic_has_safe_remote_and_local_entrypoints() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x11_shm_scheduling_diagnostic(" in runner
+    assert "def x11_shm_scheduling_diagnostic_main(" in runner
+    assert "run_x11_shm_scheduling_diagnostic.remote(" in runner
+    assert 'lambda: _ArmContext("x11-shm")' in runner
+    assert 'Path("benchmark-data/x11-shm-scheduling-diagnostic-1000.json")' in runner
+    assert "provenance=_local_provenance()" in runner
+    assert "retries=0" in runner
 
 
 def test_daemon_local_tail_script_compiles_with_fixed_workload() -> None:
