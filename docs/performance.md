@@ -1,15 +1,13 @@
 # Performance
 
-Computer-use latency comes mainly from placement, network round trips, desktop input, and
-screenshot capture. Start with the primary trajectory below. Change one setting at a time and
-measure the complete workload.
+Placement, network round trips, desktop input, and screenshot capture account for most
+computer-use latency. The primary trajectory keeps repeated operations on one borrowed connection.
+Change one setting at a time and measure the complete workload.
 
 For deployment steps, see [Modal deployment](modal-deployment.md). For commands, sample rules, and
 publication gates, see [Benchmarking](benchmarking.md).
 
 ## Use the placed trajectory
-
-The primary path has these lifecycle stages:
 
 1. An async owner creates one desktop.
 2. The owner passes a versioned session handle to an application-owned Modal Function.
@@ -22,8 +20,8 @@ The primary placed trajectory requires one exact requested region for both the F
 Sandbox, such as `us-west-2`. A missing or broad region fails before lease acquisition or desktop
 mutation. An unset or broad selector remains available only to explicit low-level SDK workflows.
 
-The shared region is a scheduling request. It does not prove that the Function and Sandbox share a
-host or availability zone. Every daemon request still crosses authenticated Modal ingress.
+Requesting the same region does not prove that the Function and Sandbox share a host or
+availability zone. Every daemon request still crosses authenticated Modal ingress.
 
 Inspect `resolved_trajectory_configuration()` before deployment. It reports the requested region,
 resources, images, timeouts, retry policy, container limits, and warm-capacity state without
@@ -42,30 +40,26 @@ Report these stages separately:
 | Warm operation | Request start to validated result on an existing borrow |
 | Cleanup | Borrow release and owned Sandbox termination |
 
-Native async provisioning improves cancellation and cleanup behavior. It does not shorten cold
-allocation or desktop startup. A warm-operation result begins after provisioning, readiness, and
-borrow entry.
+Native async provisioning supports cancellation and cleanup without reducing cold allocation or
+desktop startup. A warm-operation result begins after provisioning, readiness, and borrow entry.
 
-Keep the caller topology, target, region, resources, image, ingress, HTTP version, input backend,
-screenshot format, action payload, warmup, and connection reuse fixed when comparing two paths.
+For a valid comparison, hold the caller topology, target, region, resources, image, ingress, HTTP
+version, input backend, screenshot format, action payload, warmup, and connection reuse constant.
 Record failures and cleanup with the successful samples.
 
 ## Use `computer.step()` for model turns
 
 `computer.step(actions)` sends one ordered action batch to `POST /v1/steps` and receives one
-versioned binary envelope. The result contains:
+versioned binary envelope. `ComputerStepResult` exposes the action result, screenshot, and timing
+through its `actions`, `screenshot`, and `timing` fields.
 
-- `ComputerStepResult.actions`
-- `ComputerStepResult.screenshot`
-- `ComputerStepResult.timing`
-
-The screenshot is an immediate post-action frame. It is not application readiness. The caller
-decides whether to wait for a workload-specific condition before the next model turn.
+The returned screenshot is an immediate post-action frame. It is not application readiness. The
+caller decides whether to wait for a workload-specific condition before the next model turn.
 
 The [Computer Step promotion report](benchmark-results-2026-08-08-computer-step.md) measured 100
 interleaved pairs in one fixed topology. `computer.step()` measured 44.29 ms p50 and 52.57 ms p95.
 The prior `actions.run()` followed by `screenshots.full()` measured 47.14 ms p50 and 58.22 ms p95.
-Use the dated report for the complete configuration and promotion decision.
+The dated report contains the complete configuration and promotion decision.
 
 The article's opening 47.10 ms value is arithmetic over separate 37.25 ms raw-screenshot and
 9.85 ms click medians. It is not a measured fused turn and is not a latency promise for
@@ -96,8 +90,8 @@ daemon resets that session once after an open or grab failure, then uses the bou
 `maim` fallback path. Cursor-visible capture uses `maim` because MSS does not compose the desktop
 cursor.
 
-Raw responses report the capture backend and timing. A benchmark that intends to measure the MSS
-path must verify that attribution instead of inferring it from latency.
+Raw responses report the capture backend and timing. A benchmark of the MSS path must verify that
+attribution instead of inferring it from latency.
 
 Screenshot storage modes have different purposes:
 
@@ -140,9 +134,9 @@ refill: 100 normalized input-work tokens per second
 burst:  400 tokens
 ```
 
-The daemon reserves the whole batch cost before mutation. This prevents a rate boundary from
-partially executing a validated batch. The limit works with batch size, action and batch timeouts,
-trajectory budgets, payload bounds, and one-in-flight Step serialization.
+Reserving the whole batch cost before mutation prevents a rate boundary from partially executing a
+validated batch. The limit works with batch size, action and batch timeouts, trajectory budgets,
+payload bounds, and one-in-flight Step serialization.
 
 Run the same-runtime capacity gate before setting higher values for a faster setup. CPU and memory
 provide too little information to select a safe rate automatically. The
@@ -155,9 +149,9 @@ Each leased mutation writes an `IN_PROGRESS` receipt to the target-local SQLite 
 `synchronous=FULL` before dispatch. Terminal receipt bookkeeping uses `synchronous=NORMAL`. This
 boundary prevents dispatch without a surviving receipt on the target filesystem.
 
-The receipt does not provide remote persistence or reconstruct a lost Sandbox. Measure its local
-cost on the intended runtime filesystem. Keep the WAL on the target filesystem rather than a
-network filesystem or Modal Volume.
+The guarantee ends at the target filesystem. Remote persistence and reconstruction after Sandbox
+loss remain outside it. Measure the local cost on the intended runtime filesystem, and keep the WAL
+there instead of moving it to a network filesystem or Modal Volume.
 
 ## Choose capacity explicitly
 
@@ -177,23 +171,23 @@ Choose capacity from the workload and budget:
 - `retries=0` disables configured Function retries. A platform reschedule can still restart a
   crashed Function container.
 
-Cancellation stops the Function invocation. It does not reverse prior GUI effects or terminate a
-desktop owned by another scope. The owner waits for remote work to reach a terminal state before it
-terminates its Sandbox.
+Cancellation stops the Function invocation without reversing prior GUI effects or terminating a
+desktop owned by another scope. The owner waits for remote work to reach a terminal state before
+terminating its Sandbox.
 
 ## Tune startup behavior
 
 Set `browser.prewarm=true` when every trajectory opens the selected browser and the startup cost is
-acceptable. `open_url_on_start` can also pay the first navigation cost during startup. Keep both
-choices explicit because they move work into the cold path.
+acceptable. `open_url_on_start` can also pay the first navigation cost during startup. Both
+settings move work into the cold path, so keep them explicit.
 
 Use a managed Image only when its measured build and lifecycle behavior fits the deployment. The
 SDK does not select a managed Image automatically. Pin the exact release identity and keep the
 inline recipe available for rollback. See [Configuration](configuration.md) and the
 [Standard Image lifecycle report](benchmark-results-2026-08-08-image-lifecycle.md).
 
-GPU allocation is also explicit. Use it only for a measured browser-rendering workload. A GPU can
-increase cost without improving ordinary desktop input or screenshot capture.
+Request a GPU only for a measured browser-rendering workload. It can increase cost without
+improving ordinary desktop input or screenshot capture.
 
 Filesystem snapshots preserve filesystem and application state. They do not promise to preserve
 GUI memory state or a live browser session. Use Volumes or external storage for durable artifacts.
