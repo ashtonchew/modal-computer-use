@@ -101,6 +101,7 @@ MAX_OPERATIONAL_REGRESSION_PERCENT = 5.0
 # bounded wall-clock budget for the full run to finish without partial data.
 PROMOTION_RUN_TIMEOUT_SECONDS = 7_200
 BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES = 10
+BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLE_COUNTS = frozenset((10, 30))
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 SAFE_TIMEOUT_ORIGINS = frozenset(
     {
@@ -437,6 +438,13 @@ def _safe_daemon_failure(exc: Exception) -> dict[str, Any]:
             if categories:
                 result["failure_readiness_categories"] = categories
     return result
+
+
+def _validate_bounded_x_server_sample_count(sample_count: int) -> None:
+    if sample_count not in BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLE_COUNTS:
+        raise ValueError(
+            "bounded X server diagnostic requires exactly 10 or 30 samples"
+        )
 
 
 def _startup_failure_phase(timing: SessionStartupTiming | None) -> str:
@@ -926,6 +934,7 @@ async def _run_x_server_timeout_probe(
     failure_code: str | None = None
     failure_detail_type: str | None = None
     failure_readiness_categories: list[str] | None = None
+    lifecycle_restart_elapsed_ms: float | None = None
     phase = "context_enter"
     result: dict[str, Any] | None = None
     resumed = False
@@ -1019,7 +1028,13 @@ async def _run_x_server_timeout_probe(
             raise RuntimeError("Xvfb resume command failed")
         resumed = True
         phase = "lifecycle_restart"
-        restarted = await computer.lifecycle.restart()
+        restart_started = time.perf_counter()
+        try:
+            restarted = await computer.lifecycle.restart()
+        finally:
+            lifecycle_restart_elapsed_ms = round(
+                (time.perf_counter() - restart_started) * 1000.0, 4
+            )
         phase = "capture_after_restart"
         backend_after: str | None = None
         original = computer.client.post_bytes_with_headers
@@ -1051,6 +1066,7 @@ async def _run_x_server_timeout_probe(
             "public_error_detail_type": public_error_detail_type,
             "no_fallback_observed": failed_bounded,
             "constructor_bounded": constructor_bounded,
+            "lifecycle_restart_elapsed_ms": lifecycle_restart_elapsed_ms,
             "constructor_error_type": constructor_result.get("exception_type"),
             "xvfb_pid": int(xvfb_pid),
             "constructor_elapsed_ms": round(
@@ -1110,6 +1126,7 @@ async def _run_x_server_timeout_probe(
                 if failure_detail_type
                 else {}
             ),
+            "lifecycle_restart_elapsed_ms": lifecycle_restart_elapsed_ms,
             **(
                 {"failure_readiness_categories": failure_readiness_categories}
                 if failure_readiness_categories
@@ -2050,10 +2067,7 @@ async def _run_repeated_bounded_x_server_diagnostic(
     sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES,
     provenance: Mapping[str, str | bool] | None = None,
 ) -> dict[str, Any]:
-    if sample_count != BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES:
-        raise ValueError(
-            "bounded X server diagnostic requires exactly 10 samples"
-        )
+    _validate_bounded_x_server_sample_count(sample_count)
     if provenance is None:
         raise ValueError("clean local benchmark provenance is required")
     observations: list[dict[str, Any]] = []
@@ -2078,12 +2092,9 @@ def run_repeated_bounded_x_server_probe(
     sample_count: int = BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES,
     provenance: dict[str, str | bool] | None = None,
 ) -> dict[str, Any]:
-    """Run ten exact bounded-X probes and retain every safe observation."""
+    """Run an exact-count bounded-X diagnostic and retain safe observations."""
 
-    if sample_count != BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES:
-        raise ValueError(
-            "bounded X server diagnostic requires exactly 10 samples"
-        )
+    _validate_bounded_x_server_sample_count(sample_count)
     if provenance is None:
         raise ValueError("clean local benchmark provenance is required")
     return asyncio.run(
@@ -2316,7 +2327,7 @@ def repeated_bounded_x_server_main(
     path = (
         Path(output)
         if output
-        else Path("benchmark-data/x11-shm-bounded-x-diagnostic-10.json")
+        else Path(f"benchmark-data/x11-shm-bounded-x-diagnostic-{sample_count}.json")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
