@@ -104,7 +104,10 @@ PROMOTION_RUN_TIMEOUT_SECONDS = 7_200
 BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLES = 10
 BOUNDED_X_SERVER_DIAGNOSTIC_SAMPLE_COUNTS = frozenset((10, 30))
 SOAK_DIAGNOSTIC_CAPTURES = 10_000
-SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "VmHWM")
+# Sample VmRSS at baseline, every 100 captures, and one explicit terminal point.
+SOAK_RSS_SAMPLE_INTERVAL = 100
+SOAK_RSS_SAMPLE_COUNT = SOAK_DIAGNOSTIC_CAPTURES // SOAK_RSS_SAMPLE_INTERVAL + 2
+SOAK_RESOURCE_METRICS = ("maps", "fd", "VmRSS", "sampled_vm_rss")
 MAX_RSS_GROWTH_BYTES = 16 * 1024 * 1024
 SAFE_TIMEOUT_ORIGINS = frozenset(
     {
@@ -1528,131 +1531,52 @@ async def _run_x11_shm_soak(
         sandbox = getattr(computer, "_sandbox", None)
         if sandbox is None or not hasattr(sandbox, "exec"):
             raise RuntimeError("sandbox handle unavailable for X11 shared-memory soak")
-        script = dedent(
-            f"""
-            import http.client
-            import json
-            import os
-            from pathlib import Path
-
-{indent(_DAEMON_ARGV_MATCHER_SOURCE, "            ")}
-
-            def daemon_pid():
-                for entry in Path("/proc").iterdir():
-                    if not entry.name.isdigit():
-                        continue
-                    try:
-                        command = (entry / "cmdline").read_bytes()
-                    except OSError:
-                        continue
-                    if _is_modal_daemon_cmdline(command):
-                        return int(entry.name)
-                raise RuntimeError("daemon process was not found")
-
-            def status_bytes(pid, key):
-                with open(f"/proc/{{pid}}/status", encoding="utf-8") as status_file:
-                    for line in status_file:
-                        if line.startswith(key + ":"):
-                            return int(line.split()[1]) * 1024
-                raise RuntimeError(f"{{key}} missing for daemon process")
-
-            def counts(pid):
-                with open(f"/proc/{{pid}}/maps", encoding="utf-8") as maps_file:
-                    mappings = sum(1 for _ in maps_file)
-                return {{
-                    "fd": len(os.listdir(f"/proc/{{pid}}/fd")),
-                    "mappings": mappings,
-                    "rss": status_bytes(pid, "VmRSS"),
-                    "peak_rss": status_bytes(pid, "VmHWM"),
-                }}
-
-            token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
-            port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
-            headers = {{
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-            }}
-            full = json.dumps({{
-                "format": "png", "quality": 90, "scale": 1.0,
-                "show_cursor": False, "processing": "auto", "storage": "inline",
-            }})
-            region = json.dumps({{
-                "format": "png", "quality": 90, "scale": 1.0,
-                "show_cursor": False, "processing": "auto", "storage": "inline",
-                "region": {{"x": 7, "y": 9, "width": 511, "height": 383}},
-            }})
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
-
-            def capture(path, body, expected_width, expected_height):
-                connection.request("POST", path, body=body, headers=headers)
-                response = connection.getresponse()
-                data = response.read()
-                if response.status != 200 or not data.startswith(b"\\x89PNG"):
-                    raise RuntimeError("daemon-local screenshot failed")
-                if response.getheader("x-computer-use-capture-backend") != "x11-shm":
-                    raise RuntimeError("daemon-local screenshot used an unexpected source")
-                if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
-                    raise RuntimeError("daemon-local screenshot width changed")
-                if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
-                    raise RuntimeError("daemon-local screenshot height changed")
-
-            capture("/v1/screenshots/full/raw", full, 1024, 768)
-            capture("/v1/screenshots/region/raw", region, 511, 383)
-            pid = daemon_pid()
-            before = counts(pid)
-            full_captures = 0
-            region_captures = 0
-            try:
-                for index in range({captures}):
-                    if index % 2:
-                        capture("/v1/screenshots/region/raw", region, 511, 383)
-                        region_captures += 1
-                    else:
-                        capture("/v1/screenshots/full/raw", full, 1024, 768)
-                        full_captures += 1
-                after = counts(pid)
-            finally:
-                connection.close()
-            print(json.dumps({{
-                "captures": {captures},
-                "full_captures": full_captures,
-                "region_captures": region_captures,
-                "fd_before": before["fd"], "fd_after": after["fd"],
-                "mapping_before": before["mappings"],
-                "mapping_after": after["mappings"],
-                "rss_before_bytes": before["rss"],
-                "rss_after_bytes": after["rss"],
-                "peak_rss_before_bytes": before["peak_rss"],
-                "peak_rss_after_bytes": after["peak_rss"],
-            }}))
-            """
-        )
+        script = _build_x11_shm_soak_diagnostic_script(captures)
         process = await sandbox.exec.aio("python", "-c", script, timeout=900)
         raw = await _completed_process_stdout_text(process)
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise RuntimeError("X11 shared-memory soak returned invalid output")
-        rss_growth = int(payload["rss_after_bytes"]) - int(payload["rss_before_bytes"])
-        peak_growth = int(payload["peak_rss_after_bytes"]) - int(
-            payload["peak_rss_before_bytes"]
-        )
+        signed_deltas = payload.get("signed_deltas")
+        if not isinstance(signed_deltas, Mapping):
+            raise RuntimeError("X11 shared-memory soak returned invalid resource deltas")
+        fd_delta = int(signed_deltas["fd"])
+        mapping_delta = int(signed_deltas["mappings"])
+        current_rss = int(payload["rss_current_bytes"])
+        before_rss = int(payload["rss_before_bytes"])
+        rss_growth = current_rss - before_rss
+        peak_growth = int(payload["rss_peak_growth_bytes"])
+        rss_sample_count = int(payload["rss_sample_count"])
         result = {
             "passed": (
-                int(payload["captures"]) == captures
+                payload.get("passed") is True
+                and int(payload["captures_requested"]) == captures
                 and int(payload["full_captures"]) == captures // 2
                 and int(payload["region_captures"]) == captures // 2
-                and int(payload["fd_after"]) - int(payload["fd_before"]) == 0
-                and int(payload["mapping_after"]) - int(payload["mapping_before"]) == 0
+                and int(payload["prime_captures"]) == 2
+                and fd_delta == 0
+                and mapping_delta == 0
+                and payload.get("rss_metric_source") == "sampled_vm_rss"
+                and rss_sample_count == SOAK_RSS_SAMPLE_COUNT
+                and payload.get("final_included") is True
                 and rss_growth <= 16 * 1024 * 1024
                 and peak_growth <= 16 * 1024 * 1024
             ),
             "captures": captures,
             "full_captures": int(payload["full_captures"]),
             "region_captures": int(payload["region_captures"]),
-            "fd_delta": int(payload["fd_after"]) - int(payload["fd_before"]),
-            "mapping_delta": int(payload["mapping_after"]) - int(payload["mapping_before"]),
+            "fd_delta": fd_delta,
+            "mapping_delta": mapping_delta,
             "rss_growth_bytes": max(0, rss_growth),
             "peak_rss_growth_bytes": max(0, peak_growth),
+            "rss_metric_source": payload.get("rss_metric_source"),
+            "rss_sample_count": rss_sample_count,
+            "rss_before_bytes": before_rss,
+            "rss_current_bytes": current_rss,
+            "rss_final_bytes": int(payload["rss_final_bytes"]),
+            "rss_observed_peak_bytes": int(payload["rss_observed_peak_bytes"]),
+            "rss_peak_growth_bytes": max(0, peak_growth),
+            "final_included": payload.get("final_included") is True,
         }
     except Exception as exc:
         failure_type = type(exc).__name__
@@ -1678,11 +1602,11 @@ def _retain_soak_counts(value: object) -> dict[str, int] | None:
     if not isinstance(value, Mapping):
         return None
     retained: dict[str, int] = {}
-    for key in ("fd", "mappings", "rss", "peak_rss"):
+    for key in ("fd", "mappings", "rss"):
         candidate = value.get(key)
         if isinstance(candidate, int) and not isinstance(candidate, bool):
             retained[key] = candidate
-    return retained if len(retained) == 4 else None
+    return retained if len(retained) == 3 else None
 
 
 def _retain_resource_metric_availability(value: object) -> dict[str, bool] | None:
@@ -1697,7 +1621,13 @@ def _retain_resource_metric_availability(value: object) -> dict[str, bool] | Non
 
 
 def _retain_failure_resource_metric(value: object) -> str | None:
-    return value if value in SOAK_RESOURCE_METRICS else None
+    return value if isinstance(value, str) and value in SOAK_RESOURCE_METRICS else None
+
+
+def _retain_resource_bytes(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
 
 
 def _retain_daemon_identity(value: object) -> dict[str, Any] | None:
@@ -1745,6 +1675,42 @@ def _build_x11_shm_soak_diagnostic(
     failure_resource_metric = _retain_failure_resource_metric(
         observation.get("failure_resource_metric")
     )
+    rss_metric_source = (
+        "sampled_vm_rss"
+        if observation.get("rss_metric_source") == "sampled_vm_rss"
+        else None
+    )
+    rss_sample_count = _retain_resource_bytes(observation.get("rss_sample_count"))
+    rss_before_bytes = _retain_resource_bytes(observation.get("rss_before_bytes"))
+    rss_current_bytes = _retain_resource_bytes(observation.get("rss_current_bytes"))
+    rss_final_bytes = _retain_resource_bytes(observation.get("rss_final_bytes"))
+    rss_observed_peak_bytes = _retain_resource_bytes(
+        observation.get("rss_observed_peak_bytes")
+    )
+    rss_peak_growth_bytes = _retain_resource_bytes(
+        observation.get("rss_peak_growth_bytes")
+    )
+    final_included = observation.get("final_included") is True
+    rss_contract = (
+        rss_metric_source == "sampled_vm_rss"
+        and rss_sample_count == SOAK_RSS_SAMPLE_COUNT
+        and rss_before_bytes is not None
+        and rss_current_bytes is not None
+        and rss_final_bytes is not None
+        and rss_observed_peak_bytes is not None
+        and rss_peak_growth_bytes is not None
+        and final_included
+    )
+    expected_signed_deltas = None
+    if counts_before is not None and counts_after is not None:
+        expected_signed_deltas = {
+            key: counts_after[key] - counts_before[key]
+            for key in ("fd", "mappings", "rss")
+        }
+    signed_deltas_consistent = (
+        expected_signed_deltas is not None
+        and signed_deltas == expected_signed_deltas
+    )
     identity_same = bool(
         before_identity
         and after_identity
@@ -1754,7 +1720,18 @@ def _build_x11_shm_soak_diagnostic(
         and after_identity["argv_match"]
     )
     resource_delta_zero = bool(signed_deltas) and all(
-        value == 0 for value in signed_deltas.values()
+        signed_deltas.get(key) == 0 for key in ("fd", "mappings")
+    )
+    metrics_complete = (
+        resource_metrics_before == {key: True for key in SOAK_RESOURCE_METRICS}
+        and resource_metrics_after == {key: True for key in SOAK_RESOURCE_METRICS}
+    )
+    rss_growth_ok = (
+        rss_current_bytes is not None
+        and rss_before_bytes is not None
+        and rss_current_bytes - rss_before_bytes <= MAX_RSS_GROWTH_BYTES
+        and rss_peak_growth_bytes is not None
+        and rss_peak_growth_bytes <= MAX_RSS_GROWTH_BYTES
     )
     captures_completed = observation.get("captures_completed")
     full_captures = observation.get("full_captures")
@@ -1777,6 +1754,10 @@ def _build_x11_shm_soak_diagnostic(
         and captures_shape
         and identity_same
         and resource_delta_zero
+        and signed_deltas_consistent
+        and metrics_complete
+        and rss_contract
+        and rss_growth_ok
         and cleanup_succeeded
     )
     return {
@@ -1800,6 +1781,14 @@ def _build_x11_shm_soak_diagnostic(
         "resource_metrics_before": resource_metrics_before,
         "resource_metrics_after": resource_metrics_after,
         "failure_resource_metric": failure_resource_metric,
+        "rss_metric_source": rss_metric_source,
+        "rss_sample_count": rss_sample_count,
+        "rss_before_bytes": rss_before_bytes,
+        "rss_current_bytes": rss_current_bytes,
+        "rss_final_bytes": rss_final_bytes,
+        "rss_observed_peak_bytes": rss_observed_peak_bytes,
+        "rss_peak_growth_bytes": rss_peak_growth_bytes,
+        "final_included": final_included,
         "resource_delta_zero": resource_delta_zero,
         "failure_type": failure_type,
         "failure_phase": failure_phase,
@@ -1825,6 +1814,22 @@ def _build_x11_shm_resource_snapshot_diagnostic(
     failure_resource_metric = _retain_failure_resource_metric(
         observation.get("failure_resource_metric")
     )
+    rss_metric_source = (
+        "sampled_vm_rss"
+        if observation.get("rss_metric_source") == "sampled_vm_rss"
+        else None
+    )
+    rss_sample_count = _retain_resource_bytes(observation.get("rss_sample_count"))
+    rss_before_bytes = _retain_resource_bytes(observation.get("rss_before_bytes"))
+    rss_current_bytes = _retain_resource_bytes(observation.get("rss_current_bytes"))
+    rss_final_bytes = _retain_resource_bytes(observation.get("rss_final_bytes"))
+    rss_observed_peak_bytes = _retain_resource_bytes(
+        observation.get("rss_observed_peak_bytes")
+    )
+    rss_peak_growth_bytes = _retain_resource_bytes(
+        observation.get("rss_peak_growth_bytes")
+    )
+    final_included = observation.get("final_included") is True
     observed_backend = _safe_diagnostic_label(observation.get("observed_backend"))
     prime_captures = observation.get("prime_captures")
     if not isinstance(prime_captures, int) or isinstance(prime_captures, bool):
@@ -1835,6 +1840,16 @@ def _build_x11_shm_resource_snapshot_diagnostic(
     metrics_complete = resource_metrics_before == {
         key: True for key in SOAK_RESOURCE_METRICS
     }
+    rss_contract = (
+        rss_metric_source == "sampled_vm_rss"
+        and rss_sample_count == 1
+        and rss_before_bytes is not None
+        and rss_current_bytes is None
+        and rss_final_bytes is None
+        and rss_observed_peak_bytes == rss_before_bytes
+        and rss_peak_growth_bytes == 0
+        and not final_included
+    )
     passed = bool(
         observation.get("passed") is True
         and observation.get("requested_source") == "auto"
@@ -1843,6 +1858,7 @@ def _build_x11_shm_resource_snapshot_diagnostic(
         and before_identity is not None
         and counts_before is not None
         and metrics_complete
+        and rss_contract
         and cleanup_succeeded
     )
     return {
@@ -1857,6 +1873,14 @@ def _build_x11_shm_resource_snapshot_diagnostic(
         "counts_before": counts_before,
         "resource_metrics_before": resource_metrics_before,
         "failure_resource_metric": failure_resource_metric,
+        "rss_metric_source": rss_metric_source,
+        "rss_sample_count": rss_sample_count,
+        "rss_before_bytes": rss_before_bytes,
+        "rss_current_bytes": rss_current_bytes,
+        "rss_final_bytes": rss_final_bytes,
+        "rss_observed_peak_bytes": rss_observed_peak_bytes,
+        "rss_peak_growth_bytes": rss_peak_growth_bytes,
+        "final_included": final_included,
         "failure_type": _safe_diagnostic_label(observation.get("failure_type")),
         "failure_phase": _safe_diagnostic_label(observation.get("failure_phase")),
         "retries": 0,
@@ -1904,7 +1928,7 @@ def _build_x11_shm_soak_diagnostic_script(
                 }}
             return None
 
-        RESOURCE_METRICS = ("maps", "fd", "VmRSS", "VmHWM")
+        RESOURCE_METRICS = ("maps", "fd", "VmRSS", "sampled_vm_rss")
 
         class ResourceMetricUnavailable(RuntimeError):
             def __init__(self, metric):
@@ -1946,18 +1970,26 @@ def _build_x11_shm_soak_diagnostic_script(
                 resource_metrics_available = available
                 raise ResourceMetricUnavailable("VmRSS")
             available["VmRSS"] = True
-            peak_rss = status_bytes(pid, "VmHWM")
-            if peak_rss is None:
-                resource_metrics_available = available
-                raise ResourceMetricUnavailable("VmHWM")
-            available["VmHWM"] = True
             resource_metrics_available = available
             return {{
                 "fd": fd,
                 "mappings": mappings,
                 "rss": rss,
-                "peak_rss": peak_rss,
             }}
+
+        rss_samples = []
+
+        def sample_rss(pid):
+            global resource_metrics_available
+            value = status_bytes(pid, "VmRSS")
+            if value is None:
+                resource_metrics_available = dict(resource_metrics_available)
+                resource_metrics_available["sampled_vm_rss"] = False
+                raise ResourceMetricUnavailable("sampled_vm_rss")
+            resource_metrics_available = dict(resource_metrics_available)
+            resource_metrics_available["sampled_vm_rss"] = True
+            rss_samples.append(value)
+            return value
 
         token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
         port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
@@ -1987,6 +2019,12 @@ def _build_x11_shm_soak_diagnostic_script(
         failure_resource_metric = None
         full_captures = 0
         region_captures = 0
+        prime_captures = 0
+        rss_before_bytes = None
+        rss_current_bytes = None
+        rss_final_bytes = None
+        rss_observed_peak_bytes = None
+        rss_peak_growth_bytes = None
 
         def capture(path, body, expected_width, expected_height):
             global observed_backend
@@ -2007,13 +2045,19 @@ def _build_x11_shm_soak_diagnostic_script(
         try:
             failure_phase = "prime_capture"
             capture("/v1/screenshots/full/raw", full, 1024, 768)
+            prime_captures += 1
             capture("/v1/screenshots/region/raw", region, 511, 383)
+            prime_captures += 1
             failure_phase = "identity_before"
             identity_before = daemon_identity()
             if identity_before is None:
                 raise RuntimeError("daemon process was not found")
             failure_phase = "counts_before"
             counts_before = counts(identity_before["pid"])
+            failure_phase = "rss_sample_before"
+            rss_before_bytes = sample_rss(identity_before["pid"])
+            rss_observed_peak_bytes = rss_before_bytes
+            rss_peak_growth_bytes = 0
             resource_metrics_before = dict(resource_metrics_available)
             if {not snapshot_only}:
                 failure_phase = "soak_capture"
@@ -2024,19 +2068,34 @@ def _build_x11_shm_soak_diagnostic_script(
                     else:
                         capture("/v1/screenshots/full/raw", full, 1024, 768)
                         full_captures += 1
+                    if (index + 1) % {SOAK_RSS_SAMPLE_INTERVAL} == 0:
+                        failure_phase = "rss_sample_cadence"
+                        sample_rss(identity_before["pid"])
+                        failure_phase = "soak_capture"
                 failure_phase = "identity_after"
                 identity_after = daemon_identity()
                 if identity_after is None:
                     raise RuntimeError("daemon process was not found after soak")
                 failure_phase = "counts_after"
                 counts_after = counts(identity_after["pid"])
+                rss_current_bytes = counts_after["rss"]
+                failure_phase = "rss_sample_final"
+                rss_final_bytes = sample_rss(identity_after["pid"])
+                rss_observed_peak_bytes = max(rss_samples)
+                rss_peak_growth_bytes = max(
+                    0, rss_observed_peak_bytes - rss_before_bytes
+                )
                 resource_metrics_after = dict(resource_metrics_available)
         except ResourceMetricUnavailable as exc:
             failure_type = type(exc).__name__
             failure_resource_metric = exc.metric
-            if failure_phase == "counts_before":
+            if failure_phase in {"counts_before", "rss_sample_before"}:
                 resource_metrics_before = dict(resource_metrics_available)
-            elif failure_phase == "counts_after":
+            elif failure_phase in {
+                "counts_after",
+                "rss_sample_cadence",
+                "rss_sample_final",
+            }:
                 resource_metrics_after = dict(resource_metrics_available)
         except Exception as exc:
             failure_type = type(exc).__name__
@@ -2047,13 +2106,13 @@ def _build_x11_shm_soak_diagnostic_script(
         if counts_before is not None and counts_after is not None:
             signed_deltas = {{
                 key: counts_after[key] - counts_before[key]
-                for key in ("fd", "mappings", "rss", "peak_rss")
+                for key in ("fd", "mappings", "rss")
             }}
         print(json.dumps({{
             "passed": failure_type is None,
             "requested_source": "auto",
             "observed_backend": observed_backend,
-            "prime_captures": 2,
+            "prime_captures": prime_captures,
             "captures_requested": {0 if snapshot_only else captures},
             "captures_completed": full_captures + region_captures,
             "full_captures": full_captures,
@@ -2065,6 +2124,14 @@ def _build_x11_shm_soak_diagnostic_script(
             "resource_metrics_before": resource_metrics_before,
             "resource_metrics_after": resource_metrics_after,
             "failure_resource_metric": failure_resource_metric,
+            "rss_metric_source": "sampled_vm_rss",
+            "rss_sample_count": len(rss_samples),
+            "final_included": {not snapshot_only},
+            "rss_before_bytes": rss_before_bytes,
+            "rss_current_bytes": rss_current_bytes,
+            "rss_final_bytes": rss_final_bytes,
+            "rss_observed_peak_bytes": rss_observed_peak_bytes,
+            "rss_peak_growth_bytes": rss_peak_growth_bytes,
             "signed_deltas": signed_deltas,
             "failure_type": failure_type,
             "failure_phase": failure_phase,
