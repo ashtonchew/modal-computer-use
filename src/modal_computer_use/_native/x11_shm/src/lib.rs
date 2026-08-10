@@ -226,10 +226,9 @@ impl RgbPngEncoder {
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
         // `Compression::Fast` in png 0.18 selects fdeflate's ultra-fast
-        // profile, not zlib level 1.  The general route is compared against
-        // MSS's level-1 encoder, so select the explicit level here.  The
-        // Use MSS's filter-0 and level-one policy; the Rust implementation
-        // remains a separate codec and must be validated against live MSS.
+        // profile, not zlib level 1. Use explicit Level(1) and NoFilter to
+        // mirror MSS's policy; Rust remains a separate codec requiring live
+        // MSS validation.
         encoder.set_deflate_compression(png::DeflateCompression::Level(1));
         encoder.set_filter(png::Filter::NoFilter);
         let mut writer = encoder.write_header().context("PNG header write failed")?;
